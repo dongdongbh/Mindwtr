@@ -328,6 +328,7 @@ const renderSelfHostedCloudPanel = ({
                 onChange={(e) => onCloudTokenChange(e.target.value)}
                 className="bg-muted p-2 rounded text-sm border border-border focus:outline-none focus:ring-2 focus:ring-primary"
             />
+            <p className="text-xs text-muted-foreground">{t.cloudTokenHint}</p>
         </SettingField>
 
         {!isTauri && (

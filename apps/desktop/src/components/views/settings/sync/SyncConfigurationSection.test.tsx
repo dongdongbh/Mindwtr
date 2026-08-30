@@ -41,6 +41,7 @@ const baseProps: Parameters<typeof SyncConfigurationSection>[0] = {
         cloudUrl: 'Cloud URL',
         cloudHint: 'Cloud hint',
         cloudToken: 'Cloud token',
+        cloudTokenHint: 'Cloud token hint',
         cloudRememberToken: 'Remember token on this browser',
         cloudRememberTokenHint: 'Remember token hint',
         cloudSave: 'Save cloud',

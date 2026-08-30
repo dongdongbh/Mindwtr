@@ -1159,6 +1159,7 @@ export const svOverrides: Record<string, string> = {
         'settings.cloudUrl': 'URL till egen server',
         'settings.cloudUrlPlaceholder': 'https://example.com',
         'settings.cloudToken': 'Åtkomsttoken',
+        'settings.cloudTokenHint': 'Mindwtr använder inte användarkonton. Dina enheter ansluter till din server med den här åtkomsttoken.',
         'settings.cloudTokenInvalid': 'Synktoken måste vara 20–512 tecken med bokstäver, siffror eller . _ ~ + / = -',
         'settings.cloudSave': 'Spara egen server',
         'settings.cloudHint': 'Använd din egen serverns slutpunkts-URL.',

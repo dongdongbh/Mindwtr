@@ -101,6 +101,7 @@ export type SettingsSyncLabels = {
     cloudUrl: string;
     cloudHint: string;
     cloudToken: string;
+    cloudTokenHint: string;
     cloudRememberToken: string;
     cloudRememberTokenHint: string;
     cloudSave: string;

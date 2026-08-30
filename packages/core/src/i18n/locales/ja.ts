@@ -1190,6 +1190,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.cloudUrl': 'セルフホストの URL',
         'settings.cloudUrlPlaceholder': 'https://example.com',
         'settings.cloudToken': 'アクセストークン',
+        'settings.cloudTokenHint': 'Mindwtr にはユーザーアカウントの仕組みがありません。デバイスはこのアクセストークンを使ってあなたのサーバーに接続します。',
         'settings.cloudTokenInvalid': '同期トークンは、英数字または . _ ~ + / = - を使った20〜512文字にしてください',
         'settings.cloudSave': 'セルフホストの設定を保存',
         'settings.cloudHint': '自分で立てたエンドポイントの URL を入力してください。',

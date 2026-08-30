@@ -472,6 +472,7 @@ export const SETTINGS_LABEL_KEYS = [
     'allowInsecureHttpHint',
     'cloudUrl',
     'cloudToken',
+    'cloudTokenHint',
     'cloudRememberToken',
     'cloudRememberTokenHint',
     'cloudSave',

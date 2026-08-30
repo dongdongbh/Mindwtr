@@ -1159,6 +1159,7 @@ export const faOverrides: Record<string, string> = {
         'settings.cloudUrl': 'آدرس میزبانی شخصی',
         'settings.cloudUrlPlaceholder': 'https://example.com',
         'settings.cloudToken': 'توکن دسترسی',
+        'settings.cloudTokenHint': 'Mindwtr از حساب کاربری استفاده نمی‌کند. دستگاه‌های شما با همین توکن دسترسی به سرور شما متصل می‌شوند.',
         'settings.cloudTokenInvalid': 'توکن همگام‌سازی باید ۲۰ تا ۵۱۲ نویسه با حروف، اعداد یا . _ ~ + / = - باشد',
         'settings.cloudSave': 'ذخیره میزبانی شخصی',
         'settings.cloudHint': 'از آدرس نقطه پایانی میزبانی شخصی خود استفاده کنید.',

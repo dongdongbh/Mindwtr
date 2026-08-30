@@ -1116,6 +1116,7 @@ export const zhHant: Record<string, string> = {
         'settings.cloudUrl': '自託管地址',
         'settings.cloudUrlPlaceholder': 'https://example.com',
         'settings.cloudToken': '訪問令牌',
+        'settings.cloudTokenHint': 'Mindwtr 不使用使用者帳戶。你的裝置會透過此訪問令牌連線到你的伺服器。',
         'settings.cloudTokenInvalid': '同步權杖長度必須為 20-512 個字元，只能包含字母、數字或 . _ ~ + / = -',
         'settings.cloudSave': '保存自託管配置',
         'settings.cloudHint': '請輸入自託管同步端點 URL。',

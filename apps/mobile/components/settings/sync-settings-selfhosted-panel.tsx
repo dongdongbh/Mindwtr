@@ -112,6 +112,7 @@ export function SyncSelfHostedBackendPanel({
                         secureTextEntry
                         style={[styles.textInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
                     />
+                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.cloudTokenHint')}</Text>
                     {tokenError && (
                         <Text style={[styles.settingDescription, { color: tc.danger }]}>{t('settings.cloudTokenInvalid')}</Text>
                     )}
