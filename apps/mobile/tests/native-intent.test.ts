@@ -25,15 +25,18 @@ describe('redirectSystemPath', () => {
         expect(redirectSystemPath({ path: 'mindwtr://open?area=area-1', initial: false })).toBe('/inbox');
     });
 
-    it('leaves capture and unrelated links untouched', () => {
+    it('routes widget and system quick capture links through the reliable root modal', () => {
+        expect(redirectSystemPath({ path: 'mindwtr:///capture-quick?mode=text', initial: true }))
+            .toBe('/capture-modal');
+        expect(redirectSystemPath({ path: 'mindwtr://capture-quick?mode=text', initial: false }))
+            .toBe('/capture-modal');
+        expect(redirectSystemPath({ path: 'mindwtr://capture-quick', initial: true }))
+            .toBe('/capture-modal');
+    });
+
+    it('leaves shortcut capture and unrelated links untouched', () => {
         expect(redirectSystemPath({ path: 'mindwtr://capture?title=Buy%20milk', initial: false }))
             .toBe('mindwtr://capture?title=Buy%20milk');
-        // The widget/Lock Screen capture link is a plain route path: it must
-        // pass through so Expo Router opens /capture-quick itself (#1066).
-        expect(redirectSystemPath({ path: 'mindwtr:///capture-quick?mode=text', initial: true }))
-            .toBe('mindwtr:///capture-quick?mode=text');
-        expect(redirectSystemPath({ path: 'mindwtr://capture-quick?mode=text', initial: true }))
-            .toBe('mindwtr://capture-quick?mode=text');
         expect(redirectSystemPath({ path: '/inbox', initial: true })).toBe('/inbox');
         expect(redirectSystemPath({ path: 'not a url', initial: false })).toBe('not a url');
     });
