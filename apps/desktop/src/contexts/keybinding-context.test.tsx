@@ -236,6 +236,22 @@ describe('KeybindingProvider (vim)', () => {
         delete runtimeWindow.__MINDWTR_FLATPAK__;
     });
 
+    it('toggles keyboard shortcut help closed with a second question mark', async () => {
+        const { queryByRole } = render(
+            <LanguageProvider>
+                <KeybindingProvider currentView="inbox" onNavigate={vi.fn()}>
+                    <DummyList />
+                </KeybindingProvider>
+            </LanguageProvider>
+        );
+
+        fireEvent.keyDown(window, { key: '?' });
+        expect(queryByRole('dialog')).not.toBeNull();
+
+        fireEvent.keyDown(window, { key: '?' });
+        await waitFor(() => expect(queryByRole('dialog')).toBeNull());
+    });
+
     it('moves selection with j/k', async () => {
         render(
             <LanguageProvider>

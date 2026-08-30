@@ -695,7 +695,10 @@ export function KeybindingProvider({
         };
 
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (isHelpOpen && e.key === 'Escape') {
+            const isHelpToggleShortcut = style === 'emacs'
+                ? e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'h' || e.key === '?')
+                : !e.metaKey && !e.ctrlKey && !e.altKey && e.key === '?';
+            if (isHelpOpen && (e.key === 'Escape' || isHelpToggleShortcut)) {
                 e.preventDefault();
                 setIsHelpOpen(false);
                 return;
