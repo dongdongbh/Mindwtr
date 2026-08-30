@@ -7,6 +7,7 @@ import { KeybindingProvider } from '../../contexts/keybinding-context';
 import { useUiStore } from '../../store/ui-store';
 import { ArchiveView } from './ArchiveView';
 import { expectScrolledEndGap } from '../../test/list-end-gap';
+import { MINDWTR_NAVIGATE_EVENT } from '../../lib/navigation-events';
 
 const initialTaskState = useTaskStore.getState();
 const initialUiState = useUiStore.getState();
@@ -199,6 +200,33 @@ describe('ArchiveView', () => {
         expect(screen.queryByText('Archived project')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
         expect(screen.getByText('Archived project')).toBeInTheDocument();
+    });
+
+    it('opens an archived project from its title row', () => {
+        useTaskStore.setState({
+            projects: [archivedProject],
+            _allProjects: [archivedProject],
+        });
+        const onNavigate = vi.fn();
+        window.addEventListener(MINDWTR_NAVIGATE_EVENT, onNavigate as EventListener);
+
+        try {
+            render(
+                <LanguageProvider>
+                    <ArchiveView />
+                </LanguageProvider>
+            );
+
+            fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+            fireEvent.click(screen.getByRole('button', { name: archivedProject.title }));
+
+            expect(useUiStore.getState().projectView.selectedProjectId).toBe(archivedProject.id);
+            expect(onNavigate).toHaveBeenCalledWith(expect.objectContaining({
+                detail: { view: 'projects' },
+            }));
+        } finally {
+            window.removeEventListener(MINDWTR_NAVIGATE_EVENT, onNavigate as EventListener);
+        }
     });
 
     // The area filter is app-wide, and mobile's Archive has always honoured it.

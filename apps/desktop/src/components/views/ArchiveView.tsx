@@ -54,10 +54,12 @@ import { useUiStore } from '../../store/ui-store';
 import { useLocalDayKey } from '../../hooks/useLocalDayKey';
 import { useAreaVisibility } from '../../hooks/useVisibleTaskContext';
 import { resolveDoneTaskSortBy } from '../../lib/task-list-sort';
+import { dispatchNavigateEvent } from '../../lib/navigation-events';
 
 type ArchiveProjectRowProps = {
     project: Project;
     areaName?: string;
+    onOpen: (projectId: string) => void;
     onRestore: (projectId: string) => void;
     onDelete: (project: Project) => void;
     t: (key: string) => string;
@@ -66,10 +68,12 @@ type ArchiveProjectRowProps = {
 const ArchiveProjectRow = memo(function ArchiveProjectRow({
     project,
     areaName,
+    onOpen,
     onRestore,
     onDelete,
     t,
 }: ArchiveProjectRowProps) {
+    const handleOpen = useCallback(() => onOpen(project.id), [onOpen, project.id]);
     const handleRestore = useCallback(() => onRestore(project.id), [onRestore, project.id]);
     const handleDelete = useCallback(() => onDelete(project), [onDelete, project]);
     const archivedText = `${tFallback(t, 'list.done', 'Completed')}: ${project.updatedAt ? safeFormatDate(project.updatedAt, 'Pp', project.updatedAt) : 'Unknown'}`;
@@ -77,13 +81,18 @@ const ArchiveProjectRow = memo(function ArchiveProjectRow({
     return (
         <div className="rounded-lg px-3 py-3 flex items-center justify-between group hover:bg-muted/50 transition-colors">
             <div className="flex min-w-0 items-center gap-3">
-                <div>
+                <button
+                    type="button"
+                    aria-label={project.title}
+                    onClick={handleOpen}
+                    className="min-w-0 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
                     <h3 className="font-medium text-foreground line-through opacity-70">{project.title}</h3>
                     <p className="text-xs text-muted-foreground mt-1">
                         {archivedText}
                         {areaName ? ` • ${areaName}` : ''}
                     </p>
-                </div>
+                </button>
             </div>
             <div className="flex gap-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
                 <button
@@ -360,6 +369,11 @@ export function ArchiveView() {
     const handleRestoreProject = useCallback((projectId: string) => {
         void updateProject(projectId, { status: 'active' });
     }, [updateProject]);
+
+    const handleOpenProject = useCallback((projectId: string) => {
+        useUiStore.getState().setProjectView({ selectedProjectId: projectId });
+        dispatchNavigateEvent('projects');
+    }, []);
 
     const handleDeleteProject = useCallback(async (project: Project) => {
         const confirmed = await requestConfirmation({
@@ -703,6 +717,7 @@ export function ArchiveView() {
                                     key={project.id}
                                     project={project}
                                     areaName={project.areaId ? areaNameById.get(project.areaId) : undefined}
+                                    onOpen={handleOpenProject}
                                     onRestore={handleRestoreProject}
                                     onDelete={handleDeleteProject}
                                     t={t}

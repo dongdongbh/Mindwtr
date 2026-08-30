@@ -697,7 +697,7 @@ export function ProjectsView() {
     const selectedProject = projects.find(p => p.id === selectedProjectId);
 
     useEffect(() => {
-        if (selectedProject?.status === 'archived') {
+        if (selectedProject?.status === 'archived' && !showArchivedProjects) {
             setShowArchivedProjects(true);
         }
     }, [selectedProject?.id, selectedProject?.status]);

@@ -381,8 +381,8 @@ export function shouldShowProjectWorkspaceTask(
     if (task.deletedAt || task.projectId !== project.id) return false;
     if (task.status === 'reference') return false;
     if (project.status === 'archived') return isTaskFinished(task);
-    if (task.status === 'done') return showCompletedTasks;
-    return task.status !== 'archived';
+    if (isTaskFinished(task)) return showCompletedTasks;
+    return true;
 }
 
 export function ProjectWorkspace({
@@ -577,7 +577,7 @@ export function ProjectWorkspace({
         setSectionNotesOpen({});
     }, [selectedProjectId]);
 
-    const projectTaskSource = selectedProjectTasks ?? allTasks;
+    const projectTaskSource = selectedProjectTasks;
     const projectAllTasks = useMemo(() => {
         if (!selectedProjectId) return [];
         return projectTaskSource.filter((task) => {

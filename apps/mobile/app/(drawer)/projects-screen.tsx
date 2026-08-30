@@ -59,6 +59,7 @@ export default function ProjectsScreen() {
   const {
     projects,
     tasks,
+    allTasks,
     sections,
     addProject,
     updateProject,
@@ -76,6 +77,7 @@ export default function ProjectsScreen() {
   } = useTaskStore((state) => ({
     projects: state.projects,
     tasks: state.tasks,
+    allTasks: state._allTasks,
     sections: state.sections,
     addProject: state.addProject,
     updateProject: state.updateProject,
@@ -290,14 +292,12 @@ export default function ProjectsScreen() {
 
   // Memos key off the id so a project object refresh with the same id reuses results.
   const selectedProjectIdForLists = selectedProject?.id ?? null;
-  const selectedProjectTasks = useMemo(
-    () => (
-      selectedProjectIdForLists
-        ? tasks.filter((task) => task.projectId === selectedProjectIdForLists && !task.deletedAt)
-        : EMPTY_PROJECT_TASKS
-    ),
-    [selectedProjectIdForLists, tasks]
-  );
+  const selectedProjectTasks = useMemo(() => {
+    if (!selectedProjectIdForLists || !allTasks) return EMPTY_PROJECT_TASKS;
+    return allTasks.filter(
+      (task) => task.projectId === selectedProjectIdForLists && !task.deletedAt
+    );
+  }, [allTasks, selectedProjectIdForLists]);
   const selectedProjectSections = useMemo<Section[]>(() => {
     if (!selectedProjectIdForLists) return [];
     return sections

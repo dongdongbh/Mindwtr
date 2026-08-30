@@ -15,7 +15,7 @@ export function getProjectDetailTaskListOptions(selectedProject: Project | null,
     return {
         allowAdd: !isArchived,
         enableProjectReorder: !isArchived,
-        includeArchived: isArchived,
+        includeArchived: isArchived || showCompletedTasks,
         includeDone: isArchived || showCompletedTasks,
         groupCompletedTasksLast: !isArchived && showCompletedTasks && !selectedProject?.isSequential,
     };
@@ -91,12 +91,18 @@ export function ProjectTaskList({
         showCompletedTasks,
         sortBy,
     ]);
+    const projectTaskSource = React.useMemo(() => {
+        if (!tasks || projectOptions.includeArchived) return tasks;
+        return tasks.some((task) => task.status === 'archived')
+            ? tasks.filter((task) => task.status !== 'archived')
+            : tasks;
+    }, [projectOptions.includeArchived, tasks]);
 
     return (
         <TaskList
             statusFilter="all"
             title={project.title}
-            taskSource={tasks}
+            taskSource={projectTaskSource}
             project={projectOptions}
             enableBulkActions
             bulkBarPlacement="external"

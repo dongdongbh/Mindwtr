@@ -37,9 +37,9 @@ describe('shouldShowProjectWorkspaceTask', () => {
         expect(shouldShowProjectWorkspaceTask(task('archived'), project('active'))).toBe(false);
     });
 
-    it('shows completed but not archived linked tasks when enabled for active projects', () => {
+    it('shows done and individually archived linked tasks when enabled for active projects', () => {
         expect(shouldShowProjectWorkspaceTask(task('done'), project('active'), true)).toBe(true);
-        expect(shouldShowProjectWorkspaceTask(task('archived'), project('active'), true)).toBe(false);
+        expect(shouldShowProjectWorkspaceTask(task('archived'), project('active'), true)).toBe(true);
     });
 
     it('does not show reference or deleted tasks in archived project task lists', () => {

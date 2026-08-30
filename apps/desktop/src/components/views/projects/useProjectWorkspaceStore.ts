@@ -33,14 +33,17 @@ export const useProjectWorkspaceStore = (selectedProjectId: string | null) => {
         shallow,
     );
 
-    const { allContexts, allTags, tasksByProjectId } = store.getDerivedState();
+    const { allContexts, allTags } = store.getDerivedState();
     const allTokens = useMemo(
         () => Array.from(new Set([...allContexts, ...allTags])).sort(),
         [allContexts, allTags],
     );
     const selectedProjectTasks = useMemo<readonly Task[]>(
-        () => (selectedProjectId ? tasksByProjectId.get(selectedProjectId) ?? EMPTY_PROJECT_TASKS : EMPTY_PROJECT_TASKS),
-        [selectedProjectId, tasksByProjectId],
+        // The derived map uses the visible projection, which drops archived tasks.
+        () => (selectedProjectId
+            ? store.allTasks.filter((task) => task.projectId === selectedProjectId && !task.deletedAt)
+            : EMPTY_PROJECT_TASKS),
+        [store.allTasks, selectedProjectId],
     );
 
     const { sortedAreas, areaById } = useMemo(() => {

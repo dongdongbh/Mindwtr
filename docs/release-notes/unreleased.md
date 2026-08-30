@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Archived projects show their contents again. Opening an archived project from the Projects sidebar, from a task's project chip, or (desktop) by clicking its row in Archived → Projects now lists the tasks that were completed with it, on desktop and mobile. **Show completed** on an active project also reveals tasks that were archived individually. (#1019)
 - Desktop: the window can no longer be scrolled or dragged past the app itself on macOS. Once a view such as the calendar with **Completed** on had scrolled to its end, the next scroll moved the whole window, sidebar included, into empty space below.
 - Processing an item into a new project no longer shows a second name field: while **Make it a project** is on, the item's Title field is labeled **Project Name** and that text becomes the project's name, with the Next action below it as the first action. (#1103)
 - Android WebDAV sync no longer fails with "This WebDAV server does not provide or enforce safe version checks" on a server behind a compressing proxy (nginx, Cloudflare). Android asked for compressed responses, which turn the file's version tag weak, while desktop never did, so the same server passed on desktop and failed on the phone. (#1056)

@@ -676,6 +676,63 @@ describe('ProjectDetailModal task sorting', () => {
         expect(onTaskSortByChange).toHaveBeenCalledWith('due');
     });
 
+    it('filters individually archived tasks until Show completed is enabled', () => {
+        const activeTask = {
+            id: 'project-task-active',
+            title: 'Active project task',
+            status: 'next',
+            projectId: 'project-1',
+            createdAt: '2026-05-12T00:00:00.000Z',
+            updatedAt: '2026-05-12T00:00:00.000Z',
+        } as Task;
+        const archivedTask = {
+            ...activeTask,
+            id: 'project-task-archived',
+            title: 'Archived project task',
+            status: 'archived',
+        } as Task;
+        let tree!: ReturnType<typeof create>;
+
+        act(() => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps({
+                tasks: [activeTask, archivedTask],
+            })} />);
+        });
+
+        expect(taskListPropsSpy.mock.calls.at(-1)?.[0].taskSource).toEqual([activeTask]);
+
+        act(() => {
+            tree.root.findByProps({ testID: 'project-task-view-options-button' }).props.onPress();
+        });
+        act(() => {
+            findOptionButton(tree.root, 'project-view-completed-option').props.onPress();
+        });
+
+        expect(taskListPropsSpy.mock.calls.at(-1)?.[0].taskSource).toEqual([activeTask, archivedTask]);
+        expect(taskListPropsSpy.mock.calls.at(-1)?.[0].project.includeArchived).toBe(true);
+    });
+
+    it('supplies archived tasks to an archived project list', () => {
+        const archivedTask = {
+            id: 'project-task-archived',
+            title: 'Archived project task',
+            status: 'archived',
+            projectId: 'project-1',
+            createdAt: '2026-05-12T00:00:00.000Z',
+            updatedAt: '2026-05-12T00:00:00.000Z',
+        } as Task;
+
+        act(() => {
+            create(<ProjectDetailModal {...createProjectDetailModalProps({
+                project: project('archived'),
+                tasks: [archivedTask],
+            })} />);
+        });
+
+        expect(taskListPropsSpy.mock.calls.at(-1)?.[0].taskSource).toEqual([archivedTask]);
+        expect(taskListPropsSpy.mock.calls.at(-1)?.[0].project.includeArchived).toBe(true);
+    });
+
     it('keeps project task controls outside the scrolling task list', () => {
         const onOpenQuickAdd = vi.fn();
         const onTaskSortByChange = vi.fn();
@@ -1122,12 +1179,12 @@ describe('ProjectDetailModal archived projects', () => {
         });
     });
 
-    it('shows done tasks for active projects when the completed toggle is on', () => {
+    it('shows done and individually archived tasks for active projects when the completed toggle is on', () => {
         expect(getProjectDetailTaskListOptions(project('active'), true)).toEqual({
             allowAdd: true,
             enableProjectReorder: true,
             groupCompletedTasksLast: true,
-            includeArchived: false,
+            includeArchived: true,
             includeDone: true,
         });
     });
@@ -1137,7 +1194,7 @@ describe('ProjectDetailModal archived projects', () => {
             allowAdd: true,
             enableProjectReorder: true,
             groupCompletedTasksLast: false,
-            includeArchived: false,
+            includeArchived: true,
             includeDone: true,
         });
     });
