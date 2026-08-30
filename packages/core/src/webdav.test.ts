@@ -227,6 +227,7 @@ describe('webdav http helpers', () => {
         expect(getFetcher.mock.calls[0]?.[1]).toMatchObject({
             method: 'GET',
             headers: {
+                'Accept-Encoding': 'identity',
                 'Cache-Control': 'no-cache',
                 Pragma: 'no-cache',
             },
@@ -255,6 +256,7 @@ describe('webdav http helpers', () => {
         expect(headFetcher.mock.calls[0]?.[1]).toMatchObject({
             method: 'HEAD',
             headers: {
+                'Accept-Encoding': 'identity',
                 'Cache-Control': 'no-cache',
                 Pragma: 'no-cache',
             },

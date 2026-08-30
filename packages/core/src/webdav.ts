@@ -160,7 +160,13 @@ function encodeBase64Utf8(value: string): string {
 }
 
 function buildHeaders(options: WebDavOptions): Record<string, string> {
-    const headers: Record<string, string> = { ...(options.headers || {}) };
+    // Android's fetch (OkHttp) adds `Accept-Encoding: gzip` on its own, and a
+    // compressing proxy in front of the server (nginx, Cloudflare) then serves
+    // `data.json` with a weak `W/"…"` ETag while the octet-stream probe file
+    // keeps a strong one. Desktop's reqwest never asks for compression, so the
+    // same server passed there and failed only on Android (#1056). Conditional
+    // writes need the strong ETag, so ask for the bytes as stored.
+    const headers: Record<string, string> = { 'Accept-Encoding': 'identity', ...(options.headers || {}) };
     if (options.username && typeof options.password === 'string') {
         headers.Authorization = `Basic ${encodeBase64Utf8(`${options.username}:${options.password}`)}`;
     }
