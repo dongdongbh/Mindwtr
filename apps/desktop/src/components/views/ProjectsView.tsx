@@ -11,6 +11,7 @@ import {
 import {
     DndContext,
     DragOverlay,
+    KeyboardSensor,
     MeasuringStrategy,
     PointerSensor,
     useSensor,
@@ -18,6 +19,7 @@ import {
     type DragEndEvent,
     type DragStartEvent,
 } from '@dnd-kit/core';
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import {
     AREA_FILTER_ALL,
     AREA_FILTER_NONE,
@@ -510,6 +512,9 @@ export function ProjectsView() {
     const dndSensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: { distance: 5 },
+        }),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
         }),
     );
     const [activeDrag, setActiveDrag] = useState<ProjectsViewActiveDrag | null>(null);

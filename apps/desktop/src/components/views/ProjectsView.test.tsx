@@ -1,8 +1,23 @@
 import type { ReactNode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { KeyboardSensor } from '@dnd-kit/core';
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 
 import { ProjectsView } from './ProjectsView';
+
+const dndSensorCalls: Array<{ sensor: unknown; options: unknown }> = [];
+
+vi.mock('@dnd-kit/core', async () => {
+    const actual = await vi.importActual<typeof import('@dnd-kit/core')>('@dnd-kit/core');
+    return {
+        ...actual,
+        useSensor: (sensor: unknown, options: unknown) => {
+            dndSensorCalls.push({ sensor, options });
+            return actual.useSensor(sensor as never, options as never);
+        },
+    };
+});
 
 const setProjectView = vi.fn();
 const showToast = vi.fn();
@@ -160,6 +175,7 @@ describe('ProjectsView', () => {
         setProjectView.mockReset();
         showToast.mockReset();
         requestConfirmation.mockReset();
+        dndSensorCalls.length = 0;
         resizeObserverCallback = null;
         animationFrameId = 0;
         queuedAnimationFrames.clear();
@@ -197,6 +213,15 @@ describe('ProjectsView', () => {
             configurable: true,
             writable: true,
             value: ResizeObserverMock,
+        });
+    });
+
+    it('registers keyboard coordinates for project and task reordering', () => {
+        render(<ProjectsView />);
+
+        const keyboardSensor = dndSensorCalls.find(({ sensor }) => sensor === KeyboardSensor);
+        expect(keyboardSensor?.options).toMatchObject({
+            coordinateGetter: sortableKeyboardCoordinates,
         });
     });
 
