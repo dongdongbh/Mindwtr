@@ -26,6 +26,13 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // Settings is the biggest lazy view (~190 kB chunk, hundreds of modules).
+    // Without this, the dev server transforms that graph on the FIRST click of
+    // Settings, which shows several seconds of skeleton in dev and in the demo
+    // recordings (release builds preload the built chunk and are fine).
+    warmup: {
+      clientFiles: ['./src/components/views/SettingsView.tsx'],
+    },
     watch: {
       ignored: ['**/src-tauri/**'],
     },
