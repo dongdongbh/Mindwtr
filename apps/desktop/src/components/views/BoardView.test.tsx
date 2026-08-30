@@ -1,23 +1,34 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/react';
+import { KeyboardSensor } from '@dnd-kit/core';
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { BoardView } from './BoardView';
 import { LanguageProvider } from '../../contexts/language-context';
 import { useTaskStore, type AppData, type Area, type Project, type Task } from '@mindwtr/core';
 import { useUiStore } from '../../store/ui-store';
 import { expectScrolledEndGap } from '../../test/list-end-gap';
 
+const { dndSensorCalls } = vi.hoisted(() => ({
+    dndSensorCalls: [] as Array<{ sensor: unknown; options: unknown }>,
+}));
+
 vi.mock('@dnd-kit/core', () => ({
     DndContext: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     DragOverlay: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    KeyboardSensor: class {},
     PointerSensor: class {},
     useDroppable: () => ({ setNodeRef: () => {} }),
-    useSensor: () => ({}),
+    useSensor: (sensor: unknown, options: unknown) => {
+        dndSensorCalls.push({ sensor, options });
+        return {};
+    },
     useSensors: () => ([]),
     closestCorners: () => null,
 }));
 
 vi.mock('@dnd-kit/sortable', () => ({
     SortableContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    sortableKeyboardCoordinates: () => undefined,
     verticalListSortingStrategy: {},
     useSortable: () => ({
         attributes: {},
@@ -67,6 +78,7 @@ const setBoardStoreState = ({
 
 describe('BoardView', () => {
     beforeEach(() => {
+        dndSensorCalls.length = 0;
         window.localStorage.clear();
         setBoardStoreState({
             tasks: [],
@@ -76,6 +88,15 @@ describe('BoardView', () => {
         });
         useUiStore.setState({
             boardFilters: { criteria: {} },
+        });
+    });
+
+    it('registers keyboard coordinates for board task reordering', () => {
+        renderWithProviders();
+
+        const keyboardSensor = dndSensorCalls.find(({ sensor }) => sensor === KeyboardSensor);
+        expect(keyboardSensor?.options).toMatchObject({
+            coordinateGetter: sortableKeyboardCoordinates,
         });
     });
 

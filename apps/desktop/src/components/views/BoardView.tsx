@@ -10,12 +10,18 @@ import {
     pointerWithin,
     rectIntersection,
     getFirstCollision,
+    KeyboardSensor,
     PointerSensor,
     useSensor,
     useSensors,
     type CollisionDetection,
 } from '@dnd-kit/core';
-import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import {
+    SortableContext,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { TaskItem } from '../TaskItem';
 import { ErrorBoundary } from '../ErrorBoundary';
@@ -256,6 +262,9 @@ export function BoardView() {
             activationConstraint: {
                 distance: 6,
             },
+        }),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
         })
     );
 
