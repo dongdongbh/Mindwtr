@@ -74,7 +74,7 @@
 </div>
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/e62ac128-467d-4e2f-beb0-7fc3c947bfeb" width="60%" autoplay loop muted playsinline></video>
+  <video src="https://github.com/user-attachments/assets/95a78d42-289c-4b61-bd45-7a72f9f29f1b" width="60%" autoplay loop muted playsinline></video>
   
   <video src="https://github.com/user-attachments/assets/d6688a01-989f-41b9-b190-94b21b0ae821" width="25%" autoplay loop muted playsinline></video>
 
