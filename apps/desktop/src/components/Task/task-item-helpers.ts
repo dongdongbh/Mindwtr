@@ -18,7 +18,7 @@ export { getRecurrenceRRuleValue };
 export const TASK_PRIORITY_STRIP_COLORS: Record<TaskPriority, string> = {
     urgent: '#dc2626',
     high: '#f97316',
-    medium: '#eab308',
+    medium: '#ca8a04',
     low: '#3b82f6',
 };
 

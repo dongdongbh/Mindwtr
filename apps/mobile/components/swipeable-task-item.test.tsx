@@ -2445,7 +2445,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
         width: 3,
       }));
       expect(renderRow({ priority: 'high' })?.backgroundColor).toBe('#f97316');
-      expect(renderRow({ priority: 'medium' })?.backgroundColor).toBe('#eab308');
+      expect(renderRow({ priority: 'medium' })?.backgroundColor).toBe('#ca8a04');
       expect(renderRow({ priority: 'low' })?.backgroundColor).toBe('#3b82f6');
     });
 
