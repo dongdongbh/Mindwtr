@@ -119,8 +119,6 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
             toggleTag={noop}
             convertToProject={false}
             setConvertToProject={noop}
-            projectTitleDraft=""
-            setProjectTitleDraft={noop}
             nextActionDraft=""
             setNextActionDraft={noop}
             addProject={async () => null}
@@ -186,9 +184,7 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrid
             handleConfirmContexts={noop}
             convertToProject={false}
             setConvertToProject={noop}
-            setProjectTitleDraft={noop}
             setNextActionDraft={noop}
-            projectTitleDraft=""
             nextActionDraft=""
             extraActionDrafts={[]}
             setExtraActionDrafts={noop}
@@ -223,6 +219,16 @@ describe('InboxProcessingQuickPanel draft editing', () => {
         fireEvent.change(title, { target: { value: 'Clarified launch' } });
 
         expect((getByLabelText('taskEdit.titleLabel') as HTMLInputElement).value).toBe('Clarified launch');
+    });
+
+    it('uses the title input as the only project name input during conversion', () => {
+        const { getByLabelText, queryByLabelText } = render(
+            <QuickPanelHarness convertToProject />,
+        );
+
+        expect((getByLabelText('projects.projectName') as HTMLInputElement).value).toBe('Plan launch');
+        expect(queryByLabelText('taskEdit.titleLabel')).toBeNull();
+        expect(queryByLabelText('projects.title')).toBeNull();
     });
 
     // The draft stores the raw token text; the selected chips are derived from
@@ -279,6 +285,21 @@ describe('InboxProcessingWizard draft editing', () => {
         fireEvent.change(getByDisplayValue('Plan launch'), { target: { value: 'Clarified launch' } });
 
         expect(getByDisplayValue('Clarified launch')).toBeTruthy();
+    });
+
+    it('labels the refine title as the project name while conversion is on', () => {
+        const { getByText, queryByText } = render(<WizardHarness convertToProject />);
+
+        expect(getByText('projects.projectName')).toBeInTheDocument();
+        expect(queryByText('taskEdit.titleLabel')).toBeNull();
+    });
+
+    it('does not render a second project name input in the project step', () => {
+        const { queryByText } = render(
+            <WizardHarness processingStep="project" convertToProject />,
+        );
+
+        expect(queryByText('projects.projectName')).toBeNull();
     });
 
     it('writes organization-step selections through the draft', () => {

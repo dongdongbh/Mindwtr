@@ -65,8 +65,6 @@ export type InboxProcessingQuickPanelProps = {
     toggleTag: (tag: string) => void;
     convertToProject: boolean;
     setConvertToProject: (value: boolean) => void;
-    projectTitleDraft: string;
-    setProjectTitleDraft: (value: string) => void;
     nextActionDraft: string;
     setNextActionDraft: (value: string) => void;
     addProject: (title: string, color: string, initialProps?: Partial<Project>) => Promise<Project | null>;
@@ -136,8 +134,6 @@ export function InboxProcessingQuickPanel({
     toggleTag,
     convertToProject,
     setConvertToProject,
-    projectTitleDraft,
-    setProjectTitleDraft,
     nextActionDraft,
     setNextActionDraft,
     addProject,
@@ -472,10 +468,12 @@ export function InboxProcessingQuickPanel({
 
                 <div className="space-y-3">
                     <div className="space-y-1">
-                        <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.titleLabel')}</label>
+                        <label className="text-[11px] text-muted-foreground font-medium">
+                            {t(convertToProject ? 'projects.projectName' : 'taskEdit.titleLabel')}
+                        </label>
                         <input
                             ref={titleInputRef}
-                            aria-label={t('taskEdit.titleLabel')}
+                            aria-label={t(convertToProject ? 'projects.projectName' : 'taskEdit.titleLabel')}
                             value={processingTitle}
                             onChange={(event) => setProcessingTitle(event.target.value)}
                             className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
@@ -757,7 +755,6 @@ export function InboxProcessingQuickPanel({
                                 type="button"
                                 onClick={() => {
                                     if (!convertToProject) {
-                                        setProjectTitleDraft(processingTitle);
                                         setNextActionDraft('');
                                     }
                                     setConvertToProject(!convertToProject);
@@ -791,15 +788,6 @@ export function InboxProcessingQuickPanel({
                                         />
                                     </div>
                                 ) : null}
-                                <div className="space-y-1">
-                                    <label className="text-[11px] text-muted-foreground font-medium">{t('projects.title')}</label>
-                                    <input
-                                        aria-label={t('projects.title')}
-                                        value={projectTitleDraft}
-                                        onChange={(event) => setProjectTitleDraft(event.target.value)}
-                                        className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
-                                    />
-                                </div>
                                 <div className="space-y-1">
                                     <label className="text-[11px] text-muted-foreground font-medium">{t('process.nextAction')}</label>
                                     <input

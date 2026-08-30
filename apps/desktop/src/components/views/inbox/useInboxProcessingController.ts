@@ -115,8 +115,6 @@ export function useInboxProcessingController({
         setProjectSearch,
         convertToProject,
         setConvertToProject,
-        projectTitleDraft,
-        setProjectTitleDraft,
         nextActionDraft,
         setNextActionDraft,
         extraActionDrafts,
@@ -526,7 +524,6 @@ export function useInboxProcessingController({
     const handleProjectCheckYes = useCallback(() => {
         const baseTitle = parsedTitle.title.trim() || draft.title.trim() || processingTask?.title || '';
         setConvertToProject(true);
-        setProjectTitleDraft(baseTitle);
         setNextActionDraft(baseTitle);
         setExtraActionDrafts([]);
         goToStep('project');
@@ -717,7 +714,7 @@ export function useInboxProcessingController({
 
     const handleConvertToProject = useCallback(async () => {
         if (!processingTask || projectConversionInFlightRef.current) return;
-        const projectTitle = projectTitleDraft.trim() || draft.title.trim();
+        const projectTitle = draft.title.trim();
         const nextAction = nextActionDraft.trim();
         if (!projectTitle) return;
         if (!nextAction) {
@@ -780,7 +777,6 @@ export function useInboxProcessingController({
         nextActionDraft,
         processingTask,
         processNext,
-        projectTitleDraft,
         projects,
         selectedContexts,
         selectedTags,
@@ -914,8 +910,6 @@ export function useInboxProcessingController({
             toggleTag,
             convertToProject,
             setConvertToProject,
-            projectTitleDraft,
-            setProjectTitleDraft,
             nextActionDraft,
             setNextActionDraft,
             addProject,
@@ -973,9 +967,7 @@ export function useInboxProcessingController({
         handleConfirmContexts,
         convertToProject,
         setConvertToProject,
-        setProjectTitleDraft,
         setNextActionDraft,
-        projectTitleDraft,
         nextActionDraft,
         extraActionDrafts,
         setExtraActionDrafts,

@@ -23,10 +23,6 @@ type Props = {
   projectSearch: string;
   setProjectSearch: (v: string) => void;
   convertToProject: boolean;
-  projectTitleDraft: string;
-  setProjectTitleDraft: (v: string) => void;
-  /** The task's title: what the project is named when this is left empty. */
-  projectTitlePlaceholder: string;
   nextActionDraft: string;
   setNextActionDraft: (v: string) => void;
   extraActionDrafts: string[];
@@ -53,9 +49,6 @@ export function InboxProjectSection({
   projectSearch,
   setProjectSearch,
   convertToProject,
-  projectTitleDraft,
-  setProjectTitleDraft,
-  projectTitlePlaceholder,
   nextActionDraft,
   setNextActionDraft,
   extraActionDrafts,
@@ -235,20 +228,6 @@ export function InboxProjectSection({
     <>
       {renderAreaPicker()}
       <View style={styles.projectConversionCard}>
-        <View style={styles.projectFieldGroup}>
-          <Text style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>
-            {t('projects.projectName')}
-          </Text>
-          <TextInput
-            value={projectTitleDraft}
-            onChangeText={setProjectTitleDraft}
-            placeholder={projectTitlePlaceholder}
-            placeholderTextColor={tc.secondaryText}
-            accessibilityLabel={t('projects.projectName')}
-            style={[styles.projectSearchInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-            returnKeyType="next"
-          />
-        </View>
         <View style={styles.projectFieldGroup}>
           <Text style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>
             {t('process.nextAction')}

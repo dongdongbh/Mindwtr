@@ -82,11 +82,9 @@ export type InboxProcessingWizardProps = {
     handleConfirmContexts: () => void;
     convertToProject: boolean;
     setConvertToProject: (value: boolean) => void;
-    setProjectTitleDraft: (value: string) => void;
     setNextActionDraft: (value: string) => void;
     extraActionDrafts: string[];
     setExtraActionDrafts: (value: string[]) => void;
-    projectTitleDraft: string;
     nextActionDraft: string;
     handleConvertToProject: () => void;
     projectSearch: string;
@@ -157,11 +155,9 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     handleConfirmContexts,
     convertToProject,
     setConvertToProject,
-    setProjectTitleDraft,
     setNextActionDraft,
     extraActionDrafts,
     setExtraActionDrafts,
-    projectTitleDraft,
     nextActionDraft,
     handleConvertToProject,
     projectSearch,
@@ -455,7 +451,9 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                     <p className="text-center text-sm text-muted-foreground">{t('process.refineDesc')}</p>
                     <div className="space-y-3">
                         <div className="space-y-1">
-                            <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.titleLabel')}</label>
+                            <label className="text-[11px] text-muted-foreground font-medium">
+                                {t(convertToProject ? 'projects.projectName' : 'taskEdit.titleLabel')}
+                            </label>
                             <input
                                 ref={titleInputRef}
                                 value={processingTitle}
@@ -1112,7 +1110,6 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                             type="button"
                             onClick={() => {
                                 if (!convertToProject) {
-                                    setProjectTitleDraft(processingTitle);
                                     setNextActionDraft('');
                                     setExtraActionDrafts([]);
                                 }
@@ -1147,15 +1144,6 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     />
                                 </div>
                             ) : null}
-                            <div className="space-y-1">
-                                <label className="text-xs text-muted-foreground font-medium">{t('projects.projectName')}</label>
-                                <input
-                                    value={projectTitleDraft}
-                                    onChange={(e) => setProjectTitleDraft(e.target.value)}
-                                    placeholder={draft.title}
-                                    className="w-full bg-card border border-border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-primary"
-                                />
-                            </div>
                             <div className="space-y-1">
                                 <label className="text-xs text-muted-foreground font-medium">{t('process.nextAction')}</label>
                                 <input

@@ -380,9 +380,6 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
       projectSearch={controller.projectSearch}
       setProjectSearch={controller.setProjectSearch}
       convertToProject={allowConversion && convertToProject}
-      projectTitleDraft={controller.projectTitleDraft}
-      setProjectTitleDraft={controller.setProjectTitleDraft}
-      projectTitlePlaceholder={controller.processingTitle.trim() || currentTask?.title || ''}
       nextActionDraft={controller.nextActionDraft}
       setNextActionDraft={controller.setNextActionDraft}
       extraActionDrafts={controller.extraActionDrafts}
@@ -756,6 +753,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
           titleInputRef={controller.titleInputRef}
           processingTitle={controller.processingTitle}
           setProcessingTitle={controller.setProcessingTitle}
+          convertToProject={step === 'file' && convertToProject}
           processingDescription={controller.processingDescription}
           setProcessingDescription={controller.setProcessingDescription}
           isReturningItem={controller.isReturningItem}

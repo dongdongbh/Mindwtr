@@ -146,7 +146,6 @@ export function useInboxProcessingController({
   const [showDelegateDatePicker, setShowDelegateDatePicker] = useState(false);
   const [projectSearch, setProjectSearch] = useState('');
   const [convertToProject, setConvertToProject] = useState(false);
-  const [projectTitleDraft, setProjectTitleDraft] = useState('');
   const [nextActionDraft, setNextActionDraft] = useState('');
   const [extraActionDrafts, setExtraActionDrafts] = useState<string[]>([]);
   const projectConversionInFlightRef = useRef(false);
@@ -461,7 +460,6 @@ export function useInboxProcessingController({
     setDelegateFollowUpDateOnly(false);
     setShowDelegateDatePicker(false);
     setConvertToProject(false);
-    setProjectTitleDraft('');
     setNextActionDraft('');
     setExtraActionDrafts([]);
     setSelectedContexts(task?.contexts ?? []);
@@ -1018,7 +1016,6 @@ export function useInboxProcessingController({
   const handleProjectConversionStart = useCallback(() => {
     const baseTitle = parsedTitle.title.trim() || processingTitle.trim() || currentTask?.title || '';
     setConvertToProject(true);
-    setProjectTitleDraft((prev) => prev.trim() || baseTitle);
     setNextActionDraft((prev) => prev.trim() || baseTitle);
     setSelectedProjectId(null);
     setProjectSearch('');
@@ -1026,7 +1023,6 @@ export function useInboxProcessingController({
 
   const handleProjectConversionCancel = useCallback(() => {
     setConvertToProject(false);
-    setProjectTitleDraft('');
     setNextActionDraft('');
     setExtraActionDrafts([]);
   }, []);
@@ -1046,7 +1042,7 @@ export function useInboxProcessingController({
 
   const handleConvertToProject = useCallback(async (): Promise<boolean> => {
     if (!currentTask || projectConversionInFlightRef.current) return false;
-    const projectTitle = projectTitleDraft.trim() || processingTitle.trim() || currentTask.title;
+    const projectTitle = parsedTitle.title.trim() || processingTitle.trim() || currentTask.title;
     const nextAction = nextActionDraft.trim();
     if (!projectTitle) return false;
     if (!nextAction) {
@@ -1124,8 +1120,8 @@ export function useInboxProcessingController({
     extraActionDrafts,
     moveToNext,
     nextActionDraft,
+    parsedTitle.title,
     processingTitle,
-    projectTitleDraft,
     projects,
     selectedAreaId,
     showAreaField,
@@ -1341,7 +1337,6 @@ export function useInboxProcessingController({
     processingTitleFocused,
     projectFirst,
     projectSearch,
-    projectTitleDraft,
     projectTitle,
     referenceEnabled,
     selectedAreaId,
@@ -1371,7 +1366,6 @@ export function useInboxProcessingController({
     setProcessingDescription,
     setProcessingTitle,
     setProcessingTitleFocused,
-    setProjectTitleDraft,
     setNextActionDraft,
     extraActionDrafts,
     setExtraActionDrafts,

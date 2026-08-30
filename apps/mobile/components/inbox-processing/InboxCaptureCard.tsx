@@ -15,6 +15,7 @@ type Props = {
   titleInputRef: RefObject<TextInput>;
   processingTitle: string;
   setProcessingTitle: (v: string) => void;
+  convertToProject: boolean;
   processingDescription: string;
   setProcessingDescription: (v: string) => void;
   processingTitleFocused: boolean;
@@ -41,6 +42,7 @@ export function InboxCaptureCard({
   titleInputRef,
   processingTitle,
   setProcessingTitle,
+  convertToProject,
   processingDescription,
   setProcessingDescription,
   processingTitleFocused,
@@ -72,9 +74,9 @@ export function InboxCaptureCard({
         style={[styles.anchorTitleInput, titleDirectionStyle, { color: tc.text }]}
         value={processingTitle}
         onChangeText={setProcessingTitle}
-        placeholder={t('taskEdit.titleLabel')}
+        placeholder={t(convertToProject ? 'projects.projectName' : 'taskEdit.titleLabel')}
         placeholderTextColor={tc.secondaryText}
-        accessibilityLabel={t('taskEdit.titleLabel')}
+        accessibilityLabel={t(convertToProject ? 'projects.projectName' : 'taskEdit.titleLabel')}
         onFocus={() => setProcessingTitleFocused(true)}
         onBlur={() => setProcessingTitleFocused(false)}
         selection={processingTitleFocused ? undefined : { start: 0, end: 0 }}

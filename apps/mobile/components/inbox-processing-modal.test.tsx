@@ -382,6 +382,26 @@ describe('InboxProcessingModal', () => {
     });
   };
 
+  const findTextInputsByAccessibilityLabel = (
+    root: ReturnType<typeof create>['root'],
+    accessibilityLabel: string,
+  ) => root.findAll((node) => (
+    typeof node.type === 'string'
+    && node.props.accessibilityLabel === accessibilityLabel
+    && typeof node.props.onChangeText === 'function'
+  ));
+
+  const findTextInputByAccessibilityLabel = (
+    root: ReturnType<typeof create>['root'],
+    accessibilityLabel: string,
+  ) => {
+    const inputs = findTextInputsByAccessibilityLabel(root, accessibilityLabel);
+    if (inputs.length !== 1) {
+      throw new Error(`Expected one text input named "${accessibilityLabel}", found ${inputs.length}`);
+    }
+    return inputs[0];
+  };
+
   const flushAsyncActions = async () => {
     await act(async () => {
       await Promise.resolve();
@@ -1076,7 +1096,15 @@ describe('InboxProcessingModal', () => {
 
     walkToProjectConversion(root);
 
-    const projectTitleInput = root.findByProps({ accessibilityLabel: 'projects.projectName' });
+    expect(findTextInputsByAccessibilityLabel(root, 'projects.projectName')).toHaveLength(1);
+    expect(findTextInputsByAccessibilityLabel(root, 'taskEdit.titleLabel')).toHaveLength(0);
+
+    pressStep(root, '‹ Back');
+    expect(findTextInputsByAccessibilityLabel(root, 'projects.projectName')).toHaveLength(0);
+    expect(findTextInputsByAccessibilityLabel(root, 'taskEdit.titleLabel')).toHaveLength(1);
+    pressStep(root, 'process.moreThanOneStepYes');
+
+    const projectTitleInput = findTextInputByAccessibilityLabel(root, 'projects.projectName');
     const nextActionInput = root.findByProps({ accessibilityLabel: 'process.nextAction' });
 
     act(() => {
@@ -1174,7 +1202,7 @@ describe('InboxProcessingModal', () => {
 
     walkToProjectConversion(root);
     act(() => {
-      root.findByProps({ accessibilityLabel: 'projects.projectName' }).props.onChangeText('Plan Launch');
+      findTextInputByAccessibilityLabel(root, 'projects.projectName').props.onChangeText('Plan Launch');
     });
     act(() => {
       findPressableWithText(root, 'process.addAnotherAction').props.onPress();
@@ -1244,7 +1272,7 @@ describe('InboxProcessingModal', () => {
     const root = tree!.root;
     walkToProjectConversion(root);
     act(() => {
-      root.findByProps({ accessibilityLabel: 'projects.projectName' }).props.onChangeText('Plan Launch');
+      findTextInputByAccessibilityLabel(root, 'projects.projectName').props.onChangeText('Plan Launch');
       findPressableWithText(root, 'process.addAnotherAction').props.onPress();
     });
     act(() => {
@@ -2652,7 +2680,7 @@ describe('InboxProcessingModal', () => {
       pressStep(root, 'process.moreThanOneStepYes');
 
       act(() => {
-        root.findByProps({ accessibilityLabel: 'projects.projectName' }).props.onChangeText('Plan Launch');
+        findTextInputByAccessibilityLabel(root, 'projects.projectName').props.onChangeText('Plan Launch');
         root.findByProps({ accessibilityLabel: 'process.nextAction' }).props.onChangeText('Draft brief');
       });
 

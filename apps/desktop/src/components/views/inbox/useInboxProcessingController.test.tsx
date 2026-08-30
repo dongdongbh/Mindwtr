@@ -425,7 +425,7 @@ describe('useInboxProcessingController project conversion persistence', () => {
         });
         act(() => {
             result.current.wizardProps.setConvertToProject(true);
-            result.current.wizardProps.setProjectTitleDraft('Plan Launch');
+            result.current.wizardProps.setField('title', 'Plan Launch');
             result.current.wizardProps.setNextActionDraft('Draft launch brief');
             result.current.wizardProps.setExtraActionDrafts(extras);
         });
