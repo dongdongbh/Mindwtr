@@ -1500,7 +1500,7 @@ describe('TaskItemDisplay', () => {
                 background: 'rgb(220, 38, 38)',
             });
             expect(renderStrip({ ...baseTask, priority: 'high' }, true)?.background).toBe('rgb(249, 115, 22)');
-            expect(renderStrip({ ...baseTask, priority: 'medium' }, true)?.background).toBe('rgb(234, 179, 8)');
+            expect(renderStrip({ ...baseTask, priority: 'medium' }, true)?.background).toBe('rgb(202, 138, 4)');
             expect(renderStrip({ ...baseTask, priority: 'low' }, true)?.background).toBe('rgb(59, 130, 246)');
         });
 
