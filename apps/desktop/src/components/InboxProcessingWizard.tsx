@@ -1148,10 +1148,11 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 </div>
                             ) : null}
                             <div className="space-y-1">
-                                <label className="text-xs text-muted-foreground font-medium">{t('projects.title')}</label>
+                                <label className="text-xs text-muted-foreground font-medium">{t('projects.projectName')}</label>
                                 <input
                                     value={projectTitleDraft}
                                     onChange={(e) => setProjectTitleDraft(e.target.value)}
+                                    placeholder={draft.title}
                                     className="w-full bg-card border border-border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-primary"
                                 />
                             </div>

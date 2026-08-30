@@ -382,6 +382,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
       convertToProject={allowConversion && convertToProject}
       projectTitleDraft={controller.projectTitleDraft}
       setProjectTitleDraft={controller.setProjectTitleDraft}
+      projectTitlePlaceholder={controller.processingTitle.trim() || currentTask?.title || ''}
       nextActionDraft={controller.nextActionDraft}
       setNextActionDraft={controller.setNextActionDraft}
       extraActionDrafts={controller.extraActionDrafts}

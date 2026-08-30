@@ -1076,7 +1076,7 @@ describe('InboxProcessingModal', () => {
 
     walkToProjectConversion(root);
 
-    const projectTitleInput = root.findByProps({ accessibilityLabel: 'projects.title' });
+    const projectTitleInput = root.findByProps({ accessibilityLabel: 'projects.projectName' });
     const nextActionInput = root.findByProps({ accessibilityLabel: 'process.nextAction' });
 
     act(() => {
@@ -1174,7 +1174,7 @@ describe('InboxProcessingModal', () => {
 
     walkToProjectConversion(root);
     act(() => {
-      root.findByProps({ accessibilityLabel: 'projects.title' }).props.onChangeText('Plan Launch');
+      root.findByProps({ accessibilityLabel: 'projects.projectName' }).props.onChangeText('Plan Launch');
     });
     act(() => {
       findPressableWithText(root, 'process.addAnotherAction').props.onPress();
@@ -1244,7 +1244,7 @@ describe('InboxProcessingModal', () => {
     const root = tree!.root;
     walkToProjectConversion(root);
     act(() => {
-      root.findByProps({ accessibilityLabel: 'projects.title' }).props.onChangeText('Plan Launch');
+      root.findByProps({ accessibilityLabel: 'projects.projectName' }).props.onChangeText('Plan Launch');
       findPressableWithText(root, 'process.addAnotherAction').props.onPress();
     });
     act(() => {
@@ -2652,7 +2652,7 @@ describe('InboxProcessingModal', () => {
       pressStep(root, 'process.moreThanOneStepYes');
 
       act(() => {
-        root.findByProps({ accessibilityLabel: 'projects.title' }).props.onChangeText('Plan Launch');
+        root.findByProps({ accessibilityLabel: 'projects.projectName' }).props.onChangeText('Plan Launch');
         root.findByProps({ accessibilityLabel: 'process.nextAction' }).props.onChangeText('Draft brief');
       });
 

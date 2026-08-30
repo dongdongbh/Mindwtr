@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Processing an item into a new project now labels the name field **Project Name** on desktop and mobile, and shows the task's own title as the placeholder, since that is what the project is called when the field is left empty. It used to read "Projects", which looked like a picker. (#1103)
 - Android WebDAV sync no longer fails with "This WebDAV server does not provide or enforce safe version checks" on a server behind a compressing proxy (nginx, Cloudflare). Android asked for compressed responses, which turn the file's version tag weak, while desktop never did, so the same server passed on desktop and failed on the phone. (#1056)
 - Weekly Review's final step now shows a short "This week" look-back: actions completed, projects moved forward, and estimated vs tracked time on completed tasks when estimates are on; lines with nothing to report stay hidden.
 - Focus's **Today** section now also lists next tasks that start later the same day, on desktop and mobile — sorted in with the rest of today's schedule, by their time. A task set to start at 5:00 PM used to be hidden from Next Actions until then and was too early for Upcoming, so it sat in neither section. Upcoming goes back to listing only tasks deferred to another day, and a Today row like this shows its start time until it arrives, so it still reads as later rather than doable now.
