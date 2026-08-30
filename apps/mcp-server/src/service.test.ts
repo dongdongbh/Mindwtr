@@ -875,7 +875,7 @@ describe('mcp service error taxonomy (local core adapter)', () => {
           capError = error as { code?: string; message?: string };
         }
       }
-      expect(capError).toMatchObject({ code: 'validation_error', message: 'Maximum of 3 focused tasks allowed' });
+      expect(capError).toMatchObject({ code: 'validation_error', message: 'Focus limit of 3 reached' });
     } finally {
       await service.close();
     }

@@ -142,7 +142,7 @@ const getErrorMessage = (error: unknown): string => (error instanceof Error ? er
 // (store-tasks.ts:524, store-projects/*'s mutateEntities/update*/delete* helpers) emit ONLY
 // when the id being acted on doesn't exist — a genuine lookup miss. Update actions can also
 // fail for OTHER reasons on an id that DOES exist (store-tasks.ts's updateTask: a focus-cap
-// hit -> "Maximum of N focused tasks allowed", or preparedUpdates.error for a bad patch) —
+// hit -> "Focus limit of N reached", or preparedUpdates.error for a bad patch) —
 // those are user-input mistakes, not not-found, and must not match this set.
 //
 // The identical strings ('Area not found' etc.) are ALSO produced by task-container-rules.ts
