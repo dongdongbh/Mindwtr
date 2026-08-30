@@ -526,6 +526,11 @@
     font-size: calc(16px * var(--mindwtr-text-scale));
     overflow-x: clip;
     /* Ensure consistent sizing on WebKitGTK */
+    /* Lock the viewport here, not on body: body's overflow only propagates to
+     * the viewport while html is fully `visible`, and the clip above breaks
+     * that. WKWebView then let the whole shell scroll past its end. */
+    overflow-y: hidden;
+    overscroll-behavior: none;
   }
 
   html[data-text-size='default'] {
