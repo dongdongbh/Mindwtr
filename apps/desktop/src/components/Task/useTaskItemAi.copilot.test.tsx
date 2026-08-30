@@ -8,6 +8,7 @@ import { LanguageProvider } from '../../contexts/language-context';
 import { useUiStore } from '../../store/ui-store';
 
 const predictMetadata = vi.hoisted(() => vi.fn());
+const logWarn = vi.hoisted(() => vi.fn());
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@mindwtr/core')>();
@@ -29,7 +30,7 @@ vi.mock('../../lib/ai-config', () => ({
     loadAIKey: vi.fn(async () => 'test-key'),
 }));
 
-vi.mock('../../lib/app-log', () => ({ logWarn: vi.fn() }));
+vi.mock('../../lib/app-log', () => ({ logWarn }));
 
 const settings = { ai: { enabled: true, provider: 'openai' } } as never;
 
@@ -63,7 +64,27 @@ describe('useTaskItemAi copilot parts', () => {
     beforeEach(() => {
         vi.useFakeTimers();
         predictMetadata.mockReset();
+        logWarn.mockReset();
         predictMetadata.mockResolvedValue({ context: '@phone', timeEstimate: '15min', tags: ['#health', '#errand'] });
+    });
+
+    it('logs a sanitized diagnostic when metadata prediction fails', async () => {
+        predictMetadata.mockRejectedValueOnce(new Error('model rejected request'));
+        const { result } = renderAi(vi.fn());
+
+        await settleSuggestion();
+
+        expect(result.current.copilotSuggestion).toBeNull();
+        expect(logWarn).toHaveBeenCalledWith('AI copilot failed', {
+            scope: 'ai',
+            extra: {
+                step: 'copilot',
+                provider: 'openai',
+                model: '',
+                taskId: 'task-1',
+                error: 'model rejected request',
+            },
+        });
     });
 
     it('applies exactly one part per chip and leaves the others suggestible', async () => {

@@ -156,9 +156,20 @@ export function useTaskItemAi({
                 } else {
                     setCopilotSuggestion(suggestion);
                 }
-            } catch {
+            } catch (error) {
                 if (!cancelled && copilotMountedRef.current) {
                     setCopilotSuggestion(null);
+                    const message = error instanceof Error ? error.message : String(error);
+                    void logWarn('AI copilot failed', {
+                        scope: 'ai',
+                        extra: {
+                            step: 'copilot',
+                            provider: aiProvider,
+                            model: copilotModel ?? '',
+                            taskId,
+                            error: message,
+                        },
+                    });
                 }
             }
         }, 800);
@@ -170,7 +181,7 @@ export function useTaskItemAi({
                 copilotAbortRef.current = null;
             }
         };
-    }, [aiEnabled, aiKey, aiProvider, contextOptions, copilotEnabled, copilotModel, editContexts, editDescription, editTitle, keyRequired, settings, tagOptions, timeEstimatesEnabled]);
+    }, [aiEnabled, aiKey, aiProvider, contextOptions, copilotEnabled, copilotModel, editContexts, editDescription, editTitle, keyRequired, settings, tagOptions, taskId, timeEstimatesEnabled]);
 
     useEffect(() => {
         copilotMountedRef.current = true;

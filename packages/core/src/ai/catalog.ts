@@ -91,9 +91,10 @@ export function resolveAnthropicModel(model?: string | null): string {
 }
 
 export const DEFAULT_REASONING_EFFORT: AIReasoningEffort = 'low';
-// The copilot runs on every debounced keystroke, so keep reasoning minimal to
-// protect type-ahead latency on GPT-5 reasoning models (the fast/copilot default).
-export const COPILOT_REASONING_EFFORT: AIReasoningEffort = 'minimal';
+// The copilot runs on every debounced keystroke, so use the lowest effort that
+// is accepted across current OpenAI reasoning models. Some models reject the
+// older `minimal` value outright, which otherwise makes suggestions disappear.
+export const COPILOT_REASONING_EFFORT: AIReasoningEffort = 'low';
 
 export function getDefaultAIConfig(provider: AIProviderId): AIProviderConfig {
     return {

@@ -80,12 +80,12 @@ describe('ai-config endpoint mapping', () => {
         });
     });
 
-    it('runs the copilot at minimal reasoning effort to protect type-ahead latency', () => {
+    it('runs the copilot at portable low reasoning effort to protect type-ahead latency', () => {
         const config = buildCopilotConfig(
             createSettings({ provider: 'openai', copilotModel: 'gpt-5.4-nano' }),
             'test-key',
         );
-        expect(config.reasoningEffort).toBe('minimal');
+        expect(config.reasoningEffort).toBe('low');
     });
 
     it('passes OpenAI-compatible extra body params only for OpenAI provider configs', () => {
