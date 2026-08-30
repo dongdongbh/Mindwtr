@@ -112,3 +112,31 @@ describe('useSettingsAboutPage background update check', () => {
         expect(labels.updateRateLimited).not.toBe(new UpdateRateLimitedError().message);
     });
 });
+
+describe('useSettingsAboutPage web build', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        window.localStorage.clear();
+    });
+
+    it('reports a real version and no updater on the web build (was "vweb")', async () => {
+        runtimeMock.isTauriRuntime.mockReturnValue(false);
+        let latest: AboutPageResult | null = null;
+        render(<CaptureHarness onResult={(result) => { latest = result; }} />);
+        await waitFor(() => {
+            expect(latest!.aboutPageProps.appVersion).toMatch(/^\d+\.\d+\.\d+/);
+        });
+        expect(latest!.aboutPageProps.appVersion).not.toBe('web');
+        expect(latest!.aboutPageProps.updatesSupported).toBe(false);
+        expect(updateServiceMock.checkForUpdates).not.toHaveBeenCalled();
+    });
+
+    it('keeps the updater available in the native desktop app', async () => {
+        runtimeMock.isTauriRuntime.mockReturnValue(true);
+        let latest: AboutPageResult | null = null;
+        render(<CaptureHarness onResult={(result) => { latest = result; }} />);
+        await waitFor(() => {
+            expect(latest!.aboutPageProps.updatesSupported).toBe(true);
+        });
+    });
+});

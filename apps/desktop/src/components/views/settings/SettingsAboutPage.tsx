@@ -58,6 +58,8 @@ type Labels = {
 export type SettingsAboutPageProps = {
     t: Labels;
     appVersion: string;
+    /** False in the web/PWA build, which updates via its Docker image. */
+    updatesSupported?: boolean;
     installChannel?: string | null;
     onOpenLink: (url: string) => void;
     onCheckUpdates: () => void;
@@ -72,6 +74,7 @@ export type SettingsAboutPageProps = {
 export function SettingsAboutPage({
     t,
     appVersion,
+    updatesSupported = true,
     installChannel,
     onOpenLink,
     onCheckUpdates,
@@ -101,6 +104,7 @@ export function SettingsAboutPage({
                         </div>
                     </>
                 )}
+                {updatesSupported && (<>
                 <div className="border-t border-border/50"></div>
                 <div data-settings-key="checkForUpdates" className="flex justify-between items-center">
                     <span className="text-muted-foreground">{actionLabel}</span>
@@ -118,6 +122,7 @@ export function SettingsAboutPage({
                         {isCheckingUpdate ? t.checking : actionLabel}
                     </button>
                 </div>
+                </>)}
                 {updateError && (
                     <div className="text-destructive text-sm">{t.checkFailed}</div>
                 )}

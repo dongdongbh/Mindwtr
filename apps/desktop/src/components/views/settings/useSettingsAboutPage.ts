@@ -31,6 +31,7 @@ import {
 import { isAutoUpdateCheckAllowed } from '../../../lib/desktop-update-targets';
 import { reportError } from '../../../lib/report-error';
 import { resolveDesktopAnalyticsVersion } from '../../../lib/analytics-heartbeat';
+import { version as pkgVersion } from '../../../../package.json';
 import { getLogPath } from '../../../lib/app-log';
 import { measureSettingsOpenStep } from '../../../lib/settings-open-diagnostics';
 import type { SettingsLabels } from './labels';
@@ -128,7 +129,11 @@ export function useSettingsAboutPage({
 
     useEffect(() => {
         if (!isTauri) {
-            setAppVersion('web');
+            // Web/PWA build: no Tauri getVersion(). Use the release env when the
+            // build pipeline provides one, else the package version baked in by
+            // vite define. 'web' only as a last resort (used to render "vweb").
+            const releaseVersion = String(import.meta.env.VITE_RELEASE_VERSION || '').trim().replace(/^v/i, '');
+            setAppVersion(releaseVersion || pkgVersion || 'web');
             return;
         }
 
@@ -458,6 +463,10 @@ export function useSettingsAboutPage({
     return {
         aboutPageProps: {
             appVersion,
+            // The updater flow (GitHub/store lookups, installer downloads) only
+            // makes sense in the native desktop app; the web/PWA build updates
+            // with its Docker image, so the row is hidden there.
+            updatesSupported: isTauri,
             installChannel: installChannelDisplay,
             isCheckingUpdate,
             onCheckUpdates: handleCheckUpdates,
