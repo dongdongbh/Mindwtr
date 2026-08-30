@@ -646,7 +646,7 @@ export default function ArchivedScreen() {
                 <View style={styles.segmentRow}>
                     {(['tasks', 'projects'] as ArchiveSegment[]).map((value) => {
                         const selected = segment === value;
-                        const label = value === 'tasks' ? (tFallback(t, 'common.tasks', 'Tasks')) : (tFallback(t, 'projects.title', 'Projects'));
+                        const label = value === 'tasks' ? tFallback(t, 'archived.tasksSegment', 'Tasks') : tFallback(t, 'projects.title', 'Projects');
                         return (
                             <Pressable
                                 key={value}
@@ -972,6 +972,7 @@ const styles = StyleSheet.create({
     segmentRow: {
         paddingHorizontal: 16,
         paddingTop: 12,
+        paddingBottom: 8,
         flexDirection: 'row',
         gap: 8,
     },

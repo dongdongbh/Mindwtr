@@ -1489,6 +1489,7 @@ export const csOverrides: Record<string, string> = {
         'search.due.thisWeek': 'Tento týden',
         'search.due.nextWeek': 'Příští týden',
         'search.due.none': 'Bez termínu',
+        'archived.tasksSegment': 'Úkoly',
         'archived.title': 'Archivováno',
         'archived.searchPlaceholder': 'Hledat archivované úkoly…',
         'archived.noTasksFound': 'Žádné archivované úkoly nenalezeny.',

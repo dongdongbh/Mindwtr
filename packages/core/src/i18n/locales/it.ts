@@ -1321,6 +1321,7 @@ export const itOverrides: Record<string, string> = {
         'search.due.none': 'Nessuna scadenza',
 
         // Archived
+        'archived.tasksSegment': 'Attività',
         'archived.title': 'Archiviate',
         'archived.searchPlaceholder': 'Cerca attività archiviate...',
         'archived.noTasksFound': 'Nessuna attività archiviata trovata.',

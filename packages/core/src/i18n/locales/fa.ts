@@ -1622,6 +1622,8 @@ export const faOverrides: Record<string, string> = {
         'search.due.nextWeek': 'هفته بعد',
         'search.due.none': 'بدون تاریخ سررسید',
 
+        'archived.tasksSegment': 'کارها',
+
         'archived.title': 'بایگانی‌شده',
         'archived.searchPlaceholder': 'جستجوی کارهای بایگانی‌شده...',
         'archived.noTasksFound': 'کار بایگانی‌شده‌ای یافت نشد.',

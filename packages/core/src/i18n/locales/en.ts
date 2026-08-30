@@ -1657,6 +1657,7 @@ export const en: Record<string, string> = {
         'search.due.none': 'No due date',
 
         // Archived
+        'archived.tasksSegment': 'Tasks',
         'archived.title': 'Archived',
         'archived.searchPlaceholder': 'Search archived tasks...',
         'archived.noTasksFound': 'No archived tasks found.',

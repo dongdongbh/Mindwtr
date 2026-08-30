@@ -1698,6 +1698,7 @@ export const viOverrides: Record<string, string> = {
         'search.due.none': 'Không có ngày đến hạn',
 
         // Archived
+        'archived.tasksSegment': 'Nhiệm vụ',
         'archived.title': 'Đã lưu trữ',
         'archived.searchPlaceholder': 'Tìm kiếm nhiệm vụ đã lưu trữ...',
         'archived.noTasksFound': 'Không tìm thấy nhiệm vụ đã lưu trữ nào.',

@@ -1622,6 +1622,8 @@ export const svOverrides: Record<string, string> = {
         'search.due.nextWeek': 'Nästa vecka',
         'search.due.none': 'Inget förfallodatum',
 
+        'archived.tasksSegment': 'Uppgifter',
+
         'archived.title': 'Arkiverat',
         'archived.searchPlaceholder': 'Sök arkiverade uppgifter...',
         'archived.noTasksFound': 'Inga arkiverade uppgifter hittades.',

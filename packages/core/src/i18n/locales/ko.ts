@@ -1558,6 +1558,7 @@ export const koOverrides: Record<string, string> = {
         'search.due.none': '마감일 없음',
 
         // Archived
+        'archived.tasksSegment': '할 일',
         'archived.title': '보관됨',
         'archived.searchPlaceholder': '보관된 할 일 검색...',
         'archived.noTasksFound': '보관된 할 일이 없습니다.',

@@ -1662,6 +1662,7 @@ export const jaOverrides: Record<string, string> = {
         'search.due.none': '期限なし',
 
         // Archived
+        'archived.tasksSegment': 'タスク',
         'archived.title': 'アーカイブ',
         'archived.searchPlaceholder': 'アーカイブ済みのタスクを検索…',
         'archived.noTasksFound': 'アーカイブ済みのタスクは見つかりませんでした。',

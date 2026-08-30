@@ -1448,6 +1448,7 @@ export const frOverrides: Record<string, string> = {
         'search.due.none': 'Pas de date d’échéance',
 
         // Archived
+        'archived.tasksSegment': 'Tâches',
         'archived.title': 'Archivé',
         'archived.searchPlaceholder': 'Rechercher des tâches archivées…',
         'archived.noTasksFound': 'Aucune tâche archivée trouvée.',

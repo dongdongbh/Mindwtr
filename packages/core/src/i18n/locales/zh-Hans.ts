@@ -1516,6 +1516,7 @@ export const zhHans: Record<string, string> = {
         'search.due.thisWeek': '本周',
         'search.due.nextWeek': '下周',
         'search.due.none': '无截止日期',
+        'archived.tasksSegment': '任务',
         'archived.title': '归档',
         'archived.searchPlaceholder': '搜索归档任务...',
         'archived.noTasksFound': '未找到归档任务。',

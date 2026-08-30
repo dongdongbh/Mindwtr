@@ -563,7 +563,7 @@ export function ArchiveView() {
                                     : 'text-muted-foreground hover:text-foreground'
                             )}
                         >
-                            {t('common.tasks')}
+                            {tFallback(t, 'archived.tasksSegment', 'Tasks')}
                         </button>
                         <button
                             type="button"

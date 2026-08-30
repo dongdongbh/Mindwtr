@@ -1193,6 +1193,7 @@ export const arOverrides: Record<string, string> = {
         'search.due.thisWeek': 'هذا الاسبوع',
         'search.due.nextWeek': 'الأسبوع المقبل',
         'search.due.none': 'لا يوجد تاريخ استحقاق',
+        'archived.tasksSegment': 'المهام',
         'archived.title': 'مؤرشف',
         'archived.searchPlaceholder': 'البحث في المهام المؤرشفة...',
         'archived.noTasksFound': 'لم يتم العثور على مهام مؤرشفة.',
