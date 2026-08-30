@@ -1,10 +1,10 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { DndContext } from '@dnd-kit/core';
 import { SortableContext } from '@dnd-kit/sortable';
 import { describe, expect, it, vi } from 'vitest';
 import type { Project, Task } from '@mindwtr/core';
 
-import { DraggableProjectTaskRow, SortableProjectTaskRow } from './SortableRows';
+import { DraggableProjectTaskRow, SortableProjectRow, SortableProjectTaskRow } from './SortableRows';
 
 const taskItemProps = vi.hoisted(() => ({ calls: [] as Record<string, unknown>[] }));
 vi.mock('../../TaskItem', () => ({
@@ -53,6 +53,20 @@ const renderRow = (narrow: boolean, Row: typeof SortableProjectTaskRow | typeof 
     );
     return taskItemProps.calls[0] ?? {};
 };
+
+it('gives the project reorder handle an explicit accessible name', () => {
+    render(
+        <DndContext>
+            <SortableContext items={[project.id]}>
+                <SortableProjectRow projectId={project.id} section="active">
+                    {({ handle }) => <div>{handle}</div>}
+                </SortableProjectRow>
+            </SortableContext>
+        </DndContext>
+    );
+
+    expect(screen.getByRole('button', { name: 'Drag' })).toBeInTheDocument();
+});
 
 // The actions strip is `shrink-0`; inline, it starves the title in a container
 // as narrow as a section column. These pin the escape hatch, not the styling.
