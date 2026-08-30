@@ -244,6 +244,20 @@ export function CalendarView() {
             // Ignore storage failures; the in-memory state still updates.
         }
     }, []);
+    const periodNavigationLabels = viewMode === 'day'
+        ? {
+            previous: resolveText('calendar.prevDay', 'Previous day'),
+            next: resolveText('calendar.nextDay', 'Next day'),
+        }
+        : viewMode === 'week'
+            ? {
+                previous: resolveText('calendar.prevWeek', 'Previous week'),
+                next: resolveText('calendar.nextWeek', 'Next week'),
+            }
+            : {
+                previous: resolveText('calendar.prevMonth', 'Previous month'),
+                next: resolveText('calendar.nextMonth', 'Next month'),
+            };
 
     useLayoutEffect(() => {
         const scroller = timelineScrollRef.current;
@@ -370,8 +384,8 @@ export function CalendarView() {
                             type="button"
                             onClick={handlePrevMonth}
                             className="inline-flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                            aria-label={resolveText('calendar.prevMonth', 'Previous month')}
-                            title={resolveText('calendar.prevMonth', 'Previous month')}
+                            aria-label={periodNavigationLabels.previous}
+                            title={periodNavigationLabels.previous}
                         >
                             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                         </button>
@@ -422,8 +436,8 @@ export function CalendarView() {
                             type="button"
                             onClick={handleNextMonth}
                             className="inline-flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                            aria-label={resolveText('calendar.nextMonth', 'Next month')}
-                            title={resolveText('calendar.nextMonth', 'Next month')}
+                            aria-label={periodNavigationLabels.next}
+                            title={periodNavigationLabels.next}
                         >
                             <ChevronRight className="h-4 w-4" aria-hidden="true" />
                         </button>

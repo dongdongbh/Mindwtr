@@ -235,6 +235,21 @@ describe('CalendarView', () => {
         expect(markerStyle).toContain('color: hsl(var(--primary-foreground));');
     });
 
+    it.each([
+        ['day', 'Previous day', 'Next day'],
+        ['week', 'Previous week', 'Next week'],
+        ['month', 'Previous month', 'Next month'],
+        ['schedule', 'Previous month', 'Next month'],
+    ])('labels %s navigation for the period it changes', async (viewMode, previousLabel, nextLabel) => {
+        window.history.replaceState(null, '', `/?calendarView=${viewMode}&calendarDate=2026-04-03`);
+
+        renderCalendar();
+        await flushCalendarEffects();
+
+        expect(screen.getByRole('button', { name: previousLabel })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: nextLabel })).toBeInTheDocument();
+    });
+
     it('keeps week columns aligned beside the scrollbar and the midnight label visible', async () => {
         window.history.replaceState(null, '', '/?calendarView=week&calendarDate=2026-04-03');
         const offsetWidth = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
