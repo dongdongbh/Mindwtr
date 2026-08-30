@@ -1,4 +1,6 @@
 services:
+  # The sync server + REST API. This is the only service the native desktop and
+  # mobile apps need; point Settings -> Sync -> Self-Hosted at this service.
   mindwtr-cloud:
     image: ghcr.io/dongdongbh/mindwtr-cloud:latest
     build:
@@ -18,11 +20,22 @@ services:
     ports:
       - 8787:8787
     environment:
+      # One or more access tokens, comma-separated (each 20-512 characters).
+      # Each distinct token gets its own private dataset on this server, so
+      # several people can share one instance without seeing each other's data.
+      # Devices that should sync together must use the same token.
+      #   one person, all devices:    MINDWTR_CLOUD_AUTH_TOKENS=alices-long-random-token
+      #   several people, one server: MINDWTR_CLOUD_AUTH_TOKENS=alices-long-random-token,bobs-long-random-token
+      # For Docker secrets, set MINDWTR_CLOUD_AUTH_TOKENS_FILE to a mounted file instead.
       - MINDWTR_CLOUD_AUTH_TOKENS=${MINDWTR_CLOUD_AUTH_TOKENS:?MINDWTR_CLOUD_AUTH_TOKENS must be set}
       - MINDWTR_CLOUD_CORS_ORIGIN=${MINDWTR_CLOUD_CORS_ORIGIN:?MINDWTR_CLOUD_CORS_ORIGIN must be set}
     volumes:
       - ./data:/app/cloud_data
 
+  # OPTIONAL: the browser/PWA build of the app, served by Nginx. Only needed if
+  # you want to open Mindwtr in a web browser. If you only use the native
+  # desktop/mobile apps, you can delete this service (and skip its reverse-proxy
+  # domain) - mindwtr-cloud alone is a complete sync setup.
   mindwtr-app:
     image: ghcr.io/dongdongbh/mindwtr-app:latest
     build:

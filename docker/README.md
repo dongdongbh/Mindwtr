@@ -1,8 +1,10 @@
 # Mindwtr Docker (PWA + Cloud)
 
 This folder contains Dockerfiles and a compose file to run:
-- **mindwtr-app**: the desktop web/PWA build, served by Nginx
-- **mindwtr-cloud**: the lightweight sync server
+- **mindwtr-cloud**: the lightweight sync server + REST API. The only service the native desktop and mobile apps need.
+- **mindwtr-app**: optional; the web/PWA build of the app, served by Nginx, for using Mindwtr in a browser.
+
+If you only sync native desktop/mobile clients, run just `mindwtr-cloud` (the HTTPS compose file below does exactly that) and expose a single domain. `mindwtr-app` is a second, independent web service - behind a reverse proxy it needs its own origin, which is why running both means two domains.
 
 ## Quick start (HTTP compose)
 
@@ -110,6 +112,14 @@ The cloud server expects a token. In `docker/compose.yaml`, set:
 ```
 MINDWTR_CLOUD_AUTH_TOKENS=your_token_here
 ```
+
+Multiple tokens are supported, comma-separated:
+
+```
+MINDWTR_CLOUD_AUTH_TOKENS=alices-long-random-token,bobs-long-random-token
+```
+
+Each distinct token gets its own private dataset on the server, so several people can share one instance without seeing each other's data. Devices that should sync together must use the same token. Tokens are 20-512 characters.
 
 `MINDWTR_CLOUD_TOKEN` is still accepted for backward compatibility, but deprecated.
 
