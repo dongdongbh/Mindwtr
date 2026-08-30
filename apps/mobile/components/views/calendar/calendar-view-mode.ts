@@ -154,6 +154,24 @@ export const getCalendarWeekInitialScrollX = ({
   return Math.max(0, leadingInset) + startIndex * Math.max(0, columnWidth);
 };
 
+/**
+ * The furthest x the week canvas can scroll to: canvas width (pinned gutter +
+ * one column per day) minus the viewport. Density changes resize the columns,
+ * and a scroll offset taken under a wider canvas strands the view past the
+ * last day unless it is re-clamped against this.
+ */
+export const getCalendarWeekMaxScrollX = ({
+  columnWidth,
+  dayCount,
+  gutterWidth,
+  viewportWidth,
+}: {
+  columnWidth: number;
+  dayCount: number;
+  gutterWidth: number;
+  viewportWidth: number;
+}): number => Math.max(0, gutterWidth + columnWidth * dayCount - viewportWidth);
+
 export const getCalendarNavigationSwipeDirection = ({
   translationX,
   translationY,

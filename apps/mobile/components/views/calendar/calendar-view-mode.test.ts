@@ -8,6 +8,7 @@ import {
   getCalendarTimelineDefaultScrollKey,
   getCalendarTimelineScrollYForMinutes,
   getCalendarWeekColumnWidth,
+  getCalendarWeekMaxScrollX,
   getCalendarWeekInitialScrollX,
   getCalendarWeekInitialVisibleDayIndex,
   getInitialCalendarSelectedDate,
@@ -187,5 +188,17 @@ describe('calendar view mode helpers', () => {
     expect(getCalendarNavigationSwipeDirection({ translationX: -18, translationY: 2 })).toBeNull();
     expect(getCalendarNavigationSwipeDirection({ translationX: -72, translationY: 76 })).toBeNull();
     expect(getCalendarNavigationSwipeDirection({ translationX: -30, translationY: 34, velocityX: -900 })).toBeNull();
+  });
+});
+
+describe('getCalendarWeekMaxScrollX', () => {
+  it('is the canvas overflow past the viewport', () => {
+    expect(getCalendarWeekMaxScrollX({ columnWidth: 210, dayCount: 7, gutterWidth: 56, viewportWidth: 897 }))
+      .toBe(56 + 210 * 7 - 897);
+  });
+
+  it('never goes negative when the canvas fits', () => {
+    expect(getCalendarWeekMaxScrollX({ columnWidth: 50, dayCount: 7, gutterWidth: 56, viewportWidth: 897 }))
+      .toBe(0);
   });
 });

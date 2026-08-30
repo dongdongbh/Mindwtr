@@ -47,6 +47,7 @@ import {
   getCalendarNavigationSwipeDirection,
   getCalendarWeekColumnWidth,
   getCalendarWeekInitialScrollX,
+  getCalendarWeekMaxScrollX,
 } from './calendar/calendar-view-mode';
 import { useCalendarViewController } from './calendar/useCalendarViewController';
 
@@ -504,21 +505,40 @@ export function CalendarView() {
     if (lastWeekAutoScrollKeyRef.current === autoScrollKey) return;
     lastWeekAutoScrollKeyRef.current = autoScrollKey;
 
-    const x = getCalendarWeekInitialScrollX({
-      columnWidth: weekColumnWidth,
-      // The gutter stays pinned now, so the first day column already starts beside it.
-      leadingInset: 0,
-      selectedDate,
-      visibleDays: calendarWeekVisibleDays,
-      weekDays,
-    });
+    const x = Math.min(
+      getCalendarWeekInitialScrollX({
+        columnWidth: weekColumnWidth,
+        // The gutter stays pinned now, so the first day column already starts beside it.
+        leadingInset: 0,
+        selectedDate,
+        visibleDays: calendarWeekVisibleDays,
+        weekDays,
+      }),
+      getCalendarWeekMaxScrollX({
+        columnWidth: weekColumnWidth,
+        dayCount: weekDays.length,
+        gutterWidth: WEEK_TIME_GUTTER_WIDTH,
+        viewportWidth: screenWidth,
+      }),
+    );
     requestAnimationFrame(() => {
       weekHorizontalScrollRef.current?.scrollTo({
         x,
         animated: false,
       });
     });
-  }, [calendarWeekVisibleDays, selectedDate, viewMode, weekColumnWidth, weekDays]);
+  }, [calendarWeekVisibleDays, screenWidth, selectedDate, viewMode, weekColumnWidth, weekDays]);
+
+  // Widening the columns from the density slider shrinks nothing, but narrowing
+  // the canvas (more visible days) leaves the old scroll offset beyond the last
+  // column and Android keeps it there, showing day headers and then blank space.
+  // Re-clamp whenever the canvas actually resizes.
+  const handleWeekContentSizeChange = useCallback((contentWidth: number) => {
+    const maxX = Math.max(0, contentWidth - screenWidth);
+    if (weekScrollX.value > maxX) {
+      weekHorizontalScrollRef.current?.scrollTo({ x: maxX, animated: false });
+    }
+  }, [screenWidth, weekScrollX]);
 
   const updateWeekDensityFromTrack = useCallback((x: number) => {
     if (weekDensityTrackWidth <= 0) return;
@@ -1045,6 +1065,7 @@ export function CalendarView() {
           horizontal
           nestedScrollEnabled
           onScroll={weekHorizontalScrollHandler}
+          onContentSizeChange={handleWeekContentSizeChange}
           scrollEventThrottle={16}
           // Land on whole days: a half-scrolled column hides its own header under the pinned gutter.
           snapToInterval={weekColumnWidth}
