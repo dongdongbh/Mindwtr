@@ -11,6 +11,11 @@ import * as mcpQueries from './queries.js';
 
 const tempDirs: string[] = [];
 
+// These tests bootstrap a real SQLite database from data.json. On a loaded shared CI
+// runner that alone ran past bun's 5s default (5.3s on 2026-08-30), so give them the
+// same explicit budget the cross-process lock tests carry; a timeout at 20s is real.
+const REAL_SQLITE_TEST_TIMEOUT_MS = 20_000;
+
 const createTempDir = (): string => {
   const dir = mkdtempSync(join(tmpdir(), 'mindwtr-mcp-service-'));
   tempDirs.push(dir);
@@ -673,7 +678,7 @@ describe('mcp service', () => {
     } finally {
       await service.close();
     }
-  });
+  }, REAL_SQLITE_TEST_TIMEOUT_MS);
 
   test('persists write operations to a real sqlite database', async () => {
     const dir = createTempDir();
@@ -815,7 +820,7 @@ describe('mcp service', () => {
     } finally {
       await service.close();
     }
-  });
+  }, REAL_SQLITE_TEST_TIMEOUT_MS);
 });
 
 // core-adapter.ts's ensureActionSucceeded used to map EVERY core store failure to
@@ -849,7 +854,7 @@ describe('mcp service error taxonomy (local core adapter)', () => {
     } finally {
       await service.close();
     }
-  });
+  }, REAL_SQLITE_TEST_TIMEOUT_MS);
 
   test('updateTask hitting the focus-task cap is a validation error, not not_found', async () => {
     // Built up through live addTask/updateTask calls on one service session (like the "persists
@@ -879,7 +884,7 @@ describe('mcp service error taxonomy (local core adapter)', () => {
     } finally {
       await service.close();
     }
-  });
+  }, REAL_SQLITE_TEST_TIMEOUT_MS);
 
   test('updateTask on a missing id is still not_found (regression pin)', async () => {
     const service = seedRealService();
@@ -889,5 +894,5 @@ describe('mcp service error taxonomy (local core adapter)', () => {
     } finally {
       await service.close();
     }
-  });
+  }, REAL_SQLITE_TEST_TIMEOUT_MS);
 });
