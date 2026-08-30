@@ -82,6 +82,11 @@ const translate = vi.hoisted(() => {
     'task.select': 'Select task',
     'task.deselect': 'Deselect task',
     'taskEdit.statusLabel': 'Status',
+    'taskEdit.priorityLabel': 'Priority',
+    'priority.low': 'Low',
+    'priority.medium': 'Medium',
+    'priority.high': 'High',
+    'priority.urgent': 'Urgent',
     'taskEdit.dueDateLabel': 'Due',
     'task.deleteConfirmBody': 'Move this task to Trash?',
     'taskEdit.recurrenceLabel': 'Recurrence',
@@ -2370,5 +2375,103 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     // Exactly one: the renamed row re-rendered, the untouched one did not.
     expect(readTaskRowRenderCount() - afterMount).toBe(1);
     expect(hasText(tree, 'Task A renamed')).toBe(true);
+  });
+
+  describe('priority strip', () => {
+    const renderRow = (task: Record<string, unknown>) => {
+      let tree!: renderer.ReactTestRenderer;
+      renderer.act(() => {
+        tree = renderer.create(
+          <SwipeableTaskItem
+            task={{
+              id: 'task-1',
+              title: 'Do laundry',
+              status: 'inbox',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              ...task,
+            } as any}
+            isDark={false}
+            tc={{
+              taskItemBg: '#111111',
+              border: '#222222',
+              text: '#ffffff',
+              secondaryText: '#999999',
+              tint: '#3b82f6',
+              warning: '#f59e0b',
+            } as any}
+            onPress={vi.fn()}
+            onStatusChange={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        );
+      });
+      const strips = tree.root.findAll((node) => node.props?.testID === 'task-priority-strip');
+      return strips.length === 0 ? null : flattenStyle(strips[0].props.style);
+    };
+
+    const rowAccessibilityLabel = (task: Record<string, unknown>) => {
+      let tree!: renderer.ReactTestRenderer;
+      renderer.act(() => {
+        tree = renderer.create(
+          <SwipeableTaskItem
+            task={{
+              id: 'task-1',
+              title: 'Do laundry',
+              status: 'inbox',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              ...task,
+            } as any}
+            isDark={false}
+            tc={{ taskItemBg: '#111111', border: '#222222', text: '#ffffff', secondaryText: '#999999', tint: '#3b82f6', warning: '#f59e0b' } as any}
+            onPress={vi.fn()}
+            onStatusChange={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        );
+      });
+      const rows = tree.root.findAll((node) => (
+        typeof node.props?.accessibilityLabel === 'string'
+        && node.props.accessibilityLabel.includes('Do laundry')
+      ));
+      return rows[0]?.props.accessibilityLabel as string;
+    };
+
+    it('paints one strip per priority', () => {
+      expect(renderRow({ priority: 'urgent' })).toEqual(expect.objectContaining({
+        backgroundColor: '#dc2626',
+        position: 'absolute',
+        width: 3,
+      }));
+      expect(renderRow({ priority: 'high' })?.backgroundColor).toBe('#f97316');
+      expect(renderRow({ priority: 'medium' })?.backgroundColor).toBe('#eab308');
+      expect(renderRow({ priority: 'low' })?.backgroundColor).toBe('#3b82f6');
+    });
+
+    it('sits on the leading edge so it follows RTL', () => {
+      expect(renderRow({ priority: 'low' })?.insetInlineStart).toBe(6);
+    });
+
+    it('renders no strip when the priorities feature is off or the task has none', () => {
+      expect(renderRow({})).toBeNull();
+      storeState.settings = { features: { priorities: false }, appearance: {} } as any;
+      expect(renderRow({ priority: 'urgent' })).toBeNull();
+    });
+
+    // No green, no special case: a done row keeps its priority color and only
+    // the row's own completed styling changes.
+    it('keeps the priority color on a completed task', () => {
+      expect(renderRow({ status: 'done', priority: 'low' })?.backgroundColor).toBe('#3b82f6');
+    });
+
+    // The strip is the row's only priority signal here, so the level must not
+    // be color-only: it rides the row's accessibility label.
+    it('names the priority in the row accessibility label, and only when the strip shows', () => {
+      expect(rowAccessibilityLabel({ priority: 'high' })).toContain('Priority: High');
+      expect(rowAccessibilityLabel({})).not.toContain('Priority');
+      storeState.settings = { features: { priorities: false }, appearance: {} } as any;
+      expect(rowAccessibilityLabel({ priority: 'high' })).not.toContain('Priority');
+    });
   });
 });

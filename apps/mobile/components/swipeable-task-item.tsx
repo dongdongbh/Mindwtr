@@ -117,6 +117,7 @@ export type SwipeableTaskItemRowContext = {
     areas: Area[];
     focusedCount: number;
     focusTaskLimit: number;
+    prioritiesEnabled: boolean;
     timeEstimatesEnabled: boolean;
     timeSpentEnabled: boolean;
     showTaskAge: boolean;
@@ -201,6 +202,7 @@ function StoreBackedSwipeableTaskItem(props: Omit<SwipeableTaskItemInnerProps, '
             areas: state.areas,
             focusedCount: state.getDerivedState().focusedCount,
             focusTaskLimit: normalizeFocusTaskLimit(state.settings?.gtd?.focusTaskLimit),
+            prioritiesEnabled: resolvedFeatureFlags.priorities,
             timeEstimatesEnabled: resolvedFeatureFlags.timeEstimates,
             timeSpentEnabled: resolvedFeatureFlags.pomodoro
                 && state.settings?.gtd?.pomodoro?.linkTask === true,
@@ -266,6 +268,7 @@ function SwipeableTaskItemInner({
         areas,
         focusedCount,
         focusTaskLimit,
+        prioritiesEnabled,
         timeEstimatesEnabled,
         timeSpentEnabled,
         showTaskAge,
@@ -562,6 +565,11 @@ function SwipeableTaskItemInner({
             const hasTime = hasTimeComponent(task.dueDate);
             return `${tFallback(t, 'taskEdit.dueDateLabel', 'Due')}: ${safeFormatDate(due, hasTime ? 'Pp' : 'P')}`;
         })(),
+        // The strip is the only priority signal on a mobile row, so the level
+        // has to reach screen readers as text, not color alone.
+        prioritiesEnabled && task.priority
+            ? `${tFallback(t, 'taskEdit.priorityLabel', 'Priority')}: ${t(`priority.${task.priority}`)}`
+            : null,
         sequenceCue === 'available' ? sequenceLabel : null,
         projectDeadlineLabel,
         recurrenceLabel ? `${tFallback(t, 'taskEdit.recurrenceLabel', 'Recurrence')}: ${recurrenceLabel}` : null,
@@ -705,6 +713,7 @@ function SwipeableTaskItemInner({
             t={t}
             task={{
                 ...task,
+                priority: prioritiesEnabled ? task.priority : undefined,
                 timeEstimate: timeEstimatesEnabled ? task.timeEstimate : undefined,
                 timeSpentMinutes: timeSpentEnabled ? task.timeSpentMinutes : undefined,
             }}

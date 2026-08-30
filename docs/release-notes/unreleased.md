@@ -147,3 +147,4 @@ Changes collected after `v1.2.1` and before the next version tag.
 - Mobile: Focus gains the same "Hide details" toggle desktop already has — show every row with its description preview and metadata line, or just titles. Focus starts title-only, since it is the day's shortlist; the choice is remembered per device, like on desktop.
 - Today's Focus limit can now be set to 1 on desktop and mobile, for people who want a single task to define the day.
 - Web app (Docker/PWA): Settings -> About now shows the real app version instead of "vweb", and no longer offers the desktop update checker; the web build updates with its Docker image.
+- Task rows now show a thin colored strip on the leading edge for the task's priority (red urgent, orange high, yellow medium, blue low), on desktop and mobile. It only appears when the priorities feature is enabled and a task has a priority; tasks without one are unchanged.

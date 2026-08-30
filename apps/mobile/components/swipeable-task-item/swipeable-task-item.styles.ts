@@ -10,6 +10,14 @@ export const styles = StyleSheet.create({
         marginBottom: 6,
         position: 'relative',
     },
+    priorityStrip: {
+        position: 'absolute',
+        insetInlineStart: 6,
+        top: 8,
+        bottom: 8,
+        width: 3,
+        borderRadius: 2,
+    },
     selectionIndicator: {
         width: 22,
         height: 22,

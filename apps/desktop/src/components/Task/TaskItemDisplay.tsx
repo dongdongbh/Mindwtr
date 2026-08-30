@@ -12,6 +12,7 @@ import { InlineMarkdown } from '../Markdown';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { isImageAttachment } from './task-item-attachment-utils';
+import { TASK_PRIORITY_STRIP_COLORS } from './task-item-helpers';
 import { AttachmentImage } from './AttachmentImage';
 import { FocusStarIcon } from '../FocusStarIcon';
 
@@ -645,7 +646,20 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
         // hover action cluster) from joining the page stacking context, where
         // they painted over open toolbar menus in views whose toolbar sits at
         // a lower z-index (#1040).
-        <div className={cn("task-item-display isolate flex-1 min-w-0 flex items-start gap-3", actionsOverlay && "relative")}>
+        <div className={cn("task-item-display isolate relative flex-1 min-w-0 flex items-start gap-3")}>
+            {/*
+              * Priority strip: out of flow, so a task without a priority is not
+              * offset by a hair against one that has it, in any density.
+              * `start-0` keeps it on the leading edge under RTL.
+              */}
+            {prioritiesEnabled && task.priority && (
+                <span
+                    aria-hidden="true"
+                    data-priority-strip={task.priority}
+                    className="pointer-events-none absolute inset-y-0 start-0 w-[3px] rounded-full"
+                    style={{ backgroundColor: TASK_PRIORITY_STRIP_COLORS[task.priority] }}
+                />
+            )}
             {overlayDragHandle && (
                 <div
                     className="absolute left-0 top-2 flex items-center -translate-x-2 z-10"

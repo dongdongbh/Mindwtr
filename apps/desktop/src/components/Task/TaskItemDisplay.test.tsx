@@ -1452,4 +1452,82 @@ describe('TaskItemDisplay', () => {
         expect(upcoming).toContain('text-warning');
         expect(later).toContain('text-muted-foreground');
     });
+
+    describe('priority strip', () => {
+        const renderStrip = (task: Task, prioritiesEnabled: boolean) => {
+            const { container, unmount } = render(
+                <LanguageProvider>
+                    <TaskItemDisplay
+                        task={task}
+                        language="en"
+                        selectionMode={false}
+                        isViewOpen={false}
+                        actions={{
+                            onToggleView: vi.fn(),
+                            onEdit: vi.fn(),
+                            onDelete: vi.fn(),
+                            onDuplicate: vi.fn(),
+                            onStatusChange: vi.fn(),
+                            openAttachment: vi.fn(),
+                        }}
+                        visibleAttachments={[]}
+                        recurrenceRule=""
+                        recurrenceStrategy="strict"
+                        prioritiesEnabled={prioritiesEnabled}
+                        timeEstimatesEnabled={false}
+                        isStagnant={false}
+                        showQuickDone={false}
+                        readOnly={false}
+                        t={(key: string) => key}
+                    />
+                </LanguageProvider>
+            );
+            const strip = container.querySelector<HTMLElement>('[data-priority-strip]');
+            const result = strip && {
+                priority: strip.dataset.priorityStrip,
+                background: strip.style.backgroundColor,
+                className: strip.className,
+                ariaHidden: strip.getAttribute('aria-hidden'),
+                role: strip.getAttribute('role'),
+            };
+            unmount();
+            return result;
+        };
+
+        it('paints one strip per priority', () => {
+            expect(renderStrip({ ...baseTask, priority: 'urgent' }, true)).toMatchObject({
+                priority: 'urgent',
+                background: 'rgb(220, 38, 38)',
+            });
+            expect(renderStrip({ ...baseTask, priority: 'high' }, true)?.background).toBe('rgb(249, 115, 22)');
+            expect(renderStrip({ ...baseTask, priority: 'medium' }, true)?.background).toBe('rgb(234, 179, 8)');
+            expect(renderStrip({ ...baseTask, priority: 'low' }, true)?.background).toBe('rgb(59, 130, 246)');
+        });
+
+        it('sits out of flow on the leading edge so priority-less rows do not shift', () => {
+            const strip = renderStrip({ ...baseTask, priority: 'high' }, true);
+            expect(strip?.className).toContain('absolute');
+            expect(strip?.className).toContain('start-0');
+        });
+
+        // Desktop keeps the priority text badge, so the strip is decoration only
+        // and must not reach the accessibility tree twice.
+        it('is decorative: aria-hidden with no role', () => {
+            const strip = renderStrip({ ...baseTask, priority: 'urgent' }, true);
+            expect(strip?.ariaHidden).toBe('true');
+            expect(strip?.role).toBeNull();
+        });
+
+        it('renders no strip when the priorities feature is off or the task has none', () => {
+            expect(renderStrip({ ...baseTask, priority: 'urgent' }, false)).toBeNull();
+            expect(renderStrip(baseTask, true)).toBeNull();
+        });
+
+        // A completed task keeps the row's own dimming; the strip gets no
+        // special-cased "done" color (decision: no green).
+        it('keeps the priority color on a completed task', () => {
+            expect(renderStrip({ ...baseTask, status: 'done', priority: 'low' }, true)?.background)
+                .toBe('rgb(59, 130, 246)');
+        });
+    });
 });
