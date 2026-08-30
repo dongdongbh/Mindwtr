@@ -264,7 +264,9 @@ export default function FocusScreen() {
   const saveFilterKeyboardInset = useAndroidKeyboardInset(filtersVisible && saveFilterDialogVisible);
   const [saveFilterName, setSaveFilterName] = useState('');
   const [expandedSections, setExpandedSections] = useState(DEFAULT_EXPANDED_SECTIONS);
-  const [showDetails, setShowDetails] = useState(true);
+  // Off by default: Focus is the day's shortlist, so titles alone read faster;
+  // the persisted per-device choice above wins for anyone who turned it on.
+  const [showDetails, setShowDetails] = useState(false);
   const [focusViewStateHydrated, setFocusViewStateHydrated] = useState(false);
   const didToggleSectionRef = useRef(false);
   const didToggleDetailsRef = useRef(false);

@@ -808,7 +808,7 @@ describe('FocusScreen', () => {
     expect(asyncStorageMock.setItem).toHaveBeenCalledWith(
       'mindwtr:view:focus:v1',
       JSON.stringify({
-        showDetails: true,
+        showDetails: false,
         expandedSections: {
           focus: true,
           schedule: true,
@@ -822,7 +822,7 @@ describe('FocusScreen', () => {
     );
   });
 
-  it('hydrates showDetails to shown when the persisted blob lacks the field', async () => {
+  it('hydrates showDetails to hidden when the persisted blob lacks the field', async () => {
     const deferred = createDeferred<string | null>();
     asyncStorageMock.getItem.mockReturnValue(deferred.promise);
 
@@ -840,7 +840,7 @@ describe('FocusScreen', () => {
     });
 
     const detailsButton = tree.root.find((node) =>
-      node.props.accessibilityLabel === 'Hide details' && typeof node.props.onPress === 'function'
+      node.props.accessibilityLabel === 'Show details' && typeof node.props.onPress === 'function'
     );
     expect(detailsButton).toBeTruthy();
   });
@@ -852,7 +852,7 @@ describe('FocusScreen', () => {
     });
 
     const detailsButton = tree.root.find((node) =>
-      node.props.accessibilityLabel === 'Hide details' && typeof node.props.onPress === 'function'
+      node.props.accessibilityLabel === 'Show details' && typeof node.props.onPress === 'function'
     );
 
     act(() => {
@@ -862,7 +862,7 @@ describe('FocusScreen', () => {
     expect(asyncStorageMock.setItem).toHaveBeenCalledWith(
       'mindwtr:view:focus:v1',
       JSON.stringify({
-        showDetails: false,
+        showDetails: true,
         expandedSections: {
           focus: true,
           schedule: true,
@@ -876,7 +876,7 @@ describe('FocusScreen', () => {
     );
 
     const flippedButton = tree.root.find((node) =>
-      node.props.accessibilityLabel === 'Show details' && typeof node.props.onPress === 'function'
+      node.props.accessibilityLabel === 'Hide details' && typeof node.props.onPress === 'function'
     );
     expect(flippedButton).toBeTruthy();
   });

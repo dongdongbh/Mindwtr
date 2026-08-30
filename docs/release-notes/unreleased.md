@@ -143,5 +143,5 @@ Changes collected after `v1.2.1` and before the next version tag.
 - Quick add: an `@` or `#` in the middle of a word is now left alone — pasting `Email bob@example.com` keeps the address in the title instead of turning `@example` into a context, and a `#fragment` in a pasted URL stays part of the link. Contexts and tags still parse wherever they start a word. (#1087)
 - Desktop: consecutive time blocks in the calendar's day and week grids now leave a small seam between them, so back-to-back tasks read as separate items instead of one solid block.
 - Flatpak: the in-app feedback form (Settings → About) now works in the Flathub build; it used to say feedback wasn't available and point at GitHub instead.
-- Mobile: Focus gains the same "Hide details" toggle desktop already has — collapse every row to just its title, hiding the description preview and metadata line. Device-local, remembered per device, and on by default.
+- Mobile: Focus gains the same "Hide details" toggle desktop already has — show every row with its description preview and metadata line, or just titles. Focus starts title-only, since it is the day's shortlist; the choice is remembered per device, like on desktop.
 - Today's Focus limit can now be set to 1 on desktop and mobile, for people who want a single task to define the day.
