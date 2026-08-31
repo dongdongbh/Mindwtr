@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import {
-    taskDraftToUpdatePatch,
+    taskDraftToChangedUpdatePatch,
     flushPendingSave,
     type Attachment,
     type StoreActionResult,
@@ -10,6 +10,7 @@ import {
 } from '@mindwtr/core';
 
 type UseTaskItemSubmitParams = {
+    baselineTask: Task;
     draft: TaskDraft;
     editAttachments: Attachment[] | undefined;
     editingTaskId: string | null;
@@ -31,6 +32,7 @@ type TaskItemSubmitOptions = {
 };
 
 export function useTaskItemSubmit({
+    baselineTask,
     draft,
     editAttachments,
     editingTaskId,
@@ -46,7 +48,7 @@ export function useTaskItemSubmit({
 }: UseTaskItemSubmitParams) {
     return useCallback(async (event?: React.FormEvent, options?: TaskItemSubmitOptions) => {
         event?.preventDefault();
-        const patch = taskDraftToUpdatePatch(draft, task, {
+        const patch = taskDraftToChangedUpdatePatch(draft, baselineTask, {
             statusOverride: options?.statusOverride,
             attachments: editAttachments,
         });
@@ -85,6 +87,7 @@ export function useTaskItemSubmit({
         }
         return result;
     }, [
+        baselineTask,
         draft,
         editAttachments,
         editingTaskId,

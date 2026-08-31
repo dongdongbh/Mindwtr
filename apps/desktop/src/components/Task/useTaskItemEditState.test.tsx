@@ -57,10 +57,13 @@ describe('useTaskItemEditState', () => {
             },
         });
 
+        expect(result.current.baselineTask.description).toBe('');
+
         act(() => {
             result.current.resetEditState();
         });
 
+        expect(result.current.baselineTask.description).toBe('- Updated notes');
         expect(result.current.draft.description).toBe('- Updated notes');
         expect(result.current.showDescriptionPreview).toBe(true);
     });

@@ -46,6 +46,7 @@ describe('useTaskItemSubmit attachment durability', () => {
         const draft = createTaskDraft(task);
         draft.title = 'Edited';
         const { result } = renderHook(() => useTaskItemSubmit({
+            baselineTask: task,
             draft,
             editAttachments,
             editingTaskId: task.id,
@@ -85,6 +86,7 @@ describe('useTaskItemSubmit attachment durability', () => {
         const draft = createTaskDraft(task);
         draft.title = 'Edited';
         const { result } = renderHook(() => useTaskItemSubmit({
+            baselineTask: task,
             draft,
             editAttachments: [{
                 id: 'draft-file',
@@ -114,5 +116,43 @@ describe('useTaskItemSubmit attachment durability', () => {
         expect(settlePersistedAttachmentSave).not.toHaveBeenCalled();
         expect(cancelAttachmentSaveBeforeStoreUpdate).not.toHaveBeenCalled();
         expect(showToast).toHaveBeenCalledWith('sqlite unavailable', 'error');
+    });
+
+    it('does not submit untouched fields changed after the edit session opened', async () => {
+        const baselineTask: Task = {
+            ...task,
+            description: 'Opening description',
+            tags: ['#opening'],
+        };
+        const liveTask: Task = {
+            ...baselineTask,
+            description: 'Concurrent description',
+            tags: ['#concurrent'],
+            updatedAt: '2026-08-27T01:00:00.000Z',
+        };
+        const draft = createTaskDraft(baselineTask);
+        draft.title = 'Edited title';
+        const updateTask = vi.fn().mockResolvedValue({ success: true });
+        const { result } = renderHook(() => useTaskItemSubmit({
+            baselineTask,
+            draft,
+            editAttachments: baselineTask.attachments,
+            editingTaskId: task.id,
+            setEditingTaskId: vi.fn(),
+            setIsEditing: vi.fn(),
+            showToast: vi.fn(),
+            t: (key) => key,
+            task: liveTask,
+            updateTask,
+            beginAttachmentSave: vi.fn(() => false),
+            cancelAttachmentSaveBeforeStoreUpdate: vi.fn(),
+            settlePersistedAttachmentSave: vi.fn(),
+        }));
+
+        await act(async () => {
+            await result.current();
+        });
+
+        expect(updateTask).toHaveBeenCalledWith(task.id, { title: 'Edited title' });
     });
 });

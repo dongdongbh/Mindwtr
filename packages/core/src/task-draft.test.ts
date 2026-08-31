@@ -6,6 +6,7 @@ import {
     createTaskDraft,
     isTaskDraftDirty,
     setTaskDraftField,
+    taskDraftToChangedUpdatePatch,
     taskDraftToUpdatePatch,
 } from './task-draft';
 
@@ -179,6 +180,37 @@ describe('task-draft', () => {
 
         const untitled: Task = { ...baseTask, title: '' };
         expect(taskDraftToUpdatePatch({ ...createTaskDraft(untitled), title: ' ' }, untitled)).toBeNull();
+    });
+
+    it('serializes only fields changed from the task-draft baseline', () => {
+        const task: Task = {
+            ...baseTask,
+            dueDate: '2026-02-01',
+            location: 'Office',
+            priority: 'high',
+        };
+        const draft = setTaskDraftField(createTaskDraft(task), 'title', 'Write revised report');
+
+        expect(taskDraftToChangedUpdatePatch(draft, task)).toEqual({
+            title: 'Write revised report',
+        });
+    });
+
+    it('keeps an explicit clear in a changed-only patch', () => {
+        const task: Task = { ...baseTask, location: 'Office' };
+        const draft = setTaskDraftField(createTaskDraft(task), 'location', '');
+        const patch = taskDraftToChangedUpdatePatch(draft, task);
+
+        expect(patch).toHaveProperty('location', undefined);
+        expect(Object.keys(patch ?? {})).toEqual(['location']);
+    });
+
+    it('keeps explicit submit overrides while omitting unchanged draft fields', () => {
+        const draft = createTaskDraft(baseTask);
+
+        expect(taskDraftToChangedUpdatePatch(draft, baseTask, {
+            statusOverride: 'done',
+        })).toEqual({ status: 'done' });
     });
 
     it('assembles recurrence from the rrule and preserves completed occurrences', () => {

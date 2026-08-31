@@ -14,6 +14,7 @@ type UseTaskItemEditStateOptions = {
 };
 
 export type TaskItemEditState = {
+    baselineTask: Task;
     draft: TaskDraft;
     setField: TaskDraftSetter;
     showDescriptionPreview: boolean;
@@ -33,6 +34,9 @@ export function useTaskItemEditState({
     task,
     resetAttachmentState,
 }: UseTaskItemEditStateOptions): TaskItemEditState {
+    // This advances only when an edit session resets. Keeping it separate from
+    // the live task prop lets submit distinguish user edits from later updates.
+    const [baselineTask, setBaselineTask] = useState(task);
     const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(task));
     const [showDescriptionPreview, setShowDescriptionPreview] = useState(() => hasPreviewableDescription(task));
 
@@ -41,16 +45,18 @@ export function useTaskItemEditState({
     }, []);
 
     const resetEditState = useCallback(() => {
+        setBaselineTask(task);
         setDraft(createTaskDraft(task));
         resetAttachmentState(task.attachments);
         setShowDescriptionPreview(hasPreviewableDescription(task));
     }, [resetAttachmentState, task]);
 
     return useMemo(() => ({
+        baselineTask,
         draft,
         setField,
         showDescriptionPreview,
         setShowDescriptionPreview,
         resetEditState,
-    }), [draft, resetEditState, setField, showDescriptionPreview]);
+    }), [baselineTask, draft, resetEditState, setField, showDescriptionPreview]);
 }

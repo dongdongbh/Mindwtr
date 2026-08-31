@@ -29,8 +29,8 @@ import type {
  * hand-syncing six parallel per-field lists across four files.
  *
  * Interface: createTaskDraft · setTaskDraftField · isTaskDraftDirty ·
- * areDraftAttachmentsDirty · taskDraftToUpdatePatch. Everything else is
- * implementation.
+ * areDraftAttachmentsDirty · taskDraftToUpdatePatch ·
+ * taskDraftToChangedUpdatePatch. Everything else is implementation.
  */
 export type TaskDraft = {
     title: string;
@@ -335,4 +335,51 @@ export function taskDraftToUpdatePatch(
         suppressMindwtrReminders: draft.suppressMindwtrReminders ? true : undefined,
         ...attachmentsPatch,
     };
+}
+
+const RAW_CONTAINER_TASK_FIELDS = new Set<keyof Task>(['projectId', 'sectionId', 'areaId']);
+
+const areSerializedTaskFieldValuesEqual = (left: unknown, right: unknown): boolean => {
+    if ((left === '' && right == null) || (right === '' && left == null)) {
+        return true;
+    }
+    if (
+        Array.isArray(left)
+        || Array.isArray(right)
+        || (typeof left === 'object' && left !== null)
+        || (typeof right === 'object' && right !== null)
+    ) {
+        return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+    }
+    return (left ?? null) === (right ?? null);
+};
+
+/**
+ * Serialize only fields changed from the task snapshot that opened an edit
+ * session. Callers keep that snapshot stable while live task data may update.
+ */
+export function taskDraftToChangedUpdatePatch(
+    draft: TaskDraft,
+    baselineTask: Task,
+    options: TaskDraftPatchOptions = {},
+): Partial<Task> | null {
+    const patch = taskDraftToUpdatePatch(draft, baselineTask, options);
+    if (!patch) return null;
+
+    const baseline = taskDraftToUpdatePatch(createTaskDraft(baselineTask), baselineTask, {
+        attachments: baselineTask.attachments,
+    }) ?? {};
+    const narrowed: Partial<Task> = { ...patch };
+    for (const key of Object.keys(narrowed) as (keyof Task)[]) {
+        // A project assignment semantically clears areaId, while removing a
+        // project clears sectionId. Compare these fields to stored values so
+        // those intentional clears are not normalized away.
+        const baselineValue = RAW_CONTAINER_TASK_FIELDS.has(key)
+            ? baselineTask[key]
+            : baseline[key];
+        if (areSerializedTaskFieldValuesEqual(narrowed[key], baselineValue)) {
+            delete narrowed[key];
+        }
+    }
+    return narrowed;
 }

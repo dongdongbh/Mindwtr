@@ -225,6 +225,7 @@ export const TaskItem = memo(function TaskItem({
         settlePersistedAttachmentSave,
     } = attachments;
     const {
+        baselineTask: editBaselineTask,
         draft,
         setField: setDraftField,
         showDescriptionPreview,
@@ -699,6 +700,7 @@ export const TaskItem = memo(function TaskItem({
     }, [editingTaskId, resetEditState, setEditingTaskId, task.id]);
 
     const handleSubmit = useTaskItemSubmit({
+        baselineTask: editBaselineTask,
         draft,
         editAttachments,
         editingTaskId,

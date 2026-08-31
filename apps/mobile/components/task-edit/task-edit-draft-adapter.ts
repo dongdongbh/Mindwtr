@@ -4,10 +4,9 @@ import {
     createTaskDraft,
     isTaskDraftDirty,
     setTaskDraftField,
-    taskDraftToUpdatePatch,
+    taskDraftToChangedUpdatePatch,
     type TaskDraft,
 } from '@mindwtr/core/task-draft';
-import { areTaskFieldValuesEqual } from './task-edit-modal.helpers';
 
 /**
  * Mobile keeps checklist and attachment buffers beside the shared TaskDraft:
@@ -45,8 +44,6 @@ export type TaskEditDraftOverrides = {
     tags?: string[];
 };
 
-const RAW_CONTAINER_FIELDS = new Set<keyof Task>(['projectId', 'sectionId', 'areaId']);
-
 const applyDraftOverrides = (
     state: TaskEditDraft,
     overrides: TaskEditDraftOverrides,
@@ -69,21 +66,10 @@ export function buildTaskEditUpdatePatch(
     overrides: TaskEditDraftOverrides = {},
 ): Partial<Task> | null {
     const finalState = applyDraftOverrides(state, overrides);
-    const patch = taskDraftToUpdatePatch(finalState.draft, task, {
+    const narrowed = taskDraftToChangedUpdatePatch(finalState.draft, task, {
         attachments: finalState.attachments,
     });
-    if (!patch) return null;
-
-    const baseline = taskDraftToUpdatePatch(createTaskDraft(task), task, {
-        attachments: task.attachments,
-    }) ?? {};
-    const narrowed: Partial<Task> = { ...patch };
-    for (const key of Object.keys(narrowed) as (keyof Task)[]) {
-        const baselineValue = RAW_CONTAINER_FIELDS.has(key) ? task[key] : baseline[key];
-        if (areTaskFieldValuesEqual(narrowed[key], baselineValue)) {
-            delete narrowed[key];
-        }
-    }
+    if (!narrowed) return null;
     // Blank rows are a typing convenience (return mints the next row before it
     // has text) and never content — they are dropped at save, so a saved task
     // keeps no trailing empty item (#1045).
