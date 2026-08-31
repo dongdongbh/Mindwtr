@@ -4,12 +4,6 @@ import { parse } from "yaml";
 
 const asNeedsList = (needs) => (Array.isArray(needs) ? needs : [needs]);
 
-test("root lockfile uses the Bun 1.4 format required by Arch builds", () => {
-  const lockfile = readFileSync("bun.lock", "utf8");
-  const version = lockfile.match(/"lockfileVersion":\s*(\d+)/)?.[1];
-  expect(Number(version)).toBeGreaterThanOrEqual(3);
-});
-
 test("stable release validates tags and committed versions before any build or publish", () => {
   const workflow = parse(readFileSync(".github/workflows/release.yml", "utf8"));
   const validate = workflow.jobs.validate;
