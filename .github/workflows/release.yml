@@ -1306,53 +1306,88 @@ jobs:
             echo "Bumped PKGBUILD _nodeversion ${NODE_MAJOR} -> 22 (better-sqlite3 12 ships no prebuilds below Node 22, and the build container has no node-gyp)."
           fi
 
-      - name: Normalize Bun lockfile compatibility
+      - name: Generate frozen Bun lockfile for AUR
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          LOCK_WORKSPACE="$(mktemp -d)"
+          trap 'rm -rf "$LOCK_WORKSPACE"' EXIT
+          mkdir -p "$LOCK_WORKSPACE/source"
+          curl -fL --retry 3 --retry-delay 3 \
+            "https://github.com/dongdongbh/Mindwtr/archive/refs/tags/v${VERSION}.tar.gz" \
+            -o "$LOCK_WORKSPACE/mindwtr.tar.gz"
+          tar -xzf "$LOCK_WORKSPACE/mindwtr.tar.gz" \
+            -C "$LOCK_WORKSPACE/source" \
+            --strip-components=1
+
+          HOST_UID="$(id -u)"
+          HOST_GID="$(id -g)"
+          docker run --rm \
+            -e HOST_UID="$HOST_UID" \
+            -e HOST_GID="$HOST_GID" \
+            -v "$LOCK_WORKSPACE/source:/source" \
+            -v "$PWD/aur-mindwtr:/aur" \
+            -w /source \
+            archlinux:latest \
+            bash -lc '
+              set -euo pipefail
+              pacman -Sy --noconfirm --needed bun
+              getent group "$HOST_GID" >/dev/null 2>&1 || groupadd -g "$HOST_GID" builder
+              id -u builder >/dev/null 2>&1 || useradd -m -u "$HOST_UID" -g "$HOST_GID" builder
+              chown -R builder:builder /source /aur
+              su builder -c "export BUN_INSTALL_CACHE_DIR=/tmp/bun-cache; bun install --lockfile-only --no-cache --registry=https://registry.npmjs.org"
+              install -o "$HOST_UID" -g "$HOST_GID" -m 0644 /source/bun.lock /aur/bun.lock
+            '
+
+          LOCKFILE_VERSION="$(sed -n 's/.*"lockfileVersion": \([0-9][0-9]*\).*/\1/p' aur-mindwtr/bun.lock | head -n 1)"
+          if [ -z "$LOCKFILE_VERSION" ] || [ "$LOCKFILE_VERSION" -lt 3 ]; then
+            echo "Generated AUR lockfile is not in Bun 1.4 format: ${LOCKFILE_VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Use frozen Bun lockfile
         shell: bash
         working-directory: aur-mindwtr
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("PKGBUILD")
           text = path.read_text(encoding="utf-8")
-          compatibility_install = r"""  LOCKFILE_VERSION="$(sed -n 's/.*\"lockfileVersion\": \([0-9][0-9]*\).*/\1/p' bun.lock | head -n 1)"
-            if [ -n "$LOCKFILE_VERSION" ] && [ "$LOCKFILE_VERSION" -lt 3 ]; then
-              # Bun 1.4 rewrites legacy locks. Resolve without its manifest cache,
-              # then force one fresh registry request if the first attempt fails.
-              bun install --no-save --no-cache || bun install --no-save --no-cache --force
-            else
-              bun install --frozen-lockfile
-            fi
-          """
-          previous_compatibility_install = r"""  LOCKFILE_VERSION="$(sed -n 's/.*\"lockfileVersion\": \([0-9][0-9]*\).*/\1/p' bun.lock | head -n 1)"
-            if [ -n "$LOCKFILE_VERSION" ] && [ "$LOCKFILE_VERSION" -lt 3 ]; then
-              # Bun 1.4 can consume the release lock but rewrites its legacy format.
-              bun install --no-save
-            else
-              bun install --frozen-lockfile
-            fi
-          """
-          if compatibility_install in text:
-              print("PKGBUILD already handles legacy Bun lockfiles")
-          elif previous_compatibility_install in text:
-              text = text.replace(
-                  previous_compatibility_install,
-                  compatibility_install,
-                  1,
+
+          if '        "bun.lock"\n)' not in text:
+              text, source_replacements = re.subn(
+                  r'(source=\(.*?\n\s*"\$pkgname\.desktop"\n)(\))',
+                  r'\1        "bun.lock"\n\2',
+                  text,
+                  count=1,
+                  flags=re.DOTALL,
               )
-              path.write_text(text, encoding="utf-8")
-              print("Updated the legacy Bun install path to bypass stale manifest metadata")
-          elif "  bun install --frozen-lockfile\n" in text:
-              text = text.replace(
-                  "  bun install --frozen-lockfile\n",
-                  compatibility_install,
-                  1,
-              )
-              path.write_text(text, encoding="utf-8")
-              print("Added a no-write install path for legacy Bun lockfiles")
-          else:
-              raise SystemExit("Could not find the expected Bun install command in PKGBUILD")
+              if source_replacements != 1:
+                  raise SystemExit("Could not add bun.lock to the PKGBUILD source array")
+
+          install_pattern = re.compile(
+              r'(prepare\(\) \{.*?  export BUN_INSTALL_CACHE_DIR=.*?\n)'
+              r'.*?'
+              r'(\n  export RUSTUP_TOOLCHAIN=stable)',
+              re.DOTALL,
+          )
+          text, install_replacements = install_pattern.subn(
+              r'\1  cp "$srcdir/bun.lock" bun.lock\n'
+              r'  bun install --frozen-lockfile --registry=https://registry.npmjs.org\n'
+              r'\2',
+              text,
+              count=1,
+          )
+          if install_replacements != 1:
+              raise SystemExit("Could not replace the Bun install command in PKGBUILD")
+
+          path.write_text(text, encoding="utf-8")
+          print("PKGBUILD now installs from the shipped Bun 1.4 lockfile")
           PY
 
       - name: Update checksums
@@ -1420,11 +1455,11 @@ jobs:
               su builder -c "makepkg --cleanbuild --clean --nodeps --noconfirm"
             '
 
-      - name: Bump pkgrel for checksum-only changes
+      - name: Bump pkgrel for packaging-only changes
         shell: bash
         working-directory: aur-mindwtr
         run: |
-          if [ "${{ steps.pkgbuild_version.outputs.pkgver_changed }}" = "false" ] && ! git diff --quiet -- PKGBUILD; then
+          if [ "${{ steps.pkgbuild_version.outputs.pkgver_changed }}" = "false" ] && ! git diff --quiet -- PKGBUILD bun.lock; then
             CURRENT_PKGREL="$(sed -n 's/^pkgrel=//p' PKGBUILD | head -n 1)"
             if [[ "$CURRENT_PKGREL" =~ ^[0-9]+$ ]]; then
               NEW_PKGREL="$((CURRENT_PKGREL + 1))"
@@ -1495,14 +1530,14 @@ jobs:
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
         run: |
           set -euo pipefail
-          if [ -z "$(git status --porcelain -- PKGBUILD .SRCINFO tauri-v2-schema.patch)" ]; then
+          if [ -z "$(git status --porcelain -- PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch)" ]; then
             echo "No AUR source-package changes to publish."
             exit 0
           fi
 
           git config --local user.name "${AUR_USERNAME:-mindwtr-bot}"
           git config --local user.email "${AUR_EMAIL:-actions@github.com}"
-          git add PKGBUILD .SRCINFO
+          git add PKGBUILD .SRCINFO bun.lock
           if [ -n "$(git status --porcelain -- tauri-v2-schema.patch)" ]; then
             git add -A -- tauri-v2-schema.patch
           fi

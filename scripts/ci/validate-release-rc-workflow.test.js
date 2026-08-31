@@ -421,16 +421,35 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   expect(sourcePushIndex).toBeGreaterThan(sourceAuditIndex);
   expect(sourcePushIndex).toBeGreaterThan(sourceRecordIndex);
   expect(stableText).toContain("aur-proposal-mindwtr-");
+  const bunLockGenerationStep = sourceSteps.find(
+    (step) => step.name === "Generate frozen Bun lockfile for AUR",
+  );
+  expect(bunLockGenerationStep).toBeDefined();
+  expect(bunLockGenerationStep.run).toContain("bun install --lockfile-only");
+  expect(bunLockGenerationStep.run).toContain("--no-cache");
+  expect(bunLockGenerationStep.run).toContain(
+    "--registry=https://registry.npmjs.org",
+  );
+  expect(bunLockGenerationStep.run).toContain("aur-mindwtr/bun.lock");
+
   const bunCompatibilityStep = sourceSteps.find(
-    (step) => step.name === "Normalize Bun lockfile compatibility",
+    (step) => step.name === "Use frozen Bun lockfile",
   );
   expect(bunCompatibilityStep).toBeDefined();
-  expect(bunCompatibilityStep.run).toContain('LOCKFILE_VERSION="$(sed -n');
-  expect(bunCompatibilityStep.run).toContain("-lt 3");
-  expect(bunCompatibilityStep.run).toContain("bun install --no-save");
-  expect(bunCompatibilityStep.run).toContain("--no-cache");
-  expect(bunCompatibilityStep.run).toContain("--force");
+  expect(bunCompatibilityStep.run).toContain('cp "$srcdir/bun.lock" bun.lock');
   expect(bunCompatibilityStep.run).toContain("bun install --frozen-lockfile");
+  expect(bunCompatibilityStep.run).toContain(
+    "--registry=https://registry.npmjs.org",
+  );
+  expect(bunCompatibilityStep.run).not.toContain("bun install --no-save");
+  expect(bunCompatibilityStep.run).not.toContain("--force");
+  const sourcePushStep = sourceSteps.find((step) =>
+    step.name.startsWith("Commit and push"),
+  );
+  expect(sourcePushStep.run).toContain(
+    "PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch",
+  );
+  expect(sourcePushStep.run).toContain("git add PKGBUILD .SRCINFO bun.lock");
 
   expect(stable.jobs["update-aur-beta-bin"].name).toContain(
     "Update AUR Beta",
@@ -476,5 +495,8 @@ test("AUR publication is a manual environment-gated recovery workflow", () => {
   expect(text).toContain("git -C aur-live push origin HEAD:master");
   expect(text).toContain("SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4");
   expect(text).toContain("SOURCE_EVENT");
+  expect(text).toContain("proposal/bun.lock");
+  expect(text).toContain("PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch");
+  expect(text).toContain("git -C aur-live add -- bun.lock");
   expect(text).not.toContain("--force");
 });

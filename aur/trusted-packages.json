@@ -12,6 +12,7 @@
         ".nvchecker.toml",
         "LICENSE",
         "PKGBUILD",
+        "bun.lock",
         "mindwtr.desktop",
         "tauri-v2-schema.patch"
       ]

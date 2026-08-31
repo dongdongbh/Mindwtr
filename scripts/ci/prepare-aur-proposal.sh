@@ -32,6 +32,11 @@ cp "$PACKAGE_DIR/.SRCINFO" "$OUTPUT_DIR/.SRCINFO"
 
 : > "$OUTPUT_DIR/delete-files.txt"
 if [ "$PACKAGE_NAME" = "mindwtr" ]; then
+  if [ ! -f "$PACKAGE_DIR/bun.lock" ]; then
+    echo "mindwtr source proposals must include bun.lock" >&2
+    exit 1
+  fi
+  cp "$PACKAGE_DIR/bun.lock" "$OUTPUT_DIR/bun.lock"
   if [ -f "$PACKAGE_DIR/tauri-v2-schema.patch" ]; then
     cp "$PACKAGE_DIR/tauri-v2-schema.patch" "$OUTPUT_DIR/tauri-v2-schema.patch"
   elif git -C "$PACKAGE_DIR" ls-files --error-unmatch tauri-v2-schema.patch >/dev/null 2>&1; then
@@ -39,7 +44,7 @@ if [ "$PACKAGE_NAME" = "mindwtr" ]; then
   fi
 fi
 
-git -C "$PACKAGE_DIR" diff --binary -- PKGBUILD .SRCINFO tauri-v2-schema.patch > "$OUTPUT_DIR/review.patch"
+git -C "$PACKAGE_DIR" diff --binary -- PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch > "$OUTPUT_DIR/review.patch"
 (
   cd "$OUTPUT_DIR"
   sha256sum review.patch > review.patch.sha256
@@ -57,6 +62,9 @@ git -C "$PACKAGE_DIR" diff --binary -- PKGBUILD .SRCINFO tauri-v2-schema.patch >
   if [ -f tauri-v2-schema.patch ]; then
     manifest_files+=(tauri-v2-schema.patch)
   fi
+  if [ -f bun.lock ]; then
+    manifest_files+=(bun.lock)
+  fi
   sha256sum "${manifest_files[@]}" > proposal-manifest.sha256
 )
 
@@ -65,7 +73,7 @@ git -C "$PACKAGE_DIR" diff --binary -- PKGBUILD .SRCINFO tauri-v2-schema.patch >
   echo
   echo "- Release: \`$RELEASE_TAG\`"
   echo "- Audited AUR base: \`$(cat "$OUTPUT_DIR/base-commit")\`"
-  echo "- Artifact contains exact \`PKGBUILD\`, \`.SRCINFO\`, ownership/history snapshot, and review diff."
+  echo "- Artifact contains exact \`PKGBUILD\`, \`.SRCINFO\`, package-local sources, ownership/history snapshot, and review diff."
   echo
   echo '```diff'
   cat "$OUTPUT_DIR/review.patch"
