@@ -1507,7 +1507,7 @@ describe('TaskItemDisplay', () => {
         it('sits out of flow on the leading edge so priority-less rows do not shift', () => {
             const strip = renderStrip({ ...baseTask, priority: 'high' }, true);
             expect(strip?.className).toContain('absolute');
-            expect(strip?.className).toContain('start-0');
+            expect(strip?.className).toContain('-start-1.5');
         });
 
         // Desktop keeps the priority text badge, so the strip is decoration only
