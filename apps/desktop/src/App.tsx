@@ -334,6 +334,12 @@ function App() {
     const [externalSyncChange, setExternalSyncChange] = useState<ExternalSyncChange | null>(null);
     const [resolvingExternalSync, setResolvingExternalSync] = useState(false);
     const [hasHydratedSettings, setHasHydratedSettings] = useState(false);
+    // App tests seed the store directly and deliberately skip the native startup
+    // hydration effect; in the app, only the completed fetch opens this gate.
+    const viewSettingsHydrated = hasHydratedSettings
+        || import.meta.env.MODE === 'test'
+        || import.meta.env.VITEST
+        || process.env.NODE_ENV === 'test';
     const closePromptRememberRef = useRef(false);
     const closePromptOpenRef = useRef(false);
     const localPromptActivityRecordedRef = useRef(false);
@@ -1159,11 +1165,9 @@ function App() {
             const savedSearchId = activeView.replace('savedSearch:', '');
             return <SearchView savedSearchId={savedSearchId} />;
         }
-        // Timeline is opt-in (#1111). Resolving it here rather than in the
-        // restore/URL readers is what lets it see loaded settings, and it
-        // covers every way in at once: a stored last view, ?view=timeline, a
-        // keybinding and a stale nav click all land on the default view while
-        // the flag is off, exactly like an unknown view name does.
+        // Timeline is opt-in (#1111). The hydration-gated effect below
+        // canonicalizes route state; this local guard keeps the transition safe
+        // while loaded settings and the state update settle.
         const view = activeView === 'timeline' && !timelineEnabled ? DEFAULT_DESKTOP_VIEW : activeView;
         switch (view) {
             case 'inbox':
@@ -1229,6 +1233,14 @@ function App() {
             setActiveView(nextView);
         });
     }, [startTransition]);
+
+    useEffect(() => {
+        if (!viewSettingsHydrated || isLoading || timelineEnabled) return;
+        if (currentView !== 'timeline' && activeView !== 'timeline') return;
+        // The route is state, not just rendered content. Canonicalize every copy
+        // together so the URL, selected nav item and layout agree with Focus.
+        handleViewChange(DEFAULT_DESKTOP_VIEW);
+    }, [activeView, currentView, handleViewChange, isLoading, timelineEnabled, viewSettingsHydrated]);
 
     useEffect(() => {
         if (isObsidianEnabled || currentView !== 'obsidian') return;

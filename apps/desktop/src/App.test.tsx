@@ -97,12 +97,15 @@ describe('App', () => {
     it('falls back to the default view for ?view=timeline while Timeline is off (#1111)', async () => {
         window.history.replaceState(null, '', '?view=timeline');
 
-        const { getByRole } = renderWithProviders(<App />);
+        const { container, getByRole } = renderWithProviders(<App />);
 
         // Same landing as an unknown view name: Timeline is opt-in, so a stored
         // view or a link to it must not leave the screen blank.
         await waitFor(() => {
             expect(getByRole('heading', { name: 'Focus' })).toBeInTheDocument();
+            expect(window.location.search).toBe('?view=agenda');
+            expect(container.querySelector('[data-sidebar-item][data-view="agenda"]')).toHaveClass('bg-primary/5');
+            expect(getByRole('main')).not.toHaveClass('max-w-screen-2xl');
         });
     });
 
