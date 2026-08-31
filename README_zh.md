@@ -83,6 +83,17 @@
   </p>
 </div>
 
+### 🎥 完整视频演示与教程
+
+<div align="center">
+  <a href="https://youtu.be/c-1Fxx5gFlo"><img src="https://img.youtube.com/vi/c-1Fxx5gFlo/maxresdefault.jpg" width="60%" alt="Mindwtr 桌面端演示与教程" /></a>
+  <p>
+    <b><a href="https://youtu.be/c-1Fxx5gFlo">观看完整桌面端演示与教程</a></b>
+    ·
+    <b><a href="https://youtu.be/FApCFhViwJE">观看移动端演示与教程</a></b>
+  </p>
+</div>
+
 ## 这些场景，是不是很熟悉？
 
 - **「这事我记得住。」其实记不住。** 一个快捷键，敲下来，就能放心忘掉。这就是收集。

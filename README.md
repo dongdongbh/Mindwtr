@@ -83,6 +83,17 @@ _Mindwtr = "mind like water": the calm you get when nothing is rattling around i
   </p>
 </div>
 
+### 🎥 Full video walkthroughs
+
+<div align="center">
+  <a href="https://youtu.be/c-1Fxx5gFlo"><img src="https://img.youtube.com/vi/c-1Fxx5gFlo/maxresdefault.jpg" width="60%" alt="Mindwtr Desktop Demo & Tutorial" /></a>
+  <p>
+    <b><a href="https://youtu.be/c-1Fxx5gFlo">Watch the complete desktop demo & tutorial</a></b>
+    ·
+    <b><a href="https://youtu.be/FApCFhViwJE">Watch the mobile demo & tutorial</a></b>
+  </p>
+</div>
+
 ## Sound familiar?
 
 - **"I'll remember it." You won't.** One hotkey, type it, forget it safely. That's capture.
