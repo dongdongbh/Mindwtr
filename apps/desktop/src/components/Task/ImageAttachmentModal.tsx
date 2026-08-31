@@ -45,6 +45,7 @@ export function ImageAttachmentModal({
                         attachment={attachment}
                         alt={attachment.title || t('attachments.title')}
                         className="block max-w-full h-auto mx-auto"
+                        unavailableText={t('attachments.webUnavailable')}
                     />
                 </div>
             </DialogBody>
