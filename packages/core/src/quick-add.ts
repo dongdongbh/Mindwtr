@@ -1152,3 +1152,20 @@ export function parseQuickAdd(
         detectedDate,
     };
 }
+
+/**
+ * `quickAdd.help` is one frozen sentence per locale listing every token, so
+ * the `/priority:<level>` fragment cannot be hidden by picking a different
+ * key. Strip it at render time instead: the `/priority:` prefix is identical
+ * in all 18 locales (only the `<level>` placeholder and the separator are
+ * translated), so one pattern covers every language, and a locale that ever
+ * reworded the prefix simply keeps its full sentence rather than breaking.
+ * The parser still accepts the token — only the advertisement goes away, in
+ * line with the rest of the Priorities gating.
+ */
+const QUICK_ADD_PRIORITY_HELP_TOKEN = /\/priority:<[^>]*>(?:\s*[,،、]\s*|\s+)?/u;
+
+export function formatQuickAddHelp(help: string, flags: { priorities: boolean }): string {
+    if (flags.priorities) return help;
+    return help.replace(QUICK_ADD_PRIORITY_HELP_TOKEN, '');
+}

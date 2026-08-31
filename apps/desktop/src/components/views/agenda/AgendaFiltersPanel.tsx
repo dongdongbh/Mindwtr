@@ -1,4 +1,5 @@
 import type { RefObject } from 'react';
+import { resolveFeatureFlags, useTaskStore } from '@mindwtr/core';
 import type { MultiValueFilterMatchMode, SortField, TaskEnergyLevel, TaskPriority, TimeEstimate } from '@mindwtr/core';
 import { Filter, Save, X } from 'lucide-react';
 
@@ -126,6 +127,14 @@ export function AgendaFiltersPanel({
     timeEstimateOptions,
     showTimeEstimateFilters,
 }: AgendaFiltersPanelProps) {
+    // Focus renders its sort as chips rather than the shared SortBySelect, so
+    // the Priorities gate is repeated here: with the feature off the option
+    // must not be offered, and AgendaView resolves a stored 'priority' sort to
+    // 'default' so the missing chip can never leave nothing selected.
+    const prioritiesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).priorities);
+    const sortOptions = prioritiesEnabled
+        ? FOCUS_SORT_OPTIONS
+        : FOCUS_SORT_OPTIONS.filter((option) => option !== 'priority');
     const selectedContextCount = selectedTokens.filter((token) => token.trim().startsWith('@')).length;
     const showContextMatchMode = selectedContextCount > 1;
     const selectedTagCount = selectedTokens.filter((token) => token.trim().startsWith('#')).length;
@@ -222,7 +231,7 @@ export function AgendaFiltersPanel({
                     <div className="space-y-2">
                         <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('sort.label')}</div>
                         <div className="flex flex-wrap gap-2">
-                            {FOCUS_SORT_OPTIONS.map((sortBy) => {
+                            {sortOptions.map((sortBy) => {
                                 const isActive = focusSortBy === sortBy;
                                 const label = sortBy === 'priority' ? t('filters.priority') : t(`sort.${sortBy}`);
                                 return (

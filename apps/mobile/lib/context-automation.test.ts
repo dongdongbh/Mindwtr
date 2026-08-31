@@ -88,6 +88,24 @@ describe('context-automation', () => {
     ]);
   });
 
+  it('prioritizes next actions while Priorities is on, and stops when it is off', () => {
+    // Two undated next actions in the same bucket, titled so the alphabetical
+    // tie-break puts the LOW one first: only priority can flip them, so this
+    // fails the moment the flag stops reaching sortFocusNextActions.
+    const tasks = [
+      task({ id: 'low', title: 'Alpha', contexts: ['@parents'], priority: 'low' }),
+      task({ id: 'high', title: 'Beta', contexts: ['@parents'], priority: 'high' }),
+    ];
+    const now = new Date('2026-01-02T12:00:00.000Z');
+
+    expect(selectContextNextActions(tasks, [], 'parents', now, { features: { priorities: true } })
+      .map((item) => item.id)).toEqual(['high', 'low']);
+    expect(selectContextNextActions(tasks, [], 'parents', now, undefined)
+      .map((item) => item.id)).toEqual(['high', 'low']);
+    expect(selectContextNextActions(tasks, [], 'parents', now, { features: { priorities: false } })
+      .map((item) => item.id)).toEqual(['low', 'high']);
+  });
+
   it('builds compact notification copy', () => {
     expect(buildContextAutomationNotificationCopy('@parents', [])).toEqual({
       title: 'No @parents next actions',

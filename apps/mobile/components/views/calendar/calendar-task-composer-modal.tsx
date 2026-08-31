@@ -1,5 +1,8 @@
 import {
   CALENDAR_TIME_ESTIMATE_OPTIONS,
+  formatQuickAddHelp,
+  resolveFeatureFlags,
+  useTaskStore,
   type CalendarComposerState,
   type Task,
 } from '@mindwtr/core';
@@ -75,6 +78,7 @@ export function CalendarTaskComposerModal({
   toRgba,
   tr,
 }: CalendarTaskComposerModalProps) {
+  const prioritiesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).priorities);
   const saveDisabled = composer
     ? composer.mode === 'new'
       ? !composer.title.trim()
@@ -163,7 +167,7 @@ export function CalendarTaskComposerModal({
                   value={composer.title}
                 />
                 <Text style={[styles.composerHelp, { color: tc.secondaryText }]}>
-                  {t('quickAdd.help')}
+                  {formatQuickAddHelp(t('quickAdd.help'), { priorities: prioritiesEnabled })}
                 </Text>
               </View>
             ) : (

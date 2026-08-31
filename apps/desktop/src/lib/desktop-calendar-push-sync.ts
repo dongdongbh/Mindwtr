@@ -15,6 +15,7 @@ import {
     runCalendarPushPartialSync,
     safeFormatDate,
     safeParseDate,
+    resolveFeatureFlags,
     timeEstimateToMinutes,
     useTaskStore,
     type CalendarPushRunPorts,
@@ -273,7 +274,7 @@ function buildEventDetails(task: Task, target: CalendarPushTarget): SystemCalend
     const projectedOccurrenceDateLabel = isProjectedRecurringTask(task)
         ? formatProjectedRecurrenceEventDate(task)
         : '';
-    const { projects, sections } = dependencies.getStoreState();
+    const { projects, sections, settings } = dependencies.getStoreState();
     const projectName = task.projectId
         ? projects.find((project) => project.id === task.projectId)?.title
         : undefined;
@@ -287,7 +288,13 @@ function buildEventDetails(task: Task, target: CalendarPushTarget): SystemCalend
     const title = formatCalendarEventTitle(task.title, target.shouldPrefixTitles, projectedOccurrenceDateLabel);
 
     if (hasTimeComponent(dateValue)) {
-        const endDate = new Date(startDate.getTime() + timeEstimateToMinutes(task.timeEstimate) * 60 * 1000);
+        // The pushed event's length comes from the estimate, so it must honour
+        // the feature the same way the in-app calendars do — an estimate written
+        // before the feature was switched off must not keep stretching events.
+        const estimateMinutes = timeEstimateToMinutes(task.timeEstimate, {
+            enabled: resolveFeatureFlags(settings).timeEstimates,
+        });
+        const endDate = new Date(startDate.getTime() + estimateMinutes * 60 * 1000);
         return {
             calendarId: target.id,
             title,

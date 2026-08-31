@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useTaskStore } from '@mindwtr/core';
 
 import { AgendaFiltersPanel } from './AgendaFiltersPanel';
 
@@ -80,6 +81,23 @@ const createProps = (overrides: Partial<Parameters<typeof AgendaFiltersPanel>[0]
 });
 
 describe('AgendaFiltersPanel', () => {
+    afterEach(() => {
+        useTaskStore.setState({ settings: {} as never });
+    });
+
+    it('offers the Priority sort only while the Priorities feature is on', () => {
+        // showPriorityFilters stays false in both renders, so the only 'Priority'
+        // text on screen is the sort chip.
+        const { rerender } = render(<AgendaFiltersPanel {...createProps()} />);
+        expect(screen.getByText('Priority')).toBeInTheDocument();
+
+        useTaskStore.setState({ settings: { features: { priorities: false } } as never });
+        rerender(<AgendaFiltersPanel {...createProps()} />);
+        expect(screen.queryByText('Priority')).not.toBeInTheDocument();
+        // The other sort chips are untouched.
+        expect(screen.getByText('Due')).toBeInTheDocument();
+    });
+
     it('hides optional metadata filters until current Focus tasks use those fields', () => {
         render(<AgendaFiltersPanel {...createProps()} />);
 

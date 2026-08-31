@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { formatQuickAddHelp, resolveFeatureFlags, useTaskStore } from '@mindwtr/core';
 
 // Splits the translated quick-add help line so entry tokens (/start:, @context,
 // #tag, +Project, %Person, !Area) read as typable input while <placeholder>
@@ -8,7 +9,11 @@ import type { ReactNode } from 'react';
 const HINT_SEGMENT = /((?:<[^>]+>)|(?:%"[^"]*")|(?:[/@#+%!][^\s,()<.]+))/g;
 
 export function QuickAddSyntaxHint({ text }: { text: string }) {
-    const parts = text.split(HINT_SEGMENT);
+    // Gated here rather than at each caller: Focus, Quick Add and the calendar
+    // composer all render this hint, and a new one must not be able to
+    // advertise a disabled feature's token.
+    const priorities = useTaskStore((state) => resolveFeatureFlags(state.settings).priorities);
+    const parts = formatQuickAddHelp(text, { priorities }).split(HINT_SEGMENT);
     return (
         <>
             {parts.map((part, index): ReactNode => {

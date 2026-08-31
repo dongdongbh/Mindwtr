@@ -48,9 +48,19 @@ const setTimeEstimatesEnabled = (enabled: boolean) => {
     });
 };
 
+const setPrioritiesEnabled = (enabled: boolean) => {
+    act(() => {
+        useTaskStore.setState((state) => ({
+            ...state,
+            settings: { ...state.settings, features: { ...state.settings?.features, priorities: enabled } },
+        } as never));
+    });
+};
+
 describe('ListHeader', () => {
     afterEach(() => {
         setTimeEstimatesEnabled(true);
+        setPrioritiesEnabled(true);
     });
 
     // #1107: the sort lives in the shared SortBySelect, so the Time estimates
@@ -192,6 +202,45 @@ describe('ListHeader', () => {
 
         openToolbarSelect('Group');
         expect(screen.getByRole('option', { name: 'Tags' })).toBeInTheDocument();
+    });
+
+    it('drops the Priority group-by axis while the Priorities feature is off', () => {
+        const renderHeader = () => render(
+            <ListHeader
+                title="Focus"
+                showNextCount={false}
+                nextCount={0}
+                taskCount={3}
+                hasFilters={false}
+                filterSummaryLabel=""
+                filterSummarySuffix=""
+                sortBy="default"
+                onChangeSortBy={vi.fn()}
+                showGroupBy
+                groupBy="none"
+                groupByOptions={['none', 'priority', 'energy']}
+                onChangeGroupBy={vi.fn()}
+                selectionMode={false}
+                onToggleSelection={vi.fn()}
+                showListDetails
+                onToggleDetails={vi.fn()}
+                densityMode="comfortable"
+                onToggleDensity={vi.fn()}
+                t={t}
+            />
+        );
+
+        const { unmount } = renderHeader();
+        openToolbarSelect('Group');
+        expect(screen.getByRole('option', { name: 'Priority' })).toBeInTheDocument();
+        unmount();
+
+        setPrioritiesEnabled(false);
+        renderHeader();
+        openToolbarSelect('Group');
+        expect(screen.queryByRole('option', { name: 'Priority' })).not.toBeInTheDocument();
+        // Energy has no feature flag and must survive.
+        expect(screen.getByRole('option', { name: 'Energy' })).toBeInTheDocument();
     });
 
     it('omits the Filters toggle unless the view opts in', () => {

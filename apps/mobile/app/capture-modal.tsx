@@ -23,6 +23,7 @@ import {
   isSelectableProjectForTaskAssignment,
   parseQuickAdd,
   resolveDefaultNewTaskAreaId,
+  formatQuickAddHelp,
   resolveFeatureFlags,
   shallow,
   splitQuickAddBulkLines,
@@ -266,7 +267,7 @@ export default function CaptureScreen() {
   const aiEnabled = settings.ai?.enabled === true;
   const aiProvider = (settings.ai?.provider ?? 'openai') as AIProviderId;
   const keyRequired = isAIKeyRequired(settings);
-  const { timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
+  const { priorities: prioritiesEnabled, timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
 
   useEffect(() => {
     loadAIKey(aiProvider).then(setAiKey).catch((error) => {
@@ -721,7 +722,7 @@ export default function CaptureScreen() {
             </View>
           )}
           {showHelp && (
-            <Text style={[styles.help, { color: tc.secondaryText }]}>{t('quickAdd.help')}</Text>
+            <Text style={[styles.help, { color: tc.secondaryText }]}>{formatQuickAddHelp(t('quickAdd.help'), { priorities: prioritiesEnabled })}</Text>
           )}
           <View style={styles.actions}>
             <TouchableOpacity onPress={handleCancel} style={[styles.button, styles.cancel, { backgroundColor: tc.inputBg }]}>

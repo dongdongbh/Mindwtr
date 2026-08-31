@@ -10,6 +10,7 @@ import {
     getWeeklyReviewBuckets,
     parseProjectNextActionInput,
     parseStoredReviewStepSession,
+    resolveFeatureFlags,
     resolveReviewStepSession,
     type AIProviderId,
     type ExternalCalendarEvent,
@@ -326,11 +327,14 @@ export function useReviewModalController({
     const reviewLookBack = weeklyBuckets.lookBack;
     const estimatedLookBackDuration = formatTimeSpentLabel(reviewLookBack.estimatedMinutes);
     const trackedLookBackDuration = formatTimeSpentLabel(reviewLookBack.trackedMinutes);
-    const showEstimateLookBack = reviewLookBack.estimatedTaskCount > 0
-        && settings?.features?.timeEstimates === true;
+    // Time estimates default ON, so `=== true` read the default as OFF and hid
+    // the look-back (and the tracked row under it) for everyone who never
+    // touched the setting. Both flags go through resolveFeatureFlags.
+    const { pomodoro: pomodoroEnabled, timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
+    const showEstimateLookBack = reviewLookBack.estimatedTaskCount > 0 && timeEstimatesEnabled;
     const showTrackedLookBack = showEstimateLookBack
         && trackedLookBackDuration !== null
-        && settings?.features?.pomodoro === true
+        && pomodoroEnabled
         && settings?.gtd?.pomodoro?.linkTask === true;
     const staleItemTitleMap = useMemo(() => staleItems.reduce((acc, item) => {
         acc[item.id] = item.title;

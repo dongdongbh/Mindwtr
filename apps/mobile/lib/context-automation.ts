@@ -1,8 +1,10 @@
 import {
   isTaskInActiveProject,
   matchesHierarchicalToken,
+  resolveFeatureFlags,
   safeParseDate,
   sortFocusNextActions,
+  type AppSettings,
   type Project,
   type Task,
 } from '@mindwtr/core';
@@ -126,7 +128,13 @@ const startsInFuture = (task: Pick<Task, 'startTime'>, now: Date): boolean => {
   return Boolean(start && start.getTime() > now.getTime());
 };
 
-export function selectContextNextActions(tasks: Task[], projects: Project[], context: string, now: Date = new Date()): Task[] {
+export function selectContextNextActions(
+  tasks: Task[],
+  projects: Project[],
+  context: string,
+  now: Date = new Date(),
+  settings?: { features?: AppSettings['features'] } | null,
+): Task[] {
   const normalizedContext = normalizeContextToken(context);
   if (!normalizedContext) return [];
 
@@ -141,7 +149,13 @@ export function selectContextNextActions(tasks: Task[], projects: Project[], con
     });
   });
 
-  return sortFocusNextActions(matchingTasks);
+  // Every other sortFocusNextActions caller passes the flag; omitting it here
+  // meant the context notification listed next actions in an order that
+  // ignored priority even while the feature was on.
+  return sortFocusNextActions(matchingTasks, {
+    now,
+    prioritizeByPriority: resolveFeatureFlags(settings).priorities,
+  });
 }
 
 export function buildContextAutomationNotificationCopy(

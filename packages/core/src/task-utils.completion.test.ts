@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
     getCompletionDateGroup,
+    resolveTaskGroupByForFeatures,
     resolveTaskSortByForFeatures,
+    sortTasksBySavedPreference,
     shouldAutoArchiveCompletedTask,
     sortTasksBy,
 } from './task-utils';
@@ -132,6 +134,43 @@ describe('resolveTaskSortByForFeatures (#1107)', () => {
     it('never rewrites a sort the feature does not own', () => {
         expect(resolveTaskSortByForFeatures('due', { features: { timeEstimates: false } })).toBe('due');
         expect(resolveTaskSortByForFeatures('completed', { features: { timeEstimates: false } })).toBe('completed');
+    });
+
+    it('falls back to default order while Priorities is off, and only then', () => {
+        expect(resolveTaskSortByForFeatures('priority', { features: { priorities: false } })).toBe('default');
+        expect(resolveTaskSortByForFeatures('priority', { features: {} })).toBe('priority');
+        expect(resolveTaskSortByForFeatures('priority', undefined)).toBe('priority');
+        expect(resolveTaskSortByForFeatures('due', { features: { priorities: false } })).toBe('due');
+    });
+});
+
+describe('resolveTaskGroupByForFeatures', () => {
+    it('drops the priority axis while Priorities is off and keeps every other axis', () => {
+        expect(resolveTaskGroupByForFeatures('priority', { features: { priorities: false } })).toBe('none');
+        expect(resolveTaskGroupByForFeatures('priority', { features: {} })).toBe('priority');
+        expect(resolveTaskGroupByForFeatures('priority', undefined)).toBe('priority');
+        // Energy carries no feature flag — it must never be gated here.
+        expect(resolveTaskGroupByForFeatures('energy', { features: { priorities: false } })).toBe('energy');
+        expect(resolveTaskGroupByForFeatures('project', { features: { priorities: false } })).toBe('project');
+    });
+});
+
+describe('sortTasksBySavedPreference priority sort follows the Priorities feature', () => {
+    const highLate = task('high-late', { priority: 'high', dueDate: '2026-03-02' });
+    const lowEarly = task('low-early', { priority: 'low', dueDate: '2026-03-01' });
+
+    it('orders by priority while the feature is on', () => {
+        expect(
+            sortTasksBySavedPreference([lowEarly, highLate], 'priority', { prioritizeByPriority: true })
+                .map((item) => item.id),
+        ).toEqual(['high-late', 'low-early']);
+    });
+
+    it('ignores priority and falls through to due date while the feature is off', () => {
+        expect(
+            sortTasksBySavedPreference([highLate, lowEarly], 'priority', { prioritizeByPriority: false })
+                .map((item) => item.id),
+        ).toEqual(['low-early', 'high-late']);
     });
 });
 

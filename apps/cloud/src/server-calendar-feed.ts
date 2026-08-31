@@ -9,7 +9,7 @@
 import { readFileSync, readdirSync } from 'fs';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { join } from 'path';
-import { buildCalendarFeed } from '@mindwtr/core';
+import { buildCalendarFeed, resolveFeatureFlags } from '@mindwtr/core';
 
 import { corsOrigin } from './server-config';
 import { loadAppDataOrError } from './server-data-cache';
@@ -140,7 +140,12 @@ export const parseCalendarFeedPathToken = (pathname: string): string | null => {
 export const calendarFeedResponse = (dataDir: string, key: string): Response => {
     const dataResult = loadAppDataOrError(join(dataDir, `${key}.json`));
     if ('error' in dataResult) return dataResult.error;
-    const body = buildCalendarFeed(dataResult);
+    // The feed is another surface for the same fields, so a disabled Time
+    // estimates setting must shorten these events too — otherwise the estimate
+    // keeps sizing every subscriber's calendar.
+    const body = buildCalendarFeed(dataResult, {
+        timeEstimatesEnabled: resolveFeatureFlags(dataResult.settings).timeEstimates,
+    });
     return new Response(body, {
         status: 200,
         headers: {

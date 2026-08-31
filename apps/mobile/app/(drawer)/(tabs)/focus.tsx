@@ -43,6 +43,8 @@ import {
   getFocusStarBlockedText,
   normalizeFocusTaskLimit,
   resolveFeatureFlags,
+  resolveTaskGroupByForFeatures,
+  resolveTaskSortByForFeatures,
   sortTasksBySavedPreference,
   sortTasksByFocusOrder,
   translateWithFallback,
@@ -360,8 +362,21 @@ export default function FocusScreen() {
     clear: clearFilters,
     unbindSaved: unbindSavedFilter,
   } = selections;
-  const effectiveFocusSortBy = activeSavedFilter?.sortBy ?? focusSortBy;
-  const effectiveFocusGroupBy = normalizeFocusGroupBy(activeSavedFilter?.groupBy ?? focusGroupBy);
+  // A saved or stored 'priority' sort/group stops taking effect while
+  // Priorities is off (the preference survives for re-enable) — otherwise
+  // Focus would keep ordering and bucketing by a field hidden everywhere else
+  // in the UI. The chip rows below drop the option to match.
+  const effectiveFocusSortBy = resolveTaskSortByForFeatures(activeSavedFilter?.sortBy ?? focusSortBy, settings);
+  const effectiveFocusGroupBy = resolveTaskGroupByForFeatures(
+    normalizeFocusGroupBy(activeSavedFilter?.groupBy ?? focusGroupBy),
+    settings,
+  );
+  const focusSortOptions = prioritiesEnabled
+    ? FOCUS_SORT_OPTIONS
+    : FOCUS_SORT_OPTIONS.filter((option) => option !== 'priority');
+  const focusGroupByOptions = prioritiesEnabled
+    ? FOCUS_GROUP_BY_OPTIONS
+    : FOCUS_GROUP_BY_OPTIONS.filter((option) => option !== 'priority');
   const hasFilters = selections.hasActive;
   // "All" in the saved-filter row: nothing selected, nothing saved applied,
   // and the default sort.
@@ -1911,7 +1926,7 @@ export default function FocusScreen() {
               {resolveText('sort.label', 'Sort')}
             </Text>
             <View style={styles.sheetChipRow}>
-              {FOCUS_SORT_OPTIONS.map((sortBy) => renderFilterChip(
+              {focusSortOptions.map((sortBy) => renderFilterChip(
                 getFocusSortByLabel(sortBy),
                 effectiveFocusSortBy === sortBy,
                 () => updateFocusSortBy(sortBy),
@@ -1923,7 +1938,7 @@ export default function FocusScreen() {
               {resolveText('focus.groupBy', 'Group by')}
             </Text>
             <View style={styles.sheetChipRow}>
-              {FOCUS_GROUP_BY_OPTIONS.map((groupBy) => renderFilterChip(
+              {focusGroupByOptions.map((groupBy) => renderFilterChip(
                 getFocusGroupByLabel(groupBy),
                 effectiveFocusGroupBy === groupBy,
                 () => updateFocusGroupBy(groupBy),

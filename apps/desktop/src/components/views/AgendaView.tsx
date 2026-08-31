@@ -14,7 +14,7 @@ import {
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, applyFilter, buildAdvancedFilterCriteriaChips, compareProjectsByOrder, removeAdvancedFilterCriteriaChip, formatFocusTaskLimitText,
-    getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, getFocusSequentialFirstTaskIds, getProjectDeadlineBoosts, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, SAVED_FILTER_NO_PROJECT_ID, getUpcomingDeferredTasks, shouldShowTaskForStart, sortFocusNextActions, sortTasksByFocusOrder, sortTasksBySavedPreference, translateWithFallback, tFallback } from '@mindwtr/core';
+    getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, getFocusSequentialFirstTaskIds, getProjectDeadlineBoosts, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, resolveTaskGroupByForFeatures, resolveTaskSortByForFeatures, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, SAVED_FILTER_NO_PROJECT_ID, getUpcomingDeferredTasks, shouldShowTaskForStart, sortFocusNextActions, sortTasksByFocusOrder, sortTasksBySavedPreference, translateWithFallback, tFallback } from '@mindwtr/core';
 import type { MultiValueFilterMatchMode, ProjectDeadlineBoost, SavedFilter, SortField, Task, TaskEnergyLevel } from '@mindwtr/core';
 import { useTaskFilterSelections } from '@mindwtr/core/task-filter-selections';
 import { useLanguage } from '../../contexts/language-context';
@@ -397,8 +397,15 @@ export function AgendaView() {
     } = filterSelections;
     const activePriorities = showPriorityFilters ? selectedPriorities : [];
     const activeTimeEstimates = showTimeEstimateFilters ? selectedTimeEstimates : [];
-    const effectiveFocusSortBy = activeSavedFilter?.sortBy ?? focusSortBy;
-    const effectiveNextGroupBy = normalizeAgendaGroupBy(activeSavedFilter?.groupBy ?? focusGroupBy);
+    // A saved or stored 'priority' sort/group stops taking effect while
+    // Priorities is off (the preference survives for re-enable) — otherwise
+    // Focus would keep ordering and bucketing by a field hidden everywhere
+    // else in the UI.
+    const effectiveFocusSortBy = resolveTaskSortByForFeatures(activeSavedFilter?.sortBy ?? focusSortBy, settings);
+    const effectiveNextGroupBy = resolveTaskGroupByForFeatures(
+        normalizeAgendaGroupBy(activeSavedFilter?.groupBy ?? focusGroupBy),
+        settings,
+    );
     const effectiveContextMatchMode = effectiveFilterCriteria.contextMatchMode ?? 'all';
     const effectiveTagMatchMode = effectiveFilterCriteria.tagMatchMode ?? 'all';
     const canSaveFocusPerspective = activeSavedFilterId === null

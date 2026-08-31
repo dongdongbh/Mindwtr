@@ -12,6 +12,7 @@ type MockCalendarStoreState = {
     tasks: unknown[];
     projects: { id: string; title: string }[];
     sections: { id: string; title: string }[];
+    settings?: unknown;
     _allTasks: unknown[];
     _tasksById: Map<string, unknown>;
 };
@@ -213,12 +214,13 @@ function setupEnabled(calendarId = 'cal-1', targetCalendarId: string | null = nu
 function setStoreTasks(
     tasks: unknown[],
     allTasks: unknown[] = tasks,
-    { projects = [], sections = [] }: Partial<Pick<MockCalendarStoreState, 'projects' | 'sections'>> = {},
+    { projects = [], sections = [], settings }: Partial<Pick<MockCalendarStoreState, 'projects' | 'sections' | 'settings'>> = {},
 ) {
     mockGetState.mockReturnValue({
         tasks,
         projects,
         sections,
+        settings,
         _allTasks: allTasks,
         _tasksById: new Map(allTasks.map((task) => [(task as { id: string }).id, task])),
     });
@@ -753,6 +755,25 @@ describe('buildEventDetails — date-only calendar events stay on the intended d
         expect(eventData.allDay).toBe(false);
         expect(eventData.startDate.toISOString()).toBe('2026-04-20T10:45:00.000Z');
         expect(eventData.endDate.toISOString()).toBe('2026-04-20T11:45:00.000Z');
+    });
+
+    it('sizes the pushed event by the estimate only while Time estimates is on', async () => {
+        setupEnabled();
+        // Feature off: the stored estimate stays on the task but stops
+        // stretching the pushed event (the 30-minute default takes over).
+        const task = makeTask({
+            dueDate: null,
+            startTime: '2026-04-20T10:45:00.000Z',
+            timeEstimate: '2hr',
+        });
+        setStoreTasks([task], [task], { settings: { features: { timeEstimates: false } } });
+        mockGetCalendarSyncEntry.mockResolvedValue(null);
+        mockGetAllCalendarSyncEntries.mockResolvedValue([]);
+
+        await runFullCalendarSync();
+
+        const call = mockCreateEventAsync.mock.calls[0] as unknown as [string, { startDate: Date; endDate: Date }];
+        expect(call[1].endDate.toISOString()).toBe('2026-04-20T11:15:00.000Z');
     });
 
     it('passes task location into pushed calendar event details', async () => {

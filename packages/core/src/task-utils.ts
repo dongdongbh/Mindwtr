@@ -884,12 +884,29 @@ export function buildTrashTimeline(
  * (it comes back when the feature is re-enabled) — only the effective sort
  * falls back. Every list, widget and picker resolves through here (#1107).
  */
-export function resolveTaskSortByForFeatures(
-    sortBy: TaskSortBy,
+export function resolveTaskSortByForFeatures<Sort extends SortField>(
+    sortBy: Sort,
     settings: { features?: AppSettings['features'] } | null | undefined,
-): TaskSortBy {
-    if (sortBy === 'timeEstimate' && !resolveFeatureFlags(settings).timeEstimates) return 'default';
+): Sort | 'default' {
+    const flags = resolveFeatureFlags(settings);
+    if (sortBy === 'timeEstimate' && !flags.timeEstimates) return 'default';
+    if (sortBy === 'priority' && !flags.priorities) return 'default';
     return sortBy;
+}
+
+/**
+ * The grouping twin of `resolveTaskSortByForFeatures`: a saved or stored
+ * 'priority' group-by stops bucketing the moment Priorities is switched off,
+ * falling back to the ungrouped list. The stored preference survives and
+ * returns when the feature is re-enabled. Energy has no feature flag, so it
+ * is deliberately not handled here.
+ */
+export function resolveTaskGroupByForFeatures<Axis extends string>(
+    groupBy: Axis,
+    settings: { features?: AppSettings['features'] } | null | undefined,
+): Axis | 'none' {
+    if (groupBy === 'priority' && !resolveFeatureFlags(settings).priorities) return 'none';
+    return groupBy;
 }
 
 export function sortTasksBy(tasks: Task[], sortBy: TaskSortBy = 'default'): Task[] {
@@ -1092,7 +1109,13 @@ export function sortTasksBySavedPreference<T extends Task>(
             case 'created-desc':
                 return withFallbacks(byCreatedDesc);
             case 'priority':
-                return withFallbacks(byPriority, byDue, byStart, byCreatedAsc);
+                // A stored 'priority' sort must stop ordering the list once the
+                // Priorities feature is off — the field is hidden everywhere
+                // else, so a priority order reads as random. Same contract as
+                // 'start' above: the preference is kept, only the effect drops.
+                return options.prioritizeByPriority
+                    ? withFallbacks(byPriority, byDue, byStart, byCreatedAsc)
+                    : withFallbacks(byDue, byStart, byCreatedAsc);
             case 'energy':
                 return withFallbacks(byEnergy, byDue, byStart, byCreatedAsc);
             case 'timeEstimate':

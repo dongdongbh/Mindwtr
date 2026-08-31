@@ -177,6 +177,23 @@ describe('desktop calendar push sync', () => {
         expect(notes).toContain('Link: https://example.com/doc');
     });
 
+    it('sizes the pushed event by the estimate only while Time estimates is on', async () => {
+        setStoreTasks([makeTask({ startTime: '2026-01-10T09:00:00', timeEstimate: '2hr' })]);
+        await runFullDesktopCalendarPushSync();
+        const enabledEnd = new Date(createEvent.mock.calls[0]?.[0]?.end as string);
+        expect(enabledEnd.getHours()).toBe(11);
+
+        createEvent.mockClear();
+        // Feature off: the stored estimate stays on the task but stops
+        // stretching the pushed event (the 30-minute default takes over).
+        useTaskStore.setState((state) => ({ ...state, settings: { ...state.settings, features: { timeEstimates: false } } }));
+        setStoreTasks([makeTask({ id: 'task-2', startTime: '2026-01-10T09:00:00', timeEstimate: '2hr' })]);
+        await runFullDesktopCalendarPushSync();
+        const disabledEnd = new Date(createEvent.mock.calls[0]?.[0]?.end as string);
+        expect(disabledEnd.getHours()).toBe(9);
+        expect(disabledEnd.getMinutes()).toBe(30);
+    });
+
     it('prefixes titles when pushing to a shared selected calendar', async () => {
         getTargetCalendarId.mockResolvedValue('cal-shared');
         getTargets.mockResolvedValue([{

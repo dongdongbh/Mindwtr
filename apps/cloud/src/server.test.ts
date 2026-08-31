@@ -4521,11 +4521,11 @@ describe('cloud server calendar feed', () => {
         return { dataDir, server, url: `http://127.0.0.1:${server.port}` };
     };
 
-    const seedData = async (url: string, tasks: unknown[]) => {
+    const seedData = async (url: string, tasks: unknown[], settings: unknown = {}) => {
         const response = await fetch(`${url}/v1/data`, {
             method: 'PUT',
             headers: { ...authHeaders, 'content-type': 'application/json' },
-            body: JSON.stringify({ tasks, projects: [], sections: [], areas: [], settings: {} }),
+            body: JSON.stringify({ tasks, projects: [], sections: [], areas: [], settings }),
         });
         expect(response.status).toBe(200);
     };
@@ -4582,6 +4582,33 @@ describe('cloud server calendar feed', () => {
             server.stop();
             rmSync(dataDir, { recursive: true, force: true });
         }
+    });
+
+    test('sizes events by the estimate only while Time estimates is on', async () => {
+        const estimatedTask = makeTestTask({
+            id: '22222222-2222-4222-8222-222222222222',
+            title: 'Long block',
+            status: 'next',
+            startTime: '2026-05-06T09:00:00.000Z',
+            timeEstimate: '2hr',
+        });
+
+        const readFeed = async (settings: unknown): Promise<string> => {
+            const { dataDir, server, url } = await startFeedServer();
+            try {
+                await seedData(url, [estimatedTask], settings);
+                const created = await fetch(`${url}/v1/calendar/feed`, { method: 'POST', headers: authHeaders });
+                const feed = (await created.json()).feed as { path: string };
+                return await (await fetch(`${url}${feed.path}`)).text();
+            } finally {
+                server.stop();
+                rmSync(dataDir, { recursive: true, force: true });
+            }
+        };
+
+        expect(await readFeed({})).toContain('DTEND:20260506T110000Z');
+        // Feature off: the stored estimate is kept but stops sizing the event.
+        expect(await readFeed({ features: { timeEstimates: false } })).toContain('DTEND:20260506T093000Z');
     });
 
     test('rejects an unknown feed token and a feed for a namespace that never synced', async () => {

@@ -184,6 +184,37 @@ describe('WeeklyReviewGuideModal', () => {
         expect(screen.queryByText('Tracked on those tasks: 45m')).not.toBeInTheDocument();
     });
 
+    it('shows the estimate look-back at defaults, with no features block stored', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 2, 4, 12, 0, 0));
+        useTaskStore.setState({
+            _allTasks: [makeTask({
+                id: 'done-with-estimate',
+                status: 'done',
+                completedAt: new Date(2026, 2, 3, 9, 0, 0).toISOString(),
+                timeEstimate: '1hr',
+                timeSpentMinutes: 45,
+            })],
+            // No `features` key at all: time estimates default ON, so the
+            // look-back must render. `features?.timeEstimates === true` read
+            // this as OFF and hid the rows for everyone at defaults.
+            settings: {
+                weekStart: 'monday',
+                gtd: {
+                    weeklyReview: { includeContextStep: true },
+                    pomodoro: { linkTask: true },
+                },
+            },
+        });
+
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+
+        expect(screen.getByText('1 completed task(s) had an estimate')).toBeInTheDocument();
+        expect(screen.getByText('Estimated: 1h')).toBeInTheDocument();
+        // Pomodoro still defaults OFF, so the tracked line stays hidden.
+        expect(screen.queryByText('Tracked on those tasks: 45m')).not.toBeInTheDocument();
+    });
+
     it('opens on the inbox step when there is an inbox task to process', () => {
         useTaskStore.setState({
             _allTasks: [makeTask({ id: 'inbox-1', title: 'Inbox task', status: 'inbox' })],

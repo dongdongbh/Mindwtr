@@ -132,6 +132,9 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
     safeParseDate: vi.fn((value?: string) => (value ? new Date(value) : null)),
     safeParseDueDate: vi.fn(() => null),
     formatTimeSpentLabel: (await importOriginal<typeof import('@mindwtr/core')>()).formatTimeSpentLabel,
+    // Real implementation on purpose: the look-back rows depend on its default
+    // polarity (estimates ON when `features` is missing).
+    resolveFeatureFlags: (await importOriginal<typeof import('@mindwtr/core')>()).resolveFeatureFlags,
     // Weekly Review candidate/bucket derivation moved to core (review-buckets
     // refactor); these fakes mirror the real functions closely enough for
     // this file's fixtures, composed from the primitives already mocked above.
@@ -599,6 +602,39 @@ describe('ReviewModal', () => {
         expect(hasText('1 completed task(s) had an estimate')).toBe(true);
         expect(hasText('Estimated: 1h')).toBe(true);
         expect(hasText('Tracked on those tasks: 45m')).toBe(true);
+    });
+
+    it('shows the estimate look-back at defaults, with no features block stored', async () => {
+        storeState.tasks = [];
+        storeState.projects = [];
+        // No `features` key at all: time estimates default ON, so the look-back
+        // must render. `features?.timeEstimates === true` read this as OFF and
+        // hid the rows for everyone at defaults.
+        storeState.settings = {
+            ...defaultSettings,
+            gtd: {
+                weeklyReview: { includeContextStep: false },
+                pomodoro: { linkTask: true },
+            },
+        } as typeof storeState.settings;
+        Object.assign(mockLookBack, {
+            completedCount: 1,
+            estimatedTaskCount: 1,
+            estimatedMinutes: 60,
+            trackedMinutes: 45,
+        });
+        let tree!: ReturnType<typeof create>;
+
+        await act(async () => {
+            tree = create(<ReviewModal visible onClose={vi.fn()} />);
+        });
+
+        const hasText = (text: string) =>
+            tree.root.findAll((node) => flattenText(node.props?.children).includes(text)).length > 0;
+        expect(hasText('1 completed task(s) had an estimate')).toBe(true);
+        expect(hasText('Estimated: 1h')).toBe(true);
+        // Pomodoro still defaults OFF, so the tracked line stays hidden.
+        expect(hasText('Tracked on those tasks: 45m')).toBe(false);
     });
 
     it('keeps estimate lines hidden until time estimates are enabled', async () => {

@@ -73,7 +73,13 @@ export async function handleContextAutomationPayload(
   if (payload.action === 'deactivate') return;
 
   const state = useTaskStore.getState();
-  const matchingTasks = selectContextNextActions(state.tasks ?? [], state.projects ?? [], payload.context);
+  const matchingTasks = selectContextNextActions(
+    state.tasks ?? [],
+    state.projects ?? [],
+    payload.context,
+    new Date(),
+    state.settings,
+  );
   if (matchingTasks.length === 0) return;
 
   const copy = buildContextAutomationNotificationCopy(payload.context, matchingTasks, {

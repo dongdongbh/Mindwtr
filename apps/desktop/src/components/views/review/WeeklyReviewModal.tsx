@@ -13,6 +13,7 @@ import {
     isTaskInActiveProject,
     parseProjectNextActionInput,
     parseStoredReviewStepSession,
+    resolveFeatureFlags,
     resolveReviewStepSession,
     safeFormatDate,
     safeParseDate,
@@ -174,11 +175,14 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const reviewLookBack = weeklyBuckets.lookBack;
     const estimatedDuration = formatTimeSpentLabel(reviewLookBack.estimatedMinutes);
     const trackedDuration = formatTimeSpentLabel(reviewLookBack.trackedMinutes);
-    const showEstimateLookBack = reviewLookBack.estimatedTaskCount > 0
-        && settings?.features?.timeEstimates === true;
+    // Time estimates default ON, so `=== true` read the default as OFF and hid
+    // the look-back (and the tracked row under it) for everyone who never
+    // touched the setting. Both flags go through resolveFeatureFlags.
+    const { pomodoro: pomodoroEnabled, timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
+    const showEstimateLookBack = reviewLookBack.estimatedTaskCount > 0 && timeEstimatesEnabled;
     const showTrackedLookBack = showEstimateLookBack
         && trackedDuration !== null
-        && settings?.features?.pomodoro === true
+        && pomodoroEnabled
         && settings?.gtd?.pomodoro?.linkTask === true;
 
     const stepFlags = useMemo(() => buildReviewSteps(weeklyBuckets, {
