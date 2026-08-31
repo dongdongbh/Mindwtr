@@ -6,6 +6,14 @@ export type BulkOrganizeTaskUpdateInput = {
     /** Omit to keep each task's current status. */
     status?: BulkOrganizeStatus;
     projectId?: string | null;
+    /**
+     * Omit to keep each task's current section, null to clear it. A section
+     * belongs to exactly one project, so it is only applied to tasks that end
+     * up in `sectionProjectId` - see buildBulkOrganizeTaskUpdate.
+     */
+    sectionId?: string | null;
+    /** The project owning `sectionId`. Without it a section is never applied. */
+    sectionProjectId?: string | null;
     areaId?: string | null;
     contexts?: string[];
     tags?: string[];
@@ -47,7 +55,7 @@ const isTaskMap = (
 );
 
 export function buildBulkOrganizeTaskUpdate(
-    task: Pick<Task, 'contexts' | 'tags'>,
+    task: Pick<Task, 'contexts' | 'tags' | 'projectId'>,
     input: BulkOrganizeTaskUpdateInput,
 ): Partial<Task> {
     const updates: Partial<Task> = {};
@@ -72,6 +80,23 @@ export function buildBulkOrganizeTaskUpdate(
         if (areaId) {
             updates.projectId = undefined;
         }
+    }
+
+    if (hasOwn(input, 'sectionId')) {
+        const sectionId = normalizedOptionalString(input.sectionId);
+        // The project the task lands in once the choices above are applied.
+        const effectiveProjectId = hasOwn(updates, 'projectId')
+            ? updates.projectId
+            : normalizedOptionalString(task.projectId);
+        if (!sectionId) {
+            updates.sectionId = undefined;
+        } else if (effectiveProjectId && effectiveProjectId === normalizedOptionalString(input.sectionProjectId)) {
+            updates.sectionId = sectionId;
+        }
+        // Otherwise the section belongs to another project: leave the task's
+        // section alone rather than sending the store a mismatched pair it
+        // would reject (resolveTaskContainerAssignment: 'Section does not
+        // belong to project'). A project move clears the stale section there.
     }
 
     const contexts = mergeTokens(task.contexts, input.contexts);

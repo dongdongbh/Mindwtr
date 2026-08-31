@@ -1536,6 +1536,7 @@ export const jaOverrides: Record<string, string> = {
         'bulk.keepStatus': 'ステータスは変えない',
         'bulk.keepProject': 'プロジェクトは変えない',
         'bulk.keepArea': 'エリアは変えない',
+        'bulk.keepSection': 'セクションは変えない',
         'bulk.waitingPersonRequired': '待っている相手を選んでください。',
         'bulk.deleting': '選択したタスクを削除しています…',
 

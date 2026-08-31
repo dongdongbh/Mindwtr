@@ -1952,6 +1952,7 @@ export function ProjectWorkspace({
                 selectedCount={selectedIdsArray.length}
                 projects={projects}
                 areas={areas}
+                sectionScope={selectedProject ? { projectId: selectedProject.id, sections: projectSections } : undefined}
                 isApplying={activeAction === 'organize'}
                 t={t}
                 onCancel={() => setBulkOrganizeOpen(false)}

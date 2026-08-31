@@ -517,6 +517,23 @@ describe('ProjectWorkspace Select mode', () => {
         expect(getByRole('combobox', { name: 'Area' })).toBeInTheDocument();
     });
 
+    it('offers the project\'s sections in the bulk organize dialog (#1122)', () => {
+        const projectTask = task('task-1', 'Move me');
+        const { getByRole } = renderWorkspace({
+            allTasks: [projectTask],
+            selectedProjectTasks: [projectTask],
+            sections: [projectSection],
+        });
+
+        fireEvent.click(getByRole('button', { name: 'Select' }));
+        fireEvent.click(getByRole('checkbox', { name: 'Select task' }));
+        fireEvent.click(getByRole('button', { name: 'Bulk organize' }));
+
+        const sectionSelect = getByRole('combobox', { name: 'Project section' });
+        expect(sectionSelect).toBeInTheDocument();
+        expect(getByRole('option', { name: projectSection.title })).toBeInTheDocument();
+    });
+
     it('retries scrolling to a highlighted project task after navigation', async () => {
         vi.useFakeTimers();
         const highlightedTask = task('task-1', 'Highlighted task');

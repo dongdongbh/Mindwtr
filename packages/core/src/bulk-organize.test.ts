@@ -78,6 +78,75 @@ describe('bulk organize', () => {
         ]);
     });
 
+    it('applies a section to tasks already in that section\'s project', () => {
+        const updates = buildBulkOrganizeTaskUpdate(
+            { ...baseTask('task-1'), projectId: 'project-1' },
+            { sectionId: 'section-1', sectionProjectId: 'project-1' },
+        );
+
+        expect(updates).toEqual({ sectionId: 'section-1' });
+    });
+
+    it('applies a section alongside a matching project move', () => {
+        const updates = buildBulkOrganizeTaskUpdate(
+            { ...baseTask('task-1'), projectId: 'project-2' },
+            { projectId: 'project-1', sectionId: 'section-1', sectionProjectId: 'project-1' },
+        );
+
+        expect(updates).toEqual({
+            projectId: 'project-1',
+            areaId: undefined,
+            sectionId: 'section-1',
+        });
+    });
+
+    it('clears the section when the input asks for no section', () => {
+        const updates = buildBulkOrganizeTaskUpdate(
+            { ...baseTask('task-1'), projectId: 'project-1' },
+            { sectionId: null },
+        );
+
+        expect(updates).toEqual({ sectionId: undefined });
+        expect('sectionId' in updates).toBe(true);
+    });
+
+    it('ignores a section that belongs to a different project than the task lands in', () => {
+        const movedToAnotherProject = buildBulkOrganizeTaskUpdate(
+            { ...baseTask('task-1'), projectId: 'project-1' },
+            { projectId: 'project-2', sectionId: 'section-1', sectionProjectId: 'project-1' },
+        );
+        expect('sectionId' in movedToAnotherProject).toBe(false);
+
+        const taskInAnotherProject = buildBulkOrganizeTaskUpdate(
+            { ...baseTask('task-2'), projectId: 'project-9' },
+            { sectionId: 'section-1', sectionProjectId: 'project-1' },
+        );
+        expect('sectionId' in taskInAnotherProject).toBe(false);
+    });
+
+    it('ignores a section when the task ends up with no project at all', () => {
+        const clearedProject = buildBulkOrganizeTaskUpdate(
+            { ...baseTask('task-1'), projectId: 'project-1' },
+            { projectId: null, sectionId: 'section-1', sectionProjectId: 'project-1' },
+        );
+        expect('sectionId' in clearedProject).toBe(false);
+
+        const noProject = buildBulkOrganizeTaskUpdate(baseTask('task-1'), {
+            sectionId: 'section-1',
+            sectionProjectId: 'project-1',
+        });
+        expect('sectionId' in noProject).toBe(false);
+    });
+
+    it('never applies a section without the owning project id', () => {
+        const updates = buildBulkOrganizeTaskUpdate(
+            { ...baseTask('task-1'), projectId: 'project-1' },
+            { sectionId: 'section-1' },
+        );
+
+        expect('sectionId' in updates).toBe(false);
+    });
+
     it('normalizes bulk token input', () => {
         expect(parseBulkOrganizeTokenInput('@home computer,computer', '@')).toEqual(['@home', '@computer']);
         expect(parseBulkOrganizeTokenInput('#launch inbox,launch', '#')).toEqual(['#launch', '#inbox']);

@@ -70,6 +70,7 @@ export const viOverrides: Record<string, string> = {
         'bulk.keepStatus': 'Giữ trạng thái',
         'bulk.keepProject': 'Giữ dự án',
         'bulk.keepArea': 'Giữ khu vực',
+        'bulk.keepSection': 'Giữ phần',
         'bulk.waitingPersonRequired': 'Chọn người mà các mục này đang chờ.',
         'bulk.deleting': 'Đang xóa các nhiệm vụ đã chọn...',
         'taskEdit.aiAssistant': 'Trợ lý AI',

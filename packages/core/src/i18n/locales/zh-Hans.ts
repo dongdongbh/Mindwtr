@@ -72,6 +72,7 @@ export const zhHans: Record<string, string> = {
         'bulk.keepStatus': '保留状态',
         'bulk.keepProject': '保留项目',
         'bulk.keepArea': '保留领域',
+        'bulk.keepSection': '保留分区',
         'bulk.waitingPersonRequired': '选择这些事项在等待谁。',
         'bulk.deleting': '正在删除所选任务…',
         'taskEdit.aiAssistant': 'AI 助手',

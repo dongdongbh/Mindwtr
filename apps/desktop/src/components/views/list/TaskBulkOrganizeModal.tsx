@@ -9,6 +9,7 @@ import {
     type BulkOrganizeStatus,
     type BulkOrganizeTaskUpdateInput,
     type Project,
+    type Section,
 } from '@mindwtr/core';
 
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from '../../ui/Dialog';
@@ -21,6 +22,12 @@ type TaskBulkOrganizeModalProps = {
     selectedCount: number;
     projects: Project[];
     areas: Area[];
+    /**
+     * Only set where every selected task lives in one project (the project
+     * workspace). Sections belong to a project, so views without a project
+     * scope get no section picker.
+     */
+    sectionScope?: { projectId: string; sections: Section[] };
     isApplying: boolean;
     t: (key: string) => string;
     titleKey?: string;
@@ -39,6 +46,7 @@ export function TaskBulkOrganizeModal({
     selectedCount,
     projects,
     areas,
+    sectionScope,
     isApplying,
     t,
     titleKey = 'bulk.organizeTasks',
@@ -49,6 +57,7 @@ export function TaskBulkOrganizeModal({
     const [status, setStatus] = useState<BulkOrganizeStatus | typeof KEEP_VALUE>(KEEP_VALUE);
     const [projectChoice, setProjectChoice] = useState(KEEP_VALUE);
     const [areaChoice, setAreaChoice] = useState(KEEP_VALUE);
+    const [sectionChoice, setSectionChoice] = useState(KEEP_VALUE);
     const [contextsInput, setContextsInput] = useState('');
     const [tagsInput, setTagsInput] = useState('');
     const [startDate, setStartDate] = useState('');
@@ -63,6 +72,7 @@ export function TaskBulkOrganizeModal({
         setStatus(KEEP_VALUE);
         setProjectChoice(KEEP_VALUE);
         setAreaChoice(KEEP_VALUE);
+        setSectionChoice(KEEP_VALUE);
         setContextsInput('');
         setTagsInput('');
         setStartDate('');
@@ -90,6 +100,10 @@ export function TaskBulkOrganizeModal({
     const isWaiting = status === 'waiting';
     const canApply = selectedCount > 0 && (!isWaiting || delegateWho.trim().length > 0);
     const selectedProjectId = projectChoice !== KEEP_VALUE && projectChoice !== NONE_VALUE ? projectChoice : undefined;
+    // A section lives inside its project, so the picker goes quiet as soon as
+    // the modal is about to move the tasks to a different project.
+    const canChooseSection = sectionScope !== undefined
+        && (projectChoice === KEEP_VALUE || projectChoice === sectionScope.projectId);
     const title = tFallback(t, titleKey, titleFallback);
     const startDateLabel = tFallback(t, 'taskEdit.startDateLabel', 'Start');
     const dueDateLabel = tFallback(t, 'taskEdit.dueDateLabel', 'Due');
@@ -115,6 +129,10 @@ export function TaskBulkOrganizeModal({
         }
         if (!selectedProjectId && areaChoice !== KEEP_VALUE) {
             input.areaId = areaChoice === NONE_VALUE ? null : areaChoice;
+        }
+        if (sectionScope && canChooseSection && sectionChoice !== KEEP_VALUE) {
+            input.sectionId = sectionChoice === NONE_VALUE ? null : sectionChoice;
+            input.sectionProjectId = sectionScope.projectId;
         }
         if (startDate.trim()) input.startTime = startDate.trim();
         if (dueDate.trim()) input.dueDate = dueDate.trim();
@@ -220,6 +238,26 @@ export function TaskBulkOrganizeModal({
                             ))}
                         </select>
                     </label>
+
+                    {sectionScope && sectionScope.sections.length > 0 && (
+                        <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                            <span>{tFallback(t, 'taskEdit.sectionLabel', 'Project section')}</span>
+                            <select
+                                value={sectionChoice}
+                                onChange={(event) => setSectionChoice(event.currentTarget.value)}
+                                disabled={!canChooseSection}
+                                className="h-9 w-full rounded-md border border-border bg-card px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <option value={KEEP_VALUE}>{tFallback(t, 'bulk.keepSection', 'Keep section')}</option>
+                                <option value={NONE_VALUE}>{tFallback(t, 'taskEdit.noSectionOption', 'No Section')}</option>
+                                {sectionScope.sections.map((section) => (
+                                    <option key={section.id} value={section.id}>
+                                        {section.title}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                    )}
 
                     {isWaiting && (
                         <label className="space-y-1 text-xs font-medium text-muted-foreground">

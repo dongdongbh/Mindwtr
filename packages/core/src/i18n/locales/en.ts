@@ -1530,6 +1530,7 @@ export const en: Record<string, string> = {
         'bulk.keepStatus': 'Keep status',
         'bulk.keepProject': 'Keep project',
         'bulk.keepArea': 'Keep area',
+        'bulk.keepSection': 'Keep section',
         'bulk.waitingPersonRequired': 'Choose who these items are waiting for.',
         'bulk.deleting': 'Deleting selected tasks...',
 

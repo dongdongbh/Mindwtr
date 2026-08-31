@@ -1503,6 +1503,7 @@ export const faOverrides: Record<string, string> = {
         'bulk.keepStatus': 'نگه‌داشتن وضعیت',
         'bulk.keepProject': 'نگه‌داشتن پروژه',
         'bulk.keepArea': 'نگه‌داشتن حوزه',
+        'bulk.keepSection': 'نگه‌داشتن بخش',
         'bulk.waitingPersonRequired': 'انتخاب کنید این موارد منتظر چه کسی هستند.',
         'bulk.deleting': 'در حال حذف کارهای انتخاب‌شده...',
 

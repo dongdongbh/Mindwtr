@@ -1503,6 +1503,7 @@ export const svOverrides: Record<string, string> = {
         'bulk.keepStatus': 'Behåll status',
         'bulk.keepProject': 'Behåll projekt',
         'bulk.keepArea': 'Behåll område',
+        'bulk.keepSection': 'Behåll sektion',
         'bulk.waitingPersonRequired': 'Välj vem de här posterna väntar på.',
         'bulk.deleting': 'Tar bort markerade uppgifter...',
 
