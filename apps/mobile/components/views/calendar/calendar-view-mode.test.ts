@@ -8,9 +8,11 @@ import {
   getCalendarTimelineDefaultScrollKey,
   getCalendarTimelineScrollYForMinutes,
   getCalendarWeekColumnWidth,
+  getCalendarWeekContentClampX,
   getCalendarWeekMaxScrollX,
   getCalendarWeekInitialScrollX,
   getCalendarWeekInitialVisibleDayIndex,
+  getCalendarWeekVisibleDaysUpdate,
   getInitialCalendarSelectedDate,
   shiftCalendarVisibleMonth,
   needsCalendarSelectedDate,
@@ -200,5 +202,54 @@ describe('getCalendarWeekMaxScrollX', () => {
   it('never goes negative when the canvas fits', () => {
     expect(getCalendarWeekMaxScrollX({ columnWidth: 50, dayCount: 7, gutterWidth: 56, viewportWidth: 897 }))
       .toBe(0);
+  });
+});
+
+describe('getCalendarWeekContentClampX', () => {
+  it('returns one correction and becomes a no-op after the caller stores it', () => {
+    const correction = getCalendarWeekContentClampX({
+      currentX: 1_050,
+      contentWidth: 1_080,
+      viewportWidth: 1_080,
+    });
+
+    expect(correction).toBe(0);
+    expect(getCalendarWeekContentClampX({
+      currentX: correction ?? 1_050,
+      contentWidth: 1_080,
+      viewportWidth: 1_080,
+    })).toBeNull();
+  });
+
+  it('does not disturb an offset that already fits the resized canvas', () => {
+    expect(getCalendarWeekContentClampX({
+      currentX: 180,
+      contentWidth: 1_500,
+      viewportWidth: 1_080,
+    })).toBeNull();
+  });
+});
+
+describe('getCalendarWeekVisibleDaysUpdate', () => {
+  it('accepts a new density once and rejects repeated gesture samples', () => {
+    let requestedVisibleDays = 2;
+    const firstUpdate = getCalendarWeekVisibleDaysUpdate({
+      currentVisibleDays: requestedVisibleDays,
+      requestedVisibleDays: 5,
+    });
+
+    expect(firstUpdate).toBe(5);
+    requestedVisibleDays = firstUpdate ?? requestedVisibleDays;
+    expect(getCalendarWeekVisibleDaysUpdate({
+      currentVisibleDays: requestedVisibleDays,
+      requestedVisibleDays: 5,
+    })).toBeNull();
+  });
+
+  it('coerces the requested density before comparing it', () => {
+    expect(getCalendarWeekVisibleDaysUpdate({
+      currentVisibleDays: 7,
+      requestedVisibleDays: 20,
+    })).toBeNull();
   });
 });

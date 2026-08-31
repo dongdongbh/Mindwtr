@@ -85,6 +85,7 @@ import {
   getCalendarTimelineAnchorMinutes,
   getCalendarTimelineDefaultScrollKey,
   getCalendarTimelineScrollYForMinutes,
+  getCalendarWeekVisibleDaysUpdate,
   getInitialCalendarSelectedDate,
   needsCalendarSelectedDate,
   shiftCalendarVisibleMonth,
@@ -212,6 +213,8 @@ export function useCalendarViewController() {
   const calendarSystem = resolveCalendarSystemSetting(settings?.calendarSystem, { language, systemLocale });
   const initialViewMode = coerceCalendarViewMode(calendarSettings?.viewMode);
   const calendarWeekVisibleDays = coerceCalendarWeekVisibleDays(calendarSettings?.weekVisibleDays);
+  const calendarSettingsRef = useRef(calendarSettings);
+  const requestedCalendarWeekVisibleDaysRef = useRef(calendarWeekVisibleDays);
   const showCompleted = calendarSettings?.showCompleted === true;
   const [visibleMonthDate, setVisibleMonthDate] = useState(today);
   const [selectedDate, setSelectedDate] = useState<Date | null>(() => getInitialCalendarSelectedDate(initialViewMode, today));
@@ -243,6 +246,12 @@ export function useCalendarViewController() {
     void logError(error, { scope: 'calendar' });
   };
   useEffect(() => {
+    calendarSettingsRef.current = calendarSettings;
+  }, [calendarSettings]);
+  useEffect(() => {
+    requestedCalendarWeekVisibleDaysRef.current = calendarWeekVisibleDays;
+  }, [calendarWeekVisibleDays]);
+  useEffect(() => {
     selectedDateRef.current = selectedDate;
   }, [selectedDate]);
   useEffect(() => {
@@ -268,12 +277,30 @@ export function useCalendarViewController() {
       .catch(logCalendarError);
   };
 
-  const setCalendarWeekVisibleDays = (visibleDays: number) => {
-    const nextVisibleDays = coerceCalendarWeekVisibleDays(visibleDays);
-    if (nextVisibleDays === calendarWeekVisibleDays) return;
-    updateSettings({ calendar: { ...calendarSettings, weekVisibleDays: nextVisibleDays } })
-      .catch(logCalendarError);
-  };
+  const setCalendarWeekVisibleDays = useCallback((visibleDays: number) => {
+    const previousVisibleDays = requestedCalendarWeekVisibleDaysRef.current;
+    const nextVisibleDays = getCalendarWeekVisibleDaysUpdate({
+      currentVisibleDays: previousVisibleDays,
+      requestedVisibleDays: visibleDays,
+    });
+    if (nextVisibleDays === null) return;
+
+    // A pan gesture emits many frames for each integer tick. Record the
+    // requested value before persistence so stale callback closures cannot
+    // enqueue the same settings write on every frame.
+    requestedCalendarWeekVisibleDaysRef.current = nextVisibleDays;
+    updateSettings({
+      calendar: {
+        ...calendarSettingsRef.current,
+        weekVisibleDays: nextVisibleDays,
+      },
+    }).catch((error) => {
+      if (requestedCalendarWeekVisibleDaysRef.current === nextVisibleDays) {
+        requestedCalendarWeekVisibleDaysRef.current = previousVisibleDays;
+      }
+      void logError(error, { scope: 'calendar' });
+    });
+  }, [updateSettings]);
 
   useEffect(() => {
     ensureSelectedDateForViewMode(viewMode);

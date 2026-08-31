@@ -46,6 +46,7 @@ import {
   CALENDAR_NAVIGATION_SWIPE_VERTICAL_RATIO,
   getCalendarNavigationSwipeDirection,
   getCalendarWeekColumnWidth,
+  getCalendarWeekContentClampX,
   getCalendarWeekInitialScrollX,
   getCalendarWeekMaxScrollX,
 } from './calendar/calendar-view-mode';
@@ -534,10 +535,18 @@ export function CalendarView() {
   // column and Android keeps it there, showing day headers and then blank space.
   // Re-clamp whenever the canvas actually resizes.
   const handleWeekContentSizeChange = useCallback((contentWidth: number) => {
-    const maxX = Math.max(0, contentWidth - screenWidth);
-    if (weekScrollX.value > maxX) {
-      weekHorizontalScrollRef.current?.scrollTo({ x: maxX, animated: false });
-    }
+    const clampedX = getCalendarWeekContentClampX({
+      contentWidth,
+      currentX: weekScrollX.value,
+      viewportWidth: screenWidth,
+    });
+    if (clampedX === null) return;
+
+    // Store the correction synchronously. Without this, a second content-size
+    // callback observes the stale out-of-range value and calls scrollTo again,
+    // creating a render/layout feedback loop before onScroll can catch up.
+    weekScrollX.value = clampedX;
+    weekHorizontalScrollRef.current?.scrollTo({ x: clampedX, animated: false });
   }, [screenWidth, weekScrollX]);
 
   const updateWeekDensityFromTrack = useCallback((x: number) => {

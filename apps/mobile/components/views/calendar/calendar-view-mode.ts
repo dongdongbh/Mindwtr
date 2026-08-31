@@ -123,6 +123,23 @@ export const coerceCalendarWeekVisibleDays = (value?: number | null): number => 
   );
 };
 
+/**
+ * Resolves one requested density change while filtering duplicate samples from
+ * a continuous slider gesture. The caller stores the returned value before
+ * starting persistence so later gesture frames cannot enqueue the same write.
+ */
+export const getCalendarWeekVisibleDaysUpdate = ({
+  currentVisibleDays,
+  requestedVisibleDays,
+}: {
+  currentVisibleDays: number;
+  requestedVisibleDays: number;
+}): number | null => {
+  const current = coerceCalendarWeekVisibleDays(currentVisibleDays);
+  const requested = coerceCalendarWeekVisibleDays(requestedVisibleDays);
+  return current === requested ? null : requested;
+};
+
 export const getCalendarWeekColumnWidth = (
   availableWidth: number,
   visibleDays?: number | null,
@@ -171,6 +188,25 @@ export const getCalendarWeekMaxScrollX = ({
   gutterWidth: number;
   viewportWidth: number;
 }): number => Math.max(0, gutterWidth + columnWidth * dayCount - viewportWidth);
+
+/**
+ * Returns the corrected horizontal offset after a week canvas resize, or null
+ * when the current offset already fits. Callers must store the correction
+ * before asking the scroll view to move so repeated content-size callbacks are
+ * idempotent while the native scroll event catches up.
+ */
+export const getCalendarWeekContentClampX = ({
+  contentWidth,
+  currentX,
+  viewportWidth,
+}: {
+  contentWidth: number;
+  currentX: number;
+  viewportWidth: number;
+}): number | null => {
+  const maxX = Math.max(0, contentWidth - viewportWidth);
+  return currentX > maxX ? maxX : null;
+};
 
 export const getCalendarNavigationSwipeDirection = ({
   translationX,
