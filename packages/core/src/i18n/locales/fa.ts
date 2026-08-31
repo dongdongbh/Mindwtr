@@ -1342,6 +1342,8 @@ export const faOverrides: Record<string, string> = {
         'settings.featureTimeEstimatesDesc': 'افزودن برآورد سریع مدت زمان برای بلوک‌بندی زمانی.',
         'settings.featurePomodoro': 'تایمر پومودورو',
         'settings.featurePomodoroDesc': 'فعال‌سازی پنل اختیاری پومودورو در نمای تمرکز.',
+        'settings.featureTimeline': 'نمای خط زمانی',
+        'settings.featureTimelineDesc': 'نمایش خط زمانی فقط‌خواندنی کارهای تاریخ‌دار در نوار کناری.',
         'settings.pomodoroCustomPreset': 'پیش‌تنظیم سفارشی',
         'settings.pomodoroCustomPresetDesc': 'یک پیش‌تنظیم اضافی تمرکز/استراحت اضافه کنید. تطبیق با یک پیش‌تنظیم داخلی فقط تراشه‌های داخلی را نگه می‌دارد.',
         'settings.pomodoroFocusMinutes': 'دقایق تمرکز',

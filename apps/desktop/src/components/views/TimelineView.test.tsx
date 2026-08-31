@@ -1,6 +1,6 @@
 import { beforeEach, describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { TimelineView } from './TimelineView';
+import { TimelineView, resolveTimelineTrack } from './TimelineView';
 import { LanguageProvider } from '../../contexts/language-context';
 import { useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
 
@@ -42,6 +42,26 @@ const renderTimeline = () => render(
 
 const bars = () => Array.from(document.querySelectorAll('[data-testid="timeline-bar"]')) as HTMLElement[];
 const barFor = (taskId: string) => document.querySelector(`[data-testid="timeline-bar"][data-task-id="${taskId}"]`) as HTMLElement | null;
+// Group headings and bar titles in one pass, in the order they are laid out.
+const rowLabels = () => Array.from(
+    document.querySelectorAll('[data-testid="timeline-group"], [data-testid="timeline-bar"]'),
+).map((node) => node.textContent);
+const axisLabels = (tier: 'major' | 'minor') => Array.from(
+    document.querySelectorAll(`[data-testid="timeline-axis-${tier}"]`),
+).map((node) => node.textContent ?? '');
+
+describe('resolveTimelineTrack (#1111)', () => {
+    it('stretches a range that fits the pane and scrolls one that does not', () => {
+        // 30 days at the month zoom's 4px minimum is 120px in a 1200px pane.
+        expect(resolveTimelineTrack(30, 4, 1200)).toEqual({ dayWidth: 40, trackWidth: 1200, fitted: true });
+        // 400 days at 4px overflows, so the minimum stands and the track scrolls.
+        expect(resolveTimelineTrack(400, 4, 1200)).toEqual({ dayWidth: 4, trackWidth: 1600, fitted: false });
+        // Exactly full is still fitted, and the pre-measure paint uses the minimum.
+        expect(resolveTimelineTrack(100, 12, 1200).fitted).toBe(true);
+        expect(resolveTimelineTrack(30, 4, 0)).toEqual({ dayWidth: 4, trackWidth: 120, fitted: false });
+        expect(resolveTimelineTrack(0, 4, 1200)).toEqual({ dayWidth: 4, trackWidth: 0, fitted: false });
+    });
+});
 
 describe('TimelineView (#1111)', () => {
     beforeEach(() => {
@@ -71,7 +91,7 @@ describe('TimelineView (#1111)', () => {
         renderTimeline();
         expect(barFor('start-only')?.dataset.variant).toBe('mini');
         expect(barFor('due-only')?.dataset.variant).toBe('mini');
-        expect(barFor('start-only')?.style.width).toBe('10px');
+        expect(barFor('start-only')?.style.width).toBe('56px');
     });
 
     it('leaves out undated, done and deleted tasks', () => {
@@ -87,11 +107,14 @@ describe('TimelineView (#1111)', () => {
         expect(bars().map((bar) => bar.dataset.taskId)).toEqual(['dated']);
     });
 
-    it("colors a bar with its project's area color, falling back to the project color", () => {
+    it('colors a bar with the same accent the calendar gives that task', () => {
         setStore({
             tasks: [
                 makeTask({ id: 'in-area', title: 'In area', projectId: 'p1', startTime: iso(0), dueDate: iso(1) }),
                 makeTask({ id: 'plain', title: 'Plain', projectId: 'p2', startTime: iso(0), dueDate: iso(1) }),
+                // No project, area straight on the task: colored on the calendar,
+                // so colored here too.
+                makeTask({ id: 'loose', title: 'Loose', areaId: 'a1', startTime: iso(0), dueDate: iso(1) }),
             ],
             projects: [
                 { id: 'p1', title: 'Area project', status: 'active', areaId: 'a1', createdAt: iso(-60), updatedAt: iso(-60) } as Project,
@@ -102,6 +125,7 @@ describe('TimelineView (#1111)', () => {
         renderTimeline();
         expect(barFor('in-area')?.style.backgroundColor).toBe('rgb(255, 0, 0)');
         expect(barFor('plain')?.style.backgroundColor).toBe('rgb(0, 255, 0)');
+        expect(barFor('loose')?.style.backgroundColor).toBe('rgb(255, 0, 0)');
     });
 
     it('groups rows by project with unassigned tasks last', () => {
@@ -113,8 +137,27 @@ describe('TimelineView (#1111)', () => {
             projects: [{ id: 'p1', title: 'Area project', status: 'active', createdAt: iso(-60), updatedAt: iso(-60) } as Project],
         });
         renderTimeline();
-        const labels = Array.from(document.querySelectorAll('span.truncate')).map((node) => node.textContent);
-        expect(labels).toEqual(['Area project', 'Owned task', 'No project', 'Loose task']);
+        expect(rowLabels()).toEqual(['Area project', 'Owned task', 'No project', 'Loose task']);
+    });
+
+    it('splits the month-zoom axis into a year tier and month ticks, and floors thin bars', () => {
+        // The shipped axis printed "MMM yyyy" on every month start, which
+        // collided at 4px per day; the year moves to the top tier instead.
+        window.localStorage.setItem('mindwtr:view:timeline:v1', JSON.stringify({ zoom: 'month' }));
+        setStore({
+            tasks: [
+                makeTask({ id: 'long', title: 'Long haul', startTime: iso(-60), dueDate: iso(90) }),
+                makeTask({ id: 'oneday', title: 'One day', startTime: iso(5), dueDate: iso(5) }),
+            ],
+        });
+        renderTimeline();
+
+        expect(axisLabels('major').every((label) => /^\d{4}$/.test(label))).toBe(true);
+        const minor = axisLabels('minor');
+        expect(minor.length).toBeGreaterThan(2);
+        expect(minor.every((label) => /^[A-Za-z]+$/.test(label))).toBe(true);
+        // One day is 4px at month zoom; a bar never renders as a sliver.
+        expect(barFor('oneday')?.style.width).toBe('10px');
     });
 
     it('marks today and shows the empty state when nothing is dated', () => {

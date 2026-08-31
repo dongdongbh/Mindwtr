@@ -3,19 +3,21 @@ import { resolveFeatureFlags } from './resolve-feature-flags';
 import type { AppSettings } from './types';
 
 describe('resolveFeatureFlags', () => {
-    it('defaults priorities and timeEstimates on, pomodoro off, when settings are undefined', () => {
+    it('defaults priorities and timeEstimates on, pomodoro and timeline off, when settings are undefined', () => {
         expect(resolveFeatureFlags(undefined)).toEqual({
             priorities: true,
             timeEstimates: true,
             pomodoro: false,
+            timeline: false,
         });
     });
 
-    it('defaults priorities and timeEstimates on, pomodoro off, when features is missing', () => {
+    it('defaults priorities and timeEstimates on, pomodoro and timeline off, when features is missing', () => {
         expect(resolveFeatureFlags({} as AppSettings)).toEqual({
             priorities: true,
             timeEstimates: true,
             pomodoro: false,
+            timeline: false,
         });
     });
 
@@ -35,5 +37,11 @@ describe('resolveFeatureFlags', () => {
         expect(resolveFeatureFlags({ features: { pomodoro: true } } as AppSettings).pomodoro).toBe(true);
         expect(resolveFeatureFlags({ features: { pomodoro: false } } as AppSettings).pomodoro).toBe(false);
         expect(resolveFeatureFlags({ features: { pomodoro: undefined } } as AppSettings).pomodoro).toBe(false);
+    });
+
+    it('reads the desktop timeline as enabled only on an explicit true (#1111)', () => {
+        expect(resolveFeatureFlags({ features: { timeline: true } } as AppSettings).timeline).toBe(true);
+        expect(resolveFeatureFlags({ features: { timeline: false } } as AppSettings).timeline).toBe(false);
+        expect(resolveFeatureFlags({ features: { timeline: undefined } } as AppSettings).timeline).toBe(false);
     });
 });

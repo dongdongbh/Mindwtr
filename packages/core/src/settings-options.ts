@@ -240,6 +240,7 @@ export const GTD_SYNCED_FEATURE_FIELD_KEYS = [
     'priorities',
     'timeEstimates',
     'pomodoro',
+    'timeline',
 ] as const satisfies readonly (keyof FeatureSettings)[];
 
 export type GtdSyncedFeatureFieldKey = (typeof GTD_SYNCED_FEATURE_FIELD_KEYS)[number];

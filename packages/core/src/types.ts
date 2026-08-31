@@ -420,6 +420,7 @@ export interface FeatureSettings {
     priorities?: boolean;
     timeEstimates?: boolean;
     pomodoro?: boolean;
+    timeline?: boolean;
 }
 
 export interface AppearanceSettings {

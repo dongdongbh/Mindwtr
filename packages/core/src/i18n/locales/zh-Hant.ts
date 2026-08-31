@@ -1294,6 +1294,8 @@ export const zhHant: Record<string, string> = {
         'settings.featureTimeEstimatesDesc': '爲時間管理添加時長估計。',
         'settings.featurePomodoro': '番茄鐘',
         'settings.featurePomodoroDesc': '在聚焦視圖中啓用可選的番茄鐘面板。',
+        'settings.featureTimeline': '時間軸視圖',
+        'settings.featureTimelineDesc': '在側邊欄顯示有日期任務的唯讀時間軸。',
         'settings.pomodoroCustomPreset': '自定義預設',
         'settings.pomodoroCustomPresetDesc': '添加一個額外的專注/休息預設。若與內建預設相同，將繼續只顯示內建選項。',
         'settings.pomodoroFocusMinutes': '專注分鐘',

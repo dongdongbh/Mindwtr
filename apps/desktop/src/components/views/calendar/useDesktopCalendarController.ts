@@ -48,6 +48,7 @@ import { useLanguage } from '../../../contexts/language-context';
 import { useLocalDayKey } from '../../../hooks/useLocalDayKey';
 import { usePerformanceMonitor } from '../../../hooks/usePerformanceMonitor';
 import { reportError } from '../../../lib/report-error';
+import { getTaskAccentColor as resolveTaskAccentColor } from '../../../lib/task-accent-color';
 import { resolveCalendarLocale } from '../calendar-locale';
 import {
     DESKTOP_DAY_END_HOUR,
@@ -136,12 +137,10 @@ export function useDesktopCalendarController() {
     // The identity color a task chip's left bar carries — project first, then
     // area — mirroring how external events carry their source calendar's color.
     // Undefined (no project or area color) keeps the chip's themed fallback.
-    const getTaskAccentColor = useCallback((task: Task): string | undefined => {
-        const project = task.projectId ? projectMap.get(task.projectId) : undefined;
-        if (project?.color) return project.color;
-        const areaId = project?.areaId ?? task.areaId;
-        return (areaId ? areaById.get(areaId)?.color : undefined) || undefined;
-    }, [areaById, projectMap]);
+    const getTaskAccentColor = useCallback(
+        (task: Task): string | undefined => resolveTaskAccentColor(task, projectMap, areaById),
+        [areaById, projectMap],
+    );
     const resolvedAreaFilter = useMemo(
         () => resolveAreaFilterSelection(settings?.filters, areas),
         [settings?.filters, areas],

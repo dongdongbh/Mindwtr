@@ -3,6 +3,7 @@ import { addDays, differenceInCalendarDays, format, startOfDay } from 'date-fns'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     compareProjectsByOrder,
+    getWeekStartsOnIndex,
     isTaskVisibleInArea,
     safeParseDate,
     tFallback,
@@ -12,6 +13,8 @@ import {
 } from '@mindwtr/core';
 
 import { ErrorBoundary } from '../ErrorBoundary';
+import { cn } from '../../lib/utils';
+import { getTaskAccentColor } from '../../lib/task-accent-color';
 import { useLanguage } from '../../contexts/language-context';
 import { useAreaVisibility } from '../../hooks/useVisibleTaskContext';
 import { usePersistedViewState } from '../../hooks/usePersistedViewState';
@@ -27,12 +30,19 @@ type TimelineZoom = (typeof ZOOM_LEVELS)[number];
 
 /** Column width in pixels for one calendar day at each zoom level. */
 const DAY_WIDTH: Record<TimelineZoom, number> = { day: 32, week: 12, month: 4 };
-/** Width of the single-date marker and the floor for any bar. */
+/** Floor for a span bar, so a one-day span is still a bar and not a hairline. */
 const MIN_BAR_WIDTH = 10;
-const GUTTER_WIDTH = 220;
-const ROW_HEIGHT = 28;
-/** Day numbers only fit once a column is wide enough to hold two digits. */
-const DAY_LABEL_MIN_WIDTH = 20;
+/** A task dated on one side only is a moment, not a span: a fixed-width pill. */
+const MARKER_WIDTH = 56;
+const ROW_HEIGHT = 30;
+const BAR_HEIGHT = 20;
+const AXIS_HEIGHT = 44;
+/** Room to the right of the track for titles that sit beside their bar. */
+const TRACK_TAIL = 184;
+/** Narrower than this and a title on the bar is all ellipsis. */
+const ON_BAR_LABEL_MIN_WIDTH = 64;
+const MIN_MAJOR_LABEL_GAP = 68;
+const MIN_MINOR_LABEL_GAP = 26;
 // ponytail: a fixed 400-day window instead of paging. Tasks dated entirely
 // outside it are not drawn (the header count reports what is drawn); add
 // paging only if real stores turn out to span more than that.
@@ -58,6 +68,22 @@ function sanitizeTimelineViewState(
     };
 }
 
+/**
+ * Rec. 709 luma, enough to pick black or white for a title sitting on a bar.
+ * Area and project colors are hex from the tailwind-500 family (#1085 allows a
+ * custom one); an 8-digit #RRGGBBAA is read as its opaque prefix.
+ */
+function isLightColor(hex: string): boolean {
+    const value = hex.trim().replace('#', '');
+    const full = value.length === 3
+        ? value.split('').map((channel) => channel + channel).join('')
+        : value.slice(0, 6);
+    if (!/^[0-9a-fA-F]{6}$/.test(full)) return false;
+    const int = Number.parseInt(full, 16);
+    const luma = 0.2126 * ((int >> 16) & 255) + 0.7152 * ((int >> 8) & 255) + 0.0722 * (int & 255);
+    return luma / 255 > 0.62;
+}
+
 /** The task's dates reduced to local calendar days — the same day the calendar files it under. */
 function taskDays(task: Task): { start: Date | null; due: Date | null } {
     const start = safeParseDate(task.startTime);
@@ -68,6 +94,44 @@ function taskDays(task: Task): { start: Date | null; due: Date | null } {
     };
 }
 
+/**
+ * Column widths are minimums, not fixed sizes: a range that fits the pane
+ * stretches to fill it (the calendar's content-fit grid), and only a range too
+ * wide at the minimum scrolls. `viewportWidth` of 0 is the pre-measure paint.
+ */
+export function resolveTimelineTrack(
+    days: number,
+    minDayWidth: number,
+    viewportWidth: number,
+): { dayWidth: number; trackWidth: number; fitted: boolean } {
+    if (days <= 0) return { dayWidth: minDayWidth, trackWidth: 0, fitted: false };
+    // Fitted returns the measured width verbatim rather than days * dayWidth, so
+    // float division can never round the track past the pane and add a scrollbar.
+    return viewportWidth > 0 && days * minDayWidth <= viewportWidth
+        ? { dayWidth: viewportWidth / days, trackWidth: viewportWidth, fitted: true }
+        : { dayWidth: minDayWidth, trackWidth: days * minDayWidth, fitted: false };
+}
+
+type AxisTick = { left: number; label: string };
+
+/**
+ * Drop every label that would land within `gap` of the one before it. A tick at
+ * the very left edge is the partial leading period, so a real boundary that
+ * collides with it wins the slot instead of being the one dropped.
+ */
+function thinTicks(ticks: AxisTick[], gap: number): AxisTick[] {
+    const kept: AxisTick[] = [];
+    for (const tick of ticks) {
+        const previous = kept[kept.length - 1];
+        if (previous && tick.left - previous.left < gap) {
+            if (previous.left !== 0) continue;
+            kept.pop();
+        }
+        kept.push(tick);
+    }
+    return kept;
+}
+
 type TimelineRow =
     | { kind: 'group'; key: string; label: string; color: string | undefined }
     | { kind: 'task'; key: string; task: Task; color: string | undefined; lo: number; hi: number; single: boolean };
@@ -75,6 +139,7 @@ type TimelineRow =
 export function TimelineView() {
     const perf = usePerformanceMonitor('TimelineView');
     const tasks = useTaskStore((state) => state.tasks);
+    const weekStart = useTaskStore((state) => state.settings?.weekStart);
     const { t } = useLanguage();
     const visibility = useAreaVisibility();
     const { areaById, projectById } = visibility;
@@ -84,8 +149,9 @@ export function TimelineView() {
         sanitizeTimelineViewState,
     );
     const zoom = persistedViewState.zoom;
-    const dayWidth = DAY_WIDTH[zoom];
+    const weekStartsOn = getWeekStartsOnIndex(weekStart);
     const scrollRef = React.useRef<HTMLDivElement>(null);
+    const [viewportWidth, setViewportWidth] = React.useState(0);
     const [openTaskId, setOpenTaskId] = React.useState<string | null>(null);
 
     React.useEffect(() => {
@@ -161,8 +227,7 @@ export function TimelineView() {
             const lo = Math.min(a ?? b!, b ?? a!);
             const hi = Math.max(a ?? b!, b ?? a!);
             if (hi < 0 || lo > range.days - 1) continue;
-            const project = task.projectId ? projectById.get(task.projectId) : undefined;
-            const color = (project?.areaId ? areaById.get(project.areaId)?.color : undefined) || project?.color || undefined;
+            const color = getTaskAccentColor(task, projectById, areaById);
             const key = task.projectId ?? '';
             const list = byProject.get(key);
             const row: TimelineRow = { kind: 'task', key: task.id, task, color, lo, hi, single };
@@ -190,8 +255,9 @@ export function TimelineView() {
                 if (a.lo !== b.lo) return a.lo - b.lo;
                 return (safeParseDate(a.task.createdAt)?.getTime() ?? 0) - (safeParseDate(b.task.createdAt)?.getTime() ?? 0);
             });
+            // Project first, then its area — the same order the bars use.
             const groupColor = group.project
-                ? (group.project.areaId ? areaById.get(group.project.areaId)?.color : undefined) || group.project.color || undefined
+                ? group.project.color || (group.project.areaId ? areaById.get(group.project.areaId)?.color : undefined) || undefined
                 : undefined;
             flattened.push({
                 kind: 'group',
@@ -205,9 +271,63 @@ export function TimelineView() {
     }, [areaById, datedTasks, projectById, range, t]);
 
     const taskRowCount = rows.reduce((count, row) => (row.kind === 'task' ? count + 1 : count), 0);
-    const trackWidth = (range?.days ?? 0) * dayWidth;
+    const hasRows = Boolean(range) && rows.length > 0;
+    const { dayWidth, trackWidth, fitted } = resolveTimelineTrack(range?.days ?? 0, DAY_WIDTH[zoom], viewportWidth);
+    // Nothing scrolls off the right when the range fits, so the tail that holds
+    // titles beside their bars is only reserved when it is reachable.
+    const contentWidth = trackWidth + (fitted ? 0 : TRACK_TAIL);
     const todayIndex = range ? differenceInCalendarDays(today, range.from) : -1;
     const todayVisible = range ? todayIndex >= 0 && todayIndex < range.days : false;
+    const todayLeft = todayIndex * dayWidth;
+
+    // Two tiers so no label ever has to share a slot: the top one carries the
+    // coarser unit (the year once the columns are months), the bottom one the
+    // minor ticks for the zoom. Both are thinned to a minimum pixel spacing.
+    const axis = React.useMemo(() => {
+        if (!range) return { major: [] as AxisTick[], minor: [] as AxisTick[], monthLines: [] as number[] };
+        const majorCandidates: AxisTick[] = [];
+        const minorCandidates: AxisTick[] = [];
+        const monthLines: number[] = [];
+        for (let index = 0; index < range.days; index += 1) {
+            const day = addDays(range.from, index);
+            const left = index * dayWidth;
+            const isMonthStart = day.getDate() === 1;
+            if (isMonthStart && index > 0) monthLines.push(left);
+            const isMajor = index === 0
+                || (zoom === 'month' ? isMonthStart && day.getMonth() === 0 : isMonthStart);
+            if (isMajor) {
+                majorCandidates.push({ left, label: format(day, zoom === 'month' ? 'yyyy' : 'MMM yyyy') });
+            }
+            const isMinor = zoom === 'day'
+                ? true
+                : zoom === 'week'
+                    ? day.getDay() === weekStartsOn
+                    : isMonthStart;
+            if (isMinor) {
+                minorCandidates.push({ left, label: format(day, zoom === 'month' ? 'MMM' : 'd') });
+            }
+        }
+        return {
+            major: thinTicks(majorCandidates, MIN_MAJOR_LABEL_GAP),
+            minor: thinTicks(minorCandidates, MIN_MINOR_LABEL_GAP),
+            monthLines,
+        };
+    }, [dayWidth, range, weekStartsOn, zoom]);
+
+    // Minor gridlines are a repeating gradient rather than one div per tick:
+    // at day zoom that is 400 columns the browser paints for free.
+    const minorGridStyle = React.useMemo<React.CSSProperties | undefined>(() => {
+        if (!range || zoom === 'month') return undefined;
+        const step = zoom === 'day' ? dayWidth : dayWidth * 7;
+        const offset = zoom === 'week'
+            ? ((weekStartsOn - range.from.getDay() + 7) % 7) * dayWidth
+            : 0;
+        return {
+            backgroundImage: `repeating-linear-gradient(to right, hsl(var(--border) / 0.5) 0 1px, transparent 1px ${step}px)`,
+            backgroundPosition: `${offset}px 0`,
+            backgroundRepeat: 'repeat',
+        };
+    }, [dayWidth, range, weekStartsOn, zoom]);
 
     const shouldVirtualize = rows.length > VIRTUALIZE_ABOVE_ROWS;
     const rowVirtualizer = useVirtualizer({
@@ -217,11 +337,27 @@ export function TimelineView() {
         overscan: 12,
     });
 
+    // Same shape as ProjectsView's sidebar measurement: observer where there is
+    // one, window resize otherwise.
+    React.useEffect(() => {
+        const scroller = scrollRef.current;
+        if (!scroller) return;
+        const measure = () => setViewportWidth(scroller.clientWidth);
+        measure();
+        if (typeof ResizeObserver === 'function') {
+            const observer = new ResizeObserver(measure);
+            observer.observe(scroller);
+            return () => observer.disconnect();
+        }
+        window.addEventListener('resize', measure);
+        return () => window.removeEventListener('resize', measure);
+    }, [hasRows]);
+
     const scrollToToday = React.useCallback(() => {
         const scroller = scrollRef.current;
         if (!scroller || !todayVisible) return;
-        scroller.scrollLeft = Math.max(0, todayIndex * dayWidth - scroller.clientWidth / 2 + GUTTER_WIDTH);
-    }, [dayWidth, todayIndex, todayVisible]);
+        scroller.scrollLeft = Math.max(0, todayLeft - scroller.clientWidth / 2);
+    }, [todayLeft, todayVisible]);
 
     const openTask = React.useMemo(
         () => (openTaskId ? tasks.find((task) => task.id === openTaskId) ?? null : null),
@@ -232,48 +368,76 @@ export function TimelineView() {
     const renderRow = (row: TimelineRow) => {
         if (row.kind === 'group') {
             return (
-                <div className="flex items-center" style={{ height: ROW_HEIGHT }}>
+                <div
+                    className="flex items-center border-y border-border/60 bg-muted/60"
+                    style={{ height: ROW_HEIGHT }}
+                >
                     <div
-                        className="sticky left-0 z-20 flex h-full items-center gap-2 bg-background pr-3 text-xs font-semibold"
-                        style={{ width: GUTTER_WIDTH, minWidth: GUTTER_WIDTH }}
+                        data-testid="timeline-group"
+                        className="sticky left-0 z-20 flex items-center gap-2 pl-3 pr-4 text-xs font-semibold text-foreground"
                     >
                         <span
                             className="h-2 w-2 shrink-0 rounded-full"
-                            style={{ backgroundColor: row.color || 'hsl(var(--muted-foreground))' }}
+                            style={{ backgroundColor: row.color || 'hsl(var(--primary))' }}
                         />
-                        <span className="truncate">{row.label}</span>
+                        <span className="max-w-[240px] truncate">{row.label}</span>
                     </div>
                 </div>
             );
         }
-        const left = row.single
-            ? row.lo * dayWidth + Math.max(0, (dayWidth - MIN_BAR_WIDTH) / 2)
-            : row.lo * dayWidth;
         const width = row.single
-            ? Math.min(MIN_BAR_WIDTH, Math.max(dayWidth, 4))
+            ? MARKER_WIDTH
             : Math.max(MIN_BAR_WIDTH, (row.hi - row.lo + 1) * dayWidth);
+        const left = row.single
+            ? Math.max(0, row.lo * dayWidth + (dayWidth - MARKER_WIDTH) / 2)
+            : row.lo * dayWidth;
+        const onBar = width >= ON_BAR_LABEL_MIN_WIDTH;
+        // Full-strength area→project color; the app's accent when a task has
+        // neither, never muted-foreground.
+        const background = row.color || 'hsl(var(--primary))';
+        const onBarColor = row.color
+            ? (isLightColor(row.color) ? 'rgba(0, 0, 0, 0.84)' : 'rgba(255, 255, 255, 0.96)')
+            : 'hsl(var(--primary-foreground))';
         return (
-            <div className="flex items-center" style={{ height: ROW_HEIGHT }}>
-                <div
-                    className="sticky left-0 z-20 flex h-full items-center bg-background pl-4 pr-3 text-xs text-muted-foreground"
-                    style={{ width: GUTTER_WIDTH, minWidth: GUTTER_WIDTH }}
+            <div
+                className="relative border-b border-border/40 transition-colors hover:bg-muted/40"
+                style={{ height: ROW_HEIGHT }}
+            >
+                <button
+                    type="button"
+                    data-testid="timeline-bar"
+                    data-task-id={row.task.id}
+                    data-variant={row.single ? 'mini' : 'bar'}
+                    title={row.task.title}
+                    onClick={() => setOpenTaskId(row.task.id)}
+                    className={cn(
+                        'absolute z-10 flex items-center rounded-full shadow-sm transition-[filter] hover:brightness-110',
+                        'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card',
+                        onBar && 'overflow-hidden px-2.5',
+                    )}
+                    style={{
+                        left,
+                        width,
+                        height: BAR_HEIGHT,
+                        top: (ROW_HEIGHT - BAR_HEIGHT) / 2,
+                        backgroundColor: background,
+                    }}
                 >
-                    <span className="truncate">{row.task.title}</span>
-                </div>
-                <div className="relative h-full" style={{ width: trackWidth, minWidth: trackWidth }}>
-                    <button
-                        type="button"
-                        data-testid="timeline-bar"
-                        data-task-id={row.task.id}
-                        data-variant={row.single ? 'mini' : 'bar'}
-                        title={row.task.title}
-                        onClick={() => setOpenTaskId(row.task.id)}
-                        className="absolute top-1 z-10 h-[calc(100%-0.5rem)] rounded-sm border border-black/10 hover:brightness-110"
-                        style={{ left, width, backgroundColor: row.color || 'hsl(var(--muted-foreground))' }}
-                    >
-                        <span className="sr-only">{row.task.title}</span>
-                    </button>
-                </div>
+                    {onBar ? (
+                        <span
+                            className="truncate text-[11px] font-medium leading-none"
+                            style={{ color: onBarColor }}
+                        >
+                            {row.task.title}
+                        </span>
+                    ) : (
+                        // Outside the bar's box but still inside the button, so a
+                        // 12px marker is not the only thing you can click.
+                        <span className="absolute left-full top-1/2 ml-2 inline-block max-w-[168px] -translate-y-1/2 truncate text-xs leading-none text-muted-foreground">
+                            {row.task.title}
+                        </span>
+                    )}
+                </button>
             </div>
         );
     };
@@ -287,8 +451,8 @@ export function TimelineView() {
     return (
         <ErrorBoundary>
             <div className="flex h-full min-h-0 flex-col">
-                <div className="flex shrink-0 items-center justify-between px-4 pb-4">
-                    <div className="flex items-center gap-3">
+                <div className="flex shrink-0 items-center justify-between pb-3">
+                    <div className="flex items-baseline gap-3">
                         <h2 className="text-2xl font-bold tracking-tight">{tFallback(t, 'nav.timeline', 'Timeline')}</h2>
                         <span className="text-xs text-muted-foreground">
                             {taskRowCount} {t('common.tasks')}
@@ -299,19 +463,24 @@ export function TimelineView() {
                             <button
                                 type="button"
                                 onClick={scrollToToday}
-                                className="rounded border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                                className="rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                             >
                                 {tFallback(t, 'calendar.today', 'Today')}
                             </button>
                         )}
-                        <div className="flex items-center rounded border border-border" role="group">
+                        <div className="flex items-center rounded-md border border-border bg-card p-0.5" role="group">
                             {ZOOM_LEVELS.map((level) => (
                                 <button
                                     key={level}
                                     type="button"
                                     aria-pressed={zoom === level}
                                     onClick={() => setPersistedViewState({ zoom: level })}
-                                    className={`px-2 py-1 text-xs transition-colors ${zoom === level ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                                    className={cn(
+                                        'rounded px-2.5 py-1 text-xs font-medium transition-colors',
+                                        zoom === level
+                                            ? 'bg-muted text-foreground'
+                                            : 'text-muted-foreground hover:text-foreground',
+                                    )}
                                 >
                                     {zoomLabels[level]}
                                 </button>
@@ -320,8 +489,8 @@ export function TimelineView() {
                     </div>
                 </div>
 
-                {!range || rows.length === 0 ? (
-                    <div className="px-4">
+                {!hasRows ? (
+                    <div>
                         <ListEmptyState
                             hasFilters={false}
                             emptyState={{
@@ -333,65 +502,98 @@ export function TimelineView() {
                         />
                     </div>
                 ) : (
-                    <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto pb-4">
-                        <div className="relative" style={{ width: GUTTER_WIDTH + trackWidth }}>
-                            <div className="sticky top-0 z-30 flex bg-background">
-                                <div
-                                    className="sticky left-0 z-40 bg-background"
-                                    style={{ width: GUTTER_WIDTH, minWidth: GUTTER_WIDTH }}
-                                />
-                                <div className="relative h-9 border-b border-border" style={{ width: trackWidth }}>
-                                    {Array.from({ length: range.days }, (_, index) => {
-                                        const day = addDays(range.from, index);
-                                        const isMonthStart = index === 0 || day.getDate() === 1;
-                                        return (
-                                            <React.Fragment key={index}>
-                                                {isMonthStart && (
-                                                    <div
-                                                        className="absolute top-0 whitespace-nowrap border-l border-border px-1 text-[11px] font-medium text-muted-foreground"
-                                                        style={{ left: index * dayWidth }}
-                                                    >
-                                                        {format(day, 'MMM yyyy')}
-                                                    </div>
-                                                )}
-                                                {dayWidth >= DAY_LABEL_MIN_WIDTH && (
-                                                    <div
-                                                        className="absolute bottom-0 text-center text-[10px] text-muted-foreground"
-                                                        style={{ left: index * dayWidth, width: dayWidth }}
-                                                    >
-                                                        {day.getDate()}
-                                                    </div>
-                                                )}
-                                            </React.Fragment>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-
-                            <div
-                                className="relative"
-                                style={{ height: shouldVirtualize ? rowVirtualizer.getTotalSize() : rows.length * ROW_HEIGHT }}
-                            >
-                                {todayVisible && (
+                    // One surface, like the calendar and the board: the card hugs
+                    // its rows and only scrolls once they outgrow the viewport.
+                    <div className="min-h-0 flex-1 pb-4">
+                        <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+                            <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+                                <div className="relative flex min-h-full flex-col" style={{ width: contentWidth }}>
                                     <div
-                                        data-testid="timeline-today-line"
-                                        className="pointer-events-none absolute top-0 bottom-0 z-0 w-px bg-primary/70"
-                                        style={{ left: GUTTER_WIDTH + todayIndex * dayWidth }}
-                                    />
-                                )}
-                                {shouldVirtualize
-                                    ? rowVirtualizer.getVirtualItems().map((virtualRow) => (
-                                        <div
-                                            key={rows[virtualRow.index].key}
-                                            className="absolute left-0 right-0"
-                                            style={{ top: virtualRow.start, height: virtualRow.size }}
-                                        >
-                                            {renderRow(rows[virtualRow.index])}
+                                        className="sticky top-0 z-30 border-b border-border bg-card"
+                                        style={{ height: AXIS_HEIGHT }}
+                                    >
+                                        <div className="relative h-full" style={{ width: trackWidth }}>
+                                            {axis.monthLines.map((left) => (
+                                                <div
+                                                    key={`axis-month-${left}`}
+                                                    className="absolute inset-y-0 w-px bg-border"
+                                                    style={{ left }}
+                                                />
+                                            ))}
+                                            {axis.major.map((tick) => (
+                                                <div
+                                                    key={`axis-major-${tick.left}`}
+                                                    data-testid="timeline-axis-major"
+                                                    className="absolute top-0 whitespace-nowrap pl-2 text-[11px] font-semibold leading-[22px] text-foreground"
+                                                    style={{ left: tick.left }}
+                                                >
+                                                    {tick.label}
+                                                </div>
+                                            ))}
+                                            {axis.minor.map((tick) => (
+                                                <div
+                                                    key={`axis-minor-${tick.left}`}
+                                                    data-testid="timeline-axis-minor"
+                                                    className="absolute bottom-0 whitespace-nowrap pl-2 text-[10px] leading-[22px] tabular-nums text-muted-foreground"
+                                                    style={{ left: tick.left }}
+                                                >
+                                                    {tick.label}
+                                                </div>
+                                            ))}
+                                            {todayVisible && (
+                                                <div
+                                                    className="pointer-events-none absolute bottom-0 flex flex-col items-center"
+                                                    style={{ left: todayLeft - 3, top: 18, width: 6 }}
+                                                >
+                                                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                                                    <span className="w-0.5 flex-1 bg-primary" />
+                                                </div>
+                                            )}
                                         </div>
-                                    ))
-                                    : rows.map((row) => (
-                                        <React.Fragment key={row.key}>{renderRow(row)}</React.Fragment>
-                                    ))}
+                                    </div>
+
+                                    {/* flex-1 under a min-h-full parent: the canvas — gridlines
+                                        and the today line, both inset-y-0 — runs to the bottom of
+                                        the card even when the rows stop a third of the way down. */}
+                                    <div
+                                        className="relative flex-1"
+                                        style={{ minHeight: shouldVirtualize ? rowVirtualizer.getTotalSize() : rows.length * ROW_HEIGHT }}
+                                    >
+                                        <div
+                                            aria-hidden
+                                            className="pointer-events-none absolute inset-y-0 left-0 z-0"
+                                            style={{ width: trackWidth, ...minorGridStyle }}
+                                        >
+                                            {axis.monthLines.map((left) => (
+                                                <div
+                                                    key={`grid-month-${left}`}
+                                                    className="absolute inset-y-0 w-px bg-border"
+                                                    style={{ left }}
+                                                />
+                                            ))}
+                                        </div>
+                                        {todayVisible && (
+                                            <div
+                                                data-testid="timeline-today-line"
+                                                className="pointer-events-none absolute inset-y-0 z-[5] w-0.5 bg-primary"
+                                                style={{ left: todayLeft - 1 }}
+                                            />
+                                        )}
+                                        {shouldVirtualize
+                                            ? rowVirtualizer.getVirtualItems().map((virtualRow) => (
+                                                <div
+                                                    key={rows[virtualRow.index].key}
+                                                    className="absolute left-0 right-0"
+                                                    style={{ top: virtualRow.start, height: virtualRow.size }}
+                                                >
+                                                    {renderRow(rows[virtualRow.index])}
+                                                </div>
+                                            ))
+                                            : rows.map((row) => (
+                                                <React.Fragment key={row.key}>{renderRow(row)}</React.Fragment>
+                                            ))}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

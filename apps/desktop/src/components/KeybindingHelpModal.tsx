@@ -31,6 +31,7 @@ export function KeybindingHelpModal({
 }: KeybindingHelpModalProps) {
     const titleId = useId();
     const prioritiesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).priorities);
+    const timelineEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeline);
     const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
     const quickAddShortcutDisplay = formatGlobalQuickAddShortcutForDisplay(quickAddShortcut, isMac);
     const sharedGlobal: HelpItem[] = [
@@ -63,7 +64,7 @@ export function KeybindingHelpModal({
         { keys: 'ge', labelKey: 'keybindings.goReference' },
         { keys: 'gl', labelKey: 'keybindings.goCalendar' },
         { keys: 'gb', labelKey: 'keybindings.goBoard' },
-        { keys: 'gt', labelKey: 'keybindings.goTimeline' },
+        ...(timelineEnabled ? [{ keys: 'gt', labelKey: 'keybindings.goTimeline' }] : []),
         { keys: 'gd', labelKey: 'keybindings.goDone' },
         { keys: 'ga', labelKey: 'keybindings.goArchived' },
         { keys: '1-9 / Shift+A 1-9', labelKey: 'keybindings.switchArea', fallbackLabel: 'Switch to Area 1-9' },
@@ -117,7 +118,7 @@ export function KeybindingHelpModal({
         { keys: 'Alt-e', labelKey: 'keybindings.goReference' },
         { keys: 'Alt-l', labelKey: 'keybindings.goCalendar' },
         { keys: 'Alt-b', labelKey: 'keybindings.goBoard' },
-        { keys: 'Alt-t', labelKey: 'keybindings.goTimeline' },
+        ...(timelineEnabled ? [{ keys: 'Alt-t', labelKey: 'keybindings.goTimeline' }] : []),
         { keys: 'Alt-d', labelKey: 'keybindings.goDone' },
         { keys: 'Alt-A', labelKey: 'keybindings.goArchived' },
         { keys: '1-9 / Shift+A 1-9', labelKey: 'keybindings.switchArea', fallbackLabel: 'Switch to Area 1-9' },

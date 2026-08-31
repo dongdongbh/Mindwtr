@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { shallow, useTaskStore } from '@mindwtr/core';
+import { resolveFeatureFlags, shallow, useTaskStore } from '@mindwtr/core';
 import { useLanguage } from './language-context';
 import { KeybindingHelpModal } from '../components/KeybindingHelpModal';
 import { isFlatpakRuntime, isTauriRuntime } from '../lib/runtime';
@@ -356,6 +356,10 @@ export function KeybindingProvider({
         }
     }, []);
 
+    // Timeline is opt-in (#1111), so its go-to key only exists while the view
+    // does; with the flag off the key falls through like any unbound letter.
+    const timelineEnabled = resolveFeatureFlags(settings).timeline;
+
     const vimGoMap = useMemo<Record<string, string>>(() => ({
         i: 'inbox',
         n: 'next',
@@ -368,10 +372,10 @@ export function KeybindingProvider({
         s: 'someday',
         l: 'calendar',
         b: 'board',
-        t: 'timeline',
+        ...(timelineEnabled ? { t: 'timeline' } : {}),
         d: 'done',
         a: 'archived',
-    }), []);
+    }), [timelineEnabled]);
 
     const emacsAltMap = useMemo<Record<string, string>>(() => ({
         i: 'inbox',
@@ -385,10 +389,10 @@ export function KeybindingProvider({
         s: 'someday',
         l: 'calendar',
         b: 'board',
-        t: 'timeline',
+        ...(timelineEnabled ? { t: 'timeline' } : {}),
         d: 'done',
         A: 'archived',
-    }), []);
+    }), [timelineEnabled]);
 
     useEffect(() => {
         const handleVim = (e: KeyboardEvent) => {

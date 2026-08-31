@@ -124,6 +124,8 @@ type Labels = {
     featureTimeEstimatesDesc: string;
     featurePomodoro: string;
     featurePomodoroDesc: string;
+    featureTimeline: string;
+    featureTimelineDesc: string;
     pomodoroCustomPreset: string;
     pomodoroCustomPresetDesc: string;
     pomodoroFocusMinutes: string;
@@ -644,6 +646,20 @@ export function SettingsGtdPage({
                 open={featuresOpen}
                 onToggle={() => setFeaturesOpen((prev) => !prev)}
             >
+                <SettingRow padded settingsKey="featureTimeline" title={t.featureTimeline} description={t.featureTimelineDesc}>
+                    <Switch
+                        aria-label={t.featureTimeline}
+                        checked={resolvedFeatureFlags.timeline}
+                        onCheckedChange={() => {
+                            updateSettings({
+                                features: {
+                                    ...(safeSettings.features ?? {}),
+                                    timeline: !resolvedFeatureFlags.timeline,
+                                },
+                            }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update feature flags', error, t.settingsSaveFailed));
+                        }}
+                    />
+                </SettingRow>
                 <SettingRow padded settingsKey="featurePomodoro" title={t.featurePomodoro} description={t.featurePomodoroDesc}>
                     <Switch
                         aria-label={t.featurePomodoro}

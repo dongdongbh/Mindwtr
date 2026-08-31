@@ -26,7 +26,7 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { shallow, useTaskStore, safeFormatDate, tFallback, isAllowedInsecureUrl, formatTaskMovedMessage, isSyncFileLockUnavailableError } from '@mindwtr/core';
+import { shallow, useTaskStore, resolveFeatureFlags, safeFormatDate, tFallback, isAllowedInsecureUrl, formatTaskMovedMessage, isSyncFileLockUnavailableError } from '@mindwtr/core';
 import type { StoreActionResult, TaskStatus } from '@mindwtr/core';
 import { showUndoToast } from '../lib/undo-registry';
 import { useLanguage } from '../contexts/language-context';
@@ -130,6 +130,8 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     const isFocusMode = useUiStore((state) => state.isFocusMode);
     const showToast = useUiStore((state) => state.showToast);
     const isObsidianEnabled = useObsidianStore((state) => state.config.enabled);
+    // Timeline is opt-in (#1111): hidden from navigation until it is switched on.
+    const isTimelineEnabled = resolveFeatureFlags(settings).timeline;
     const [syncStatus, setSyncStatus] = useState(() => SyncService.getSyncStatus());
     const [isManualSyncing, setIsManualSyncing] = useState(false);
     const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
@@ -314,7 +316,6 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     const isWideView = wideViews.has(currentView);
     const fullWidthViews = new Set([
         'board',
-        'timeline',
         'projects',
         'contexts',
         'obsidian',
@@ -352,7 +353,9 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                     ? [{ id: 'obsidian', labelKey: 'nav.obsidian', fallbackLabel: 'Obsidian', icon: BookOpen }]
                     : []),
                 { id: 'board', labelKey: 'nav.board', icon: Kanban },
-                { id: 'timeline', labelKey: 'nav.timeline', fallbackLabel: 'Timeline', icon: GanttChartSquare },
+                ...(isTimelineEnabled
+                    ? [{ id: 'timeline', labelKey: 'nav.timeline', fallbackLabel: 'Timeline', icon: GanttChartSquare }]
+                    : []),
             ],
         },
         {
@@ -364,7 +367,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                 { id: 'trash', labelKey: 'nav.trash', icon: Trash2, tone: 'recessed' },
             ],
         },
-    ]), [inboxCount, isObsidianEnabled, t]);
+    ]), [inboxCount, isObsidianEnabled, isTimelineEnabled, t]);
 
     const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => loadCollapsedSections());
 
@@ -1027,7 +1030,8 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                             ? "w-full max-w-none"
                             // The week/month grids want more room than a list does, but going
                             // edge-to-edge looks wrong, so the calendar keeps its side margins (#966).
-                            : currentView === 'calendar'
+                            // The timeline is the same shape of chart and takes the same box (#1111).
+                            : currentView === 'calendar' || currentView === 'timeline'
                             ? "w-full max-w-screen-2xl"
                             : isWideView
                             ? "w-full max-w-6xl"

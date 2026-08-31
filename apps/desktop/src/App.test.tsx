@@ -94,6 +94,29 @@ describe('App', () => {
         expect(getByRole('heading', { name: 'Focus' })).toBeInTheDocument();
     });
 
+    it('falls back to the default view for ?view=timeline while Timeline is off (#1111)', async () => {
+        window.history.replaceState(null, '', '?view=timeline');
+
+        const { getByRole } = renderWithProviders(<App />);
+
+        // Same landing as an unknown view name: Timeline is opt-in, so a stored
+        // view or a link to it must not leave the screen blank.
+        await waitFor(() => {
+            expect(getByRole('heading', { name: 'Focus' })).toBeInTheDocument();
+        });
+    });
+
+    it('opens ?view=timeline once the Timeline feature is switched on (#1111)', async () => {
+        useTaskStore.setState((state) => ({ ...state, settings: { features: { timeline: true } } }));
+        window.history.replaceState(null, '', '?view=timeline');
+
+        const { getByRole } = renderWithProviders(<App />);
+
+        await waitFor(() => {
+            expect(getByRole('heading', { name: 'Timeline' })).toBeInTheDocument();
+        }, { timeout: 5000 });
+    });
+
     it('writes the resolved initial view back into the URL on a fresh load with no ?view= param (#931 follow-up)', async () => {
         window.history.replaceState(null, '', '/');
         expect(window.location.search).toBe('');

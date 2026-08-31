@@ -180,6 +180,8 @@ export const SETTINGS_LABEL_KEYS = [
     'featureTimeEstimatesDesc',
     'featurePomodoro',
     'featurePomodoroDesc',
+    'featureTimeline',
+    'featureTimelineDesc',
     'pomodoroCustomPreset',
     'pomodoroCustomPresetDesc',
     'pomodoroFocusMinutes',

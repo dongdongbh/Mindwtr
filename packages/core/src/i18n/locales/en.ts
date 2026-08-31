@@ -1367,6 +1367,8 @@ export const en: Record<string, string> = {
         'settings.featureTimeEstimatesDesc': 'Add quick duration estimates for time blocking.',
         'settings.featurePomodoro': 'Pomodoro timer',
         'settings.featurePomodoroDesc': 'Enable the optional Pomodoro panel in Focus view.',
+        'settings.featureTimeline': 'Timeline view',
+        'settings.featureTimelineDesc': 'Show a read-only timeline of dated tasks in the sidebar.',
         'settings.pomodoroCustomPreset': 'Custom preset',
         'settings.pomodoroCustomPresetDesc': 'Add one extra focus/break preset. Matching a built-in preset keeps the built-in chips only.',
         'settings.pomodoroFocusMinutes': 'Focus minutes',

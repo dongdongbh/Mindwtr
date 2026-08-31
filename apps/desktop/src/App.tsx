@@ -285,6 +285,7 @@ function App() {
     const fetchData = useTaskStore((state) => state.fetchData);
     const seedGettingStarted = useTaskStore((state) => state.seedGettingStarted);
     const isLoading = useTaskStore((state) => state.isLoading);
+    const timelineEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeline);
     const visibleDataCount = useTaskStore((state) => (
         state.tasks.length + state.projects.length + state.sections.length + state.areas.length
     ));
@@ -1158,7 +1159,13 @@ function App() {
             const savedSearchId = activeView.replace('savedSearch:', '');
             return <SearchView savedSearchId={savedSearchId} />;
         }
-        switch (activeView) {
+        // Timeline is opt-in (#1111). Resolving it here rather than in the
+        // restore/URL readers is what lets it see loaded settings, and it
+        // covers every way in at once: a stored last view, ?view=timeline, a
+        // keybinding and a stale nav click all land on the default view while
+        // the flag is off, exactly like an unknown view name does.
+        const view = activeView === 'timeline' && !timelineEnabled ? DEFAULT_DESKTOP_VIEW : activeView;
+        switch (view) {
             case 'inbox':
                 return <ListView title={t('list.inbox')} statusFilter="inbox" />;
             case 'agenda':

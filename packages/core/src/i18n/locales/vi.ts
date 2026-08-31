@@ -1291,6 +1291,8 @@ export const viOverrides: Record<string, string> = {
         'settings.featureTimeEstimatesDesc': 'Thêm ước tính thời lượng nhanh để chặn thời gian.',
         'settings.featurePomodoro': 'Hẹn giờ Pomodoro',
         'settings.featurePomodoroDesc': 'Bật bảng Pomodoro tùy chọn trong chế độ Tập trung.',
+        'settings.featureTimeline': 'Chế độ xem Dòng thời gian',
+        'settings.featureTimelineDesc': 'Hiển thị dòng thời gian chỉ đọc của các công việc có ngày trong thanh bên.',
         'settings.pomodoroCustomPreset': 'Cài đặt sẵn tùy chỉnh',
         'settings.pomodoroCustomPresetDesc': 'Thêm một cài đặt sẵn tập trung/nghỉ thêm. Khớp với cài đặt sẵn tích hợp chỉ giữ các chip tích hợp.',
         'settings.pomodoroFocusMinutes': 'Phút tập trung',

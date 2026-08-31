@@ -1373,6 +1373,8 @@ export const jaOverrides: Record<string, string> = {
         'settings.featureTimeEstimatesDesc': '時間を確保して計画を立てるための、簡単な所要時間の見積もりを追加します。',
         'settings.featurePomodoro': 'ポモドーロタイマー',
         'settings.featurePomodoroDesc': 'フォーカス画面にポモドーロのパネルを表示します。',
+        'settings.featureTimeline': 'タイムラインビュー',
+        'settings.featureTimelineDesc': '日付のあるタスクの読み取り専用タイムラインをサイドバーに表示します。',
         'settings.pomodoroCustomPreset': 'カスタムのプリセット',
         'settings.pomodoroCustomPresetDesc': '集中・休憩の組み合わせを1つだけ追加できます。既定のプリセットと同じ値にした場合は、既定のものだけが表示されます。',
         'settings.pomodoroFocusMinutes': '集中する時間（分）',

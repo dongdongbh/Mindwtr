@@ -56,6 +56,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         'focusTaskLimit',
         'defaultProjectFlowMode',
         'features',
+        { key: 'featureTimeline', section: 'features' },
         { key: 'featurePomodoro', section: 'features' },
         { key: 'pomodoroCustomPreset', section: 'features' },
         { key: 'pomodoroLinkTask', section: 'features' },
