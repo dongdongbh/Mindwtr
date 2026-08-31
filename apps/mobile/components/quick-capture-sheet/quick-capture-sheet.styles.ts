@@ -13,6 +13,11 @@ export const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
+    // The keyboard lift (padding on the keyboard-avoiding parent) can leave less room
+    // than sheetMaxHeight allows; without this the bottom-anchored sheet overflows past
+    // the top of the screen and takes the title input with it (#1120). Shrinking hands
+    // the loss to scrollArea, the only shrinkable child, so the title/header stay put.
+    flexShrink: 1,
     width: '100%',
     maxWidth: 860,
     alignSelf: 'center',

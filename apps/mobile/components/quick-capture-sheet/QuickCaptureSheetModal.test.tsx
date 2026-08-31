@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, View } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -933,7 +933,7 @@ describe('Quick capture modal composition', () => {
     }
   });
 
-  it('keeps the Android sheet body flow free of the iOS scroll container', () => {
+  it('scrolls the expanded Android sheet body and lets the sheet shrink for the keyboard', () => {
     let tree!: ReturnType<typeof create>;
     const originalPlatformOs = Platform.OS;
 
@@ -987,8 +987,20 @@ describe('Quick capture modal composition', () => {
         );
       });
 
-      expect(tree.root.findAllByType(ScrollView)).toHaveLength(0);
-      // The title input still renders in the plain flow on Android.
+      // Tapping More hides the Android keyboard, but it comes back the moment the user
+      // taps the title to keep typing. The measured lift then shrinks the space left for
+      // a sheet whose expanded content is taller than the screen, so the More panel has
+      // to scroll inside the sheet instead of pushing the title off the top (#1120).
+      const scroll = tree.root.findByType(ScrollView);
+      expect(scroll.props.testID).toBe('quick-capture-scroll');
+      expect(scroll.findAllByType(TextInput)).toHaveLength(0);
+      const sheet = tree.root
+        .findAllByType(View)
+        .find((node) => flattenStyle(node.props.style).maxHeight === 500);
+      // Without this the bottom-anchored sheet keeps its full height and overflows the
+      // top of the keyboard-padded container.
+      expect(flattenStyle(sheet?.props.style).flexShrink).toBe(1);
+      // The title input stays outside the scroll area, in the pinned part of the sheet.
       expect(tree.root.findByType(TextInput).props.accessibilityLabel).toBe('quickAdd.inputLabel');
       // Without a viewport inside the native modal, toasts fired from the sheet (the
       // speech-not-configured notice) only appear after the sheet closes (#886). It has

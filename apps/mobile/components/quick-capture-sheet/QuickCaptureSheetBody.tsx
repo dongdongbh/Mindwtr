@@ -16,18 +16,15 @@ import { styles } from './quick-capture-sheet.styles';
 // Rarer choices (+3 days, next month) and clearing live behind the Custom picker / tapping the active chip.
 const QUICK_CAPTURE_DATE_PRESETS = ['today', 'tomorrow', 'next_week'] as const;
 
-// iOS keeps the keyboard up while the sheet grows (padding behavior), so an expanded
-// "More" panel can push the title input above the top of the visible area with no way
-// back (#887). Only the More panel scrolls: the title input must stay OUTSIDE this
-// container, because UIKit auto-scrolls a focused TextInput inside a UIScrollView above
-// the keyboard, which double-counts against KeyboardAvoidingView and flings the title off
-// the top on every refocus (the regression the first #887 fix shipped). Android dismisses
-// the keyboard before expanding (see useAndroidQuickCaptureExpand) and drives its own
-// measured layout, so it keeps the plain flow untouched.
+// An expanded "More" panel is taller than the space left above the keyboard, so without
+// a scroll container it pushes the title input off the top of the screen with no way back
+// (#887 on iOS, #1120 on Android). Android dismisses the keyboard before expanding, but it
+// comes straight back when the user taps the title to keep typing, and the measured lift
+// then leaves the tall sheet no room. Only the More panel scrolls: the title input must
+// stay OUTSIDE this container, because UIKit auto-scrolls a focused TextInput inside a
+// UIScrollView above the keyboard, which double-counts against KeyboardAvoidingView and
+// flings the title off the top on every refocus (the regression the first #887 fix shipped).
 function SheetScrollArea({ children }: { children: React.ReactNode }) {
-  if (Platform.OS !== 'ios') {
-    return <>{children}</>;
-  }
   return (
     <ScrollView
       style={styles.scrollArea}
