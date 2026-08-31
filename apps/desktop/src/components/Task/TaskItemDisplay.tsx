@@ -748,7 +748,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             isRtl && "text-right"
                         )}
                         aria-expanded={isViewOpen}
-                        aria-label={tFallback(t, 'task.toggleDetails', 'Toggle task details')}
+                        aria-label={`${tFallback(t, 'task.toggleDetails', 'Toggle task details')}: ${task.title}`}
                         title={!selectionMode && !readOnly && showHoverHint ? hoverHintText : undefined}
                         dir={resolvedDirection}
                     >

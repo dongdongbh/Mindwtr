@@ -97,7 +97,7 @@ describe('ArchiveView', () => {
         // is what tells the closed row from the open one.
         expect(screen.queryByText('Scan receipt')).not.toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', { name: 'Toggle task details' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Toggle task details: Archived task' }));
 
         expect(screen.getByText('Receipt is in the shared drive')).toBeInTheDocument();
         expect(screen.getByText('Scan receipt')).toBeInTheDocument();

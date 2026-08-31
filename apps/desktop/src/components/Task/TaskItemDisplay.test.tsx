@@ -988,7 +988,7 @@ describe('TaskItemDisplay', () => {
         );
 
         expect(queryByText('Click to toggle details / Double-click to edit')).not.toBeInTheDocument();
-        expect(getByRole('button', { name: 'Toggle task details' })).toHaveAttribute(
+        expect(getByRole('button', { name: 'Toggle task details: Localized age' })).toHaveAttribute(
             'title',
             'Click to toggle details / Double-click to edit',
         );
