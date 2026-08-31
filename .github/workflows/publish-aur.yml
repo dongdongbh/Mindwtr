@@ -239,7 +239,9 @@ jobs:
           git -C aur-live config user.email "${AUR_EMAIL:-actions@github.com}"
           git -C aur-live add PKGBUILD .SRCINFO
           git -C aur-live add -f -- pnpm-lock.yaml pnpm-workspace.yaml
-          git -C aur-live add -u -- bun.lock
+          if git -C aur-live ls-files --error-unmatch bun.lock >/dev/null 2>&1; then
+            git -C aur-live add -u -- bun.lock
+          fi
           if git -C aur-live ls-files --error-unmatch tauri-v2-schema.patch >/dev/null 2>&1; then
             git -C aur-live add -u -- tauri-v2-schema.patch
           fi

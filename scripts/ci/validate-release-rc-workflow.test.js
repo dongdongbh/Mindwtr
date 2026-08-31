@@ -1,8 +1,92 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parse } from "yaml";
 
 const asNeedsList = (needs) => (Array.isArray(needs) ? needs : [needs]);
+
+const git = (cwd, ...args) =>
+  execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+
+const runSourceAurPublishFixture = ({ run, layout, interpolateTag = false }) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "mindwtr-aur-publish-"));
+  const repository =
+    layout === "recovery" ? join(fixtureRoot, "aur-live") : fixtureRoot;
+  const remote = join(fixtureRoot, "remote.git");
+  try {
+    mkdirSync(repository, { recursive: true });
+    git(repository, "init", "-b", "master");
+    writeFileSync(
+      join(repository, "PKGBUILD"),
+      "pkgname=mindwtr\npkgver=1\npkgrel=1\n",
+    );
+    writeFileSync(
+      join(repository, ".SRCINFO"),
+      "pkgbase = mindwtr\npkgver = 1\npkgrel = 1\n",
+    );
+    writeFileSync(
+      join(repository, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+    );
+    writeFileSync(join(repository, "pnpm-workspace.yaml"), "packages: []\n");
+    git(repository, "add", ".");
+    git(
+      repository,
+      "-c",
+      "user.name=AUR fixture",
+      "-c",
+      "user.email=aur-fixture@example.com",
+      "commit",
+      "-m",
+      "Initial source package",
+    );
+    git(fixtureRoot, "init", "--bare", remote);
+    git(repository, "remote", "add", "origin", remote);
+    git(repository, "push", "origin", "master");
+
+    writeFileSync(
+      join(repository, "PKGBUILD"),
+      "pkgname=mindwtr\npkgver=1\npkgrel=2\n",
+    );
+    const script = interpolateTag
+      ? run.replaceAll("${{ steps.version.outputs.tag }}", "v9.9.9")
+      : run;
+    execFileSync("bash", ["-c", script], {
+      cwd: layout === "recovery" ? fixtureRoot : repository,
+      env: {
+        ...process.env,
+        AUR_EMAIL: "aur-fixture@example.com",
+        AUR_USERNAME: "AUR fixture",
+        GITHUB_OUTPUT: join(fixtureRoot, "github-output"),
+        PACKAGE_NAME: "mindwtr",
+        RELEASE_TAG: "v9.9.9",
+        RUNNER_TEMP: fixtureRoot,
+      },
+      stdio: "pipe",
+    });
+
+    return {
+      local: git(repository, "rev-parse", "HEAD"),
+      remote: git(
+        fixtureRoot,
+        "--git-dir",
+        remote,
+        "rev-parse",
+        "refs/heads/master",
+      ),
+    };
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+};
 
 test("stable release validates tags and committed versions before any build or publish", () => {
   const workflow = parse(readFileSync(".github/workflows/release.yml", "utf8"));
@@ -492,6 +576,43 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   expect(betaCreationAudit.run).toContain("REMOTE_HEAD");
   expect(betaCreationAudit.run).toContain("AUR RPC has not indexed");
 });
+
+for (const scenario of [
+  {
+    name: "direct stable publication",
+    workflowPath: ".github/workflows/release.yml",
+    getStep: (workflow) =>
+      workflow.jobs["update-aur-source"].steps.find(
+        (step) => step.name === "Commit and push changes",
+      ),
+    layout: "direct",
+    interpolateTag: true,
+  },
+  {
+    name: "reviewed-proposal recovery",
+    workflowPath: ".github/workflows/publish-aur.yml",
+    getStep: (workflow) =>
+      workflow.jobs.publish.steps.find(
+        (step) => step.name === "Commit and publish without force-push",
+      ),
+    layout: "recovery",
+    interpolateTag: false,
+  },
+]) {
+  test(`source AUR ${scenario.name} publishes when bun.lock is already absent`, () => {
+    const workflow = parse(readFileSync(scenario.workflowPath, "utf8"));
+    const publishStep = scenario.getStep(workflow);
+    expect(publishStep).toBeDefined();
+
+    const heads = runSourceAurPublishFixture({
+      run: publishStep.run,
+      layout: scenario.layout,
+      interpolateTag: scenario.interpolateTag,
+    });
+
+    expect(heads.remote).toBe(heads.local);
+  });
+}
 
 test("AUR publication is a manual environment-gated recovery workflow", () => {
   const text = readFileSync(".github/workflows/publish-aur.yml", "utf8");

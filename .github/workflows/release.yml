@@ -1565,7 +1565,9 @@ jobs:
           git config --local user.email "${AUR_EMAIL:-actions@github.com}"
           git add PKGBUILD .SRCINFO
           git add -f -- pnpm-lock.yaml pnpm-workspace.yaml
-          git add -u -- bun.lock
+          if git ls-files --error-unmatch bun.lock >/dev/null 2>&1; then
+            git add -u -- bun.lock
+          fi
           if [ -n "$(git status --porcelain -- tauri-v2-schema.patch)" ]; then
             git add -A -- tauri-v2-schema.patch
           fi
