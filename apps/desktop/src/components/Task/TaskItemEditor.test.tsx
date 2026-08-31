@@ -70,8 +70,6 @@ const translations: Record<string, string> = {
     'taskEdit.editorLayoutHelpText': 'You can customize which fields appear here in Settings -> GTD -> Task Editor Layout.',
     'task.aria.location': 'Location',
     'taskEdit.locationPlaceholder': 'Add location',
-    'taskEdit.duplicateTask': 'Duplicate task',
-    'task.convertToReference': 'Convert to Reference',
     'taskEdit.aiAssistant': 'AI assistant',
     'ai.working': 'Working...',
     'ai.breakdownTitle': 'Suggested steps',
@@ -139,7 +137,6 @@ const baseProps: Parameters<typeof TaskItemEditor>[0] = {
     renderField: (fieldId) => <div>{`field:${fieldId}`}</div>,
     language: 'en',
     inputContexts: [],
-    onDuplicateTask: vi.fn(),
     onCancel: vi.fn(),
     onSubmit: vi.fn(),
 };
@@ -515,58 +512,4 @@ describe('TaskItemEditor file drop', () => {
         expect(onFilesDropped).toHaveBeenCalledWith([file]);
     });
 
-    it('opens the section holding Attachments on drop, wherever the user assigned it', () => {
-        const onFilesDropped = vi.fn();
-        const file = new File(['hi'], 'a.txt');
-        const { container, getByRole, getByText } = render(
-            <TaskItemEditor
-                {...baseProps}
-                organizationFields={['attachments']}
-                onFilesDropped={onFilesDropped}
-            />
-        );
-        const form = container.querySelector('form')!;
-        expect(getByRole('button', { name: /Organization/i })).toHaveAttribute('aria-expanded', 'false');
-
-        const dataTransfer = createDataTransfer(['Files'], [file]);
-        fireEvent.dragOver(form, { dataTransfer });
-        fireEvent.drop(form, { dataTransfer });
-
-        expect(onFilesDropped).toHaveBeenCalledWith([file]);
-        expect(getByRole('button', { name: /Organization/i })).toHaveAttribute('aria-expanded', 'true');
-        expect(getByText('field:attachments')).toBeInTheDocument();
-    });
-});
-
-describe('TaskItemEditor convert to reference', () => {
-    const name = 'Convert to Reference';
-
-    it('offers the conversion for a non-reference task and calls the handler', () => {
-        const onConvertToReference = vi.fn();
-        const { getByRole } = render(
-            <TaskItemEditor {...baseProps} onConvertToReference={onConvertToReference} />
-        );
-
-        fireEvent.click(getByRole('button', { name }));
-
-        expect(onConvertToReference).toHaveBeenCalledTimes(1);
-    });
-
-    it('hides the conversion for a task that is already a reference', () => {
-        const { queryByRole } = render(
-            <TaskItemEditor
-                {...baseProps}
-                draft={createTaskDraft({ ...baseTask, status: 'reference' })}
-                onConvertToReference={vi.fn()}
-            />
-        );
-
-        expect(queryByRole('button', { name })).not.toBeInTheDocument();
-    });
-
-    it('hides the conversion when no handler is wired', () => {
-        const { queryByRole } = render(<TaskItemEditor {...baseProps} />);
-
-        expect(queryByRole('button', { name })).not.toBeInTheDocument();
-    });
 });

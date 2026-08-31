@@ -1279,15 +1279,6 @@ export const TaskItem = memo(function TaskItem({
                     },
                 };
             })() : undefined}
-            onDuplicateTask={handleDuplicateTask}
-            onConvertToReference={() => {
-                // Reference tasks leave the list this row lives in, so close the
-                // edit session first (same reason delete does) or the stale
-                // editingTaskId keeps global shortcuts suppressed. Pending draft
-                // edits are discarded, matching Duplicate.
-                closeQuickEditSession();
-                handleStatusChange('reference');
-            }}
             onDeleteTask={task.status === 'inbox' ? handleDeleteTask : undefined}
             onCancel={handleEditorCancel}
             onSubmit={handleSubmit}
