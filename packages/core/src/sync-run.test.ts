@@ -627,6 +627,137 @@ describe('runSharedSyncCycle', () => {
         expect(storage.persistLocal).not.toHaveBeenCalled();
     });
 
+    it('uploads an exact local fallback when the candidate attachment blob returns 404', async () => {
+        const sharedHash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        const localTask = createTask('t-candidate-404-fallback', 'Attached task');
+        localTask.attachments = [{
+            id: 'attachment-candidate-404-fallback',
+            kind: 'file',
+            title: 'Notes',
+            uri: '/managed/attachment-candidate-404-fallback.txt',
+            cloudKey: 'cloudkit:previous-backend',
+            fileHash: sharedHash,
+            contentRev: 2,
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const remoteTask = cloneAppData(createData([localTask])).tasks[0]!;
+        remoteTask.attachments![0] = {
+            ...remoteTask.attachments![0]!,
+            uri: '',
+            cloudKey: 'attachments/missing-on-candidate.txt',
+            localStatus: 'missing',
+        };
+        const syncAttachments = vi.fn(async (data: AppData) => {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            expect(attachment).toBeDefined();
+            if (syncAttachments.mock.calls.length === 1) {
+                expect(attachment).toMatchObject({
+                    uri: '',
+                    cloudKey: 'attachments/missing-on-candidate.txt',
+                    fileHash: sharedHash,
+                    contentRev: 2,
+                    localStatus: 'missing',
+                });
+                attachment!.cloudKey = undefined;
+                attachment!.fileHash = undefined;
+                attachment!.localStatus = 'missing';
+                attachment!.deletedAt = '2026-07-02T00:00:00.000Z';
+                attachment!.updatedAt = '2026-07-02T00:00:00.000Z';
+                return data;
+            }
+            expect(attachment).toMatchObject({
+                uri: '/managed/attachment-candidate-404-fallback.txt',
+                cloudKey: undefined,
+                fileHash: sharedHash,
+                contentRev: 2,
+                localStatus: 'available',
+                pendingContentUpload: true,
+            });
+            expect(attachment!.deletedAt).toBeUndefined();
+            attachment!.cloudKey = 'attachments/recovered-on-candidate.txt';
+            attachment!.localStatus = 'available';
+            attachment!.pendingContentUpload = undefined;
+            return data;
+        });
+        const { harness, io, storage, run } = createHarness({
+            local: createData([localTask]),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: true });
+        expect(syncAttachments).toHaveBeenCalledTimes(2);
+        expect(harness.remote?.tasks[0]?.attachments?.[0]).toMatchObject({
+            cloudKey: 'attachments/recovered-on-candidate.txt',
+            fileHash: sharedHash,
+            contentRev: 2,
+        });
+        expect(harness.remote?.tasks[0]?.attachments?.[0]?.deletedAt).toBeUndefined();
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+    });
+
+    it('does not upload stale local bytes when a missing candidate blob has a different hash', async () => {
+        const localTask = createTask('t-candidate-404-mismatch', 'Attached task');
+        localTask.attachments = [{
+            id: 'attachment-candidate-404-mismatch',
+            kind: 'file',
+            title: 'Notes',
+            uri: '/managed/stale-local-copy.txt',
+            cloudKey: 'cloudkit:previous-backend',
+            fileHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            contentRev: 2,
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const remoteTask = cloneAppData(createData([localTask])).tasks[0]!;
+        remoteTask.attachments![0] = {
+            ...remoteTask.attachments![0]!,
+            uri: '',
+            cloudKey: 'attachments/missing-newer-candidate.txt',
+            fileHash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            contentRev: 3,
+            localStatus: 'missing',
+        };
+        const syncAttachments = vi.fn(async (data: AppData) => {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            expect(attachment).toMatchObject({
+                uri: '',
+                cloudKey: 'attachments/missing-newer-candidate.txt',
+                contentRev: 3,
+            });
+            if (attachment) {
+                attachment.cloudKey = undefined;
+                attachment.fileHash = undefined;
+                attachment.localStatus = 'missing';
+                attachment.deletedAt = '2026-07-02T00:00:00.000Z';
+                attachment.updatedAt = '2026-07-02T00:00:00.000Z';
+            }
+            return data;
+        });
+        const { io, run } = createHarness({
+            local: createData([localTask]),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            error: '[cloud] Candidate attachment proof failed for attachment-candidate-404-mismatch',
+        });
+        expect(syncAttachments).toHaveBeenCalledTimes(1);
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
     it('marks a newer local content winner for upload while retaining the candidate key during activation', async () => {
         const localTask = createTask('t-local-content-winner', 'Attached task');
         localTask.attachments = [{
@@ -2307,7 +2438,7 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
         updatedAt: STAMP,
     });
 
-    it('accepts activation when the trial tombstones a blob that is gone from the candidate', async () => {
+    it('refuses activation when the trial tombstones a blob that is gone from the candidate', async () => {
         const remoteTask = createTask('t-two-attachments', 'Two attachments');
         remoteTask.attachments = [fileAttachment('attachment-ok', 'Fine'), fileAttachment('attachment-404', 'Gone')];
         const syncAttachments = vi.fn(async (data: AppData) => {
@@ -2324,7 +2455,7 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
             }
             return data;
         });
-        const { run } = createHarness({
+        const { io, run } = createHarness({
             local: createData(),
             remote: createData([remoteTask]),
             activationProbe: true,
@@ -2333,7 +2464,52 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
 
         const result = await run();
 
-        expect(result.success).toBe(true);
+        expect(result).toMatchObject({
+            success: false,
+            error: '[cloud] Candidate attachment proof failed for attachment-404',
+        });
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('refuses activation when an unreadable local attachment is tombstoned during upload', async () => {
+        const localTask = createTask('t-unreadable-attachment', 'Unreadable attachment');
+        localTask.attachments = [{
+            id: 'attachment-local-read-failure',
+            kind: 'file',
+            title: 'Unreadable',
+            uri: '/managed/unreadable.txt',
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const syncAttachments = vi.fn(async (data: AppData) => {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            expect(attachment?.uri).toBe('/managed/unreadable.txt');
+            if (attachment) {
+                // Mobile WebDAV's LocalReadFailure currently reaches core only as
+                // the same untyped tombstone used for a terminal remote 404.
+                attachment.cloudKey = undefined;
+                attachment.fileHash = undefined;
+                attachment.localStatus = 'missing';
+                attachment.deletedAt = '2026-07-02T00:00:00.000Z';
+                attachment.updatedAt = '2026-07-02T00:00:00.000Z';
+            }
+            return data;
+        });
+        const { io, run } = createHarness({
+            local: createData([localTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            error: '[cloud] Candidate attachment proof failed for attachment-local-read-failure',
+        });
+        expect(syncAttachments).toHaveBeenCalledTimes(1);
+        expect(io.writeRemote).not.toHaveBeenCalled();
     });
 
     it('still refuses activation when an expected attachment vanishes without a tombstone', async () => {

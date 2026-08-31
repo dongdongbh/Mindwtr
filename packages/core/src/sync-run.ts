@@ -172,18 +172,65 @@ const mergedContentMustReplaceCandidateBlob = (
     return merged.fileHash.toLowerCase() !== candidate.fileHash.toLowerCase();
 };
 
+const normalizeAttachmentHash = (value?: string): string => value?.trim().toLowerCase() ?? '';
+
+/** A candidate winner may still have an identical managed copy on this device.
+ *  Hash + content revision are the only cross-backend proof that those local
+ *  bytes are safe to publish if the candidate object turns out to be missing. */
+const buildExactLocalActivationFallback = (
+    merged: Attachment,
+    local: Attachment | undefined,
+    candidate: Attachment | undefined,
+): Attachment | null => {
+    if (!local || !candidate?.cloudKey) return null;
+    const localUri = local.uri?.trim();
+    const localHash = normalizeAttachmentHash(local.fileHash);
+    const mergedHash = normalizeAttachmentHash(merged.fileHash);
+    const candidateHash = normalizeAttachmentHash(candidate.fileHash);
+    if (
+        !localUri
+        || local.localStatus === 'missing'
+        || !localHash
+        || localHash !== mergedHash
+        || localHash !== candidateHash
+        || (local.contentRev ?? 0) !== (merged.contentRev ?? 0)
+        || (local.contentRev ?? 0) !== (candidate.contentRev ?? 0)
+    ) {
+        return null;
+    }
+    return {
+        ...merged,
+        uri: local.uri,
+        cloudKey: undefined,
+        fileHash: merged.fileHash,
+        contentMtimeMs: local.contentMtimeMs,
+        contentSize: local.contentSize,
+        localStatus: 'available',
+        pendingContentUpload: true,
+        deletedAt: undefined,
+    };
+};
+
 const prepareActivationAttachmentSnapshot = (
     data: AppData,
     candidateRemoteData: AppData | null,
-): { data: AppData; count: number; expectedIds: Set<string> } => {
+    localData: AppData | null,
+): { data: AppData; count: number; expectedIds: Set<string>; localFallbacks: Map<string, Attachment> } => {
     const candidateAttachments = new Map<string, Attachment>();
     if (candidateRemoteData) {
         visitLiveFileAttachments(candidateRemoteData, (attachment) => {
             candidateAttachments.set(attachment.id, attachment);
         });
     }
+    const localAttachments = new Map<string, Attachment>();
+    if (localData) {
+        visitLiveFileAttachments(localData, (attachment) => {
+            localAttachments.set(attachment.id, attachment);
+        });
+    }
     const candidate = cloneAppData(data);
     const expectedIds = new Set<string>();
+    const localFallbacks = new Map<string, Attachment>();
     const count = visitLiveFileAttachments(candidate, (attachment) => {
         expectedIds.add(attachment.id);
         const candidateAttachment = candidateAttachments.get(attachment.id);
@@ -191,6 +238,14 @@ const prepareActivationAttachmentSnapshot = (
             candidateAttachment?.cloudKey
             && mergedContentMustReplaceCandidateBlob(attachment, candidateAttachment),
         );
+        if (!mustReplaceCandidateBlob) {
+            const fallback = buildExactLocalActivationFallback(
+                attachment,
+                localAttachments.get(attachment.id),
+                candidateAttachment,
+            );
+            if (fallback) localFallbacks.set(attachment.id, fallback);
+        }
         // Only a key read from the candidate destination belongs to that
         // destination. A local/previous-backend key is cleared so the adapter
         // creates the missing candidate blob; a candidate key is preserved so
@@ -209,7 +264,31 @@ const prepareActivationAttachmentSnapshot = (
         }
         attachment.localStatus = 'missing';
     });
-    return { data: candidate, count, expectedIds };
+    return { data: candidate, count, expectedIds, localFallbacks };
+};
+
+const prepareActivationFallbackRetry = (
+    data: AppData,
+    localFallbacks: ReadonlyMap<string, Attachment>,
+): { data: AppData; count: number } => {
+    if (localFallbacks.size === 0) return { data, count: 0 };
+    const retryData = cloneAppData(data);
+    let count = 0;
+    for (const owner of [...retryData.tasks, ...retryData.projects]) {
+        if (owner.deletedAt) continue;
+        for (const attachment of owner.attachments ?? []) {
+            if (attachment.kind !== 'file' || !attachment.deletedAt) continue;
+            const fallback = localFallbacks.get(attachment.id);
+            if (!fallback) continue;
+            // The adapter exposes both remote 404 and local-read failure as an
+            // untyped tombstone. Restore only the pre-proven local identity and
+            // give the adapter one bounded upload attempt; final proof below
+            // rejects any tombstone that survives this retry.
+            Object.assign(attachment, fallback);
+            count += 1;
+        }
+    }
+    return count > 0 ? { data: retryData, count } : { data, count: 0 };
 };
 
 const assertActivationAttachmentsProven = (data: AppData, expectedIds: ReadonlySet<string>): void => {
@@ -218,11 +297,9 @@ const assertActivationAttachmentsProven = (data: AppData, expectedIds: ReadonlyS
         for (const attachment of owner.attachments ?? []) {
             if (attachment.kind !== 'file') continue;
             if (owner.deletedAt || attachment.deletedAt) {
-                // Tombstoned during the trial itself (a 404'd blob is marked
-                // unrecoverable, #1119): that is a PROVEN outcome - the same one an
-                // established device converges to - not a gap in the proof. Only ids
-                // the snapshot expected count; a pre-existing tombstone never does.
-                if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
+                if (expectedIds.has(attachment.id)) {
+                    throw new Error(`Candidate attachment proof failed for ${attachment.id}`);
+                }
                 continue;
             }
             if (
@@ -869,6 +946,7 @@ class SharedSyncRunMachine {
             const activationSnapshot = prepareActivationAttachmentSnapshot(
                 data,
                 this.state.remoteDataForCompare,
+                this.state.localDataCache?.data ?? null,
             );
             if (activationSnapshot.count === 0) return data;
             const io = this.requireIo();
@@ -881,20 +959,38 @@ class SharedSyncRunMachine {
                 await this.ensureNetwork();
             }
             await this.ensureRemoteMutationFence();
-            const result = await io.syncAttachments(
+            let result = await io.syncAttachments(
                 activationSnapshot.data,
                 this.attachmentHelpers('post-merge'),
             );
             await this.assertRemoteMutationFenceHeld();
-            const provenData = result && typeof result === 'object'
+            let provenData = result && typeof result === 'object'
                 ? result
                 : activationSnapshot.data;
+            this.ensureLocalSnapshotFresh();
+            const fallbackRetry = prepareActivationFallbackRetry(
+                provenData,
+                activationSnapshot.localFallbacks,
+            );
+            if (fallbackRetry.count > 0) {
+                result = await io.syncAttachments(
+                    fallbackRetry.data,
+                    this.attachmentHelpers('post-merge'),
+                );
+                await this.assertRemoteMutationFenceHeld();
+                provenData = result && typeof result === 'object'
+                    ? result
+                    : fallbackRetry.data;
+            }
             assertActivationAttachmentsProven(provenData, activationSnapshot.expectedIds);
             this.ensureLocalSnapshotFresh();
             this.notifier.onDiagnostic?.({
                 event: 'attachments-prepare-complete',
                 data: provenData,
-                extra: { mutated: String(result === true || Boolean(result && typeof result === 'object')) },
+                extra: {
+                    mutated: String(result === true || Boolean(result && typeof result === 'object')),
+                    fallbackRetries: String(fallbackRetry.count),
+                },
             });
             return provenData;
         }
