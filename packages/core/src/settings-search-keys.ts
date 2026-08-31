@@ -36,6 +36,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         { key: 'density', section: 'lookAndFeel' },
         { key: 'textSize', section: 'lookAndFeel' },
         { key: 'showTaskAge', section: 'lookAndFeel' },
+        { key: 'sidebarViews', section: 'lookAndFeel' },
         { key: 'language', section: 'localization' },
         { key: 'weekStart', section: 'localization' },
         { key: 'dateFormat', section: 'localization' },

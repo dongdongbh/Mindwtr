@@ -251,3 +251,20 @@ describe('useUiStore project layouts (#1019)', () => {
         });
     });
 });
+
+describe('useUiStore hidden sidebar views', () => {
+    it('hydrates only hideable roster ids and persists changes', async () => {
+        window.localStorage.clear();
+        vi.resetModules();
+        window.localStorage.setItem('mindwtr:sidebar:hiddenViews:v1', JSON.stringify(['someday', 'inbox', 42]));
+        const { useUiStore } = await import('./ui-store');
+        // 'inbox' is structural and 42 is junk — neither may hydrate.
+        expect(useUiStore.getState().hiddenSidebarViews).toEqual(['someday']);
+
+        useUiStore.getState().setSidebarViewHidden('board', true);
+        expect(JSON.parse(window.localStorage.getItem('mindwtr:sidebar:hiddenViews:v1')!)).toEqual(['someday', 'board']);
+
+        useUiStore.getState().setSidebarViewHidden('someday', false);
+        expect(useUiStore.getState().hiddenSidebarViews).toEqual(['board']);
+    });
+});

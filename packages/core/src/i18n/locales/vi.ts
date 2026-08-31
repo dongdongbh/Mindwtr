@@ -1293,6 +1293,8 @@ export const viOverrides: Record<string, string> = {
         'settings.featurePomodoroDesc': 'Bật bảng Pomodoro tùy chọn trong chế độ Tập trung.',
         'settings.featureTimeline': 'Chế độ xem Dòng thời gian',
         'settings.featureTimelineDesc': 'Hiển thị dòng thời gian chỉ đọc của các công việc có ngày trong thanh bên.',
+        'settings.sidebarViews': 'Chế độ xem trên thanh bên',
+        'settings.sidebarViewsDesc': 'Chọn chế độ xem nào hiển thị trên thanh bên. Chế độ xem bị ẩn vẫn mở được qua tìm kiếm.',
         'settings.pomodoroCustomPreset': 'Cài đặt sẵn tùy chỉnh',
         'settings.pomodoroCustomPresetDesc': 'Thêm một cài đặt sẵn tập trung/nghỉ thêm. Khớp với cài đặt sẵn tích hợp chỉ giữ các chip tích hợp.',
         'settings.pomodoroFocusMinutes': 'Phút tập trung',

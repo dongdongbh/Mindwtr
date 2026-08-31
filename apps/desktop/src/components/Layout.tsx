@@ -128,6 +128,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     const isCollapsed = userSidebarCollapsed || compactViewport;
     const calendarDragNavTimeoutRef = useRef<number | null>(null);
     const isFocusMode = useUiStore((state) => state.isFocusMode);
+    const hiddenSidebarViews = useUiStore((state) => state.hiddenSidebarViews);
     const showToast = useUiStore((state) => state.showToast);
     const isObsidianEnabled = useObsidianStore((state) => state.config.enabled);
     // Timeline is opt-in (#1111): hidden from navigation until it is switched on.
@@ -367,7 +368,12 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                 { id: 'trash', labelKey: 'nav.trash', icon: Trash2, tone: 'recessed' },
             ],
         },
-    ]), [inboxCount, isObsidianEnabled, isTimelineEnabled, t]);
+    ] satisfies NavSection[])
+        .map((section) => ({
+            ...section,
+            items: section.items.filter((item) => !hiddenSidebarViews.includes(item.id as (typeof hiddenSidebarViews)[number])),
+        }))
+        .filter((section) => section.items.length > 0), [hiddenSidebarViews, inboxCount, isObsidianEnabled, isTimelineEnabled, t]);
 
     const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => loadCollapsedSections());
 

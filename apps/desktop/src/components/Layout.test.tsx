@@ -1007,3 +1007,24 @@ describe('Layout sync security warning', () => {
         }
     });
 });
+
+describe('Sidebar hidden views (#1115)', () => {
+    it('omits hidden entries and drops fully hidden sections, keeping structural items', () => {
+        act(() => {
+            useUiStore.getState().setSidebarViewHidden('someday', true);
+            useUiStore.getState().setSidebarViewHidden('done', true);
+            useUiStore.getState().setSidebarViewHidden('archived', true);
+            useUiStore.getState().setSidebarViewHidden('trash', true);
+        });
+        const { container } = renderLayout();
+        const ids = Array.from(container.querySelectorAll('[data-sidebar-item]'))
+            .map((el) => el.getAttribute('data-view'));
+        expect(ids).not.toContain('someday');
+        expect(ids).not.toContain('done');
+        expect(ids).toContain('inbox');
+        expect(ids).toContain('waiting');
+        // Every Archive entry is hidden, so its section header disappears too.
+        expect(container.querySelector('#sidebar-section-archive')).toBeNull();
+        expect(container.querySelector('#sidebar-section-lists')).not.toBeNull();
+    });
+});

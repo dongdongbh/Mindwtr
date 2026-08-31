@@ -1344,6 +1344,8 @@ export const svOverrides: Record<string, string> = {
         'settings.featurePomodoroDesc': 'Aktivera den valfria Pomodoro-panelen i Fokus-vyn.',
         'settings.featureTimeline': 'Tidslinjevy',
         'settings.featureTimelineDesc': 'Visa en skrivskyddad tidslinje över daterade uppgifter i sidofältet.',
+        'settings.sidebarViews': 'Vyer i sidofältet',
+        'settings.sidebarViewsDesc': 'Välj vilka vyer som visas i sidofältet. Dolda vyer nås fortfarande via sök.',
         'settings.pomodoroCustomPreset': 'Anpassad förinställning',
         'settings.pomodoroCustomPresetDesc': 'Lägg till en extra fokus-/pausförinställning. Matchar den en inbyggd förinställning behålls bara de inbyggda alternativen.',
         'settings.pomodoroFocusMinutes': 'Fokusminuter',

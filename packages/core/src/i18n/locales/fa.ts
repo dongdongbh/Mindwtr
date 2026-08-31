@@ -1344,6 +1344,8 @@ export const faOverrides: Record<string, string> = {
         'settings.featurePomodoroDesc': 'فعال‌سازی پنل اختیاری پومودورو در نمای تمرکز.',
         'settings.featureTimeline': 'نمای خط زمانی',
         'settings.featureTimelineDesc': 'نمایش خط زمانی فقط‌خواندنی کارهای تاریخ‌دار در نوار کناری.',
+        'settings.sidebarViews': 'نماهای نوار کناری',
+        'settings.sidebarViewsDesc': 'انتخاب کنید کدام نماها در نوار کناری نمایش داده شوند. نماهای پنهان از طریق جستجو در دسترس می‌مانند.',
         'settings.pomodoroCustomPreset': 'پیش‌تنظیم سفارشی',
         'settings.pomodoroCustomPresetDesc': 'یک پیش‌تنظیم اضافی تمرکز/استراحت اضافه کنید. تطبیق با یک پیش‌تنظیم داخلی فقط تراشه‌های داخلی را نگه می‌دارد.',
         'settings.pomodoroFocusMinutes': 'دقایق تمرکز',

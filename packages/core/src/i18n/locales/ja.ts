@@ -1375,6 +1375,8 @@ export const jaOverrides: Record<string, string> = {
         'settings.featurePomodoroDesc': 'フォーカス画面にポモドーロのパネルを表示します。',
         'settings.featureTimeline': 'タイムラインビュー',
         'settings.featureTimelineDesc': '日付のあるタスクの読み取り専用タイムラインをサイドバーに表示します。',
+        'settings.sidebarViews': 'サイドバーの表示項目',
+        'settings.sidebarViewsDesc': 'サイドバーに表示するビューを選択します。非表示のビューも検索から開けます。',
         'settings.pomodoroCustomPreset': 'カスタムのプリセット',
         'settings.pomodoroCustomPresetDesc': '集中・休憩の組み合わせを1つだけ追加できます。既定のプリセットと同じ値にした場合は、既定のものだけが表示されます。',
         'settings.pomodoroFocusMinutes': '集中する時間（分）',

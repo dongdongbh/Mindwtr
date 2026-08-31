@@ -1296,6 +1296,8 @@ export const zhHans: Record<string, string> = {
         'settings.featurePomodoroDesc': '在聚焦视图中启用可选的番茄钟面板。',
         'settings.featureTimeline': '时间线视图',
         'settings.featureTimelineDesc': '在侧边栏显示有日期任务的只读时间线。',
+        'settings.sidebarViews': '侧边栏视图',
+        'settings.sidebarViewsDesc': '选择侧边栏中显示哪些视图。隐藏的视图仍可通过搜索打开。',
         'settings.pomodoroCustomPreset': '自定义预设',
         'settings.pomodoroCustomPresetDesc': '添加一个额外的专注/休息预设。若与内置预设相同，将继续只显示内置选项。',
         'settings.pomodoroFocusMinutes': '专注分钟',

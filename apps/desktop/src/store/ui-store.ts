@@ -1,6 +1,7 @@
 import { createWithEqualityFn } from 'zustand/traditional';
 import { useTaskStore, type FilterCriteria, type TaskSortBy } from '@mindwtr/core';
 import { DONE_AXES, FOCUS_AXES, REFERENCE_AXES, SOMEDAY_AXES, sanitizeAxis, type DoneGroupBy, type NextGroupBy, type ReferenceGroupBy, type SomedayGroupBy } from '../components/views/list/next-grouping';
+import { HIDDEN_SIDEBAR_VIEWS_STORAGE_KEY, sanitizeHiddenSidebarViews, type HideableSidebarViewId } from '../lib/sidebar-views';
 import { DONE_SORT_OPTIONS } from '../lib/task-list-sort';
 
 const toastTimeouts = new Map<string, number>();
@@ -148,6 +149,28 @@ function pruneProjectLayouts(layouts: Record<string, ProjectLayout>): Record<str
     return pruned;
 }
 
+function readStoredHiddenSidebarViews(): HideableSidebarViewId[] {
+    const storage = getPersistentStorage();
+    if (!storage) return [];
+    try {
+        const raw = storage.getItem(HIDDEN_SIDEBAR_VIEWS_STORAGE_KEY);
+        if (!raw) return [];
+        return sanitizeHiddenSidebarViews(JSON.parse(raw));
+    } catch {
+        return [];
+    }
+}
+
+function saveStoredHiddenSidebarViews(views: HideableSidebarViewId[]) {
+    const storage = getPersistentStorage();
+    if (!storage) return;
+    try {
+        storage.setItem(HIDDEN_SIDEBAR_VIEWS_STORAGE_KEY, JSON.stringify(views));
+    } catch {
+        // Sidebar visibility is convenience state; storage failures should not block UI updates.
+    }
+}
+
 function saveStoredProjectLayouts(layouts: Record<string, ProjectLayout>) {
     const storage = getPersistentStorage();
     if (!storage) return;
@@ -199,6 +222,8 @@ interface UiState {
     setProjectView: (partial: Partial<UiState['projectView']>) => void;
     projectLayouts: Record<string, ProjectLayout>;
     setProjectLayout: (projectId: string, layout: ProjectLayout) => void;
+    hiddenSidebarViews: HideableSidebarViewId[];
+    setSidebarViewHidden: (viewId: HideableSidebarViewId, hidden: boolean) => void;
 }
 
 export const useUiStore = createWithEqualityFn<UiState>()((set) => ({
@@ -295,5 +320,13 @@ export const useUiStore = createWithEqualityFn<UiState>()((set) => ({
             const projectLayouts = pruneProjectLayouts({ ...state.projectLayouts, [projectId]: layout });
             saveStoredProjectLayouts(projectLayouts);
             return { projectLayouts };
+        }),
+    hiddenSidebarViews: readStoredHiddenSidebarViews(),
+    setSidebarViewHidden: (viewId, hidden) =>
+        set((state) => {
+            const next = state.hiddenSidebarViews.filter((id) => id !== viewId);
+            if (hidden) next.push(viewId);
+            saveStoredHiddenSidebarViews(next);
+            return { hiddenSidebarViews: next };
         }),
 }));

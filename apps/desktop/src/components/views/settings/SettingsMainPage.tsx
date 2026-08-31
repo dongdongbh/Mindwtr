@@ -4,10 +4,12 @@ import {
     GLOBAL_QUICK_ADD_SHORTCUT_DISABLED,
     getGlobalQuickAddShortcutOptions,
 } from '../../../lib/global-quick-add-shortcut';
-import { getLocaleCoverageTier, normalizeWeekStartSetting } from '@mindwtr/core';
+import { getLocaleCoverageTier, normalizeWeekStartSetting, resolveFeatureFlags, useTaskStore } from '@mindwtr/core';
 import type { DesktopThemeMode } from '../../../lib/theme';
 import { Switch } from '../../ui/Switch';
-import { SettingRow, SettingsCard, SettingsSectionHeader } from './SettingRow';
+import { SettingField, SettingRow, SettingsCard, SettingsSectionHeader } from './SettingRow';
+import { useUiStore } from '../../../store/ui-store';
+import { HIDEABLE_SIDEBAR_VIEW_IDS, type HideableSidebarViewId } from '../../../lib/sidebar-views';
 
 const FLATPAK_QUICK_ADD_COMMAND = 'flatpak run tech.dongdongbh.mindwtr --quick-add';
 
@@ -38,6 +40,20 @@ type Labels = {
     textSizeExtraLarge: string;
     showTaskAge: string;
     showTaskAgeDesc: string;
+    sidebarViews: string;
+    sidebarViewsDesc: string;
+    navAgenda: string;
+    navSomeday: string;
+    navWaiting: string;
+    navReference: string;
+    navCalendar: string;
+    navReview: string;
+    navContexts: string;
+    navBoard: string;
+    navTimeline: string;
+    navDone: string;
+    navArchived: string;
+    navTrash: string;
     system: string;
     light: string;
     dark: string;
@@ -210,6 +226,27 @@ export function SettingsMainPage({
                 ? t.weekStartSunday
                 : t.weekStartSystem;
 
+    const hiddenSidebarViews = useUiStore((state) => state.hiddenSidebarViews);
+    const setSidebarViewHidden = useUiStore((state) => state.setSidebarViewHidden);
+    const timelineEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeline);
+    const sidebarViewLabels: Record<HideableSidebarViewId, string> = {
+        agenda: t.navAgenda,
+        someday: t.navSomeday,
+        waiting: t.navWaiting,
+        reference: t.navReference,
+        calendar: t.navCalendar,
+        review: t.navReview,
+        contexts: t.navContexts,
+        board: t.navBoard,
+        timeline: t.navTimeline,
+        done: t.navDone,
+        archived: t.navArchived,
+        trash: t.navTrash,
+    };
+    const sidebarViewOptions = HIDEABLE_SIDEBAR_VIEW_IDS
+        .filter((id) => id !== 'timeline' || timelineEnabled)
+        .map((id) => ({ id, label: sidebarViewLabels[id] }));
+
     return (
         <div className="space-y-5">
             {/* Look & Feel */}
@@ -269,6 +306,26 @@ export function SettingsMainPage({
                         onCheckedChange={() => onShowTaskAgeChange(!showTaskAge)}
                     />
                 </SettingRow>
+            <SettingField
+                    settingsKey="sidebarViews"
+                    title={t.sidebarViews}
+                    description={t.sidebarViewsDesc}
+                    className="p-4 gap-3"
+                >
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-3">
+                        {sidebarViewOptions.map((view) => (
+                            <label key={view.id} className="flex items-center gap-2 text-sm text-foreground">
+                                <input
+                                    type="checkbox"
+                                    className="h-4 w-4 accent-primary"
+                                    checked={!hiddenSidebarViews.includes(view.id)}
+                                    onChange={(e) => setSidebarViewHidden(view.id, !e.target.checked)}
+                                />
+                                <span className="truncate">{view.label}</span>
+                            </label>
+                        ))}
+                    </div>
+                </SettingField>
             </SettingsCard>
 
             {/* Localization */}
