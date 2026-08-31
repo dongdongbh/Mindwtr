@@ -18,6 +18,7 @@ export const RESTORABLE_VIEWS = new Set([
     'done',
     'calendar',
     'board',
+    'timeline',
     'projects',
     'contexts',
     'review',

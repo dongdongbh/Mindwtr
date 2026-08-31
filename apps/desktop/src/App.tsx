@@ -3,6 +3,7 @@ import { Layout } from './components/Layout';
 import { ListView } from './components/views/ListView';
 import { CalendarView } from './components/views/CalendarView';
 const BoardView = lazy(() => import('./components/views/BoardView').then((m) => ({ default: m.BoardView })));
+const TimelineView = lazy(() => import('./components/views/TimelineView').then((m) => ({ default: m.TimelineView })));
 const ObsidianView = lazy(() => import('./components/views/ObsidianView').then((m) => ({ default: m.ObsidianView })));
 import { ContextsView } from './components/views/ContextsView';
 import { ProjectsView as ProjectsViewEager } from './components/views/ProjectsView';
@@ -1142,6 +1143,7 @@ function App() {
             ?? ((id: number) => window.clearTimeout(id));
         const id = idleCallback(() => {
             void import('./components/views/BoardView');
+            void import('./components/views/TimelineView');
             void import('./components/views/ObsidianView');
             if (!import.meta.env.DEV) {
                 void import('./components/views/ProjectsView');
@@ -1175,6 +1177,8 @@ function App() {
                 return <CalendarView />;
             case 'board':
                 return <BoardView />;
+            case 'timeline':
+                return <TimelineView />;
             case 'obsidian':
                 return <ObsidianView />;
             case 'projects':

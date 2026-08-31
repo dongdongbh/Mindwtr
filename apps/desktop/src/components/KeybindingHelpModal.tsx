@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { resolveFeatureFlags, useTaskStore } from '@mindwtr/core';
 import { KeybindingStyle } from '../contexts/keybinding-context';
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from './ui/Dialog';
 import {
@@ -29,6 +30,7 @@ export function KeybindingHelpModal({
     t,
 }: KeybindingHelpModalProps) {
     const titleId = useId();
+    const prioritiesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).priorities);
     const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
     const quickAddShortcutDisplay = formatGlobalQuickAddShortcutForDisplay(quickAddShortcut, isMac);
     const sharedGlobal: HelpItem[] = [
@@ -61,6 +63,7 @@ export function KeybindingHelpModal({
         { keys: 'ge', labelKey: 'keybindings.goReference' },
         { keys: 'gl', labelKey: 'keybindings.goCalendar' },
         { keys: 'gb', labelKey: 'keybindings.goBoard' },
+        { keys: 'gt', labelKey: 'keybindings.goTimeline' },
         { keys: 'gd', labelKey: 'keybindings.goDone' },
         { keys: 'ga', labelKey: 'keybindings.goArchived' },
         { keys: '1-9 / Shift+A 1-9', labelKey: 'keybindings.switchArea', fallbackLabel: 'Switch to Area 1-9' },
@@ -114,6 +117,7 @@ export function KeybindingHelpModal({
         { keys: 'Alt-e', labelKey: 'keybindings.goReference' },
         { keys: 'Alt-l', labelKey: 'keybindings.goCalendar' },
         { keys: 'Alt-b', labelKey: 'keybindings.goBoard' },
+        { keys: 'Alt-t', labelKey: 'keybindings.goTimeline' },
         { keys: 'Alt-d', labelKey: 'keybindings.goDone' },
         { keys: 'Alt-A', labelKey: 'keybindings.goArchived' },
         { keys: '1-9 / Shift+A 1-9', labelKey: 'keybindings.switchArea', fallbackLabel: 'Switch to Area 1-9' },
@@ -142,7 +146,11 @@ export function KeybindingHelpModal({
         { keys: '/note:<text>', labelKey: 'taskEdit.descriptionLabel' },
         { keys: '/link:<url>', labelKey: 'attachments.addLink' },
         { keys: '/energy:<level>', labelKey: 'taskEdit.energyLevel' },
-        { keys: '/priority:<level>', labelKey: 'taskEdit.priorityLabel' },
+        // The parser drops /priority: while the Priorities feature is off, so the
+        // help table must not advertise it (#1107).
+        ...(prioritiesEnabled
+            ? [{ keys: '/priority:<level>', labelKey: 'taskEdit.priorityLabel' }]
+            : []),
         { keys: '/inbox /next /waiting /someday /reference /done /archived', labelKey: 'taskEdit.statusLabel' },
         { keys: '/*', labelKey: 'agenda.addToFocus', fallbackLabel: "Add to today's focus" },
         { keys: '/area:<name> or !Area', labelKey: 'taskEdit.areaLabel' },

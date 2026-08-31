@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Desktop has a new read-only **Timeline** view: every task with a start or due date is drawn as a bar from start to due, grouped by project and colored the way its project dot is, with day/week/month zoom, a today line and a Today button. Dragging bars to reschedule comes later. (#1111)
 - A task that has outgrown itself can now become a section of the project it is in. **Convert to Section** in the task menu, on desktop and mobile, makes a section from the task's title and notes, turns each checklist item into a task inside it (items already ticked stay done), and moves the original task to Trash, so its attachments and history remain recoverable. (#1106)
 - Mobile calendar: dragging the week density slider toward more visible days no longer strands the view past the last day, where only a column or two showed next to blank space. The week re-clamps to its real width as the columns resize.
 - The Tasks | Projects switch in Archived now reads **Tasks** (it borrowed the lowercase count word), and on mobile the chips no longer sit flush against the search box.

@@ -368,6 +368,7 @@ export function KeybindingProvider({
         s: 'someday',
         l: 'calendar',
         b: 'board',
+        t: 'timeline',
         d: 'done',
         a: 'archived',
     }), []);
@@ -384,6 +385,7 @@ export function KeybindingProvider({
         s: 'someday',
         l: 'calendar',
         b: 'board',
+        t: 'timeline',
         d: 'done',
         A: 'archived',
     }), []);

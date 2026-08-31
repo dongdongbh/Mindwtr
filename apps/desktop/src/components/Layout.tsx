@@ -4,6 +4,7 @@ import {
     Inbox,
     CheckSquare,
     Archive,
+    GanttChartSquare,
     Kanban,
     Tag,
     CheckCircle2,
@@ -313,6 +314,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     const isWideView = wideViews.has(currentView);
     const fullWidthViews = new Set([
         'board',
+        'timeline',
         'projects',
         'contexts',
         'obsidian',
@@ -350,6 +352,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                     ? [{ id: 'obsidian', labelKey: 'nav.obsidian', fallbackLabel: 'Obsidian', icon: BookOpen }]
                     : []),
                 { id: 'board', labelKey: 'nav.board', icon: Kanban },
+                { id: 'timeline', labelKey: 'nav.timeline', fallbackLabel: 'Timeline', icon: GanttChartSquare },
             ],
         },
         {

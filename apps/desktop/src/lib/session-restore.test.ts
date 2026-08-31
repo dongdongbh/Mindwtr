@@ -31,6 +31,11 @@ describe('desktop session restore', () => {
         expect(readRestorableLastView()).toEqual({ view: 'contexts' });
     });
 
+    it('restores the timeline view (#1111)', () => {
+        persistLastView('timeline');
+        expect(readRestorableLastView()).toEqual({ view: 'timeline' });
+    });
+
     it('restores saved search views by prefix', () => {
         persistLastView('savedSearch:abc');
         expect(readRestorableLastView()).toEqual({ view: 'savedSearch:abc' });

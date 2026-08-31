@@ -17,6 +17,10 @@ describe('view URL params (#931)', () => {
             expect(readViewFromUrl('?view=obsidian')).toBe('obsidian');
         });
 
+        it('reads the timeline view (#1111)', () => {
+            expect(readViewFromUrl('?view=timeline')).toBe('timeline');
+        });
+
         it('reads a saved search by prefix', () => {
             expect(readViewFromUrl('?view=savedSearch:abc')).toBe('savedSearch:abc');
         });
