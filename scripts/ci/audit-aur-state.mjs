@@ -44,26 +44,42 @@ async function fetchJson(url) {
 }
 
 function remoteHead(packageName) {
-  const output = execFileSync(
-    "git",
-    [
-      "ls-remote",
-      `https://aur.archlinux.org/${packageName}.git`,
-      "refs/heads/master",
-    ],
-    { encoding: "utf8" },
-  ).trim();
-  const [head, ref, ...extra] = output.split(/\s+/);
-  if (
-    !/^[0-9a-f]{40}$/.test(head ?? "") ||
-    ref !== "refs/heads/master" ||
-    extra.length > 0
-  ) {
-    throw new Error(
-      `Could not resolve a single master head for ${packageName}`,
-    );
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const output = execFileSync(
+        "git",
+        [
+          "ls-remote",
+          `https://aur.archlinux.org/${packageName}.git`,
+          "refs/heads/master",
+        ],
+        { encoding: "utf8" },
+      ).trim();
+      const [head, ref, ...extra] = output.split(/\s+/);
+      if (
+        !/^[0-9a-f]{40}$/.test(head ?? "") ||
+        ref !== "refs/heads/master" ||
+        extra.length > 0
+      ) {
+        throw new Error(
+          `Could not resolve a single master head for ${packageName}`,
+        );
+      }
+      return head;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) {
+        Atomics.wait(
+          new Int32Array(new SharedArrayBuffer(4)),
+          0,
+          0,
+          attempt * 1000,
+        );
+      }
+    }
   }
-  return head;
+  throw lastError;
 }
 
 export async function captureAurState(policyPath) {
