@@ -1068,8 +1068,9 @@ class MobileSyncRun {
 
   private createHooks(): SyncRunPlatformHooks {
     return {
-      setupCycle: async ({ setStep }) => {
+      setupCycle: async ({ setStep, setBackend }) => {
         const backend = this.backend;
+        setBackend(backend);
         if (backend === 'file' && !(await this.resolveFileBackendConfig())) {
           return { kind: 'disabled' };
         }
@@ -1105,11 +1106,15 @@ class MobileSyncRun {
         if (backend === 'webdav') {
           const webdavConfig = this.webdavConfig!;
           const compatibility = await ensureWebdavCapabilityProof(webdavConfig, async () => {
+            // Same budget as the cycle's own reads: a legacy-plaintext result is
+            // never pinned, so this probe runs every cycle, and on a slow link
+            // a tighter timeout failed syncs whose data.json GET would succeed.
+            setStep('webdav_probe');
             const compatibility = await probeWebdavSyncCompatibility(webdavConfig.url, {
               ...getMobileWebDavRequestOptions(webdavConfig.allowInsecureHttp),
               username: webdavConfig.username,
               password: webdavConfig.password,
-              timeoutMs: 10_000,
+              timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
               fetcher: this.fetchWithAbort,
             }, {
               requireStrongEtag: !legacyWebdavPostureAllowed,

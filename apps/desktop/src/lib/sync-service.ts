@@ -1635,7 +1635,6 @@ export class SyncService {
                 allowInsecureHttp: config.allowInsecureHttp,
                 username: config.username?.trim(),
                 password,
-                timeoutMs: 10_000,
                 fetcher: fetcher ?? fetch,
             }, {
                 requireStrongEtag: !allowLegacyPlaintext,
@@ -2059,7 +2058,7 @@ export class SyncService {
     private static async setupDesktopCycle(
         context: DesktopSyncCycleContext,
         options: SyncRunOptions,
-        setStep: (step: string) => void
+        { setStep, setBackend }: { setStep: (step: string) => void; setBackend: (backend: SyncBackend) => void }
     ): Promise<SyncRunCycleSetup> {
         const configOverride = options.configOverride;
         context.usesConfigOverride = Boolean(configOverride);
@@ -2069,6 +2068,7 @@ export class SyncService {
         if (context.backend === 'off') {
             return { kind: 'disabled' };
         }
+        setBackend(context.backend);
 
         const encryptionStatus = await readSyncEncryptionStatus();
         const legacyWebdavPostureAllowed = isLegacyWebdavPlaintextPostureAllowed(encryptionStatus);
@@ -2115,6 +2115,7 @@ export class SyncService {
             ? configOverride?.webdav ?? await SyncService.getWebDavConfig()
             : null;
         if (context.webdavConfig) {
+            setStep('webdav_probe');
             const compatibility = await ensureWebdavCapabilityProof(
                 context.webdavConfig,
                 () => SyncService.probeWebDavCompatibility(
@@ -3027,7 +3028,7 @@ export class SyncService {
                     getSettings: () => getStoreState().settings,
                 },
                 hooks: {
-                    setupCycle: (setupContext) => SyncService.setupDesktopCycle(context, options, setupContext.setStep),
+                    setupCycle: (setupContext) => SyncService.setupDesktopCycle(context, options, setupContext),
                     requestFollowUp: () => SyncService.requestQueuedSyncRun({
                         ...options,
                         fileSyncLockBusyRetryAttempt: 0,

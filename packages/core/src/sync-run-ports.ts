@@ -287,8 +287,14 @@ export interface SyncRunPlatformHooks {
      *  the flush snapshot. Platform prologue work lives here: desktop creates
      *  the pre-sync data snapshot, registers its offline listener, and runs
      *  CloudKit setup; mobile resolves/normalizes sync paths and runs CloudKit
-     *  setup. Return `{ kind: 'disabled' }` for backend "off"/unconfigured. */
-    setupCycle(context: { setStep(step: string): void }): Promise<SyncRunCycleSetup>;
+     *  setup. Return `{ kind: 'disabled' }` for backend "off"/unconfigured.
+     *  Call `setBackend` as soon as the backend is known: a failure later in
+     *  setup (the WebDAV capability probe, CloudKit setup) is then recorded
+     *  against that backend instead of the pre-setup default 'off'. */
+    setupCycle(context: {
+        setStep(step: string): void;
+        setBackend(backend: SyncBackend): void;
+    }): Promise<SyncRunCycleSetup>;
     /** Queue a follow-up sync cycle with the current cycle's options. */
     requestFollowUp(): void;
     /** Queue no earlier than a provider-time-derived delay (remote lease

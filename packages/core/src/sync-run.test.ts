@@ -1385,6 +1385,33 @@ describe('runSharedSyncCycle', () => {
         expect(harness.diagnostics).toContain('requeued');
     });
 
+    it('records a setup-phase failure against the backend the hook reported, not the pre-setup default', async () => {
+        const { hooks, notifier, run } = createHarness({
+            hooks: {
+                setupCycle: vi.fn(async ({ setStep, setBackend }) => {
+                    setBackend('webdav');
+                    setStep('webdav_probe');
+                    throw new Error('WebDAV request timed out');
+                }),
+            },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('[webdav] WebDAV request timed out');
+        expect(notifier.logSyncError).toHaveBeenCalledWith(
+            expect.any(Error),
+            expect.objectContaining({ backend: 'webdav', step: 'webdav_probe' }),
+        );
+        expect(hooks.finalizeErrorStatus).toHaveBeenCalledWith(expect.objectContaining({
+            step: 'webdav_probe',
+            history: expect.arrayContaining([
+                expect.objectContaining({ status: 'error', backend: 'webdav', details: 'webdav_probe' }),
+            ]),
+        }));
+    });
+
     it('marks the retry backoff locally and reports the error when the remote write fails', async () => {
         const { harness, hooks, notifier, run } = createHarness({
             remote: createData([createTask('t-remote', 'Remote task')]),
