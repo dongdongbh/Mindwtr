@@ -1148,7 +1148,21 @@ export async function probeWebdavSyncCompatibility(
         }
         return 'legacy-plaintext';
     }
-    await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
+    try {
+        await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
+    } catch (error) {
+        // Observational mode (encryption off): a server can serve strong ETags yet
+        // fail the conditional-write proof (Fastmail accepts a create that
+        // If-None-Match: * must refuse, #1113). Before rc.2->1.2.5 asked for
+        // uncompressed responses (942afdd84), such servers arrived with weak ETags
+        // and were classed legacy without any probe write, and plaintext sync worked.
+        // Keep that posture: class them legacy instead of failing the cycle. With
+        // encryption required the proof stays mandatory, so the error propagates.
+        if (!policy.requireStrongEtag && error instanceof SyncEncryptionRemoteVersionUnavailableError) {
+            return 'legacy-plaintext';
+        }
+        throw error;
+    }
     return 'strong-etag';
 }
 

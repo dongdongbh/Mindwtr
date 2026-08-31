@@ -738,6 +738,33 @@ describe('versioned WebDAV transition byte operations', () => {
         ]);
     });
 
+    it('classes a strong-ETag server that ignores create-only writes as legacy when encryption is off (#1113)', async () => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher } = createWebdavCapabilityFetcher(documentUrl, {
+            documentBody: '{"tasks":[]}',
+            ignoreCreateOnly: true,
+        });
+
+        await expect(probeWebdavSyncCompatibility(
+            documentUrl,
+            { fetcher },
+        )).resolves.toBe('legacy-plaintext');
+    });
+
+    it('still fails a strong-ETag server that ignores create-only writes when encryption requires the proof', async () => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher } = createWebdavCapabilityFetcher(documentUrl, {
+            documentBody: '{"tasks":[]}',
+            ignoreCreateOnly: true,
+        });
+
+        await expect(probeWebdavSyncCompatibility(
+            documentUrl,
+            { fetcher },
+            { requireStrongEtag: true },
+        )).rejects.toThrow('WebDAV If-None-Match enforcement');
+    });
+
     it.each([
         'mindwtr strong-etag capability probe v1',
         'mindwtr strong-etag capability probe v2',
@@ -838,7 +865,10 @@ describe('versioned WebDAV transition byte operations', () => {
         expect(requests).toEqual(['GET']);
     });
 
-    it('does not downgrade a strong-ETag server that fails conditional-write enforcement', async () => {
+    // Reversed for #1113: before 942afdd84 asked for uncompressed responses, these
+    // servers arrived with weak ETags and were silently classed legacy, and plaintext
+    // sync worked. Failing the cycle instead was a 1.2.5 regression for Fastmail.
+    it('downgrades a strong-ETag server that fails conditional-write enforcement when encryption is off', async () => {
         const documentUrl = 'https://example.com/dav/data.json';
         const { fetcher } = createWebdavCapabilityFetcher(documentUrl, {
             documentBody: '{"tasks":[]}',
@@ -846,7 +876,7 @@ describe('versioned WebDAV transition byte operations', () => {
         });
 
         await expect(probeWebdavSyncCompatibility(documentUrl, { fetcher }))
-            .rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+            .resolves.toBe('legacy-plaintext');
     });
 
     it.each([
