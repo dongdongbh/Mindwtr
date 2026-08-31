@@ -994,6 +994,7 @@ export const esOverrides: Record<string, string> = {
         'sort.start': 'Fecha de inicio',
         'sort.review': 'Fecha de revisión',
         'sort.title': 'Nombre',
+        'sort.timeEstimate': 'Tiempo estimado',
         'sort.created': 'Más antigua',
         'sort.created-desc': 'Más nueva',
         'sort.completed': 'Fecha de finalización',

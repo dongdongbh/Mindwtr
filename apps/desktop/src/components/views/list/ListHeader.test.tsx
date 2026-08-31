@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useTaskStore } from '@mindwtr/core';
 
 import { ListHeader } from './ListHeader';
 import { openToolbarSelect } from '../../../test/toolbar-select';
@@ -30,13 +31,69 @@ const translations: Record<string, string> = {
     'sort.label': 'Sort',
     'sort.review': 'Review',
     'sort.start': 'Start date',
+    'sort.timeEstimate': 'Time estimate',
     'sort.title': 'Title',
     'taskEdit.tagsLabel': 'Tags',
 };
 
 const t = (key: string) => translations[key] ?? key;
 
+const setTimeEstimatesEnabled = (enabled: boolean) => {
+    act(() => {
+        useTaskStore.setState((state) => ({
+            ...state,
+            settings: { ...state.settings, features: { ...state.settings?.features, timeEstimates: enabled } },
+        } as never));
+    });
+};
+
 describe('ListHeader', () => {
+    afterEach(() => {
+        setTimeEstimatesEnabled(true);
+    });
+
+    // #1107: the sort lives in the shared SortBySelect, so the Time estimates
+    // toggle has to reach it there rather than at each individual toolbar.
+    it('offers the time-estimate sort only while the Time estimates feature is on', () => {
+        const header = (sortBy: 'default' | 'timeEstimate') => (
+            <ListHeader
+                title="Next"
+                showNextCount={false}
+                nextCount={0}
+                taskCount={3}
+                hasFilters={false}
+                filterSummaryLabel=""
+                filterSummarySuffix=""
+                sortBy={sortBy}
+                onChangeSortBy={vi.fn()}
+                selectionMode={false}
+                onToggleSelection={vi.fn()}
+                showListDetails
+                onToggleDetails={vi.fn()}
+                densityMode="comfortable"
+                onToggleDensity={vi.fn()}
+                t={t}
+            />
+        );
+
+        const enabled = render(header('default'));
+        openToolbarSelect('Sort');
+        expect(screen.getByRole('option', { name: 'Time estimate' })).toBeInTheDocument();
+        enabled.unmount();
+
+        setTimeEstimatesEnabled(false);
+        const disabled = render(header('default'));
+        openToolbarSelect('Sort');
+        expect(screen.queryByRole('option', { name: 'Time estimate' })).not.toBeInTheDocument();
+        disabled.unmount();
+
+        // A sort already stored as 'timeEstimate' must stay listed with the
+        // feature off, or the trigger renders with no matching option.
+        render(header('timeEstimate'));
+        openToolbarSelect('Sort');
+        expect(screen.getByRole('option', { name: 'Time estimate' })).toBeInTheDocument();
+    });
+
     it('labels sort and group controls visibly inside the compact header controls', () => {
         render(
             <ListHeader

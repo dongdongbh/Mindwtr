@@ -1049,6 +1049,7 @@ export const plOverrides: Record<string, string> = {
         'sort.start': 'Data rozpoczęcia',
         'sort.review': 'Data przeglądu',
         'sort.title': 'Tytuł',
+        'sort.timeEstimate': 'Oszacowanie czasu',
         'sort.created': 'Najstarsze',
         'sort.created-desc': 'Najnowsze',
         'sort.completed': 'Data ukończenia',

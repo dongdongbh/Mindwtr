@@ -1208,6 +1208,7 @@ export const itOverrides: Record<string, string> = {
         'sort.start': 'Data di inizio',
         'sort.review': 'Data di revisione',
         'sort.title': 'Titolo',
+        'sort.timeEstimate': 'Tempo stimato',
         'sort.created': 'Meno recenti',
         'sort.created-desc': 'Più recenti',
         'sort.completed': 'Data di completamento',

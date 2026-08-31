@@ -907,6 +907,12 @@ export function sortTasksBy(tasks: Task[], sortBy: TaskSortBy = 'default'): Task
             return byDateThenCreated((task) => timeOrInfinity(task.startTime));
         case 'review':
             return byDateThenCreated((task) => timeOrInfinity(task.reviewAt));
+        case 'timeEstimate':
+            // timeEstimateSortRank maps a missing estimate to +Infinity, and the
+            // comparator's equality guard sends those to the createdAt tie-break
+            // instead of Infinity - Infinity = NaN, so unestimated tasks land last
+            // in a stable order (#1107).
+            return byDateThenCreated((task) => timeEstimateSortRank(task.timeEstimate));
         case 'created':
             return sortByPrecomputedKey(tasks, (task) => timeOrZero(task.createdAt), (a, b) => a - b);
         case 'created-desc':

@@ -10,7 +10,7 @@ export function normalizeProjectSequentialScope(value: unknown): Project['sequen
  *  Wire-level allowlist: the cloud server validates against this, so it must
  *  stay a superset of what any client can persist. */
 export const TASK_SORT_BY_VALUES = [
-    'default', 'due', 'start', 'review', 'title', 'created', 'created-desc', 'completed',
+    'default', 'due', 'start', 'review', 'title', 'timeEstimate', 'created', 'created-desc', 'completed',
 ] as const;
 
 export const TASK_SORT_BY_VALUE_SET: ReadonlySet<TaskSortBy> =

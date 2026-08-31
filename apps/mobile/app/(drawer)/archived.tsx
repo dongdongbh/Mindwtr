@@ -354,6 +354,13 @@ export default function ArchivedScreen() {
     );
 
     const resolvedFeatureFlags = resolveFeatureFlags(settings);
+    // Same gate the shared sort modal applies (#1107).
+    const archivedSortOptions = useMemo(
+        () => DONE_TASK_LIST_SORT_OPTIONS.filter((option) => (
+            option !== 'timeEstimate' || resolvedFeatureFlags.timeEstimates || sortBy === 'timeEstimate'
+        )),
+        [resolvedFeatureFlags.timeEstimates, sortBy],
+    );
     const metadataFilterVisibility = useMemo(
         () => getTaskMetadataFilterVisibility(allArchivedTasks, {
             prioritiesEnabled: resolvedFeatureFlags.priorities,
@@ -855,7 +862,7 @@ export default function ArchivedScreen() {
                                 {tFallback(t, 'sort.label', 'Sort')}
                             </Text>
                             <View style={styles.sheetChipRow}>
-                                {DONE_TASK_LIST_SORT_OPTIONS.map((option) => (
+                                {archivedSortOptions.map((option) => (
                                     <FilterChip
                                         key={`sort:${option}`}
                                         label={t(`sort.${option}`)}

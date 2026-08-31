@@ -1502,6 +1502,7 @@ export const svOverrides: Record<string, string> = {
         'sort.start': 'Startdatum',
         'sort.review': 'Granskningsdatum',
         'sort.title': 'Titel',
+        'sort.timeEstimate': 'Tidsuppskattning',
         'sort.created': 'Äldst',
         'sort.created-desc': 'Nyast',
         'sort.completed': 'Slutfört datum',

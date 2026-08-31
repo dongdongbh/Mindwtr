@@ -1405,6 +1405,7 @@ export const zhHans: Record<string, string> = {
         'sort.start': '按开始日期',
         'sort.review': '按回顾日期',
         'sort.title': '按标题',
+        'sort.timeEstimate': '时间预估',
         'sort.created': '最早',
         'sort.created-desc': '最新',
         'sort.completed': '完成日期',

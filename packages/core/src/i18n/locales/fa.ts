@@ -1502,6 +1502,7 @@ export const faOverrides: Record<string, string> = {
         'sort.start': 'تاریخ شروع',
         'sort.review': 'تاریخ مرور',
         'sort.title': 'عنوان',
+        'sort.timeEstimate': 'برآورد زمان',
         'sort.created': 'قدیمی‌ترین',
         'sort.created-desc': 'جدیدترین',
         'sort.completed': 'تاریخ تکمیل',

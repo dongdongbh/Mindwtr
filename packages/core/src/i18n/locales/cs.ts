@@ -1379,6 +1379,7 @@ export const csOverrides: Record<string, string> = {
         'sort.start': 'Datum zahájení',
         'sort.review': 'Datum revize',
         'sort.title': 'Název',
+        'sort.timeEstimate': 'Odhad času',
         'sort.created': 'Nejstarší',
         'sort.created-desc': 'Nejnovější',
         'sort.completed': 'Datum dokončení',

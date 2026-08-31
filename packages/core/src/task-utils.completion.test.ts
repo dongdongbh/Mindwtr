@@ -89,6 +89,28 @@ describe('sortTasksBy case coverage', () => {
     it('sorts created-desc newest first', () => {
         expect(sortTasksBy(tasks, 'created-desc').map((item) => item.id)).toEqual(['newest', 'mid', 'oldest']);
     });
+
+    // #1107: shortest estimate first, no estimate last, createdAt breaking ties.
+    // Two unestimated tasks both rank +Infinity, so this also pins that the
+    // comparator reaches the createdAt tie-break instead of returning NaN.
+    it('sorts timeEstimate shortest first and leaves unestimated tasks last', () => {
+        const estimated = [
+            task('none-later', { createdAt: '2026-02-04T00:00:00.000Z' }),
+            task('hour', { createdAt: '2026-02-02T00:00:00.000Z', timeEstimate: '1hr' }),
+            task('none-earlier', { createdAt: '2026-02-03T00:00:00.000Z' }),
+            task('quarter', { createdAt: '2026-02-01T00:00:00.000Z', timeEstimate: '15min' }),
+        ];
+        expect(sortTasksBy(estimated, 'timeEstimate').map((item) => item.id))
+            .toEqual(['quarter', 'hour', 'none-earlier', 'none-later']);
+    });
+
+    it('breaks equal time estimates by createdAt ascending', () => {
+        const sameEstimate = [
+            task('second', { createdAt: '2026-02-02T00:00:00.000Z', timeEstimate: '30min' }),
+            task('first', { createdAt: '2026-02-01T00:00:00.000Z', timeEstimate: '30min' }),
+        ];
+        expect(sortTasksBy(sameEstimate, 'timeEstimate').map((item) => item.id)).toEqual(['first', 'second']);
+    });
 });
 
 describe('shouldAutoArchiveCompletedTask (#959)', () => {

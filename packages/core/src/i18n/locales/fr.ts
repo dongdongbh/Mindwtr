@@ -1324,6 +1324,7 @@ export const frOverrides: Record<string, string> = {
         'sort.start': 'Date de début',
         'sort.review': 'Date de revue',
         'sort.title': 'Titre',
+        'sort.timeEstimate': 'Estimation du temps',
         'sort.created': 'Plus ancien',
         'sort.created-desc': 'Plus récent',
         'sort.completed': 'Date d’achèvement',

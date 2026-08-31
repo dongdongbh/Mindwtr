@@ -1127,6 +1127,7 @@ export const ptOverrides: Record<string, string> = {
         'sort.start': 'Data de início',
         'sort.review': 'Data da revisão',
         'sort.title': 'Título',
+        'sort.timeEstimate': 'Estimativa de tempo',
         'sort.created': 'Mais antigo',
         'sort.created-desc': 'Mais novo',
         'sort.completed': 'Data de conclusão',

@@ -1100,6 +1100,7 @@ export const arOverrides: Record<string, string> = {
         'sort.start': 'تاريخ البدء',
         'sort.review': 'تاريخ المراجعة',
         'sort.title': 'عنوان',
+        'sort.timeEstimate': 'تقدير الوقت',
         'sort.created': 'الأقدم',
         'sort.created-desc': 'الأحدث',
         'sort.completed': 'تاريخ الإكمال',

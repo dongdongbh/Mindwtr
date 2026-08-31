@@ -1098,6 +1098,7 @@ export const deOverrides: Record<string, string> = {
         'sort.start': 'Beginn-Datum',
         'sort.review': 'Revisions-Datum',
         'sort.title': 'Titel',
+        'sort.timeEstimate': 'Zeitabschätzung',
         'sort.created': 'Älteste',
         'sort.created-desc': 'Neueste',
         'sort.completed': 'Abschlussdatum',

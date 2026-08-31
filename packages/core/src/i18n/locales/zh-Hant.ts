@@ -1405,6 +1405,7 @@ export const zhHant: Record<string, string> = {
         'sort.start': '按開始日期',
         'sort.review': '按回顧日期',
         'sort.title': '按標題',
+        'sort.timeEstimate': '時間預估',
         'sort.created': '最早',
         'sort.created-desc': '最新',
         'sort.completed': '完成日期',

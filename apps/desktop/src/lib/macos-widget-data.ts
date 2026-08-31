@@ -62,7 +62,7 @@ export interface MacWidgetPayload {
     palette: MacWidgetPalette;
 }
 
-const TASK_SORT_OPTIONS: TaskSortBy[] = ['default', 'due', 'start', 'review', 'title', 'created', 'created-desc'];
+const TASK_SORT_OPTIONS: TaskSortBy[] = ['default', 'due', 'start', 'review', 'timeEstimate', 'title', 'created', 'created-desc'];
 
 const resolveTaskSort = (data: AppData): TaskSortBy => {
     const sortBy = data.settings?.taskSortBy;

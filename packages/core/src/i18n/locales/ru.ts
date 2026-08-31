@@ -1053,6 +1053,7 @@ export const ruOverrides: Record<string, string> = {
         'sort.start': 'Дата начала',
         'sort.review': 'Дата рассмотрения',
         'sort.title': 'Заголовок',
+        'sort.timeEstimate': 'Оценка времени',
         'sort.created': 'Самые старые',
         'sort.created-desc': 'Самые новые',
         'sort.completed': 'Дата завершения',

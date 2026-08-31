@@ -1530,6 +1530,7 @@ export const en: Record<string, string> = {
         'sort.start': 'Start date',
         'sort.review': 'Review date',
         'sort.title': 'Title',
+        'sort.timeEstimate': 'Time estimate',
         'sort.created': 'Oldest',
         'sort.created-desc': 'Newest',
         'sort.completed': 'Completion date',

@@ -1434,6 +1434,7 @@ export const koOverrides: Record<string, string> = {
         'sort.start': '시작일',
         'sort.review': '검토 날짜',
         'sort.title': '제목',
+        'sort.timeEstimate': '예상 시간',
         'sort.created': '오래된순',
         'sort.created-desc': '최신순',
         'sort.completed': '완료 날짜',

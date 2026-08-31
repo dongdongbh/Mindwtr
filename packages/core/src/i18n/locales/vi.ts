@@ -1574,6 +1574,7 @@ export const viOverrides: Record<string, string> = {
         'sort.start': 'Ngày bắt đầu',
         'sort.review': 'Ngày xem lại',
         'sort.title': 'Tiêu đề',
+        'sort.timeEstimate': 'Ước tính thời gian',
         'sort.created': 'Đã tạo (cũ nhất)',
         'sort.created-desc': 'Đã tạo (mới nhất)',
         'sort.completed': 'Ngày hoàn thành',

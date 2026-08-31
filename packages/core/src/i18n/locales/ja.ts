@@ -1536,6 +1536,7 @@ export const jaOverrides: Record<string, string> = {
         'sort.start': '開始日',
         'sort.review': 'レビュー日',
         'sort.title': 'タスク名',
+        'sort.timeEstimate': '所要時間',
         'sort.created': '古い順',
         'sort.created-desc': '新しい順',
         'sort.completed': '完了日',

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ArrowUpDown } from 'lucide-react';
-import { tFallback, type TaskSortBy } from '@mindwtr/core';
+import { resolveFeatureFlags, tFallback, useTaskStore, type TaskSortBy } from '@mindwtr/core';
 import { cn } from '../../../lib/utils';
 import { DONE_SORT_OPTIONS, SORT_OPTIONS } from '../../../lib/task-list-sort';
 import { ToolbarSelect } from './ToolbarSelect';
@@ -72,6 +72,14 @@ type SortBySelectProps = {
 /** The labelled SORT select shared by every list toolbar. */
 export function SortBySelect({ value, onChange, t, className, iconTestId, options }: SortBySelectProps) {
     const sortLabel = tFallback(t, 'sort.label', 'Sort');
+    // Gated here rather than at each toolbar: Focus, Review, Contexts, Archive
+    // and the project workspace all render this select, and a new one must not
+    // be able to leak a disabled feature's sort. A stored 'timeEstimate' stays
+    // listed even with the feature off, so the trigger never shows blank (#1107).
+    const timeEstimatesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeEstimates);
+    const sortOptions = (options ?? SORT_OPTIONS).filter(
+        (option) => option !== 'timeEstimate' || timeEstimatesEnabled || value === 'timeEstimate'
+    );
     return (
         <ToolbarSelect
             className={cn('min-w-[160px]', className)}
@@ -84,7 +92,7 @@ export function SortBySelect({ value, onChange, t, className, iconTestId, option
                 />
             )}
             value={value}
-            options={(options ?? SORT_OPTIONS).map((option) => ({ value: option, label: t(`sort.${option}`) }))}
+            options={sortOptions.map((option) => ({ value: option, label: t(`sort.${option}`) }))}
             onChange={(next) => onChange(next as TaskSortBy)}
         />
     );

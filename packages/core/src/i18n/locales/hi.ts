@@ -1052,6 +1052,7 @@ export const hiOverrides: Record<string, string> = {
         'sort.start': 'आरंभ करने की तिथि',
         'sort.review': 'समीक्षा दिनांक',
         'sort.title': 'शीर्षक',
+        'sort.timeEstimate': 'समय का अनुमान',
         'sort.created': 'सबसे पुराना',
         'sort.created-desc': 'नवीनतम',
         'sort.completed': 'पूर्णता तिथि',

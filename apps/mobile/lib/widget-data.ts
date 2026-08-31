@@ -101,7 +101,7 @@ export interface ShortcutsSnapshot {
     projects: ShortcutsSnapshotProjectGroup[];
 }
 
-const TASK_SORT_OPTIONS: TaskSortBy[] = ['default', 'due', 'start', 'review', 'title', 'created', 'created-desc'];
+const TASK_SORT_OPTIONS: TaskSortBy[] = ['default', 'due', 'start', 'review', 'timeEstimate', 'title', 'created', 'created-desc'];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FALLBACK_SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

@@ -1065,6 +1065,7 @@ export const trOverrides: Record<string, string> = {
         'sort.start': 'Başlangıç ​​tarihi',
         'sort.review': 'İnceleme tarihi',
         'sort.title': 'Başlık',
+        'sort.timeEstimate': 'Zaman tahmini',
         'sort.created': 'En eski',
         'sort.created-desc': 'En yeni',
         'sort.completed': 'Tamamlanma tarihi',

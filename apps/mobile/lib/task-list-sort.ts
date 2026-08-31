@@ -5,6 +5,7 @@ export const TASK_LIST_SORT_OPTIONS: readonly TaskSortBy[] = [
   'due',
   'start',
   'review',
+  'timeEstimate',
   'title',
   'created',
   'created-desc',
