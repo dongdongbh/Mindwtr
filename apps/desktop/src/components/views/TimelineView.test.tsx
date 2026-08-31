@@ -1,5 +1,5 @@
 import { beforeEach, describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { TimelineView, resolveTimelineTrack } from './TimelineView';
 import { LanguageProvider } from '../../contexts/language-context';
 import { useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
@@ -170,5 +170,28 @@ describe('TimelineView (#1111)', () => {
         renderTimeline();
         expect(bars()).toHaveLength(0);
         expect(screen.getByText('Nothing scheduled yet')).toBeTruthy();
+    });
+
+    it('keeps scheduled tasks recoverable when the bounded window omits them', () => {
+        setStore({
+            tasks: [
+                makeTask({ id: 'early', title: 'Early task', dueDate: iso(-365) }),
+                makeTask({ id: 'late', title: 'Late task', dueDate: iso(365) }),
+            ],
+        });
+        renderTimeline();
+
+        expect(screen.queryByText('Nothing scheduled yet')).toBeNull();
+        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('+2 tasks');
+        expect(bars()).toHaveLength(0);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Earlier' }));
+        expect(barFor('early')).not.toBeNull();
+        expect(barFor('late')).toBeNull();
+        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('+1 tasks');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+        expect(barFor('early')).toBeNull();
+        expect(barFor('late')).not.toBeNull();
     });
 });

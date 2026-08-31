@@ -156,6 +156,7 @@ export function TimelineView() {
     const scrollRef = React.useRef<HTMLDivElement>(null);
     const [viewportWidth, setViewportWidth] = React.useState(0);
     const [openTaskId, setOpenTaskId] = React.useState<string | null>(null);
+    const [windowStart, setWindowStart] = React.useState<Date | null>(null);
 
     React.useEffect(() => {
         if (!perf.enabled) return;
@@ -193,6 +194,17 @@ export function TimelineView() {
             }
         }
         if (!min || !max) return null;
+        if (windowStart && differenceInCalendarDays(max, min) > MAX_SPAN_DAYS) {
+            const latestFrom = addDays(max, -MAX_SPAN_DAYS);
+            const from = windowStart < min
+                ? min
+                : windowStart > latestFrom
+                    ? latestFrom
+                    : windowStart;
+            const requestedTo = addDays(from, MAX_SPAN_DAYS);
+            const to = requestedTo > max ? max : requestedTo;
+            return { from, to, days: differenceInCalendarDays(to, from) + 1 };
+        }
         // Today is part of the axis whenever it fits, so the today line and the
         // Today button are there even when every task is dated ahead.
         let from = min < today ? min : today;
@@ -214,13 +226,15 @@ export function TimelineView() {
             }
         }
         return { from, to, days: differenceInCalendarDays(to, from) + 1 };
-    }, [datedTasks, today]);
+    }, [datedTasks, today, windowStart]);
 
-    const rows = React.useMemo<TimelineRow[]>(() => {
+    const timelineRows = React.useMemo(() => {
         perf.trackUseMemo();
-        if (!range) return [];
+        if (!range) return { rows: [] as TimelineRow[], earlierOmitted: 0, laterOmitted: 0 };
         const dayIndex = (day: Date) => differenceInCalendarDays(day, range.from);
         const byProject = new Map<string, TimelineRow[]>();
+        let earlierOmitted = 0;
+        let laterOmitted = 0;
         for (const task of datedTasks) {
             const { start, due } = taskDays(task);
             const a = start ? dayIndex(start) : null;
@@ -229,7 +243,14 @@ export function TimelineView() {
             // Reversed dates (due before start) still draw as the span they cover.
             const lo = Math.min(a ?? b!, b ?? a!);
             const hi = Math.max(a ?? b!, b ?? a!);
-            if (hi < 0 || lo > range.days - 1) continue;
+            if (hi < 0) {
+                earlierOmitted += 1;
+                continue;
+            }
+            if (lo > range.days - 1) {
+                laterOmitted += 1;
+                continue;
+            }
             const color = getTaskAccentColor(task, projectById, areaById);
             const key = task.projectId ?? '';
             const list = byProject.get(key);
@@ -270,10 +291,13 @@ export function TimelineView() {
             });
             flattened.push(...group.rows);
         }
-        return flattened;
+        return { rows: flattened, earlierOmitted, laterOmitted };
     }, [areaById, datedTasks, projectById, range, t]);
 
+    const { rows, earlierOmitted, laterOmitted } = timelineRows;
+    const omittedCount = earlierOmitted + laterOmitted;
     const taskRowCount = rows.reduce((count, row) => (row.kind === 'task' ? count + 1 : count), 0);
+    const hasDatedTasks = datedTasks.length > 0;
     const hasRows = Boolean(range) && rows.length > 0;
     const { dayWidth, trackWidth, fitted } = resolveTimelineTrack(
         range?.days ?? 0,
@@ -363,6 +387,16 @@ export function TimelineView() {
         if (!scroller || !todayVisible) return;
         scroller.scrollLeft = Math.max(0, GUTTER_WIDTH + todayLeft - scroller.clientWidth / 2);
     }, [todayLeft, todayVisible]);
+
+    const showEarlierWindow = React.useCallback(() => {
+        if (!range || earlierOmitted === 0) return;
+        setWindowStart(addDays(range.from, -MAX_SPAN_DAYS));
+    }, [earlierOmitted, range]);
+
+    const showLaterWindow = React.useCallback(() => {
+        if (!range || laterOmitted === 0) return;
+        setWindowStart(addDays(range.from, MAX_SPAN_DAYS));
+    }, [laterOmitted, range]);
 
     const openTask = React.useMemo(
         () => (openTaskId ? tasks.find((task) => task.id === openTaskId) ?? null : null),
@@ -505,7 +539,7 @@ export function TimelineView() {
                     </div>
                 </div>
 
-                {!hasRows ? (
+                {!hasDatedTasks ? (
                     <div>
                         <ListEmptyState
                             hasFilters={false}
@@ -518,10 +552,42 @@ export function TimelineView() {
                         />
                     </div>
                 ) : (
-                    // One surface, like the calendar and the board: the card hugs
-                    // its rows (no stretched empty canvas below the last one) and
-                    // only scrolls once they outgrow the viewport.
-                    <div className="min-h-0 flex-1 pb-4">
+                    <>
+                        {omittedCount > 0 && (
+                            <div
+                                data-testid="timeline-omitted-notice"
+                                className="mb-3 flex shrink-0 items-center justify-between gap-3 rounded-md border border-border bg-muted/40 px-3 py-2"
+                            >
+                                <span className="text-xs text-muted-foreground">
+                                    +{omittedCount} {t('common.tasks')}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                    {earlierOmitted > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={showEarlierWindow}
+                                            className="rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                                        >
+                                            {tFallback(t, 'list.completedGroup.earlier', 'Earlier')}
+                                        </button>
+                                    )}
+                                    {laterOmitted > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={showLaterWindow}
+                                            className="rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                                        >
+                                            {tFallback(t, 'settings.later', 'Later')}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                        {hasRows && (
+                            // One surface, like the calendar and the board: the card hugs
+                            // its rows (no stretched empty canvas below the last one) and
+                            // only scrolls once they outgrow the viewport.
+                            <div className="min-h-0 flex-1 pb-4">
                         <div className="flex max-h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
                             <div ref={scrollRef} className="min-h-0 overflow-auto">
                                 <div className="relative flex flex-col" style={{ width: contentWidth }}>
@@ -614,7 +680,9 @@ export function TimelineView() {
                                 </div>
                             </div>
                         </div>
-                    </div>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
             <CalendarOpenTaskModal
