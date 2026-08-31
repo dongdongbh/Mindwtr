@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { computeGlobalSearchResults, type ComputeGlobalSearchResultsInput } from './global-search-filter';
+import {
+    computeGlobalSearchResults,
+    getGlobalSearchFilterPresentation,
+    type ComputeGlobalSearchResultsInput,
+} from './global-search-filter';
 import type { Project, Task } from './types';
 
 const now = '2026-05-03T00:00:00.000Z';
@@ -70,6 +74,36 @@ const compute = (selectedArea: string) => computeGlobalSearchResults({
     duePreset: 'any',
     scope: 'all',
     weekStart: 'sunday',
+});
+
+describe('getGlobalSearchFilterPresentation', () => {
+    it('maps every shared filter value through its translation key', () => {
+        const labels = getGlobalSearchFilterPresentation((key) => `translated:${key}`);
+
+        expect(labels.sections).toEqual({
+            status: 'translated:taskEdit.statusLabel',
+            scope: 'translated:search.scope.label',
+            area: 'translated:taskEdit.areaLabel',
+            due: 'translated:search.due.label',
+            tokens: 'translated:filters.contexts',
+        });
+        expect(labels.scope).toEqual({
+            all: 'translated:search.scope.all',
+            projects: 'translated:search.scope.projects',
+            tasks: 'translated:search.scope.tasks',
+            project_tasks: 'translated:search.scope.projectTasks',
+        });
+        expect(labels.due).toEqual({
+            any: 'translated:search.due.any',
+            none: 'translated:search.due.none',
+            overdue: 'translated:search.due.overdue',
+            today: 'translated:search.due.today',
+            tomorrow: 'translated:search.due.tomorrow',
+            this_week: 'translated:search.due.thisWeek',
+            next_week: 'translated:search.due.nextWeek',
+        });
+        expect(labels.clear).toBe('translated:filters.clear');
+    });
 });
 
 describe('computeGlobalSearchResults', () => {

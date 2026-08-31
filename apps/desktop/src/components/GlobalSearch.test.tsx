@@ -297,6 +297,31 @@ describe('GlobalSearch', () => {
         expect(screen.queryByText('Type to search')).not.toBeInTheDocument();
     });
 
+    it('uses localized presentation labels for filter sections, options, and chips', async () => {
+        render(
+            <LanguageProvider>
+                <GlobalSearch onNavigate={vi.fn()} />
+            </LanguageProvider>
+        );
+
+        await act(async () => {
+            window.dispatchEvent(new Event('mindwtr:open-search'));
+            await vi.advanceTimersByTimeAsync(50);
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+
+        expect(screen.getByText('Status')).toBeInTheDocument();
+        expect(screen.getByText('Scope')).toBeInTheDocument();
+        expect(screen.getByText('Contexts & tags')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument();
+
+        fireEvent.change(screen.getByRole('combobox', { name: 'Due date' }), {
+            target: { value: 'tomorrow' },
+        });
+
+        expect(screen.getByRole('button', { name: 'Due date: Tomorrow' })).toBeInTheDocument();
+    });
+
     // Opened over the Done or Archived view, search must find the finished
     // tasks the user is looking at — hiding them there read as broken (#1019).
     it('includes finished tasks from the start when opened with that default', async () => {

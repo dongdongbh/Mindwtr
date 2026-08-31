@@ -27,7 +27,12 @@ import { getUrgencyColor } from './Task/TaskItemDisplay';
 import { PromptModal } from './PromptModal';
 import { Dialog } from './ui/Dialog';
 import { useUiStore } from '../store/ui-store';
-import { computeGlobalSearchResults, type DuePreset, type GlobalSearchScope } from '@mindwtr/core/global-search-filter';
+import {
+    computeGlobalSearchResults,
+    getGlobalSearchFilterPresentation,
+    type DuePreset,
+    type GlobalSearchScope,
+} from '@mindwtr/core/global-search-filter';
 import { resolveTaskNavigationView } from '../lib/task-navigation';
 import { useFutureStartRevealTick, useLocalDayKey } from '../hooks/useLocalDayKey';
 
@@ -102,6 +107,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
     const setProjectView = useUiStore((state) => state.setProjectView);
     const showToast = useUiStore((state) => state.showToast);
     const { t } = useLanguage();
+    const filterPresentation = getGlobalSearchFilterPresentation(t);
     const futureStartDayKey = useLocalDayKey(isOpen && hideFutureTasks);
     const futureStartRevealTick = useFutureStartRevealTick(_allTasks, isOpen && hideFutureTasks);
 
@@ -424,7 +430,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
             : (areas.find((area) => area.id === selectedArea)?.name ?? selectedArea);
         activeChips.push({
             key: `area:${selectedArea}`,
-            label: `Area: ${label}`,
+            label: `${filterPresentation.sections.area}: ${label}`,
             onRemove: () => setSelectedArea('all'),
         });
     }
@@ -443,29 +449,16 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
         });
     }
     if (duePreset !== 'any') {
-        const labels: Record<string, string> = {
-            overdue: 'Overdue',
-            today: 'Today',
-            tomorrow: 'Tomorrow',
-            this_week: 'This week',
-            next_week: 'Next week',
-            none: 'No due date',
-        };
         activeChips.push({
             key: `due:${duePreset}`,
-            label: `Due: ${labels[duePreset] ?? duePreset}`,
+            label: `${filterPresentation.sections.due}: ${filterPresentation.due[duePreset]}`,
             onRemove: () => setDuePreset('any'),
         });
     }
     if (scope !== 'all') {
-        const labels: Record<string, string> = {
-            projects: 'Projects only',
-            tasks: 'Tasks only',
-            project_tasks: 'Tasks in projects',
-        };
         activeChips.push({
             key: `scope:${scope}`,
-            label: labels[scope] ?? scope,
+            label: filterPresentation.scope[scope],
             onRemove: () => setScope('all'),
         });
     }
@@ -585,7 +578,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
             {filtersOpen && (
                 <div className="min-h-0 overflow-y-auto px-4 py-3 border-b space-y-3 text-xs">
                     <div className="space-y-2">
-                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">State</div>
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{filterPresentation.sections.status}</div>
                         <div className="flex flex-wrap gap-2">
                             {(['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived'] as TaskStatus[]).map((status) => (
                                 <button
@@ -605,33 +598,28 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                         </div>
                     </div>
                     <div className="space-y-2">
-                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Scope</div>
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{filterPresentation.sections.scope}</div>
                         <div className="flex flex-wrap gap-2">
-                            {[
-                                { id: 'all', label: 'All' },
-                                { id: 'projects', label: 'Projects only' },
-                                { id: 'tasks', label: 'Tasks only' },
-                                { id: 'project_tasks', label: 'Tasks in projects' },
-                            ].map((option) => (
+                            {(Object.keys(filterPresentation.scope) as GlobalSearchScope[]).map((option) => (
                                 <button
-                                    key={option.id}
+                                    key={option}
                                     type="button"
-                                    onClick={() => setScope(option.id as typeof scope)}
+                                    onClick={() => setScope(option)}
                                     className={cn(
                                         "whitespace-nowrap rounded-full border px-2 py-1 text-xs transition-colors",
-                                        scope === option.id
+                                        scope === option
                                             ? "bg-primary/15 text-primary border-primary/40"
                                             : "bg-muted/40 text-muted-foreground border-border hover:bg-muted/60"
                                     )}
                                 >
-                                    {option.label}
+                                    {filterPresentation.scope[option]}
                                 </button>
                             ))}
                         </div>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div className="space-y-2">
-                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Area</div>
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{filterPresentation.sections.area}</div>
                             <select
                                 aria-label={tFallback(t, 'taskEdit.areaLabel', 'Area')}
                                 value={selectedArea}
@@ -646,20 +634,16 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                             </select>
                         </div>
                         <div className="space-y-2">
-                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Due</div>
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{filterPresentation.sections.due}</div>
                             <select
-                                aria-label={tFallback(t, 'taskEdit.dueDateLabel', 'Due')}
+                                aria-label={filterPresentation.sections.due}
                                 value={duePreset}
                                 onChange={(event) => setDuePreset(event.target.value as DuePreset)}
                                 className="w-full rounded border border-border bg-muted/40 px-2 py-1 text-xs"
                             >
-                                <option value="any">Any</option>
-                                <option value="overdue">Overdue</option>
-                                <option value="today">Today</option>
-                                <option value="tomorrow">Tomorrow</option>
-                                <option value="this_week">This week</option>
-                                <option value="next_week">Next week</option>
-                                <option value="none">No due date</option>
+                                {(Object.keys(filterPresentation.due) as DuePreset[]).map((value) => (
+                                    <option key={value} value={value}>{filterPresentation.due[value]}</option>
+                                ))}
                             </select>
                         </div>
                     </div>
@@ -677,7 +661,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                         />
                     </div>
                     <div className="space-y-2">
-                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Contexts & Tags</div>
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{filterPresentation.sections.tokens}</div>
                         <div className="flex flex-wrap gap-2 max-h-20 overflow-y-auto">
                             {allTokens.map((token) => (
                                 <button
@@ -751,7 +735,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                             }}
                             className="text-xs text-muted-foreground hover:text-foreground"
                         >
-                            Clear filters
+                            {filterPresentation.clear}
                         </button>
                     </div>
                 </div>

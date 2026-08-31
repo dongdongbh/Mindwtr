@@ -9,6 +9,57 @@ import type { Project, Task, TaskStatus } from './types';
 export type GlobalSearchScope = 'all' | 'projects' | 'tasks' | 'project_tasks';
 export type DuePreset = 'any' | 'none' | 'overdue' | 'today' | 'tomorrow' | 'this_week' | 'next_week';
 
+export type GlobalSearchFilterPresentation = {
+    sections: {
+        status: string;
+        scope: string;
+        area: string;
+        due: string;
+        tokens: string;
+    };
+    scope: Record<GlobalSearchScope, string>;
+    due: Record<DuePreset, string>;
+    clear: string;
+};
+
+/** Shared, exhaustive filter vocabulary for desktop and mobile search. */
+export function getGlobalSearchFilterPresentation(
+    t: (key: string) => string,
+): GlobalSearchFilterPresentation {
+    const translated = (key: string, fallback: string) => {
+        const value = t(key);
+        return value && value !== key ? value : fallback;
+    };
+    const scope = {
+        all: translated('search.scope.all', 'All'),
+        projects: translated('search.scope.projects', 'Projects only'),
+        tasks: translated('search.scope.tasks', 'Tasks only'),
+        project_tasks: translated('search.scope.projectTasks', 'Tasks in projects'),
+    } satisfies Record<GlobalSearchScope, string>;
+    const due = {
+        any: translated('search.due.any', 'Any'),
+        overdue: translated('search.due.overdue', 'Overdue'),
+        today: translated('search.due.today', 'Today'),
+        tomorrow: translated('search.due.tomorrow', 'Tomorrow'),
+        this_week: translated('search.due.thisWeek', 'This week'),
+        next_week: translated('search.due.nextWeek', 'Next week'),
+        none: translated('search.due.none', 'No due date'),
+    } satisfies Record<DuePreset, string>;
+
+    return {
+        sections: {
+            status: translated('taskEdit.statusLabel', 'Status'),
+            scope: translated('search.scope.label', 'Scope'),
+            area: translated('taskEdit.areaLabel', 'Area'),
+            due: translated('search.due.label', 'Due date'),
+            tokens: translated('filters.contexts', 'Contexts & tags'),
+        },
+        scope,
+        due,
+        clear: translated('filters.clear', 'Clear'),
+    };
+}
+
 export type ComputeGlobalSearchResultsInput = {
     query: string;
     tasks: Task[];

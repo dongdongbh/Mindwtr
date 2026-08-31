@@ -33,7 +33,12 @@ import { useTaskStore,
     undoTaskCompletion,
     formatTaskMarkedDoneMessage,
     translateWithFallback, tFallback, } from '@mindwtr/core';
-import { computeGlobalSearchResults } from '@mindwtr/core/global-search-filter';
+import {
+    computeGlobalSearchResults,
+    getGlobalSearchFilterPresentation,
+    type DuePreset,
+    type GlobalSearchScope,
+} from '@mindwtr/core/global-search-filter';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLanguage } from '../contexts/language-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -94,8 +99,8 @@ export default function SearchScreen() {
     const [selectedArea, setSelectedArea] = useState<'all' | 'none' | string>('all');
     const [selectedTokens, setSelectedTokens] = useState<string[]>([]);
     const [locationQuery, setLocationQuery] = useState('');
-    const [duePreset, setDuePreset] = useState<'any' | 'overdue' | 'today' | 'tomorrow' | 'this_week' | 'next_week' | 'none'>('any');
-    const [scope, setScope] = useState<'all' | 'projects' | 'tasks' | 'project_tasks'>('all');
+    const [duePreset, setDuePreset] = useState<DuePreset>('any');
+    const [scope, setScope] = useState<GlobalSearchScope>('all');
     const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
     const inputRef = useRef<TextInput>(null);
     const futureStartDayKey = useLocalDayKey(hideFutureTasks);
@@ -369,21 +374,7 @@ export default function SearchScreen() {
         });
         return Array.from(tokens).filter(Boolean).sort();
     }, [_allTasks]);
-    const dueLabels: Record<typeof duePreset, string> = {
-        any: t('search.due.any'),
-        overdue: t('search.due.overdue'),
-        today: t('search.due.today'),
-        tomorrow: t('search.due.tomorrow'),
-        this_week: t('search.due.thisWeek'),
-        next_week: t('search.due.nextWeek'),
-        none: t('search.due.none'),
-    };
-    const scopeLabels: Record<typeof scope, string> = {
-        all: t('search.scope.all'),
-        projects: t('search.scope.projects'),
-        tasks: t('search.scope.tasks'),
-        project_tasks: t('search.scope.projectTasks'),
-    };
+    const filterPresentation = getGlobalSearchFilterPresentation(t);
     const toggleStatus = (status: TaskStatus) => {
         setSelectedStatuses((prev) => (
             prev.includes(status) ? prev.filter((item) => item !== status) : [...prev, status]
@@ -440,14 +431,14 @@ export default function SearchScreen() {
     if (duePreset !== 'any') {
         activeChips.push({
             key: `due:${duePreset}`,
-            label: `${tFallback(t, 'taskEdit.dueDateLabel', 'Due')}: ${dueLabels[duePreset]}`,
+            label: `${filterPresentation.sections.due}: ${filterPresentation.due[duePreset]}`,
             onPress: () => setDuePreset('any'),
         });
     }
     if (scope !== 'all') {
         activeChips.push({
             key: `scope:${scope}`,
-            label: scopeLabels[scope],
+            label: filterPresentation.scope[scope],
             onPress: () => setScope('all'),
         });
     }
@@ -583,7 +574,7 @@ export default function SearchScreen() {
                                         onPress={clearFilters}
                                         style={styles.filtersTextButton}
                                     >
-                                        <Text style={[styles.clearFiltersText, { color: tc.tint }]}>{t('common.clear')}</Text>
+                                        <Text style={[styles.clearFiltersText, { color: tc.tint }]}>{filterPresentation.clear}</Text>
                                     </TouchableOpacity>
                                 )}
                                 <TouchableOpacity
@@ -603,11 +594,11 @@ export default function SearchScreen() {
                             showsVerticalScrollIndicator={false}
                         >
                             <Text style={[styles.sectionLabel, { color: tc.secondaryText }]}>
-                                {tFallback(t, 'search.due.label', 'Due date')}
+                                {filterPresentation.sections.due}
                             </Text>
                             <View style={styles.chipRow}>
                                 {(['any', 'overdue', 'today', 'tomorrow', 'this_week', 'next_week', 'none'] as const).map((value) =>
-                                    renderChip(dueLabels[value], duePreset === value, () => setDuePreset(value))
+                                    renderChip(filterPresentation.due[value], duePreset === value, () => setDuePreset(value))
                                 )}
                             </View>
 
@@ -627,7 +618,7 @@ export default function SearchScreen() {
                             />
 
                             <Text style={[styles.sectionLabel, { color: tc.secondaryText }]}>
-                                {tFallback(t, 'filters.contexts', 'Contexts & tags')}
+                                {filterPresentation.sections.tokens}
                             </Text>
                             <View style={styles.chipRow}>
                                 {allTokens.map((token) => renderChip(token, selectedTokens.includes(token), () => toggleToken(token)))}
@@ -655,7 +646,7 @@ export default function SearchScreen() {
                             </View>
 
                             <Text style={[styles.sectionLabel, { color: tc.secondaryText }]}>
-                                {tFallback(t, 'taskEdit.statusLabel', 'Status')}
+                                {filterPresentation.sections.status}
                             </Text>
                             <View style={styles.chipRow}>
                                 {statusOptions.map((status) =>
@@ -668,16 +659,16 @@ export default function SearchScreen() {
                             </View>
 
                             <Text style={[styles.sectionLabel, { color: tc.secondaryText }]}>
-                                {tFallback(t, 'search.scope.label', 'Scope')}
+                                {filterPresentation.sections.scope}
                             </Text>
                             <View style={styles.chipRow}>
                                 {(['all', 'projects', 'tasks', 'project_tasks'] as const).map((value) =>
-                                    renderChip(scopeLabels[value], scope === value, () => setScope(value))
+                                    renderChip(filterPresentation.scope[value], scope === value, () => setScope(value))
                                 )}
                             </View>
 
                             <Text style={[styles.sectionLabel, { color: tc.secondaryText }]}>
-                                {tFallback(t, 'taskEdit.areaLabel', 'Area')}
+                                {filterPresentation.sections.area}
                             </Text>
                             <View style={styles.chipRow}>
                                 {renderChip(
