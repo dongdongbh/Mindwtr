@@ -9,6 +9,7 @@ const policyPath = "aur/trusted-packages.json";
 const checksum = "a".repeat(64);
 
 function fixture({
+  packageName = "mindwtr-bin",
   source,
   pkgbuildSource,
   checksumValue = checksum,
@@ -24,16 +25,16 @@ function fixture({
   writeFileSync(
     join(directory, "PKGBUILD"),
     `# Maintainer: dongdongbh <dongdongbhbh@gmail.com>\n` +
-      `pkgname=mindwtr-bin\npkgver=1.2.0\npkgrel=1\n` +
+      `pkgname=${packageName}\npkgver=1.2.0\npkgrel=1\n` +
       `url="https://github.com/dongdongbh/Mindwtr"\n` +
       `source_x86_64=("${renderedPkgbuildSource}")\n` +
       `sha256sums_x86_64=('${checksumValue}')\n${extraPkgbuild}`,
   );
   writeFileSync(
     join(directory, ".SRCINFO"),
-    `pkgbase = mindwtr-bin\n\turl = https://github.com/dongdongbh/Mindwtr\n` +
+    `pkgbase = ${packageName}\n\turl = https://github.com/dongdongbh/Mindwtr\n` +
       `\tsource_x86_64 = ${srcinfoSource}\n` +
-      `\tsha256sums_x86_64 = ${checksumValue}\n\npkgname = mindwtr-bin\n`,
+      `\tsha256sums_x86_64 = ${checksumValue}\n\npkgname = ${packageName}\n`,
   );
   if (extraFile)
     writeFileSync(join(directory, extraFile), "post_install() { :; }\n");
@@ -75,6 +76,29 @@ test("rejects untrusted source domains", () => {
       packageDir: fixture({
         pkgbuildSource: "https://example.com/hidden-from-srcinfo.deb",
       }),
+      packageName: "mindwtr-bin",
+      policyPath,
+    }),
+  ).toThrow("PKGBUILD contains an untrusted URL");
+});
+
+test("allows the pinned npm registry only for the source package", () => {
+  const registryCommand =
+    "prepare() {\n  bun install --registry=https://registry.npmjs.org\n}\n";
+  expect(() =>
+    validatePackageDir({
+      packageDir: fixture({
+        packageName: "mindwtr",
+        extraPkgbuild: registryCommand,
+      }),
+      packageName: "mindwtr",
+      policyPath,
+    }),
+  ).not.toThrow();
+
+  expect(() =>
+    validatePackageDir({
+      packageDir: fixture({ extraPkgbuild: registryCommand }),
       packageName: "mindwtr-bin",
       policyPath,
     }),

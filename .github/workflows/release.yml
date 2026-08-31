@@ -1424,37 +1424,6 @@ jobs:
               fi
             '
 
-      - name: Validate source package build (clean container)
-        shell: bash
-        working-directory: aur-mindwtr
-        run: |
-          HOST_UID="$(id -u)"
-          HOST_GID="$(id -g)"
-          docker run --rm \
-            -e HOST_UID="$HOST_UID" \
-            -e HOST_GID="$HOST_GID" \
-            -v "$PWD:/aur" \
-            -w /aur \
-            archlinux:latest \
-            bash -lc '
-              set -euo pipefail
-              pacman -Sy --noconfirm --needed base-devel git
-              mapfile -t pkgdeps < <(bash -lc "
-                source PKGBUILD
-                printf \"%s\\n\" \"\${depends[@]}\" \"\${makedepends[@]}\" \"\${checkdepends[@]}\" \
-                  | sed -E \"s/[<>=].*$//\" \
-                  | awk \"NF\" \
-                  | sort -u
-              ")
-              if [ "${#pkgdeps[@]}" -gt 0 ]; then
-                pacman -S --noconfirm --needed "${pkgdeps[@]}"
-              fi
-              getent group "$HOST_GID" >/dev/null 2>&1 || groupadd -g "$HOST_GID" builder
-              id -u builder >/dev/null 2>&1 || useradd -m -u "$HOST_UID" -g "$HOST_GID" builder
-              chown -R builder:builder /aur
-              su builder -c "makepkg --cleanbuild --clean --nodeps --noconfirm"
-            '
-
       - name: Bump pkgrel for packaging-only changes
         shell: bash
         working-directory: aur-mindwtr
@@ -1498,6 +1467,37 @@ jobs:
           node source/scripts/ci/validate-aur-package.mjs \
             --package-dir aur-mindwtr \
             --package mindwtr
+
+      - name: Validate source package build (clean container)
+        shell: bash
+        working-directory: aur-mindwtr
+        run: |
+          HOST_UID="$(id -u)"
+          HOST_GID="$(id -g)"
+          docker run --rm \
+            -e HOST_UID="$HOST_UID" \
+            -e HOST_GID="$HOST_GID" \
+            -v "$PWD:/aur" \
+            -w /aur \
+            archlinux:latest \
+            bash -lc '
+              set -euo pipefail
+              pacman -Sy --noconfirm --needed base-devel git
+              mapfile -t pkgdeps < <(bash -lc "
+                source PKGBUILD
+                printf \"%s\\n\" \"\${depends[@]}\" \"\${makedepends[@]}\" \"\${checkdepends[@]}\" \
+                  | sed -E \"s/[<>=].*$//\" \
+                  | awk \"NF\" \
+                  | sort -u
+              ")
+              if [ "${#pkgdeps[@]}" -gt 0 ]; then
+                pacman -S --noconfirm --needed "${pkgdeps[@]}"
+              fi
+              getent group "$HOST_GID" >/dev/null 2>&1 || groupadd -g "$HOST_GID" builder
+              id -u builder >/dev/null 2>&1 || useradd -m -u "$HOST_UID" -g "$HOST_GID" builder
+              chown -R builder:builder /aur
+              su builder -c "makepkg --cleanbuild --clean --nodeps --noconfirm"
+            '
 
       - name: Verify AUR package ownership before push
         shell: bash

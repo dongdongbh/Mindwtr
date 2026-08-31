@@ -420,6 +420,10 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   expect(sourcePushIndex).toBeGreaterThan(sourceValidateIndex);
   expect(sourcePushIndex).toBeGreaterThan(sourceAuditIndex);
   expect(sourcePushIndex).toBeGreaterThan(sourceRecordIndex);
+  const sourceCleanBuildIndex = sourceSteps.findIndex(
+    (step) => step.name === "Validate source package build (clean container)",
+  );
+  expect(sourceCleanBuildIndex).toBeGreaterThan(sourceValidateIndex);
   expect(stableText).toContain("aur-proposal-mindwtr-");
   const bunLockGenerationStep = sourceSteps.find(
     (step) => step.name === "Generate frozen Bun lockfile for AUR",

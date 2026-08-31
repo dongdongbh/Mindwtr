@@ -113,8 +113,16 @@ export function validatePackageDir({ packageDir, packageName, policyPath }) {
   if (urlMatch?.[1] !== policy.upstreamRepository) {
     throw new Error(`${packageName} PKGBUILD has an untrusted upstream URL`);
   }
+  const trustedPkgbuildUrls = [
+    policy.upstreamRepository,
+    ...(packagePolicy.trustedPkgbuildUrls ?? []),
+  ];
   for (const url of pkgbuild.match(/(?:git\+)?https?:\/\/[^\s"')]+/g) ?? []) {
-    if (!url.startsWith(policy.upstreamRepository)) {
+    if (
+      !trustedPkgbuildUrls.some(
+        (trustedUrl) => url === trustedUrl || url.startsWith(`${trustedUrl}/`),
+      )
+    ) {
       throw new Error(
         `${packageName} PKGBUILD contains an untrusted URL: ${url}`,
       );

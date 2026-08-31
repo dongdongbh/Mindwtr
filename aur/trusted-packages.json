@@ -6,6 +6,7 @@
     "mindwtr": {
       "maintainer": "yochananmarqos",
       "coMaintainers": ["dongdongbh"],
+      "trustedPkgbuildUrls": ["https://registry.npmjs.org"],
       "trackedFiles": [
         ".SRCINFO",
         ".gitignore",
