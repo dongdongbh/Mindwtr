@@ -23,6 +23,8 @@ import { TEXT_SIZE_STORAGE_KEY, applyDesktopTextSize, coerceDesktopTextSize } fr
 import { loadStoredFullscreen } from './lib/window-state';
 import { restoreStoredWebviewZoom } from './lib/webview-zoom';
 import { isQuickAddWindowLocation } from './lib/quick-add-window';
+import { isDesktopWidgetLocation } from './components/widgets/widget-data';
+import { DesktopWidgetApp } from './components/widgets/DesktopWidgetApp';
 import {
     sendDesktopDailyHeartbeat,
 } from './lib/analytics-heartbeat';
@@ -97,6 +99,10 @@ if (diagnosticsEnabled) {
 const isQuickAddWindow = isQuickAddWindowLocation();
 if (isQuickAddWindow) {
     document.documentElement.dataset.quickAddWindow = 'true';
+}
+const isDesktopWidgetWindow = isDesktopWidgetLocation();
+if (isDesktopWidgetWindow) {
+    document.documentElement.dataset.desktopWidgetWindow = 'true';
 }
 
 const nativeTheme = resolveNativeTheme(savedTheme);
@@ -196,12 +202,12 @@ async function bootstrap() {
     installFileDropNavigationGuard();
     await initStorage();
     setupGlobalErrorLogging();
-    if (!isQuickAddWindow) {
+    if (!isQuickAddWindow && !isDesktopWidgetWindow) {
         await restoreFullscreenState();
         await restoreWebviewZoomState();
     }
 
-    if (!isQuickAddWindow && !isTauriRuntime() && 'serviceWorker' in navigator) {
+    if (!isQuickAddWindow && !isDesktopWidgetWindow && !isTauriRuntime() && 'serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(() => undefined);
     }
 
@@ -220,7 +226,7 @@ async function bootstrap() {
         });
     }
 
-    const RootApp = isQuickAddWindow ? QuickAddWindowApp : App;
+    const RootApp = isQuickAddWindow ? QuickAddWindowApp : isDesktopWidgetWindow ? DesktopWidgetApp : App;
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
         <React.StrictMode>
@@ -230,7 +236,7 @@ async function bootstrap() {
         </React.StrictMode>,
     );
 
-    if (!isQuickAddWindow) {
+    if (!isQuickAddWindow && !isDesktopWidgetWindow) {
         void signalUiReady();
         void sendDesktopDailyHeartbeat().catch((error) => {
             void logWarn('Desktop analytics heartbeat failed', {

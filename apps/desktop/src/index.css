@@ -654,6 +654,14 @@
   html[data-quick-add-window='true'] #root {
     background-color: transparent;
   }
+
+  /* Desktop widget windows are created with a transparent native window so the
+     user-chosen opacity really shows the desktop through the widget. */
+  html[data-desktop-widget-window='true'],
+  html[data-desktop-widget-window='true'] body,
+  html[data-desktop-widget-window='true'] #root {
+    background-color: transparent;
+  }
 }
 
 @layer components {

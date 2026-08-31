@@ -4,18 +4,26 @@
   "description": "enables the default permissions",
   "windows": [
     "main",
-    "quick-add"
+    "quick-add",
+    "desktop-widget-*"
   ],
   "permissions": [
     "core:default",
     "core:app:allow-set-app-theme",
     "core:window:allow-close",
+    "core:window:allow-destroy",
     "core:window:allow-set-decorations",
     "core:window:allow-set-theme",
     "core:window:allow-set-skip-taskbar",
+    "core:window:allow-set-position",
+    "core:window:allow-start-dragging",
+    "core:window:allow-outer-position",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
     "core:window:allow-hide",
     "core:window:allow-is-focused",
     "core:window:allow-request-user-attention",
+    "core:webview:allow-create-webview-window",
     "core:webview:allow-set-webview-zoom",
     "dialog:default",
     "fs:default",

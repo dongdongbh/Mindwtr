@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { isSameDay, isToday } from 'date-fns';
-import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Minus, Plus, Search } from 'lucide-react';
+import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Minus, Pin, Plus, Search, StickyNote } from 'lucide-react';
 import {
     formatI18nTemplate,
     getCalendarDayOfMonth,
@@ -18,6 +18,7 @@ import {
 
 import { ErrorBoundary } from '../ErrorBoundary';
 import { cn } from '../../lib/utils';
+import { toggleDesktopWidget } from '../../lib/desktop-widget-launcher';
 import { reportError } from '../../lib/report-error';
 import { showUndoToast } from '../../lib/undo-registry';
 import {
@@ -487,6 +488,24 @@ export function CalendarView() {
                     >
                         <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                         {resolveText('calendar.showCompleted', 'Completed')}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => void toggleDesktopWidget('calendar')}
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        aria-label={resolveText('calendar.pinCalendarWidget', 'Pin calendar widget to desktop')}
+                        title={resolveText('calendar.pinCalendarWidgetHint', 'Pin a small month calendar to the desktop; click again to remove it')}
+                    >
+                        <Pin className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => void toggleDesktopWidget('today')}
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        aria-label={resolveText('calendar.pinTodayWidget', 'Pin today-tasks note to desktop')}
+                        title={resolveText('calendar.pinTodayWidgetHint', 'Pin a sticky note with today’s tasks to the desktop; click again to remove it')}
+                    >
+                        <StickyNote className="h-4 w-4" aria-hidden="true" />
                     </button>
                 </div>
                 {visibleSearchMatchCount !== null && (
