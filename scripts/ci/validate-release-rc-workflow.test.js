@@ -459,6 +459,8 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   expect(betaAudit.run).toContain('del(.packages["mindwtr-beta-bin"])');
   expect(betaCreationAudit.if).toContain("steps.beta_repo.outputs.initialized");
   expect(betaCreationAudit.run).toContain("audit-aur-state.mjs");
+  expect(betaCreationAudit.run).toContain("REMOTE_HEAD");
+  expect(betaCreationAudit.run).toContain("AUR RPC has not indexed");
 });
 
 test("AUR publication is a manual environment-gated recovery workflow", () => {

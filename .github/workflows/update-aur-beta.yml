@@ -253,13 +253,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          LOCAL_HEAD="$(git -C aur-mindwtr-beta-bin rev-parse HEAD)"
+          REMOTE_HEAD="$(git ls-remote https://aur.archlinux.org/mindwtr-beta-bin.git refs/heads/master | awk '{print $1}')"
+          if [ "$REMOTE_HEAD" != "$LOCAL_HEAD" ]; then
+            echo "Published mindwtr-beta-bin head mismatch: local ${LOCAL_HEAD}, remote ${REMOTE_HEAD:-missing}." >&2
+            exit 1
+          fi
           for attempt in 1 2 3 4 5 6; do
             if node scripts/ci/audit-aur-state.mjs; then
               exit 0
             fi
             if [ "$attempt" -eq 6 ]; then
-              echo "The new mindwtr-beta-bin package did not become auditable after publication." >&2
-              exit 1
+              echo "::warning::AUR RPC has not indexed mindwtr-beta-bin yet; its public Git head matches the exact pushed commit. The next update will require the normal full ownership audit."
+              exit 0
             fi
             sleep 5
           done
