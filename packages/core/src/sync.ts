@@ -896,19 +896,31 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
             const contentRev = contentSource.contentRev;
             const normalizedLocalFileHash = localAttachment.fileHash?.trim().toLowerCase();
             const normalizedResolvedFileHash = fileHash?.trim().toLowerCase();
+            // Merge kept the exact local content identity: same contentRev, same
+            // fileHash. This is the steady state of every device merging against its
+            // own stripped remote twin, and the attachment-level tie can still hand
+            // `winner` to the incoming copy.
+            const localIdentitySurvived = (contentRev ?? 0) === localRev
+                && Boolean(normalizedLocalFileHash)
+                && normalizedResolvedFileHash === normalizedLocalFileHash;
             // `pendingContentUpload` is device-local retry state, never an LWW
             // field. Preserve this device's marker whenever merge kept the exact
             // local content identity, even if an otherwise-identical remote record
             // won the attachment-level tie after its local-only fields were stripped.
             const localPendingIdentitySurvived = localAttachment.pendingContentUpload === true
-                && (contentRev ?? 0) === localRev
-                && Boolean(normalizedLocalFileHash)
-                && normalizedResolvedFileHash === normalizedLocalFileHash;
+                && localIdentitySurvived;
+            // The recorded stat describes THIS device's disk file and never travels, so
+            // when the identity survived it must come from the local copy: taking it
+            // from an incoming winner yields an absent stat, the post-merge pass
+            // re-records it, and that local write triggers another sync, every cycle.
+            // Design point 4 is untouched: newer remote content arrives with a higher
+            // contentRev or a different fileHash and still lands with an absent stat.
+            const statSource = localIdentitySurvived ? localAttachment : contentSource;
             return {
                 fileHash,
                 contentRev,
-                contentMtimeMs: contentSource.contentMtimeMs,
-                contentSize: contentSource.contentSize,
+                contentMtimeMs: statSource.contentMtimeMs,
+                contentSize: statSource.contentSize,
                 pendingContentUpload: localPendingIdentitySurvived ? true : undefined,
             };
         };

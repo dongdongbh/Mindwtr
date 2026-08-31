@@ -471,6 +471,55 @@ describe('Sync Logic', () => {
                 expect(secondAttachment?.fileHash).toBe('dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd');
             });
 
+            it('keeps this device\'s recorded stat when merging against its own stripped remote twin (no local churn)', async () => {
+                // Steady state on one device: local carries the stat, the remote copy of the
+                // same attachment is sanitized (no uri/localStatus/stat), everything else is
+                // byte-for-byte equal, so the attachment-level LWW is a tie. Whichever copy the
+                // tie hands to `winner`, the merged record must keep the local stat: dropping it
+                // made every post-merge check-on-touch pass re-record it, which persisted a
+                // local write, which queued another sync, forever (desktop, WebDAV, 2026-08-31).
+                const localAttachment: Attachment = {
+                    id: 'att-twin',
+                    kind: 'file',
+                    title: 'photo.jpg',
+                    uri: '/device/attachments/att-twin.jpg',
+                    cloudKey: 'attachments/att-twin.jpg',
+                    fileHash: 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+                    contentRev: 1,
+                    contentMtimeMs: 1780243119338,
+                    contentSize: 92826,
+                    localStatus: 'available',
+                    createdAt: '2026-04-19T20:06:20.922Z',
+                    updatedAt: '2026-04-19T20:06:20.922Z',
+                };
+                const local = mockAppData([{ ...createMockTask('twin', '2026-04-19'), attachments: [localAttachment] }]);
+                const remote = sanitizeAppDataForRemote(local);
+                expect(remote.tasks[0].attachments?.[0]?.contentMtimeMs).toBeUndefined();
+
+                const merged = mergeAppData(local, remote);
+                const attachment = merged.tasks[0].attachments?.find((item) => item.id === 'att-twin');
+                expect(attachment).toMatchObject({
+                    contentMtimeMs: 1780243119338,
+                    contentSize: 92826,
+                    localStatus: 'available',
+                    uri: '/device/attachments/att-twin.jpg',
+                });
+
+                // And the post-merge lifecycle sees nothing to record: no patch, no local write.
+                const { patches } = await runAttachmentTransferLifecycle({
+                    attachmentsById: new Map([[attachment!.id, attachment!]]),
+                    getLocalFilePresence: async () => 'present' as const,
+                    getLocalFileStat: async () => ({ mtimeMs: 1780243119338, size: 92826 }),
+                    computeLocalFileHash: async () => { throw new Error('stat matched; hash must not be read'); },
+                    contentChangePhase: 'post-merge',
+                    onUpload: async () => { throw new Error('must not upload'); },
+                    onUploadError: vi.fn(),
+                    onDownload: async () => { throw new Error('must not download'); },
+                    onDownloadError: vi.fn(),
+                });
+                expect(patches.size).toBe(0);
+            });
+
             it('two devices with byte-identical content and different local mtimes converge to zero remote writes (review B1)', async () => {
                 // Reproduces the reviewer's exact scenario: two devices hold the same bytes but
                 // recorded their own stat at different times (1000ms vs 2000ms) — nothing about
