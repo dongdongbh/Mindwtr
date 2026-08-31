@@ -14,6 +14,7 @@ This runs:
 
 - `packages/core/src/performance-large-store.test.ts`
 - `apps/desktop/src/components/views/ListView.performance.test.tsx`
+- `apps/desktop/src/components/views/TimelineView.performance.test.tsx`
 - `apps/mobile/tests/large-store-performance.test.tsx`
 
 The core suite generates stores with 1k, 10k, and 50k tasks, many projects, many sections, mixed statuses, due dates, start dates, tags, contexts, deleted records, and a project with many selected-project tasks.
@@ -43,10 +44,11 @@ Platform tests exercise the production component seams with 5,000 generated task
 | Surface | Dataset | Budget |
 | --- | ---: | ---: |
 | Desktop `ListView` | 5,000 next actions | 500ms |
+| Desktop `TimelineView` | 5,000 actionable tasks dated across 360 days and grouped into 50 projects | 500ms |
 | Mobile `TaskList` | 5,000 mixed-status tasks | 350ms |
 | Mobile `ProjectDetailModal` | 5,000 tasks in one project | 500ms |
 
-The mobile suite also retains budgets for Focus, Projects, Archived, Trash, editor open/save, completion, picker dismissal, and bulk selection. These are JavaScript render-path regression gates; use release-mode device profiling for native layout, UI-thread, and frame-timing conclusions.
+The Timeline budget includes filtering, date-range computation, project grouping and sorting, axis construction, and the virtualized initial render. The mobile suite also retains budgets for Focus, Projects, Archived, Trash, editor open/save, completion, picker dismissal, and bulk selection. These are JavaScript render-path regression gates; use release-mode device profiling for native layout, UI-thread, and frame-timing conclusions.
 
 ## When To Add A Budget
 
