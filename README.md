@@ -79,7 +79,7 @@ _Mindwtr = "mind like water": the calm you get when nothing is rattling around i
   <video src="https://github.com/user-attachments/assets/912eb827-e357-476e-9d28-1cd2cdf655d1" width="25%" autoplay loop muted playsinline></video>
 
   <p>
-    <i>Local-First GTD on Arch Linux & Android</i>
+    <i>Local-First GTD on desktop & mobile</i>
   </p>
 </div>
 

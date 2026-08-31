@@ -79,7 +79,7 @@
   <video src="https://github.com/user-attachments/assets/912eb827-e357-476e-9d28-1cd2cdf655d1" width="25%" autoplay loop muted playsinline></video>
 
   <p>
-    <i>Arch Linux 与 Android 上的本地优先 GTD</i>
+    <i>桌面与移动端的本地优先 GTD</i>
   </p>
 </div>
 
