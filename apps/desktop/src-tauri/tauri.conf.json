@@ -68,6 +68,9 @@
     ]
   },
   "plugins": {
+    "fs": {
+      "requireLiteralLeadingDot": false
+    },
     "shell": {
       "open": "^(mailto:[^\\s]+|tel:[^\\s]+|mid:[^\\s]+|https?://[^\\s]+|obsidian://[^\\s]+|ms-windows-store://[^\\s]+)$"
     }

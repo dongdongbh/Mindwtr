@@ -167,11 +167,16 @@ const describeAttachmentUriForLog = (
 
 const describeAttachmentErrorForLog = (error: unknown): Error => {
     const status = getErrorStatus(error);
-    return new Error(
-        status == null
-            ? 'Attachment sync operation failed'
-            : `Attachment sync operation failed (${status})`,
-    );
+    if (status != null) return new Error(`Attachment sync operation failed (${status})`);
+    // The plugin-fs scope refusal is the one local failure worth naming: it carries
+    // no secret, and without it a blocked stage file reads like a network error
+    // (leading-dot stage names were refused on Unix until requireLiteralLeadingDot
+    // was disabled in tauri.conf.json).
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    if (/forbidden path|not allowed on the configured scope/i.test(message)) {
+        return new Error('Attachment sync operation failed (path refused by fs scope)');
+    }
+    return new Error('Attachment sync operation failed');
 };
 
 const logAttachmentWarning = (
