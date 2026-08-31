@@ -1,5 +1,13 @@
 import { useState } from 'react';
-import { buildRRuleString, parseRRuleString, RECURRENCE_INTERVAL_MAX, safeParseDate, tFallback, type RecurrenceByDay, type RecurrenceRule, type RecurrenceStrategy } from '@mindwtr/core';
+import {
+    parseRRuleString,
+    RECURRENCE_INTERVAL_MAX,
+    safeParseDate,
+    tFallback,
+    type RecurrenceRule,
+    type RecurrenceStrategy,
+    type RRuleEditOverrides,
+} from '@mindwtr/core';
 
 import { cn } from '../../../lib/utils';
 import { DateField } from '../../ui/DateField';
@@ -30,13 +38,7 @@ type RecurrenceFieldProps = {
     openCustomRecurrence: () => void;
     buildRecurrenceRRule: (
         rule: RecurrenceRule,
-        overrides?: {
-            byDay?: RecurrenceByDay[];
-            interval?: number;
-            byMonthDay?: number[];
-            count?: number;
-            until?: string;
-        },
+        overrides?: RRuleEditOverrides,
     ) => string;
 };
 
@@ -114,33 +116,37 @@ export function RecurrenceField({
                     if (value) setExpanded(true);
                     if (value === 'daily') {
                         if (!editRecurrenceRRule || parsedRecurrenceRRule.rule !== 'daily') {
-                            onRecurrenceRRuleChange(buildRRuleString('daily', undefined, 1, {
-                                count: parsedRecurrenceRRule.count,
-                                until: parsedRecurrenceRRule.until,
+                            onRecurrenceRRuleChange(buildRecurrenceRRule('daily', {
+                                byDay: undefined,
+                                byMonthDay: undefined,
+                                interval: 1,
                             }));
                         }
                     }
                     if (value === 'weekly') {
                         if (!editRecurrenceRRule || parsedRecurrenceRRule.rule !== 'weekly') {
-                            onRecurrenceRRuleChange(buildRRuleString('weekly', undefined, undefined, {
-                                count: parsedRecurrenceRRule.count,
-                                until: parsedRecurrenceRRule.until,
+                            onRecurrenceRRuleChange(buildRecurrenceRRule('weekly', {
+                                byDay: undefined,
+                                byMonthDay: undefined,
+                                interval: undefined,
                             }));
                         }
                     }
                     if (value === 'monthly') {
                         if (!editRecurrenceRRule || parsedRecurrenceRRule.rule !== 'monthly') {
-                            onRecurrenceRRuleChange(buildRRuleString('monthly', undefined, undefined, {
-                                count: parsedRecurrenceRRule.count,
-                                until: parsedRecurrenceRRule.until,
+                            onRecurrenceRRuleChange(buildRecurrenceRRule('monthly', {
+                                byDay: undefined,
+                                byMonthDay: undefined,
+                                interval: undefined,
                             }));
                         }
                     }
                     if (value === 'yearly') {
                         if (!editRecurrenceRRule || parsedRecurrenceRRule.rule !== 'yearly') {
-                            onRecurrenceRRuleChange(buildRRuleString('yearly', undefined, undefined, {
-                                count: parsedRecurrenceRRule.count,
-                                until: parsedRecurrenceRRule.until,
+                            onRecurrenceRRuleChange(buildRecurrenceRRule('yearly', {
+                                byDay: undefined,
+                                byMonthDay: undefined,
+                                interval: undefined,
                             }));
                         }
                     }
@@ -229,16 +235,10 @@ export function RecurrenceField({
                     <span className="text-[10px] text-muted-foreground">{t('recurrence.weekUnit')}</span>
                     <span className="text-[10px] text-muted-foreground">{t('recurrence.onLabel')}</span>
                     <WeekdaySelector
-                        value={editRecurrenceRRule || buildRRuleString('weekly', undefined, undefined, {
-                            count: parsedRecurrenceRRule.count,
-                            until: parsedRecurrenceRRule.until,
-                        })}
+                        value={editRecurrenceRRule || buildRecurrenceRRule('weekly')}
                         onChange={(rrule) => {
                             const parsed = parseRRuleString(rrule);
-                            onRecurrenceRRuleChange(buildRRuleString('weekly', parsed.byDay, parsedRecurrenceRRule.interval, {
-                                count: parsedRecurrenceRRule.count,
-                                until: parsedRecurrenceRRule.until,
-                            }));
+                            onRecurrenceRRuleChange(buildRecurrenceRRule('weekly', { byDay: parsed.byDay }));
                         }}
                     />
                 </div>

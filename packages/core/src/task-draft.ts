@@ -276,6 +276,9 @@ export function taskDraftToUpdatePatch(
         if (parsed.byMonthDay && parsed.byMonthDay.length > 0) {
             recurrenceValue.byMonthDay = parsed.byMonthDay;
         }
+        if (parsed.weekStart) {
+            recurrenceValue.weekStart = parsed.weekStart;
+        }
         if (parsed.count) {
             recurrenceValue.count = parsed.count;
         }

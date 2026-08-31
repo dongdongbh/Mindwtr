@@ -40,6 +40,11 @@ type BuildRRuleOptions = {
     until?: string;
 };
 
+export type RRuleEditOverrides = BuildRRuleOptions & {
+    byDay?: RecurrenceByDay[];
+    interval?: number;
+};
+
 type FormatRecurrenceLabelOptions = {
     recurrence: Task['recurrence'];
     t: (key: string) => string;
@@ -355,6 +360,58 @@ export function buildRRuleString(
     return parts.join(';');
 }
 
+const EDITABLE_RRULE_TOKEN_KEYS = new Set([
+    'FREQ',
+    'INTERVAL',
+    'BYDAY',
+    'BYMONTHDAY',
+    'COUNT',
+    'WKST',
+    'UNTIL',
+]);
+
+const hasRRuleEditOverride = <TKey extends keyof RRuleEditOverrides>(
+    overrides: RRuleEditOverrides,
+    key: TKey,
+): boolean => Object.prototype.hasOwnProperty.call(overrides, key);
+
+/**
+ * Rebuild the editor-owned RRULE fields while carrying every field the action
+ * did not override. Unknown key/value tokens stay opaque and survive edits.
+ */
+export function editRRuleString(
+    existingRRule: string,
+    rule: RecurrenceRule,
+    overrides: RRuleEditOverrides = {},
+): string {
+    const parsed = parseRRuleString(existingRRule);
+    const byDay = hasRRuleEditOverride(overrides, 'byDay') ? overrides.byDay : parsed.byDay;
+    const interval = hasRRuleEditOverride(overrides, 'interval') ? overrides.interval : parsed.interval;
+    const byMonthDay = hasRRuleEditOverride(overrides, 'byMonthDay')
+        ? overrides.byMonthDay
+        : parsed.byMonthDay;
+    const count = hasRRuleEditOverride(overrides, 'count') ? overrides.count : parsed.count;
+    const weekStart = hasRRuleEditOverride(overrides, 'weekStart')
+        ? overrides.weekStart
+        : parsed.weekStart;
+    const until = hasRRuleEditOverride(overrides, 'until') ? overrides.until : parsed.until;
+    const edited = buildRRuleString(rule, byDay, interval, {
+        byMonthDay,
+        count,
+        weekStart,
+        until,
+    });
+    const opaqueTokens = existingRRule
+        .split(';')
+        .map((part) => part.trim())
+        .filter((part) => {
+            const separator = part.indexOf('=');
+            if (separator <= 0 || separator === part.length - 1) return false;
+            return !EDITABLE_RRULE_TOKEN_KEYS.has(part.slice(0, separator).trim().toUpperCase());
+        });
+    return opaqueTokens.length > 0 ? `${edited};${opaqueTokens.join(';')}` : edited;
+}
+
 /**
  * Returns the RRULE used by task editors for an existing recurrence value.
  * Stored RRULE text stays authoritative so extensions and interval metadata
@@ -367,16 +424,25 @@ export function getRecurrenceRRuleValue(value: Task['recurrence']): string {
     const count = getRecurrenceCountValue(value);
     const until = getRecurrenceUntilValue(value);
     if (value.byDay?.length) {
-        return buildRRuleString(value.rule, value.byDay, undefined, { count, until });
+        return buildRRuleString(value.rule, value.byDay, undefined, {
+            count,
+            weekStart: value.weekStart,
+            until,
+        });
     }
     if (value.byMonthDay?.length) {
         return buildRRuleString(value.rule, undefined, undefined, {
             byMonthDay: value.byMonthDay,
             count,
+            weekStart: value.weekStart,
             until,
         });
     }
-    return buildRRuleString(value.rule, undefined, undefined, { count, until });
+    return buildRRuleString(value.rule, undefined, undefined, {
+        count,
+        weekStart: value.weekStart,
+        until,
+    });
 }
 
 export function hasRecurrenceRule(value: Task['recurrence']): boolean {

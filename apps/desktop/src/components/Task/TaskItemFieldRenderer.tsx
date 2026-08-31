@@ -4,9 +4,9 @@ import {
     applyMarkdownPairInsertion,
     applyMarkdownToolbarAction,
     applyMarkdownUrlPaste,
-    buildRRuleString,
     continueMarkdownOnEnter,
     computeRelativeStartTime,
+    editRRuleString,
     getProjectedRecurringTaskCalendarDate,
     getRecurrenceCompletedOccurrencesValue,
     getTaskDateCoherenceIssues,
@@ -23,10 +23,10 @@ import {
     type MarkdownSelection,
     type MarkdownToolbarActionId,
     type MarkdownToolbarResult,
-    type RecurrenceByDay,
     type Recurrence,
     type RecurrenceRule,
     type RecurrenceStrategy,
+    type RRuleEditOverrides,
     type Task,
     type TaskDraft,
     type TaskDraftSetter,
@@ -297,27 +297,8 @@ export function TaskItemFieldRenderer({
         );
     const buildRecurrenceRRule = (
         rule: RecurrenceRule,
-        overrides: {
-            byDay?: RecurrenceByDay[];
-            interval?: number;
-            byMonthDay?: number[];
-            count?: number;
-            until?: string;
-        } = {}
-    ) => {
-        const hasOverride = <TKey extends keyof typeof overrides>(key: TKey) =>
-            Object.prototype.hasOwnProperty.call(overrides, key);
-        return buildRRuleString(
-            rule,
-            hasOverride('byDay') ? overrides.byDay : parsedRecurrenceRRule.byDay,
-            hasOverride('interval') ? overrides.interval : parsedRecurrenceRRule.interval,
-            {
-                byMonthDay: hasOverride('byMonthDay') ? overrides.byMonthDay : parsedRecurrenceRRule.byMonthDay,
-                count: hasOverride('count') ? overrides.count : parsedRecurrenceRRule.count,
-                until: hasOverride('until') ? overrides.until : parsedRecurrenceRRule.until,
-            }
-        );
-    };
+        overrides: RRuleEditOverrides = {},
+    ) => editRRuleString(editRecurrenceRRule, rule, overrides);
     const recurrencePreviewValue: Recurrence | undefined = editRecurrence
         ? { rule: editRecurrence, strategy: editRecurrenceStrategy }
         : undefined;

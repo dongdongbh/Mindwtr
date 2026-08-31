@@ -1158,7 +1158,7 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
                     {...createProps({
                         draft: {
                             recurrence: 'weekly',
-                            recurrenceRRule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU',
+                            recurrenceRRule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;WKST=SU;X-CUSTOM=keep',
                         },
                         setField,
                     })}
@@ -1171,11 +1171,17 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(input).toBeTruthy();
         fireEvent.change(input!, { target: { value: '78' } });
 
-        expect(setField).toHaveBeenCalledWith('recurrenceRRule', 'FREQ=WEEKLY;INTERVAL=78;BYDAY=TU');
+        expect(setField).toHaveBeenCalledWith(
+            'recurrenceRRule',
+            'FREQ=WEEKLY;INTERVAL=78;BYDAY=TU;WKST=SU;X-CUSTOM=keep',
+        );
 
         fireEvent.click(getByRole('button', { name: 'Wed' }));
 
-        expect(setField).toHaveBeenCalledWith('recurrenceRRule', 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,WE');
+        expect(setField).toHaveBeenCalledWith(
+            'recurrenceRRule',
+            'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,WE;WKST=SU;X-CUSTOM=keep',
+        );
     });
 
     it('updates yearly recurrence intervals', () => {

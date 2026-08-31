@@ -2,8 +2,8 @@ import React from 'react';
 import { Keyboard, Platform, Pressable, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import {
-    buildRRuleString,
     computeRelativeStartTime,
+    editRRuleString,
     getProjectedRecurringTaskCalendarDate,
     getTaskDateCoherenceIssues,
     hasTimeComponent,
@@ -122,13 +122,18 @@ export function TaskEditScheduleField({
         const byDay = hasOverride('byDay')
             ? overrides.byDay
             : parsedRecurrenceRRule.byDay;
-        const interval = hasOverride('interval') ? overrides.interval : parsedRecurrenceRRule.interval;
         const byMonthDay = hasOverride('byMonthDay') ? overrides.byMonthDay : parsedRecurrenceRRule.byMonthDay;
         const count = hasOverride('count') ? overrides.count : parsedRecurrenceRRule.count;
         const until = hasOverride('until') ? overrides.until : parsedRecurrenceRRule.until;
         const rrule = hasOverride('rrule')
             ? overrides.rrule
-            : buildRRuleString(rule, byDay, interval, { byMonthDay, count, until });
+            : editRRuleString(recurrenceRRuleValue, rule, {
+                ...(hasOverride('byDay') ? { byDay: overrides.byDay } : {}),
+                ...(hasOverride('interval') ? { interval: overrides.interval } : {}),
+                ...(hasOverride('byMonthDay') ? { byMonthDay: overrides.byMonthDay } : {}),
+                ...(hasOverride('count') ? { count: overrides.count } : {}),
+                ...(hasOverride('until') ? { until: overrides.until } : {}),
+            });
         return buildRecurrenceValue(rule, hasOverride('strategy') ? overrides.strategy ?? recurrenceStrategyValue : recurrenceStrategyValue, {
             byDay,
             byMonthDay,

@@ -188,15 +188,16 @@ describe('task-draft', () => {
         };
         const draft = createTaskDraft(recurringTask);
         const patch = taskDraftToUpdatePatch(
-            { ...draft, recurrenceRRule: 'FREQ=WEEKLY;BYDAY=MO;COUNT=5' },
+            { ...draft, recurrenceRRule: 'FREQ=WEEKLY;BYDAY=MO;COUNT=5;WKST=SU' },
             recurringTask,
         );
         expect(patch?.recurrence).toMatchObject({
             rule: 'weekly',
             strategy: 'strict',
             count: 5,
+            weekStart: 'SU',
             completedOccurrences: 3,
-            rrule: 'FREQ=WEEKLY;BYDAY=MO;COUNT=5',
+            rrule: 'FREQ=WEEKLY;BYDAY=MO;COUNT=5;WKST=SU',
         });
     });
 

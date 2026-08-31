@@ -584,7 +584,7 @@ describe('TaskEditScheduleField', () => {
                             rule: 'weekly',
                             strategy: 'strict',
                             byDay: ['TU'],
-                            rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU',
+                            rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;WKST=SU;X-CUSTOM=keep',
                         },
                     }),
                     fieldId: 'recurrence',
@@ -600,7 +600,7 @@ describe('TaskEditScheduleField', () => {
                         { value: '', label: 'None' },
                         { value: 'weekly', label: 'Weekly' },
                     ],
-                    recurrenceRRuleValue: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU',
+                    recurrenceRRuleValue: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;WKST=SU;X-CUSTOM=keep',
                     recurrenceRuleValue: 'weekly',
                     recurrenceStrategyValue: 'strict',
                     recurrenceWeekdayButtons: [{ key: 'TU', label: 'T' }],
@@ -631,7 +631,7 @@ describe('TaskEditScheduleField', () => {
         expect(setDraftField).toHaveBeenCalledWith('recurrenceStrategy', 'strict');
         expect(setDraftField).toHaveBeenCalledWith(
             'recurrenceRRule',
-            'FREQ=WEEKLY;INTERVAL=78;BYDAY=TU',
+            'FREQ=WEEKLY;INTERVAL=78;BYDAY=TU;WKST=SU;X-CUSTOM=keep',
         );
     });
 

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
     buildRRuleString,
+    editRRuleString,
     parseRRuleString,
     createNextRecurringTask,
     createCurrentRecurringCalendarTask,
@@ -137,6 +138,22 @@ describe('recurrence', () => {
         expect(rrule).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;WKST=SU');
     });
 
+    it('edits one RRULE field without dropping WKST or extension tokens', () => {
+        expect(editRRuleString(
+            'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;WKST=SU;X-CUSTOM=keep',
+            'weekly',
+            { interval: 3 },
+        )).toBe('FREQ=WEEKLY;INTERVAL=3;BYDAY=TU,TH;WKST=SU;X-CUSTOM=keep');
+    });
+
+    it('removes explicitly cleared RRULE fields while retaining untouched tokens', () => {
+        expect(editRRuleString(
+            'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;COUNT=5;WKST=SU;X-CUSTOM=keep',
+            'weekly',
+            { byDay: ['WE'], count: undefined },
+        )).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=WE;WKST=SU;X-CUSTOM=keep');
+    });
+
     it('builds and parses count and until options', () => {
         const rrule = buildRRuleString('monthly', undefined, 2, {
             byMonthDay: [15],
@@ -174,6 +191,14 @@ describe('recurrence', () => {
                 byDay: ['MO'],
                 rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=WE;X-CUSTOM=value',
             })).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=WE;X-CUSTOM=value');
+        });
+
+        it('includes a stored week start when synthesizing an RRULE', () => {
+            expect(getRecurrenceRRuleValue({
+                rule: 'weekly',
+                byDay: ['TU'],
+                weekStart: 'SU',
+            })).toBe('FREQ=WEEKLY;BYDAY=TU;WKST=SU');
         });
 
         it('serializes recurrence metadata through the canonical RRULE builder', () => {
