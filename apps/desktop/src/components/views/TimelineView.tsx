@@ -6,7 +6,9 @@ import {
     getCalendarDayOfMonth,
     getCalendarMonthIndex,
     getWeekStartsOnIndex,
+    hasTimeComponent,
     isTaskVisibleInArea,
+    safeFormatDate,
     safeParseDate,
     tFallback,
     useTaskStore,
@@ -472,6 +474,25 @@ export function TimelineView() {
         const onBarColor = row.color
             ? (isLightColor(row.color) ? 'rgba(0, 0, 0, 0.84)' : 'rgba(255, 255, 255, 0.96)')
             : 'hsl(var(--primary-foreground))';
+        const dateDescription = [
+            row.task.startTime
+                ? `${tFallback(
+                    t,
+                    hasTimeComponent(row.task.startTime) ? 'task.aria.startTime' : 'task.aria.startDate',
+                    hasTimeComponent(row.task.startTime) ? 'Start time' : 'Start date',
+                )}: ${safeFormatDate(row.task.startTime, hasTimeComponent(row.task.startTime) ? 'PPp' : 'PP', row.task.startTime)}`
+                : null,
+            row.task.dueDate
+                ? `${tFallback(
+                    t,
+                    hasTimeComponent(row.task.dueDate) ? 'task.aria.dueTime' : 'task.aria.dueDate',
+                    hasTimeComponent(row.task.dueDate) ? 'Due time' : 'Due date',
+                )}: ${safeFormatDate(row.task.dueDate, hasTimeComponent(row.task.dueDate) ? 'PPp' : 'PP', row.task.dueDate)}`
+                : null,
+        ].filter((part): part is string => Boolean(part)).join('. ');
+        const taskActionLabel = dateDescription
+            ? `${row.task.title}. ${dateDescription}`
+            : row.task.title;
         return (
             <div className="group/timeline-row flex border-b border-border/40" style={{ height: ROW_HEIGHT }}>
                 {/* The name column is the row's primary click target; the bar is a
@@ -481,6 +502,7 @@ export function TimelineView() {
                     data-testid="timeline-row-label"
                     data-task-id={row.task.id}
                     title={row.task.title}
+                    aria-label={taskActionLabel}
                     onClick={() => setOpenTaskId(row.task.id)}
                     className={cn(
                         'sticky left-0 z-20 flex shrink-0 items-center border-r border-border/60 bg-card pl-6 pr-3 text-left',
@@ -492,17 +514,15 @@ export function TimelineView() {
                     <span className="min-w-0 truncate">{row.task.title}</span>
                 </button>
                 <div className="relative min-w-0 flex-1 transition-colors group-hover/timeline-row:bg-muted/40">
-                    <button
-                        type="button"
+                    <div
                         data-testid="timeline-bar"
                         data-task-id={row.task.id}
                         data-variant={row.single ? 'mini' : 'bar'}
                         title={row.task.title}
-                        aria-label={row.task.title}
+                        aria-hidden="true"
                         onClick={() => setOpenTaskId(row.task.id)}
                         className={cn(
-                            'absolute z-10 flex items-center rounded-full shadow-sm transition-[filter] hover:brightness-110',
-                            'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card',
+                            'absolute z-10 flex cursor-pointer items-center rounded-full shadow-sm transition-[filter] hover:brightness-110',
                             onBar && 'overflow-hidden px-2.5',
                         )}
                         style={{
@@ -521,7 +541,7 @@ export function TimelineView() {
                                 {row.task.title}
                             </span>
                         )}
-                    </button>
+                    </div>
                 </div>
             </div>
         );

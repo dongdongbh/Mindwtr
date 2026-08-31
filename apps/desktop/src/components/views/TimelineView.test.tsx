@@ -235,4 +235,21 @@ describe('TimelineView (#1111)', () => {
         expect(axisLabels('major')).not.toContain('2026');
         expect(axisLabels('minor')).toContain('فروردین');
     });
+
+    it('exposes one task action with localized start and due semantics', () => {
+        setStore({
+            tasks: [makeTask({
+                id: 'accessible',
+                title: 'Accessible task',
+                startTime: iso(-2).slice(0, 10),
+                dueDate: iso(3).slice(0, 10),
+            })],
+        });
+        renderTimeline();
+
+        const taskActions = screen.getAllByRole('button').filter((button) => button.dataset.taskId === 'accessible');
+        expect(taskActions).toHaveLength(1);
+        expect(taskActions[0]).toHaveAccessibleName(/Accessible task.*Start date: .+Due date: .+/);
+        expect(barFor('accessible')).toHaveAttribute('aria-hidden', 'true');
+    });
 });
