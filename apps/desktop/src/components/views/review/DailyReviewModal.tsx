@@ -82,7 +82,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     const [today] = useState(() => new Date());
     const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const followUpTodayReviewAt = startOfToday.toISOString();
-    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy);
+    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
     const focusTaskLimit = normalizeFocusTaskLimit(settings?.gtd?.focusTaskLimit);
     const followUpTodayLabel = tFallback(t, 'dailyReview.followUpToday', 'Follow up today');
     const reviewDueLabel = tFallback(t, 'agenda.reviewDue', 'Review Due');

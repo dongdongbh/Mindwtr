@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { getCompletionDateGroup, shouldAutoArchiveCompletedTask, sortTasksBy } from './task-utils';
+import {
+    getCompletionDateGroup,
+    resolveTaskSortByForFeatures,
+    shouldAutoArchiveCompletedTask,
+    sortTasksBy,
+} from './task-utils';
 import type { Task } from './types';
 
 const task = (id: string, overrides: Partial<Task> = {}): Task => ({
@@ -110,6 +115,23 @@ describe('sortTasksBy case coverage', () => {
             task('first', { createdAt: '2026-02-01T00:00:00.000Z', timeEstimate: '30min' }),
         ];
         expect(sortTasksBy(sameEstimate, 'timeEstimate').map((item) => item.id)).toEqual(['first', 'second']);
+    });
+});
+
+describe('resolveTaskSortByForFeatures (#1107)', () => {
+    it('falls back to default order while Time estimates is off', () => {
+        expect(resolveTaskSortByForFeatures('timeEstimate', { features: { timeEstimates: false } })).toBe('default');
+    });
+
+    it('keeps the stored sort when the feature is on, unset, or settings are missing', () => {
+        expect(resolveTaskSortByForFeatures('timeEstimate', { features: { timeEstimates: true } })).toBe('timeEstimate');
+        expect(resolveTaskSortByForFeatures('timeEstimate', { features: {} })).toBe('timeEstimate');
+        expect(resolveTaskSortByForFeatures('timeEstimate', undefined)).toBe('timeEstimate');
+    });
+
+    it('never rewrites a sort the feature does not own', () => {
+        expect(resolveTaskSortByForFeatures('due', { features: { timeEstimates: false } })).toBe('due');
+        expect(resolveTaskSortByForFeatures('completed', { features: { timeEstimates: false } })).toBe('completed');
     });
 });
 

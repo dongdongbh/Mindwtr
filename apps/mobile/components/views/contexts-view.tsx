@@ -141,7 +141,7 @@ export function ContextsView() {
       ? activeTasks.filter((t) => selectedContexts.every((ctx) => matchesSelected(t, ctx)))
       : activeTasks;
 
-  const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy);
+  const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
   const sortedTasks = sortTasksBy(filteredTasks, sortBy);
   const restoreActionLabel = tFallback(t, 'trash.restoreToInbox', 'Restore');
   const {

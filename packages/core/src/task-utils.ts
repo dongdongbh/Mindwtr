@@ -2,7 +2,8 @@
  * Utility functions for task operations
  */
 
-import { Task, TaskStatus, TaskSortBy, TaskPriority, Project, AppData, SortField } from './types';
+import { Task, TaskStatus, TaskSortBy, TaskPriority, Project, AppData, AppSettings, SortField } from './types';
+import { resolveFeatureFlags } from './resolve-feature-flags';
 import { differenceInCalendarDays, startOfDay } from 'date-fns';
 import { hasTimeComponent, isDueForReview, safeParseDate, safeParseDueDate } from './date';
 import { hasRecurrenceRule } from './recurrence';
@@ -876,6 +877,21 @@ export function buildTrashTimeline(
  * Sort tasks by a user-selected sort option.
  * Falls back to default sortTasks when sortBy is 'default' or undefined.
  */
+/**
+ * A stored 'timeEstimate' sort must stop ordering lists the moment the Time
+ * estimates feature is switched off: the field is hidden everywhere else, so
+ * an order derived from it reads as random. The preference itself is kept
+ * (it comes back when the feature is re-enabled) — only the effective sort
+ * falls back. Every list, widget and picker resolves through here (#1107).
+ */
+export function resolveTaskSortByForFeatures(
+    sortBy: TaskSortBy,
+    settings: { features?: AppSettings['features'] } | null | undefined,
+): TaskSortBy {
+    if (sortBy === 'timeEstimate' && !resolveFeatureFlags(settings).timeEstimates) return 'default';
+    return sortBy;
+}
+
 export function sortTasksBy(tasks: Task[], sortBy: TaskSortBy = 'default'): Task[] {
     if (!sortBy || sortBy === 'default') {
         return sortTasks(tasks);

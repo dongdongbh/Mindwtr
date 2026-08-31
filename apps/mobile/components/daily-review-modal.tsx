@@ -123,7 +123,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
             .catch(() => undefined);
     }, [reviewSession, sessionHydrated]);
 
-    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy);
+    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
     const includeFocusStep = settings.gtd?.dailyReview?.includeFocusStep !== false;
     const focusTaskLimit = normalizeFocusTaskLimit(settings.gtd?.focusTaskLimit);
 

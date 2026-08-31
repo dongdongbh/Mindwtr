@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildQuickAddPreviewEntries } from './quick-add-preview';
-import { parseQuickAdd } from './quick-add';
+import { buildQuickAddParseOptions, parseQuickAdd } from './quick-add';
 import type { Project } from './types';
 
 const t = (key: string) => key;
@@ -137,5 +137,18 @@ describe('buildQuickAddPreviewEntries', () => {
         const parsed = parseQuickAdd(input, [], now);
         const entries = buildQuickAddPreviewEntries(parsed, { t, rawInput: input });
         expect(entries.find((entry) => entry.kind === 'project')?.value).toBe('Brand New');
+    });
+
+    it('shows no priority chip while the Priorities feature is off (#1107)', () => {
+        const input = 'call mom /priority:high';
+        const options = buildQuickAddParseOptions({ features: { priorities: false } });
+        const parsed = parseQuickAdd(input, [], now, undefined, options);
+        const entries = buildQuickAddPreviewEntries(parsed, { t, rawInput: input });
+
+        expect(entries.some((entry) => entry.kind === 'priority')).toBe(false);
+
+        const enabled = parseQuickAdd(input, [], now, undefined, buildQuickAddParseOptions({}));
+        expect(buildQuickAddPreviewEntries(enabled, { t, rawInput: input })
+            .some((entry) => entry.kind === 'priority')).toBe(true);
     });
 });

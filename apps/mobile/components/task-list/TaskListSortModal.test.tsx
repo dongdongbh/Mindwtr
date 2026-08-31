@@ -9,6 +9,7 @@ let timeEstimatesEnabled = true;
 
 vi.mock('@mindwtr/core', () => ({
   resolveFeatureFlags: () => ({ timeEstimates: timeEstimatesEnabled }),
+  resolveTaskSortByForFeatures: (sortBy: string) => sortBy,
   useTaskStore: (selector: (state: unknown) => unknown) => selector({ settings: {} }),
 }));
 
@@ -52,8 +53,13 @@ describe('TaskListSortModal time-estimate sort (#1107)', () => {
     expect(markup).toContain('sort-option-title');
   });
 
-  it('keeps a stored time-estimate sort visible with the feature off', () => {
+  // Callers now pass the RESOLVED sort (resolveTaskListSortBy turns a stored
+  // 'timeEstimate' into 'default' while the feature is off), so the selected row
+  // is always one of the listed options and no escape hatch is needed (#1107).
+  it('shows the default row selected for a stored time-estimate sort with the feature off', () => {
     timeEstimatesEnabled = false;
-    expect(renderModal('timeEstimate')).toContain('sort-option-timeEstimate');
+    const markup = renderModal('default');
+    expect(markup).not.toContain('sort-option-timeEstimate');
+    expect(markup).toContain('sort-option-default');
   });
 });

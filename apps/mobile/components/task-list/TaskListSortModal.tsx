@@ -31,11 +31,12 @@ export function TaskListSortModal({
   visible,
 }: TaskListSortModalProps) {
   // Gated here rather than at each caller (task list + project detail) so a new
-  // caller cannot leak a disabled feature's sort. A stored 'timeEstimate' stays
-  // listed with the feature off so the current sort is still shown (#1107).
+  // caller cannot leak a disabled feature's sort. Callers pass the resolved sort
+  // ('timeEstimate' reads as 'default' while the feature is off), so dropping the
+  // option can never hide the row that is actually selected (#1107).
   const timeEstimatesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeEstimates);
   const visibleSortOptions = sortOptions.filter(
-    (option) => option !== 'timeEstimate' || timeEstimatesEnabled || sortBy === 'timeEstimate',
+    (option) => option !== 'timeEstimate' || timeEstimatesEnabled,
   );
   return (
     <Modal

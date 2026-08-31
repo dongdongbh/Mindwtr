@@ -1,4 +1,4 @@
-import type { TaskSortBy } from '@mindwtr/core';
+import { resolveTaskSortByForFeatures, type AppSettings, type TaskSortBy } from '@mindwtr/core';
 
 export const SORT_OPTIONS: readonly TaskSortBy[] = [
     'default',
@@ -16,10 +16,22 @@ export const DONE_SORT_OPTIONS: readonly TaskSortBy[] = [
     'completed',
 ];
 
-export function resolveNonDoneTaskSortBy(stored?: TaskSortBy): TaskSortBy {
-    return !stored || stored === 'completed' ? 'default' : stored;
+// `settings` is required, not optional: a view that forgets it would silently
+// keep sorting by a disabled feature's field (#1107).
+export function resolveNonDoneTaskSortBy(
+    stored: TaskSortBy | undefined,
+    settings: AppSettings | undefined,
+): TaskSortBy {
+    return resolveTaskSortByForFeatures(!stored || stored === 'completed' ? 'default' : stored, settings);
 }
 
-export function resolveDoneTaskSortBy(stored?: TaskSortBy, viewSortBy?: TaskSortBy): TaskSortBy {
-    return viewSortBy ?? (stored === 'completed' ? 'completed' : 'default');
+export function resolveDoneTaskSortBy(
+    stored: TaskSortBy | undefined,
+    viewSortBy: TaskSortBy | undefined,
+    settings: AppSettings | undefined,
+): TaskSortBy {
+    return resolveTaskSortByForFeatures(
+        viewSortBy ?? (stored === 'completed' ? 'completed' : 'default'),
+        settings,
+    );
 }

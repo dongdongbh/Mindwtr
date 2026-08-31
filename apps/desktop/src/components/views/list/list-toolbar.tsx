@@ -74,11 +74,12 @@ export function SortBySelect({ value, onChange, t, className, iconTestId, option
     const sortLabel = tFallback(t, 'sort.label', 'Sort');
     // Gated here rather than at each toolbar: Focus, Review, Contexts, Archive
     // and the project workspace all render this select, and a new one must not
-    // be able to leak a disabled feature's sort. A stored 'timeEstimate' stays
-    // listed even with the feature off, so the trigger never shows blank (#1107).
+    // be able to leak a disabled feature's sort. Callers pass the resolved sort
+    // ('timeEstimate' reads as 'default' while the feature is off), so dropping
+    // the option can never leave the trigger blank (#1107).
     const timeEstimatesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeEstimates);
     const sortOptions = (options ?? SORT_OPTIONS).filter(
-        (option) => option !== 'timeEstimate' || timeEstimatesEnabled || value === 'timeEstimate'
+        (option) => option !== 'timeEstimate' || timeEstimatesEnabled
     );
     return (
         <ToolbarSelect

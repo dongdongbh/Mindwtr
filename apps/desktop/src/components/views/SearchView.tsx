@@ -51,7 +51,7 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
     );
     const { t } = useLanguage();
     const showToast = useUiStore((state) => state.showToast);
-    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy);
+    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
     const [tagPromptOpen, setTagPromptOpen] = useState(false);
     const [removeTagPickerOpen, setRemoveTagPickerOpen] = useState(false);
     const [contextPromptOpen, setContextPromptOpen] = useState(false);

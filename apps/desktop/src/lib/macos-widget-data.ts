@@ -26,6 +26,7 @@ import {
     isTaskActionable,
     isTaskInActiveProject,
     loadTranslations,
+    resolveTaskSortByForFeatures,
     resolveThemeColorScheme,
     safeParseDate,
     safeParseDueDate,
@@ -66,7 +67,9 @@ const TASK_SORT_OPTIONS: TaskSortBy[] = ['default', 'due', 'start', 'review', 't
 
 const resolveTaskSort = (data: AppData): TaskSortBy => {
     const sortBy = data.settings?.taskSortBy;
-    return TASK_SORT_OPTIONS.includes(sortBy as TaskSortBy) ? (sortBy as TaskSortBy) : 'default';
+    const allowed = TASK_SORT_OPTIONS.includes(sortBy as TaskSortBy) ? (sortBy as TaskSortBy) : 'default';
+    // Widgets follow the feature toggles too (#1107).
+    return resolveTaskSortByForFeatures(allowed, data.settings);
 };
 
 const LIGHT_PALETTE: MacWidgetPalette = {

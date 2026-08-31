@@ -105,7 +105,7 @@ export function ReviewView() {
     const setListOptions = useUiStore((state) => state.setListOptions);
     const collapseAllTaskDetails = useUiStore((state) => state.collapseAllTaskDetails);
 
-    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy);
+    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
     const statusOptions = STATUS_OPTIONS;
     const visibility = useAreaVisibility();

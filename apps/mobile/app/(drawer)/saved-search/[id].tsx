@@ -20,7 +20,7 @@ export default function SavedSearchScreen() {
     tasks,
     projects,
     savedSearches,
-    taskSortBy,
+    settings,
     updateTask,
     deleteTask,
     fetchData,
@@ -29,7 +29,7 @@ export default function SavedSearchScreen() {
     tasks: state.tasks,
     projects: state.projects,
     savedSearches: state.settings?.savedSearches,
-    taskSortBy: state.settings?.taskSortBy,
+    settings: state.settings,
     updateTask: state.updateTask,
     deleteTask: state.deleteTask,
     fetchData: state.fetchData,
@@ -47,7 +47,7 @@ export default function SavedSearchScreen() {
 
   const savedSearch = savedSearches?.find(s => s.id === id);
   const query = savedSearch?.query || '';
-  const sortBy = resolveNonDoneTaskSortBy(taskSortBy);
+  const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
 
   const filteredTasks = useMemo(() => {
     if (!query) return [];

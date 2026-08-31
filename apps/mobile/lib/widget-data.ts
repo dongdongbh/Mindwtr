@@ -3,6 +3,7 @@ import {
     type AppTheme,
     type Language,
     type TaskSortBy,
+    resolveTaskSortByForFeatures,
     resolveThemeColorScheme,
     safeParseDate,
     safeParseDueDate,
@@ -152,7 +153,9 @@ const computeDueLabel = (
 
 const resolveWidgetTaskSort = (data: AppData): TaskSortBy => {
     const sortBy = data.settings?.taskSortBy;
-    return TASK_SORT_OPTIONS.includes(sortBy as TaskSortBy) ? (sortBy as TaskSortBy) : 'default';
+    const allowed = TASK_SORT_OPTIONS.includes(sortBy as TaskSortBy) ? (sortBy as TaskSortBy) : 'default';
+    // Widgets follow the feature toggles too (#1107).
+    return resolveTaskSortByForFeatures(allowed, data.settings);
 };
 
 export function resolveWidgetLanguage(saved: string | null, setting?: string): Language {

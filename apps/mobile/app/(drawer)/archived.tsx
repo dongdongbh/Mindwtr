@@ -7,6 +7,7 @@ import {
     getUsedTaskTokens,
     projectMatchesAreaFilterSelection,
     resolveFeatureFlags,
+    resolveTaskSortByForFeatures,
     safeFormatDate,
     shallow,
     sortDoneTasksForListView,
@@ -327,7 +328,9 @@ export default function ArchivedScreen() {
         });
     }, []);
 
-    const sortBy: TaskSortBy = viewState.sortBy ?? 'default';
+    // A stored 'timeEstimate' sort falls back to default while the feature is
+    // off, so the chip row and the ordering agree (#1107).
+    const sortBy: TaskSortBy = resolveTaskSortByForFeatures(viewState.sortBy ?? 'default', settings);
     // Sorted once, then narrowed in stages. Every stage below only filters, and
     // filtering preserves relative order, so the visible order is the same as
     // sorting last would give — but the O(n log n) sort now hangs off _allTasks and
@@ -357,9 +360,9 @@ export default function ArchivedScreen() {
     // Same gate the shared sort modal applies (#1107).
     const archivedSortOptions = useMemo(
         () => DONE_TASK_LIST_SORT_OPTIONS.filter((option) => (
-            option !== 'timeEstimate' || resolvedFeatureFlags.timeEstimates || sortBy === 'timeEstimate'
+            option !== 'timeEstimate' || resolvedFeatureFlags.timeEstimates
         )),
-        [resolvedFeatureFlags.timeEstimates, sortBy],
+        [resolvedFeatureFlags.timeEstimates],
     );
     const metadataFilterVisibility = useMemo(
         () => getTaskMetadataFilterVisibility(allArchivedTasks, {

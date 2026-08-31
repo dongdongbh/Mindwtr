@@ -1,6 +1,7 @@
 import * as chrono from 'chrono-node';
 import { format, isValid, set } from 'date-fns';
-import type { Area, Attachment, Person, Project, Task, TaskEnergyLevel, TaskPriority, TaskStatus } from './types';
+import type { Area, AppSettings, Attachment, Person, Project, Task, TaskEnergyLevel, TaskPriority, TaskStatus } from './types';
+import { resolveFeatureFlags } from './resolve-feature-flags';
 import { generateUUID } from './uuid';
 import { normalizeTaskStatus } from './task-status';
 import { normalizeLinkAttachmentInput } from './attachment-link-utils';
@@ -52,6 +53,10 @@ export interface QuickAddParseOptions {
     // regardless of this option. Default true = current detection behavior.
     // See #742 (2026-07-16 comment).
     naturalLanguageDates?: boolean;
+    // When false, `/priority:` is not parsed at all: the token stays in the
+    // title exactly like an unknown level does, and no priority is applied.
+    // Follows the Priorities feature toggle. Default true. See #1107.
+    parsePriority?: boolean;
 }
 
 // Single source of truth for the default-on semantics: only an explicit
@@ -69,6 +74,7 @@ export interface QuickAddParseSettings {
         defaultScheduleTime?: string | null;
         naturalLanguageDates?: boolean;
     };
+    features?: AppSettings['features'];
 }
 
 /** Everything the bag is derived from; `useTaskStore.getState()` satisfies it. */
@@ -95,6 +101,7 @@ export function buildQuickAddParseOptions(
         defaultScheduleTime: normalizeClockTimeInput(settings?.gtd?.defaultScheduleTime) || undefined,
         preserveText: settings?.quickAddAutoClean !== true,
         naturalLanguageDates: isNaturalLanguageDatesEnabled(settings),
+        parsePriority: resolveFeatureFlags(settings).priorities,
     };
 }
 
@@ -948,7 +955,11 @@ export function parseQuickAdd(
     }
 
     let priority: TaskPriority | undefined;
-    const priorityMatch = working.match(/(?:^|\s)\/priority:([^\s/]+)/i);
+    // Feature off: no parse, no strip — the token reads as plain title text,
+    // the same as `/priority:bogus` does today (#1107).
+    const priorityMatch = options.parsePriority === false
+        ? null
+        : working.match(/(?:^|\s)\/priority:([^\s/]+)/i);
     if (priorityMatch) {
         const token = restoreEscapes(priorityMatch[1] ?? '').trim().toLowerCase();
         priority = PRIORITY_TOKENS[token];

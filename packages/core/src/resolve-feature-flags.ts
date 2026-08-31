@@ -15,7 +15,9 @@ export type ResolvedFeatureFlags = {
  * to re-derive this inline; collapsing it here means a new site can't
  * silently pick the wrong default by copying the wrong sibling.
  */
-export function resolveFeatureFlags(settings: AppSettings | undefined): ResolvedFeatureFlags {
+export function resolveFeatureFlags(
+    settings: { features?: AppSettings['features'] } | null | undefined,
+): ResolvedFeatureFlags {
     return {
         priorities: settings?.features?.priorities !== false,
         timeEstimates: settings?.features?.timeEstimates !== false,

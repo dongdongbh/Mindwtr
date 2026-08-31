@@ -363,6 +363,7 @@ function TaskListComponent({
   const sortBy = resolveTaskListSortBy({
     globalSortBy: settings?.taskSortBy,
     projectSortBy,
+    settings,
     statusFilter,
     viewSortBy,
   });

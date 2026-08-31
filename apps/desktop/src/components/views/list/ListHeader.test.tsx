@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useTaskStore } from '@mindwtr/core';
 
 import { ListHeader } from './ListHeader';
+import { resolveNonDoneTaskSortBy } from '../../../lib/task-list-sort';
 import { openToolbarSelect } from '../../../test/toolbar-select';
 
 const translations: Record<string, string> = {
@@ -87,11 +88,16 @@ describe('ListHeader', () => {
         expect(screen.queryByRole('option', { name: 'Time estimate' })).not.toBeInTheDocument();
         disabled.unmount();
 
-        // A sort already stored as 'timeEstimate' must stay listed with the
-        // feature off, or the trigger renders with no matching option.
-        render(header('timeEstimate'));
-        openToolbarSelect('Sort');
-        expect(screen.getByRole('option', { name: 'Time estimate' })).toBeInTheDocument();
+        // A sort stored as 'timeEstimate' now reaches the picker already resolved
+        // to 'default' (resolveNonDoneTaskSortBy), so the trigger shows Default
+        // and no escape hatch has to keep the disabled option listed (#1107).
+        const resolved = resolveNonDoneTaskSortBy('timeEstimate', useTaskStore.getState().settings);
+        expect(resolved).toBe('default');
+        render(header(resolved as 'default'));
+        const trigger = openToolbarSelect('Sort');
+        expect(trigger).toHaveTextContent('Default');
+        expect(screen.queryByRole('option', { name: 'Time estimate' })).not.toBeInTheDocument();
+        expect(screen.getByRole('option', { name: 'Default' })).toHaveAttribute('aria-selected', 'true');
     });
 
     it('labels sort and group controls visibly inside the compact header controls', () => {

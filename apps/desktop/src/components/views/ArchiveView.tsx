@@ -183,7 +183,7 @@ export function ArchiveView() {
     // only one carrying 'completed') and lands on Done's completion-recency
     // default rather than the global task sort, which orders by due date and
     // priority — neither of which means anything once a task is finished.
-    const sortBy = resolveDoneTaskSortBy(settings?.taskSortBy, archivedSortBy);
+    const sortBy = resolveDoneTaskSortBy(settings?.taskSortBy, archivedSortBy, settings);
     const { areaById, projectById, resolvedAreaFilter } = useAreaVisibility();
 
     useEffect(() => {

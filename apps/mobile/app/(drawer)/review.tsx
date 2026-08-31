@@ -170,7 +170,7 @@ export default function ReviewScreen() {
 
   const bulkStatuses: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'done', 'reference'];
 
-  const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy);
+  const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
   const reviewOverviewGroups = useMemo(() => getReviewOverviewGroups({
     tasks,
     projects,

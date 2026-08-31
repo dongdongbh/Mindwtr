@@ -14,6 +14,7 @@ import { Attachment,
     generateUUID,
     getInlineMarkdownPreview,
     stripMarkdown,
+    resolveTaskSortByForFeatures,
     sortTasksBy,
     splitCompletedTasks, tFallback, } from '@mindwtr/core';
 import { useDndMonitor } from '@dnd-kit/core';
@@ -407,6 +408,7 @@ export function ProjectWorkspace({
         sections,
         areas,
         allTasks,
+        settings,
         undoNotificationsEnabled,
         addSection,
         updateSection,
@@ -453,7 +455,10 @@ export function ProjectWorkspace({
     // Effective sort is read straight from the selected project so it persists
     // across restarts and view switches; the change handler writes it back via
     // updateProject. Core normalizes 'default' to an absent field.
-    const projectTaskSortBy: TaskSortBy = selectedProject?.taskSortBy ?? 'default';
+    const projectTaskSortBy: TaskSortBy = resolveTaskSortByForFeatures(
+        selectedProject?.taskSortBy ?? 'default',
+        settings,
+    );
     const [projectDetailsExpanded, setProjectDetailsExpanded] = useState(false);
     const [isProjectDeleting, setIsProjectDeleting] = useState(false);
     const [bulkTokenPicker, setBulkTokenPicker] = useState<BulkTokenPickerState>(null);

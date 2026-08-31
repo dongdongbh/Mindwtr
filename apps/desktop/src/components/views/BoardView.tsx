@@ -219,7 +219,7 @@ export function BoardView() {
         shallow
     );
     const { t } = useLanguage();
-    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy);
+    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
     const isDense = (settings?.appearance?.density ?? 'comfortable') !== 'comfortable';
 
     const [activeTask, setActiveTask] = React.useState<Task | null>(null);

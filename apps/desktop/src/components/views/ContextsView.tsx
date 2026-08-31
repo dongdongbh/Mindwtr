@@ -69,11 +69,11 @@ const CONTEXTS_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:contexts:groups:v1';
 
 export function ContextsView() {
     const perf = usePerformanceMonitor('ContextsView');
-    const { tasksById, areas, taskSortBy, theme, undoNotificationsEnabled, updateSettings } = useTaskStore(
+    const { tasksById, areas, settings, theme, undoNotificationsEnabled, updateSettings } = useTaskStore(
         (state) => ({
             tasksById: state._tasksById,
             areas: state.areas,
-            taskSortBy: state.settings?.taskSortBy,
+            settings: state.settings,
             theme: state.settings?.theme,
             undoNotificationsEnabled: state.settings?.undoNotificationsEnabled !== false,
             updateSettings: state.updateSettings,
@@ -98,7 +98,7 @@ export function ContextsView() {
     const selectedContext = persistedViewState.selectedContext;
     const statusFilters = persistedViewState.statusFilters;
     const selectedStatusSet = useMemo(() => new Set(statusFilters), [statusFilters]);
-    const sortBy = resolveNonDoneTaskSortBy(taskSortBy);
+    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
     const [searchQuery, setSearchQuery] = useState('');
     const [bulkTokenPicker, setBulkTokenPicker] = useState<BulkTokenPickerState>(null);
     const [contextsCollapsed, setContextsCollapsed] = useState(false);

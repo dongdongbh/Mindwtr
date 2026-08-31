@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEventHandler, KeyboardEventHandler, RefObject } from 'react';
-import type { Area, Project } from '@mindwtr/core';
+import { resolveFeatureFlags, useTaskStore, type Area, type Project } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
 import {
     compareAutocompleteLabels,
@@ -129,7 +129,7 @@ const SLASH_COMMANDS: Array<{
 const ENERGY_LEVEL_VALUES = ['low', 'medium', 'high'];
 const PRIORITY_VALUES = ['low', 'medium', 'high', 'urgent'];
 
-function getSlashCommandOptions(query: string): Option[] {
+function getSlashCommandOptions(query: string, prioritiesEnabled: boolean): Option[] {
     const separatorIndex = query.indexOf(':');
     const rawCommandQuery = (separatorIndex >= 0 ? query.slice(0, separatorIndex) : query).trim().toLowerCase();
     const rawValue = separatorIndex >= 0 ? query.slice(separatorIndex + 1).trim() : '';
@@ -146,7 +146,7 @@ function getSlashCommandOptions(query: string): Option[] {
             }));
     }
 
-    if (separatorIndex >= 0 && rawCommandQuery === 'priority') {
+    if (separatorIndex >= 0 && rawCommandQuery === 'priority' && prioritiesEnabled) {
         return PRIORITY_VALUES
             .filter((level) => level.startsWith(rawValue.toLowerCase()))
             .map((level) => ({
@@ -159,6 +159,9 @@ function getSlashCommandOptions(query: string): Option[] {
     }
 
     return SLASH_COMMANDS
+        // The parser ignores /priority: while the feature is off, so suggesting
+        // it would hand the user a token that stays in their title (#1107).
+        .filter(({ command }) => command !== 'priority' || prioritiesEnabled)
         .filter(({ command }) => (
             rawCommandQuery.length === 0
             || command.startsWith(rawCommandQuery)
@@ -278,12 +281,13 @@ export function TaskInput({
     });
     const pendingSelectionRef = useRef<PendingSelectionRestore | null>(null);
     const undoRef = useRef<Array<{ value: string; selection: InputSelection }>>([]);
+    const prioritiesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).priorities);
 
     const options = useMemo<Option[]>(() => {
         if (!trigger) return [];
         const query = trigger.query.trim().toLowerCase();
         if (trigger.type === 'command') {
-            return getSlashCommandOptions(trigger.query);
+            return getSlashCommandOptions(trigger.query, prioritiesEnabled);
         }
         if (trigger.type === 'project') {
             const activeProjects = projects.filter((project) => project.status !== 'archived');
@@ -337,7 +341,7 @@ export function TaskInput({
             label: token,
             value: token,
         }));
-    }, [trigger, projects, contexts, areas, people]);
+    }, [trigger, projects, contexts, areas, people, prioritiesEnabled]);
 
     const closeTrigger = () => {
         setTrigger(null);

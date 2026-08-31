@@ -214,8 +214,8 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const doneSortBy = useUiStore((state) => state.listOptions.doneSortBy);
     const setListOptions = useUiStore((state) => state.setListOptions);
     const sortBy: TaskSortBy = statusFilter === 'done'
-        ? resolveDoneTaskSortBy(globalSortBy, doneSortBy)
-        : resolveNonDoneTaskSortBy(globalSortBy);
+        ? resolveDoneTaskSortBy(globalSortBy, doneSortBy, settings)
+        : resolveNonDoneTaskSortBy(globalSortBy, settings);
     const collapseAllTaskDetails = useUiStore((state) => state.collapseAllTaskDetails);
     const setProjectView = useUiStore((state) => state.setProjectView);
     const [baseTasks, setBaseTasks] = useState<Task[]>(() => (statusFilter === 'archived' ? [] : tasks));

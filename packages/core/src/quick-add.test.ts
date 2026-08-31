@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect } from 'vitest';
 import { getTaskDateCoherenceIssues } from './task-date-coherence';
+import { mergeParsedProcessInboxFields } from './process-inbox-workflow';
 import { configureDateFormatting } from './date';
 import type { Area, Person, Project, Task } from './types';
 import { buildQuickAddParseOptions, getQuickAddProjectInitialProps, parseProcessInboxTitleInput, parseProjectNextActionInput, parseQuickAdd, parseQuickAddDateCommands, splitQuickAddBulkLines } from './quick-add';
@@ -180,6 +181,39 @@ describe('quick-add', () => {
 
         expect(result.title).toBe('Draft proposal /priority:asap');
         expect(result.props.priority).toBeUndefined();
+    });
+
+    it('leaves /priority: in the title when the Priorities feature is off (#1107)', () => {
+        const options = buildQuickAddParseOptions({ features: { priorities: false } });
+        const result = parseQuickAdd('Draft proposal /priority:high /next', undefined, undefined, undefined, options);
+
+        expect(result.title).toBe('Draft proposal /priority:high');
+        expect(result.props.priority).toBeUndefined();
+        expect(result.props.status).toBe('next');
+    });
+
+    it('still parses /priority: when the feature is on or unset (#1107)', () => {
+        expect(buildQuickAddParseOptions({ features: { priorities: true } }).parsePriority).toBe(true);
+        expect(buildQuickAddParseOptions({}).parsePriority).toBe(true);
+
+        const result = parseQuickAdd(
+            'Draft proposal /priority:high',
+            undefined,
+            undefined,
+            undefined,
+            buildQuickAddParseOptions({}),
+        );
+        expect(result.props.priority).toBe('high');
+    });
+
+    it('leaves the clarify merge without a priority while the feature is off (#1107)', () => {
+        const options = buildQuickAddParseOptions({ features: { priorities: false } });
+        const parsed = parseQuickAdd('Draft proposal /priority:high @phone', undefined, undefined, undefined, options);
+        const fields = mergeParsedProcessInboxFields({ contexts: ['home'] }, parsed.props);
+
+        expect(parsed.title).toBe('Draft proposal /priority:high');
+        expect(fields.priority).toBeUndefined();
+        expect(fields.contexts).toEqual(['home', '@phone']);
     });
 
     it('parses a priority command mixed with a date command and a context', () => {

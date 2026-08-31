@@ -26,6 +26,7 @@ import {
     type Task,
     type TaskSortBy,
     getSequentialProjectTaskCues,
+    resolveTaskSortByForFeatures,
     safeParseDate,
     shallow,
     tFallback,
@@ -506,7 +507,7 @@ export function ProjectDetailModal({
     onTaskSortByChange,
     project: selectedProject,
     sections: selectedProjectSections = [],
-    taskSortBy: projectTaskSortBy,
+    taskSortBy: storedProjectTaskSortBy,
     tasks: selectedProjectTasks,
 }: ProjectDetailModalProps) {
     const { t } = useLanguage();
@@ -519,13 +520,18 @@ export function ProjectDetailModal({
         reorderSections,
         updateProject,
         updateSection,
+        settings,
     } = useTaskStore((state) => ({
         addSection: state.addSection,
         deleteSection: state.deleteSection,
         reorderSections: state.reorderSections,
         updateProject: state.updateProject,
         updateSection: state.updateSection,
+        settings: state.settings,
     }), shallow);
+    // A stored 'timeEstimate' project sort reverts to default order while the
+    // feature is off — list, sort sheet and label all read this one value (#1107).
+    const projectTaskSortBy = resolveTaskSortByForFeatures(storedProjectTaskSortBy, settings);
     const {
         commitSelectedProjectNotes,
         handleSelectedProjectNotesApplyAction,

@@ -13,6 +13,7 @@ export const useProjectWorkspaceStore = (selectedProjectId: string | null) => {
             sections: state.sections,
             areas: state.areas,
             allTasks: state._allTasks,
+            settings: state.settings,
             undoNotificationsEnabled: state.settings?.undoNotificationsEnabled !== false,
             getDerivedState: state.getDerivedState,
             addSection: state.addSection,
