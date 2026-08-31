@@ -22,7 +22,8 @@ import {
     type TasksWidgetPayload,
     WIDGET_LANGUAGE_KEY,
 } from './widget-data';
-import { logError, logWarn } from './app-log';
+import { logError, logInfo, logWarn } from './app-log';
+import { isExpoGo } from './expo-go';
 import { getSystemColorSchemeForWidget } from './system-color-scheme';
 import {
     getAdaptiveAndroidWidgetTaskLimit,
@@ -85,8 +86,19 @@ function buildPayloadFromData(
     });
 }
 
+let expoGoWidgetSkipLogged = false;
+
 async function updateAndroidWidgetsFromData(data: AppData, language: Language): Promise<boolean> {
     if (Platform.OS !== 'android') return false;
+    // Expo Go does not bundle react-native-android-widget; the bridge call below would
+    // fail (twice, then log an error) on every data change. Say so once, then stay quiet.
+    if (isExpoGo()) {
+        if (!expoGoWidgetSkipLogged) {
+            expoGoWidgetSkipLogged = true;
+            void logInfo('[RNWidget] Android widgets are unavailable in Expo Go; skipping updates', { scope: 'widget' });
+        }
+        return false;
+    }
 
     try {
         for (let attempt = 0; attempt < 2; attempt += 1) {

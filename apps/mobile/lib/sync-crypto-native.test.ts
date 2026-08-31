@@ -203,25 +203,38 @@ describe('native module unavailability latch', () => {
     setSyncCryptoNativeModuleForTests(nodeBackedQuickCrypto);
   });
 
-  it('refuses with one clean cached error in Expo Go instead of requiring the native module', () => {
+  it('refuses encryption with one clean cached error in Expo Go instead of requiring the native module', () => {
     setExpoGoProbeForTests(() => true);
     setSyncCryptoNativeModuleForTests(null);
 
-    let first: unknown;
-    try {
-      mobileSha256Hex(new Uint8Array([1]));
-    } catch (error) {
-      first = error;
-    }
+    const attempt = (): unknown => {
+      try {
+        return mobileSyncCryptoPrimitives.randomBytes(1);
+      } catch (error) {
+        return error;
+      }
+    };
+    const first = attempt();
     expect(String(first)).toMatch(/Expo Go/);
     expect(String(first)).not.toMatch(/Invariant/);
+    expect(attempt()).toBe(first);
+  });
 
-    let second: unknown;
-    try {
-      mobileSha256Hex(new Uint8Array([1]));
-    } catch (error) {
-      second = error;
-    }
-    expect(second).toBe(first);
+  it('outside Expo Go a missing native module still fails the digest instead of silently switching to JS', () => {
+    setExpoGoProbeForTests(() => false);
+    setSyncCryptoNativeModuleForTests(null);
+
+    // Under vitest the real react-native-quick-crypto cannot load, which is exactly
+    // the broken-build shape: the digest must surface that, not hide it in pure JS.
+    expect(() => mobileSha256Hex(new Uint8Array([1]))).toThrow(/rebuild the app/);
+  });
+
+  it('still digests attachments in Expo Go, in pure JS, so plaintext sync does not depend on the encryption module', () => {
+    setExpoGoProbeForTests(() => true);
+    setSyncCryptoNativeModuleForTests(null);
+
+    expect(mobileSha256Hex(new Uint8Array([0x61, 0x62, 0x63]))).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    );
   });
 });

@@ -38,7 +38,8 @@ import {
   validateAttachmentHash,
   writeBytesSafely,
 } from '../attachment-sync-utils';
-import { installAttachmentFileGeneration } from '../attachment-file-installer';
+import { installAttachmentFileGeneration, type AttachmentFileInstallResult } from '../attachment-file-installer';
+import { isExpoGo } from '../expo-go';
 import { mobileSyncCryptoPrimitives } from '../sync-crypto-native';
 import { assertMobileWebdavConnection } from '../webdav-request-options';
 
@@ -271,6 +272,40 @@ export const readAttachmentDownloadStageBytes = async (
   return bytes;
 };
 
+const isInstallerUnavailableError = (error: unknown): boolean => error instanceof Error
+  && (error as Error & { code?: unknown }).code === 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE';
+
+const hashExistingFile = async (path: string): Promise<string | null> => {
+  const info = await FileSystem.getInfoAsync(path);
+  if (!info.exists) return null;
+  const hash = await computeSha256Hex(await readAttachmentDownloadStageBytes(path));
+  if (!hash) throw new Error('Attachment download hash is unavailable');
+  return hash;
+};
+
+/** Expo Go fallback for {@link installAttachmentFileGeneration}: same contract,
+ * JS moves instead of a native journaled publish. `absent` accepts an identical
+ * file already at the target; `present` replaces only the exact generation named. */
+const installStagedDownloadWithoutNativeInstaller = async (
+  stagedPath: string,
+  targetPath: string,
+  expectation: AttachmentDownloadExpectation,
+  stagedSha256: string,
+): Promise<AttachmentFileInstallResult> => {
+  const existingHash = await hashExistingFile(targetPath);
+  if (expectation.kind === 'absent') {
+    if (existingHash === stagedSha256) return { status: 'installed' };
+    if (existingHash !== null) return { status: 'conflict', preservedPath: stagedPath };
+  } else {
+    if (existingHash !== expectation.sha256.toLowerCase()) {
+      return { status: 'conflict', preservedPath: stagedPath };
+    }
+    await FileSystem.deleteAsync(targetPath, { idempotent: true });
+  }
+  await FileSystem.moveAsync({ from: stagedPath, to: targetPath });
+  return { status: 'installed' };
+};
+
 type InstallStagedAttachmentDownloadOptions = {
   attachment: Attachment;
   stagedPath: string;
@@ -317,12 +352,28 @@ export const installStagedAttachmentDownload = async ({
     }
     assertAttachmentSyncNotAborted(signal);
     nativeInstallStarted = true;
-    const result = await installAttachmentFileGeneration(
-      stagedPath,
-      targetPath,
-      expectation,
-      actualStagedHash,
-    );
+    let result: AttachmentFileInstallResult;
+    try {
+      result = await installAttachmentFileGeneration(
+        stagedPath,
+        targetPath,
+        expectation,
+        actualStagedHash,
+      );
+    } catch (error) {
+      // Expo Go cannot carry the native installer. Plaintext sync must still work
+      // there, so publish from JS with the same absent/present contract, minus the
+      // crash journal. Any other binary keeps failing loudly: a missing installer in
+      // a real build is a packaging bug, not something to paper over.
+      if (!isInstallerUnavailableError(error) || !isExpoGo()) throw error;
+      nativeInstallStarted = false;
+      result = await installStagedDownloadWithoutNativeInstaller(
+        stagedPath,
+        targetPath,
+        expectation,
+        actualStagedHash,
+      );
+    }
     if (result.status !== 'installed') {
       reportProgress(
         attachment.id,

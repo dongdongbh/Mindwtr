@@ -296,6 +296,9 @@ function appendWithFileHandle(line: string): boolean {
 }
 
 async function appendLogLine(entry: LogEntry, options?: { force?: boolean }): Promise<string | null> {
+  // Dev builds mirror every entry to the Metro console, gate or not: an Expo Go
+  // tester has no way to hand over the log file, but can paste the terminal.
+  logEntryToDevConsole(entry);
   if (!options?.force && !isLoggingEnabled()) return null;
   const backend = customLogBackend;
   const line = `${JSON.stringify(entry)}\n`;
@@ -325,10 +328,7 @@ async function appendLogLine(entry: LogEntry, options?: { force?: boolean }): Pr
       try {
         const fs = await getLegacyFileSystem();
         const path = await ensureLegacyLogFilePath();
-        if (!fs || !path) {
-          logEntryToDevConsole(entry);
-          return null;
-        }
+        if (!fs || !path) return null;
         const info = await fs.getInfoAsync(path);
         const current = info.exists ? await fs.readAsStringAsync(path, { encoding: UTF8_ENCODING }).catch(() => '') : '';
         let next = current + line;
@@ -339,7 +339,6 @@ async function appendLogLine(entry: LogEntry, options?: { force?: boolean }): Pr
         logWriteCount += 1;
         return path;
       } catch {
-        logEntryToDevConsole(entry);
         return null;
       }
     }

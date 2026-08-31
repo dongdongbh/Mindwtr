@@ -2,6 +2,9 @@ import type { ReactElement } from 'react';
 import type { AppData } from '@mindwtr/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { resetMobileWidgetRenderCache, updateMobileWidgetFromData } from './widget-service';
+import { setExpoGoProbeForTests } from './expo-go';
+
 const {
     mockAsyncStorageGetItem,
     mockIosWidgetReloadTimelines,
@@ -38,8 +41,6 @@ vi.mock('react-native-widgetkit', () => ({
     reloadTimelines: mockIosWidgetReloadTimelines,
     setItem: mockIosWidgetSetItem,
 }));
-
-import { resetMobileWidgetRenderCache, updateMobileWidgetFromData } from './widget-service';
 
 type WidgetElement = ReactElement<{
     children?: WidgetElement | WidgetElement[];
@@ -89,6 +90,16 @@ describe('widget-service', () => {
         mockIosWidgetSetItem.mockReset();
         mockRequestWidgetUpdate.mockReset();
         resetMobileWidgetRenderCache();
+    });
+
+    it('never calls the Android widget bridge inside Expo Go, where the package cannot be linked', async () => {
+        setExpoGoProbeForTests(() => true);
+        try {
+            await updateMobileWidgetFromData(buildData(3));
+            expect(mockRequestWidgetUpdate).not.toHaveBeenCalled();
+        } finally {
+            setExpoGoProbeForTests(null);
+        }
     });
 
     it('skips the native render when nothing any widget shows changed (#766)', async () => {

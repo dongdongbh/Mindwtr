@@ -1867,6 +1867,125 @@ describe('attachment sync', () => {
     });
   });
 
+  it('outside Expo Go an unavailable native installer still fails the download; nothing is moved from JS', async () => {
+    const unavailable = Object.assign(new Error('Attachment file installer native module is unavailable'), {
+      code: 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE',
+    });
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockRejectedValueOnce(unavailable);
+    const remoteBytes = new Uint8Array([1, 2, 3]);
+    const remoteHash = sha256Hex(remoteBytes);
+    mockMissingTargetWithDownloadStage(remoteBytes);
+    const core = await import('@mindwtr/core');
+    vi.mocked(core.cloudGetFile).mockResolvedValue(remoteBytes.buffer);
+    const appData: AppData = {
+      tasks: [{
+        id: 'task-1',
+        title: 'Task',
+        status: 'inbox',
+        tags: [],
+        contexts: [],
+        attachments: [{
+          id: 'report',
+          kind: 'file',
+          title: 'Report.pdf',
+          uri: '',
+          cloudKey: 'attachments/report.pdf',
+          fileHash: remoteHash,
+          localStatus: 'missing',
+          createdAt: '2026-08-03T10:00:00.000Z',
+          updatedAt: '2026-08-03T10:00:00.000Z',
+        }],
+        createdAt: '2026-08-03T10:00:00.000Z',
+        updatedAt: '2026-08-03T10:00:00.000Z',
+      }],
+      projects: [],
+      sections: [],
+      areas: [],
+      settings: {},
+    };
+
+    const { syncCloudAttachments } = attachmentSync;
+    const { data } = syncResult(
+      await syncCloudAttachments(
+        appData,
+        { url: 'https://candidate.example/v1/data', token: 'candidate-token' },
+        'https://candidate.example/v1',
+        { activationProbe: true, phase: 'post-merge' },
+      ),
+      appData,
+    );
+
+    expect(fileSystemMock.moveAsync).not.toHaveBeenCalledWith(expect.objectContaining({
+      to: 'file://document/attachments/report.pdf',
+    }));
+    expect(data.tasks[0]?.attachments?.[0]).toMatchObject({ localStatus: 'missing' });
+  });
+
+  it('publishes a downloaded attachment from JS in Expo Go, where the native installer cannot exist', async () => {
+    const { setExpoGoProbeForTests } = await import('./expo-go');
+    setExpoGoProbeForTests(() => true);
+    const unavailable = Object.assign(new Error('Attachment file installer native module is unavailable'), {
+      code: 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE',
+    });
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockRejectedValueOnce(unavailable);
+    try {
+      const remoteBytes = new Uint8Array([1, 2, 3]);
+      const remoteHash = sha256Hex(remoteBytes);
+      mockMissingTargetWithDownloadStage(remoteBytes);
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.cloudGetFile).mockResolvedValue(remoteBytes.buffer);
+      const appData: AppData = {
+        tasks: [{
+          id: 'task-1',
+          title: 'Task',
+          status: 'inbox',
+          tags: [],
+          contexts: [],
+          attachments: [{
+            id: 'report',
+            kind: 'file',
+            title: 'Report.pdf',
+            uri: '',
+            cloudKey: 'attachments/report.pdf',
+            fileHash: remoteHash,
+            localStatus: 'missing',
+            createdAt: '2026-08-03T10:00:00.000Z',
+            updatedAt: '2026-08-03T10:00:00.000Z',
+          }],
+          createdAt: '2026-08-03T10:00:00.000Z',
+          updatedAt: '2026-08-03T10:00:00.000Z',
+        }],
+        projects: [],
+        sections: [],
+        areas: [],
+        settings: {},
+      };
+
+      const { syncCloudAttachments } = attachmentSync;
+      const { data } = syncResult(
+        await syncCloudAttachments(
+          appData,
+          { url: 'https://candidate.example/v1/data', token: 'candidate-token' },
+          'https://candidate.example/v1',
+          { activationProbe: true, phase: 'post-merge' },
+        ),
+        appData,
+      );
+
+      expect(fileSystemMock.moveAsync).toHaveBeenCalledWith({
+        from: expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-download-/),
+        to: 'file://document/attachments/report.pdf',
+      });
+      expect(data.tasks[0]?.attachments?.[0]).toMatchObject({
+        uri: 'file://document/attachments/report.pdf',
+        fileHash: remoteHash,
+        localStatus: 'available',
+      });
+    } finally {
+      setExpoGoProbeForTests(null);
+    }
+  });
+
   it('uploads a candidate-cleared local attachment when proving a cloud backend', async () => {
     const localUri = 'file://document/attachments/notes.txt';
     fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (

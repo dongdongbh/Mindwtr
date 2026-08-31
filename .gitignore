@@ -113,3 +113,6 @@ pnpm-workspace.yaml
 
 # Brainstorming/implementation working files (decisions distilled to docs/adr/)
 docs/superpowers/
+
+# CMake build caches from native module builds; Metro's watcher crashes on their transient dirs
+apps/mobile/modules/*/android/.cxx/

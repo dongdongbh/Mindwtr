@@ -17,6 +17,9 @@
 // sync stack does, transitively) never pulls a native TurboModule into a unit test.
 
 import { SyncCryptoAuthError, type SyncCryptoPrimitives } from '@mindwtr/core';
+import { sha256 as pureJsSha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
+import { isExpoGo as sharedIsExpoGo } from './expo-go';
 
 const AES_GCM_TAG_LEN = 16;
 
@@ -64,24 +67,11 @@ export const setSyncCryptoNativeModuleForTests = (module: SyncCryptoNativeModule
     nativeModuleError = null;
 };
 
-const defaultIsExpoGo = (): boolean => {
-    try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const constants = require('expo-constants') as {
-            default?: { appOwnership?: string | null };
-            appOwnership?: string | null;
-        };
-        return (constants.default ?? constants).appOwnership === 'expo';
-    } catch {
-        return false;
-    }
-};
-
-let isExpoGo: () => boolean = defaultIsExpoGo;
+let isExpoGo: () => boolean = sharedIsExpoGo;
 
 /** Test seam. Pass `null` to restore the real expo-constants probe. */
 export const setExpoGoProbeForTests = (probe: (() => boolean) | null): void => {
-    isExpoGo = probe ?? defaultIsExpoGo;
+    isExpoGo = probe ?? sharedIsExpoGo;
 };
 
 const getNativeModule = (): SyncCryptoNativeModule => {
@@ -194,5 +184,13 @@ export const mobileSyncCryptoPrimitives: SyncCryptoPrimitives = {
  * module, same Node-shaped API, so the node-environment vitest suite exercises it against
  * node's own `crypto`.
  */
-export const mobileSha256Hex = (bytes: Uint8Array): string =>
-    getNativeModule().createHash('sha256').update(bytes).digest('hex');
+export const mobileSha256Hex = (bytes: Uint8Array): string => {
+    // Expo Go cannot carry quick-crypto, and plaintext sync must not depend on the
+    // encryption module there: the integrity digest (#1057) runs in pure JS, a few
+    // MB in tens of ms. Only Expo Go: a real build whose native module fails to load
+    // keeps failing loudly, because that is a packaging bug, not a runtime to adapt to.
+    // Encryption itself stays native-only; its primitives above still throw the
+    // latched unavailability error in Expo Go.
+    if (isExpoGo()) return bytesToHex(pureJsSha256(bytes));
+    return getNativeModule().createHash('sha256').update(bytes).digest('hex');
+};
