@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, View } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -38,6 +38,83 @@ const flattenStyle = (style: unknown): Record<string, any> => {
 };
 
 describe('Quick capture modal composition', () => {
+  it('announces saving and disables save and dismissal controls while a submission is active', () => {
+    const handleClose = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    const t = (key: string) => ({
+      'common.close': 'Close',
+      'common.loading': 'Loading...',
+      'common.more': 'More',
+      'common.save': 'Save',
+      'nav.addTask': 'Add Task',
+      'quickAdd.addAnother': 'Add another',
+      'quickAdd.audioRecord': 'Record',
+      'quickAdd.inputHint': 'Capture task title',
+      'quickAdd.inputLabel': 'Task title',
+      'taskEdit.contextsLabel': 'Contexts',
+      'taskEdit.projectLabel': 'Project',
+    }[key] ?? key);
+
+    act(() => {
+      tree = create(
+        <QuickCaptureSheetBody
+          addAnother={false}
+          areaLabel="No Area"
+          contextLabel="Contexts"
+          dueDate={null}
+          dueLabel="Due Date"
+          dueTimeLabel="Change time"
+          handleClose={handleClose}
+          handleSave={vi.fn()}
+          insetsBottom={0}
+          inputRef={{ current: null }}
+          noteValue=""
+          onNoteChange={vi.fn()}
+          onOpenAreaPicker={vi.fn()}
+          onOpenContextPicker={vi.fn()}
+          onOpenDueDatePicker={vi.fn()}
+          onOpenDueTimePicker={vi.fn()}
+          onOpenPriorityPicker={vi.fn()}
+          onOpenProjectPicker={vi.fn()}
+          onQuickDueDateSelect={vi.fn()}
+          onResetArea={vi.fn()}
+          onResetContexts={vi.fn()}
+          onResetDueDate={vi.fn()}
+          onResetDueTime={vi.fn()}
+          onResetPriority={vi.fn()}
+          onResetProject={vi.fn()}
+          onToggleOptions={vi.fn()}
+          onToggleAddAnother={vi.fn()}
+          onToggleRecording={vi.fn()}
+          onValueChange={vi.fn()}
+          optionsExpanded={false}
+          prioritiesEnabled
+          priorityLabel="Priority"
+          projectLabel="Project"
+          recording={false}
+          recordingBusy={false}
+          recordingReady={false}
+          saving
+          sheetMaxHeight={500}
+          showDueTime={false}
+          t={t}
+          tc={tc}
+          value="Capture me"
+          visible
+        />
+      );
+    });
+
+    const controls = tree.root.findAllByType(TouchableOpacity);
+    const closeControls = controls.filter((node) => node.props.accessibilityLabel === 'Close');
+    const save = controls.find((node) => node.props.accessibilityLabel === 'Save');
+    expect(closeControls.length).toBeGreaterThan(0);
+    expect(closeControls.every((node) => node.props.disabled === true)).toBe(true);
+    expect(save?.props.disabled).toBe(true);
+    expect(save?.props.accessibilityState).toEqual({ busy: true, disabled: true });
+    expect(tree.root.findByType(Modal).props.onRequestClose).not.toBe(handleClose);
+  });
+
   it('does not mount picker modals while every picker is closed', () => {
     let tree!: ReturnType<typeof create>;
 

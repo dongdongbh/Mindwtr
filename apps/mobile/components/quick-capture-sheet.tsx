@@ -13,6 +13,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 
 import {
+  CaptureSessionCoordinator,
   executeCaptureTransaction,
   prepareCaptureTask,
   filterCaptureAreas,
@@ -39,6 +40,7 @@ import {
   splitQuickAddBulkLines,
   tFallback,
   type CaptureAssemblyInput,
+  type CaptureSessionId,
   type CaptureTransactionOptions,
   type Task,
   type TaskPriority,
@@ -190,7 +192,8 @@ export function QuickCaptureSheet({
   const { height: windowHeight } = useWindowDimensions();
   const inputRef = useRef<TextInput>(null);
   const contextInputRef = useRef<TextInput>(null);
-  const isSavingRef = useRef(false);
+  const submissionCoordinatorRef = useRef(new CaptureSessionCoordinator());
+  const activeSubmissionSessionRef = useRef<CaptureSessionId | null>(null);
   const { priorities: prioritiesEnabled } = resolveFeatureFlags(settings);
   const { selectedAreaIdForNewTasks } = useMobileAreaFilter();
   const defaultAreaMode = getDefaultTaskAreaMode(settings);
@@ -214,6 +217,7 @@ export function QuickCaptureSheet({
   );
 
   const [value, setValue] = useState('');
+  const [saving, setSaving] = useState(false);
   // Refreshed by resetDraftState — which runs on open AND after each capture in
   // an "Add another" burst, so a context/tag/person created by one capture is
   // known to the next one's parse. Not subscribed and not rebuilt per render:
@@ -463,11 +467,26 @@ export function QuickCaptureSheet({
   }, [clearAndroidOptionsExpand, clearContextOptionsLoad, defaultAreaId, initialProps, initialValue]);
 
   useEffect(() => () => {
+    const session = activeSubmissionSessionRef.current;
+    if (session !== null) submissionCoordinatorRef.current.invalidateSession(session);
+    activeSubmissionSessionRef.current = null;
     clearAndroidOptionsExpand();
     clearInitialFocusTimer();
     clearContextOptionsLoad();
     contextOptionsRequestRef.current += 1;
   }, [clearAndroidOptionsExpand, clearContextOptionsLoad, clearInitialFocusTimer]);
+
+  useEffect(() => {
+    if (!visible) {
+      const session = activeSubmissionSessionRef.current;
+      if (session !== null) submissionCoordinatorRef.current.invalidateSession(session);
+      activeSubmissionSessionRef.current = null;
+      setSaving(false);
+      return;
+    }
+    activeSubmissionSessionRef.current = submissionCoordinatorRef.current.beginSession();
+    setSaving(false);
+  }, [openRequestId, visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -623,6 +642,10 @@ export function QuickCaptureSheet({
   }, [clearAndroidOptionsExpand, clearContextOptionsLoad, defaultAreaId]);
 
   const finalizeClose = useCallback(() => {
+    const session = activeSubmissionSessionRef.current;
+    if (session !== null) submissionCoordinatorRef.current.invalidateSession(session);
+    activeSubmissionSessionRef.current = null;
+    setSaving(false);
     clearInitialFocusTimer();
     resetState();
     onClose();
@@ -649,6 +672,8 @@ export function QuickCaptureSheet({
   });
 
   const handleClose = useCallback(() => {
+    const session = activeSubmissionSessionRef.current;
+    if (session !== null && submissionCoordinatorRef.current.isSubmitting(session)) return;
     if (recording && !recordingBusy) {
       void stopRecording({ saveTask: false });
     }
@@ -688,8 +713,9 @@ export function QuickCaptureSheet({
   }, [addProject, addTask, buildCaptureRequestForInput, showToast, t]);
 
   const createBulkTasks = useCallback(async (lines: string[]) => {
-    if (isSavingRef.current) return;
-    isSavingRef.current = true;
+    const session = activeSubmissionSessionRef.current;
+    if (session === null || !submissionCoordinatorRef.current.tryBeginSubmission(session)) return;
+    setSaving(true);
     try {
       try {
         await createMobileRecoverySnapshot();
@@ -703,11 +729,13 @@ export function QuickCaptureSheet({
         });
         return;
       }
+      if (!submissionCoordinatorRef.current.isCurrent(session)) return;
       const taskInputs: Array<{ title: string; initialProps: Partial<Task> }> = [];
       let currentProjects = projects;
       for (const line of lines) {
         const request = buildCaptureRequestForInput(line, line.trim(), undefined, currentProjects);
         const prepared = await prepareCaptureTask(request.input, { addProject }, request.options);
+        if (!submissionCoordinatorRef.current.isCurrent(session)) return;
         if (!prepared.success && prepared.reason === 'invalid-date-command') {
           showInvalidDateCommandToast(showToast, t, prepared.invalidDateCommands);
           return;
@@ -717,10 +745,13 @@ export function QuickCaptureSheet({
         if (prepared.createdProject) currentProjects = [...currentProjects, prepared.createdProject];
       }
       const result = await addTasks(taskInputs);
+      if (!submissionCoordinatorRef.current.isCurrent(session)) return;
       if (result && typeof result === 'object' && result.success === false) return;
       finalizeClose();
     } finally {
-      isSavingRef.current = false;
+      if (submissionCoordinatorRef.current.finishSubmission(session)) {
+        setSaving(false);
+      }
     }
   }, [addProject, addTasks, buildCaptureRequestForInput, finalizeClose, projects, showToast, t]);
 
@@ -751,11 +782,12 @@ export function QuickCaptureSheet({
       confirmBulkQuickAdd(bulkLines);
       return;
     }
-    if (isSavingRef.current) return;
-    isSavingRef.current = true;
+    const session = activeSubmissionSessionRef.current;
+    if (session === null || !submissionCoordinatorRef.current.tryBeginSubmission(session)) return;
+    setSaving(true);
     try {
       const result = await createTaskFromInput(value.trim());
-      if (!result) return;
+      if (!submissionCoordinatorRef.current.isCurrent(session) || !result) return;
 
       if (openAfterSave) {
         finalizeClose();
@@ -782,7 +814,9 @@ export function QuickCaptureSheet({
 
       finalizeClose();
     } finally {
-      isSavingRef.current = false;
+      if (submissionCoordinatorRef.current.finishSubmission(session)) {
+        setSaving(false);
+      }
     }
   }, [addAnother, confirmBulkQuickAdd, createTaskFromInput, finalizeClose, initialProps?.projectId, resetDraftState, setHighlightTask, value]);
 
@@ -1158,6 +1192,7 @@ export function QuickCaptureSheet({
         recording={Boolean(recording)}
         recordingBusy={recordingBusy}
         recordingReady={recordingReady}
+        saving={saving}
         saveButtonBackgroundColor={saveButtonBackgroundColor}
         saveButtonTextColor={saveButtonTextColor}
         sheetMaxHeight={sheetMaxHeight}

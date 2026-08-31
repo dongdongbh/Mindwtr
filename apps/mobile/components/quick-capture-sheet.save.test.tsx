@@ -80,7 +80,11 @@ const {
 vi.mock('@mindwtr/core', async () => {
   // The shared capture transaction is real; only its store actions are substituted.
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
+  const sessionActual = await vi.importActual<typeof import('../../../packages/core/src/capture-session')>(
+    '../../../packages/core/src/capture-session'
+  );
   return {
+  CaptureSessionCoordinator: sessionActual.CaptureSessionCoordinator,
   executeCaptureTransaction: actual.executeCaptureTransaction,
   prepareCaptureTask: actual.prepareCaptureTask,
   buildQuickAddParseOptions: actual.buildQuickAddParseOptions,
@@ -680,11 +684,71 @@ describe('QuickCaptureSheet save handling', () => {
 
     expect(addTask).toHaveBeenCalledTimes(1);
     expect(addTask).toHaveBeenCalledWith('Double tap task', expect.objectContaining({ status: 'inbox' }));
+    expect(tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0]?.props.saving).toBe(true);
 
     await act(async () => {
       resolveAddTask?.({ success: true, id: 'task-1' });
       await Promise.resolve();
     });
+  });
+
+  it('does not let a stale save close or clear a reopened capture session', async () => {
+    let resolveAddTask: ((value: unknown) => void) | null = null;
+    addTask.mockImplementation(() => new Promise((resolve) => {
+      resolveAddTask = resolve;
+    }));
+    const onClose = vi.fn();
+
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <QuickCaptureSheet
+          visible
+          openRequestId={1}
+          initialValue="First capture"
+          onClose={onClose}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    const firstBody = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+    if (!firstBody) throw new Error('QuickCaptureSheetBody not found');
+    await act(async () => {
+      firstBody.props.handleSave();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      tree.update(
+        <QuickCaptureSheet
+          visible={false}
+          openRequestId={1}
+          initialValue="First capture"
+          onClose={onClose}
+        />
+      );
+      tree.update(
+        <QuickCaptureSheet
+          visible
+          openRequestId={2}
+          initialValue="Second capture"
+          onClose={onClose}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      resolveAddTask?.({ success: true, id: 'task-1' });
+      await Promise.resolve();
+    });
+
+    const reopenedBody = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+    if (!reopenedBody) throw new Error('QuickCaptureSheetBody not found');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(reopenedBody.props.value).toBe('Second capture');
+    expect(reopenedBody.props.saving).toBe(false);
   });
 
   it("stars a task for Today's Focus from the capture sheet", async () => {

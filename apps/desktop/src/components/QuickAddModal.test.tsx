@@ -68,12 +68,15 @@ const renderQuickAddModal = (props?: ComponentProps<typeof QuickAddModal>) => re
     </LanguageProvider>
 );
 
-const createDeferred = () => {
-    let resolve!: () => void;
-    const promise = new Promise<void>((done) => {
-        resolve = done;
+const createDeferred = <T = void>() => {
+    let resolvePromise!: (value: T | PromiseLike<T>) => void;
+    const promise = new Promise<T>((done) => {
+        resolvePromise = done;
     });
-    return { promise, resolve };
+    return {
+        promise,
+        resolve: (value?: T) => resolvePromise(value as T),
+    };
 };
 
 const createImageClipboardData = (file: File) => ({
@@ -114,6 +117,42 @@ beforeEach(() => {
 });
 
 describe('QuickAddModal', () => {
+    it('submits once and exposes a busy, non-dismissible state while saving', async () => {
+        const deferred = createDeferred<{ success: true; id: string }>();
+        const addTask = vi.fn(() => deferred.promise);
+        act(() => {
+            useTaskStore.setState((state) => ({ ...state, addTask }));
+        });
+        renderQuickAddModal();
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', {
+                detail: { initialValue: 'Single flight' },
+            }));
+            await Promise.resolve();
+        });
+
+        const save = screen.getByRole('button', { name: 'Save' });
+        await act(async () => {
+            fireEvent.click(save);
+            fireEvent.click(save);
+            await Promise.resolve();
+        });
+
+        expect(addTask).toHaveBeenCalledTimes(1);
+        expect(save).toBeDisabled();
+        expect(save).toHaveAttribute('aria-busy', 'true');
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled();
+
+        await act(async () => {
+            deferred.resolve({ success: true, id: 'task-id' });
+            await deferred.promise;
+        });
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
     it('ignores duplicate open requests while the first open is still committing', async () => {
         renderQuickAddModal();
 

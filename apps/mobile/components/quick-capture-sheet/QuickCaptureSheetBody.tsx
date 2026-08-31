@@ -89,6 +89,7 @@ interface QuickCaptureSheetBodyProps {
   recording: boolean;
   recordingBusy: boolean;
   recordingReady: boolean;
+  saving?: boolean;
   saveButtonBackgroundColor?: string;
   saveButtonTextColor?: string;
   sheetMaxHeight: number;
@@ -149,6 +150,7 @@ export function QuickCaptureSheetBody({
   recording,
   recordingBusy,
   recordingReady,
+  saving = false,
   saveButtonBackgroundColor,
   saveButtonTextColor,
   sheetMaxHeight,
@@ -226,14 +228,16 @@ export function QuickCaptureSheetBody({
       navigationBarTranslucent={Platform.OS === 'android'}
       statusBarTranslucent={Platform.OS === 'android'}
       accessibilityViewIsModal
-      onRequestClose={handleRequestClose ?? handleClose}
+      onRequestClose={saving ? () => undefined : (handleRequestClose ?? handleClose)}
     >
       <View style={styles.modalRoot} accessibilityViewIsModal>
         <Pressable
           style={styles.backdrop}
-          onPress={handleClose}
+          onPress={saving ? undefined : handleClose}
+          disabled={saving}
           accessibilityRole="button"
           accessibilityLabel={t('common.close')}
+          accessibilityState={{ busy: saving, disabled: saving }}
           accessibilityElementsHidden={contentAccessibilityHidden}
           importantForAccessibility={contentAccessibilityHidden ? 'no-hide-descendants' : 'auto'}
         />
@@ -261,7 +265,12 @@ export function QuickCaptureSheetBody({
               >
                 {t('nav.addTask')}
               </CompactText>
-              <TouchableOpacity onPress={handleClose} accessibilityLabel={t('common.close')}>
+              <TouchableOpacity
+                onPress={handleClose}
+                disabled={saving}
+                accessibilityLabel={t('common.close')}
+                accessibilityState={{ busy: saving, disabled: saving }}
+              >
                 <X size={18} color={tc.secondaryText} />
               </TouchableOpacity>
             </View>
@@ -274,9 +283,12 @@ export function QuickCaptureSheetBody({
                 placeholderTextColor={tc.secondaryText}
                 value={value}
                 onChangeText={onValueChange}
+                editable={!saving}
+                accessibilityState={{ busy: saving, disabled: saving }}
                 accessibilityLabel={t('quickAdd.inputLabel')}
                 accessibilityHint={t('quickAdd.inputHint')}
                 onSubmitEditing={() => {
+                  if (saving) return;
                   if (!addAnother) {
                     inputRef.current?.blur();
                   }
@@ -561,6 +573,7 @@ export function QuickCaptureSheetBody({
                 <Switch
                   value={addAnother}
                   onValueChange={onToggleAddAnother}
+                  disabled={saving}
                   thumbColor={addAnother ? tc.tint : tc.border}
                   trackColor={{ false: tc.border, true: `${tc.tint}55` }}
                   accessibilityLabel={t('quickAdd.addAnother')}
@@ -579,11 +592,12 @@ export function QuickCaptureSheetBody({
                     style={[
                       styles.saveButton,
                       styles.saveAndEditButton,
-                      { borderColor: tc.border, opacity: value.trim() ? 1 : 0.5 },
+                      { borderColor: tc.border, opacity: value.trim() && !saving ? 1 : 0.5 },
                     ]}
-                    disabled={!value.trim()}
+                    disabled={saving || !value.trim()}
                     accessibilityRole="button"
                     accessibilityLabel={t('quickAdd.saveAndEdit')}
+                    accessibilityState={{ busy: saving, disabled: saving || !value.trim() }}
                   >
                     <CompactText
                       style={[styles.saveAndEditText, { color: tc.text }]}
@@ -597,10 +611,11 @@ export function QuickCaptureSheetBody({
                 ) : null}
                 <TouchableOpacity
                   onPress={handleSave}
-                  style={[styles.saveButton, { backgroundColor: saveButtonBackgroundColor ?? tc.tint, opacity: value.trim() ? 1 : 0.5 }]}
-                  disabled={!value.trim()}
+                  style={[styles.saveButton, { backgroundColor: saveButtonBackgroundColor ?? tc.tint, opacity: value.trim() && !saving ? 1 : 0.5 }]}
+                  disabled={saving || !value.trim()}
                   accessibilityRole="button"
                   accessibilityLabel={t('common.save')}
+                  accessibilityState={{ busy: saving, disabled: saving || !value.trim() }}
                 >
                   <CompactText
                     style={[styles.saveText, saveButtonTextColor ? { color: saveButtonTextColor } : null]}

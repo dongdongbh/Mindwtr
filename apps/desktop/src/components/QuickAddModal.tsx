@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ClipboardEvent } from 'react';
 import {
     executeCaptureTransaction,
+    CaptureSessionCoordinator,
     prepareCaptureTask,
     canStarNewCapture,
     shallow,
@@ -28,6 +29,7 @@ import {
     tFallback,
     type Area,
     type Attachment,
+    type CaptureSessionId,
     type Project,
     type QuickAddResult,
     type Task,
@@ -184,10 +186,13 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const [pastingImageCount, setPastingImageCount] = useState(0);
     const [bulkQuickAddLines, setBulkQuickAddLines] = useState<string[] | null>(null);
     const [bulkQuickAddError, setBulkQuickAddError] = useState<string | null>(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const lastActiveElementRef = useRef<HTMLElement | null>(null);
     const modalRef = useRef<HTMLDivElement | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const captureSessionRef = useRef<AudioCaptureSession | null>(null);
+    const submissionCoordinatorRef = useRef(new CaptureSessionCoordinator());
+    const activeSubmissionSessionRef = useRef<CaptureSessionId | null>(null);
     const isOpenRef = useRef(false);
     const openRequestInFlightRef = useRef(false);
     const standaloneDataRefreshRef = useRef<Promise<void> | null>(null);
@@ -293,6 +298,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         if (isOpenRef.current || openRequestInFlightRef.current) return false;
         openRequestInFlightRef.current = true;
         try {
+            activeSubmissionSessionRef.current = submissionCoordinatorRef.current.beginSession();
+            setIsSubmitting(false);
             setInitialProps(detail?.initialProps ?? null);
             setFocusNewTask(Boolean(detail?.initialProps?.isFocusedToday));
             setValue(detail?.initialValue ?? '');
@@ -307,6 +314,9 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             }
             return true;
         } catch (error) {
+            const session = activeSubmissionSessionRef.current;
+            if (session !== null) submissionCoordinatorRef.current.invalidateSession(session);
+            activeSubmissionSessionRef.current = null;
             openRequestInFlightRef.current = false;
             throw error;
         }
@@ -433,6 +443,10 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     }, [standaloneWindow]);
 
     const close = useCallback((options?: { keepPastedImages?: boolean }) => {
+        const session = activeSubmissionSessionRef.current;
+        if (session !== null) submissionCoordinatorRef.current.invalidateSession(session);
+        activeSubmissionSessionRef.current = null;
+        setIsSubmitting(false);
         isOpenRef.current = false;
         openRequestInFlightRef.current = false;
         setIsOpen(false);
@@ -758,6 +772,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     }, [isRecording, stopRecording]);
 
     const handleClose = () => {
+        const session = activeSubmissionSessionRef.current;
+        if (session !== null && submissionCoordinatorRef.current.isSubmitting(session)) return;
         if (isRecording && !recordingBusy) {
             void stopRecording({ saveTask: false });
         }
@@ -871,121 +887,148 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         if (isPastingImage) return;
         const hasPastedAttachments = pastedAttachments.length > 0;
         if (!value.trim() && !hasPastedAttachments) return;
-        let currentProjects = projects;
-        let currentAreas = areas;
-        if (standaloneWindow) {
-            // The standalone window re-parses against projects/areas fetched
-            // here, which can be fresher than the ones the preview strip
-            // rendered from — the preview may lag by whatever this fetch pulls
-            // in. Accepted: the submit deciding on fresher data is the right
-            // direction, and the window closes on save.
-            await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
-            const currentState = useTaskStore.getState();
-            currentProjects = currentState.projects;
-            currentAreas = currentState.areas;
-        }
-        const parsed = parseQuickAdd(value, currentProjects, new Date(), currentAreas, quickAddParseOptions);
-        if (parsed.invalidDateCommands && parsed.invalidDateCommands.length > 0) {
-            return;
-        }
-        const result = await createTaskFromParsedQuickAdd({
-            currentAreas,
-            currentProjects,
-            extraAttachments: pastedAttachments,
-            input: value,
-            parsed,
-        });
-        if (!result.success) return;
-        if (standaloneWindow) {
-            await flushPendingSave().catch((error) => reportError('Failed to save quick add task', error));
-            await notifyStandaloneTaskSaved();
-        }
-        if (addAnother) {
-            // Shift+Enter batch capture: clear per-task state but keep the
-            // dialog (and the picked area) for the next entry.
-            setValue('');
-            setFocusNewTask(false);
-            setPastedImageError(null);
-            resetPastedImageAttachments(false);
-            return;
-        }
-        close({ keepPastedImages: true });
-        if (openAfterSave && result.createdTaskId && result.props && !standaloneWindow) {
-            openCreatedTaskForEditing(result.createdTaskId, result.props);
-        } else if (initialProps?.projectId && result.createdTaskId) {
-            // Opened from a project/section preset (ProjectWorkspace's add button):
-            // flash + scroll the new row in the project view. Global captures with
-            // no project preset intentionally skip this so they never leave a
-            // stray highlight on an unrelated view (#916).
-            setHighlightTask(result.createdTaskId);
+        const session = activeSubmissionSessionRef.current;
+        if (session === null || !submissionCoordinatorRef.current.tryBeginSubmission(session)) return;
+        setIsSubmitting(true);
+        try {
+            let currentProjects = projects;
+            let currentAreas = areas;
+            if (standaloneWindow) {
+                // The standalone window re-parses against projects/areas fetched
+                // here, which can be fresher than the ones the preview strip
+                // rendered from — the preview may lag by whatever this fetch pulls
+                // in. Accepted: the submit deciding on fresher data is the right
+                // direction, and the window closes on save.
+                await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
+                if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+                const currentState = useTaskStore.getState();
+                currentProjects = currentState.projects;
+                currentAreas = currentState.areas;
+            }
+            const parsed = parseQuickAdd(value, currentProjects, new Date(), currentAreas, quickAddParseOptions);
+            if (parsed.invalidDateCommands && parsed.invalidDateCommands.length > 0) {
+                return;
+            }
+            const result = await createTaskFromParsedQuickAdd({
+                currentAreas,
+                currentProjects,
+                extraAttachments: pastedAttachments,
+                input: value,
+                parsed,
+            });
+            if (!submissionCoordinatorRef.current.isCurrent(session) || !result.success) return;
+            if (standaloneWindow) {
+                await flushPendingSave().catch((error) => reportError('Failed to save quick add task', error));
+                if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+                await notifyStandaloneTaskSaved();
+                if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+            }
+            if (addAnother) {
+                // Shift+Enter batch capture: clear per-task state but keep the
+                // dialog (and the picked area) for the next entry.
+                setValue('');
+                setFocusNewTask(false);
+                setPastedImageError(null);
+                resetPastedImageAttachments(false);
+                return;
+            }
+            close({ keepPastedImages: true });
+            if (openAfterSave && result.createdTaskId && result.props && !standaloneWindow) {
+                openCreatedTaskForEditing(result.createdTaskId, result.props);
+            } else if (initialProps?.projectId && result.createdTaskId) {
+                // Opened from a project/section preset (ProjectWorkspace's add button):
+                // flash + scroll the new row in the project view. Global captures with
+                // no project preset intentionally skip this so they never leave a
+                // stray highlight on an unrelated view (#916).
+                setHighlightTask(result.createdTaskId);
+            }
+        } finally {
+            if (submissionCoordinatorRef.current.finishSubmission(session)) {
+                setIsSubmitting(false);
+            }
         }
     };
 
     const confirmBulkQuickAdd = async () => {
         if (!bulkQuickAddLines || bulkQuickAddLines.length === 0 || isPastingImage) return;
+        const session = activeSubmissionSessionRef.current;
+        if (session === null || !submissionCoordinatorRef.current.tryBeginSubmission(session)) return;
+        setIsSubmitting(true);
         try {
-            await createDesktopRecoverySnapshot();
-        } catch (error) {
-            reportError('Failed to create a recovery snapshot before bulk quick add', error);
-            setBulkQuickAddError(tFallback(t, 'quickAdd.bulkCreateError', 'Could not create all tasks.'));
-            return;
-        }
-        let currentProjects = projects;
-        let currentAreas = areas;
-        if (standaloneWindow) {
-            await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
-            const currentState = useTaskStore.getState();
-            currentProjects = currentState.projects;
-            currentAreas = currentState.areas;
-        }
-        const parsedItems: ParsedQuickAddTask[] = bulkQuickAddLines.map((line) => ({
-            input: line,
-            parsed: parseQuickAdd(line, currentProjects, new Date(), currentAreas, quickAddParseOptions),
-        }));
-        const invalid = parsedItems.find((item) => item.parsed.invalidDateCommands?.length);
-        if (invalid?.parsed.invalidDateCommands?.length) {
-            setBulkQuickAddError(
-                `${tFallback(t, 'quickAdd.invalidDateCommand', 'Invalid date command')}: ${invalid.parsed.invalidDateCommands.join(', ')}`
-            );
-            return;
-        }
-
-        // One store write for the whole import, not one per line (#942): a
-        // per-line loop left a half-imported inbox behind whenever any line
-        // failed, and queued one full-data save snapshot per task. Mobile's
-        // bulk capture already prepares then batches the same way.
-        const bulkFailed = (detail?: string) => {
-            const message = tFallback(t, 'quickAdd.bulkCreateError', 'Could not create all tasks.');
-            setBulkQuickAddError(detail ? `${message} (${detail})` : message);
-        };
-        const taskInputs: Array<{ title: string; initialProps: Partial<Task> }> = [];
-        for (const item of parsedItems) {
-            const prepared = await prepareCaptureTask(
-                buildQuickAddCaptureInput({ currentProjects, input: item.input, parsed: item.parsed }),
-                { addProject },
-            );
-            if (!prepared.success) {
-                reportError('Failed to prepare a bulk quick add task', prepared.reason);
-                bulkFailed(prepared.reason);
+            try {
+                await createDesktopRecoverySnapshot();
+            } catch (error) {
+                reportError('Failed to create a recovery snapshot before bulk quick add', error);
+                setBulkQuickAddError(tFallback(t, 'quickAdd.bulkCreateError', 'Could not create all tasks.'));
                 return;
             }
-            taskInputs.push({ title: prepared.title, initialProps: prepared.props });
-            if (prepared.createdProject) currentProjects = [...currentProjects, prepared.createdProject];
-        }
-        const bulkResult = await addTasks(taskInputs);
-        if (!bulkResult.success) {
-            reportError('Failed to create bulk quick add tasks', bulkResult.error);
-            bulkFailed(bulkResult.error);
-            return;
-        }
+            if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+            let currentProjects = projects;
+            let currentAreas = areas;
+            if (standaloneWindow) {
+                await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
+                if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+                const currentState = useTaskStore.getState();
+                currentProjects = currentState.projects;
+                currentAreas = currentState.areas;
+            }
+            const parsedItems: ParsedQuickAddTask[] = bulkQuickAddLines.map((line) => ({
+                input: line,
+                parsed: parseQuickAdd(line, currentProjects, new Date(), currentAreas, quickAddParseOptions),
+            }));
+            const invalid = parsedItems.find((item) => item.parsed.invalidDateCommands?.length);
+            if (invalid?.parsed.invalidDateCommands?.length) {
+                setBulkQuickAddError(
+                    `${tFallback(t, 'quickAdd.invalidDateCommand', 'Invalid date command')}: ${invalid.parsed.invalidDateCommands.join(', ')}`
+                );
+                return;
+            }
 
-        if (standaloneWindow) {
-            await flushPendingSave().catch((error) => reportError('Failed to save quick add tasks', error));
-            await notifyStandaloneTaskSaved();
+            // One store write for the whole import, not one per line (#942): a
+            // per-line loop left a half-imported inbox behind whenever any line
+            // failed, and queued one full-data save snapshot per task. Mobile's
+            // bulk capture already prepares then batches the same way.
+            const bulkFailed = (detail?: string) => {
+                const message = tFallback(t, 'quickAdd.bulkCreateError', 'Could not create all tasks.');
+                setBulkQuickAddError(detail ? `${message} (${detail})` : message);
+            };
+            const taskInputs: Array<{ title: string; initialProps: Partial<Task> }> = [];
+            for (const item of parsedItems) {
+                const prepared = await prepareCaptureTask(
+                    buildQuickAddCaptureInput({ currentProjects, input: item.input, parsed: item.parsed }),
+                    { addProject },
+                );
+                if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+                if (!prepared.success) {
+                    reportError('Failed to prepare a bulk quick add task', prepared.reason);
+                    bulkFailed(prepared.reason);
+                    return;
+                }
+                taskInputs.push({ title: prepared.title, initialProps: prepared.props });
+                if (prepared.createdProject) currentProjects = [...currentProjects, prepared.createdProject];
+            }
+            const bulkResult = await addTasks(taskInputs);
+            if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+            if (!bulkResult.success) {
+                reportError('Failed to create bulk quick add tasks', bulkResult.error);
+                bulkFailed(bulkResult.error);
+                return;
+            }
+
+            if (standaloneWindow) {
+                await flushPendingSave().catch((error) => reportError('Failed to save quick add tasks', error));
+                if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+                await notifyStandaloneTaskSaved();
+                if (!submissionCoordinatorRef.current.isCurrent(session)) return;
+            }
+            setBulkQuickAddLines(null);
+            setBulkQuickAddError(null);
+            close({ keepPastedImages: true });
+        } finally {
+            if (submissionCoordinatorRef.current.finishSubmission(session)) {
+                setIsSubmitting(false);
+            }
         }
-        setBulkQuickAddLines(null);
-        setBulkQuickAddError(null);
-        close({ keepPastedImages: true });
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -1010,7 +1053,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const pastedImageLabel = pastedImageAttachments.length === 1
         ? tFallback(t, 'quickAdd.pastedImageAttached', '1 image attached')
         : tFallback(t, 'quickAdd.pastedImagesAttached', '{{count}} images attached').replace('{{count}}', String(pastedImageAttachments.length));
-    const saveDisabled = isPastingImage || (!value.trim() && pastedImageAttachments.length === 0);
+    const saveDisabled = isSubmitting || isPastingImage || (!value.trim() && pastedImageAttachments.length === 0);
     const bulkTaskCount = bulkQuickAddLines?.length ?? 0;
     const bulkConfirmTitle = tFallback(t, 'quickAdd.bulkConfirmTitle', 'Create {{count}} tasks?')
         .replace('{{count}}', String(bulkTaskCount));
@@ -1041,6 +1084,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                     <h3 id={titleId} className="font-semibold">{t('nav.addTask')}</h3>
                     <button
                         onClick={handleClose}
+                        disabled={isSubmitting}
                         tabIndex={-1}
                         aria-label={t('common.close')}
                         className="text-sm text-muted-foreground hover:text-foreground"
@@ -1073,7 +1117,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                     </div>
                 </div>
                 {captureMode === 'text' ? (
-                    <form onSubmit={handleSubmit} className="p-4 space-y-2">
+                    <form onSubmit={handleSubmit} className="p-4 space-y-2" aria-busy={isSubmitting}>
                         <div className="relative">
                             <TaskInput
                                 value={value}
@@ -1201,6 +1245,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             <button
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
+                                disabled={isSubmitting}
                                 className="px-3 py-1.5 rounded-md text-sm border border-border bg-background hover:bg-muted/60"
                             >
                                 {tFallback(t, 'quickAdd.bulkImportTextFile', 'Import .txt')}
@@ -1208,7 +1253,11 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             <button
                                 type="button"
                                 onClick={handleClose}
-                                className="px-3 py-1.5 rounded-md text-sm bg-muted hover:bg-muted/80"
+                                disabled={isSubmitting}
+                                className={cn(
+                                    'px-3 py-1.5 rounded-md text-sm bg-muted hover:bg-muted/80',
+                                    isSubmitting && 'opacity-50 cursor-not-allowed',
+                                )}
                             >
                                 {t('common.cancel')}
                             </button>
@@ -1220,6 +1269,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                     }}
                                     title={SAVE_AND_EDIT_SHORTCUT_HINT}
                                     disabled={saveDisabled}
+                                    aria-busy={isSubmitting}
                                     className={cn(
                                         'px-3 py-1.5 rounded-md text-sm border border-border bg-background hover:bg-muted/60',
                                         saveDisabled && 'opacity-50 cursor-not-allowed hover:bg-background',
@@ -1232,6 +1282,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                 type="submit"
                                 title={SAVE_SHORTCUT_HINT}
                                 disabled={saveDisabled}
+                                aria-busy={isSubmitting}
                                 className={cn(
                                     'px-3 py-1.5 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90',
                                     saveDisabled && 'opacity-50 cursor-not-allowed hover:bg-primary',
@@ -1291,6 +1342,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         {bulkQuickAddLines ? (
             <Dialog
                 onClose={() => {
+                    if (isSubmitting) return;
                     setBulkQuickAddLines(null);
                     setBulkQuickAddError(null);
                 }}
@@ -1329,7 +1381,11 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                 setBulkQuickAddLines(null);
                                 setBulkQuickAddError(null);
                             }}
-                            className="px-3 py-1.5 rounded-md text-sm bg-muted hover:bg-muted/80"
+                            disabled={isSubmitting}
+                            className={cn(
+                                'px-3 py-1.5 rounded-md text-sm bg-muted hover:bg-muted/80',
+                                isSubmitting && 'opacity-50 cursor-not-allowed',
+                            )}
                         >
                             {t('common.cancel')}
                         </button>
@@ -1338,7 +1394,12 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             onClick={() => {
                                 void confirmBulkQuickAdd();
                             }}
-                            className="px-3 py-1.5 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90"
+                            disabled={isSubmitting}
+                            aria-busy={isSubmitting}
+                            className={cn(
+                                'px-3 py-1.5 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90',
+                                isSubmitting && 'opacity-50 cursor-not-allowed hover:bg-primary',
+                            )}
                         >
                             {tFallback(t, 'quickAdd.bulkConfirmCreate', 'Create tasks')}
                         </button>

@@ -149,6 +149,7 @@ export * from './focus-star';
 export * from './focus-grouping';
 export * from './context-color';
 export * from './capture';
+export * from './capture-session';
 export * from './session-restore';
 export * from './whisper-models';
 export * from './import-apply';
