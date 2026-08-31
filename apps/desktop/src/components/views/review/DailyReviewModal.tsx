@@ -27,6 +27,7 @@ import { Dialog, DialogHeader } from '../../ui/Dialog';
 import { TaskItem } from '../../TaskItem';
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 import { resolveNonDoneTaskSortBy } from '../../../lib/task-list-sort';
+import { useLocalDayKey } from '../../../hooks/useLocalDayKey';
 
 type DailyReviewStep = 'today' | 'focus' | 'inbox' | 'waiting' | 'completed';
 type DailyReviewStepDefinition = {
@@ -79,7 +80,8 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     const [externalCalendarLoading, setExternalCalendarLoading] = useState(false);
     const [externalCalendarError, setExternalCalendarError] = useState<string | null>(null);
 
-    const [today] = useState(() => new Date());
+    const localDayKey = useLocalDayKey();
+    const today = useMemo(() => new Date(), [localDayKey]);
     const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const followUpTodayReviewAt = startOfToday.toISOString();
     const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
@@ -139,7 +141,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
             setExternalCalendarLoading(true);
             setExternalCalendarError(null);
             try {
-                const todayStart = new Date();
+                const todayStart = new Date(today);
                 todayStart.setHours(0, 0, 0, 0);
                 const tomorrowEnd = new Date(todayStart);
                 tomorrowEnd.setDate(tomorrowEnd.getDate() + 2);
@@ -160,7 +162,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [today]);
 
     const getEventsForDay = useCallback((date: Date) => {
         const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);

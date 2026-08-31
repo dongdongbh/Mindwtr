@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetForTests, useTaskStore, type Task } from '@mindwtr/core';
 
@@ -197,5 +197,27 @@ describe('DailyReviewGuideModal', () => {
         expect(updateTask).toHaveBeenCalledWith('waiting-1', {
             reviewAt: new Date(2026, 1, 15, 0, 0, 0, 0).toISOString(),
         });
+    });
+
+    it('refreshes review buckets when the open review crosses local midnight', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 6, 15, 23, 59, 59));
+        useTaskStore.setState({
+            _allTasks: [
+                makeTask({ id: 'today-1', title: 'Before midnight', dueDate: '2026-07-15' }),
+                makeTask({ id: 'tomorrow-1', title: 'After midnight', dueDate: '2026-07-16' }),
+            ],
+        });
+
+        render(<DailyReviewGuideModal onClose={vi.fn()} />);
+
+        expect(screen.getByTestId('task-today-1')).toBeInTheDocument();
+        expect(screen.queryByTestId('task-tomorrow-1')).not.toBeInTheDocument();
+
+        act(() => {
+            vi.advanceTimersByTime(1_100);
+        });
+
+        expect(screen.getByTestId('task-tomorrow-1')).toBeInTheDocument();
     });
 });

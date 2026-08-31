@@ -458,4 +458,32 @@ describe('DailyReviewScreen', () => {
 
         expect(rowProps()[1].footerContent).toBe(before[1].footerContent);
     });
+
+    it('refreshes review buckets when the open review crosses local midnight', async () => {
+        vi.setSystemTime(new Date(2026, 6, 15, 23, 59, 59));
+        storeState.tasks = [
+            makeTask({ id: 'today-1', title: 'Before midnight', dueDate: '2026-07-15' }),
+            makeTask({ id: 'tomorrow-1', title: 'After midnight', dueDate: '2026-07-16' }),
+        ];
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<DailyReviewScreen onClose={vi.fn()} />);
+            await Promise.resolve();
+        });
+        const renderedTaskIds = () => tree.root
+            .findByProps({ testID: 'daily-review-step-scroll-today' })
+            .findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')
+            .map((node) => node.props.task.id);
+
+        expect(renderedTaskIds()).toContain('today-1');
+        expect(renderedTaskIds()).not.toContain('tomorrow-1');
+
+        await act(async () => {
+            vi.advanceTimersByTime(1_100);
+            await Promise.resolve();
+        });
+
+        expect(renderedTaskIds()).toContain('tomorrow-1');
+    });
 });

@@ -37,6 +37,7 @@ import { InboxProcessingModal } from './inbox-processing-modal';
 import { ErrorBoundary } from './ErrorBoundary';
 import { fetchExternalCalendarEvents } from '../lib/external-calendar';
 import { resolveNonDoneTaskSortBy } from '@/lib/task-list-sort';
+import { useLocalDayKey } from '@/hooks/use-local-day-key';
 
 type DailyReviewStep = 'today' | 'focus' | 'inbox' | 'waiting' | 'completed';
 type DailyReviewStepDefinition = {
@@ -127,7 +128,11 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
     const includeFocusStep = settings.gtd?.dailyReview?.includeFocusStep !== false;
     const focusTaskLimit = normalizeFocusTaskLimit(settings.gtd?.focusTaskLimit);
 
-    const today = useMemo(() => new Date(), []);
+    const localDayKey = useLocalDayKey();
+    const today = useMemo(() => {
+        const [year, monthIndex, day] = localDayKey.split('-').map(Number);
+        return new Date(year, monthIndex, day);
+    }, [localDayKey]);
     const followUpTodayReviewAt = useMemo(
         () => new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString(),
         [today],
