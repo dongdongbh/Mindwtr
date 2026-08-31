@@ -1110,7 +1110,9 @@ class MobileSyncRun {
             // never pinned, so this probe runs every cycle, and on a slow link
             // a tighter timeout failed syncs whose data.json GET would succeed.
             setStep('webdav_probe');
-            const compatibility = await probeWebdavSyncCompatibility(webdavConfig.url, {
+            // Retried like the cycle's own read: a single 30s timeout on the cold
+            // first request must not fail a cycle whose reads would then succeed.
+            const compatibility = await withRetry(() => probeWebdavSyncCompatibility(webdavConfig.url, {
               ...getMobileWebDavRequestOptions(webdavConfig.allowInsecureHttp),
               username: webdavConfig.username,
               password: webdavConfig.password,
@@ -1118,12 +1120,12 @@ class MobileSyncRun {
               fetcher: this.fetchWithAbort,
             }, {
               requireStrongEtag: !legacyWebdavPostureAllowed,
-            });
+            }), WEBDAV_READ_RETRY_OPTIONS);
             if (compatibility === 'legacy-plaintext' && !legacyWebdavPostureAllowed) {
               throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
             }
             return compatibility;
-          });
+          }, { allowLegacyPlaintext: legacyWebdavPostureAllowed });
           this.allowLegacyWebdavPlaintext = compatibility === 'legacy-plaintext';
         }
         // CloudKit setup — ensure zone and subscription exist before sync cycle.

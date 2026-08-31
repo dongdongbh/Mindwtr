@@ -2116,12 +2116,18 @@ export class SyncService {
             : null;
         if (context.webdavConfig) {
             setStep('webdav_probe');
+            // Retried like the cycle's own read: a single timeout on the cold first
+            // request must not fail a cycle whose reads would then succeed.
             const compatibility = await ensureWebdavCapabilityProof(
                 context.webdavConfig,
-                () => SyncService.probeWebDavCompatibility(
-                    context.webdavConfig!,
-                    legacyWebdavPostureAllowed,
+                () => withRetry(
+                    () => SyncService.probeWebDavCompatibility(
+                        context.webdavConfig!,
+                        legacyWebdavPostureAllowed,
+                    ),
+                    WEBDAV_READ_RETRY_OPTIONS,
                 ),
+                { allowLegacyPlaintext: legacyWebdavPostureAllowed },
             );
             context.allowLegacyWebdavPlaintext = compatibility === 'legacy-plaintext';
         }

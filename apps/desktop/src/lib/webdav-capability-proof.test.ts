@@ -5,6 +5,8 @@ import {
     hasWebdavCapabilityProof,
     rememberWebdavCapabilityProof,
     WEBDAV_CAPABILITY_PROOF_STORAGE_KEY,
+    WEBDAV_LEGACY_PROOF_STORAGE_KEY,
+    WEBDAV_LEGACY_PROOF_TTL_MS,
 } from './webdav-capability-proof';
 
 afterEach(() => {
@@ -66,5 +68,33 @@ describe('desktop WebDAV capability proof', () => {
         await expect(ensureWebdavCapabilityProof(config, probe)).resolves.toBe('strong-etag');
         expect(hasWebdavCapabilityProof(config)).toBe(true);
         expect(probe).toHaveBeenCalledTimes(2);
+    });
+
+    it('reuses a legacy answer for a day when plaintext is allowed, then probes again', async () => {
+        const probe = vi.fn().mockResolvedValue('legacy-plaintext');
+        let now = 1_000_000;
+        const options = { allowLegacyPlaintext: true, now: () => now };
+
+        await expect(ensureWebdavCapabilityProof(config, probe, options)).resolves.toBe('legacy-plaintext');
+        await expect(ensureWebdavCapabilityProof(config, probe, options)).resolves.toBe('legacy-plaintext');
+        expect(probe).toHaveBeenCalledTimes(1);
+
+        now += WEBDAV_LEGACY_PROOF_TTL_MS;
+        await expect(ensureWebdavCapabilityProof(config, probe, options)).resolves.toBe('legacy-plaintext');
+        expect(probe).toHaveBeenCalledTimes(2);
+    });
+
+    it('never reuses a legacy answer when plaintext is not allowed, and a strong answer clears it', async () => {
+        const probe = vi.fn().mockResolvedValue('legacy-plaintext');
+        await ensureWebdavCapabilityProof(config, probe, { allowLegacyPlaintext: true });
+        await ensureWebdavCapabilityProof(config, probe);
+        expect(probe).toHaveBeenCalledTimes(2);
+
+        // The cached legacy answer is still fresh, so only a call that must probe (plaintext
+        // not allowed) sees the server's upgrade; the strong proof then replaces the legacy one.
+        probe.mockResolvedValue('strong-etag');
+        await expect(ensureWebdavCapabilityProof(config, probe)).resolves.toBe('strong-etag');
+        expect(localStorage.getItem(WEBDAV_LEGACY_PROOF_STORAGE_KEY)).toBeNull();
+        expect(hasWebdavCapabilityProof(config)).toBe(true);
     });
 });
