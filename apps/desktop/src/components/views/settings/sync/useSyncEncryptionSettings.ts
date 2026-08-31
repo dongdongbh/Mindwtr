@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
     generateDicewarePassphrase,
@@ -46,6 +46,12 @@ export function useSyncEncryptionSettings(
     cloudProvider: CloudProvider,
     persistedSyncBackend: SyncBackend,
     persistedCloudProvider: CloudProvider,
+    // True while a sync/test/save transport action runs. On its falling edge the
+    // section re-reads the encryption state: activating a location that already
+    // holds ciphertext persists 'remote-encrypted-no-key' during the probe, and
+    // the section must flip from "set a new passphrase" to "enter the existing
+    // passphrase" without the user first failing an enable (#1001).
+    transportBusy = false,
 ): SyncEncryptionController {
     const supported = isEncryptionCapableBackend(syncBackend, cloudProvider);
     // The service resolves the DURABLE backend, and a typed-but-unproven config is still
@@ -91,6 +97,24 @@ export function useSyncEncryptionSettings(
             cancelled = true;
         };
     }, [readState, supported]);
+
+    // Falling-edge refresh: see the transportBusy parameter comment.
+    const previousTransportBusy = useRef(transportBusy);
+    useEffect(() => {
+        const wasBusy = previousTransportBusy.current;
+        previousTransportBusy.current = transportBusy;
+        if (!wasBusy || transportBusy || !supported) return;
+        let cancelled = false;
+        void readState().then((next) => {
+            if (!cancelled) {
+                setState(next);
+                setStateUnavailable(next === null);
+            }
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [transportBusy, readState, supported]);
 
     const run = useCallback(async (
         operation: (onProgress: (value: SyncEncryptionTransitionProgress) => void) => Promise<void>,

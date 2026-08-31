@@ -46,6 +46,12 @@ export type SyncEncryptionCardProps = {
     appData: AppData;
     t: Translate;
     tc: ThemeColors;
+    /** True while a sync/test/save transport action runs. On its falling edge the card
+     *  re-reads the encryption state: activating a folder that already holds ciphertext
+     *  persists 'remote-encrypted-no-key' during the probe, and the card must flip from
+     *  "set a new passphrase" to "enter the existing passphrase" without the user first
+     *  failing an enable (#1001). */
+    transportBusy?: boolean;
 };
 
 const classifyFailure = (error: unknown, terminal: ErrorKind): ErrorKind => {
@@ -57,7 +63,7 @@ const classifyFailure = (error: unknown, terminal: ErrorKind): ErrorKind => {
     return 'generic';
 };
 
-export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) {
+export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: SyncEncryptionCardProps) {
     const [state, setState] = useState<SyncEncryptionState | null>(null);
     const [stateUnavailable, setStateUnavailable] = useState(false);
     const [flow, setFlow] = useState<Flow>('none');
@@ -115,6 +121,30 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
             cancelled = true;
         };
     }, [readState]);
+
+    // Falling-edge refresh: see the transportBusy prop comment.
+    const previousTransportBusy = React.useRef(transportBusy);
+    useEffect(() => {
+        const wasBusy = previousTransportBusy.current;
+        previousTransportBusy.current = transportBusy;
+        if (!wasBusy || transportBusy) return;
+        let cancelled = false;
+        void readState().then((next) => {
+            if (!cancelled) {
+                setState(next.state);
+                setStateUnavailable(next.unavailable);
+                if (next.incomplete) setError('transition-incomplete');
+            }
+        });
+        void isSyncEncryptionBackendPending()
+            .then((pending) => {
+                if (!cancelled) setPendingFirstSync(pending);
+            })
+            .catch(logSettingsError);
+        return () => {
+            cancelled = true;
+        };
+    }, [transportBusy, readState]);
 
     const closeFlow = useCallback(() => {
         setFlow('none');

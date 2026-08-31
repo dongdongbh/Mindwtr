@@ -848,7 +848,7 @@ function SyncSettingsView({
                         )}
 
                         {isEncryptionCapableBackend && (
-                            <SyncEncryptionCard appData={encryptionAppData} t={t} tc={tc} />
+                            <SyncEncryptionCard appData={encryptionAppData} t={t} tc={tc} transportBusy={isSyncing || isTestingConnection || dropboxBusy} />
                         )}
 
                         <SyncPreferencesCard

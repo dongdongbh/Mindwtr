@@ -337,3 +337,26 @@ describe('classifyFailure', () => {
         ).toBe('rotation-first');
     });
 });
+
+describe('useSyncEncryptionSettings transport refresh (#1001)', () => {
+    it('re-reads state on the falling edge of a transport action', async () => {
+        const status = vi.spyOn(SyncService, 'getSyncEncryptionStatus')
+            .mockResolvedValueOnce({ state: 'off' })
+            .mockResolvedValue({ state: 'remote-encrypted-no-key' });
+        const { result, rerender, unmount } = renderHook(
+            ({ busy }: { busy: boolean }) => useSyncEncryptionSettings('webdav', 'selfhosted', 'webdav', 'selfhosted', busy),
+            { initialProps: { busy: false } },
+        );
+        await waitFor(() => expect(result.current.state).toBe('off'));
+
+        // The activation probe (run by Sync now / Test connection) discovered an
+        // encrypted location and persisted the no-key state; when the action ends,
+        // the section must flip to the unlock UI without a failed enable first.
+        rerender({ busy: true });
+        rerender({ busy: false });
+        await waitFor(() => expect(result.current.state).toBe('remote-encrypted-no-key'));
+
+        status.mockRestore();
+        unmount();
+    });
+});

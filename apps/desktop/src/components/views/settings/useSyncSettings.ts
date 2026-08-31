@@ -1923,7 +1923,13 @@ export const useSyncSettings = ({
             allowInsecureHttp: cloudAllowInsecureHttp,
         })
         : !cloudUrl.trim();
-    const encryption = useSyncEncryptionSettings(syncBackend, cloudProvider, persistedSyncBackend, persistedCloudProvider);
+    const encryption = useSyncEncryptionSettings(
+        syncBackend,
+        cloudProvider,
+        persistedSyncBackend,
+        persistedCloudProvider,
+        syncStatus.inFlight || isTestingSyncPath || isSavingWebDav || isTestingWebDav || dropboxBusy,
+    );
     const isSyncTargetValid =
         syncBackend === 'file'
             ? !!syncPath.trim()

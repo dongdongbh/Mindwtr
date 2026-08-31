@@ -405,3 +405,28 @@ describe('SyncEncryptionCard', () => {
     expect(toggle?.props.accessibilityState).toEqual({ checked: false });
   });
 });
+
+describe('SyncEncryptionCard transport refresh (#1001)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'off' });
+    encryptionMocks.isSyncEncryptionBackendPending.mockResolvedValue(false);
+  });
+
+  it('re-reads encryption state when a transport action finishes', async () => {
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SyncEncryptionCard appData={appData} t={t} tc={tc} transportBusy />);
+    });
+    expect(texts(tree)).not.toContain('settings.syncEncryptionLockedTitle');
+
+    // The activation probe discovered an encrypted folder and persisted the
+    // no-key state; when the action ends, the card must flip to the unlock UI
+    // without the user first failing an enable.
+    encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'remote-encrypted-no-key' });
+    await act(async () => {
+      tree.update(<SyncEncryptionCard appData={appData} t={t} tc={tc} transportBusy={false} />);
+    });
+    expect(texts(tree)).toContain('settings.syncEncryptionLockedTitle');
+  });
+});
