@@ -4,6 +4,12 @@ import { parse } from "yaml";
 
 const asNeedsList = (needs) => (Array.isArray(needs) ? needs : [needs]);
 
+test("root lockfile uses the Bun 1.4 format required by Arch builds", () => {
+  const lockfile = readFileSync("bun.lock", "utf8");
+  const version = lockfile.match(/"lockfileVersion":\s*(\d+)/)?.[1];
+  expect(Number(version)).toBeGreaterThanOrEqual(3);
+});
+
 test("stable release validates tags and committed versions before any build or publish", () => {
   const workflow = parse(readFileSync(".github/workflows/release.yml", "utf8"));
   const validate = workflow.jobs.validate;
@@ -421,6 +427,14 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   expect(sourcePushIndex).toBeGreaterThan(sourceAuditIndex);
   expect(sourcePushIndex).toBeGreaterThan(sourceRecordIndex);
   expect(stableText).toContain("aur-proposal-mindwtr-");
+  const bunCompatibilityStep = sourceSteps.find(
+    (step) => step.name === "Normalize Bun lockfile compatibility",
+  );
+  expect(bunCompatibilityStep).toBeDefined();
+  expect(bunCompatibilityStep.run).toContain('LOCKFILE_VERSION="$(sed -n');
+  expect(bunCompatibilityStep.run).toContain("-lt 3");
+  expect(bunCompatibilityStep.run).toContain("bun install --no-save");
+  expect(bunCompatibilityStep.run).toContain("bun install --frozen-lockfile");
 
   expect(stable.jobs["update-aur-bin-beta"].name).toContain(
     "Update AUR Beta",

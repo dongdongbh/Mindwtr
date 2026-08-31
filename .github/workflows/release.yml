@@ -1306,6 +1306,38 @@ jobs:
             echo "Bumped PKGBUILD _nodeversion ${NODE_MAJOR} -> 22 (better-sqlite3 12 ships no prebuilds below Node 22, and the build container has no node-gyp)."
           fi
 
+      - name: Normalize Bun lockfile compatibility
+        shell: bash
+        working-directory: aur-mindwtr
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("PKGBUILD")
+          text = path.read_text(encoding="utf-8")
+          compatibility_install = r"""  LOCKFILE_VERSION="$(sed -n 's/.*\"lockfileVersion\": \([0-9][0-9]*\).*/\1/p' bun.lock | head -n 1)"
+            if [ -n "$LOCKFILE_VERSION" ] && [ "$LOCKFILE_VERSION" -lt 3 ]; then
+              # Bun 1.4 can consume the release lock but rewrites its legacy format.
+              bun install --no-save
+            else
+              bun install --frozen-lockfile
+            fi
+          """
+          if compatibility_install in text:
+              print("PKGBUILD already handles legacy Bun lockfiles")
+          elif "  bun install --frozen-lockfile\n" in text:
+              text = text.replace(
+                  "  bun install --frozen-lockfile\n",
+                  compatibility_install,
+                  1,
+              )
+              path.write_text(text, encoding="utf-8")
+              print("Added a no-write install path for legacy Bun lockfiles")
+          else:
+              raise SystemExit("Could not find the expected Bun install command in PKGBUILD")
+          PY
+
       - name: Update checksums
         shell: bash
         working-directory: aur-mindwtr
