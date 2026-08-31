@@ -37,12 +37,14 @@ type Harness = {
     deleteTask?: (taskId: string) => Promise<StoreActionResult>;
     resetTaskChecklist?: (taskId: string) => Promise<StoreActionResult>;
     restoreTask?: (taskId: string) => Promise<StoreActionResult>;
+    convertTaskToSection?: (taskId: string) => Promise<StoreActionResult>;
     setChecklist?: ReturnType<typeof vi.fn>;
 };
 
 let saveHandle: () => Promise<boolean>;
 let deleteHandle: () => Promise<void>;
 let resetHandle: () => Promise<void>;
+let convertToSectionHandle: () => Promise<void>;
 
 function SaveProbe({
     onSave,
@@ -51,6 +53,7 @@ function SaveProbe({
     deleteTask = vi.fn(async () => ({ success: true })),
     resetTaskChecklist = vi.fn(async () => ({ success: true })),
     restoreTask = vi.fn(async () => ({ success: true })),
+    convertTaskToSection = vi.fn(async () => ({ success: true })),
     setChecklist = vi.fn(),
 }: Harness) {
     const draft = createTaskEditDraft(baseTask);
@@ -75,6 +78,7 @@ function SaveProbe({
         descriptionDraft: '',
         draftLifecycle: state.draftLifecycle,
         duplicateTask: vi.fn(),
+        convertTaskToSection,
         mergedTask: baseTask,
         taskEditDraft: draft,
         formatDate: () => '',
@@ -102,6 +106,7 @@ function SaveProbe({
     saveHandle = state.draftLifecycle.save;
     deleteHandle = actions.handleDeleteTask;
     resetHandle = actions.handleResetChecklist;
+    convertToSectionHandle = actions.handleConvertToSection;
     return <Text>probe</Text>;
 }
 
@@ -218,6 +223,41 @@ describe('task editor save results', () => {
             tone: 'error',
             message: 'Task is deleted',
         }));
+    });
+
+    // The conversion soft-deletes the task, so an uncommitted title edit would be
+    // lost with it unless the draft is saved first (#1106).
+    it('commits the open draft before converting the task into a section', async () => {
+        const onSave = vi.fn(() => Promise.resolve({ success: true }));
+        const convertTaskToSection = vi.fn(async () => ({ success: true }));
+        const { showToast } = await renderActions({ onSave, convertTaskToSection });
+
+        await act(async () => {
+            await convertToSectionHandle();
+        });
+
+        expect(onSave).toHaveBeenCalledWith('task-1', expect.objectContaining({ title: 'Plan launch v2' }));
+        expect(convertTaskToSection).toHaveBeenCalledWith('task-1');
+        expect(convertTaskToSection.mock.invocationCallOrder[0])
+            .toBeGreaterThan(onSave.mock.invocationCallOrder[0]);
+        expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    });
+
+    it('reports a failed conversion instead of a success toast', async () => {
+        const { showToast } = await renderActions({
+            onSave: vi.fn(() => Promise.resolve({ success: true })),
+            convertTaskToSection: vi.fn(async () => ({ success: false, error: 'Task is not in a project' })),
+        });
+
+        await act(async () => {
+            await convertToSectionHandle();
+        });
+
+        expect(showToast).toHaveBeenCalledWith(expect.objectContaining({
+            tone: 'error',
+            message: 'Task is not in a project',
+        }));
+        expect(showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });
 
     it('reports a fulfilled undo failure', async () => {

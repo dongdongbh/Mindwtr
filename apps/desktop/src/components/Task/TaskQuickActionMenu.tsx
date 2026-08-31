@@ -9,7 +9,7 @@ import {
     type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, Calendar, CalendarClock, ChevronRight, Copy, FolderPlus, MapPin, Pencil, Tag, Trash2 } from 'lucide-react';
+import { BookOpen, Calendar, CalendarClock, ChevronRight, Copy, FolderPlus, MapPin, Pencil, Rows3, Tag, Trash2 } from 'lucide-react';
 import {
     getAdvancedReviewDate,
     isDueForReview,
@@ -65,6 +65,7 @@ export interface TaskQuickActionMenuProps {
     onRename?: () => void;
     onDuplicate: () => void;
     onPromoteToProject?: () => void;
+    onConvertToSection?: () => void;
     onDelete: () => void;
     onStatusChange: (status: TaskStatus) => void;
     onCreateArea: (name: string) => Promise<string | null>;
@@ -146,6 +147,7 @@ export function TaskQuickActionMenu({
     onRename,
     onDuplicate,
     onPromoteToProject,
+    onConvertToSection,
     onDelete,
     onStatusChange,
     onCreateArea,
@@ -189,6 +191,7 @@ export function TaskQuickActionMenu({
     const promoteToProjectLabel = t('task.createProjectFromTask');
     const deleteLabel = tFallback(t, 'common.delete', 'Delete');
     const convertToReferenceLabel = tFallback(t, 'task.convertToReference', 'Convert to Reference');
+    const convertToSectionLabel = tFallback(t, 'task.convertToSection', 'Convert to Section');
     const markReviewedLabel = tFallback(t, 'review.markReviewed', 'Mark reviewed');
     const advanceReviewLabel = tFallback(t, 'review.advanceWeek', 'Review in 1 week');
     const saveLabel = tFallback(t, 'common.save', 'Save');
@@ -772,6 +775,14 @@ export function TaskQuickActionMenu({
                     label: convertToReferenceLabel,
                     onClick: () => {
                         onStatusChange('reference');
+                        onClose();
+                    },
+                })}
+                {!readOnly && task.projectId && onConvertToSection && renderMenuAction({
+                    icon: <Rows3 className="h-4 w-4" />,
+                    label: convertToSectionLabel,
+                    onClick: () => {
+                        onConvertToSection();
                         onClose();
                     },
                 })}

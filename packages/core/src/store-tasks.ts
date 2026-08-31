@@ -169,6 +169,7 @@ type TaskActions = Pick<
     | 'purgeTasks'
     | 'purgeDeletedTasks'
     | 'duplicateTask'
+    | 'convertTaskToSection'
     | 'promoteTaskToProject'
     | 'resetTaskChecklist'
     | 'moveTask'
@@ -872,6 +873,51 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
             };
         });
         return missingTask ? actionFail('Task not found') : actionOk({ id: duplicatedTaskId });
+    },
+
+    /**
+     * Turn a task into a section of the project it already lives in: the title
+     * becomes the section, its checklist items become tasks inside it (completed
+     * ones stay done), and the original task is soft-deleted so its notes and
+     * attachments remain recoverable from Trash (#1106).
+     *
+     * Creation runs before the delete, so a failure part-way leaves the source
+     * task intact rather than losing it.
+     */
+    convertTaskToSection: async (id: string) => {
+        const sourceTask = get()._tasksById.get(id);
+        if (!sourceTask || sourceTask.deletedAt) return actionFail('Task not found');
+        const projectId = sourceTask.projectId;
+        if (!projectId) return actionFail('Task is not in a project');
+
+        const description = typeof sourceTask.description === 'string' ? sourceTask.description.trim() : '';
+        const section = await get().addSection(
+            projectId,
+            sourceTask.title,
+            description ? { description } : undefined,
+        );
+        if (!section) return actionFail('Section could not be created');
+
+        const now = new Date().toISOString();
+        const checklistTasks = (sourceTask.checklist || [])
+            .filter((item) => typeof item.title === 'string' && item.title.trim().length > 0)
+            .map((item) => ({
+                title: item.title,
+                initialProps: {
+                    projectId,
+                    sectionId: section.id,
+                    status: (item.isCompleted ? 'done' : 'next') as TaskStatus,
+                    ...(item.isCompleted ? { completedAt: now } : {}),
+                },
+            }));
+        if (checklistTasks.length > 0) {
+            const added = await get().addTasks(checklistTasks);
+            if (!added.success) return added;
+        }
+
+        const deleted = await get().deleteTask(id);
+        if (!deleted.success) return deleted;
+        return actionOk({ id: section.id });
     },
 
     /**

@@ -30,6 +30,7 @@ export type TaskQuickActionMenuOverrides = {
     readOnly?: boolean;
     onRename?: () => void;
     onPromoteToProject?: () => void;
+    onConvertToSection?: () => void;
     focusAction?: TaskQuickActionMenuProps['focusAction'];
     /** Runs before the default delete; the row uses it to close its edit session. */
     onBeforeDelete?: () => void;
@@ -229,6 +230,7 @@ export function useTaskQuickActionMenuProps(
         onRename: overrides?.onRename,
         onDuplicate,
         onPromoteToProject: overrides?.onPromoteToProject,
+        onConvertToSection: overrides?.onConvertToSection,
         onDelete,
         onStatusChange: overrides?.onStatusChange ?? defaultOnStatusChange,
         onCreateArea,

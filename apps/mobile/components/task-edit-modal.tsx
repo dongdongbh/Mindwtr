@@ -101,6 +101,7 @@ function TaskEditModalInner({
         settings,
         duplicateTask,
         promoteTaskToProject,
+        convertTaskToSection,
         resetTaskChecklist,
         addProject,
         addSection,
@@ -123,6 +124,7 @@ function TaskEditModalInner({
             settings: state.settings,
             duplicateTask: state.duplicateTask,
             promoteTaskToProject: state.promoteTaskToProject,
+            convertTaskToSection: state.convertTaskToSection,
             resetTaskChecklist: state.resetTaskChecklist,
             addProject: state.addProject,
             addSection: state.addSection,
@@ -399,6 +401,7 @@ function TaskEditModalInner({
         t,
     });
     const isReference = (taskEditDraft?.draft.status ?? task?.status) === 'reference';
+    const hasProject = taskEditDraft ? Boolean(taskEditDraft.draft.projectId) : Boolean(task?.projectId);
     const somedaySections = useMemo(
         () => sortViewSectionDefinitions(settings.gtd?.viewSections?.someday ?? []),
         [settings.gtd?.viewSections?.someday],
@@ -675,6 +678,7 @@ function TaskEditModalInner({
         handleAIBreakdown,
         handleAttemptClose,
         handleConvertToReference,
+        handleConvertToSection,
         handleDeleteTask,
         handleDone,
         handleDuplicateTask,
@@ -689,6 +693,7 @@ function TaskEditModalInner({
         draftLifecycle,
         duplicateTask,
         promoteTaskToProject,
+        convertTaskToSection,
         mergedTask,
         taskEditDraft,
         formatDate,
@@ -958,6 +963,8 @@ function TaskEditModalInner({
                         onDelete={handleDeleteTask}
                         onConvertToReference={handleConvertToReference}
                         showConvertToReference={!isReference}
+                        onConvertToSection={handleConvertToSection}
+                        showConvertToSection={hasProject}
                     />
 
                     <TaskEditTabs

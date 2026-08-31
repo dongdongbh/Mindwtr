@@ -155,6 +155,7 @@ export const TaskItem = memo(function TaskItem({
         settings,
         focusedCount,
         promoteTaskToProject,
+        convertTaskToSection,
         resetTaskChecklist,
         highlightTaskId,
         setHighlightTask,
@@ -758,6 +759,22 @@ export const TaskItem = memo(function TaskItem({
             showToast(t('task.promoteToProjectFailed'), 'error');
         }
     }, [effectiveReadOnly, promoteTaskToProject, setEditingTaskId, setHighlightTask, setSelectedProjectId, setTaskExpanded, showToast, t, task.id]);
+    const handleConvertTaskToSection = useCallback(async () => {
+        if (effectiveReadOnly) return;
+        try {
+            const result = await convertTaskToSection(task.id);
+            if (!result.success) {
+                showToast(result.error || t('task.convertToSectionFailed'), 'error');
+                return;
+            }
+            showToast(t('task.convertToSectionCreated'), 'success');
+            setEditingTaskId(null);
+            setTaskExpanded(task.id, false);
+        } catch (error) {
+            reportError('Failed to convert task to a section', error);
+            showToast(t('task.convertToSectionFailed'), 'error');
+        }
+    }, [convertTaskToSection, effectiveReadOnly, setEditingTaskId, setTaskExpanded, showToast, t, task.id]);
     const handleOpenContextToken = useCallback((token: string) => {
         setHighlightTask(task.id);
         dispatchContextsTokenSelection(token);
@@ -1422,6 +1439,7 @@ export const TaskItem = memo(function TaskItem({
                         readOnly: effectiveReadOnly,
                         onRename: () => setRenameRequestToken((token) => token + 1),
                         onPromoteToProject: handlePromoteTaskToProject,
+                        onConvertToSection: handleConvertTaskToSection,
                         focusAction: quickActionFocus,
                         onBeforeDelete: closeQuickEditSession,
                         onStatusChange: handleStatusChange,

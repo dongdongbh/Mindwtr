@@ -89,6 +89,8 @@ export interface TaskStore {
     purgeDeletedTasks: () => Promise<StoreActionResult>;
     /** Duplicate a task (useful for reusable lists/templates) */
     duplicateTask: (id: string, asNextAction?: boolean) => Promise<StoreActionResult>;
+    /** Convert a task into a section of its project; checklist items become tasks and the task is soft-deleted */
+    convertTaskToSection: (id: string) => Promise<StoreActionResult>;
     /** Create or reuse a project from a task, then move the task into it */
     promoteTaskToProject: (id: string, options?: { title?: string; color?: string; areaId?: string }) => Promise<StoreActionResult>;
     /** Reset checklist items to unchecked */

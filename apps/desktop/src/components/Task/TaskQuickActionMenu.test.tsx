@@ -32,6 +32,7 @@ const t = (key: string) => ({
     'projects.duplicate': 'Duplicate',
     'review.markReviewed': 'Mark reviewed',
     'task.convertToReference': 'Convert to Reference',
+    'task.convertToSection': 'Convert to Section',
     'task.createProjectFromTask': 'Create project from task',
     'task.aria.dueTime': 'Due time',
     'task.aria.reviewTime': 'Review time',
@@ -604,6 +605,21 @@ describe('TaskQuickActionMenu', () => {
 
         fireEvent.click(screen.getByRole('menuitem', { name: 'Convert to Reference' }));
         expect(onStatusChange).toHaveBeenCalledWith('reference');
+        expect(props.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs the convert-to-section action only for a task in a project', () => {
+        const onConvertToSection = vi.fn();
+        renderMenu({ onConvertToSection });
+        expect(screen.queryByRole('menuitem', { name: 'Convert to Section' })).not.toBeInTheDocument();
+
+        const props = renderMenu({
+            onConvertToSection,
+            task: { ...task, id: 'task-2', projectId: 'project-1' },
+        });
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Convert to Section' }));
+
+        expect(onConvertToSection).toHaveBeenCalledTimes(1);
         expect(props.onClose).toHaveBeenCalledTimes(1);
     });
 

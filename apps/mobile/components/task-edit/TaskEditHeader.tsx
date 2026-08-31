@@ -16,6 +16,8 @@ type TaskEditHeaderProps = {
   onDelete: () => void;
   onConvertToReference?: () => void;
   showConvertToReference?: boolean;
+  onConvertToSection?: () => void;
+  showConvertToSection?: boolean;
 };
 
 export function TaskEditHeader({
@@ -26,6 +28,8 @@ export function TaskEditHeader({
   onDelete,
   onConvertToReference,
   showConvertToReference = false,
+  onConvertToSection,
+  showConvertToSection = false,
 }: TaskEditHeaderProps) {
   const { t } = useLanguage();
   const tc = useThemeColors();
@@ -127,6 +131,19 @@ export function TaskEditHeader({
                   }}
                 >
                   <Text style={[styles.menuItemText, { color: tc.text }]}>{t('task.convertToReference')}</Text>
+                </AppPressable>
+              )}
+              {showConvertToSection && onConvertToSection && (
+                <AppPressable
+                  style={styles.menuItem}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('task.convertToSection')}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    onConvertToSection();
+                  }}
+                >
+                  <Text style={[styles.menuItemText, { color: tc.text }]}>{t('task.convertToSection')}</Text>
                 </AppPressable>
               )}
               <AppPressable

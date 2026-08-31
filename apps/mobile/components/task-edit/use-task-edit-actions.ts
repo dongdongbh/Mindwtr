@@ -50,6 +50,7 @@ type TaskEditActionsParams = {
     draftLifecycle: TaskEditDraftLifecycle;
     duplicateTask: (taskId: string, includeDoneSubtasks?: boolean) => Promise<StoreActionResult>;
     promoteTaskToProject?: (taskId: string, options?: { title?: string; color?: string; areaId?: string }) => Promise<StoreActionResult>;
+    convertTaskToSection?: (taskId: string) => Promise<StoreActionResult>;
     mergedTask: Partial<Task>;
     taskEditDraft: TaskEditDraft | null;
     formatDate: (dateStr?: string) => string;
@@ -83,6 +84,7 @@ export function useTaskEditActions({
     draftLifecycle,
     duplicateTask,
     promoteTaskToProject,
+    convertTaskToSection,
     mergedTask,
     taskEditDraft,
     formatDate,
@@ -327,6 +329,25 @@ export function useTaskEditActions({
         void draftLifecycle.convertToReference();
     }, [draftLifecycle]);
 
+    // The task is soft-deleted by the conversion, so the open draft is committed
+    // first (save closes the editor) and only then does the section get built —
+    // otherwise edits made in this session would be lost with the task (#1106).
+    const handleConvertToSection = useCallback(async () => {
+        if (!task || !convertTaskToSection) return;
+        const saved = await draftLifecycle.save();
+        if (!saved) return;
+        const converted = await runStoreAction(
+            () => convertTaskToSection(task.id),
+            'Failed to convert task to a section',
+        );
+        if (!converted) return;
+        showToast({
+            title: tFallback(t, 'common.success', 'Success'),
+            message: t('task.convertToSectionCreated'),
+            tone: 'success',
+        });
+    }, [convertTaskToSection, draftLifecycle, runStoreAction, showToast, t, task]);
+
     const getAIProvider = useCallback(async () => {
         if (!aiEnabled) {
             Alert.alert(t('ai.disabledTitle'), t('ai.disabledBody'));
@@ -487,6 +508,7 @@ export function useTaskEditActions({
         handleAIBreakdown,
         handleAttemptClose,
         handleConvertToReference,
+        handleConvertToSection,
         handleDeleteTask,
         handleDone,
         handleDuplicateTask,

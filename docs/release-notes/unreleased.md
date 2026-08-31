@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- A task that has outgrown itself can now become a section of the project it is in. **Convert to Section** in the task menu, on desktop and mobile, makes a section from the task's title and notes, turns each checklist item into a task inside it (items already ticked stay done), and moves the original task to Trash, so its attachments and history remain recoverable. (#1106)
 - Mobile calendar: dragging the week density slider toward more visible days no longer strands the view past the last day, where only a column or two showed next to blank space. The week re-clamps to its real width as the columns resize.
 - The Tasks | Projects switch in Archived now reads **Tasks** (it borrowed the lowercase count word), and on mobile the chips no longer sit flush against the search box.
 - Archived projects show their contents again. Opening an archived project from the Projects sidebar, from a task's project chip, or (desktop) by clicking its row in Archived → Projects now lists the tasks that were completed with it, on desktop and mobile. **Show completed** on an active project also reveals tasks that were archived individually. (#1019)

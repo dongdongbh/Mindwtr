@@ -767,6 +767,60 @@ describe('TaskStore', () => {
         expect(useTaskStore.getState()._tasksById.get(copy.id!)?.status).toBe('someday');
     });
 
+    it('converts a task with a checklist into a section of its project', async () => {
+        const { addProject, addTask, convertTaskToSection } = useTaskStore.getState();
+        const project = await addProject('Move house', '#123456');
+        expect(project).toBeTruthy();
+        const addResult = await addTask('Pack the kitchen', {
+            status: 'next',
+            projectId: project!.id,
+            description: 'Boxes are in the garage.',
+            checklist: [
+                { id: 'c1', title: 'Wrap the glasses', isCompleted: true },
+                { id: 'c2', title: 'Empty the fridge', isCompleted: false },
+                { id: 'c3', title: '   ', isCompleted: false },
+            ],
+        });
+        expect(addResult.success).toBe(true);
+
+        const result = await convertTaskToSection(addResult.id!);
+        expect(result.success).toBe(true);
+
+        const state = useTaskStore.getState();
+        const section = state._allSections.find((candidate) => candidate.id === result.id);
+        expect(section).toMatchObject({
+            projectId: project!.id,
+            title: 'Pack the kitchen',
+            description: 'Boxes are in the garage.',
+        });
+
+        const sectionTasks = state._allTasks
+            .filter((candidate) => candidate.sectionId === section!.id && !candidate.deletedAt)
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        expect(sectionTasks.map((candidate) => [candidate.title, candidate.status])).toEqual([
+            ['Wrap the glasses', 'done'],
+            ['Empty the fridge', 'next'],
+        ]);
+        expect(sectionTasks[0].completedAt).toBeTruthy();
+        expect(sectionTasks.every((candidate) => candidate.projectId === project!.id)).toBe(true);
+
+        const source = state._allTasks.find((candidate) => candidate.id === addResult.id);
+        expect(source?.deletedAt).toBeTruthy();
+        expect(source?.purgedAt).toBeUndefined();
+    });
+
+    it('refuses to convert a task that is not in a project', async () => {
+        const { addTask, convertTaskToSection } = useTaskStore.getState();
+        const addResult = await addTask('Loose task', { status: 'next' });
+        expect(addResult.success).toBe(true);
+        const sectionCountBefore = useTaskStore.getState()._allSections.length;
+
+        const result = await convertTaskToSection(addResult.id!);
+        expect(result.success).toBe(false);
+        expect(useTaskStore.getState()._allSections.length).toBe(sectionCountBefore);
+        expect(useTaskStore.getState()._tasksById.get(addResult.id!)?.deletedAt).toBeUndefined();
+    });
+
     it('creates a project from a task without replacing the task', async () => {
         const { addArea, addTask, promoteTaskToProject } = useTaskStore.getState();
         const area = await addArea('Work');
