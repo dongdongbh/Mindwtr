@@ -25,8 +25,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
-  group: release-android-foss-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-android-foss-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   android-foss:

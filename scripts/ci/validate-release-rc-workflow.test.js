@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -12,6 +13,43 @@ import { join } from "node:path";
 import { parse } from "yaml";
 
 const asNeedsList = (needs) => (Array.isArray(needs) ? needs : [needs]);
+
+test("tag-accepting release workflows queue by effective release tag", () => {
+  const workflowDirectory = ".github/workflows";
+  const effectiveTag = "${{ inputs.tag || github.ref_name }}";
+  const expectedGroups = new Map([
+    ["release-android-foss.yml", `release-android-foss-${effectiveTag}`],
+    ["release-android.yml", `release-android-${effectiveTag}`],
+    ["release-ios-appstore.yml", `release-ios-appstore-${effectiveTag}`],
+    ["release-linux.yml", `release-linux-${effectiveTag}`],
+    ["release-macos-appstore.yml", `release-macos-appstore-${effectiveTag}`],
+    ["release-macos.yml", `release-macos-${effectiveTag}`],
+    ["release-rc.yml", `release-rc-${effectiveTag}`],
+    ["release-windows.yml", `release-windows-${effectiveTag}`],
+    ["release.yml", `\${{ github.workflow }}-${effectiveTag}`],
+  ]);
+  const tagAcceptingFiles = readdirSync(workflowDirectory)
+    .filter((file) => /^release(?:-.+)?\.yml$/.test(file))
+    .filter((file) => {
+      const workflow = parse(
+        readFileSync(join(workflowDirectory, file), "utf8"),
+      );
+      return Boolean(
+        workflow.on?.workflow_call?.inputs?.tag ||
+          workflow.on?.workflow_dispatch?.inputs?.tag,
+      );
+    })
+    .sort();
+
+  expect(tagAcceptingFiles).toEqual([...expectedGroups.keys()]);
+  for (const file of tagAcceptingFiles) {
+    const workflow = parse(
+      readFileSync(join(workflowDirectory, file), "utf8"),
+    );
+    expect(workflow.concurrency.group).toBe(expectedGroups.get(file));
+    expect(workflow.concurrency["cancel-in-progress"]).toBe(false);
+  }
+});
 
 const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();

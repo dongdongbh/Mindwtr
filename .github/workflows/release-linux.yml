@@ -26,8 +26,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
-  group: release-linux-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-linux-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   linux:
