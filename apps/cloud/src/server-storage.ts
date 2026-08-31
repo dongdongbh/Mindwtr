@@ -12,7 +12,7 @@ import {
     unlinkSync,
     writeFileSync,
 } from 'fs';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { basename, dirname, join, relative, resolve, sep } from 'path';
 import { sleep, type AppData } from '@mindwtr/core';
 import {
@@ -72,6 +72,20 @@ export type DurableRemovalFileSystem = DurableDirectorySyncFileSystem & {
     rmdirSync: (path: string) => void;
 };
 
+export type WritableDirectoryProbeFileSystem = {
+    openSync: (path: string, flags: 'wx', mode?: number) => number;
+    writeFileSync: (handle: number, data: string | Uint8Array) => void;
+    fsyncSync: (handle: number) => void;
+    closeSync: (handle: number) => void;
+    unlinkSync: (path: string) => void;
+};
+
+type WritableDirectoryProbeOptions = {
+    directoryFileSystem?: DurableDirectoryFileSystem;
+    probeFileSystem?: WritableDirectoryProbeFileSystem;
+    createProbeId?: () => string;
+};
+
 const nodeDurableFileSystem: DurableFileSystem = {
     openSync: (path, flags, mode) => openSync(path, flags, mode),
     writeFileSync: (handle, data) => writeFileSync(handle, data),
@@ -98,6 +112,14 @@ const nodeDurableRemovalFileSystem: DurableRemovalFileSystem = {
     openSync: (path, flags) => openSync(path, flags),
     fsyncSync,
     closeSync,
+};
+
+const nodeWritableDirectoryProbeFileSystem: WritableDirectoryProbeFileSystem = {
+    openSync: (path, flags, mode) => openSync(path, flags, mode),
+    writeFileSync: (handle, data) => writeFileSync(handle, data),
+    fsyncSync,
+    closeSync,
+    unlinkSync,
 };
 
 const createDefaultData = (): AppData => ({ tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} });
@@ -734,27 +756,54 @@ async function withCloudFileLock<T>(
     }
 }
 
-export function ensureWritableDir(dirPath: string): boolean {
+export function ensureWritableDir(
+    dirPath: string,
+    options: WritableDirectoryProbeOptions = {},
+): boolean {
+    const directoryFileSystem = options.directoryFileSystem ?? nodeDurableDirectoryFileSystem;
+    const probeFileSystem = options.probeFileSystem ?? nodeWritableDirectoryProbeFileSystem;
+    const createProbeId = options.createProbeId ?? (() => randomBytes(16).toString('hex'));
+    let probeHandle: number | null = null;
+    let probePath: string | null = null;
+    let ownsProbe = false;
+    let writable = false;
+
     try {
-        const durableDirPath = ensureDurableDirectory(dirPath);
-        if (!durableDirPath) {
-            logError('cloud data directory is not writable', {
-                failureClass: 'filesystem',
-                failureCode: 'data_dir_not_writable',
-            });
-            return false;
+        const durableDirPath = ensureDurableDirectory(dirPath, directoryFileSystem);
+        if (durableDirPath) {
+            probePath = join(durableDirPath, `.mindwtr-write-probe-${createProbeId()}.tmp`);
+            probeHandle = probeFileSystem.openSync(probePath, 'wx', 0o600);
+            ownsProbe = true;
+            probeFileSystem.writeFileSync(probeHandle, 'ok');
+            probeFileSystem.fsyncSync(probeHandle);
+            writable = true;
         }
-        const testPath = join(durableDirPath, '.mindwtr_write_test');
-        writeFileSync(testPath, 'ok');
-        unlinkSync(testPath);
-        return true;
     } catch {
+        writable = false;
+    } finally {
+        if (probeHandle !== null) {
+            try {
+                probeFileSystem.closeSync(probeHandle);
+            } catch {
+                writable = false;
+            }
+        }
+        if (ownsProbe && probePath !== null) {
+            try {
+                probeFileSystem.unlinkSync(probePath);
+            } catch {
+                writable = false;
+            }
+        }
+    }
+
+    if (!writable) {
         logError('cloud data directory is not writable', {
             failureClass: 'filesystem',
             failureCode: 'data_dir_not_writable',
         });
-        return false;
     }
+    return writable;
 }
 
 export async function readRequestBytes(

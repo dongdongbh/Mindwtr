@@ -142,6 +142,7 @@ export const shouldLogCloudRequest = (
 const STATIC_CLOUD_ROUTES = new Set([
     '/',
     '/health',
+    '/ready',
     '/v1/areas',
     '/v1/attachments/orphans',
     '/v1/calendar/feed',
@@ -1157,6 +1158,11 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
 
                 if (req.method === 'GET' && pathname === '/health') {
                     return jsonResponse({ ok: true });
+                }
+
+                if (req.method === 'GET' && pathname === '/ready') {
+                    const ready = ensureWritableDir(dataDir);
+                    return jsonResponse({ ok: ready }, ready ? {} : { status: 503 });
                 }
 
                 if (

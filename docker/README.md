@@ -32,7 +32,8 @@ docker compose up -d
 
 Then open:
 - PWA: `http://localhost:5173`
-- Cloud health: `http://localhost:8787/health`
+- Cloud liveness: `http://localhost:8787/health`
+- Cloud storage readiness: `http://localhost:8787/ready`
 - Self-Hosted URL for local testing: `http://localhost:8787`
 - REST API base URL: `http://localhost:8787/v1`
 
@@ -41,6 +42,11 @@ From a phone or another computer, replace `localhost` with the Docker host's LAN
 To build from source instead, clone the repository and run `docker compose -f docker/compose.yaml up --build -d` from its root.
 
 This HTTP compose file is best for local testing. Mindwtr desktop and mobile clients accept HTTP for localhost, private IPs, and local hostnames. Public URLs should use HTTPS.
+
+`/health` reports only whether the Cloud process can answer HTTP requests. `/ready`
+also verifies that the configured data directory is currently safe and writable;
+the Docker health checks use `/ready` so a storage failure marks the service
+unhealthy without reading or modifying any user dataset.
 
 ## Dropbox sync and the Docker PWA
 
@@ -74,7 +80,7 @@ docker compose --env-file docker/.env.https.local -f docker/compose.https.yaml u
 Then check:
 
 ```bash
-curl https://mindwtr.example.com/health
+curl https://mindwtr.example.com/ready
 ```
 
 In Mindwtr Settings -> Sync -> Self-Hosted, use:

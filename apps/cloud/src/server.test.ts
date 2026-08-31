@@ -1806,6 +1806,41 @@ describe('cloud server api', () => {
         expect(await response.text()).toBe('');
     });
 
+    test('keeps liveness independent while readiness fails closed when storage becomes unavailable', async () => {
+        const live = await fetch(`${baseUrl}/health`);
+        expect(live.status).toBe(200);
+        expect(await live.json()).toEqual({ ok: true });
+
+        const ready = await fetch(`${baseUrl}/ready`);
+        expect(ready.status).toBe(200);
+        expect(await ready.json()).toEqual({ ok: true });
+        expectCompletion(completionRecords.at(-1)!, {
+            requestId: getRequestId(ready),
+            method: 'GET',
+            route: '/ready',
+            status: 200,
+        });
+
+        rmSync(dataDir, { recursive: true, force: true });
+        writeFileSync(dataDir, 'storage unavailable');
+
+        const liveWithoutStorage = await fetch(`${baseUrl}/health`);
+        expect(liveWithoutStorage.status).toBe(200);
+        expect(await liveWithoutStorage.json()).toEqual({ ok: true });
+
+        const unavailable = await fetch(`${baseUrl}/ready`);
+        expect(unavailable.status).toBe(503);
+        const unavailableBody = await unavailable.text();
+        expect(JSON.parse(unavailableBody)).toEqual({ ok: false });
+        expect(unavailableBody).not.toContain(dataDir);
+        expectCompletion(completionRecords.at(-1)!, {
+            requestId: getRequestId(unavailable),
+            method: 'GET',
+            route: '/ready',
+            status: 503,
+        });
+    });
+
     test('correlates success, validation, authorization, and internal-error responses without sensitive route data', async () => {
         const success = await fetch(`${baseUrl}/health?token=query-secret`);
         const successId = getRequestId(success);
@@ -1859,6 +1894,7 @@ describe('cloud server api', () => {
     });
 
     test('canonicalizes dynamic and unknown paths without retaining identifiers', () => {
+        expect(canonicalCloudRoute('/ready')).toBe('/ready');
         expect(canonicalCloudRoute('/v1/tasks/task-secret/complete')).toBe('/v1/tasks/:id/complete');
         expect(canonicalCloudRoute('/v1/attachments/private/folder/file.pdf')).toBe('/v1/attachments/:path');
         expect(canonicalCloudRoute('/v1/calendar/private-token.ics')).toBe('/v1/calendar/:token');

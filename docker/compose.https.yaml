@@ -10,7 +10,7 @@ services:
     cpus: "1.0"
     mem_limit: 512m
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8787/health >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8787/ready >/dev/null || exit 1"]
       interval: 1m30s
       timeout: 10s
       retries: 3

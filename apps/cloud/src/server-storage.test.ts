@@ -6,10 +6,12 @@ import {
     durablyRemoveFile,
     ensureDurableDirectory,
     ensureDirectoryWithinRoot,
+    ensureWritableDir,
     normalizeAttachmentRelativePath,
     type DurableDirectoryFileSystem,
     type DurableFileSystem,
     type DurableRemovalFileSystem,
+    type WritableDirectoryProbeFileSystem,
 } from './server-storage';
 import { ATTACHMENT_PATH_MAX_LENGTH, ATTACHMENT_PATH_MAX_SEGMENTS } from './server-config';
 
@@ -484,6 +486,162 @@ describe('ensureDurableDirectory', () => {
             )).toThrow(`injected ${failureStage} failure`);
         });
     }
+});
+
+type WritableProbeFailureStage = 'open' | 'write' | 'fsync' | 'close' | 'unlink';
+
+function createWritableDirectoryProbeFileSystem(
+    initialFiles: string[] = [],
+    failureStage?: WritableProbeFailureStage,
+) {
+    const events: string[] = [];
+    const files = new Set(initialFiles);
+    const handles = new Map<number, string>();
+    let nextHandle = 1;
+
+    const failAt = (stage: WritableProbeFailureStage): void => {
+        if (failureStage === stage) throw new Error(`injected ${stage} failure`);
+    };
+
+    const fileSystem: WritableDirectoryProbeFileSystem = {
+        openSync(path, flags, mode) {
+            events.push(`open:${path}`);
+            failAt('open');
+            expect(flags).toBe('wx');
+            expect(mode).toBe(0o600);
+            if (files.has(path)) {
+                throw Object.assign(new Error('probe collision'), { code: 'EEXIST' });
+            }
+            files.add(path);
+            const handle = nextHandle++;
+            handles.set(handle, path);
+            return handle;
+        },
+        writeFileSync(handle, data) {
+            events.push(`write:${handles.get(handle) ?? 'unknown'}`);
+            failAt('write');
+            expect(data).toBe('ok');
+        },
+        fsyncSync(handle) {
+            events.push(`fsync:${handles.get(handle) ?? 'unknown'}`);
+            failAt('fsync');
+        },
+        closeSync(handle) {
+            const path = handles.get(handle) ?? 'unknown';
+            events.push(`close:${path}`);
+            failAt('close');
+            handles.delete(handle);
+        },
+        unlinkSync(path) {
+            events.push(`unlink:${path}`);
+            failAt('unlink');
+            files.delete(path);
+        },
+    };
+
+    return { events, files, handles, fileSystem };
+}
+
+describe('ensureWritableDir', () => {
+    test('uses a unique private probe file for every readiness check and removes it', () => {
+        const directoryHarness = createDurableDirectoryFileSystem(['/cloud', '/cloud/data']);
+        const probeHarness = createWritableDirectoryProbeFileSystem();
+        const probeIds = ['first', 'second'];
+
+        for (const probeId of probeIds) {
+            expect(ensureWritableDir('/cloud/data', {
+                directoryFileSystem: directoryHarness.fileSystem,
+                probeFileSystem: probeHarness.fileSystem,
+                createProbeId: () => probeId,
+            })).toBe(true);
+        }
+
+        expect(probeHarness.events).toEqual([
+            'open:/cloud/data/.mindwtr-write-probe-first.tmp',
+            'write:/cloud/data/.mindwtr-write-probe-first.tmp',
+            'fsync:/cloud/data/.mindwtr-write-probe-first.tmp',
+            'close:/cloud/data/.mindwtr-write-probe-first.tmp',
+            'unlink:/cloud/data/.mindwtr-write-probe-first.tmp',
+            'open:/cloud/data/.mindwtr-write-probe-second.tmp',
+            'write:/cloud/data/.mindwtr-write-probe-second.tmp',
+            'fsync:/cloud/data/.mindwtr-write-probe-second.tmp',
+            'close:/cloud/data/.mindwtr-write-probe-second.tmp',
+            'unlink:/cloud/data/.mindwtr-write-probe-second.tmp',
+        ]);
+        expect([...probeHarness.files]).toEqual([]);
+        expect([...probeHarness.handles.keys()]).toEqual([]);
+    });
+
+    test('fails closed and cleans its probe when durable sync fails', () => {
+        const directoryHarness = createDurableDirectoryFileSystem(['/cloud', '/cloud/data']);
+        const probeHarness = createWritableDirectoryProbeFileSystem([], 'fsync');
+        const probePath = '/cloud/data/.mindwtr-write-probe-fsync-failed.tmp';
+
+        expect(ensureWritableDir('/cloud/data', {
+            directoryFileSystem: directoryHarness.fileSystem,
+            probeFileSystem: probeHarness.fileSystem,
+            createProbeId: () => 'fsync-failed',
+        })).toBe(false);
+
+        expect(probeHarness.events).toEqual([
+            `open:${probePath}`,
+            `write:${probePath}`,
+            `fsync:${probePath}`,
+            `close:${probePath}`,
+            `unlink:${probePath}`,
+        ]);
+        expect([...probeHarness.files]).toEqual([]);
+        expect([...probeHarness.handles.keys()]).toEqual([]);
+    });
+
+    test('cleans its own probe file when the write fails', () => {
+        const directoryHarness = createDurableDirectoryFileSystem(['/cloud', '/cloud/data']);
+        const probeHarness = createWritableDirectoryProbeFileSystem([], 'write');
+        const probePath = '/cloud/data/.mindwtr-write-probe-failed.tmp';
+
+        expect(ensureWritableDir('/cloud/data', {
+            directoryFileSystem: directoryHarness.fileSystem,
+            probeFileSystem: probeHarness.fileSystem,
+            createProbeId: () => 'failed',
+        })).toBe(false);
+
+        expect(probeHarness.events).toEqual([
+            `open:${probePath}`,
+            `write:${probePath}`,
+            `close:${probePath}`,
+            `unlink:${probePath}`,
+        ]);
+        expect([...probeHarness.files]).toEqual([]);
+        expect([...probeHarness.handles.keys()]).toEqual([]);
+    });
+
+    test('never deletes a colliding probe file it did not create', () => {
+        const directoryHarness = createDurableDirectoryFileSystem(['/cloud', '/cloud/data']);
+        const probePath = '/cloud/data/.mindwtr-write-probe-collision.tmp';
+        const probeHarness = createWritableDirectoryProbeFileSystem([probePath]);
+
+        expect(ensureWritableDir('/cloud/data', {
+            directoryFileSystem: directoryHarness.fileSystem,
+            probeFileSystem: probeHarness.fileSystem,
+            createProbeId: () => 'collision',
+        })).toBe(false);
+
+        expect(probeHarness.events).toEqual([`open:${probePath}`]);
+        expect([...probeHarness.files]).toEqual([probePath]);
+    });
+
+    test('fails closed before creating a probe when the configured directory is unsafe', () => {
+        const directoryHarness = createDurableDirectoryFileSystem(['/cloud'], 'verify-directory');
+        const probeHarness = createWritableDirectoryProbeFileSystem();
+
+        expect(ensureWritableDir('/cloud/data', {
+            directoryFileSystem: directoryHarness.fileSystem,
+            probeFileSystem: probeHarness.fileSystem,
+            createProbeId: () => 'unused',
+        })).toBe(false);
+
+        expect(probeHarness.events).toEqual([]);
+    });
 });
 
 describe('ensureDirectoryWithinRoot', () => {
