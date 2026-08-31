@@ -59,6 +59,8 @@ interface QuickCaptureSheetBodyProps {
   inputRef: RefObject<TextInput | null>;
   keyboardAvoidingEnabled?: boolean;
   androidKeyboardInset?: number;
+  noteValue: string;
+  onNoteChange: (value: string) => void;
   onOpenAreaPicker: () => void;
   onOpenContextPicker: () => void;
   onOpenDueDatePicker: () => void;
@@ -118,6 +120,8 @@ export function QuickCaptureSheetBody({
   inputRef,
   keyboardAvoidingEnabled = true,
   androidKeyboardInset = 0,
+  noteValue,
+  onNoteChange,
   onOpenAreaPicker,
   onOpenContextPicker,
   onOpenDueDatePicker,
@@ -387,6 +391,25 @@ export function QuickCaptureSheetBody({
             <SheetScrollArea>
             {optionsExpanded && (
               <>
+                {/* Longer notes without typing /note: (#1118). First in the panel
+                    because it is the most-reached expanded field; the same
+                    description the task editor and the full capture screen edit. */}
+                <CompactText
+                  style={[styles.noteLabel, { color: tc.secondaryText }]}
+                  numberOfLines={1}
+                >
+                  {t('taskEdit.descriptionLabel')}
+                </CompactText>
+                <CompactTextInput
+                  style={[styles.noteInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
+                  placeholder={t('taskEdit.descriptionPlaceholder')}
+                  placeholderTextColor={tc.secondaryText}
+                  value={noteValue}
+                  onChangeText={onNoteChange}
+                  accessibilityLabel={t('taskEdit.descriptionLabel')}
+                  multiline
+                  textAlignVertical="top"
+                />
                 <View style={styles.optionsRow}>
                   {renderFocusChip(styles.optionChip)}
                   {showDueTime && (

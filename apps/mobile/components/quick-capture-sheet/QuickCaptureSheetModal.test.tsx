@@ -183,6 +183,8 @@ describe('Quick capture modal composition', () => {
             handleSave={vi.fn()}
             insetsBottom={0}
             inputRef={{ current: null }}
+            noteValue=""
+            onNoteChange={vi.fn()}
             onOpenAreaPicker={vi.fn()}
             onOpenContextPicker={vi.fn()}
             onOpenDueDatePicker={vi.fn()}
@@ -263,6 +265,8 @@ describe('Quick capture modal composition', () => {
             insetsBottom={0}
             inputRef={{ current: null }}
             androidKeyboardInset={280}
+            noteValue=""
+            onNoteChange={vi.fn()}
             onOpenAreaPicker={vi.fn()}
             onOpenContextPicker={vi.fn()}
             onOpenDueDatePicker={vi.fn()}
@@ -478,6 +482,8 @@ describe('Quick capture modal composition', () => {
           handleSave={vi.fn()}
           insetsBottom={0}
           inputRef={{ current: null }}
+          noteValue=""
+          onNoteChange={vi.fn()}
           onOpenAreaPicker={vi.fn()}
           onOpenContextPicker={vi.fn()}
           onOpenDueDatePicker={vi.fn()}
@@ -550,6 +556,8 @@ describe('Quick capture modal composition', () => {
           handleSave={vi.fn()}
           insetsBottom={0}
           inputRef={{ current: null }}
+          noteValue=""
+          onNoteChange={vi.fn()}
           onOpenAreaPicker={vi.fn()}
           onOpenContextPicker={vi.fn()}
           onOpenDueDatePicker={vi.fn()}
@@ -610,6 +618,8 @@ describe('Quick capture modal composition', () => {
           handleSave={vi.fn()}
           insetsBottom={0}
           inputRef={{ current: null }}
+          noteValue=""
+          onNoteChange={vi.fn()}
           onOpenAreaPicker={vi.fn()}
           onOpenContextPicker={vi.fn()}
           onOpenDueDatePicker={vi.fn()}
@@ -683,6 +693,8 @@ describe('Quick capture modal composition', () => {
             handleSave={handleSave}
             insetsBottom={0}
             inputRef={{ current: null }}
+            noteValue=""
+            onNoteChange={vi.fn()}
             onOpenAreaPicker={vi.fn()}
             onOpenContextPicker={vi.fn()}
             onOpenDueDatePicker={vi.fn()}
@@ -754,6 +766,8 @@ describe('Quick capture modal composition', () => {
           handleSave={handleSave}
           insetsBottom={0}
           inputRef={inputRef}
+          noteValue=""
+          onNoteChange={vi.fn()}
           onOpenAreaPicker={vi.fn()}
           onOpenContextPicker={vi.fn()}
           onOpenDueDatePicker={vi.fn()}
@@ -822,6 +836,8 @@ describe('Quick capture modal composition', () => {
           handleSave={vi.fn()}
           insetsBottom={0}
           inputRef={{ current: null }}
+          noteValue=""
+          onNoteChange={vi.fn()}
           onOpenAreaPicker={vi.fn()}
           onOpenContextPicker={vi.fn()}
           onOpenDueDatePicker={vi.fn()}
@@ -886,6 +902,8 @@ describe('Quick capture modal composition', () => {
             handleSave={vi.fn()}
             insetsBottom={0}
             inputRef={{ current: null }}
+            noteValue=""
+            onNoteChange={vi.fn()}
             onOpenAreaPicker={vi.fn()}
             onOpenContextPicker={vi.fn()}
             onOpenDueDatePicker={vi.fn()}
@@ -926,8 +944,9 @@ describe('Quick capture modal composition', () => {
       // The More panel scrolls, but the title input must stay OUTSIDE it: a focused
       // TextInput inside an iOS ScrollView gets auto-scrolled above the keyboard and
       // flies off the top of the sheet on every refocus (#887).
-      expect(scroll.findAllByType(TextInput)).toHaveLength(0);
-      expect(tree.root.findByType(TextInput).props.accessibilityLabel).toBe('quickAdd.inputLabel');
+      expect(scroll.findAllByType(TextInput).map((node) => node.props.accessibilityLabel))
+        .toEqual(['taskEdit.descriptionLabel']);
+      expect(tree.root.findAllByType(TextInput)[0].props.accessibilityLabel).toBe('quickAdd.inputLabel');
     } finally {
       Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOs });
     }
@@ -953,6 +972,8 @@ describe('Quick capture modal composition', () => {
             handleSave={vi.fn()}
             insetsBottom={0}
             inputRef={{ current: null }}
+            noteValue=""
+            onNoteChange={vi.fn()}
             onOpenAreaPicker={vi.fn()}
             onOpenContextPicker={vi.fn()}
             onOpenDueDatePicker={vi.fn()}
@@ -993,7 +1014,8 @@ describe('Quick capture modal composition', () => {
       // to scroll inside the sheet instead of pushing the title off the top (#1120).
       const scroll = tree.root.findByType(ScrollView);
       expect(scroll.props.testID).toBe('quick-capture-scroll');
-      expect(scroll.findAllByType(TextInput)).toHaveLength(0);
+      expect(scroll.findAllByType(TextInput).map((node) => node.props.accessibilityLabel))
+        .toEqual(['taskEdit.descriptionLabel']);
       const sheet = tree.root
         .findAllByType(View)
         .find((node) => flattenStyle(node.props.style).maxHeight === 500);
@@ -1001,7 +1023,7 @@ describe('Quick capture modal composition', () => {
       // top of the keyboard-padded container.
       expect(flattenStyle(sheet?.props.style).flexShrink).toBe(1);
       // The title input stays outside the scroll area, in the pinned part of the sheet.
-      expect(tree.root.findByType(TextInput).props.accessibilityLabel).toBe('quickAdd.inputLabel');
+      expect(tree.root.findAllByType(TextInput)[0].props.accessibilityLabel).toBe('quickAdd.inputLabel');
       // Without a viewport inside the native modal, toasts fired from the sheet (the
       // speech-not-configured notice) only appear after the sheet closes (#886). It has
       // to live inside the keyboard-avoiding view or the keyboard covers it.
@@ -1009,5 +1031,72 @@ describe('Quick capture modal composition', () => {
     } finally {
       Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOs });
     }
+  });
+  it('keeps the note field behind More instead of crowding collapsed capture', () => {
+    const renderBody = (optionsExpanded: boolean) => {
+      let tree!: ReturnType<typeof create>;
+      act(() => {
+        tree = create(
+          <QuickCaptureSheetBody
+            addAnother={false}
+            areaLabel="No Area"
+            contextLabel="Contexts"
+            dueDate={null}
+            dueLabel="Due Date"
+            dueTimeLabel="Change time"
+            handleClose={vi.fn()}
+            handleSave={vi.fn()}
+            insetsBottom={0}
+            inputRef={{ current: null }}
+            noteValue="Bring the signed form"
+            onNoteChange={vi.fn()}
+            onOpenAreaPicker={vi.fn()}
+            onOpenContextPicker={vi.fn()}
+            onOpenDueDatePicker={vi.fn()}
+            onOpenDueTimePicker={vi.fn()}
+            onOpenPriorityPicker={vi.fn()}
+            onOpenProjectPicker={vi.fn()}
+            onQuickDueDateSelect={vi.fn()}
+            onResetArea={vi.fn()}
+            onResetContexts={vi.fn()}
+            onResetDueDate={vi.fn()}
+            onResetDueTime={vi.fn()}
+            onResetPriority={vi.fn()}
+            onResetProject={vi.fn()}
+            onToggleOptions={vi.fn()}
+            onToggleAddAnother={vi.fn()}
+            onToggleRecording={vi.fn()}
+            onValueChange={vi.fn()}
+            optionsExpanded={optionsExpanded}
+            prioritiesEnabled
+            priorityLabel="Priority"
+            projectLabel="Project"
+            recording={false}
+            recordingBusy={false}
+            recordingReady={false}
+            sheetMaxHeight={500}
+            showDueTime={false}
+            t={(key) => key}
+            tc={tc}
+            value="Capture me"
+            visible
+          />
+        );
+      });
+      return tree;
+    };
+
+    const findNote = (tree: ReturnType<typeof create>) => tree.root
+      .findAllByType(TextInput)
+      .filter((node) => node.props.accessibilityLabel === 'taskEdit.descriptionLabel');
+
+    // Collapsed capture stays a one-field sheet: the note is progressive
+    // disclosure behind More (#1118).
+    expect(findNote(renderBody(false))).toHaveLength(0);
+
+    const expanded = findNote(renderBody(true));
+    expect(expanded).toHaveLength(1);
+    expect(expanded[0].props.value).toBe('Bring the signed form');
+    expect(expanded[0].props.multiline).toBe(true);
   });
 });

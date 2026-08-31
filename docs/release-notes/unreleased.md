@@ -176,3 +176,4 @@ Changes collected after `v1.2.1` and before the next version tag.
 - Settings → About now links the official YouTube video tutorials (the Mindwtr App Demos playlist with the complete desktop and mobile walkthroughs). Desktop and mobile.
 - Desktop: the "go to Next" keybinding (`g n`, or Alt+N in the Emacs style) now opens the actual Next Actions list, with the full sort and group toolbar. It had always shown the Focus view instead, so the all-Next list was unreachable. (#1107)
 - Android: in the quick "Add task" sheet, tapping More no longer pushes the title input off the top of the screen behind the keyboard; the expanded options now scroll within the space the keyboard leaves while the input and Save buttons stay visible. (#1120)
+- Mobile: the quick "Add task" sheet's More panel now starts with a Note field, so a longer thought can be captured without typing the /note: token; a typed field and a /note: token merge instead of one overwriting the other. (#1118)

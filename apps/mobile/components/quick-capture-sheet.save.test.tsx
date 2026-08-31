@@ -1336,4 +1336,87 @@ describe('QuickCaptureSheet save handling', () => {
     }));
     expect(onClose).not.toHaveBeenCalled();
   });
+  it('saves the More-panel note as the task description', async () => {
+    addTask.mockResolvedValue({ success: true, id: 'task-1' });
+
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <QuickCaptureSheet
+          visible
+          openRequestId={1}
+          initialValue="Renew passport"
+          onClose={vi.fn()}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    const getBody = () => {
+      const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+      if (!body) throw new Error('QuickCaptureSheetBody not found');
+      return body;
+    };
+
+    expect(getBody().props.noteValue).toBe('');
+
+    await act(async () => {
+      getBody().props.onNoteChange('  Bring the old one and two photos  ');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      getBody().props.handleSave();
+      await Promise.resolve();
+    });
+
+    expect(addTask).toHaveBeenCalledWith('Renew passport', expect.objectContaining({
+      description: 'Bring the old one and two photos',
+      status: 'inbox',
+    }));
+  });
+
+  it('keeps a /note: token typed in the title after the note field text', async () => {
+    addTask.mockResolvedValue({ success: true, id: 'task-1' });
+    parseQuickAdd.mockReturnValue({
+      title: 'Renew passport',
+      props: { description: 'from the token' },
+      invalidDateCommands: [],
+    });
+
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <QuickCaptureSheet
+          visible
+          openRequestId={1}
+          initialValue="Renew passport /note: from the token"
+          onClose={vi.fn()}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    const getBody = () => {
+      const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+      if (!body) throw new Error('QuickCaptureSheetBody not found');
+      return body;
+    };
+
+    await act(async () => {
+      getBody().props.onNoteChange('typed in the field');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      getBody().props.handleSave();
+      await Promise.resolve();
+    });
+
+    // Same merge as the full capture screen: neither note is dropped, the typed
+    // field leads.
+    expect(addTask).toHaveBeenCalledWith('Renew passport', expect.objectContaining({
+      description: 'typed in the field\nfrom the token',
+    }));
+  });
 });

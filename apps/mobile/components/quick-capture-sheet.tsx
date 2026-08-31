@@ -222,6 +222,8 @@ export function QuickCaptureSheet({
   // object, so they cannot disagree. A background sync landing mid-draft leaves
   // it one capture stale — accepted, to keep the scan off the keystroke path.
   const [quickAddParseOptions, setQuickAddParseOptions] = useState(readQuickAddParseOptions);
+  // Note (task description) captured from the expanded More panel (#1118).
+  const [noteValue, setNoteValue] = useState('');
   const [pendingBulkLines, setPendingBulkLines] = useState<string[] | null>(null);
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [dueDateHasTime, setDueDateHasTime] = useState(false);
@@ -424,6 +426,7 @@ export function QuickCaptureSheet({
     clearAndroidOptionsExpand();
     setQuickAddParseOptions(readQuickAddParseOptions());
     setValue(options?.value ?? initialValue ?? '');
+    setNoteValue(initialProps?.description ?? '');
     setDueDate(initialProps?.dueDate ? safeParseDate(initialProps.dueDate) : null);
     setDueDateHasTime(Boolean(initialProps?.dueDate && hasTimeComponent(initialProps.dueDate)));
     setStartTime(initialProps?.startTime ? safeParseDate(initialProps.startTime) : null);
@@ -543,6 +546,14 @@ export function QuickCaptureSheet({
     const options: CaptureTransactionOptions = {
       transformProps: (props) => {
         const taskProps = { ...props };
+        // The typed field leads; a /note: token in the title is kept after it
+        // (identical merge to app/capture-modal.tsx, so the two capture
+        // surfaces cannot disagree about which note wins).
+        const note = noteValue.trim();
+        if (note) {
+          const parsedNote = typeof taskProps.description === 'string' ? taskProps.description.trim() : '';
+          taskProps.description = parsedNote && parsedNote !== note ? `${note}\n${parsedNote}` : note;
+        }
         if (projectId) taskProps.projectId = projectId;
         if (contextTags.length > 0) {
           taskProps.contexts = Array.from(new Set([...(taskProps.contexts ?? []), ...contextTags]));
@@ -554,7 +565,7 @@ export function QuickCaptureSheet({
       },
     };
     return { input, options };
-  }, [areas, canFocusNewTask, contextTags, focusNewTask, initialProps, pickedDueDate, prioritiesEnabled, priority, projectId, projects, quickAddParseOptions, selectedAreaId, startTime, suppressDetectedDate]);
+  }, [areas, canFocusNewTask, contextTags, focusNewTask, initialProps, noteValue, pickedDueDate, prioritiesEnabled, priority, projectId, projects, quickAddParseOptions, selectedAreaId, startTime, suppressDetectedDate]);
 
   const buildTaskPropsForInput = useCallback(async (inputValue: string, fallbackTitle: string, extraProps?: Partial<Task>) => {
     const request = buildCaptureRequestForInput(inputValue, fallbackTitle, extraProps);
@@ -584,6 +595,7 @@ export function QuickCaptureSheet({
     clearContextOptionsLoad();
     contextOptionsRequestRef.current += 1;
     setValue('');
+    setNoteValue('');
     setDueDate(null);
     setDueDateHasTime(false);
     setStartTime(null);
@@ -1099,6 +1111,8 @@ export function QuickCaptureSheet({
         inputRef={inputRef}
         keyboardAvoidingEnabled={androidKeyboardAvoidingEnabled}
         androidKeyboardInset={androidKeyboardInset}
+        noteValue={noteValue}
+        onNoteChange={setNoteValue}
         onOpenAreaPicker={() => setShowAreaPicker(true)}
         onOpenContextPicker={openContextPicker}
         onOpenDueDatePicker={openDueDatePicker}
