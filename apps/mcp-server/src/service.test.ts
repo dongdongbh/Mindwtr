@@ -108,6 +108,13 @@ describe('mcp service', () => {
       },
       runCoreService: async (_options: any, fn: any) =>
         fn({
+          getQuickAddSnapshot: async () => ({
+            tasks: [],
+            projects: [{ id: 'p1', title: 'Home' }],
+            areas: [],
+            people: [],
+            settings: {},
+          }),
           addTask: async (input: any) => {
             receivedAddTaskInput = input;
             return {
@@ -168,6 +175,13 @@ describe('mcp service', () => {
       }),
       runCoreService: async (_options: any, fn: any) =>
         fn({
+          getQuickAddSnapshot: async () => ({
+            tasks: [],
+            projects: [],
+            areas: [],
+            people: [],
+            settings: {},
+          }),
           addProject: async (input: any) => {
             receivedAddProjectInput = input;
             return {
@@ -675,6 +689,63 @@ describe('mcp service', () => {
       expect(projects.filter((project) => project.title === 'Launch')).toHaveLength(1);
       expect(tasks.filter((task) => task.title === 'Ship it')).toHaveLength(1);
       expect(tasks[0]?.projectId).toBe(projects[0]?.id);
+    } finally {
+      await service.close();
+    }
+  }, REAL_SQLITE_TEST_TIMEOUT_MS);
+
+  test('quickAdd follows the current Priorities setting while explicit priority stays available', async () => {
+    const dir = createTempDir();
+    const dbPath = join(dir, 'mindwtr.db');
+    writeFileSync(
+      join(dir, 'data.json'),
+      JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} }),
+    );
+    const service = createService({ dbPath, readonly: false });
+    const setPrioritySetting = async (enabled: boolean | undefined) => {
+      const { db } = await mcpDb.openMindwtrDb({ dbPath, readonly: false });
+      try {
+        const row = db.prepare('SELECT data FROM settings WHERE id = 1').get<{ data: string }>();
+        const settings = JSON.parse(row?.data ?? '{}') as Record<string, unknown> & {
+          features?: Record<string, boolean | undefined>;
+        };
+        const features = { ...(settings.features ?? {}) };
+        if (enabled === undefined) {
+          delete features.priorities;
+        } else {
+          features.priorities = enabled;
+        }
+        settings.features = features;
+        db.prepare('UPDATE settings SET data = ? WHERE id = 1').run(JSON.stringify(settings));
+      } finally {
+        mcpDb.closeDb(db);
+      }
+    };
+    const capture = async (input: { quickAdd: string; priority?: 'urgent' }) => {
+      const created = await service.addTask(input);
+      const persisted = await service.getTask({ id: created.id });
+      return { title: persisted.title, priority: persisted.priority };
+    };
+
+    try {
+      await runCoreService({ dbPath, readonly: false }, (core: any) => core.getQuickAddSnapshot());
+
+      await setPrioritySetting(undefined);
+      const defaults = await capture({ quickAdd: 'Default /priority:high' });
+
+      await setPrioritySetting(false);
+      const disabled = await capture({ quickAdd: 'Disabled /priority:high' });
+      const explicit = await capture({ quickAdd: 'Explicit /priority:high', priority: 'urgent' });
+
+      await setPrioritySetting(true);
+      const enabled = await capture({ quickAdd: 'Enabled /priority:high' });
+
+      expect([disabled, explicit, defaults, enabled]).toEqual([
+        { title: 'Disabled /priority:high', priority: undefined },
+        { title: 'Explicit /priority:high', priority: 'urgent' },
+        { title: 'Default', priority: 'high' },
+        { title: 'Enabled', priority: 'high' },
+      ]);
     } finally {
       await service.close();
     }

@@ -1,4 +1,5 @@
 import {
+  buildQuickAddParseOptions,
   DEFAULT_PROJECT_COLOR,
   executeCaptureTransaction,
   parseQuickAdd,
@@ -122,8 +123,8 @@ const isRetryableSqliteWriteError = (error: unknown): boolean => {
  *     by the time the next attempt re-reads. (This is a per-capture guarantee, not a strict
  *     per-call durability barrier — service.test.ts's fault-injection test is sensitive to
  *     invariant 2, which is the one that actually prevents duplication.)
- *  2. The callback re-derives its plan from storage on EVERY attempt — it re-runs
- *     listProjects and parseQuickAdd inside the retried body, never from values captured
+ *  2. The callback re-derives its plan from storage on EVERY attempt — it reloads the core
+ *     snapshot and re-runs parseQuickAdd inside the retried body, never from values captured
  *     outside it. So the retry sees the project attempt 1 created and resolves `+Launch` to
  *     that id instead of minting a second one.
  *
@@ -458,8 +459,15 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
       const recurrence = normalizeOptionalTaskRecurrence(normalizedInput.recurrence);
       return await runCoreWriteWithRetries(options, deps, async (core) => {
         if (normalizedInput.quickAdd) {
-          const projects = await withDb((db) => deps.listProjects(db));
-          const quick = deps.parseQuickAdd(normalizedInput.quickAdd, projects as CoreProject[]);
+          const snapshot = await core.getQuickAddSnapshot();
+          const { projects, areas, tasks, people, settings } = snapshot;
+          const quick = deps.parseQuickAdd(
+            normalizedInput.quickAdd,
+            projects as CoreProject[],
+            undefined,
+            areas as CoreArea[],
+            buildQuickAddParseOptions(settings, { tasks, people }),
+          );
           let createdTask: Task | undefined;
           const capture = await executeCaptureTransaction({
             parsed: {

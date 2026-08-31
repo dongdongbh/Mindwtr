@@ -1,3 +1,5 @@
+import type { AppSettings } from '@mindwtr/core';
+
 import type { Area, Person, Project, Section, Task } from './queries.js';
 import { ensureMindwtrDbPath, type DbOptions } from './db.js';
 import { withMcpWriteLock } from './db-write-lock.js';
@@ -5,6 +7,11 @@ import { NotFoundError, ValidationError } from './errors.js';
 
 type CoreStore = {
   getState: () => {
+    tasks: Task[];
+    projects: Project[];
+    areas: Area[];
+    people: Person[];
+    settings: AppSettings;
     _allTasks: Task[];
     _allProjects: Project[];
     _allSections: Section[];
@@ -54,7 +61,16 @@ type SerializedAsyncQueue = {
 
 type TaskWriteResult = Task & { storageWarning?: string };
 
+type CoreQuickAddSnapshot = {
+  tasks: Task[];
+  projects: Project[];
+  areas: Area[];
+  people: Person[];
+  settings: AppSettings;
+};
+
 type CoreService = {
+  getQuickAddSnapshot: () => Promise<CoreQuickAddSnapshot>;
   addTask: (input: { title: string; props?: Partial<Task> }) => Promise<TaskWriteResult>;
   updateTask: (input: { id: string; updates: Partial<Task> }) => Promise<TaskWriteResult>;
   completeTask: (id: string) => Promise<TaskWriteResult>;
@@ -354,6 +370,18 @@ const ensureCoreReady = async (options: DbOptions) => {
 
       coreService = {
         ...createCorePersistenceService(core, runWriteTransaction),
+        getQuickAddSnapshot: async () => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          const current = core.useTaskStore.getState();
+          return {
+            tasks: current.tasks,
+            projects: current.projects,
+            areas: current.areas,
+            people: current.people,
+            settings: current.settings,
+          };
+        }),
         addProject: async ({ title, color, props }) => runWriteTransaction(async () => {
           const state = core.useTaskStore.getState();
           await state.fetchData();
