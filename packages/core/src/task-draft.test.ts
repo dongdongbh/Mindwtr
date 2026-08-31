@@ -214,6 +214,33 @@ describe('task-draft', () => {
         });
     });
 
+    it('preserves recurrence anchors when an unrelated draft field changes', () => {
+        const recurringTask: Task = {
+            ...baseTask,
+            recurrence: {
+                rule: 'monthly',
+                strategy: 'strict',
+                anchorDay: 31,
+                startAnchorDay: 30,
+                dueAnchorDay: 31,
+                reviewAnchorDay: 29,
+            },
+        };
+        const draft = createTaskDraft(recurringTask);
+
+        expect(taskDraftToUpdatePatch(
+            { ...draft, title: 'Write revised report' },
+            recurringTask,
+        )?.recurrence).toMatchObject({
+            rule: 'monthly',
+            strategy: 'strict',
+            anchorDay: 31,
+            startAnchorDay: 30,
+            dueAnchorDay: 31,
+            reviewAnchorDay: 29,
+        });
+    });
+
     it('keeps checklist data out of description patches', () => {
         const withChecklist: Task = {
             ...baseTask,

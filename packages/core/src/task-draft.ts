@@ -234,6 +234,13 @@ type TaskDraftPatchOptions = {
     attachments?: Attachment[];
 };
 
+const RECURRENCE_ANCHOR_FIELDS = [
+    'anchorDay',
+    'startAnchorDay',
+    'dueAnchorDay',
+    'reviewAnchorDay',
+] as const satisfies readonly (keyof Recurrence)[];
+
 /**
  * Serialize the draft into the `updateTask` patch. Returns null when there is
  * no usable title (empty draft title on a task that never had one).
@@ -250,6 +257,17 @@ export function taskDraftToUpdatePatch(
     const recurrenceValue: Recurrence | undefined = draft.recurrence
         ? { rule: draft.recurrence, strategy: draft.recurrenceStrategy }
         : undefined;
+    const storedRecurrence = task.recurrence && typeof task.recurrence === 'object'
+        ? task.recurrence
+        : undefined;
+    if (recurrenceValue && storedRecurrence?.rule === recurrenceValue.rule) {
+        for (const field of RECURRENCE_ANCHOR_FIELDS) {
+            const value = storedRecurrence[field];
+            if (typeof value === 'number') {
+                recurrenceValue[field] = value;
+            }
+        }
+    }
     if (recurrenceValue && draft.recurrenceRRule) {
         const parsed = parseRRuleString(draft.recurrenceRRule);
         if (parsed.byDay && parsed.byDay.length > 0) {
