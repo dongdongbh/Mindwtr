@@ -1,4 +1,5 @@
 import {
+    ResponseTooLargeError,
     DEFAULT_TIMEOUT_MS,
     assertConnectionAllowed,
     createProgressStream,
@@ -40,6 +41,12 @@ export interface WebDavOptions {
     /** Internal one-shot write mode. A legacy plaintext document without a usable
      * generation cannot safely retry after an ambiguous response. */
     disableParentCollectionRetry?: boolean;
+    /** Fence reads only: a body larger than maxBytes cannot be a fence record, and some
+     * servers (Koofr, #1113) answer the GET for a missing file with a large HTML page
+     * instead of 404. Reports such a response as an absent file; the caller's create-only
+     * conditional write still guards against a real racing peer. Never set this for a
+     * document read - an oversized document must fail, not read as absent. */
+    treatOversizeAsAbsent?: boolean;
 }
 
 export type RemoteFileMetadata = {
@@ -939,13 +946,22 @@ export async function webdavGetFileVersionedWithServerTime(
                 (error as { status?: number }).status = res.status;
                 throw error;
             }
-            return {
-                bytes: new Uint8Array(await readResponseBody(
+            let body: ArrayBuffer;
+            try {
+                body = await readResponseBody(
                     res,
                     options.onProgress,
                     options.maxBytes ?? MAX_DOWNLOAD_BYTES,
                     signal,
-                )),
+                );
+            } catch (error) {
+                if (options.treatOversizeAsAbsent && error instanceof ResponseTooLargeError) {
+                    return { bytes: null, version: null, serverNowMs };
+                }
+                throw error;
+            }
+            return {
+                bytes: new Uint8Array(body),
                 version: normalizeStrongWebdavEtag(res.headers.get('etag')),
                 serverNowMs,
             };

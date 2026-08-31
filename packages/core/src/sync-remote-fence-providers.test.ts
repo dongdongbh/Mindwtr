@@ -77,3 +77,26 @@ describe('remote mutation fence provider ports', () => {
         });
     });
 });
+
+describe('oversized fence responses (#1113)', () => {
+    it('reads a non-404 response too large to be a fence as an absent file', async () => {
+        // Koofr answers the GET for a missing file with a large HTML page instead
+        // of 404; before the fix this rejected with ResponseTooLargeError and no
+        // encryption transition could start.
+        const hugeHtml = `<html>${'x'.repeat(8_192)}</html>`;
+        const fetcher = vi.fn(async () => new Response(hugeHtml, {
+            status: 200,
+            headers: { date: SERVER_DATE, 'content-type': 'text/html' },
+        })) as unknown as typeof fetch;
+        const port = createWebdavSyncRemoteMutationFencePort(
+            'https://dav.example/root/data.json',
+            { fetcher },
+        );
+
+        await expect(port.read()).resolves.toEqual({
+            bytes: null,
+            version: null,
+            serverNowMs: Date.parse(SERVER_DATE),
+        });
+    });
+});

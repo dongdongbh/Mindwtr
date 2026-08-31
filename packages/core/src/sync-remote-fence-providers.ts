@@ -33,7 +33,10 @@ export const createWebdavSyncRemoteMutationFencePort = (
     options: WebDavOptions = {},
 ): SyncRemoteMutationFencePort => {
     const url = webdavMutationFenceUrl(documentUrl);
-    const readOptions: WebDavOptions = { ...options, maxBytes: FENCE_MAX_BYTES };
+    // A response bigger than a fence record cannot be one. Koofr answers the GET for a
+    // missing file with a large HTML page instead of 404 (#1113); reading it as absent
+    // keeps acquisition safe because the follow-up write is create-only conditional.
+    const readOptions: WebDavOptions = { ...options, maxBytes: FENCE_MAX_BYTES, treatOversizeAsAbsent: true };
     return {
         read: () => webdavGetFileVersionedWithServerTime(url, readOptions),
         write: (bytes, expectedVersion) => webdavPutFileVersioned(
