@@ -1171,7 +1171,7 @@ function App() {
             case 'agenda':
                 return <AgendaView />;
             case 'next':
-                return <AgendaView />;
+                return <ListView title={t('list.next')} statusFilter="next" />;
             case 'someday':
                 return <ListView title={t('list.someday')} statusFilter="someday" />;
             case 'reference':
