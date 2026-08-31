@@ -481,6 +481,72 @@ describe('backup transfer', () => {
         });
     });
 
+    it.each(['tasks', 'projects'] as const)(
+        'makes restored %s attachment children authoritative and convergent',
+        (collection) => {
+            const restoredAt = '2026-04-01T00:00:10.000Z';
+            const backup = buildAppData();
+            const previousData = buildAppData();
+            const backupParent = backup[collection][0];
+            const previousParent = previousData[collection][0];
+            const restoredAttachment = {
+                id: 'attachment-restored',
+                kind: 'file' as const,
+                title: 'Restored file',
+                uri: 'attachments/restored.txt',
+                createdAt: '2026-03-01T00:00:00.000Z',
+                updatedAt: '2026-03-01T00:00:00.000Z',
+            };
+            const absentFromBackupAttachment = {
+                id: 'attachment-absent',
+                kind: 'file' as const,
+                title: 'Created after backup',
+                uri: 'attachments/absent.txt',
+                createdAt: '2026-03-20T00:00:00.000Z',
+                updatedAt: '2026-03-31T00:00:00.000Z',
+            };
+            backupParent.attachments = [restoredAttachment];
+            previousParent.attachments = [
+                {
+                    ...restoredAttachment,
+                    uri: '',
+                    updatedAt: '2026-03-31T00:00:00.000Z',
+                    deletedAt: '2026-03-31T00:00:00.000Z',
+                },
+                absentFromBackupAttachment,
+            ];
+
+            const restored = prepareRestoredBackupDataForSync(backup, { previousData, restoredAt });
+            const restoredParent = restored[collection][0];
+            expect(restoredParent.attachments).toEqual([
+                expect.objectContaining({
+                    id: 'attachment-restored',
+                    updatedAt: restoredAt,
+                }),
+                expect.objectContaining({
+                    id: 'attachment-absent',
+                    updatedAt: restoredAt,
+                    deletedAt: restoredAt,
+                }),
+            ]);
+            expect(restoredParent.attachments?.[0].deletedAt).toBeUndefined();
+
+            const forward = mergeAppData(restored, previousData);
+            const reverse = mergeAppData(previousData, restored);
+            expect(forward[collection][0]).toEqual(reverse[collection][0]);
+            expect(forward[collection][0].attachments).toEqual([
+                expect.objectContaining({ id: 'attachment-restored', updatedAt: restoredAt }),
+                expect.objectContaining({
+                    id: 'attachment-absent',
+                    updatedAt: restoredAt,
+                    deletedAt: restoredAt,
+                }),
+            ]);
+            expect(forward[collection][0].attachments?.[0].deletedAt).toBeUndefined();
+            expect(mergeAppData(forward, previousData)[collection][0]).toEqual(forward[collection][0]);
+        },
+    );
+
     it('refreshes expired backup and carried tombstones so restore cleanup retains them', () => {
         const restoredAt = '2026-04-01T00:00:10.000Z';
         const backup = buildAppData();

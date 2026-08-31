@@ -304,6 +304,45 @@ const sanitizeRestoredAttachments = <T extends { attachments?: Attachment[] }>(i
     item.attachments ? { ...item, attachments: normalizeAttachmentsForSyncMerge(item.attachments) } : item
 );
 
+/**
+ * Attachments merge as child records, independently of the task/project revision.
+ * A restore therefore has to make the backup authoritative at the child seam too:
+ * refresh the backup children and explicitly tombstone children the replaced local
+ * parent knew about but the backup omitted. Otherwise the next sync can immediately
+ * resurrect an omitted attachment or let a stale remote tombstone re-delete a file
+ * the user just restored.
+ */
+const prepareRestoredAttachmentsForSync = <T extends { attachments?: Attachment[] }>(
+    item: T,
+    restoredAt: string,
+    previous?: T,
+): T => {
+    const restoredAttachments = normalizeAttachmentsForSyncMerge(item.attachments) ?? [];
+    const previousAttachments = normalizeAttachmentsForSyncMerge(previous?.attachments) ?? [];
+    if (restoredAttachments.length === 0 && previousAttachments.length === 0) {
+        return sanitizeRestoredAttachments(item);
+    }
+
+    const restoredIds = new Set(restoredAttachments.map((attachment) => attachment.id));
+    const refreshed = restoredAttachments.map((attachment) => ({
+        ...attachment,
+        ...(attachment.deletedAt ? { deletedAt: restoredAt } : {}),
+        updatedAt: restoredAt,
+    }));
+    const carriedTombstones = previousAttachments
+        .filter((attachment) => !restoredIds.has(attachment.id))
+        .map((attachment) => ({
+            ...attachment,
+            deletedAt: restoredAt,
+            updatedAt: restoredAt,
+        }));
+
+    return {
+        ...item,
+        attachments: [...refreshed, ...carriedTombstones],
+    };
+};
+
 export const prepareRestoredBackupDataForSync = (
     data: AppData,
     options: BackupRestoreSyncPreparationOptions = {}
@@ -324,7 +363,7 @@ export const prepareRestoredBackupDataForSync = (
                 ...task,
                 attachments: previousTasksById.get(task.id)?.attachments,
             })
-            : sanitizeRestoredAttachments(task)
+            : prepareRestoredAttachmentsForSync(task, restoredAt, previousTasksById.get(task.id))
     ));
     const projects = prepare(data.projects, previous?.projects).map((project) => (
         project.purgedAt
@@ -332,7 +371,7 @@ export const prepareRestoredBackupDataForSync = (
                 ...project,
                 attachments: previousProjectsById.get(project.id)?.attachments,
             })
-            : sanitizeRestoredAttachments(project)
+            : prepareRestoredAttachmentsForSync(project, restoredAt, previousProjectsById.get(project.id))
     ));
     const sections = compactSectionsForPurgedProjects(
         prepare(data.sections, previous?.sections),
