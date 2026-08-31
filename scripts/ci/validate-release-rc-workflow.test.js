@@ -637,3 +637,56 @@ test("AUR publication is a manual environment-gated recovery workflow", () => {
   );
   expect(text).not.toContain("--force");
 });
+
+test("manual AUR recovery exposes only the saved mindwtr source proposal", () => {
+  const workflowText = readFileSync(
+    ".github/workflows/publish-aur.yml",
+    "utf8",
+  );
+  const workflow = parse(workflowText);
+  const dispatchInputs = workflow.on.workflow_dispatch.inputs;
+  const steps = workflow.jobs.publish.steps;
+  const validateInputs = steps.find(
+    (step) => step.name === "Validate dispatch inputs",
+  );
+  const findProposal = steps.find(
+    (step) => step.name === "Find the saved proposal artifact",
+  );
+  const trustedSourceCheck = findProposal.run.match(
+    /case "\$SOURCE_WORKFLOW" in([\s\S]*?)esac/,
+  )?.[1];
+
+  expect(Object.keys(dispatchInputs)).toEqual(["tag"]);
+  expect(dispatchInputs.tag.description).toContain("stable");
+  expect(validateInputs.run).toContain("Invalid stable tag");
+  expect(validateInputs.run).not.toContain("-rc\\.");
+  expect(workflow.jobs.publish.name).toBe(
+    "Publish mindwtr source proposal after review",
+  );
+  expect(findProposal.run).toContain(
+    'ARTIFACT_NAME="aur-proposal-mindwtr-${RELEASE_TAG}"',
+  );
+  expect(trustedSourceCheck).toContain(".github/workflows/release.yml");
+  expect(trustedSourceCheck).not.toContain("release-rc.yml");
+  expect(trustedSourceCheck).not.toContain("update-aur-beta.yml");
+  expect(workflowText).not.toContain("inputs.package");
+  expect(workflowText).not.toContain("mindwtr-bin");
+  expect(workflowText).not.toContain("mindwtr-beta-bin");
+
+  const proposalScript = readFileSync(
+    "scripts/ci/prepare-aur-proposal.sh",
+    "utf8",
+  );
+  expect(proposalScript).toContain('if [ "$#" -ne 3 ]');
+  expect(proposalScript).toContain(
+    "Usage: $0 <package-dir> <release-tag> <output-dir>",
+  );
+  expect(proposalScript).not.toContain("PACKAGE_NAME");
+
+  const aurPolicy = readFileSync("aur/README.md", "utf8");
+  expect(aurPolicy).toContain("saved `mindwtr` source-package artifact");
+  expect(aurPolicy).toContain(
+    "Recover `mindwtr-bin` and `mindwtr-beta-bin` by rerunning their dedicated release workflows.",
+  );
+  expect(aurPolicy).not.toContain("incident-mode fallback for all three packages");
+});

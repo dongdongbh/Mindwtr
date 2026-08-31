@@ -1535,7 +1535,6 @@ jobs:
           set -euo pipefail
           bash source/scripts/ci/prepare-aur-proposal.sh \
             aur-mindwtr \
-            mindwtr \
             "${{ steps.version.outputs.tag }}" \
             aur-proposal
 

@@ -54,7 +54,7 @@ A recognized AUR maintenance response (pushes disabled) marks the channel delaye
 
 `mindwtr` (the source package, co-maintained with `yochananmarqos`) additionally runs a full clean-container build of the package before pushing, and its release job still saves the exact published files, base commit, all-package ownership/history snapshot, review diff, and diff checksum as a 90-day workflow artifact — now as a publish record rather than a pending proposal.
 
-The manual `Publish reviewed AUR proposal` workflow (`publish-aur.yml`), protected by the `aur-publish` GitHub Environment, publishes such a saved artifact and remains available as an incident-mode fallback for all three packages, for out-of-band publication when direct pushes are unavailable or extra review is warranted.
+Maintainers can use the Environment-protected `Publish reviewed mindwtr source proposal` workflow (`publish-aur.yml`) to publish the saved `mindwtr` source-package artifact after a direct-push failure or an extra review. Recover `mindwtr-bin` and `mindwtr-beta-bin` by rerunning their dedicated release workflows.
 
 ## Maintainer security
 

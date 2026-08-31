@@ -1,20 +1,12 @@
-name: Publish reviewed AUR proposal
+name: Publish reviewed mindwtr source proposal
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing Mindwtr release tag whose saved AUR proposal should be published"
+        description: "Existing stable Mindwtr release tag whose saved source-package proposal should be published"
         required: true
         type: string
-      package:
-        description: "Official AUR package to publish"
-        required: true
-        type: choice
-        options:
-          - mindwtr-beta-bin
-          - mindwtr-bin
-          - mindwtr
 
 permissions:
   actions: read
@@ -25,7 +17,7 @@ env:
 
 jobs:
   publish:
-    name: Publish ${{ inputs.package }} after review
+    name: Publish mindwtr source proposal after review
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: aur-publish
@@ -34,17 +26,12 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.tag }}
-          PACKAGE_NAME: ${{ inputs.package }}
         run: |
           set -euo pipefail
-          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
-            echo "Invalid stable or RC tag: $RELEASE_TAG" >&2
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid stable tag: $RELEASE_TAG" >&2
             exit 1
           fi
-          case "$PACKAGE_NAME" in
-            mindwtr|mindwtr-bin|mindwtr-beta-bin) ;;
-            *) echo "Unsupported AUR package: $PACKAGE_NAME" >&2; exit 1 ;;
-          esac
 
       - name: Checkout security policy and validators
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -55,10 +42,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
-          PACKAGE_NAME: ${{ inputs.package }}
         run: |
           set -euo pipefail
-          ARTIFACT_NAME="aur-proposal-${PACKAGE_NAME}-${RELEASE_TAG}"
+          ARTIFACT_NAME="aur-proposal-mindwtr-${RELEASE_TAG}"
           RESPONSE="$(gh api \
             -H 'Accept: application/vnd.github+json' \
             "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${ARTIFACT_NAME}&per_page=100")"
@@ -82,7 +68,7 @@ jobs:
             *) echo "Proposal artifact came from an untrusted event: ${SOURCE_EVENT:-missing}" >&2; exit 1 ;;
           esac
           case "$SOURCE_WORKFLOW" in
-            .github/workflows/release.yml|.github/workflows/release-rc.yml|.github/workflows/update-aur-beta.yml) ;;
+            .github/workflows/release.yml) ;;
             *) echo "Proposal artifact came from an untrusted workflow: ${SOURCE_WORKFLOW:-missing}" >&2; exit 1 ;;
           esac
           echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
@@ -102,10 +88,9 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.tag }}
-          PACKAGE_NAME: ${{ inputs.package }}
         run: |
           set -euo pipefail
-          test "$(cat proposal/package-name)" = "$PACKAGE_NAME"
+          test "$(cat proposal/package-name)" = "mindwtr"
           test "$(cat proposal/release-tag)" = "$RELEASE_TAG"
           (
             cd proposal
@@ -152,11 +137,9 @@ jobs:
 
       - name: Re-fetch target package and apply the reviewed proposal
         shell: bash
-        env:
-          PACKAGE_NAME: ${{ inputs.package }}
         run: |
           set -euo pipefail
-          git clone "ssh://aur@aur.archlinux.org/${PACKAGE_NAME}.git" aur-live
+          git clone "ssh://aur@aur.archlinux.org/mindwtr.git" aur-live
           EXPECTED_BASE="$(cat proposal/base-commit)"
           ACTUAL_BASE="$(git -C aur-live rev-parse HEAD)"
           if [ "$ACTUAL_BASE" != "$EXPECTED_BASE" ]; then
@@ -166,13 +149,11 @@ jobs:
 
           install -m 0644 proposal/PKGBUILD aur-live/PKGBUILD
           install -m 0644 proposal/.SRCINFO aur-live/.SRCINFO
-          if [ "$PACKAGE_NAME" = "mindwtr" ]; then
-            test -f proposal/pnpm-lock.yaml
-            test -f proposal/pnpm-workspace.yaml
-            install -m 0644 proposal/pnpm-lock.yaml aur-live/pnpm-lock.yaml
-            install -m 0644 proposal/pnpm-workspace.yaml aur-live/pnpm-workspace.yaml
-            git -C aur-live add -N -f -- pnpm-lock.yaml pnpm-workspace.yaml
-          fi
+          test -f proposal/pnpm-lock.yaml
+          test -f proposal/pnpm-workspace.yaml
+          install -m 0644 proposal/pnpm-lock.yaml aur-live/pnpm-lock.yaml
+          install -m 0644 proposal/pnpm-workspace.yaml aur-live/pnpm-workspace.yaml
+          git -C aur-live add -N -f -- pnpm-lock.yaml pnpm-workspace.yaml
           if [ -f proposal/tauri-v2-schema.patch ]; then
             install -m 0644 proposal/tauri-v2-schema.patch aur-live/tauri-v2-schema.patch
           fi
@@ -187,7 +168,7 @@ jobs:
 
           node scripts/ci/validate-aur-package.mjs \
             --package-dir aur-live \
-            --package "$PACKAGE_NAME"
+            --package mindwtr
 
           cp aur-live/.SRCINFO "$RUNNER_TEMP/reviewed.SRCINFO"
           HOST_UID="$(id -u)"
@@ -225,7 +206,6 @@ jobs:
         env:
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
-          PACKAGE_NAME: ${{ inputs.package }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
@@ -267,13 +247,12 @@ jobs:
         shell: bash
         env:
           STATUS: ${{ steps.publish.outputs.status }}
-          PACKAGE_NAME: ${{ inputs.package }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           {
             echo "## AUR publication"
             echo
-            echo "- Package: \`${PACKAGE_NAME}\`"
+            echo "- Package: \`mindwtr\`"
             echo "- Release: \`${RELEASE_TAG}\`"
             echo "- Status: **${STATUS}**"
           } >> "$GITHUB_STEP_SUMMARY"
