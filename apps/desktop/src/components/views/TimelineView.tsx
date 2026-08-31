@@ -1,8 +1,10 @@
 import React from 'react';
-import { addDays, differenceInCalendarDays, format, startOfDay } from 'date-fns';
+import { addDays, differenceInCalendarDays, startOfDay } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     compareProjectsByOrder,
+    getCalendarDayOfMonth,
+    getCalendarMonthIndex,
     getWeekStartsOnIndex,
     isTaskVisibleInArea,
     safeParseDate,
@@ -23,6 +25,7 @@ import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
 import { checkBudget } from '../../config/performanceBudgets';
 import { ListEmptyState } from './list/ListEmptyState';
 import { CalendarOpenTaskModal } from './calendar/CalendarModals';
+import { resolveCalendarLocale } from './calendar-locale';
 
 const TIMELINE_VIEW_STATE_STORAGE_KEY = 'mindwtr:view:timeline:v1';
 
@@ -144,6 +147,9 @@ export function TimelineView() {
     const perf = usePerformanceMonitor('TimelineView');
     const tasks = useTaskStore((state) => state.tasks);
     const weekStart = useTaskStore((state) => state.settings?.weekStart);
+    const calendarSystem = useTaskStore((state) => state.settings?.calendarSystem);
+    const dateFormat = useTaskStore((state) => state.settings?.dateFormat);
+    const language = useTaskStore((state) => state.settings?.language);
     const { t } = useLanguage();
     const visibility = useAreaVisibility();
     const { areaById, projectById } = visibility;
@@ -154,6 +160,27 @@ export function TimelineView() {
     );
     const zoom = persistedViewState.zoom;
     const weekStartsOn = getWeekStartsOnIndex(weekStart);
+    const calendarLocale = React.useMemo(() => resolveCalendarLocale({
+        language,
+        dateFormat,
+        calendarSystem,
+        systemLocale: typeof navigator === 'undefined' ? undefined : navigator.language,
+    }), [calendarSystem, dateFormat, language]);
+    const axisDateFormatters = React.useMemo(() => {
+        const create = (options: Intl.DateTimeFormatOptions) => {
+            try {
+                return new Intl.DateTimeFormat(calendarLocale, options);
+            } catch {
+                return new Intl.DateTimeFormat('en-US', options);
+            }
+        };
+        return {
+            day: create({ day: 'numeric' }),
+            month: create({ month: 'short' }),
+            monthYear: create({ month: 'short', year: 'numeric' }),
+            year: create({ year: 'numeric' }),
+        };
+    }, [calendarLocale]);
     const scrollRef = React.useRef<HTMLDivElement>(null);
     const [viewportWidth, setViewportWidth] = React.useState(0);
     const [openTaskId, setOpenTaskId] = React.useState<string | null>(null);
@@ -322,12 +349,15 @@ export function TimelineView() {
         for (let index = 0; index < range.days; index += 1) {
             const day = addDays(range.from, index);
             const left = index * dayWidth;
-            const isMonthStart = day.getDate() === 1;
+            const isMonthStart = getCalendarDayOfMonth(day, calendarSystem) === 1;
             if (isMonthStart && index > 0) monthLines.push(left);
             const isMajor = index === 0
-                || (zoom === 'month' ? isMonthStart && day.getMonth() === 0 : isMonthStart);
+                || (zoom === 'month' ? isMonthStart && getCalendarMonthIndex(day, calendarSystem) === 0 : isMonthStart);
             if (isMajor) {
-                majorCandidates.push({ left, label: format(day, zoom === 'month' ? 'yyyy' : 'MMM yyyy') });
+                majorCandidates.push({
+                    left,
+                    label: (zoom === 'month' ? axisDateFormatters.year : axisDateFormatters.monthYear).format(day),
+                });
             }
             const isMinor = zoom === 'day'
                 ? true
@@ -335,7 +365,10 @@ export function TimelineView() {
                     ? day.getDay() === weekStartsOn
                     : isMonthStart;
             if (isMinor) {
-                minorCandidates.push({ left, label: format(day, zoom === 'month' ? 'MMM' : 'd') });
+                minorCandidates.push({
+                    left,
+                    label: (zoom === 'month' ? axisDateFormatters.month : axisDateFormatters.day).format(day),
+                });
             }
         }
         return {
@@ -343,7 +376,7 @@ export function TimelineView() {
             minor: thinTicks(minorCandidates, MIN_MINOR_LABEL_GAP),
             monthLines,
         };
-    }, [dayWidth, range, weekStartsOn, zoom]);
+    }, [axisDateFormatters, calendarSystem, dayWidth, range, weekStartsOn, zoom]);
 
     // Minor gridlines are a repeating gradient rather than one div per tick:
     // at day zoom that is 400 columns the browser paints for free.

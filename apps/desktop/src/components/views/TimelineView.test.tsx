@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { TimelineView, resolveTimelineTrack } from './TimelineView';
 import { LanguageProvider } from '../../contexts/language-context';
-import { useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
+import { configureDateFormatting, useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
 
 const iso = (offsetDays: number): string => {
     const date = new Date();
@@ -71,6 +71,7 @@ describe('TimelineView (#1111)', () => {
 
     afterEach(() => {
         vi.useRealTimers();
+        configureDateFormatting({ language: 'en', calendarSystem: 'gregorian' });
     });
 
     it('draws a span bar for a task with both a start and a due date', () => {
@@ -212,5 +213,26 @@ describe('TimelineView (#1111)', () => {
             vi.advanceTimersByTime(200);
         });
         expect(screen.getByTestId('timeline-today-line').style.left).not.toBe(before);
+    });
+
+    it('uses Jalali month and year boundaries when that calendar is selected', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 2, 20, 12, 0, 0));
+        configureDateFormatting({ language: 'fa', calendarSystem: 'jalali' });
+        window.localStorage.setItem('mindwtr:view:timeline:v1', JSON.stringify({ zoom: 'month' }));
+        const start = new Date(2026, 2, 20, 12, 0, 0);
+        const due = new Date(2026, 2, 23, 12, 0, 0);
+        setStore({
+            tasks: [makeTask({ id: 'new-year', title: 'New year span', startTime: start.toISOString(), dueDate: due.toISOString() })],
+        });
+        useTaskStore.setState((state) => ({
+            ...state,
+            settings: { ...state.settings, calendarSystem: 'jalali', language: 'fa' },
+        }));
+        renderTimeline();
+
+        expect(axisLabels('major')).toContain('۱۴۰۵');
+        expect(axisLabels('major')).not.toContain('2026');
+        expect(axisLabels('minor')).toContain('فروردین');
     });
 });
