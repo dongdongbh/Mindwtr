@@ -6,8 +6,11 @@ import {
 } from '../../../lib/global-quick-add-shortcut';
 import { getLocaleCoverageTier, normalizeWeekStartSetting, resolveFeatureFlags, useTaskStore } from '@mindwtr/core';
 import type { DesktopThemeMode } from '../../../lib/theme';
+import { useState } from 'react';
+import { Check, ChevronDown } from 'lucide-react';
+import { cn } from '../../../lib/utils';
 import { Switch } from '../../ui/Switch';
-import { SettingField, SettingRow, SettingsCard, SettingsSectionHeader } from './SettingRow';
+import { SettingRow, SettingsCard, SettingsSectionHeader } from './SettingRow';
 import { useUiStore } from '../../../store/ui-store';
 import { HIDEABLE_SIDEBAR_VIEW_IDS, type HideableSidebarViewId } from '../../../lib/sidebar-views';
 
@@ -226,6 +229,7 @@ export function SettingsMainPage({
                 ? t.weekStartSunday
                 : t.weekStartSystem;
 
+    const [sidebarViewsOpen, setSidebarViewsOpen] = useState(false);
     const hiddenSidebarViews = useUiStore((state) => state.hiddenSidebarViews);
     const setSidebarViewHidden = useUiStore((state) => state.setSidebarViewHidden);
     const timelineEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeline);
@@ -306,26 +310,50 @@ export function SettingsMainPage({
                         onCheckedChange={() => onShowTaskAgeChange(!showTaskAge)}
                     />
                 </SettingRow>
-            <SettingField
-                    settingsKey="sidebarViews"
-                    title={t.sidebarViews}
-                    description={t.sidebarViewsDesc}
-                    className="p-4 gap-3"
-                >
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-3">
-                        {sidebarViewOptions.map((view) => (
-                            <label key={view.id} className="flex items-center gap-2 text-sm text-foreground">
-                                <input
-                                    type="checkbox"
-                                    className="h-4 w-4 accent-primary"
-                                    checked={!hiddenSidebarViews.includes(view.id)}
-                                    onChange={(e) => setSidebarViewHidden(view.id, !e.target.checked)}
-                                />
-                                <span className="truncate">{view.label}</span>
-                            </label>
-                        ))}
-                    </div>
-                </SettingField>
+            {/* Folded by default: the roster is a one-time customization, not a
+                daily control, and a dozen always-open toggles would dominate the card. */}
+            <div data-settings-key="sidebarViews" className="p-4 flex flex-col gap-3">
+                    <button
+                        type="button"
+                        aria-expanded={sidebarViewsOpen}
+                        onClick={() => setSidebarViewsOpen((prev) => !prev)}
+                        className="flex w-full items-center justify-between gap-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-md"
+                    >
+                        <span>
+                            <span className="block font-medium">{t.sidebarViews}</span>
+                            <span className="block text-sm text-muted-foreground">{t.sidebarViewsDesc}</span>
+                        </span>
+                        <ChevronDown
+                            className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', sidebarViewsOpen && 'rotate-180')}
+                            aria-hidden="true"
+                        />
+                    </button>
+                    {sidebarViewsOpen && (
+                        <div className="flex flex-wrap gap-2">
+                            {sidebarViewOptions.map((view) => {
+                                const visible = !hiddenSidebarViews.includes(view.id);
+                                return (
+                                    <button
+                                        key={view.id}
+                                        type="button"
+                                        aria-pressed={visible}
+                                        onClick={() => setSidebarViewHidden(view.id, visible)}
+                                        className={cn(
+                                            'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm transition-colors',
+                                            'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                                            visible
+                                                ? 'border-primary/40 bg-primary/10 text-primary'
+                                                : 'border-border bg-muted/40 text-muted-foreground hover:text-foreground',
+                                        )}
+                                    >
+                                        {visible && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+                                        <span className="truncate">{view.label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
             </SettingsCard>
 
             {/* Localization */}
