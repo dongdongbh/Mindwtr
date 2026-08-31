@@ -71,6 +71,7 @@ const translations: Record<string, string> = {
     'task.aria.location': 'Location',
     'taskEdit.locationPlaceholder': 'Add location',
     'taskEdit.duplicateTask': 'Duplicate task',
+    'task.convertToReference': 'Convert to Reference',
     'taskEdit.aiAssistant': 'AI assistant',
     'ai.working': 'Working...',
     'ai.breakdownTitle': 'Suggested steps',
@@ -534,5 +535,38 @@ describe('TaskItemEditor file drop', () => {
         expect(onFilesDropped).toHaveBeenCalledWith([file]);
         expect(getByRole('button', { name: /Organization/i })).toHaveAttribute('aria-expanded', 'true');
         expect(getByText('field:attachments')).toBeInTheDocument();
+    });
+});
+
+describe('TaskItemEditor convert to reference', () => {
+    const name = 'Convert to Reference';
+
+    it('offers the conversion for a non-reference task and calls the handler', () => {
+        const onConvertToReference = vi.fn();
+        const { getByRole } = render(
+            <TaskItemEditor {...baseProps} onConvertToReference={onConvertToReference} />
+        );
+
+        fireEvent.click(getByRole('button', { name }));
+
+        expect(onConvertToReference).toHaveBeenCalledTimes(1);
+    });
+
+    it('hides the conversion for a task that is already a reference', () => {
+        const { queryByRole } = render(
+            <TaskItemEditor
+                {...baseProps}
+                draft={createTaskDraft({ ...baseTask, status: 'reference' })}
+                onConvertToReference={vi.fn()}
+            />
+        );
+
+        expect(queryByRole('button', { name })).not.toBeInTheDocument();
+    });
+
+    it('hides the conversion when no handler is wired', () => {
+        const { queryByRole } = render(<TaskItemEditor {...baseProps} />);
+
+        expect(queryByRole('button', { name })).not.toBeInTheDocument();
     });
 });

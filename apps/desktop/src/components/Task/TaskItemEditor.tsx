@@ -69,6 +69,7 @@ interface TaskItemEditorProps {
         onToggle: () => void;
     };
     onDuplicateTask: () => void;
+    onConvertToReference?: () => void;
     onDeleteTask?: () => void;
     onCancel: () => void;
     onSubmit: (e: FormEvent) => void;
@@ -126,6 +127,7 @@ export function TaskItemEditor({
     onRequestBackdatedComplete,
     focusStar,
     onDuplicateTask,
+    onConvertToReference,
     onDeleteTask,
     onCancel,
     onSubmit,
@@ -574,6 +576,15 @@ export function TaskItemEditor({
                     </button>
                 )}
                 <div className="flex flex-wrap gap-2 ml-auto">
+                    {onConvertToReference && draft.status !== 'reference' && (
+                        <button
+                            type="button"
+                            onClick={onConvertToReference}
+                            className="text-xs px-3 py-1.5 rounded bg-muted/50 hover:bg-muted transition-colors text-muted-foreground"
+                        >
+                            {t('task.convertToReference')}
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={onDuplicateTask}
