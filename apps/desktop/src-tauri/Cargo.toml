@@ -34,7 +34,10 @@ tauri-plugin-global-shortcut = "2"
 # Mindwtr uses header/token authentication, not cookie sessions. Keeping the
 # plugin's default `cookies` feature would create `.cookies` under the OS app
 # cache on every launch, which breaks Windows portable mode (#855).
-tauri-plugin-http = { version = "2", default-features = false, features = ["rustls-tls", "http2", "charset", "macos-system-configuration"] }
+# unsafe-headers: the JS fetch wrapper otherwise drops Accept-Encoding as a forbidden
+# header, so the WebDAV identity-encoding request (#1056 weak-ETag fix) never left the
+# app and proxied servers kept answering with gzip + weak ETags on desktop.
+tauri-plugin-http = { version = "2", default-features = false, features = ["rustls-tls", "http2", "charset", "macos-system-configuration", "unsafe-headers"] }
 tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
