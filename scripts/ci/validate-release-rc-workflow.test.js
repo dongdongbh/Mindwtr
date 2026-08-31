@@ -455,6 +455,7 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
     (step) => step.name === "Verify newly created AUR package",
   );
   expect(betaClone.id).toBe("beta_repo");
+  expect(betaClone.run).toContain("rev-parse --verify HEAD");
   expect(betaAudit.run).toContain('del(.packages["mindwtr-beta-bin"])');
   expect(betaCreationAudit.if).toContain("steps.beta_repo.outputs.initialized");
   expect(betaCreationAudit.run).toContain("audit-aur-state.mjs");

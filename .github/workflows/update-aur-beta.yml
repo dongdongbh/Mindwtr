@@ -105,7 +105,12 @@ jobs:
           AUR_URL="ssh://aur@aur.archlinux.org/mindwtr-beta-bin.git"
           for attempt in 1 2 3; do
             if git clone "$AUR_URL" aur-mindwtr-beta-bin; then
-              echo "initialized=false" >> "$GITHUB_OUTPUT"
+              if git -C aur-mindwtr-beta-bin rev-parse --verify HEAD >/dev/null 2>&1; then
+                echo "initialized=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "AUR returned an empty repository; preparing the first mindwtr-beta-bin commit."
+                echo "initialized=true" >> "$GITHUB_OUTPUT"
+              fi
               exit 0
             fi
             echo "AUR beta clone attempt ${attempt} failed; retrying..." >&2
