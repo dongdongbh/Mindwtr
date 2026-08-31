@@ -5,6 +5,7 @@ import { useTaskItemAttachments } from './useTaskItemAttachments';
 
 const fetchWebCloudAttachmentBlobMock = vi.fn();
 const fetchWebCloudAttachmentTextMock = vi.fn();
+const retainOpenedWebAttachmentUrlMock = vi.fn();
 const openAttachmentTargetMock = vi.fn(async (..._args: unknown[]) => undefined);
 const revokeObjectUrlMock = vi.fn();
 
@@ -34,6 +35,7 @@ vi.mock('../../lib/open-attachment-target', () => ({
 vi.mock('../../lib/web-attachment-source', () => ({
     fetchWebCloudAttachmentBlob: (...args: unknown[]) => fetchWebCloudAttachmentBlobMock(...args),
     fetchWebCloudAttachmentText: (...args: unknown[]) => fetchWebCloudAttachmentTextMock(...args),
+    retainOpenedWebAttachmentUrl: (...args: unknown[]) => retainOpenedWebAttachmentUrlMock(...args),
 }));
 
 const task = {
@@ -64,6 +66,7 @@ describe('useTaskItemAttachments in the web build', () => {
     beforeEach(() => {
         fetchWebCloudAttachmentBlobMock.mockReset();
         fetchWebCloudAttachmentTextMock.mockReset();
+        retainOpenedWebAttachmentUrlMock.mockReset();
         openAttachmentTargetMock.mockClear();
         // jsdom has neither; the hook revokes the blob URLs it is handed.
         (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = revokeObjectUrlMock;
@@ -80,6 +83,7 @@ describe('useTaskItemAttachments in the web build', () => {
         });
 
         await waitFor(() => expect(openSpy).toHaveBeenCalledWith('blob:cloud-bytes', '_blank'));
+        expect(retainOpenedWebAttachmentUrlMock).toHaveBeenCalledWith('blob:cloud-bytes');
         expect(openAttachmentTargetMock).not.toHaveBeenCalled();
         expect(result.current.attachmentError).toBeNull();
         openSpy.mockRestore();

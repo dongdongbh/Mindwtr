@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Attachment } from '@mindwtr/core';
-import { fetchWebCloudAttachmentBlob, fetchWebCloudAttachmentText } from './web-attachment-source';
+import {
+    clearWebAttachmentMemoryCaches,
+    fetchWebCloudAttachmentBlob,
+    fetchWebCloudAttachmentText,
+    retainOpenedWebAttachmentUrl,
+    WEB_ATTACHMENT_BYTE_CACHE_MAX_BYTES,
+    WEB_ATTACHMENT_BYTE_CACHE_MAX_ENTRIES,
+    WEB_ATTACHMENT_OPEN_URL_MAX_ENTRIES,
+} from './web-attachment-source';
 
 const syncState = {
     backend: 'cloud',
@@ -44,6 +52,7 @@ const okFetcher = (body: Uint8Array) => vi.fn(async () => new Response(body.buff
 
 describe('fetchWebCloudAttachmentBlob', () => {
     beforeEach(() => {
+        clearWebAttachmentMemoryCaches();
         syncState.backend = 'cloud';
         syncState.provider = 'selfhosted';
         syncState.encryption = { state: 'off' };
@@ -75,6 +84,43 @@ describe('fetchWebCloudAttachmentBlob', () => {
 
         expect(fetcher).toHaveBeenCalledTimes(1);
         expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
+    });
+
+    it('evicts least-recently-used byte entries after the entry budget', async () => {
+        const first = makeAttachment();
+        const firstFetcher = okFetcher(new Uint8Array([1]));
+        await fetchWebCloudAttachmentBlob(first, { fetcher: firstFetcher as unknown as typeof fetch });
+
+        for (let index = 0; index < WEB_ATTACHMENT_BYTE_CACHE_MAX_ENTRIES; index += 1) {
+            const fetcher = okFetcher(new Uint8Array([index]));
+            await fetchWebCloudAttachmentBlob(makeAttachment(), { fetcher: fetcher as unknown as typeof fetch });
+        }
+
+        const refetcher = okFetcher(new Uint8Array([9]));
+        await fetchWebCloudAttachmentBlob(first, { fetcher: refetcher as unknown as typeof fetch });
+        expect(refetcher).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retain a single byte entry larger than the byte budget', async () => {
+        const attachment = makeAttachment();
+        const oversized = new Uint8Array(WEB_ATTACHMENT_BYTE_CACHE_MAX_BYTES + 1);
+        await fetchWebCloudAttachmentBlob(attachment, {
+            fetcher: okFetcher(oversized) as unknown as typeof fetch,
+        });
+
+        const refetcher = okFetcher(new Uint8Array([1]));
+        await fetchWebCloudAttachmentBlob(attachment, { fetcher: refetcher as unknown as typeof fetch });
+        expect(refetcher).toHaveBeenCalledTimes(1);
+    });
+
+    it('bounds externally opened object URLs and revokes retained URLs on clear', () => {
+        for (let index = 0; index <= WEB_ATTACHMENT_OPEN_URL_MAX_ENTRIES; index += 1) {
+            retainOpenedWebAttachmentUrl(`blob:opened-${index}`);
+        }
+
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:opened-0');
+        clearWebAttachmentMemoryCaches();
+        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(WEB_ATTACHMENT_OPEN_URL_MAX_ENTRIES + 1);
     });
 
     it('decodes text attachments as UTF-8', async () => {

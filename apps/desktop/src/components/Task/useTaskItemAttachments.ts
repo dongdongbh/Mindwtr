@@ -7,7 +7,11 @@ import { normalizeAttachmentPathForUrl, resolveAttachmentReadPath } from '../../
 import { normalizeAttachmentInput } from '../../lib/attachment-utils';
 import { openAttachmentTarget } from '../../lib/open-attachment-target';
 import { isTauriRuntime } from '../../lib/runtime';
-import { fetchWebCloudAttachmentBlob, fetchWebCloudAttachmentText } from '../../lib/web-attachment-source';
+import {
+    fetchWebCloudAttachmentBlob,
+    fetchWebCloudAttachmentText,
+    retainOpenedWebAttachmentUrl,
+} from '../../lib/web-attachment-source';
 import { logWarn } from '../../lib/app-log';
 import { getManagedDataDir, getManagedPath } from '../../lib/managed-paths';
 import { ATTACHMENTS_DIR_NAME } from '../../lib/sync-service-utils';
@@ -186,8 +190,10 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
             if (!isTauriRuntime() && !(attachment.uri || '').trim()) {
                 const blobUrl = await fetchWebCloudAttachmentBlob(attachment);
                 if (!blobUrl) throw new Error(t('attachments.fileNotSupported'));
-                // The new tab owns the URL for as long as it stays open; revoking it here
-                // would hand that tab a blank document.
+                // Browser tabs have no matching React close lifecycle. Retain a small global
+                // window of opened URLs; opening more revokes the oldest instead of leaking
+                // one full attachment blob per click for the rest of the session.
+                retainOpenedWebAttachmentUrl(blobUrl);
                 window.open(blobUrl, '_blank');
                 return;
             }
