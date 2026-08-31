@@ -175,7 +175,7 @@ const mergedContentMustReplaceCandidateBlob = (
 const prepareActivationAttachmentSnapshot = (
     data: AppData,
     candidateRemoteData: AppData | null,
-): { data: AppData; count: number } => {
+): { data: AppData; count: number; expectedIds: Set<string> } => {
     const candidateAttachments = new Map<string, Attachment>();
     if (candidateRemoteData) {
         visitLiveFileAttachments(candidateRemoteData, (attachment) => {
@@ -183,7 +183,9 @@ const prepareActivationAttachmentSnapshot = (
         });
     }
     const candidate = cloneAppData(data);
+    const expectedIds = new Set<string>();
     const count = visitLiveFileAttachments(candidate, (attachment) => {
+        expectedIds.add(attachment.id);
         const candidateAttachment = candidateAttachments.get(attachment.id);
         const mustReplaceCandidateBlob = Boolean(
             candidateAttachment?.cloudKey
@@ -207,23 +209,36 @@ const prepareActivationAttachmentSnapshot = (
         }
         attachment.localStatus = 'missing';
     });
-    return { data: candidate, count };
+    return { data: candidate, count, expectedIds };
 };
 
-const assertActivationAttachmentsProven = (data: AppData, expectedCount: number): void => {
-    let provenCount = 0;
-    visitLiveFileAttachments(data, (attachment) => {
-        if (
-            !attachment.cloudKey
-            || attachment.localStatus !== 'available'
-            || attachment.pendingContentUpload === true
-        ) {
-            throw new Error(`Candidate attachment proof failed for ${attachment.id}`);
+const assertActivationAttachmentsProven = (data: AppData, expectedIds: ReadonlySet<string>): void => {
+    const resolved = new Set<string>();
+    for (const owner of [...data.tasks, ...data.projects]) {
+        for (const attachment of owner.attachments ?? []) {
+            if (attachment.kind !== 'file') continue;
+            if (owner.deletedAt || attachment.deletedAt) {
+                // Tombstoned during the trial itself (a 404'd blob is marked
+                // unrecoverable, #1119): that is a PROVEN outcome - the same one an
+                // established device converges to - not a gap in the proof. Only ids
+                // the snapshot expected count; a pre-existing tombstone never does.
+                if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
+                continue;
+            }
+            if (
+                !attachment.cloudKey
+                || attachment.localStatus !== 'available'
+                || attachment.pendingContentUpload === true
+            ) {
+                throw new Error(`Candidate attachment proof failed for ${attachment.id}`);
+            }
+            if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
         }
-        provenCount += 1;
-    });
-    if (provenCount !== expectedCount) {
-        throw new Error(`Candidate attachment proof incomplete: expected ${expectedCount}, proved ${provenCount}`);
+    }
+    // An expected attachment that vanished without a tombstone is a silent drop
+    // and still refuses the activation.
+    if (resolved.size !== expectedIds.size) {
+        throw new Error(`Candidate attachment proof incomplete: expected ${expectedIds.size}, proved ${resolved.size}`);
     }
 };
 
@@ -874,7 +889,7 @@ class SharedSyncRunMachine {
             const provenData = result && typeof result === 'object'
                 ? result
                 : activationSnapshot.data;
-            assertActivationAttachmentsProven(provenData, activationSnapshot.count);
+            assertActivationAttachmentsProven(provenData, activationSnapshot.expectedIds);
             this.ensureLocalSnapshotFresh();
             this.notifier.onDiagnostic?.({
                 event: 'attachments-prepare-complete',

@@ -2294,3 +2294,71 @@ describe('normalizeRemoteWriteResult', () => {
         expect(normalizeRemoteWriteResult('cloud', null)).toEqual({ fingerprint: null, serverMergedRemoteData: false });
     });
 });
+
+describe('activation proof with unrecoverable attachments (#1119)', () => {
+    const fileAttachment = (id: string, title: string) => ({
+        id,
+        kind: 'file' as const,
+        title,
+        uri: '',
+        cloudKey: `attachments/${id}.txt`,
+        localStatus: 'missing' as const,
+        createdAt: STAMP,
+        updatedAt: STAMP,
+    });
+
+    it('accepts activation when the trial tombstones a blob that is gone from the candidate', async () => {
+        const remoteTask = createTask('t-two-attachments', 'Two attachments');
+        remoteTask.attachments = [fileAttachment('attachment-ok', 'Fine'), fileAttachment('attachment-404', 'Gone')];
+        const syncAttachments = vi.fn(async (data: AppData) => {
+            for (const attachment of data.tasks[0]?.attachments ?? []) {
+                if (attachment.id === 'attachment-ok') {
+                    attachment.localStatus = 'available';
+                } else {
+                    // What markAttachmentUnrecoverable does on a terminal 404.
+                    attachment.cloudKey = undefined;
+                    attachment.fileHash = undefined;
+                    attachment.localStatus = 'missing';
+                    attachment.deletedAt = '2026-07-02T00:00:00.000Z';
+                }
+            }
+            return data;
+        });
+        const { run } = createHarness({
+            local: createData(),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+    });
+
+    it('still refuses activation when an expected attachment vanishes without a tombstone', async () => {
+        const remoteTask = createTask('t-two-attachments', 'Two attachments');
+        remoteTask.attachments = [fileAttachment('attachment-ok', 'Fine'), fileAttachment('attachment-dropped', 'Dropped')];
+        const syncAttachments = vi.fn(async (data: AppData) => {
+            const task = data.tasks[0]!;
+            for (const attachment of task.attachments ?? []) {
+                attachment.localStatus = 'available';
+            }
+            task.attachments = (task.attachments ?? []).filter((attachment) => attachment.id !== 'attachment-dropped');
+            return data;
+        });
+        const { run } = createHarness({
+            local: createData(),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            error: '[cloud] Candidate attachment proof incomplete: expected 2, proved 1',
+        });
+    });
+});
