@@ -81,16 +81,10 @@
   <p>
     <i>桌面与移动端的本地优先 GTD</i>
   </p>
-</div>
-
-### 🎥 完整视频演示与教程
-
-<div align="center">
-  <a href="https://youtu.be/c-1Fxx5gFlo"><img src="https://img.youtube.com/vi/c-1Fxx5gFlo/maxresdefault.jpg" width="60%" alt="Mindwtr 桌面端演示与教程" /></a>
   <p>
-    <b><a href="https://youtu.be/c-1Fxx5gFlo">观看完整桌面端演示与教程</a></b>
+    🎥 <b><a href="https://youtu.be/c-1Fxx5gFlo">完整桌面端视频教程</a></b>
     ·
-    <b><a href="https://youtu.be/FApCFhViwJE">观看移动端演示与教程</a></b>
+    <b><a href="https://youtu.be/FApCFhViwJE">完整移动端视频教程</a></b>
   </p>
 </div>
 

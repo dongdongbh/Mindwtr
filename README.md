@@ -81,16 +81,10 @@ _Mindwtr = "mind like water": the calm you get when nothing is rattling around i
   <p>
     <i>Local-First GTD on desktop & mobile</i>
   </p>
-</div>
-
-### 🎥 Full video walkthroughs
-
-<div align="center">
-  <a href="https://youtu.be/c-1Fxx5gFlo"><img src="https://img.youtube.com/vi/c-1Fxx5gFlo/maxresdefault.jpg" width="60%" alt="Mindwtr Desktop Demo & Tutorial" /></a>
   <p>
-    <b><a href="https://youtu.be/c-1Fxx5gFlo">Watch the complete desktop demo & tutorial</a></b>
+    🎥 <b><a href="https://youtu.be/c-1Fxx5gFlo">Full desktop tutorial</a></b>
     ·
-    <b><a href="https://youtu.be/FApCFhViwJE">Watch the mobile demo & tutorial</a></b>
+    <b><a href="https://youtu.be/FApCFhViwJE">Full mobile tutorial</a></b>
   </p>
 </div>
 
