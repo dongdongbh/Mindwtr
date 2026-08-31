@@ -6,7 +6,7 @@ Mindwtr recognizes these AUR package identities:
 | ------------------------------------------------------------------------- | ------- | ----------------------------- | ------------------------------------------------------- |
 | [`mindwtr-bin`](https://aur.archlinux.org/packages/mindwtr-bin)           | Stable  | GitHub release `.deb`         | Maintainer `dongdongbh`                                 |
 | [`mindwtr`](https://aur.archlinux.org/packages/mindwtr)                   | Stable  | GitHub release source archive | Maintainer `yochananmarqos`; co-maintainer `dongdongbh` |
-| [`mindwtr-bin-beta`](https://aur.archlinux.org/packages/mindwtr-bin-beta) | RC/beta | GitHub prerelease `.deb`      | Maintainer `dongdongbh`                                 |
+| [`mindwtr-beta-bin`](https://aur.archlinux.org/packages/mindwtr-beta-bin) | RC/beta | GitHub prerelease `.deb`      | Maintainer `dongdongbh`                                 |
 
 Treat a different upstream URL or an unexpected ownership change as a security event. The machine-readable policy is in [`trusted-packages.json`](trusted-packages.json).
 

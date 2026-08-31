@@ -21,7 +21,7 @@
       "coMaintainers": [],
       "trackedFiles": [".SRCINFO", ".gitignore", "PKGBUILD"]
     },
-    "mindwtr-bin-beta": {
+    "mindwtr-beta-bin": {
       "maintainer": "dongdongbh",
       "coMaintainers": [],
       "trackedFiles": [".SRCINFO", "PKGBUILD"]

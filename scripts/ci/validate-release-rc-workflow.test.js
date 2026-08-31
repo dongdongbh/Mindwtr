@@ -77,7 +77,7 @@ test("stable release validates tags and committed versions before any build or p
     "update-flathub",
     "update-flathub-beta",
     "update-linux-repos",
-    "update-aur-bin-beta",
+    "update-aur-beta-bin",
     "update-linux-repos-beta",
     "publish-chocolatey",
     "update-aur",
@@ -428,18 +428,36 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   expect(bunCompatibilityStep.run).toContain('LOCKFILE_VERSION="$(sed -n');
   expect(bunCompatibilityStep.run).toContain("-lt 3");
   expect(bunCompatibilityStep.run).toContain("bun install --no-save");
+  expect(bunCompatibilityStep.run).toContain("--no-cache");
+  expect(bunCompatibilityStep.run).toContain("--force");
   expect(bunCompatibilityStep.run).toContain("bun install --frozen-lockfile");
 
-  expect(stable.jobs["update-aur-bin-beta"].name).toContain(
+  expect(stable.jobs["update-aur-beta-bin"].name).toContain(
     "Update AUR Beta",
   );
-  expect(stable.jobs["update-aur-bin-beta"].secrets).toBe("inherit");
+  expect(stable.jobs["update-aur-beta-bin"].secrets).toBe("inherit");
   expect(rc.jobs["aur-beta"].name).toContain("Update AUR Beta");
   expect(rc.jobs["aur-beta"].secrets).toBe("inherit");
 
   // Beta is dispatchable standalone, not gated behind the reviewed environment.
   expect(beta.on.workflow_dispatch.inputs.tag.required).toBe(true);
   expect(beta.jobs["update-aur-beta"].environment).toBeUndefined();
+  expect(betaText).toContain("mindwtr-beta-bin");
+  expect(betaText).not.toContain("mindwtr-bin-beta");
+  const betaSteps = beta.jobs["update-aur-beta"].steps;
+  const betaClone = betaSteps.find(
+    (step) => step.name === "Clone or initialize AUR beta repo",
+  );
+  const betaAudit = betaSteps.find(
+    (step) => step.name === "Verify AUR package ownership before push",
+  );
+  const betaCreationAudit = betaSteps.find(
+    (step) => step.name === "Verify newly created AUR package",
+  );
+  expect(betaClone.id).toBe("beta_repo");
+  expect(betaAudit.run).toContain('del(.packages["mindwtr-beta-bin"])');
+  expect(betaCreationAudit.if).toContain("steps.beta_repo.outputs.initialized");
+  expect(betaCreationAudit.run).toContain("audit-aur-state.mjs");
 });
 
 test("AUR publication is a manual environment-gated recovery workflow", () => {

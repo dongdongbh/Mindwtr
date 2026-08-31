@@ -13,7 +13,7 @@ OUTPUT_DIR="$4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 case "$PACKAGE_NAME" in
-  mindwtr|mindwtr-bin|mindwtr-bin-beta) ;;
+  mindwtr|mindwtr-bin|mindwtr-beta-bin) ;;
   *) echo "Unsupported AUR package: $PACKAGE_NAME" >&2; exit 2 ;;
 esac
 

@@ -36,7 +36,7 @@ on:
         default: true
         type: boolean
       run_aur_beta:
-        description: 'Update the mindwtr-bin-beta AUR package for the RC'
+        description: 'Update the mindwtr-beta-bin AUR package for the RC'
         required: false
         default: true
         type: boolean
@@ -500,7 +500,7 @@ jobs:
   aur-beta:
     if: ${{ always() && needs.validate.result == 'success' && (needs.prerelease.result == 'success' || (needs.validate.outputs.existing_release == 'true' && github.event_name == 'workflow_dispatch')) && (github.event_name != 'workflow_dispatch' || inputs.run_aur_beta) }}
     needs: [validate, prerelease]
-    name: Update AUR Beta (mindwtr-bin-beta)
+    name: Update AUR Beta (mindwtr-beta-bin)
     uses: ./.github/workflows/update-aur-beta.yml
     with:
       tag: ${{ needs.validate.outputs.tag }}

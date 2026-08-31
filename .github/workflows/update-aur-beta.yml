@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: 'RC or stable tag to publish to mindwtr-bin-beta (e.g., v1.0.5-rc.1 or v1.0.5)'
+        description: 'RC or stable tag to publish to mindwtr-beta-bin (e.g., v1.0.5-rc.1 or v1.0.5)'
         required: true
         type: string
     secrets:
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'RC or stable tag to publish to mindwtr-bin-beta (e.g., v1.0.5-rc.1 or v1.0.5)'
+        description: 'RC or stable tag to publish to mindwtr-beta-bin (e.g., v1.0.5-rc.1 or v1.0.5)'
         required: true
         type: string
 
@@ -34,7 +34,7 @@ concurrency:
 jobs:
   update-aur-beta:
     runs-on: ubuntu-latest
-    name: Update mindwtr-bin-beta
+    name: Update mindwtr-beta-bin
     timeout-minutes: 45
     steps:
       - name: Checkout repo
@@ -57,7 +57,7 @@ jobs:
           # Stable tags are allowed too: every stable release also lands in the
           # beta channels so beta users never have to hop back to stay current.
           if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
-            echo "mindwtr-bin-beta must be updated from an RC or stable tag like v1.0.5-rc.1 or v1.0.5; got: $TAG" >&2
+            echo "mindwtr-beta-bin must be updated from an RC or stable tag like v1.0.5-rc.1 or v1.0.5; got: $TAG" >&2
             exit 1
           fi
 
@@ -97,23 +97,26 @@ jobs:
           cp "$RUNNER_TEMP/aur-known-hosts" ~/.ssh/known_hosts
 
       - name: Clone or initialize AUR beta repo
+        id: beta_repo
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf aur-mindwtr-bin-beta
-          AUR_URL="ssh://aur@aur.archlinux.org/mindwtr-bin-beta.git"
+          rm -rf aur-mindwtr-beta-bin
+          AUR_URL="ssh://aur@aur.archlinux.org/mindwtr-beta-bin.git"
           for attempt in 1 2 3; do
-            if git clone "$AUR_URL" aur-mindwtr-bin-beta; then
+            if git clone "$AUR_URL" aur-mindwtr-beta-bin; then
+              echo "initialized=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "AUR beta clone attempt ${attempt} failed; retrying..." >&2
-            rm -rf aur-mindwtr-bin-beta
+            rm -rf aur-mindwtr-beta-bin
             sleep 3
           done
 
-          echo "Could not clone mindwtr-bin-beta; initializing a new AUR package checkout."
-          git init -b master aur-mindwtr-bin-beta
-          git -C aur-mindwtr-bin-beta remote add origin "$AUR_URL"
+          echo "Could not clone mindwtr-beta-bin; initializing a new AUR package checkout."
+          git init -b master aur-mindwtr-beta-bin
+          git -C aur-mindwtr-beta-bin remote add origin "$AUR_URL"
+          echo "initialized=true" >> "$GITHUB_OUTPUT"
 
       - name: Generate beta PKGBUILD
         shell: bash
@@ -132,12 +135,12 @@ jobs:
           import os
           from pathlib import Path
 
-          template = Path('aur/PKGBUILD-bin-beta.template').read_text(encoding='utf-8')
+          template = Path('aur/PKGBUILD-beta-bin.template').read_text(encoding='utf-8')
           text = (template
               .replace('__PKGVER__', os.environ['PKGVER'])
               .replace('__RELEASE_TAG__', os.environ['TAG'])
               .replace('__ASSET_VERSION__', os.environ['VERSION']))
-          Path('aur-mindwtr-bin-beta/PKGBUILD').write_text(text, encoding='utf-8')
+          Path('aur-mindwtr-beta-bin/PKGBUILD').write_text(text, encoding='utf-8')
           PY
 
       - name: Wait for release assets
@@ -171,7 +174,7 @@ jobs:
           docker run --rm \
             -e HOST_UID="$HOST_UID" \
             -e HOST_GID="$HOST_GID" \
-            -v "$PWD/aur-mindwtr-bin-beta:/aur" \
+            -v "$PWD/aur-mindwtr-beta-bin:/aur" \
             -w /aur \
             archlinux:latest \
             bash -lc '
@@ -191,16 +194,26 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/ci/validate-aur-package.mjs \
-            --package-dir aur-mindwtr-bin-beta \
-            --package mindwtr-bin-beta
+            --package-dir aur-mindwtr-beta-bin \
+            --package mindwtr-beta-bin
 
       - name: Verify AUR package ownership before push
         shell: bash
-        run: node scripts/ci/audit-aur-state.mjs
+        env:
+          INITIALIZED: ${{ steps.beta_repo.outputs.initialized }}
+        run: |
+          set -euo pipefail
+          if [ "$INITIALIZED" = "true" ]; then
+            jq 'del(.packages["mindwtr-beta-bin"])' aur/trusted-packages.json > "$RUNNER_TEMP/aur-existing-packages.json"
+            node scripts/ci/audit-aur-state.mjs --policy "$RUNNER_TEMP/aur-existing-packages.json"
+          else
+            node scripts/ci/audit-aur-state.mjs
+          fi
 
       - name: Commit and push beta package
+        id: publish
         shell: bash
-        working-directory: aur-mindwtr-bin-beta
+        working-directory: aur-mindwtr-beta-bin
         env:
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
@@ -208,6 +221,7 @@ jobs:
           set -euo pipefail
           if [ -z "$(git status --porcelain -- PKGBUILD .SRCINFO)" ]; then
             echo "No AUR beta package changes to publish."
+            echo "status=already-current" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -218,11 +232,29 @@ jobs:
 
           PUSH_LOG="$RUNNER_TEMP/aur-beta-push.log"
           if git push origin master 2>&1 | tee "$PUSH_LOG"; then
+            echo "status=published" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if grep -Eqi 'AUR is down due to maintenance|disabled (all )?AUR pushes|pushes (are|have been) disabled' "$PUSH_LOG"; then
             echo "::warning::AUR beta publication delayed by Arch maintenance/security controls. Re-dispatch once pushes are restored."
+            echo "status=delayed" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "Failed to push mindwtr-bin-beta to AUR." >&2
+          echo "Failed to push mindwtr-beta-bin to AUR." >&2
           exit 1
+
+      - name: Verify newly created AUR package
+        if: ${{ steps.beta_repo.outputs.initialized == 'true' && steps.publish.outputs.status == 'published' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            if node scripts/ci/audit-aur-state.mjs; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 6 ]; then
+              echo "The new mindwtr-beta-bin package did not become auditable after publication." >&2
+              exit 1
+            fi
+            sleep 5
+          done

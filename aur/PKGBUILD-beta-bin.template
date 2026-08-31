@@ -1,5 +1,5 @@
 # Maintainer: dongdongbh <dongdongbhbh@gmail.com>
-pkgname=mindwtr-bin-beta
+pkgname=mindwtr-beta-bin
 pkgver=__PKGVER__
 epoch=1
 pkgrel=1

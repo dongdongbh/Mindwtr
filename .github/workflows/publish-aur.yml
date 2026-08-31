@@ -12,7 +12,7 @@ on:
         required: true
         type: choice
         options:
-          - mindwtr-bin-beta
+          - mindwtr-beta-bin
           - mindwtr-bin
           - mindwtr
 
@@ -42,7 +42,7 @@ jobs:
             exit 1
           fi
           case "$PACKAGE_NAME" in
-            mindwtr|mindwtr-bin|mindwtr-bin-beta) ;;
+            mindwtr|mindwtr-bin|mindwtr-beta-bin) ;;
             *) echo "Unsupported AUR package: $PACKAGE_NAME" >&2; exit 1 ;;
           esac
 

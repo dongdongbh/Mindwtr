@@ -808,12 +808,12 @@ jobs:
     with:
       tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
-  # Stable releases also update the AUR beta package so mindwtr-bin-beta users
+  # Stable releases also update the AUR beta package so mindwtr-beta-bin users
   # pick stable back up after a test cycle without switching packages.
-  update-aur-bin-beta:
+  update-aur-beta-bin:
     needs: [validate, release]
     if: ${{ always() && needs.validate.result == 'success' && !contains(github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name, '-') && ((startsWith(github.ref, 'refs/tags/') && github.event_name == 'push' && needs.release.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.run_update_aur && (needs.release.result == 'success' || needs.release.result == 'skipped'))) }}
-    name: Update AUR Beta (mindwtr-bin-beta)
+    name: Update AUR Beta (mindwtr-beta-bin)
     uses: ./.github/workflows/update-aur-beta.yml
     with:
       tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -1318,6 +1318,15 @@ jobs:
           text = path.read_text(encoding="utf-8")
           compatibility_install = r"""  LOCKFILE_VERSION="$(sed -n 's/.*\"lockfileVersion\": \([0-9][0-9]*\).*/\1/p' bun.lock | head -n 1)"
             if [ -n "$LOCKFILE_VERSION" ] && [ "$LOCKFILE_VERSION" -lt 3 ]; then
+              # Bun 1.4 rewrites legacy locks. Resolve without its manifest cache,
+              # then force one fresh registry request if the first attempt fails.
+              bun install --no-save --no-cache || bun install --no-save --no-cache --force
+            else
+              bun install --frozen-lockfile
+            fi
+          """
+          previous_compatibility_install = r"""  LOCKFILE_VERSION="$(sed -n 's/.*\"lockfileVersion\": \([0-9][0-9]*\).*/\1/p' bun.lock | head -n 1)"
+            if [ -n "$LOCKFILE_VERSION" ] && [ "$LOCKFILE_VERSION" -lt 3 ]; then
               # Bun 1.4 can consume the release lock but rewrites its legacy format.
               bun install --no-save
             else
@@ -1326,6 +1335,14 @@ jobs:
           """
           if compatibility_install in text:
               print("PKGBUILD already handles legacy Bun lockfiles")
+          elif previous_compatibility_install in text:
+              text = text.replace(
+                  previous_compatibility_install,
+                  compatibility_install,
+                  1,
+              )
+              path.write_text(text, encoding="utf-8")
+              print("Updated the legacy Bun install path to bypass stale manifest metadata")
           elif "  bun install --frozen-lockfile\n" in text:
               text = text.replace(
                   "  bun install --frozen-lockfile\n",
