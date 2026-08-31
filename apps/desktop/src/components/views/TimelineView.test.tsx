@@ -1,5 +1,5 @@
-import { beforeEach, describe, it, expect } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { TimelineView, resolveTimelineTrack } from './TimelineView';
 import { LanguageProvider } from '../../contexts/language-context';
 import { useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
@@ -67,6 +67,10 @@ describe('TimelineView (#1111)', () => {
     beforeEach(() => {
         window.localStorage.clear();
         setStore({});
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it('draws a span bar for a task with both a start and a due date', () => {
@@ -193,5 +197,20 @@ describe('TimelineView (#1111)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Later' }));
         expect(barFor('early')).toBeNull();
         expect(barFor('late')).not.toBeNull();
+    });
+
+    it('advances the today marker when the local day rolls over', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 6, 27, 23, 59, 59, 900));
+        setStore({
+            tasks: [makeTask({ id: 'span', title: 'Spanning task', startTime: iso(-2), dueDate: iso(2) })],
+        });
+        renderTimeline();
+
+        const before = screen.getByTestId('timeline-today-line').style.left;
+        act(() => {
+            vi.advanceTimersByTime(200);
+        });
+        expect(screen.getByTestId('timeline-today-line').style.left).not.toBe(before);
     });
 });

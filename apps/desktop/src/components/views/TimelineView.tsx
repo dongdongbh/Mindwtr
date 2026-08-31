@@ -18,6 +18,7 @@ import { getTaskAccentColor } from '../../lib/task-accent-color';
 import { useLanguage } from '../../contexts/language-context';
 import { useAreaVisibility } from '../../hooks/useVisibleTaskContext';
 import { usePersistedViewState } from '../../hooks/usePersistedViewState';
+import { useLocalDayKey } from '../../hooks/useLocalDayKey';
 import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
 import { checkBudget } from '../../config/performanceBudgets';
 import { ListEmptyState } from './list/ListEmptyState';
@@ -157,6 +158,7 @@ export function TimelineView() {
     const [viewportWidth, setViewportWidth] = React.useState(0);
     const [openTaskId, setOpenTaskId] = React.useState<string | null>(null);
     const [windowStart, setWindowStart] = React.useState<Date | null>(null);
+    const localDayKey = useLocalDayKey();
 
     React.useEffect(() => {
         if (!perf.enabled) return;
@@ -166,7 +168,7 @@ export function TimelineView() {
         return () => window.clearTimeout(timer);
     }, [perf.enabled]);
 
-    const today = React.useMemo(() => startOfDay(new Date()), []);
+    const today = React.useMemo(() => startOfDay(new Date()), [localDayKey]);
 
     // Same scope as the board: no deleted tasks, no tasks parked out of the
     // active area filter. Finished and filed work has no place on a plan, so
