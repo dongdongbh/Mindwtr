@@ -1306,7 +1306,7 @@ jobs:
             echo "Bumped PKGBUILD _nodeversion ${NODE_MAJOR} -> 22 (better-sqlite3 12 ships no prebuilds below Node 22, and the build container has no node-gyp)."
           fi
 
-      - name: Generate frozen Bun lockfile for AUR
+      - name: Generate frozen pnpm lockfile for AUR
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -1321,6 +1321,14 @@ jobs:
           tar -xzf "$LOCK_WORKSPACE/mindwtr.tar.gz" \
             -C "$LOCK_WORKSPACE/source" \
             --strip-components=1
+          cat > "$LOCK_WORKSPACE/source/pnpm-workspace.yaml" <<'EOF'
+          packages:
+            - apps/desktop
+            - packages/core
+
+          patchedDependencies:
+            mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
+          EOF
 
           HOST_UID="$(id -u)"
           HOST_GID="$(id -g)"
@@ -1333,21 +1341,21 @@ jobs:
             archlinux:latest \
             bash -lc '
               set -euo pipefail
-              pacman -Sy --noconfirm --needed bun
+              pacman -Sy --noconfirm --needed pnpm
               getent group "$HOST_GID" >/dev/null 2>&1 || groupadd -g "$HOST_GID" builder
               id -u builder >/dev/null 2>&1 || useradd -m -u "$HOST_UID" -g "$HOST_GID" builder
               chown -R builder:builder /source /aur
-              su builder -c "export BUN_INSTALL_CACHE_DIR=/tmp/bun-cache; bun install --lockfile-only --no-cache --registry=https://registry.npmjs.org"
-              install -o "$HOST_UID" -g "$HOST_GID" -m 0644 /source/bun.lock /aur/bun.lock
+              su builder -c "pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile"
+              install -o "$HOST_UID" -g "$HOST_GID" -m 0644 /source/pnpm-lock.yaml /aur/pnpm-lock.yaml
+              install -o "$HOST_UID" -g "$HOST_GID" -m 0644 /source/pnpm-workspace.yaml /aur/pnpm-workspace.yaml
             '
 
-          LOCKFILE_VERSION="$(sed -n 's/.*"lockfileVersion": \([0-9][0-9]*\).*/\1/p' aur-mindwtr/bun.lock | head -n 1)"
-          if [ -z "$LOCKFILE_VERSION" ] || [ "$LOCKFILE_VERSION" -lt 3 ]; then
-            echo "Generated AUR lockfile is not in Bun 1.4 format: ${LOCKFILE_VERSION}" >&2
+          if ! grep -Eq "^lockfileVersion: '9\\.0'$" aur-mindwtr/pnpm-lock.yaml; then
+            echo "Generated AUR lockfile is not in the expected pnpm 11 format." >&2
             exit 1
           fi
 
-      - name: Use frozen Bun lockfile
+      - name: Use frozen pnpm lockfile
         shell: bash
         working-directory: aur-mindwtr
         run: |
@@ -1359,36 +1367,54 @@ jobs:
           path = Path("PKGBUILD")
           text = path.read_text(encoding="utf-8")
 
-          if '        "bun.lock"\n)' not in text:
-              text, source_replacements = re.subn(
-                  r'(source=\(.*?\n\s*"\$pkgname\.desktop"\n)(\))',
-                  r'\1        "bun.lock"\n\2',
-                  text,
-                  count=1,
-                  flags=re.DOTALL,
-              )
-              if source_replacements != 1:
-                  raise SystemExit("Could not add bun.lock to the PKGBUILD source array")
+          text = text.replace("  'bun'\n", "  'pnpm'\n")
+          if "  'pnpm'\n" not in text:
+              raise SystemExit("Could not replace the Bun make dependency with pnpm")
 
-          install_pattern = re.compile(
-              r'(prepare\(\) \{.*?  export BUN_INSTALL_CACHE_DIR=.*?\n)'
+          source_pattern = re.compile(
+              r'(source=\(.*?\n\s*"\$pkgname\.desktop"\n)'
+              r'(?:\s*"(?:bun\.lock|pnpm-lock\.yaml|pnpm-workspace\.yaml)"\n)*'
+              r'(\))',
+              re.DOTALL,
+          )
+          text, source_replacements = source_pattern.subn(
+              r'\1        "pnpm-lock.yaml"\n'
+              r'        "pnpm-workspace.yaml"\n\2',
+              text,
+              count=1,
+          )
+          if source_replacements != 1:
+              raise SystemExit("Could not add pnpm lock files to the PKGBUILD source array")
+
+          prepare_pattern = re.compile(
+              r'(  nvm install "\$\{_nodeversion\}"\n)'
               r'.*?'
               r'(\n  export RUSTUP_TOOLCHAIN=stable)',
               re.DOTALL,
           )
-          text, install_replacements = install_pattern.subn(
-              r'\1  cp "$srcdir/bun.lock" bun.lock\n'
-              r'  bun install --frozen-lockfile --registry=https://registry.npmjs.org\n'
+          text, install_replacements = prepare_pattern.subn(
+              r'\1\n'
+              r'  cp "$srcdir/pnpm-lock.yaml" pnpm-lock.yaml\n'
+              r'  cp "$srcdir/pnpm-workspace.yaml" pnpm-workspace.yaml\n'
+              r'  pnpm install --frozen-lockfile --ignore-scripts --store-dir "$srcdir/pnpm-store"\n'
+              r"  sed -i 's/\"beforeBuildCommand\": \"bun run build:vite\"/\"beforeBuildCommand\": \"pnpm run build:vite\"/' apps/desktop/src-tauri/tauri.conf.json\n"
               r'\2',
               text,
               count=1,
           )
           if install_replacements != 1:
-              raise SystemExit("Could not replace the Bun install command in PKGBUILD")
+              raise SystemExit("Could not replace the dependency install command in PKGBUILD")
+
+          text = text.replace('  export BUN_INSTALL_CACHE_DIR="$srcdir/bun-cache"\n', '')
+          text = text.replace('  bun run test || :\n', '  pnpm run test || :\n')
+          if "bun install" in text or "bun run test" in text:
+              raise SystemExit("PKGBUILD still invokes Bun")
 
           path.write_text(text, encoding="utf-8")
-          print("PKGBUILD now installs from the shipped Bun 1.4 lockfile")
+          print("PKGBUILD now installs the desktop/core workspace from the shipped pnpm lockfile")
           PY
+          rm -f bun.lock
+          git add -N -f -- pnpm-lock.yaml pnpm-workspace.yaml
 
       - name: Update checksums
         shell: bash
@@ -1428,7 +1454,7 @@ jobs:
         shell: bash
         working-directory: aur-mindwtr
         run: |
-          if [ "${{ steps.pkgbuild_version.outputs.pkgver_changed }}" = "false" ] && ! git diff --quiet -- PKGBUILD bun.lock; then
+          if [ "${{ steps.pkgbuild_version.outputs.pkgver_changed }}" = "false" ] && ! git diff --quiet -- PKGBUILD bun.lock pnpm-lock.yaml pnpm-workspace.yaml; then
             CURRENT_PKGREL="$(sed -n 's/^pkgrel=//p' PKGBUILD | head -n 1)"
             if [[ "$CURRENT_PKGREL" =~ ^[0-9]+$ ]]; then
               NEW_PKGREL="$((CURRENT_PKGREL + 1))"
@@ -1530,7 +1556,7 @@ jobs:
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
         run: |
           set -euo pipefail
-          if [ -z "$(git status --porcelain -- PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch)" ]; then
+          if [ -z "$(git status --porcelain -- PKGBUILD .SRCINFO pnpm-lock.yaml pnpm-workspace.yaml tauri-v2-schema.patch bun.lock)" ]; then
             echo "No AUR source-package changes to publish."
             exit 0
           fi
@@ -1538,7 +1564,8 @@ jobs:
           git config --local user.name "${AUR_USERNAME:-mindwtr-bot}"
           git config --local user.email "${AUR_EMAIL:-actions@github.com}"
           git add PKGBUILD .SRCINFO
-          git add -f -- bun.lock
+          git add -f -- pnpm-lock.yaml pnpm-workspace.yaml
+          git add -u -- bun.lock
           if [ -n "$(git status --porcelain -- tauri-v2-schema.patch)" ]; then
             git add -A -- tauri-v2-schema.patch
           fi

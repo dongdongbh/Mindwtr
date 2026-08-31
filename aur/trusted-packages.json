@@ -6,7 +6,6 @@
     "mindwtr": {
       "maintainer": "yochananmarqos",
       "coMaintainers": ["dongdongbh"],
-      "trustedPkgbuildUrls": ["https://registry.npmjs.org"],
       "trackedFiles": [
         ".SRCINFO",
         ".gitignore",
@@ -15,6 +14,8 @@
         "PKGBUILD",
         "bun.lock",
         "mindwtr.desktop",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
         "tauri-v2-schema.patch"
       ]
     },

@@ -425,35 +425,42 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   );
   expect(sourceCleanBuildIndex).toBeGreaterThan(sourceValidateIndex);
   expect(stableText).toContain("aur-proposal-mindwtr-");
-  const bunLockGenerationStep = sourceSteps.find(
-    (step) => step.name === "Generate frozen Bun lockfile for AUR",
+  const pnpmLockGenerationStep = sourceSteps.find(
+    (step) => step.name === "Generate frozen pnpm lockfile for AUR",
   );
-  expect(bunLockGenerationStep).toBeDefined();
-  expect(bunLockGenerationStep.run).toContain("bun install --lockfile-only");
-  expect(bunLockGenerationStep.run).toContain("--no-cache");
-  expect(bunLockGenerationStep.run).toContain(
-    "--registry=https://registry.npmjs.org",
+  expect(pnpmLockGenerationStep).toBeDefined();
+  expect(pnpmLockGenerationStep.run).toContain(
+    "pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile",
   );
-  expect(bunLockGenerationStep.run).toContain("aur-mindwtr/bun.lock");
+  expect(pnpmLockGenerationStep.run).toContain("aur-mindwtr/pnpm-lock.yaml");
+  expect(pnpmLockGenerationStep.run).toContain(
+    "/aur/pnpm-workspace.yaml",
+  );
 
-  const bunCompatibilityStep = sourceSteps.find(
-    (step) => step.name === "Use frozen Bun lockfile",
+  const pnpmCompatibilityStep = sourceSteps.find(
+    (step) => step.name === "Use frozen pnpm lockfile",
   );
-  expect(bunCompatibilityStep).toBeDefined();
-  expect(bunCompatibilityStep.run).toContain('cp "$srcdir/bun.lock" bun.lock');
-  expect(bunCompatibilityStep.run).toContain("bun install --frozen-lockfile");
-  expect(bunCompatibilityStep.run).toContain(
-    "--registry=https://registry.npmjs.org",
+  expect(pnpmCompatibilityStep).toBeDefined();
+  expect(pnpmCompatibilityStep.run).toContain(
+    'cp "$srcdir/pnpm-lock.yaml" pnpm-lock.yaml',
   );
-  expect(bunCompatibilityStep.run).not.toContain("bun install --no-save");
-  expect(bunCompatibilityStep.run).not.toContain("--force");
+  expect(pnpmCompatibilityStep.run).toContain(
+    'cp "$srcdir/pnpm-workspace.yaml" pnpm-workspace.yaml',
+  );
+  expect(pnpmCompatibilityStep.run).toContain(
+    "pnpm install --frozen-lockfile --ignore-scripts",
+  );
+  expect(pnpmCompatibilityStep.run).not.toMatch(/^\s*bun install/m);
+  expect(pnpmCompatibilityStep.run).not.toContain("--force");
   const sourcePushStep = sourceSteps.find((step) =>
     step.name.startsWith("Commit and push"),
   );
   expect(sourcePushStep.run).toContain(
-    "PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch",
+    "PKGBUILD .SRCINFO pnpm-lock.yaml pnpm-workspace.yaml tauri-v2-schema.patch",
   );
-  expect(sourcePushStep.run).toContain("git add -f -- bun.lock");
+  expect(sourcePushStep.run).toContain(
+    "git add -f -- pnpm-lock.yaml pnpm-workspace.yaml",
+  );
 
   expect(stable.jobs["update-aur-beta-bin"].name).toContain(
     "Update AUR Beta",
@@ -499,8 +506,13 @@ test("AUR publication is a manual environment-gated recovery workflow", () => {
   expect(text).toContain("git -C aur-live push origin HEAD:master");
   expect(text).toContain("SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4");
   expect(text).toContain("SOURCE_EVENT");
-  expect(text).toContain("proposal/bun.lock");
-  expect(text).toContain("PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch");
-  expect(text).toContain("git -C aur-live add -f -- bun.lock");
+  expect(text).toContain("proposal/pnpm-lock.yaml");
+  expect(text).toContain("proposal/pnpm-workspace.yaml");
+  expect(text).toContain(
+    "PKGBUILD .SRCINFO pnpm-lock.yaml pnpm-workspace.yaml tauri-v2-schema.patch",
+  );
+  expect(text).toContain(
+    "git -C aur-live add -f -- pnpm-lock.yaml pnpm-workspace.yaml",
+  );
   expect(text).not.toContain("--force");
 });

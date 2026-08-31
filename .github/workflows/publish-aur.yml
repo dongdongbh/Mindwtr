@@ -167,15 +167,18 @@ jobs:
           install -m 0644 proposal/PKGBUILD aur-live/PKGBUILD
           install -m 0644 proposal/.SRCINFO aur-live/.SRCINFO
           if [ "$PACKAGE_NAME" = "mindwtr" ]; then
-            test -f proposal/bun.lock
-            install -m 0644 proposal/bun.lock aur-live/bun.lock
+            test -f proposal/pnpm-lock.yaml
+            test -f proposal/pnpm-workspace.yaml
+            install -m 0644 proposal/pnpm-lock.yaml aur-live/pnpm-lock.yaml
+            install -m 0644 proposal/pnpm-workspace.yaml aur-live/pnpm-workspace.yaml
+            git -C aur-live add -N -f -- pnpm-lock.yaml pnpm-workspace.yaml
           fi
           if [ -f proposal/tauri-v2-schema.patch ]; then
             install -m 0644 proposal/tauri-v2-schema.patch aur-live/tauri-v2-schema.patch
           fi
           while IFS= read -r file; do
             [ -n "$file" ] || continue
-            if [ "$file" != "tauri-v2-schema.patch" ]; then
+            if [ "$file" != "tauri-v2-schema.patch" ] && [ "$file" != "bun.lock" ]; then
               echo "Proposal requested an unauthorized deletion: $file" >&2
               exit 1
             fi
@@ -209,7 +212,7 @@ jobs:
             exit 1
           fi
           rm aur-live/.SRCINFO.generated
-          git -C aur-live diff --binary -- PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch > actual-review.patch
+          git -C aur-live diff --binary -- PKGBUILD .SRCINFO pnpm-lock.yaml pnpm-workspace.yaml tauri-v2-schema.patch bun.lock > actual-review.patch
           if ! cmp -s proposal/review.patch actual-review.patch; then
             echo "Applied AUR diff does not match the manually reviewed proposal." >&2
             diff -u proposal/review.patch actual-review.patch || true
@@ -226,7 +229,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if [ -z "$(git -C aur-live status --porcelain -- PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch)" ]; then
+          if [ -z "$(git -C aur-live status --porcelain -- PKGBUILD .SRCINFO pnpm-lock.yaml pnpm-workspace.yaml tauri-v2-schema.patch bun.lock)" ]; then
             echo "AUR package already matches the reviewed proposal."
             echo "status=already-current" >> "$GITHUB_OUTPUT"
             exit 0
@@ -235,9 +238,8 @@ jobs:
           git -C aur-live config user.name "${AUR_USERNAME:-mindwtr-bot}"
           git -C aur-live config user.email "${AUR_EMAIL:-actions@github.com}"
           git -C aur-live add PKGBUILD .SRCINFO
-          if [ -e aur-live/bun.lock ]; then
-            git -C aur-live add -f -- bun.lock
-          fi
+          git -C aur-live add -f -- pnpm-lock.yaml pnpm-workspace.yaml
+          git -C aur-live add -u -- bun.lock
           if git -C aur-live ls-files --error-unmatch tauri-v2-schema.patch >/dev/null 2>&1; then
             git -C aur-live add -u -- tauri-v2-schema.patch
           fi

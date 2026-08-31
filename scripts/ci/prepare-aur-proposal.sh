@@ -32,19 +32,24 @@ cp "$PACKAGE_DIR/.SRCINFO" "$OUTPUT_DIR/.SRCINFO"
 
 : > "$OUTPUT_DIR/delete-files.txt"
 if [ "$PACKAGE_NAME" = "mindwtr" ]; then
-  if [ ! -f "$PACKAGE_DIR/bun.lock" ]; then
-    echo "mindwtr source proposals must include bun.lock" >&2
-    exit 1
+  for package_file in pnpm-lock.yaml pnpm-workspace.yaml; do
+    if [ ! -f "$PACKAGE_DIR/$package_file" ]; then
+      echo "mindwtr source proposals must include $package_file" >&2
+      exit 1
+    fi
+    cp "$PACKAGE_DIR/$package_file" "$OUTPUT_DIR/$package_file"
+  done
+  if git -C "$PACKAGE_DIR" ls-files --error-unmatch bun.lock >/dev/null 2>&1 && [ ! -f "$PACKAGE_DIR/bun.lock" ]; then
+    printf '%s\n' bun.lock >> "$OUTPUT_DIR/delete-files.txt"
   fi
-  cp "$PACKAGE_DIR/bun.lock" "$OUTPUT_DIR/bun.lock"
   if [ -f "$PACKAGE_DIR/tauri-v2-schema.patch" ]; then
     cp "$PACKAGE_DIR/tauri-v2-schema.patch" "$OUTPUT_DIR/tauri-v2-schema.patch"
   elif git -C "$PACKAGE_DIR" ls-files --error-unmatch tauri-v2-schema.patch >/dev/null 2>&1; then
-    printf '%s\n' tauri-v2-schema.patch > "$OUTPUT_DIR/delete-files.txt"
+    printf '%s\n' tauri-v2-schema.patch >> "$OUTPUT_DIR/delete-files.txt"
   fi
 fi
 
-git -C "$PACKAGE_DIR" diff --binary -- PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch > "$OUTPUT_DIR/review.patch"
+git -C "$PACKAGE_DIR" diff --binary -- PKGBUILD .SRCINFO pnpm-lock.yaml pnpm-workspace.yaml tauri-v2-schema.patch bun.lock > "$OUTPUT_DIR/review.patch"
 (
   cd "$OUTPUT_DIR"
   sha256sum review.patch > review.patch.sha256
@@ -62,9 +67,7 @@ git -C "$PACKAGE_DIR" diff --binary -- PKGBUILD .SRCINFO bun.lock tauri-v2-schem
   if [ -f tauri-v2-schema.patch ]; then
     manifest_files+=(tauri-v2-schema.patch)
   fi
-  if [ -f bun.lock ]; then
-    manifest_files+=(bun.lock)
-  fi
+  manifest_files+=(pnpm-lock.yaml pnpm-workspace.yaml)
   sha256sum "${manifest_files[@]}" > proposal-manifest.sha256
 )
 

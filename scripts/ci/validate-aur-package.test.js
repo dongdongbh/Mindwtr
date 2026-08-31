@@ -82,7 +82,7 @@ test("rejects untrusted source domains", () => {
   ).toThrow("PKGBUILD contains an untrusted URL");
 });
 
-test("allows the pinned npm registry only for the source package", () => {
+test("rejects explicit package-registry URLs in AUR recipes", () => {
   const registryCommand =
     "prepare() {\n  bun install --registry=https://registry.npmjs.org\n}\n";
   expect(() =>
@@ -94,7 +94,7 @@ test("allows the pinned npm registry only for the source package", () => {
       packageName: "mindwtr",
       policyPath,
     }),
-  ).not.toThrow();
+  ).toThrow("PKGBUILD contains an untrusted URL");
 
   expect(() =>
     validatePackageDir({
