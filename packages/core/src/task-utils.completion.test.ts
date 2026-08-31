@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     getCompletionDateGroup,
+    resolveTaskPerspectiveForFeatures,
     resolveTaskGroupByForFeatures,
     resolveTaskSortByForFeatures,
     sortTasksBySavedPreference,
@@ -152,6 +153,38 @@ describe('resolveTaskGroupByForFeatures', () => {
         // Energy carries no feature flag — it must never be gated here.
         expect(resolveTaskGroupByForFeatures('energy', { features: { priorities: false } })).toBe('energy');
         expect(resolveTaskGroupByForFeatures('project', { features: { priorities: false } })).toBe('project');
+    });
+});
+
+describe('resolveTaskPerspectiveForFeatures', () => {
+    it('uses effective feature-gated axes for default and save controls', () => {
+        expect(resolveTaskPerspectiveForFeatures({
+            sortBy: 'priority',
+            groupBy: 'priority',
+            settings: { features: { priorities: false } },
+            hasActiveFilters: false,
+            hasCurrentCriteria: false,
+            activeSavedFilterId: null,
+        })).toEqual({
+            effectiveSortBy: 'default',
+            effectiveGroupBy: 'none',
+            isDefaultPerspective: true,
+            canSavePerspective: false,
+        });
+    });
+
+    it('keeps visible criteria saveable without reviving hidden axes', () => {
+        const state = resolveTaskPerspectiveForFeatures({
+            sortBy: 'priority',
+            groupBy: 'priority',
+            settings: { features: { priorities: false } },
+            hasActiveFilters: true,
+            hasCurrentCriteria: true,
+            activeSavedFilterId: null,
+        });
+        expect(state.effectiveSortBy).toBe('default');
+        expect(state.effectiveGroupBy).toBe('none');
+        expect(state.canSavePerspective).toBe(true);
     });
 });
 

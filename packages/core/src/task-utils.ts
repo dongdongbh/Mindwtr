@@ -909,6 +909,50 @@ export function resolveTaskGroupByForFeatures<Axis extends string>(
     return groupBy;
 }
 
+export type TaskPerspectiveFeatureState<Sort extends SortField, Group extends string> = {
+    effectiveSortBy: Sort | 'default';
+    effectiveGroupBy: Group | 'none';
+    isDefaultPerspective: boolean;
+    canSavePerspective: boolean;
+};
+
+/**
+ * Derives Focus-style perspective controls from the axes that are actually visible.
+ * Raw stored choices deliberately survive feature-off periods, but they must not make
+ * Default look inactive, enable Save, or leak back into a newly saved perspective.
+ */
+export function resolveTaskPerspectiveForFeatures<Sort extends SortField, Group extends string>({
+    sortBy,
+    groupBy,
+    settings,
+    hasActiveFilters,
+    hasCurrentCriteria,
+    activeSavedFilterId,
+}: {
+    sortBy: Sort;
+    groupBy: Group;
+    settings: { features?: AppSettings['features'] } | null | undefined;
+    hasActiveFilters: boolean;
+    hasCurrentCriteria: boolean;
+    activeSavedFilterId: string | null;
+}): TaskPerspectiveFeatureState<Sort, Group> {
+    const effectiveSortBy = resolveTaskSortByForFeatures(sortBy, settings);
+    const effectiveGroupBy = resolveTaskGroupByForFeatures(groupBy, settings);
+    return {
+        effectiveSortBy,
+        effectiveGroupBy,
+        isDefaultPerspective: !hasActiveFilters
+            && activeSavedFilterId === null
+            && effectiveSortBy === 'default',
+        canSavePerspective: activeSavedFilterId === null
+            && (
+                hasCurrentCriteria
+                || effectiveSortBy !== 'default'
+                || effectiveGroupBy !== 'none'
+            ),
+    };
+}
+
 export function sortTasksBy(tasks: Task[], sortBy: TaskSortBy = 'default'): Task[] {
     if (!sortBy || sortBy === 'default') {
         return sortTasks(tasks);

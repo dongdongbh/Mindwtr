@@ -43,8 +43,7 @@ import {
   getFocusStarBlockedText,
   normalizeFocusTaskLimit,
   resolveFeatureFlags,
-  resolveTaskGroupByForFeatures,
-  resolveTaskSortByForFeatures,
+  resolveTaskPerspectiveForFeatures,
   sortTasksBySavedPreference,
   sortTasksByFocusOrder,
   translateWithFallback,
@@ -362,33 +361,30 @@ export default function FocusScreen() {
     clear: clearFilters,
     unbindSaved: unbindSavedFilter,
   } = selections;
+  const hasFilters = selections.hasActive;
   // A saved or stored 'priority' sort/group stops taking effect while
   // Priorities is off (the preference survives for re-enable) — otherwise
   // Focus would keep ordering and bucketing by a field hidden everywhere else
   // in the UI. The chip rows below drop the option to match.
-  const effectiveFocusSortBy = resolveTaskSortByForFeatures(activeSavedFilter?.sortBy ?? focusSortBy, settings);
-  const effectiveFocusGroupBy = resolveTaskGroupByForFeatures(
-    normalizeFocusGroupBy(activeSavedFilter?.groupBy ?? focusGroupBy),
+  const {
+    effectiveSortBy: effectiveFocusSortBy,
+    effectiveGroupBy: effectiveFocusGroupBy,
+    isDefaultPerspective,
+    canSavePerspective: canSaveFocusPerspective,
+  } = resolveTaskPerspectiveForFeatures({
+    sortBy: activeSavedFilter?.sortBy ?? focusSortBy,
+    groupBy: normalizeFocusGroupBy(activeSavedFilter?.groupBy ?? focusGroupBy),
     settings,
-  );
+    hasActiveFilters: hasFilters,
+    hasCurrentCriteria: selections.hasCurrentCriteria,
+    activeSavedFilterId: selections.activeSavedFilterId,
+  });
   const focusSortOptions = prioritiesEnabled
     ? FOCUS_SORT_OPTIONS
     : FOCUS_SORT_OPTIONS.filter((option) => option !== 'priority');
   const focusGroupByOptions = prioritiesEnabled
     ? FOCUS_GROUP_BY_OPTIONS
     : FOCUS_GROUP_BY_OPTIONS.filter((option) => option !== 'priority');
-  const hasFilters = selections.hasActive;
-  // "All" in the saved-filter row: nothing selected, nothing saved applied,
-  // and the default sort.
-  const isDefaultPerspective = !hasFilters
-    && !selections.activeSavedFilterId
-    && focusSortBy === DEFAULT_FOCUS_SORT_BY;
-  const canSaveFocusPerspective = selections.activeSavedFilterId === null
-    && (
-      selections.hasCurrentCriteria
-      || focusSortBy !== DEFAULT_FOCUS_SORT_BY
-      || effectiveFocusGroupBy !== 'none'
-    );
   const filteredActiveTasks = useMemo(() => (
     applyFilter(activeTasks, selections.criteria, { projects, tokenMatchMode: 'all' })
   ), [
@@ -685,7 +681,7 @@ export default function FocusScreen() {
       name: trimmedName,
       view: 'focus',
       criteria: selections.currentCriteria,
-      ...(focusSortBy !== DEFAULT_FOCUS_SORT_BY ? { sortBy: focusSortBy } : {}),
+      ...(effectiveFocusSortBy !== DEFAULT_FOCUS_SORT_BY ? { sortBy: effectiveFocusSortBy } : {}),
       ...(effectiveFocusGroupBy !== 'none' ? { groupBy: effectiveFocusGroupBy } : {}),
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -698,7 +694,7 @@ export default function FocusScreen() {
       applySavedFocusFilter(nextFilter);
       setSaveFilterDialogVisible(false);
     }).catch(() => undefined);
-  }, [applySavedFocusFilter, canSaveFocusPerspective, effectiveFocusGroupBy, focusSortBy, saveFilterName, selections.currentCriteria, settings?.savedFilters, updateSettings]);
+  }, [applySavedFocusFilter, canSaveFocusPerspective, effectiveFocusGroupBy, effectiveFocusSortBy, saveFilterName, selections.currentCriteria, settings?.savedFilters, updateSettings]);
   // A deleted saved filter drops out of savedFocusFilters, and the selections
   // hook clears its own binding from there.
   const deleteSavedFilter = useCallback((filter: SavedFilter) => {

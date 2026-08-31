@@ -199,6 +199,8 @@ vi.mock('../contexts/language-context', () => {
         'status.active': 'Active',
         'energyLevel.high': 'High energy',
         'filters.label': 'Filters',
+        'filters.priority': 'Priority',
+        'sort.default': 'Default',
         'savedFilters.save': 'Save',
         'projects.reorderTasks': 'Reorder',
         'focus.reorderPosition': '{{title}}. Item {{position}} of {{count}}',
@@ -1753,6 +1755,45 @@ describe('FocusScreen', () => {
     expect(
       tree.root.findAllByType(SwipeableTaskItem).map((node) => node.props.task.id),
     ).toEqual(['desk-task', 'phone-task']);
+  });
+
+  it('treats a hidden Priority sort as All/default after Priorities is disabled', () => {
+    storeState.settings = {
+      appearance: {},
+      features: { priorities: true },
+      savedFilters: [{
+        id: 'filter-desk',
+        name: 'Desk',
+        view: 'focus',
+        criteria: { contexts: ['@desk'] },
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+      }],
+    } as any;
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+    act(() => {
+      findButtonByLabel(tree, 'Filters').props.onPress();
+    });
+    act(() => {
+      findButtonByText(tree, 'Priority').props.onPress();
+    });
+    expect(() => findButtonByText(tree, 'Save')).not.toThrow();
+    expect(findButtonByText(tree, 'All').props.accessibilityState.selected).toBe(false);
+
+    storeState.settings = {
+      ...storeState.settings,
+      features: { ...storeState.settings.features, priorities: false },
+    };
+    act(() => {
+      tree.update(<FocusScreen />);
+    });
+
+    expect(() => findButtonByText(tree, 'Save')).toThrow();
+    expect(findButtonByText(tree, 'All').props.accessibilityState.selected).toBe(true);
   });
 
   it('can switch multiple context filters from all to any matching', () => {

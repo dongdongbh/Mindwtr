@@ -2174,6 +2174,49 @@ describe('AgendaView', () => {
         });
     });
 
+    it('treats a hidden Priority sort as Default after Priorities is disabled', async () => {
+        useTaskStore.setState({
+            tasks: [],
+            _allTasks: [],
+            projects: [],
+            _allProjects: [],
+            areas: [],
+            _allAreas: [],
+            settings: {
+                features: { priorities: true },
+                savedFilters: [{
+                    id: 'saved-desk',
+                    name: 'Desk',
+                    view: 'focus',
+                    criteria: { contexts: ['@desk'] },
+                    createdAt: nowIso,
+                    updatedAt: nowIso,
+                }],
+            },
+            highlightTaskId: null,
+        });
+
+        const { getByRole, queryByRole } = renderAgenda();
+        fireEvent.click(getByRole('button', { name: /^Filters$/i }));
+        fireEvent.click(getByRole('button', { name: 'Priority' }));
+        expect(getByRole('button', { name: /^Save$/i })).toBeInTheDocument();
+        expect(getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false');
+
+        act(() => {
+            useTaskStore.setState((state) => ({
+                settings: {
+                    ...state.settings,
+                    features: { ...state.settings.features, priorities: false },
+                },
+            }));
+        });
+
+        await waitFor(() => {
+            expect(queryByRole('button', { name: /^Save$/i })).not.toBeInTheDocument();
+            expect(getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+        });
+    });
+
     it('collapses next actions when the section header is toggled', () => {
         const nextTask: Task = {
             id: 'next-action-task',

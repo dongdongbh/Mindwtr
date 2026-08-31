@@ -14,7 +14,7 @@ import {
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, applyFilter, buildAdvancedFilterCriteriaChips, compareProjectsByOrder, removeAdvancedFilterCriteriaChip, formatFocusTaskLimitText,
-    getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, getFocusSequentialFirstTaskIds, getProjectDeadlineBoosts, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, resolveTaskGroupByForFeatures, resolveTaskSortByForFeatures, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, SAVED_FILTER_NO_PROJECT_ID, getUpcomingDeferredTasks, shouldShowTaskForStart, sortFocusNextActions, sortTasksByFocusOrder, sortTasksBySavedPreference, translateWithFallback, tFallback } from '@mindwtr/core';
+    getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, getFocusSequentialFirstTaskIds, getProjectDeadlineBoosts, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, SAVED_FILTER_NO_PROJECT_ID, getUpcomingDeferredTasks, shouldShowTaskForStart, sortFocusNextActions, sortTasksByFocusOrder, sortTasksBySavedPreference, translateWithFallback, tFallback } from '@mindwtr/core';
 import type { MultiValueFilterMatchMode, ProjectDeadlineBoost, SavedFilter, SortField, Task, TaskEnergyLevel } from '@mindwtr/core';
 import { useTaskFilterSelections } from '@mindwtr/core/task-filter-selections';
 import { useLanguage } from '../../contexts/language-context';
@@ -401,19 +401,21 @@ export function AgendaView() {
     // Priorities is off (the preference survives for re-enable) — otherwise
     // Focus would keep ordering and bucketing by a field hidden everywhere
     // else in the UI.
-    const effectiveFocusSortBy = resolveTaskSortByForFeatures(activeSavedFilter?.sortBy ?? focusSortBy, settings);
-    const effectiveNextGroupBy = resolveTaskGroupByForFeatures(
-        normalizeAgendaGroupBy(activeSavedFilter?.groupBy ?? focusGroupBy),
+    const {
+        effectiveSortBy: effectiveFocusSortBy,
+        effectiveGroupBy: effectiveNextGroupBy,
+        isDefaultPerspective: isDefaultFocusPerspective,
+        canSavePerspective: canSaveFocusPerspective,
+    } = resolveTaskPerspectiveForFeatures({
+        sortBy: activeSavedFilter?.sortBy ?? focusSortBy,
+        groupBy: normalizeAgendaGroupBy(activeSavedFilter?.groupBy ?? focusGroupBy),
         settings,
-    );
+        hasActiveFilters: hasTaskFilters,
+        hasCurrentCriteria: hasCurrentFilterCriteria,
+        activeSavedFilterId,
+    });
     const effectiveContextMatchMode = effectiveFilterCriteria.contextMatchMode ?? 'all';
     const effectiveTagMatchMode = effectiveFilterCriteria.tagMatchMode ?? 'all';
-    const canSaveFocusPerspective = activeSavedFilterId === null
-        && (
-            hasCurrentFilterCriteria
-            || focusSortBy !== DEFAULT_FOCUS_SORT_BY
-            || effectiveNextGroupBy !== 'none'
-        );
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
     const matchesSearchQuery = useCallback((title: string) => {
         if (!normalizedSearchQuery) return true;
@@ -659,7 +661,7 @@ export function AgendaView() {
             name: trimmedName,
             view: 'focus',
             criteria: currentFilterCriteria,
-            ...(focusSortBy !== DEFAULT_FOCUS_SORT_BY ? { sortBy: focusSortBy } : {}),
+            ...(effectiveFocusSortBy !== DEFAULT_FOCUS_SORT_BY ? { sortBy: effectiveFocusSortBy } : {}),
             ...(effectiveNextGroupBy !== 'none' ? { groupBy: effectiveNextGroupBy } : {}),
             createdAt: nowIso,
             updatedAt: nowIso,
@@ -670,7 +672,7 @@ export function AgendaView() {
             setSaveFilterPromptOpen(false);
             applySavedSelections(nextFilter);
         }).catch(() => undefined);
-    }, [applySavedSelections, canSaveFocusPerspective, currentFilterCriteria, effectiveNextGroupBy, focusSortBy, settings?.savedFilters, updateSettings]);
+    }, [applySavedSelections, canSaveFocusPerspective, currentFilterCriteria, effectiveFocusSortBy, effectiveNextGroupBy, settings?.savedFilters, updateSettings]);
     const handleDeleteSavedFilter = useCallback(async (filter: SavedFilter) => {
         const confirmed = await requestConfirmation({
             title: resolveText('savedFilters.deleteTitle', 'Delete saved filter?'),
@@ -1105,10 +1107,10 @@ export function AgendaView() {
                     <button
                         type="button"
                         onClick={clearAllFilters}
-                        aria-pressed={!hasTaskFilters && !activeSavedFilterId && focusSortBy === DEFAULT_FOCUS_SORT_BY}
+                        aria-pressed={isDefaultFocusPerspective}
                         className={cn(
                             'shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                            !hasTaskFilters && !activeSavedFilterId && focusSortBy === DEFAULT_FOCUS_SORT_BY
+                            isDefaultFocusPerspective
                                 ? 'border-primary bg-primary text-primary-foreground'
                                 : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground',
                         )}
