@@ -1035,6 +1035,7 @@ export const en: Record<string, string> = {
         'settings.material3ThemeDesc': 'Use Material 3 color tokens on Android',
         'settings.selectLang': 'Select your preferred language',
         'settings.languagePartlyTranslated': 'Partly translated',
+        'settings.videoTutorials': 'Video tutorials',
         'settings.privacy': 'Privacy',
         'settings.mobile.appLock': 'App lock',
         'settings.mobile.appLockDesc': 'Require your device lock when opening Mindwtr or returning to the app. This protects the app view, not the on-device database.',

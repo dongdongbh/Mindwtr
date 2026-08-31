@@ -10,6 +10,7 @@ type Labels = {
     license: string;
     github: string;
     documentation: string;
+    videoTutorials: string;
     privacy: string;
     sponsorProject: string;
     checkForUpdates: string;
@@ -148,6 +149,17 @@ export function SettingsAboutPage({
                         className="text-primary hover:underline flex items-center gap-1"
                     >
                         docs.mindwtr.app
+                        <ExternalLink className="w-3 h-3" />
+                    </button>
+                </div>
+                <div className="border-t border-border/50"></div>
+                <div data-settings-key="videoTutorials" className="flex justify-between items-center">
+                    <span className="text-muted-foreground">{t.videoTutorials}</span>
+                    <button
+                        onClick={() => onOpenLink('https://youtube.com/playlist?list=PLLwV6zeTfB_k')}
+                        className="text-primary hover:underline flex items-center gap-1"
+                    >
+                        youtube.com/@mindwtr
                         <ExternalLink className="w-3 h-3" />
                     </button>
                 </div>

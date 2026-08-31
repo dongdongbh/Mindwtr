@@ -447,6 +447,13 @@ export function AboutSettingsScreen({
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
+                        onPress={() => openLink('https://youtube.com/playlist?list=PLLwV6zeTfB_k')}
+                    >
+                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.videoTutorials')}</Text>
+                        <Text style={styles.linkText}>YouTube</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
                         onPress={() => openLink('https://mindwtr.app/privacy')}
                     >
                         <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.privacy')}</Text>

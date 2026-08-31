@@ -978,6 +978,7 @@ export const zhHant: Record<string, string> = {
         'settings.material3ThemeDesc': '在 Android 上使用 Material 3 配色',
         'settings.selectLang': '選擇您的首選語言',
         'settings.languagePartlyTranslated': '部分翻譯',
+        'settings.videoTutorials': '影片教學',
         'settings.privacy': '隱私',
         'settings.mobile.appLock': '應用鎖',
         'settings.mobile.appLockDesc': '打開 Mindwtr 或返回應用時需要設備鎖驗證。它保護應用界面，不加密設備上的資料庫。',

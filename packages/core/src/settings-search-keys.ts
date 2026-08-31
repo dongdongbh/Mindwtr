@@ -201,6 +201,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         'checkForUpdates',
         'feedback',
         'documentation',
+        'videoTutorials',
         'privacy',
         'github',
         'sponsorProject',

@@ -1010,6 +1010,7 @@ export const faOverrides: Record<string, string> = {
         'settings.material3ThemeDesc': 'استفاده از رنگ‌های متریال ۳ در اندروید',
         'settings.selectLang': 'زبان دلخواه خود را انتخاب کنید',
         'settings.languagePartlyTranslated': 'ترجمهٔ ناقص',
+        'settings.videoTutorials': 'آموزش‌های ویدیویی',
         'settings.privacy': 'حریم خصوصی',
         'settings.mobile.appLock': 'قفل برنامه',
         'settings.mobile.appLockDesc': 'هنگام باز کردن Mindwtr یا بازگشت به برنامه، قفل دستگاه را الزامی کنید. این فقط نمای برنامه را محافظت می‌کند، نه پایگاه‌داده روی دستگاه.',
