@@ -44,7 +44,7 @@ const bars = () => Array.from(document.querySelectorAll('[data-testid="timeline-
 const barFor = (taskId: string) => document.querySelector(`[data-testid="timeline-bar"][data-task-id="${taskId}"]`) as HTMLElement | null;
 // Group headings and bar titles in one pass, in the order they are laid out.
 const rowLabels = () => Array.from(
-    document.querySelectorAll('[data-testid="timeline-group"], [data-testid="timeline-bar"]'),
+    document.querySelectorAll('[data-testid="timeline-group"], [data-testid="timeline-row-label"]'),
 ).map((node) => node.textContent);
 const axisLabels = (tier: 'major' | 'minor') => Array.from(
     document.querySelectorAll(`[data-testid="timeline-axis-${tier}"]`),
@@ -91,7 +91,7 @@ describe('TimelineView (#1111)', () => {
         renderTimeline();
         expect(barFor('start-only')?.dataset.variant).toBe('mini');
         expect(barFor('due-only')?.dataset.variant).toBe('mini');
-        expect(barFor('start-only')?.style.width).toBe('56px');
+        expect(barFor('start-only')?.style.width).toBe('14px');
     });
 
     it('leaves out undated, done and deleted tasks', () => {

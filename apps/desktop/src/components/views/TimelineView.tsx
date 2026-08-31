@@ -32,13 +32,16 @@ type TimelineZoom = (typeof ZOOM_LEVELS)[number];
 const DAY_WIDTH: Record<TimelineZoom, number> = { day: 32, week: 12, month: 4 };
 /** Floor for a span bar, so a one-day span is still a bar and not a hairline. */
 const MIN_BAR_WIDTH = 10;
-/** A task dated on one side only is a moment, not a span: a fixed-width pill. */
-const MARKER_WIDTH = 56;
+/** A task dated on one side only is a moment, not a span: a small dot on its day. */
+const MARKER_WIDTH = 14;
+const MARKER_HEIGHT = 14;
 const ROW_HEIGHT = 30;
 const BAR_HEIGHT = 20;
 const AXIS_HEIGHT = 44;
-/** Room to the right of the track for titles that sit beside their bar. */
-const TRACK_TAIL = 184;
+/** The sticky name column: every row's title lives here, not floating on the canvas. */
+const GUTTER_WIDTH = 224;
+/** Breathing room right of the last column when the track scrolls. */
+const TRACK_TAIL = 24;
 /** Narrower than this and a title on the bar is all ellipsis. */
 const ON_BAR_LABEL_MIN_WIDTH = 64;
 const MIN_MAJOR_LABEL_GAP = 68;
@@ -272,10 +275,12 @@ export function TimelineView() {
 
     const taskRowCount = rows.reduce((count, row) => (row.kind === 'task' ? count + 1 : count), 0);
     const hasRows = Boolean(range) && rows.length > 0;
-    const { dayWidth, trackWidth, fitted } = resolveTimelineTrack(range?.days ?? 0, DAY_WIDTH[zoom], viewportWidth);
-    // Nothing scrolls off the right when the range fits, so the tail that holds
-    // titles beside their bars is only reserved when it is reachable.
-    const contentWidth = trackWidth + (fitted ? 0 : TRACK_TAIL);
+    const { dayWidth, trackWidth, fitted } = resolveTimelineTrack(
+        range?.days ?? 0,
+        DAY_WIDTH[zoom],
+        Math.max(0, viewportWidth - GUTTER_WIDTH),
+    );
+    const contentWidth = GUTTER_WIDTH + trackWidth + (fitted ? 0 : TRACK_TAIL);
     const todayIndex = range ? differenceInCalendarDays(today, range.from) : -1;
     const todayVisible = range ? todayIndex >= 0 && todayIndex < range.days : false;
     const todayLeft = todayIndex * dayWidth;
@@ -356,7 +361,7 @@ export function TimelineView() {
     const scrollToToday = React.useCallback(() => {
         const scroller = scrollRef.current;
         if (!scroller || !todayVisible) return;
-        scroller.scrollLeft = Math.max(0, todayLeft - scroller.clientWidth / 2);
+        scroller.scrollLeft = Math.max(0, GUTTER_WIDTH + todayLeft - scroller.clientWidth / 2);
     }, [todayLeft, todayVisible]);
 
     const openTask = React.useMemo(
@@ -368,30 +373,30 @@ export function TimelineView() {
     const renderRow = (row: TimelineRow) => {
         if (row.kind === 'group') {
             return (
-                <div
-                    className="flex items-center border-y border-border/60 bg-muted/60"
-                    style={{ height: ROW_HEIGHT }}
-                >
+                <div className="flex border-y border-border/60" style={{ height: ROW_HEIGHT }}>
                     <div
                         data-testid="timeline-group"
-                        className="sticky left-0 z-20 flex items-center gap-2 pl-3 pr-4 text-xs font-semibold text-foreground"
+                        className="sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-muted pl-3 pr-2 text-xs font-semibold text-foreground"
+                        style={{ width: GUTTER_WIDTH }}
                     >
                         <span
                             className="h-2 w-2 shrink-0 rounded-full"
                             style={{ backgroundColor: row.color || 'hsl(var(--primary))' }}
                         />
-                        <span className="max-w-[240px] truncate">{row.label}</span>
+                        <span className="min-w-0 truncate">{row.label}</span>
                     </div>
+                    <div className="min-w-0 flex-1 bg-muted/60" />
                 </div>
             );
         }
         const width = row.single
             ? MARKER_WIDTH
             : Math.max(MIN_BAR_WIDTH, (row.hi - row.lo + 1) * dayWidth);
+        const barHeight = row.single ? MARKER_HEIGHT : BAR_HEIGHT;
         const left = row.single
             ? Math.max(0, row.lo * dayWidth + (dayWidth - MARKER_WIDTH) / 2)
             : row.lo * dayWidth;
-        const onBar = width >= ON_BAR_LABEL_MIN_WIDTH;
+        const onBar = !row.single && width >= ON_BAR_LABEL_MIN_WIDTH;
         // Full-strength area→project color; the app's accent when a task has
         // neither, never muted-foreground.
         const background = row.color || 'hsl(var(--primary))';
@@ -399,45 +404,56 @@ export function TimelineView() {
             ? (isLightColor(row.color) ? 'rgba(0, 0, 0, 0.84)' : 'rgba(255, 255, 255, 0.96)')
             : 'hsl(var(--primary-foreground))';
         return (
-            <div
-                className="relative border-b border-border/40 transition-colors hover:bg-muted/40"
-                style={{ height: ROW_HEIGHT }}
-            >
+            <div className="group/timeline-row flex border-b border-border/40" style={{ height: ROW_HEIGHT }}>
+                {/* The name column is the row's primary click target; the bar is a
+                    secondary one, so a 14px dot never has to carry the interaction. */}
                 <button
                     type="button"
-                    data-testid="timeline-bar"
+                    data-testid="timeline-row-label"
                     data-task-id={row.task.id}
-                    data-variant={row.single ? 'mini' : 'bar'}
                     title={row.task.title}
                     onClick={() => setOpenTaskId(row.task.id)}
                     className={cn(
-                        'absolute z-10 flex items-center rounded-full shadow-sm transition-[filter] hover:brightness-110',
-                        'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card',
-                        onBar && 'overflow-hidden px-2.5',
+                        'sticky left-0 z-20 flex shrink-0 items-center border-r border-border/60 bg-card pl-6 pr-3 text-left',
+                        'text-xs text-foreground transition-colors hover:bg-muted group-hover/timeline-row:bg-muted',
+                        'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
                     )}
-                    style={{
-                        left,
-                        width,
-                        height: BAR_HEIGHT,
-                        top: (ROW_HEIGHT - BAR_HEIGHT) / 2,
-                        backgroundColor: background,
-                    }}
+                    style={{ width: GUTTER_WIDTH }}
                 >
-                    {onBar ? (
-                        <span
-                            className="truncate text-[11px] font-medium leading-none"
-                            style={{ color: onBarColor }}
-                        >
-                            {row.task.title}
-                        </span>
-                    ) : (
-                        // Outside the bar's box but still inside the button, so a
-                        // 12px marker is not the only thing you can click.
-                        <span className="absolute left-full top-1/2 ml-2 inline-block max-w-[168px] -translate-y-1/2 truncate text-xs leading-none text-muted-foreground">
-                            {row.task.title}
-                        </span>
-                    )}
+                    <span className="min-w-0 truncate">{row.task.title}</span>
                 </button>
+                <div className="relative min-w-0 flex-1 transition-colors group-hover/timeline-row:bg-muted/40">
+                    <button
+                        type="button"
+                        data-testid="timeline-bar"
+                        data-task-id={row.task.id}
+                        data-variant={row.single ? 'mini' : 'bar'}
+                        title={row.task.title}
+                        aria-label={row.task.title}
+                        onClick={() => setOpenTaskId(row.task.id)}
+                        className={cn(
+                            'absolute z-10 flex items-center rounded-full shadow-sm transition-[filter] hover:brightness-110',
+                            'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card',
+                            onBar && 'overflow-hidden px-2.5',
+                        )}
+                        style={{
+                            left,
+                            width,
+                            height: barHeight,
+                            top: (ROW_HEIGHT - barHeight) / 2,
+                            backgroundColor: background,
+                        }}
+                    >
+                        {onBar && (
+                            <span
+                                className="truncate text-[11px] font-medium leading-none"
+                                style={{ color: onBarColor }}
+                            >
+                                {row.task.title}
+                            </span>
+                        )}
+                    </button>
+                </div>
             </div>
         );
     };
@@ -503,15 +519,20 @@ export function TimelineView() {
                     </div>
                 ) : (
                     // One surface, like the calendar and the board: the card hugs
-                    // its rows and only scrolls once they outgrow the viewport.
+                    // its rows (no stretched empty canvas below the last one) and
+                    // only scrolls once they outgrow the viewport.
                     <div className="min-h-0 flex-1 pb-4">
-                        <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-                            <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
-                                <div className="relative flex min-h-full flex-col" style={{ width: contentWidth }}>
+                        <div className="flex max-h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+                            <div ref={scrollRef} className="min-h-0 overflow-auto">
+                                <div className="relative flex flex-col" style={{ width: contentWidth }}>
                                     <div
-                                        className="sticky top-0 z-30 border-b border-border bg-card"
+                                        className="sticky top-0 z-30 flex border-b border-border bg-card"
                                         style={{ height: AXIS_HEIGHT }}
                                     >
+                                        <div
+                                            className="sticky left-0 z-40 shrink-0 border-r border-border/60 bg-card"
+                                            style={{ width: GUTTER_WIDTH }}
+                                        />
                                         <div className="relative h-full" style={{ width: trackWidth }}>
                                             {axis.monthLines.map((left) => (
                                                 <div
@@ -552,17 +573,14 @@ export function TimelineView() {
                                         </div>
                                     </div>
 
-                                    {/* flex-1 under a min-h-full parent: the canvas — gridlines
-                                        and the today line, both inset-y-0 — runs to the bottom of
-                                        the card even when the rows stop a third of the way down. */}
                                     <div
-                                        className="relative flex-1"
+                                        className="relative"
                                         style={{ minHeight: shouldVirtualize ? rowVirtualizer.getTotalSize() : rows.length * ROW_HEIGHT }}
                                     >
                                         <div
                                             aria-hidden
-                                            className="pointer-events-none absolute inset-y-0 left-0 z-0"
-                                            style={{ width: trackWidth, ...minorGridStyle }}
+                                            className="pointer-events-none absolute inset-y-0 z-0"
+                                            style={{ left: GUTTER_WIDTH, width: trackWidth, ...minorGridStyle }}
                                         >
                                             {axis.monthLines.map((left) => (
                                                 <div
@@ -576,7 +594,7 @@ export function TimelineView() {
                                             <div
                                                 data-testid="timeline-today-line"
                                                 className="pointer-events-none absolute inset-y-0 z-[5] w-0.5 bg-primary"
-                                                style={{ left: todayLeft - 1 }}
+                                                style={{ left: GUTTER_WIDTH + todayLeft - 1 }}
                                             />
                                         )}
                                         {shouldVirtualize
