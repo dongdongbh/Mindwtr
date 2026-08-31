@@ -1537,7 +1537,8 @@ jobs:
 
           git config --local user.name "${AUR_USERNAME:-mindwtr-bot}"
           git config --local user.email "${AUR_EMAIL:-actions@github.com}"
-          git add PKGBUILD .SRCINFO bun.lock
+          git add PKGBUILD .SRCINFO
+          git add -f -- bun.lock
           if [ -n "$(git status --porcelain -- tauri-v2-schema.patch)" ]; then
             git add -A -- tauri-v2-schema.patch
           fi

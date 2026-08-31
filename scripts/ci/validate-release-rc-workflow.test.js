@@ -453,7 +453,7 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   expect(sourcePushStep.run).toContain(
     "PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch",
   );
-  expect(sourcePushStep.run).toContain("git add PKGBUILD .SRCINFO bun.lock");
+  expect(sourcePushStep.run).toContain("git add -f -- bun.lock");
 
   expect(stable.jobs["update-aur-beta-bin"].name).toContain(
     "Update AUR Beta",
@@ -501,6 +501,6 @@ test("AUR publication is a manual environment-gated recovery workflow", () => {
   expect(text).toContain("SOURCE_EVENT");
   expect(text).toContain("proposal/bun.lock");
   expect(text).toContain("PKGBUILD .SRCINFO bun.lock tauri-v2-schema.patch");
-  expect(text).toContain("git -C aur-live add -- bun.lock");
+  expect(text).toContain("git -C aur-live add -f -- bun.lock");
   expect(text).not.toContain("--force");
 });
