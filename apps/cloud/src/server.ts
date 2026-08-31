@@ -38,7 +38,6 @@ import {
     type AllowedAuthTokenInput,
 } from './server-auth';
 import {
-    AUTH_FAILURE_RATE_MAX,
     CLOUD_API_REV_BY,
     corsOrigin,
     createInternalServerErrorResponse,
@@ -56,9 +55,9 @@ import {
     parseArgs,
     parsePagination,
     preflightResponse,
-    RATE_LIMIT_MAX_KEYS,
     UUID_PATTERN,
 } from './server-config';
+import { resolveCloudRuntimeConfig } from './server-runtime-config';
 import {
     createRequestAbortError,
     createWriteLockRunner,
@@ -105,7 +104,6 @@ import {
     type CalendarFeedRecord,
 } from './server-calendar-feed';
 
-const ANY_TOKEN_NAMESPACE_LIMIT_DEFAULT = 32;
 const NAMESPACE_ADMISSION_LOCK_KEY = '__namespace_admission__';
 const createEmptyCloudData = (): AppData => ({
     tasks: [],
@@ -949,20 +947,27 @@ type CloudServerHandle = {
 
 export async function startCloudServer(options: CloudServerOptions = {}): Promise<CloudServerHandle> {
     const flags = parseArgs(process.argv.slice(2));
-    const port = Number(options.port ?? flags.port ?? process.env.PORT ?? 8787);
+    const runtimeConfig = resolveCloudRuntimeConfig(process.env, {
+        port: options.port ?? flags.port,
+        rateWindowMs: options.windowMs,
+        rateMax: options.maxPerWindow,
+        attachmentRateMax: options.maxAttachmentPerWindow,
+        maxBodyBytes: options.maxBodyBytes,
+        maxAttachmentBytes: options.maxAttachmentBytes,
+        anyTokenMaxNamespaces: options.maxAnyTokenNamespaces,
+        requestTimeoutMs: options.requestTimeoutMs,
+        slowRequestMs: options.slowRequestMs,
+    });
+    const port = runtimeConfig.port;
     const host = String(options.host ?? flags.host ?? process.env.HOST ?? '0.0.0.0');
     const dataDir = String(options.dataDir ?? process.env.MINDWTR_CLOUD_DATA_DIR ?? join(process.cwd(), 'data'));
     const attachmentPathResolver = options.attachmentPathResolver ?? resolveAttachmentPath;
 
-    const windowMs = Number(options.windowMs ?? process.env.MINDWTR_CLOUD_RATE_WINDOW_MS ?? 60_000);
-    const maxPerWindow = Number(options.maxPerWindow ?? process.env.MINDWTR_CLOUD_RATE_MAX ?? 120);
-    const maxAttachmentPerWindow = Number(
-        options.maxAttachmentPerWindow ?? process.env.MINDWTR_CLOUD_ATTACHMENT_RATE_MAX ?? maxPerWindow
-    );
-    const maxBodyBytes = Number(options.maxBodyBytes ?? process.env.MINDWTR_CLOUD_MAX_BODY_BYTES ?? 2_000_000);
-    const maxAttachmentBytes = Number(
-        options.maxAttachmentBytes ?? process.env.MINDWTR_CLOUD_MAX_ATTACHMENT_BYTES ?? 50_000_000
-    );
+    const windowMs = runtimeConfig.rateWindowMs;
+    const maxPerWindow = runtimeConfig.rateMax;
+    const maxAttachmentPerWindow = runtimeConfig.attachmentRateMax;
+    const maxBodyBytes = runtimeConfig.maxBodyBytes;
+    const maxAttachmentBytes = runtimeConfig.maxAttachmentBytes;
     const allowedAuthTokens = normalizeAllowedAuthTokens(
         options.allowedAuthTokens === undefined
             ? resolveAllowedAuthTokensFromEnv(process.env)
@@ -970,23 +975,13 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
     );
     const trustProxyHeaders = options.trustProxyHeaders ?? parseBoolEnv(process.env.MINDWTR_CLOUD_TRUST_PROXY_HEADERS);
     const trustedProxyIps = options.trustedProxyIps ?? parseTrustedProxyIps(process.env.MINDWTR_CLOUD_TRUSTED_PROXY_IPS);
-    const rawMaxAnyTokenNamespaces = Number(
-        options.maxAnyTokenNamespaces
-        ?? process.env.MINDWTR_CLOUD_ANY_TOKEN_MAX_NAMESPACES
-        ?? ANY_TOKEN_NAMESPACE_LIMIT_DEFAULT
-    );
-    const maxAnyTokenNamespaces = Number.isFinite(rawMaxAnyTokenNamespaces) && rawMaxAnyTokenNamespaces >= 0
-        ? Math.floor(rawMaxAnyTokenNamespaces)
-        : ANY_TOKEN_NAMESPACE_LIMIT_DEFAULT;
+    const maxAnyTokenNamespaces = runtimeConfig.anyTokenMaxNamespaces;
     const withWriteLock = createWriteLockRunner(dataDir);
-    const rateLimitCleanupMs = Number(process.env.MINDWTR_CLOUD_RATE_CLEANUP_MS || 60_000);
-    const requestTimeoutMs = Number(options.requestTimeoutMs ?? process.env.MINDWTR_CLOUD_REQUEST_TIMEOUT_MS ?? 30_000);
+    const rateLimitCleanupMs = runtimeConfig.rateCleanupMs;
+    const requestTimeoutMs = runtimeConfig.requestTimeoutMs;
     const logAllRequests = options.logAllRequests
         ?? parseBoolEnv(process.env.MINDWTR_CLOUD_LOG_ALL_REQUESTS);
-    const rawSlowRequestMs = Number(options.slowRequestMs ?? process.env.MINDWTR_CLOUD_SLOW_REQUEST_MS ?? 1_000);
-    const slowRequestMs = Number.isFinite(rawSlowRequestMs) && rawSlowRequestMs >= 0
-        ? rawSlowRequestMs
-        : 1_000;
+    const slowRequestMs = runtimeConfig.slowRequestMs;
     const requestCompletionSink = options.requestCompletionSink ?? ((record: CloudRequestCompletion) => {
         const context = { ...record };
         if (record.status >= 400 || record.elapsedMs >= slowRequestMs) {
@@ -995,7 +990,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
             logInfo('request completed', context);
         }
     });
-    const rateLimiter = createRateLimiter({ windowMs, maxKeys: RATE_LIMIT_MAX_KEYS });
+    const rateLimiter = createRateLimiter({ windowMs, maxKeys: runtimeConfig.rateMaxKeys });
 
     const getRequestIpAddress = (req: Request): string | null => {
         const bunServer = server as { requestIP?: (request: Request) => { address?: string | null } | null };
@@ -1017,7 +1012,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
             }),
         ].filter((key): key is string => Boolean(key));
         for (const key of authRateLimitKeys) {
-            const authRateLimitResponse = rateLimiter.check(key, AUTH_FAILURE_RATE_MAX);
+            const authRateLimitResponse = rateLimiter.check(key, runtimeConfig.authFailureRateMax);
             if (authRateLimitResponse) {
                 return authRateLimitResponse;
             }

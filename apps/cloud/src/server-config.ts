@@ -6,10 +6,7 @@ import type { Area, Project, Section, Task } from '@mindwtr/core';
 import { TASK_SYNC_FIELD_SCHEMA } from '../../../packages/core/src/task-sync-schema';
 import { PROJECT_SYNC_FIELD_SCHEMA } from '../../../packages/core/src/project-sync-schema';
 import { SECTION_SYNC_FIELD_SCHEMA } from '../../../packages/core/src/section-sync-schema';
-import {
-    AREA_NAME_MAX_LENGTH as SHARED_AREA_NAME_MAX_LENGTH,
-    LIST_PAGE_MAX_LIMIT as SHARED_LIST_PAGE_MAX_LIMIT,
-} from '../../../packages/core/src/shared-api-write-limits';
+import { resolveCloudRuntimeConfig } from './server-runtime-config';
 
 type Flags = Record<string, string | boolean>;
 type LogLevel = 'info' | 'warn' | 'error';
@@ -117,45 +114,22 @@ if (!configuredCorsOrigin && isProductionEnv) {
 }
 
 export const corsOrigin = configuredCorsOrigin || 'http://localhost:5173';
-const maxTaskTitleLengthValue = Number(process.env.MINDWTR_CLOUD_MAX_TASK_TITLE_LENGTH || 500);
-export const MAX_TASK_TITLE_LENGTH = Number.isFinite(maxTaskTitleLengthValue) && maxTaskTitleLengthValue > 0
-    ? Math.floor(maxTaskTitleLengthValue)
-    : 500;
-const maxTaskQuickAddLengthValue = Number(process.env.MINDWTR_CLOUD_MAX_TASK_QUICK_ADD_LENGTH || 2000);
-export const MAX_TASK_QUICK_ADD_LENGTH = Number.isFinite(maxTaskQuickAddLengthValue) && maxTaskQuickAddLengthValue > 0
-    ? Math.floor(maxTaskQuickAddLengthValue)
-    : 2000;
+const cloudRuntimeConfig = resolveCloudRuntimeConfig(process.env);
+export const MAX_TASK_TITLE_LENGTH = cloudRuntimeConfig.maxTaskTitleLength;
+export const MAX_TASK_QUICK_ADD_LENGTH = cloudRuntimeConfig.maxTaskQuickAddLength;
 // Aligned with apps/mcp-server's area-name cap (packages/core/src/shared-api-write-limits.ts)
 // — this used to reuse MAX_TASK_TITLE_LENGTH (500), letting a cloud-created area name run
 // 2.5x longer than the same call through MCP or the desktop/mobile apps for no reason.
-const maxAreaNameLengthValue = Number(process.env.MINDWTR_CLOUD_MAX_AREA_NAME_LENGTH || SHARED_AREA_NAME_MAX_LENGTH);
-export const MAX_AREA_NAME_LENGTH = Number.isFinite(maxAreaNameLengthValue) && maxAreaNameLengthValue > 0
-    ? Math.floor(maxAreaNameLengthValue)
-    : SHARED_AREA_NAME_MAX_LENGTH;
-const maxItemsPerCollectionValue = Number(process.env.MINDWTR_CLOUD_MAX_ITEMS_PER_COLLECTION || 50_000);
-export const MAX_ITEMS_PER_COLLECTION = Number.isFinite(maxItemsPerCollectionValue) && maxItemsPerCollectionValue > 0
-    ? Math.floor(maxItemsPerCollectionValue)
-    : 50_000;
-const listDefaultLimitValue = Number(process.env.MINDWTR_CLOUD_LIST_DEFAULT_LIMIT || 200);
-export const LIST_DEFAULT_LIMIT = Number.isFinite(listDefaultLimitValue) && listDefaultLimitValue > 0
-    ? Math.floor(listDefaultLimitValue)
-    : 200;
+export const MAX_AREA_NAME_LENGTH = cloudRuntimeConfig.maxAreaNameLength;
+export const MAX_ITEMS_PER_COLLECTION = cloudRuntimeConfig.maxItemsPerCollection;
+export const LIST_DEFAULT_LIMIT = cloudRuntimeConfig.listDefaultLimit;
 // Aligned with apps/mcp-server's page-size cap (packages/core/src/shared-api-write-limits.ts)
 // — this used to default to 1000 while MCP capped the same kind of request at 500.
-const listMaxLimitValue = Number(process.env.MINDWTR_CLOUD_LIST_MAX_LIMIT || SHARED_LIST_PAGE_MAX_LIMIT);
-export const LIST_MAX_LIMIT = Number.isFinite(listMaxLimitValue) && listMaxLimitValue > 0
-    ? Math.floor(listMaxLimitValue)
-    : SHARED_LIST_PAGE_MAX_LIMIT;
-const rateLimitMaxKeysValue = Number(process.env.MINDWTR_CLOUD_RATE_MAX_KEYS || 10_000);
-export const RATE_LIMIT_MAX_KEYS = Number.isFinite(rateLimitMaxKeysValue) && rateLimitMaxKeysValue > 0
-    ? Math.floor(rateLimitMaxKeysValue)
-    : 10_000;
+export const LIST_MAX_LIMIT = cloudRuntimeConfig.listMaxLimit;
+export const RATE_LIMIT_MAX_KEYS = cloudRuntimeConfig.rateMaxKeys;
 export const MAX_PENDING_REMOTE_DELETE_ATTEMPTS = 100;
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const authFailureRateMaxValue = Number(process.env.MINDWTR_CLOUD_AUTH_FAILURE_RATE_MAX || 30);
-export const AUTH_FAILURE_RATE_MAX = Number.isFinite(authFailureRateMaxValue) && authFailureRateMaxValue > 0
-    ? Math.floor(authFailureRateMaxValue)
-    : 30;
+export const AUTH_FAILURE_RATE_MAX = cloudRuntimeConfig.authFailureRateMax;
 export const ATTACHMENT_PATH_ALLOWLIST = /^[a-zA-Z0-9._/-]+$/;
 // Real cloudKeys reaching this server are content-addressed and short: buildCloudKey
 // (packages/core/src/attachment-paths.ts) emits `attachments/<uuid>[.ext]` — 2 segments,
