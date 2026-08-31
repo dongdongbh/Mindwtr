@@ -76,7 +76,7 @@
 <div align="center">
   <video src="https://github.com/user-attachments/assets/40dd65b9-96cb-44e4-98d9-4dc08f329b45" width="60%" autoplay loop muted playsinline></video>
   
-  <video src="https://github.com/user-attachments/assets/d6688a01-989f-41b9-b190-94b21b0ae821" width="25%" autoplay loop muted playsinline></video>
+  <video src="https://github.com/user-attachments/assets/912eb827-e357-476e-9d28-1cd2cdf655d1" width="25%" autoplay loop muted playsinline></video>
 
   <p>
     <i>Arch Linux 与 Android 上的本地优先 GTD</i>
