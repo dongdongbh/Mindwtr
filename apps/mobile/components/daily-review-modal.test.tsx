@@ -210,6 +210,7 @@ describe('DailyReviewScreen', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-07-15T12:00:00.000Z'));
         storeState.tasks = [makeTask({ dueDate: '2026-07-15' })];
+        storeState.settings.gtd.dailyReview.includeFocusStep = false;
         storeState.updateTask.mockReset();
         storeState.deleteTask.mockReset();
         mockStorageGetItem.mockReset().mockResolvedValue(null);
@@ -235,6 +236,49 @@ describe('DailyReviewScreen', () => {
         expect(scroll.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')).toHaveLength(1);
         expect(scroll.findAllByProps({ testID: 'daily-review-footer' })).toHaveLength(0);
         expect(tree.root.findAllByProps({ testID: 'daily-review-footer' }).length).toBeGreaterThan(0);
+    });
+
+    it.each([
+        {
+            step: 'today',
+            testID: 'daily-review-step-scroll-today',
+            task: { dueDate: '2026-07-15' },
+        },
+        {
+            step: 'inbox',
+            testID: 'daily-review-step-scroll-inbox',
+            task: { dueDate: undefined, status: 'inbox' },
+        },
+        {
+            step: 'waiting',
+            testID: 'daily-review-step-scroll-waiting',
+            task: { dueDate: undefined, status: 'waiting' },
+        },
+        {
+            step: 'focus',
+            testID: 'daily-review-step-scroll-focus',
+            task: { dueDate: undefined, status: 'next' },
+        },
+    ])('shows every eligible task in the $step step', async ({ step, task, testID }) => {
+        storeState.settings.gtd.dailyReview.includeFocusStep = step === 'focus';
+        storeState.tasks = Array.from({ length: 9 }, (_, index) => makeTask({
+            id: `${step}-${index + 1}`,
+            title: `${step} task ${index + 1}`,
+            ...task,
+        }));
+        mockStorageGetItem.mockResolvedValue(JSON.stringify({
+            step,
+            startedAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
+        }));
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<DailyReviewScreen onClose={vi.fn()} />);
+            await Promise.resolve();
+        });
+
+        const scroll = tree.root.findByProps({ testID });
+        expect(scroll.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')).toHaveLength(9);
     });
 
     it('resumes a valid checkpoint, disables Back on the first step, and clears only on Finish', async () => {

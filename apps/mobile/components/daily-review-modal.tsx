@@ -283,12 +283,12 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         void updateTask(task.id, { reviewAt: followUpTodayReviewAt });
     }, [followUpTodayReviewAt, updateTask]);
 
-    // The waiting step is the only one that gives rows a footer, and it shows at
-    // most 8. Building them once keeps `footerContent` identity-stable, so that
+    // The waiting step is the only one that gives rows a footer. Building them
+    // once keeps `footerContent` identity-stable, so that
     // step keeps the same row memo the other four already have (#766).
     const followUpFooters = useMemo(() => {
         const byTaskId = new Map<string, React.ReactNode>();
-        for (const task of waitingTasks.slice(0, 8)) {
+        for (const task of waitingTasks) {
             const reviewDue = isDueForReview(task.reviewAt, today);
             byTaskId.set(task.id, (
                 <TouchableOpacity
@@ -394,7 +394,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
     const renderStep = () => {
         switch (displayedStep) {
             case 'today': {
-                const topTasks = [...overdueTasks, ...dueTodayTasks].slice(0, 8);
+                const topTasks = [...overdueTasks, ...dueTodayTasks];
                 const totalToday = overdueTasks.length + dueTodayTasks.length;
                 const calendarEventCount = todayEvents.length + tomorrowEvents.length;
                 return renderTaskList(topTasks, {
@@ -461,7 +461,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                 });
             }
             case 'focus':
-                return renderTaskList(focusCandidates.slice(0, 8), {
+                return renderTaskList(focusCandidates, {
                     testID: 'daily-review-step-scroll-focus',
                     showFocusToggle: true,
                     hideStatusBadge: true,
@@ -483,7 +483,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                     ),
                 });
             case 'inbox':
-                return renderTaskList(inboxTasks.slice(0, 8), {
+                return renderTaskList(inboxTasks, {
                     testID: 'daily-review-step-scroll-inbox',
                     header: (
                         <>
@@ -517,7 +517,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                     ),
                 });
             case 'waiting':
-                return renderTaskList(waitingTasks.slice(0, 8), {
+                return renderTaskList(waitingTasks, {
                     testID: 'daily-review-step-scroll-waiting',
                     showFollowUpToday: true,
                     header: (
