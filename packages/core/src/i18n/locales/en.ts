@@ -689,7 +689,7 @@ export const en: Record<string, string> = {
         'projects.sectionPlaceholder': 'Section title',
         'projects.noSection': 'No Section',
         'projects.sectionEmpty': 'No tasks',
-        'projects.deleteSectionConfirm': 'Are you sure you want to delete this section?',
+        'projects.deleteSectionConfirm': 'Delete this section? Its tasks are not deleted; they move to No Section.',
         'projects.areaFilter': 'Area filter',
         'projects.allAreas': 'All areas',
         'projects.noArea': 'No area',

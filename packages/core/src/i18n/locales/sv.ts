@@ -669,7 +669,7 @@ export const svOverrides: Record<string, string> = {
         'projects.sectionPlaceholder': 'Sektionens titel',
         'projects.noSection': 'Ingen sektion',
         'projects.sectionEmpty': 'Inga uppgifter',
-        'projects.deleteSectionConfirm': 'Är du säker på att du vill ta bort den här sektionen?',
+        'projects.deleteSectionConfirm': 'Ta bort denna sektion? Uppgifterna i den tas inte bort utan flyttas till Ingen sektion.',
         'projects.areaFilter': 'Områdesfilter',
         'projects.allAreas': 'Alla områden',
         'projects.noArea': 'Inget område',

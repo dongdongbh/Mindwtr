@@ -697,7 +697,7 @@ export const jaOverrides: Record<string, string> = {
         'projects.sectionPlaceholder': 'セクション名',
         'projects.noSection': 'セクションなし',
         'projects.sectionEmpty': 'タスクなし',
-        'projects.deleteSectionConfirm': 'このセクションを削除してもよろしいですか？',
+        'projects.deleteSectionConfirm': 'このセクションを削除しますか？中のタスクは削除されず、「セクションなし」に移動します。',
         'projects.areaFilter': 'エリアで絞り込む',
         'projects.allAreas': 'すべてのエリア',
         'projects.noArea': 'エリアなし',

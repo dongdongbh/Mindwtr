@@ -669,7 +669,7 @@ export const faOverrides: Record<string, string> = {
         'projects.sectionPlaceholder': 'عنوان بخش',
         'projects.noSection': 'بدون بخش',
         'projects.sectionEmpty': 'بدون وظیفه',
-        'projects.deleteSectionConfirm': 'آیا مطمئنید می‌خواهید این بخش را حذف کنید؟',
+        'projects.deleteSectionConfirm': 'این بخش حذف شود؟ کارهای داخل آن حذف نمی‌شوند و به «بدون بخش» منتقل می‌شوند.',
         'projects.areaFilter': 'فیلتر حوزه',
         'projects.allAreas': 'همه حوزه‌ها',
         'projects.noArea': 'بدون حوزه',

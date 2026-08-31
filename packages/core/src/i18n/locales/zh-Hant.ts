@@ -670,7 +670,7 @@ export const zhHant: Record<string, string> = {
         'projects.sectionPlaceholder': '分區標題',
         'projects.noSection': '無分區',
         'projects.sectionEmpty': '尚無任務',
-        'projects.deleteSectionConfirm': '確定要刪除此分區嗎？',
+        'projects.deleteSectionConfirm': '刪除此分區？其中的任務不會被刪除，會移到「無分區」。',
         'projects.areaFilter': '領域篩選',
         'projects.allAreas': '所有領域',
         'projects.noArea': '無領域',

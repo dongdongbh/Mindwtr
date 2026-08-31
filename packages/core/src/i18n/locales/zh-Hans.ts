@@ -670,7 +670,7 @@ export const zhHans: Record<string, string> = {
         'projects.sectionPlaceholder': '分区标题',
         'projects.noSection': '无分区',
         'projects.sectionEmpty': '暂无任务',
-        'projects.deleteSectionConfirm': '确定要删除此分区吗？',
+        'projects.deleteSectionConfirm': '删除此分区？其中的任务不会被删除，会移到“无分区”。',
         'projects.areaFilter': '领域筛选',
         'projects.allAreas': '所有领域',
         'projects.noArea': '无领域',
