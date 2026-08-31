@@ -1,0 +1,4 @@
+- Encrypt File Sync, WebDAV, and Dropbox before the first sync.
+- Organize Someday/Maybe with synced sections and process Inbox with the full quick-add syntax.
+- See Review Due first, preview the coming week, and repeat on several month days or the last day.
+- Use `/reference` and `/priority:` during capture, with safer attachments and faster large lists.

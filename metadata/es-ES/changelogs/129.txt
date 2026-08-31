@@ -1,0 +1,4 @@
+- Cifra la sincronización de archivos, WebDAV y Dropbox antes de la primera sincronización.
+- Organiza Algún día/Quizá con secciones sincronizadas y procesa la bandeja con toda la sintaxis de captura rápida.
+- Consulta primero las revisiones, anticipa la semana y repite varios días del mes o el último.
+- Usa `/reference` y `/priority:` al capturar, con adjuntos más seguros y listas grandes más rápidas.

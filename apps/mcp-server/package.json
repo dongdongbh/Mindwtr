@@ -1,7 +1,7 @@
 {
   "name": "mindwtr-mcp",
   "description": "Stdio MCP server for Mindwtr local and self-hosted Cloud task access.",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "license": "AGPL-3.0-only",
   "type": "module",
   "mcpName": "io.github.dongdongbh/mindwtr",

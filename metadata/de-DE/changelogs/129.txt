@@ -1,0 +1,4 @@
+- Dateisynchronisierung, WebDAV und Dropbox vor dem ersten Sync verschlüsseln.
+- Irgendwann/Vielleicht mit synchronisierten Abschnitten ordnen und den Posteingang mit der gesamten Schnellerfassungs-Syntax verarbeiten.
+- Fällige Durchsichten zuerst sehen, die kommende Woche überblicken und an mehreren Monatstagen oder am letzten Tag wiederholen.
+- Mit `/reference` und `/priority:` erfassen; Anhänge sind sicherer und große Listen schneller.

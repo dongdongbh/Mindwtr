@@ -1,4 +1,4 @@
-- Search results stay steady while you type.
-- Save & edit returns to the right project, reorder exits where you dropped the task, and Undo stays above the tab bar.
-- Dropbox runs its first sync after sign-in and restores the last proven setup after a failed attempt.
-- Checklists drop blank rows, Areas gain six colors, and Japanese text is complete.
+- Encrypt File Sync, WebDAV, and Dropbox with a passphrase before the first sync.
+- Organize Someday/Maybe with synced sections and process Inbox with the full quick-add syntax.
+- See Review Due before Next Actions, preview the coming week, and repeat on several month days or the last day.
+- Capture from the Lock Screen or Control Center, use guarded attachment sync, and move through responsive large lists.

@@ -30,7 +30,7 @@
           "列表、日历与看板视图，支持提醒与重复任务",
           "免费开源、无广告"
         ],
-        "ReleaseNotes": "• 搜索结果在输入时保持稳定，从“已完成”或“已归档”打开搜索时会包含已完成任务。\n• 文件同步会修复缺失的附件副本，在更新后保留设置，并拦截不安全的路径。\n• 清单会丢弃空白行，打开链接时不再改变完成状态。\n• 单次日历项目优先显示，领域新增六种颜色。",
+        "ReleaseNotes": "• 用密码加密文件同步、WebDAV 和 Dropbox，并安全同步附件。\n• 用可同步的分区整理“将来/也许”，收集箱支持完整的快速添加语法。\n• “待回顾”优先显示，可预览未来一周，并支持每月多日或月末重复。\n• 可导出筛选后的 CSV、转换任务、按时间估算排序，大型清单更流畅。",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -82,7 +82,7 @@
           "List, calendar, and kanban views with reminders and repeating tasks",
           "Free and open source, no ads"
         ],
-        "ReleaseNotes": "• Search stays steady while you type, and Done or Archive searches include finished tasks.\n• File Sync repairs missing attachment copies, keeps settings through upgrades, and rejects unsafe path traversal.\n• Checklists drop blank rows and open links without changing completion.\n• One-off calendar items get visible space before recurring previews, and Areas gain six colors.",
+        "ReleaseNotes": "• Encrypt File Sync, WebDAV, and Dropbox with a passphrase, with safer attachment sync.\n• Organize Someday/Maybe with synced sections and process Inbox with the full quick-add syntax.\n• See Review Due first, preview the coming week, and repeat on several month days or the last day.\n• Export filtered CSV, convert tasks, sort by time estimate, and move through large lists faster.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -131,7 +131,7 @@
           "Listen-, Kalender- und Kanban-Ansichten mit Erinnerungen und Wiederholungen",
           "Kostenlos und Open Source, ohne Werbung"
         ],
-        "ReleaseNotes": "• Die Suche bleibt beim Tippen stabil; in Erledigt und Archiv erscheinen abgeschlossene Aufgaben.\n• Die Dateisynchronisierung repariert fehlende Anhangkopien, behält Einstellungen bei Updates und blockiert unsichere Pfade.\n• Checklisten verwerfen Leerzeilen und öffnen Links, ohne den Status zu ändern.\n• Einzelne Kalendereinträge stehen vor Wiederholungsvorschauen; Bereiche erhalten sechs Farben.",
+        "ReleaseNotes": "• Dateisynchronisierung, WebDAV und Dropbox mit einer Passphrase verschlüsseln und Anhänge sicherer synchronisieren.\n• Irgendwann/Vielleicht mit synchronisierten Abschnitten ordnen und den Posteingang mit der gesamten Schnellerfassungs-Syntax verarbeiten.\n• Fällige Durchsichten zuerst sehen, die kommende Woche überblicken und an mehreren Monatstagen oder am letzten Tag wiederholen.\n• Gefilterte CSV-Dateien exportieren, Aufgaben umwandeln, nach Zeitschätzung sortieren und große Listen schneller nutzen.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -161,7 +161,7 @@
           "Vues liste, calendrier et kanban, rappels et tâches répétées",
           "Gratuit et open source, sans publicité"
         ],
-        "ReleaseNotes": "• La recherche reste stable pendant la saisie et inclut les tâches terminées depuis Terminé ou Archive.\n• La synchronisation de fichiers répare les copies de pièces jointes, conserve les réglages et bloque les chemins dangereux.\n• Les listes ignorent les lignes vides et ouvrent les liens sans changer leur état.\n• Les éléments uniques du calendrier passent avant les récurrences; les domaines gagnent six couleurs.",
+        "ReleaseNotes": "• Chiffrez la synchronisation de fichiers, WebDAV et Dropbox avec une phrase secrète, avec des pièces jointes mieux protégées.\n• Organisez Un jour/Peut-être avec des sections synchronisées et traitez la boîte de réception avec toute la syntaxe de saisie rapide.\n• Voyez les revues en premier, anticipez la semaine et répétez plusieurs jours du mois ou le dernier.\n• Exportez la liste filtrée en CSV, convertissez des tâches, triez par durée estimée et parcourez plus vite les grandes listes.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -190,7 +190,7 @@
           "Vistas de lista, calendario y kanban, con recordatorios y tareas repetidas",
           "Gratis y de código abierto, sin anuncios"
         ],
-        "ReleaseNotes": "• La búsqueda permanece estable al escribir e incluye tareas terminadas desde Hecho o Archivo.\n• La sincronización de archivos repara copias de adjuntos, conserva los ajustes y bloquea rutas inseguras.\n• Las listas omiten filas vacías y abren enlaces sin cambiar su estado.\n• Los elementos únicos del calendario preceden a las repeticiones; las áreas suman seis colores.",
+        "ReleaseNotes": "• Cifra la sincronización de archivos, WebDAV y Dropbox con una contraseña, con adjuntos más seguros.\n• Organiza Algún día/Quizá con secciones sincronizadas y procesa la bandeja con toda la sintaxis de captura rápida.\n• Consulta primero las revisiones, anticipa la semana y repite varios días del mes o el último.\n• Exporta la lista filtrada en CSV, convierte tareas, ordena por tiempo estimado y recorre listas grandes más rápido.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",

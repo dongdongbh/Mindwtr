@@ -1,4 +1,4 @@
-- Los resultados de búsqueda permanecen estables mientras escribes.
-- Guardar y editar vuelve al proyecto correcto, la lista queda donde soltaste la tarea y Deshacer no tapa las pestañas.
-- Dropbox inicia la primera sincronización tras conectar y restaura la configuración verificada si falla.
-- Las listas omiten filas vacías, las áreas suman seis colores y el japonés está completo.
+- Cifra la sincronización de archivos, WebDAV y Dropbox con una contraseña antes de la primera sincronización.
+- Organiza Algún día/Quizá con secciones sincronizadas y procesa la bandeja con toda la sintaxis de captura rápida.
+- Consulta las revisiones antes que las próximas acciones, anticipa la semana y repite en varios días del mes o el último.
+- Captura desde la pantalla bloqueada o el Centro de control, sincroniza adjuntos con más seguridad y recorre listas grandes más rápido.

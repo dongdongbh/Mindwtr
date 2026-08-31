@@ -88,39 +88,22 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
-    <release version="1.2.5-rc.2" date="2026-08-28">
-      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.5-rc.2</url>
+    <release version="1.2.5" date="2026-08-31">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.5</url>
       <description>
-        <p>Mindwtr 1.2.5-rc.2 hardens File Sync and attachments while improving capture, Someday organization, and Focus.</p>
-        <p xml:lang="de">Mindwtr 1.2.5-rc.2 macht Dateisynchronisierung und Anhaenge robuster und verbessert Erfassung, Someday-Organisation und Fokus.</p>
+        <p>Mindwtr 1.2.5 adds encrypted sync, safer attachments, stronger GTD organization, and faster desktop planning.</p>
+        <p xml:lang="de">Mindwtr 1.2.5 bringt verschluesselten Sync, sicherere Anhaenge, bessere GTD-Organisation und schnellere Desktop-Planung.</p>
         <ul>
-          <li>File Sync retains exact attachment generations across replacement, cleanup, interruption, and concurrent access.</li>
-          <li xml:lang="de">Die Dateisynchronisierung behaelt exakte Anhanggenerationen bei Ersetzung, Bereinigung, Unterbrechung und gleichzeitigem Zugriff.</li>
-          <li>Sync encryption can be configured before the first sync, and encrypted locations request their passphrase on first contact.</li>
-          <li xml:lang="de">Sync-Verschluesselung kann vor dem ersten Sync eingerichtet werden; verschluesselte Speicherorte fragen beim ersten Kontakt nach der Passphrase.</li>
-          <li>Someday gains synced named sections, while Inbox Processing shares quick-add syntax across desktop and mobile.</li>
-          <li xml:lang="de">Someday erhaelt synchronisierte benannte Abschnitte; die Inbox-Verarbeitung nutzt auf Desktop und Mobilgeraeten dieselbe Schnellerfassungs-Syntax.</li>
-          <li>Focus shows Review Due before Next Actions and previews tasks that start later today without duplicating sections.</li>
-          <li xml:lang="de">Fokus zeigt faellige Ueberpruefungen vor naechsten Aktionen und Aufgaben mit spaeterem Start heute ohne doppelte Abschnitte.</li>
-          <li>Desktop adds filtered CSV export, direct Reference capture, custom area colours, and Linux image paste in Quick Add.</li>
-          <li xml:lang="de">Desktop erhaelt gefilterten CSV-Export, direkte Referenz-Erfassung, eigene Bereichsfarben und Bild-Einfuegen in der Linux-Schnellerfassung.</li>
-        </ul>
-      </description>
-    </release>
-    <release version="1.2.5-rc.1" date="2026-08-24">
-      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.5-rc.1</url>
-      <description>
-        <p>Mindwtr 1.2.5-rc.1 adds encrypted file-based sync, richer recurrence, safer attachments, and faster everyday planning.</p>
-        <p xml:lang="de">Mindwtr 1.2.5-rc.1 bringt verschluesselte dateibasierte Synchronisierung, vielseitigere Wiederholungen, sicherere Anhaenge und schnellere Alltagsplanung.</p>
-        <ul>
-          <li>File Sync, WebDAV, and Dropbox can encrypt sync data, backups, snapshots, and attachments with a passphrase.</li>
-          <li xml:lang="de">Dateisynchronisierung, WebDAV und Dropbox koennen Sync-Daten, Backups, Snapshots und Anhaenge mit einer Passphrase verschluesseln.</li>
-          <li>Monthly recurrence supports multiple days and the true last day of the month, with progress for count-limited series.</li>
-          <li xml:lang="de">Monatliche Wiederholungen unterstuetzen mehrere Tage und den echten letzten Monatstag sowie Fortschritt bei begrenzten Serien.</li>
-          <li>Attachment edits propagate through sync, downloads are checksum-verified, and removed copies are cleaned up safely.</li>
-          <li xml:lang="de">Aenderungen an Anhaengen werden synchronisiert, Downloads per Pruefsumme geprueft und entfernte Kopien sicher bereinigt.</li>
-          <li>Desktop planning gains Upcoming work, clearer calendar and status controls, faster large lists, and more resilient storage and sync recovery.</li>
-          <li xml:lang="de">Die Desktop-Planung bietet anstehende Aufgaben, klarere Kalender- und Statussteuerung, schnellere grosse Listen sowie robustere Speicher- und Sync-Wiederherstellung.</li>
+          <li>File Sync, WebDAV, and Dropbox can encrypt sync data and attachments with a passphrase before the first sync.</li>
+          <li xml:lang="de">Dateisynchronisierung, WebDAV und Dropbox koennen Sync-Daten und Anhaenge vor dem ersten Sync mit einer Passphrase verschluesseln.</li>
+          <li>File Sync preserves exact attachment generations through replacement, interruption, cleanup, and concurrent access.</li>
+          <li xml:lang="de">Die Dateisynchronisierung behaelt exakte Anhanggenerationen bei Ersetzung, Unterbrechung, Bereinigung und gleichzeitigem Zugriff.</li>
+          <li>Someday gains synced named sections, while Inbox Processing uses the full quick-add syntax.</li>
+          <li xml:lang="de">Irgendwann erhaelt synchronisierte benannte Abschnitte; die Posteingangsverarbeitung nutzt die gesamte Schnellerfassungs-Syntax.</li>
+          <li>Focus shows Review Due first, previews the coming week, and supports clearer later-today planning.</li>
+          <li xml:lang="de">Fokus zeigt faellige Durchsichten zuerst, bietet eine Wochenvorschau und verbessert die Planung fuer spaeter am selben Tag.</li>
+          <li>Desktop adds filtered CSV export, task conversion, time-estimate sorting, keyboard reordering, and Linux image paste.</li>
+          <li xml:lang="de">Desktop erhaelt gefilterten CSV-Export, Aufgabenumwandlung, Sortierung nach Zeitschaetzung, Tastatur-Sortierung und Bild-Einfuegen unter Linux.</li>
         </ul>
       </description>
     </release>

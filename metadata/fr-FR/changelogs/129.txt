@@ -1,0 +1,4 @@
+- Chiffrez la synchronisation de fichiers, WebDAV et Dropbox avant la première synchronisation.
+- Organisez Un jour/Peut-être avec des sections synchronisées et traitez la boîte de réception avec toute la syntaxe de saisie rapide.
+- Voyez les revues en premier, anticipez la semaine et répétez plusieurs jours du mois ou le dernier.
+- Utilisez `/reference` et `/priority:` à la saisie, avec des pièces jointes plus sûres et de grandes listes plus rapides.

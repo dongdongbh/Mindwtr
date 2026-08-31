@@ -1,4 +1,4 @@
-- Suchergebnisse bleiben beim Tippen stabil.
-- Speichern & bearbeiten kehrt zum richtigen Projekt zurück, die Sortierung endet am Ablageort und Rückgängig bleibt über der Tableiste.
-- Dropbox startet nach der Anmeldung den ersten Sync und stellt bei Fehlern die letzte geprüfte Einrichtung wieder her.
-- Checklisten verwerfen Leerzeilen, Bereiche erhalten sechs Farben und die japanische Übersetzung ist vollständig.
+- Dateisynchronisierung, WebDAV und Dropbox vor dem ersten Sync mit einer Passphrase verschlüsseln.
+- Irgendwann/Vielleicht mit synchronisierten Abschnitten ordnen und den Posteingang mit der Schnellerfassungs-Syntax verarbeiten.
+- Fällige Durchsichten vor nächsten Aktionen sehen, die kommende Woche überblicken und an mehreren Monatstagen oder am letzten Tag wiederholen.
+- Vom Sperrbildschirm oder Kontrollzentrum erfassen, Anhänge sicherer synchronisieren und große Listen schneller öffnen.

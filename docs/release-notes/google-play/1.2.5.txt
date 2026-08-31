@@ -1,0 +1,30 @@
+<en-US>
+- Encrypt File Sync, WebDAV, and Dropbox before the first sync.
+- Organize Someday/Maybe with synced sections and process Inbox with the full quick-add syntax.
+- See Review Due first, preview the coming week, and repeat on several month days or the last day.
+- Use `/reference` and `/priority:` during capture, with safer attachments and faster large lists.
+</en-US>
+<de-DE>
+- Dateisynchronisierung, WebDAV und Dropbox vor dem ersten Sync verschlüsseln.
+- Irgendwann/Vielleicht mit synchronisierten Abschnitten ordnen und den Posteingang mit der gesamten Schnellerfassungs-Syntax verarbeiten.
+- Fällige Durchsichten zuerst sehen, die kommende Woche überblicken und an mehreren Monatstagen oder am letzten Tag wiederholen.
+- Mit `/reference` und `/priority:` erfassen; Anhänge sind sicherer und große Listen schneller.
+</de-DE>
+<es-ES>
+- Cifra la sincronización de archivos, WebDAV y Dropbox antes de la primera sincronización.
+- Organiza Algún día/Quizá con secciones sincronizadas y procesa la bandeja con toda la sintaxis de captura rápida.
+- Consulta primero las revisiones, anticipa la semana y repite varios días del mes o el último.
+- Usa `/reference` y `/priority:` al capturar, con adjuntos más seguros y listas grandes más rápidas.
+</es-ES>
+<fr-FR>
+- Chiffrez la synchronisation de fichiers, WebDAV et Dropbox avant la première synchronisation.
+- Organisez Un jour/Peut-être avec des sections synchronisées et traitez la boîte de réception avec toute la syntaxe de saisie rapide.
+- Voyez les revues en premier, anticipez la semaine et répétez plusieurs jours du mois ou le dernier.
+- Utilisez `/reference` et `/priority:` à la saisie, avec des pièces jointes plus sûres et de grandes listes plus rapides.
+</fr-FR>
+<zh-CN>
+- 首次同步前即可加密文件同步、WebDAV 和 Dropbox。
+- 用可同步的分区整理“将来/也许”，并用完整的快速添加语法处理收集箱。
+- “待回顾”优先显示，可预览未来一周，并支持每月多日或月末重复。
+- 收集时可用 `/reference` 和 `/priority:`；附件更安全，大型清单更流畅。
+</zh-CN>
