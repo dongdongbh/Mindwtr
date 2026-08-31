@@ -210,7 +210,7 @@ describe('TaskInput autocomplete', () => {
         input.setSelectionRange(input.value.length, input.value.length);
         fireEvent.click(input);
 
-        for (const name of ['/link:<url>', '/energy:<level>', '/area:<name>', '/reference', '/archived', '/*']) {
+        for (const name of ['/link:<url>', '/energy:<level>', '/priority:<level>', '/area:<name>', '/reference', '/archived', '/*']) {
             expect(getByRole('option', { name })).toBeInTheDocument();
         }
     });
@@ -233,6 +233,28 @@ describe('TaskInput autocomplete', () => {
 
         await waitFor(() => {
             expect(input.value).toBe('/energy:medium ');
+        });
+    });
+
+    it('suggests the valid priority levels after /priority: and inserts the canonical token', async () => {
+        const { getByRole, getAllByRole } = render(<TaskInputHarness initialValue="/priority:" />);
+        const input = getByRole('combobox') as HTMLInputElement;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+        fireEvent.click(input);
+
+        expect(getAllByRole('option').map((option) => option.textContent)).toEqual([
+            '/priority:low',
+            '/priority:medium',
+            '/priority:high',
+            '/priority:urgent',
+        ]);
+
+        fireEvent.keyDown(input, { key: 'ArrowDown' });
+        fireEvent.keyDown(input, { key: 'Enter' });
+
+        await waitFor(() => {
+            expect(input.value).toBe('/priority:medium ');
         });
     });
 

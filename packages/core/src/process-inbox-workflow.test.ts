@@ -8,6 +8,7 @@ import {
     resolveProcessInboxWorkflowEvent,
     withParsedProcessInboxFields,
 } from './process-inbox-workflow';
+import { parseProcessInboxTitleInput } from './quick-add';
 
 describe('resolveProcessInboxWorkflowEvent', () => {
     it('turns discard into a delete effect', () => {
@@ -207,6 +208,23 @@ describe('withParsedProcessInboxFields', () => {
             followUpAt: '2026-09-01T09:00:00.000Z',
             fields: { contexts: ['@phone'], assignedTo: 'Bob' },
         });
+    });
+
+    // The parsed-token path is the only route a typed /priority: has into the
+    // clarify decision; the picker writes `priority` directly (#1105).
+    it('lands a /priority: typed in the clarify title on the merged fields', () => {
+        const parsedTitle = parseProcessInboxTitleInput('Call plumber /priority:high /energy:low');
+        expect(parsedTitle.title).toBe('Call plumber');
+
+        const merged = mergeParsedProcessInboxFields({}, parsedTitle.props);
+        expect(merged.priority).toBe('high');
+        expect(merged.energyLevel).toBe('low');
+    });
+
+    it('lets the picked priority stand when the title carries no token', () => {
+        const parsedTitle = parseProcessInboxTitleInput('Call plumber');
+        expect(mergeParsedProcessInboxFields({ priority: 'urgent' }, parsedTitle.props).priority)
+            .toBe('urgent');
     });
 
     it('leaves a discard alone — trashing writes nothing for a token to land on', () => {

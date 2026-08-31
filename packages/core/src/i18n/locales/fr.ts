@@ -35,7 +35,7 @@ export const frOverrides: Record<string, string> = {
         'nav.sectionArchive': 'Archiver',
 
         // Quick Add
-        'quickAdd.help': 'L’ajout rapide prend en charge /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /next, /area:<name> ou !Area, @context, #tag, +Project, %Person (ou %"Full Name").',
+        'quickAdd.help': 'L’ajout rapide prend en charge /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /area:<name> ou !Area, @context, #tag, +Project, %Person (ou %"Full Name").',
         'quickAdd.example': 'Exemple : Appeler maman /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Essayez : Appeler maman /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Aide sur la syntaxe d’ajout rapide',

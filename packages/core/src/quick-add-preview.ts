@@ -16,6 +16,7 @@ export type QuickAddPreviewEntryKind =
     | 'context'
     | 'tag'
     | 'person'
+    | 'priority'
     | 'energy'
     | 'note'
     | 'link';
@@ -200,6 +201,16 @@ export function buildQuickAddPreviewEntries(
             kind: 'person',
             label: tFallback(t, 'taskEdit.assignedTo', 'Assigned To'),
             value: truncate(props.assignedTo),
+            tone: 'default',
+        });
+    }
+
+    if (props.priority) {
+        entries.push({
+            id: 'priority',
+            kind: 'priority',
+            label: tFallback(t, 'taskEdit.priorityLabel', 'Priority'),
+            value: tFallback(t, `priority.${props.priority}`, props.priority),
             tone: 'default',
         });
     }

@@ -50,7 +50,7 @@ export const jaOverrides: Record<string, string> = {
         'accessibility.mainContent': 'メインコンテンツ',
 
         // Quick Add
-        'quickAdd.help': 'クイック追加では /start:<日時>、/due:<日時>、/review:<日時>、/note:<メモ>、/link:<URL>、/energy:<レベル>、/next、/*（フォーカスに追加）、/area:<エリア名> または !Area、@context、#tag、+Project、%Person（%"氏名" の形も可）が使えます。期限は時刻を書かない限り日付のみとして扱われます。',
+        'quickAdd.help': 'クイック追加では /start:<日時>、/due:<日時>、/review:<日時>、/note:<メモ>、/link:<URL>、/energy:<レベル>、/priority:<レベル>、/next、/*（フォーカスに追加）、/area:<エリア名> または !Area、@context、#tag、+Project、%Person（%"氏名" の形も可）が使えます。期限は時刻を書かない限り日付のみとして扱われます。',
         'quickAdd.example': '例：母に電話する /due:tomorrow @phone',
         'quickAdd.pastedImageTitle': 'スクリーンショット',
         'quickAdd.pastedImageSaving': '画像を添付しています…',

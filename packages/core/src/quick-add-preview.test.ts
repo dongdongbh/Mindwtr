@@ -43,6 +43,26 @@ describe('buildQuickAddPreviewEntries', () => {
         expect(byKind.title).toBe('call mom');
     });
 
+    it('shows the priority and energy levels as their own chips', () => {
+        const input = 'call mom /priority:urgent /energy:low';
+        const parsed = parseQuickAdd(input, [], now);
+        // The identity `t` above falls back, so translate here to prove the keys.
+        const translations: Record<string, string> = {
+            'priority.urgent': 'Urgent',
+            'energyLevel.low': 'Low energy',
+            'taskEdit.priorityLabel': 'Priority',
+        };
+        const entries = buildQuickAddPreviewEntries(parsed, {
+            t: (key: string) => translations[key] ?? key,
+            rawInput: input,
+        });
+        const byKind = Object.fromEntries(entries.map((entry) => [entry.kind, entry.value]));
+
+        expect(byKind.priority).toBe('Urgent');
+        expect(byKind.energy).toBe('Low energy');
+        expect(entries.find((entry) => entry.kind === 'priority')?.label).toBe('Priority');
+    });
+
     it('flags every invalid date command as a warning chip', () => {
         const input = 'call mom /due:notaday';
         const parsed = parseQuickAdd(input, [], now);

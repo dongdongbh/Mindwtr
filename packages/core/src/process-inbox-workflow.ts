@@ -46,7 +46,7 @@ function unionTokens(picked: readonly string[] | undefined, parsed: readonly str
 /** The half of a parsed processing title that maps onto decision fields. */
 export type ParsedProcessInboxTitleFields = Pick<
     Partial<Task>,
-    'contexts' | 'tags' | 'assignedTo' | 'energyLevel' | 'projectId' | 'areaId'
+    'contexts' | 'tags' | 'assignedTo' | 'priority' | 'energyLevel' | 'projectId' | 'areaId'
 >;
 
 /**
@@ -68,6 +68,7 @@ export function mergeParsedProcessInboxFields(
     if (parsed.contexts && parsed.contexts.length > 0) next.contexts = unionTokens(fields.contexts, parsed.contexts);
     if (parsed.tags && parsed.tags.length > 0) next.tags = unionTokens(fields.tags, parsed.tags);
     if (parsed.assignedTo) next.assignedTo = parsed.assignedTo;
+    if (parsed.priority) next.priority = parsed.priority;
     if (parsed.energyLevel) next.energyLevel = parsed.energyLevel;
     if (parsed.projectId || parsed.areaId) {
         Object.assign(next, resolveProcessInboxContainerFields(

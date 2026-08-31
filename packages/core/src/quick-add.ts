@@ -1,6 +1,6 @@
 import * as chrono from 'chrono-node';
 import { format, isValid, set } from 'date-fns';
-import type { Area, Attachment, Person, Project, Task, TaskEnergyLevel, TaskStatus } from './types';
+import type { Area, Attachment, Person, Project, Task, TaskEnergyLevel, TaskPriority, TaskStatus } from './types';
 import { generateUUID } from './uuid';
 import { normalizeTaskStatus } from './task-status';
 import { normalizeLinkAttachmentInput } from './attachment-link-utils';
@@ -222,6 +222,13 @@ const ENERGY_TOKENS: Record<string, TaskEnergyLevel> = {
     high: 'high',
 };
 
+const PRIORITY_TOKENS: Record<string, TaskPriority> = {
+    low: 'low',
+    medium: 'medium',
+    high: 'high',
+    urgent: 'urgent',
+};
+
 const ESCAPE_SENTINEL = '__MW_ESC__';
 const QUICK_ADD_ESCAPE_CHARS = new Set(['@', '#', '+', '/', '!', '%']);
 const QUICK_ADD_FOCUS_COMMAND_PATTERN = String.raw`\*(?:\s+focus\b)?`;
@@ -230,8 +237,8 @@ const QUICK_ADD_FOCUS_COMMAND_PATTERN = String.raw`\*(?:\s+focus\b)?`;
 // would corrupt real text — `https://example.com/next-steps` is a link, not
 // a status.
 const QUICK_ADD_COMMAND_START = String.raw`(?:^|\s)`;
-const QUICK_ADD_COMMAND_BOUNDARY = String.raw`(?=\s\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b)|$)`;
-const QUICK_ADD_INLINE_CONTROL_BOUNDARY = String.raw`(?=\s(?:[@#+!%]|\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b))|$)`;
+const QUICK_ADD_COMMAND_BOUNDARY = String.raw`(?=\s\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|priority:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b)|$)`;
+const QUICK_ADD_INLINE_CONTROL_BOUNDARY = String.raw`(?=\s(?:[@#+!%]|\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|priority:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b))|$)`;
 const SIMPLE_TASK_TOKEN_RE = /[@#][\p{L}\p{N}_-]+/gu;
 const RICH_TASK_TOKEN_RE = new RegExp(
     String.raw`(?:^|\s)([@#](?![\s\p{L}\p{N}_-])[^@#+/!%]+?)${QUICK_ADD_INLINE_CONTROL_BOUNDARY}`,
@@ -940,6 +947,16 @@ export function parseQuickAdd(
         }
     }
 
+    let priority: TaskPriority | undefined;
+    const priorityMatch = working.match(/(?:^|\s)\/priority:([^\s/]+)/i);
+    if (priorityMatch) {
+        const token = restoreEscapes(priorityMatch[1] ?? '').trim().toLowerCase();
+        priority = PRIORITY_TOKENS[token];
+        if (priority) {
+            working = stripToken(working, priorityMatch[0]);
+        }
+    }
+
     // Area: /area:<id|name> or !Area Name
     let areaId: string | undefined;
     const areaIdMatch = working.match(/(?:^|\s)\/area:([^\s/]+)/i);
@@ -1112,6 +1129,7 @@ export function parseQuickAdd(
     if (projectId) props.projectId = projectId;
     if (areaId) props.areaId = areaId;
     if (energyLevel) props.energyLevel = energyLevel;
+    if (priority) props.priority = priority;
     if (assignedTo) props.assignedTo = assignedTo;
     if (focusToday) props.isFocusedToday = true;
 

@@ -10,7 +10,7 @@ import {
 
 type TriggerType = 'project' | 'context' | 'tag' | 'area' | 'person' | 'command';
 type SlashCommand =
-    | 'due' | 'start' | 'review' | 'note' | 'link' | 'energy' | 'area'
+    | 'due' | 'start' | 'review' | 'note' | 'link' | 'energy' | 'priority' | 'area'
     | 'inbox' | 'next' | 'waiting' | 'someday' | 'reference' | 'done' | 'archived' | '*';
 
 interface TriggerState {
@@ -112,6 +112,7 @@ const SLASH_COMMANDS: Array<{
     { command: 'note', hint: '<text>', requiresArgument: true },
     { command: 'link', hint: '<url>', requiresArgument: true },
     { command: 'energy', hint: '<level>', requiresArgument: true },
+    { command: 'priority', hint: '<level>', requiresArgument: true },
     { command: 'area', hint: '<name>', requiresArgument: true },
     { command: 'next', requiresArgument: false },
     { command: 'waiting', requiresArgument: false },
@@ -126,6 +127,7 @@ const SLASH_COMMANDS: Array<{
 // The parser only accepts these exact tokens for /energy: — suggest them so
 // a partial token like "l" never ends up in the task title.
 const ENERGY_LEVEL_VALUES = ['low', 'medium', 'high'];
+const PRIORITY_VALUES = ['low', 'medium', 'high', 'urgent'];
 
 function getSlashCommandOptions(query: string): Option[] {
     const separatorIndex = query.indexOf(':');
@@ -140,6 +142,18 @@ function getSlashCommandOptions(query: string): Option[] {
                 label: `/energy:${level}`,
                 value: level,
                 command: 'energy' as const,
+                requiresArgument: true,
+            }));
+    }
+
+    if (separatorIndex >= 0 && rawCommandQuery === 'priority') {
+        return PRIORITY_VALUES
+            .filter((level) => level.startsWith(rawValue.toLowerCase()))
+            .map((level) => ({
+                kind: 'command' as const,
+                label: `/priority:${level}`,
+                value: level,
+                command: 'priority' as const,
                 requiresArgument: true,
             }));
     }

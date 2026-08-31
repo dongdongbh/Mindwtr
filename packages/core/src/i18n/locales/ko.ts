@@ -111,7 +111,7 @@ export const koOverrides: Record<string, string> = {
         'nav.sectionArchive': '보관함',
 
         // Quick Add
-        'quickAdd.help': '빠른 추가 기능은 /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /next, /* focus, /area:<name> 또는 !Area, @context, #tag, +Project, %Person (또는 %"Full Name") 문법을 지원합니다. 시간을 따로 지정하지 않으면 날짜만 마감일로 설정됩니다.',
+        'quickAdd.help': '빠른 추가 기능은 /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> 또는 !Area, @context, #tag, +Project, %Person (또는 %"Full Name") 문법을 지원합니다. 시간을 따로 지정하지 않으면 날짜만 마감일로 설정됩니다.',
         'quickAdd.example': '예: 엄마에게 전화 /due:tomorrow @전화',
         'quickAdd.inlineHint': '예: 엄마에게 전화 /due:tomorrow 5pm @전화 #가족',
         'quickAdd.syntaxHelp': '빠른 추가 문법 도움말',

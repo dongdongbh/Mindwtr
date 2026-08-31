@@ -105,7 +105,7 @@ export const csOverrides: Record<string, string> = {
         'nav.sectionLists': 'Seznamy',
         'nav.sectionOrganize': 'Organizace',
         'nav.sectionArchive': 'Archiv',
-        'quickAdd.help': 'Rychlé přidání podporuje /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /next, /* focus, /area:<name> nebo !Area, @context, #tag, +Project, %Person (nebo %"Full Name"). Termíny zůstávají bez času, dokud čas neuvedete.',
+        'quickAdd.help': 'Rychlé přidání podporuje /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> nebo !Area, @context, #tag, +Project, %Person (nebo %"Full Name"). Termíny zůstávají bez času, dokud čas neuvedete.',
         'quickAdd.example': 'Příklad: Zavolat mámě /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Zkuste: Zavolat mámě /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Nápověda syntaxe rychlého přidání',

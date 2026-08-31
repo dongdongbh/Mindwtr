@@ -1651,6 +1651,7 @@ describe('TaskItemFieldRenderer quick-add token hints (#918)', () => {
         ['startTime' as const, '/start:'],
         ['dueDate' as const, '/due:'],
         ['reviewAt' as const, '/review:'],
+        ['priority' as const, '/priority:'],
         ['energyLevel' as const, '/energy:'],
         ['assignedTo' as const, '%Name'],
         ['contexts' as const, '@context'],
@@ -1665,7 +1666,7 @@ describe('TaskItemFieldRenderer quick-add token hints (#918)', () => {
         expect(getByTitle(`Quick add: ${token}`)).toHaveTextContent(token);
     });
 
-    it.each(['status' as const, 'priority' as const, 'location' as const])(
+    it.each(['status' as const, 'location' as const])(
         'leaves the %s field without a token badge',
         (fieldId) => {
             const { queryByTitle } = render(

@@ -107,7 +107,7 @@ export const zhHans: Record<string, string> = {
         'nav.sectionLists': '列表',
         'nav.sectionOrganize': '整理',
         'nav.sectionArchive': '归档',
-        'quickAdd.help': '快速添加支持 /start:<when>、/due:<when>、/review:<when>、/note:<text>、/link:<url>、/energy:<level>、/next、/area:<name> 或 !Area、@context、#tag、+Project、%Person（或 %"Full Name"）。',
+        'quickAdd.help': '快速添加支持 /start:<when>、/due:<when>、/review:<when>、/note:<text>、/link:<url>、/energy:<level>、/priority:<level>、/next、/area:<name> 或 !Area、@context、#tag、+Project、%Person（或 %"Full Name"）。',
         'quickAdd.example': '示例：给妈妈打电话 /due:tomorrow @phone',
         'quickAdd.inlineHint': '试试：给妈妈打电话 /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': '快速添加语法帮助',

@@ -35,7 +35,7 @@ export const ptOverrides: Record<string, string> = {
         'nav.sectionArchive': 'Arquivo',
 
         // Quick Add
-        'quickAdd.help': 'A adição rápida suporta /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /next, /area:<name> ou !Area, @context, #tag, +Project, %Person (ou %"Full Name").',
+        'quickAdd.help': 'A adição rápida suporta /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /area:<name> ou !Area, @context, #tag, +Project, %Person (ou %"Full Name").',
         'quickAdd.example': 'Exemplo: Ligue para a mãe /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tente: Ligue para a mãe /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Ajuda da sintaxe de adição rápida',

@@ -142,6 +142,7 @@ export function KeybindingHelpModal({
         { keys: '/note:<text>', labelKey: 'taskEdit.descriptionLabel' },
         { keys: '/link:<url>', labelKey: 'attachments.addLink' },
         { keys: '/energy:<level>', labelKey: 'taskEdit.energyLevel' },
+        { keys: '/priority:<level>', labelKey: 'taskEdit.priorityLabel' },
         { keys: '/inbox /next /waiting /someday /reference /done /archived', labelKey: 'taskEdit.statusLabel' },
         { keys: '/*', labelKey: 'agenda.addToFocus', fallbackLabel: "Add to today's focus" },
         { keys: '/area:<name> or !Area', labelKey: 'taskEdit.areaLabel' },

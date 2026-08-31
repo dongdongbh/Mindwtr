@@ -111,7 +111,7 @@ export const viOverrides: Record<string, string> = {
         'nav.sectionArchive': 'Lưu trữ',
 
         // Quick Add
-        'quickAdd.help': 'Thêm nhanh hỗ trợ /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /next, /area:<name> hoặc !Area, @context, #tag, +Project, %Person (hoặc %"Full Name"). Ngày đến hạn chỉ là ngày trừ khi bạn thêm giờ.',
+        'quickAdd.help': 'Thêm nhanh hỗ trợ /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /area:<name> hoặc !Area, @context, #tag, +Project, %Person (hoặc %"Full Name"). Ngày đến hạn chỉ là ngày trừ khi bạn thêm giờ.',
         'quickAdd.example': 'Ví dụ: Gọi cho mẹ /start:tomorrow /due:tomorrow 5pm @phone #family',
         'quickAdd.placeholder': 'Thêm nhiệm vụ… dùng @ngữ cảnh +Dự án #thẻ',
         'quickAdd.addAnother': 'Thêm cái khác',

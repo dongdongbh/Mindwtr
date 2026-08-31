@@ -620,6 +620,7 @@ export function PriorityField({
             t={t}
             ariaLabel={t('taskEdit.priorityLabel')}
             label={t('taskEdit.priorityLabel')}
+            labelToken={QUICK_ADD_FIELD_TOKENS.priority}
             options={options}
             value={value}
             onChange={onChange}

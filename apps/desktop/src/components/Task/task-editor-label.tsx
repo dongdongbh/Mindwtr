@@ -6,6 +6,7 @@ export const taskEditorLabelClassName = 'text-xs text-muted-foreground font-semi
 // (packages/core/src/quick-add.ts). Fields whose token the parser does not
 // accept get no hint. Tokens are language-neutral and never translated.
 export const QUICK_ADD_FIELD_TOKENS = {
+    priority: '/priority:',
     energyLevel: '/energy:',
     assignedTo: '%Name',
     contexts: '@context',

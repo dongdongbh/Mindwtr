@@ -36,7 +36,7 @@ export const svOverrides: Record<string, string> = {
         'accessibility.skipToContent': 'Hoppa till innehåll',
         'accessibility.mainContent': 'Huvudinnehåll',
 
-        'quickAdd.help': 'Snabbtillägg stödjer /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /next, /* fokus, /area:<name> eller !Area, @context, #tag, +Project, %Person (eller %"Full Name"). Förfallodatum blir bara ett datum utan tid, om du inte anger en tid också.',
+        'quickAdd.help': 'Snabbtillägg stödjer /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* fokus, /area:<name> eller !Area, @context, #tag, +Project, %Person (eller %"Full Name"). Förfallodatum blir bara ett datum utan tid, om du inte anger en tid också.',
         'quickAdd.example': 't.ex. Ring mamma /due:tomorrow @phone',
         'quickAdd.pastedImageTitle': 'Skärmbild',
         'quickAdd.pastedImageSaving': 'Bifogar bild...',

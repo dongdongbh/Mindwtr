@@ -137,6 +137,61 @@ describe('quick-add', () => {
         expect(result.props.status).toBe('next');
     });
 
+    it('parses priority quick-add commands', () => {
+        const result = parseQuickAdd('Draft proposal /priority:High /next');
+
+        expect(result.title).toBe('Draft proposal');
+        expect(result.props.priority).toBe('high');
+        expect(result.props.status).toBe('next');
+    });
+
+    it('keeps parsing later priority commands after a note', () => {
+        const result = parseQuickAdd('Call mom /note:ask about trip /priority:urgent /next');
+
+        expect(result.title).toBe('Call mom');
+        expect(result.props.description).toBe('ask about trip');
+        expect(result.props.priority).toBe('urgent');
+        expect(result.props.status).toBe('next');
+    });
+
+    it('recognizes a priority command mid-title and straight after a note', () => {
+        const midTitle = parseQuickAdd('Call plumber /priority:high about the leak');
+        expect(midTitle.title).toBe('Call plumber about the leak');
+        expect(midTitle.props.priority).toBe('high');
+
+        const afterNote = parseQuickAdd('Call plumber /note:some text /priority:high');
+        expect(afterNote.title).toBe('Call plumber');
+        expect(afterNote.props.description).toBe('some text');
+        expect(afterNote.props.priority).toBe('high');
+    });
+
+    // Guard for both quick-add boundary regexes: without `priority:` in them a
+    // preceding /link: (or /note:, /due:) value swallows the whole token.
+    it('ends a preceding /link: value at the priority command', () => {
+        const result = parseQuickAdd('Call plumber /link:https://example.com /priority:high');
+
+        expect(result.title).toBe('Call plumber');
+        expect(result.props.priority).toBe('high');
+        expect(result.props.attachments).toHaveLength(1);
+    });
+
+    it('leaves an unknown priority level in the title', () => {
+        const result = parseQuickAdd('Draft proposal /priority:asap');
+
+        expect(result.title).toBe('Draft proposal /priority:asap');
+        expect(result.props.priority).toBeUndefined();
+    });
+
+    it('parses a priority command mixed with a date command and a context', () => {
+        const now = new Date(2026, 7, 31, 9, 0, 0);
+        const result = parseQuickAdd('Call plumber about leak /due:friday @phone /priority:high', undefined, now);
+
+        expect(result.title).toBe('Call plumber about leak');
+        expect(result.props.priority).toBe('high');
+        expect(result.props.contexts).toEqual(['@phone']);
+        expect(result.props.dueDate).toBeTruthy();
+    });
+
     it('parses URL notes into the description field', () => {
         const now = new Date('2026-03-30T10:00:00Z');
         const result = parseQuickAdd('Check website /note:https://example.com', undefined, now);
