@@ -293,9 +293,31 @@ const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
             if (!StorageAccessFramework?.createFileAsync) {
                 throw new Error('This Android build cannot create SAF transition files.');
             }
-            const created = await StorageAccessFramework.createFileAsync(dirUri, name, mimeType);
-            if (!created || getLeafName(created) !== name) {
-                if (created) await deleteSyncArtifact(created).catch(() => undefined);
+            let created = await StorageAccessFramework.createFileAsync(dirUri, name, mimeType);
+            if (created && getLeafName(created) !== name) {
+                // Some providers decorate the display name on create (an extension derived
+                // from the MIME type, most often ".bin" for application/octet-stream), which
+                // used to read as "another writer" and fail every File Sync write (#1113).
+                // Repair with the exact-rename CAS; the listExact guard below still catches
+                // a real racing peer.
+                const createdName = getLeafName(created);
+                try {
+                    const repaired = await renameSafTransitionDocument(created, name);
+                    void logWarn('SAF provider renamed a transition scratch on create; repaired', {
+                        scope: 'sync',
+                        extra: { requested: name, created: createdName },
+                    });
+                    created = repaired.uri;
+                } catch (error) {
+                    void logWarn('SAF provider renamed a transition scratch on create; repair failed', {
+                        scope: 'sync',
+                        extra: { requested: name, created: createdName, error: error instanceof Error ? error.message : String(error) },
+                    });
+                    await deleteSyncArtifact(created).catch(() => undefined);
+                    throw new SyncEncryptionRemoteConflictError(`${name} was created or renamed by another writer`);
+                }
+            }
+            if (!created) {
                 throw new SyncEncryptionRemoteConflictError(`${name} was created or renamed by another writer`);
             }
             const matches = await listExact(name);

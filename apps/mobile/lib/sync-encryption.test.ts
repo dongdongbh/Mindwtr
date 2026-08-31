@@ -1854,3 +1854,48 @@ describe('local-state persistence and the remote-plaintext state', () => {
     await expect(isSyncEncryptionBlocked()).resolves.toBe(true);
   });
 });
+
+describe('SAF transition scratch name decoration (#1113)', () => {
+  it('repairs a provider-decorated scratch name and completes the versioned write', async () => {
+    const configuredUri = 'content://provider/tree/root/document/root%2Fdata.json';
+    const canonicalUri = 'content://provider/tree/root/document/root/data.json';
+    fs.files.set(canonicalUri, new TextEncoder().encode(JSON.stringify(appData('baseline'))));
+    const baseline = await readSyncFileVersioned(configuredUri);
+
+    // A provider that appends a MIME-derived extension to the requested display name
+    // (leonardo's Fastmail-adjacent report: ".mindwtr-et-s-..." came back decorated).
+    const fileSystem = await import('./file-system');
+    vi.mocked(fileSystem.StorageAccessFramework!.createFileAsync!).mockImplementationOnce(async (dir: string, name: string) => {
+      const uri = `${dir.replace(/\/+$/, '')}/${name}.bin`;
+      fs.files.set(uri, new Uint8Array(0));
+      return uri;
+    });
+
+    await writeSyncFile(configuredUri, appData('mine'), { expectedFingerprint: baseline.fingerprint });
+    expect(textOf(canonicalUri)).toContain('mine');
+  });
+
+  it('still reports a conflict when the decorated scratch cannot be renamed back', async () => {
+    const configuredUri = 'content://provider/tree/root/document/root%2Fdata.json';
+    const canonicalUri = 'content://provider/tree/root/document/root/data.json';
+    const baselineBytes = new TextEncoder().encode(JSON.stringify(appData('baseline')));
+    fs.files.set(canonicalUri, baselineBytes);
+    const baseline = await readSyncFileVersioned(configuredUri);
+
+    const fileSystem = await import('./file-system');
+    vi.mocked(fileSystem.StorageAccessFramework!.createFileAsync!).mockImplementationOnce(async (dir: string, name: string) => {
+      const uri = `${dir.replace(/\/+$/, '')}/${name}.bin`;
+      fs.files.set(uri, new Uint8Array(0));
+      return uri;
+    });
+    const cas = await import('./sync-file-transition-cas');
+    vi.mocked(cas.renameSafTransitionDocument).mockImplementationOnce(async () => {
+      throw new Error('provider refuses the rename');
+    });
+
+    await expect(writeSyncFile(configuredUri, appData('mine'), {
+      expectedFingerprint: baseline.fingerprint,
+    })).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(canonicalUri)).toEqual(baselineBytes);
+  });
+});
