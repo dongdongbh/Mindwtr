@@ -782,43 +782,77 @@ describe('TaskStore', () => {
             ],
         });
         expect(addResult.success).toBe(true);
+        await flushPendingSave();
+        vi.mocked(mockStorage.saveData).mockClear();
+        const listener = vi.fn();
+        const unsubscribe = useTaskStore.subscribe(listener);
+        try {
+            const result = await convertTaskToSection(addResult.id!);
+            expect(result.success).toBe(true);
+            expect(listener).toHaveBeenCalledTimes(1);
 
-        const result = await convertTaskToSection(addResult.id!);
-        expect(result.success).toBe(true);
+            const state = useTaskStore.getState();
+            const section = state._allSections.find((candidate) => candidate.id === result.id);
+            expect(section).toMatchObject({
+                projectId: project!.id,
+                title: 'Pack the kitchen',
+                description: 'Boxes are in the garage.',
+            });
 
-        const state = useTaskStore.getState();
-        const section = state._allSections.find((candidate) => candidate.id === result.id);
-        expect(section).toMatchObject({
-            projectId: project!.id,
-            title: 'Pack the kitchen',
-            description: 'Boxes are in the garage.',
-        });
+            const sectionTasks = state._allTasks
+                .filter((candidate) => candidate.sectionId === section!.id && !candidate.deletedAt)
+                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            expect(sectionTasks.map((candidate) => [candidate.title, candidate.status])).toEqual([
+                ['Wrap the glasses', 'done'],
+                ['Empty the fridge', 'next'],
+            ]);
+            expect(sectionTasks[0].completedAt).toBeTruthy();
+            expect(sectionTasks.every((candidate) => candidate.projectId === project!.id)).toBe(true);
 
-        const sectionTasks = state._allTasks
-            .filter((candidate) => candidate.sectionId === section!.id && !candidate.deletedAt)
-            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-        expect(sectionTasks.map((candidate) => [candidate.title, candidate.status])).toEqual([
-            ['Wrap the glasses', 'done'],
-            ['Empty the fridge', 'next'],
-        ]);
-        expect(sectionTasks[0].completedAt).toBeTruthy();
-        expect(sectionTasks.every((candidate) => candidate.projectId === project!.id)).toBe(true);
+            const source = state._allTasks.find((candidate) => candidate.id === addResult.id);
+            expect(source?.deletedAt).toBeTruthy();
+            expect(source?.purgedAt).toBeUndefined();
 
-        const source = state._allTasks.find((candidate) => candidate.id === addResult.id);
-        expect(source?.deletedAt).toBeTruthy();
-        expect(source?.purgedAt).toBeUndefined();
+            await flushPendingSave();
+            expect(mockStorage.saveData).toHaveBeenCalledTimes(1);
+            const persisted = vi.mocked(mockStorage.saveData).mock.calls[0]?.[0] as AppData;
+            expect(persisted.sections.some((candidate) => candidate.id === section!.id)).toBe(true);
+            expect(persisted.tasks.filter((candidate) => candidate.sectionId === section!.id)).toHaveLength(2);
+            expect(persisted.tasks.find((candidate) => candidate.id === addResult.id)?.deletedAt).toBeTruthy();
+
+            const collectionsBeforeRetry = structuredClone({
+                tasks: state._allTasks,
+                sections: state._allSections,
+            });
+            const retry = await convertTaskToSection(addResult.id!);
+            expect(retry).toEqual({ success: false, error: 'Task not found' });
+            expect(useTaskStore.getState()._allTasks).toEqual(collectionsBeforeRetry.tasks);
+            expect(useTaskStore.getState()._allSections).toEqual(collectionsBeforeRetry.sections);
+            expect(listener).toHaveBeenCalledTimes(1);
+            await flushPendingSave();
+            expect(mockStorage.saveData).toHaveBeenCalledTimes(1);
+        } finally {
+            unsubscribe();
+        }
     });
 
     it('refuses to convert a task that is not in a project', async () => {
         const { addTask, convertTaskToSection } = useTaskStore.getState();
         const addResult = await addTask('Loose task', { status: 'next' });
         expect(addResult.success).toBe(true);
-        const sectionCountBefore = useTaskStore.getState()._allSections.length;
+        await flushPendingSave();
+        vi.mocked(mockStorage.saveData).mockClear();
+        const collectionsBefore = structuredClone({
+            tasks: useTaskStore.getState()._allTasks,
+            sections: useTaskStore.getState()._allSections,
+        });
 
         const result = await convertTaskToSection(addResult.id!);
         expect(result.success).toBe(false);
-        expect(useTaskStore.getState()._allSections.length).toBe(sectionCountBefore);
-        expect(useTaskStore.getState()._tasksById.get(addResult.id!)?.deletedAt).toBeUndefined();
+        expect(useTaskStore.getState()._allTasks).toEqual(collectionsBefore.tasks);
+        expect(useTaskStore.getState()._allSections).toEqual(collectionsBefore.sections);
+        await flushPendingSave();
+        expect(mockStorage.saveData).not.toHaveBeenCalled();
     });
 
     it('creates a project from a task without replacing the task', async () => {

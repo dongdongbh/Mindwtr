@@ -1,5 +1,5 @@
 import { collectFocusEligibilityTasks, resolveFocusStarAction, type FocusStarAction } from './focus-star';
-import type { AppData, PendingRemoteAttachmentDelete, Task, TaskStatus } from './types';
+import type { AppData, PendingRemoteAttachmentDelete, Section, Task, TaskStatus } from './types';
 import type { StorageAdapter, TaskQueryOptions } from './storage';
 import { taskMatchesQuery } from './task-query';
 import type { StoreActionResult, TaskStore } from './store-types';
@@ -881,43 +881,120 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
      * ones stay done), and the original task is soft-deleted so its notes and
      * attachments remain recoverable from Trash (#1106).
      *
-     * Creation runs before the delete, so a failure part-way leaves the source
-     * task intact rather than losing it.
+     * Every entity is validated and built before one store mutation publishes
+     * the complete task/section snapshot. No partial conversion is observable or
+     * persistable, and retry sees the source tombstone instead of duplicating it.
      */
     convertTaskToSection: async (id: string) => {
-        const sourceTask = get()._tasksById.get(id);
-        if (!sourceTask || sourceTask.deletedAt) return actionFail('Task not found');
-        const projectId = sourceTask.projectId;
-        if (!projectId) return actionFail('Task is not in a project');
-
-        const description = typeof sourceTask.description === 'string' ? sourceTask.description.trim() : '';
-        const section = await get().addSection(
-            projectId,
-            sourceTask.title,
-            description ? { description } : undefined,
-        );
-        if (!section) return actionFail('Section could not be created');
-
+        const changeAt = Date.now();
         const now = new Date().toISOString();
-        const checklistTasks = (sourceTask.checklist || [])
-            .filter((item) => typeof item.title === 'string' && item.title.trim().length > 0)
-            .map((item) => ({
-                title: item.title,
-                initialProps: {
+        let errorMessage: string | undefined;
+        let convertedSectionId: string | undefined;
+        set((state) => {
+            const sourceTask = state._tasksById.get(id);
+            if (!sourceTask || sourceTask.deletedAt) {
+                errorMessage = 'Task not found';
+                return state;
+            }
+            const projectId = normalizeOptionalContainerId(sourceTask.projectId);
+            if (!projectId) {
+                errorMessage = 'Task is not in a project';
+                return state;
+            }
+            const projectExists = state._allProjects.some((project) => project.id === projectId && !project.deletedAt);
+            const sectionTitle = typeof sourceTask.title === 'string' ? sourceTask.title.trim() : '';
+            if (!projectExists || !sectionTitle) {
+                errorMessage = 'Section could not be created';
+                return state;
+            }
+
+            const deviceState = ensureDeviceId(state.settings);
+            const sectionOrder = state._allSections
+                .filter((section) => section.projectId === projectId && !section.deletedAt)
+                .reduce((max, section) => Math.max(max, Number.isFinite(section.order) ? section.order : -1), -1) + 1;
+            const description = typeof sourceTask.description === 'string' ? sourceTask.description.trim() : '';
+            const section: Section = {
+                id: uuidv4(),
+                projectId,
+                title: sectionTitle,
+                ...(description ? { description } : {}),
+                order: sectionOrder,
+                isCollapsed: false,
+                rev: 1,
+                revBy: deviceState.deviceId,
+                createdAt: now,
+                updatedAt: now,
+            };
+            const nextAllSections = [...state._allSections, section];
+            const projectOrderReserver = createProjectOrderReserver(state._allTasks);
+            const checklistTasks: Task[] = [];
+
+            for (const item of sourceTask.checklist || []) {
+                const title = typeof item.title === 'string' ? item.title.trim() : '';
+                if (!title) continue;
+                const containerResolution = resolveTaskContainerAssignment({
                     projectId,
                     sectionId: section.id,
-                    status: (item.isCompleted ? 'done' : 'next') as TaskStatus,
+                    areaId: undefined,
+                    allProjects: state._allProjects,
+                    allSections: nextAllSections,
+                    allAreas: state._allAreas,
+                });
+                if (!containerResolution.ok) {
+                    errorMessage = containerResolution.error;
+                    return state;
+                }
+                const order = projectOrderReserver(containerResolution.projectId);
+                checklistTasks.push({
+                    id: uuidv4(),
+                    title,
+                    status: item.isCompleted ? 'done' : 'next',
+                    taskMode: 'task',
+                    tags: [],
+                    contexts: [],
+                    pushCount: 0,
+                    projectId: containerResolution.projectId,
+                    sectionId: containerResolution.sectionId,
+                    areaId: containerResolution.areaId,
                     ...(item.isCompleted ? { completedAt: now } : {}),
-                },
-            }));
-        if (checklistTasks.length > 0) {
-            const added = await get().addTasks(checklistTasks);
-            if (!added.success) return added;
-        }
+                    order,
+                    orderNum: order,
+                    rev: 1,
+                    revBy: deviceState.deviceId,
+                    createdAt: now,
+                    updatedAt: now,
+                });
+            }
 
-        const deleted = await get().deleteTask(id);
-        if (!deleted.success) return deleted;
-        return actionOk({ id: section.id });
+            const deletedSource: Task = {
+                ...sourceTask,
+                deletedAt: now,
+                updatedAt: now,
+                rev: nextRevision(sourceTask.rev),
+                revBy: deviceState.deviceId,
+            };
+            const nextAllTasks = [
+                ...replaceEntityInArray(state._allTasks, deletedSource.id, deletedSource),
+                ...checklistTasks,
+            ];
+            convertedSectionId = section.id;
+            persist(set, debouncedSave, state, {
+                tasks: nextAllTasks,
+                sections: nextAllSections,
+                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+            });
+            return {
+                _allTasks: nextAllTasks,
+                _allSections: nextAllSections,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
+                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+            };
+        });
+
+        if (errorMessage) return actionFail(errorMessage);
+        return convertedSectionId
+            ? actionOk({ id: convertedSectionId })
+            : actionFail('Task not found');
     },
 
     /**
