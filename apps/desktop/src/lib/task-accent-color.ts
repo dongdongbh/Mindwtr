@@ -1,4 +1,4 @@
-import type { Area, Project, Task } from '@mindwtr/core';
+import { DEFAULT_PROJECT_COLOR, type Area, type Project, type Task } from '@mindwtr/core';
 
 /**
  * The identity color a task carries on the calendar and the timeline — project
@@ -13,7 +13,10 @@ export function getTaskAccentColor(
     areaById: Map<string, Area>,
 ): string | undefined {
     const project = task.projectId ? projectById.get(task.projectId) : undefined;
-    if (project?.color) return project.color;
+    // Every project stores DEFAULT_PROJECT_COLOR until the user picks one; that
+    // placeholder grey is "no identity", so it must not shadow the area color (#1124).
+    if (project?.color && project.color !== DEFAULT_PROJECT_COLOR) return project.color;
     const areaId = project?.areaId ?? task.areaId;
-    return (areaId ? areaById.get(areaId)?.color : undefined) || undefined;
+    const areaColor = areaId ? areaById.get(areaId)?.color : undefined;
+    return (areaColor !== DEFAULT_PROJECT_COLOR ? areaColor : undefined) || undefined;
 }
