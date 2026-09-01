@@ -43,6 +43,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve release version
         id: version
@@ -81,16 +82,6 @@ jobs:
             echo "message=" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Verify Flathub automation secrets
-        if: steps.stability.outputs.skip != 'true'
-        env:
-          FLATHUB_REPO_TOKEN: ${{ secrets.FLATHUB_REPO_TOKEN }}
-        run: |
-          if [ -z "${FLATHUB_REPO_TOKEN:-}" ]; then
-            echo "Missing FLATHUB_REPO_TOKEN secret." >&2
-            exit 1
-          fi
-
       - name: Verify Flathub branch exists
         if: steps.stability.outputs.skip != 'true'
         run: |
@@ -108,8 +99,8 @@ jobs:
         with:
           repository: flathub/tech.dongdongbh.mindwtr
           ref: ${{ steps.stability.outputs.flathub_branch }}
-          token: ${{ secrets.FLATHUB_REPO_TOKEN }}
           path: flathub
+          persist-credentials: false
 
       - name: Verify Flathub target branch
         if: steps.stability.outputs.skip != 'true'
@@ -153,14 +144,25 @@ jobs:
           repository: flatpak/flatpak-builder-tools
           ref: 37eb3e5bdc5a14d13ee27b85265aae2c5e9a60c2
           path: flatpak-builder-tools
+          persist-credentials: false
+
+      - name: Set up Python for Flathub generators
+        if: steps.stability.outputs.skip != 'true'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12.14'
 
       - name: Install Flatpak generator dependencies
         if: steps.stability.outputs.skip != 'true'
         run: |
-          python3 -m pip install --user --upgrade pip
-          python3 -m pip install --user aiohttp tomlkit pipx
-          python3 -m pipx install "$GITHUB_WORKSPACE/flatpak-builder-tools/node"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
+
+          generator_venv="$RUNNER_TEMP/flathub-generator-venv"
+          python -m venv "$RUNNER_TEMP/flathub-generator-venv"
+          "$generator_venv/bin/python" -m pip install --require-hashes --only-binary=:all: \
+            --requirement "$GITHUB_WORKSPACE/scripts/ci/flathub-generator-requirements.txt"
+          "$generator_venv/bin/python" -m pip install --no-deps --no-build-isolation "$GITHUB_WORKSPACE/flatpak-builder-tools/node"
+          echo "$generator_venv/bin" >> "$GITHUB_PATH"
 
       - name: Update Flathub checkout
         if: steps.stability.outputs.skip != 'true'
@@ -256,6 +258,7 @@ jobs:
           REPO="flathub/tech.dongdongbh.mindwtr"
 
           cd flathub
+          gh auth setup-git --hostname github.com
 
           existing_pr_url="$(gh pr list \
             --repo "$REPO" \
