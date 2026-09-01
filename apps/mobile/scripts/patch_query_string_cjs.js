@@ -13,6 +13,9 @@ const COMPATIBLE_IMPORT = [
   'const decodeComponent = decodeComponentModule.default ?? decodeComponentModule;',
 ].join('\n');
 
+const hasCompatibleImport = (source) =>
+  source.replaceAll('\r\n', '\n').includes(COMPATIBLE_IMPORT);
+
 const readPackageMetadata = (packageDirectory) =>
   JSON.parse(fs.readFileSync(path.join(packageDirectory, 'package.json'), 'utf8'));
 
@@ -44,7 +47,7 @@ const patchQueryString = (mobileDirectory = path.resolve(__dirname, '..')) => {
 
   const queryStringEntrypoint = path.join(queryStringDirectory, 'index.js');
   const source = fs.readFileSync(queryStringEntrypoint, 'utf8');
-  if (!source.includes(COMPATIBLE_IMPORT)) {
+  if (!hasCompatibleImport(source)) {
     const occurrences = source.split(ORIGINAL_IMPORT).length - 1;
     if (occurrences !== 1) {
       throw new Error(
@@ -69,4 +72,4 @@ if (require.main === module) {
   patchQueryString();
 }
 
-module.exports = { patchQueryString };
+module.exports = { hasCompatibleImport, patchQueryString };

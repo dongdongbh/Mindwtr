@@ -103,9 +103,15 @@ test("mobile query parsing keeps a patched CommonJS-compatible resolution", () =
     '["query-string@9.3.1"',
   ]));
 
-  const { patchQueryString } = rootRequire(
+  const { hasCompatibleImport, patchQueryString } = rootRequire(
     "../../apps/mobile/scripts/patch_query_string_cjs.js",
   );
+  const compatibleImport = [
+    "const decodeComponentModule = require('decode-uri-component');",
+    "const decodeComponent = decodeComponentModule.default ?? decodeComponentModule;",
+  ];
+  expect(hasCompatibleImport(compatibleImport.join("\n"))).toBe(true);
+  expect(hasCompatibleImport(compatibleImport.join("\r\n"))).toBe(true);
   expect(() => patchQueryString()).not.toThrow();
 
   const navigationRequire = createRequire(
