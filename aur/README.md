@@ -7,6 +7,7 @@ Mindwtr recognizes these AUR package identities:
 | [`mindwtr-bin`](https://aur.archlinux.org/packages/mindwtr-bin)           | Stable  | GitHub release `.deb`         | Maintainer `dongdongbh`                                 |
 | [`mindwtr`](https://aur.archlinux.org/packages/mindwtr)                   | Stable  | GitHub release source archive | Maintainer `yochananmarqos`; co-maintainer `dongdongbh` |
 | [`mindwtr-beta-bin`](https://aur.archlinux.org/packages/mindwtr-beta-bin) | RC/beta | GitHub prerelease `.deb`      | Maintainer `dongdongbh`                                 |
+| [`mindwtr-bin-beta`](https://aur.archlinux.org/packages/mindwtr-bin-beta) | RC/beta | Legacy compatibility identity | Maintainer `dongdongbh`                                 |
 
 Treat a different upstream URL or an unexpected ownership change as a security event. The machine-readable policy is in [`trusted-packages.json`](trusted-packages.json).
 
@@ -25,6 +26,19 @@ makepkg -sri
 
 The source URLs must resolve to `https://github.com/dongdongbh/Mindwtr`, executable and source artifacts must have full SHA-256 checksums, and `.SRCINFO` must match `PKGBUILD`. Mindwtr AUR packages must not contain install scripts, remote-shell commands, persistence hooks, or `SKIP` checksums for executable/source content.
 
+### Beta package rename
+
+`mindwtr-beta-bin` is the current beta package name. `mindwtr-bin-beta` remains updated from the same signed release artifacts during the transition, so existing installations continue receiving RC and stable updates. AUR helpers do not reliably migrate package identities from `replaces` metadata alone.
+
+To move explicitly, review the new package and then replace the legacy identity:
+
+```bash
+sudo pacman -R mindwtr-bin-beta
+paru -S mindwtr-beta-bin
+```
+
+Removing the package does not remove Mindwtr's user data. The legacy identity will remain published through at least two stable releases after v1.2.5 and for at least 60 days. After both gates pass, announce the retirement before stopping legacy updates or requesting an AUR merge.
+
 ## Release trust anchor
 
 Mindwtr publishes `SHA256SUMS` with release artifacts and signs new manifests as `SHA256SUMS.asc`. The primary signing-key fingerprint is:
@@ -42,7 +56,7 @@ sha256sum --check SHA256SUMS
 
 ## Publishing policy
 
-All three packages publish directly from release jobs:
+All recognized packages publish directly from release jobs:
 
 1. Generate the package's `PKGBUILD` and `.SRCINFO` from the release tag.
 2. Reject unexpected files, owners, sources, commands, or skipped checksums (`scripts/ci/validate-aur-package.mjs`).
@@ -54,7 +68,7 @@ A recognized AUR maintenance response (pushes disabled) marks the channel delaye
 
 `mindwtr` (the source package, co-maintained with `yochananmarqos`) additionally runs a full clean-container build of the package before pushing, and its release job still saves the exact published files, base commit, all-package ownership/history snapshot, review diff, and diff checksum as a 90-day workflow artifact — now as a publish record rather than a pending proposal.
 
-Maintainers can use the Environment-protected `Publish reviewed mindwtr source proposal` workflow (`publish-aur.yml`) to publish the saved `mindwtr` source-package artifact after a direct-push failure or an extra review. Recover `mindwtr-bin` and `mindwtr-beta-bin` by rerunning their dedicated release workflows.
+Maintainers can use the Environment-protected `Publish reviewed mindwtr source proposal` workflow (`publish-aur.yml`) to publish the saved `mindwtr` source-package artifact after a direct-push failure or an extra review. Recover `mindwtr-bin`, `mindwtr-beta-bin`, and the transitional `mindwtr-bin-beta` identity by rerunning their dedicated release workflows.
 
 ## Maintainer security
 

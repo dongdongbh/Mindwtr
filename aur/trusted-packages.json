@@ -28,6 +28,11 @@
       "maintainer": "dongdongbh",
       "coMaintainers": [],
       "trackedFiles": [".SRCINFO", "PKGBUILD"]
+    },
+    "mindwtr-bin-beta": {
+      "maintainer": "dongdongbh",
+      "coMaintainers": [],
+      "trackedFiles": [".SRCINFO", "PKGBUILD"]
     }
   }
 }

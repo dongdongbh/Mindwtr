@@ -715,24 +715,54 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   expect(beta.on.workflow_dispatch.inputs.tag.required).toBe(true);
   expect(beta.jobs["update-aur-beta"].environment).toBeUndefined();
   expect(betaText).toContain("mindwtr-beta-bin");
-  expect(betaText).not.toContain("mindwtr-bin-beta");
+  expect(betaText).toContain("mindwtr-bin-beta");
+  expect(
+    beta.jobs["update-aur-beta"].strategy.matrix.include.map(
+      (entry) => entry.package,
+    ),
+  ).toEqual(["mindwtr-beta-bin", "mindwtr-bin-beta"]);
   const betaSteps = beta.jobs["update-aur-beta"].steps;
   const betaClone = betaSteps.find(
-    (step) => step.name === "Clone or initialize AUR beta repo",
+    (step) => step.name === "Clone existing AUR beta repo",
   );
   const betaAudit = betaSteps.find(
     (step) => step.name === "Verify AUR package ownership before push",
   );
-  const betaCreationAudit = betaSteps.find(
-    (step) => step.name === "Verify newly created AUR package",
+  const betaPublishedAudit = betaSteps.find(
+    (step) => step.name === "Verify published AUR package",
   );
-  expect(betaClone.id).toBe("beta_repo");
+  expect(betaClone).toBeDefined();
   expect(betaClone.run).toContain("rev-parse --verify HEAD");
-  expect(betaAudit.run).toContain('del(.packages["mindwtr-beta-bin"])');
-  expect(betaCreationAudit.if).toContain("steps.beta_repo.outputs.initialized");
-  expect(betaCreationAudit.run).toContain("audit-aur-state.mjs");
-  expect(betaCreationAudit.run).toContain("REMOTE_HEAD");
-  expect(betaCreationAudit.run).toContain("AUR RPC has not indexed");
+  expect(betaClone.run).toContain("exit 1");
+  expect(betaAudit.run).toContain("node scripts/ci/audit-aur-state.mjs");
+  expect(betaAudit.run).not.toContain("del(.packages");
+  expect(betaPublishedAudit.if).toContain("steps.publish.outputs.status == 'published'");
+  expect(betaPublishedAudit.run).toContain("audit-aur-state.mjs");
+  expect(betaPublishedAudit.run).toContain("REMOTE_HEAD");
+
+  const canonicalTemplate = readFileSync(
+    "aur/PKGBUILD-beta-bin.template",
+    "utf8",
+  );
+  const legacyTemplate = readFileSync(
+    "aur/PKGBUILD-bin-beta-legacy.template",
+    "utf8",
+  );
+  expect(canonicalTemplate).toContain("pkgname=mindwtr-beta-bin");
+  expect(canonicalTemplate).toContain("replaces=('mindwtr-bin-beta')");
+  expect(legacyTemplate).toContain("pkgname=mindwtr-bin-beta");
+  expect(legacyTemplate).toContain("migrate manually to mindwtr-beta-bin");
+  expect(legacyTemplate).not.toContain("replaces=");
+
+  const trustedPackages = JSON.parse(
+    readFileSync("aur/trusted-packages.json", "utf8"),
+  ).packages;
+  expect(trustedPackages["mindwtr-beta-bin"]).toBeDefined();
+  expect(trustedPackages["mindwtr-bin-beta"]).toBeDefined();
+
+  const aurDocs = readFileSync("aur/README.md", "utf8");
+  expect(aurDocs).toContain("pacman -R mindwtr-bin-beta");
+  expect(aurDocs).toContain("AUR helpers do not reliably migrate package identities");
 });
 
 for (const scenario of [
@@ -844,7 +874,7 @@ test("manual AUR recovery exposes only the saved mindwtr source proposal", () =>
   const aurPolicy = readFileSync("aur/README.md", "utf8");
   expect(aurPolicy).toContain("saved `mindwtr` source-package artifact");
   expect(aurPolicy).toContain(
-    "Recover `mindwtr-bin` and `mindwtr-beta-bin` by rerunning their dedicated release workflows.",
+    "Recover `mindwtr-bin`, `mindwtr-beta-bin`, and the transitional `mindwtr-bin-beta` identity",
   );
   expect(aurPolicy).not.toContain("incident-mode fallback for all three packages");
 });

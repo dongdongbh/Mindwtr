@@ -808,12 +808,12 @@ jobs:
     with:
       tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
-  # Stable releases also update the AUR beta package so mindwtr-beta-bin users
-  # pick stable back up after a test cycle without switching packages.
+  # Stable releases update both AUR beta identities so current and transitional
+  # users pick stable back up after a test cycle without switching packages.
   update-aur-beta-bin:
     needs: [validate, release]
     if: ${{ always() && needs.validate.result == 'success' && !contains(github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name, '-') && ((startsWith(github.ref, 'refs/tags/') && github.event_name == 'push' && needs.release.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.run_update_aur && (needs.release.result == 'success' || needs.release.result == 'skipped'))) }}
-    name: Update AUR Beta (mindwtr-beta-bin)
+    name: Update AUR Beta identities
     uses: ./.github/workflows/update-aur-beta.yml
     with:
       tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}

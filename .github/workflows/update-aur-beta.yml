@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: 'RC or stable tag to publish to mindwtr-beta-bin (e.g., v1.0.5-rc.1 or v1.0.5)'
+        description: 'RC or stable tag to publish to both beta AUR identities (e.g., v1.0.5-rc.1 or v1.0.5)'
         required: true
         type: string
     secrets:
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'RC or stable tag to publish to mindwtr-beta-bin (e.g., v1.0.5-rc.1 or v1.0.5)'
+        description: 'RC or stable tag to publish to both beta AUR identities (e.g., v1.0.5-rc.1 or v1.0.5)'
         required: true
         type: string
 
@@ -34,8 +34,18 @@ concurrency:
 jobs:
   update-aur-beta:
     runs-on: ubuntu-latest
-    name: Update mindwtr-beta-bin
+    name: Update ${{ matrix.package }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: mindwtr-beta-bin
+            directory: aur-mindwtr-beta-bin
+            template: aur/PKGBUILD-beta-bin.template
+          - package: mindwtr-bin-beta
+            directory: aur-mindwtr-bin-beta
+            template: aur/PKGBUILD-bin-beta-legacy.template
     steps:
       - name: Checkout repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -57,7 +67,7 @@ jobs:
           # Stable tags are allowed too: every stable release also lands in the
           # beta channels so beta users never have to hop back to stay current.
           if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
-            echo "mindwtr-beta-bin must be updated from an RC or stable tag like v1.0.5-rc.1 or v1.0.5; got: $TAG" >&2
+            echo "Mindwtr beta AUR packages must be updated from an RC or stable tag like v1.0.5-rc.1 or v1.0.5; got: $TAG" >&2
             exit 1
           fi
 
@@ -96,36 +106,37 @@ jobs:
           fi
           cp "$RUNNER_TEMP/aur-known-hosts" ~/.ssh/known_hosts
 
-      - name: Clone or initialize AUR beta repo
-        id: beta_repo
+      - name: Clone existing AUR beta repo
         shell: bash
+        env:
+          AUR_PACKAGE: ${{ matrix.package }}
+          PACKAGE_DIR: ${{ matrix.directory }}
         run: |
           set -euo pipefail
-          rm -rf aur-mindwtr-beta-bin
-          AUR_URL="ssh://aur@aur.archlinux.org/mindwtr-beta-bin.git"
+          case "${AUR_PACKAGE}:${PACKAGE_DIR}" in
+            mindwtr-beta-bin:aur-mindwtr-beta-bin|mindwtr-bin-beta:aur-mindwtr-bin-beta) ;;
+            *) echo "Unexpected beta package matrix entry." >&2; exit 1 ;;
+          esac
+          rm -rf "$PACKAGE_DIR"
+          AUR_URL="ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git"
           for attempt in 1 2 3; do
-            if git clone "$AUR_URL" aur-mindwtr-beta-bin; then
-              if git -C aur-mindwtr-beta-bin rev-parse --verify HEAD >/dev/null 2>&1; then
-                echo "initialized=false" >> "$GITHUB_OUTPUT"
-              else
-                echo "AUR returned an empty repository; preparing the first mindwtr-beta-bin commit."
-                echo "initialized=true" >> "$GITHUB_OUTPUT"
-              fi
+            if git clone "$AUR_URL" "$PACKAGE_DIR" \
+              && git -C "$PACKAGE_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
               exit 0
             fi
-            echo "AUR beta clone attempt ${attempt} failed; retrying..." >&2
-            rm -rf aur-mindwtr-beta-bin
+            echo "AUR ${AUR_PACKAGE} clone attempt ${attempt} failed or returned no history; retrying..." >&2
+            rm -rf "$PACKAGE_DIR"
             sleep 3
           done
 
-          echo "Could not clone mindwtr-beta-bin; initializing a new AUR package checkout."
-          git init -b master aur-mindwtr-beta-bin
-          git -C aur-mindwtr-beta-bin remote add origin "$AUR_URL"
-          echo "initialized=true" >> "$GITHUB_OUTPUT"
+          echo "Could not clone existing ${AUR_PACKAGE}; refusing to initialize over a transition identity." >&2
+          exit 1
 
       - name: Generate beta PKGBUILD
         shell: bash
         env:
+          PACKAGE_DIR: ${{ matrix.directory }}
+          PACKAGE_TEMPLATE: ${{ matrix.template }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -135,17 +146,17 @@ jobs:
           else
             PKGVER="${VERSION//-/_}"
           fi
-          export TAG VERSION PKGVER
+          export PACKAGE_DIR PACKAGE_TEMPLATE TAG VERSION PKGVER
           python3 - <<'PY'
           import os
           from pathlib import Path
 
-          template = Path('aur/PKGBUILD-beta-bin.template').read_text(encoding='utf-8')
+          template = Path(os.environ['PACKAGE_TEMPLATE']).read_text(encoding='utf-8')
           text = (template
               .replace('__PKGVER__', os.environ['PKGVER'])
               .replace('__RELEASE_TAG__', os.environ['TAG'])
               .replace('__ASSET_VERSION__', os.environ['VERSION']))
-          Path('aur-mindwtr-beta-bin/PKGBUILD').write_text(text, encoding='utf-8')
+          Path(os.environ['PACKAGE_DIR'], 'PKGBUILD').write_text(text, encoding='utf-8')
           PY
 
       - name: Wait for release assets
@@ -172,6 +183,8 @@ jobs:
 
       - name: Update .SRCINFO and smoke package
         shell: bash
+        env:
+          PACKAGE_DIR: ${{ matrix.directory }}
         run: |
           set -euo pipefail
           HOST_UID="$(id -u)"
@@ -179,7 +192,7 @@ jobs:
           docker run --rm \
             -e HOST_UID="$HOST_UID" \
             -e HOST_GID="$HOST_GID" \
-            -v "$PWD/aur-mindwtr-beta-bin:/aur" \
+            -v "$PWD/$PACKAGE_DIR:/aur" \
             -w /aur \
             archlinux:latest \
             bash -lc '
@@ -196,30 +209,27 @@ jobs:
 
       - name: Validate AUR package contents
         shell: bash
+        env:
+          AUR_PACKAGE: ${{ matrix.package }}
+          PACKAGE_DIR: ${{ matrix.directory }}
         run: |
           set -euo pipefail
           node scripts/ci/validate-aur-package.mjs \
-            --package-dir aur-mindwtr-beta-bin \
-            --package mindwtr-beta-bin
+            --package-dir "$PACKAGE_DIR" \
+            --package "$AUR_PACKAGE"
 
       - name: Verify AUR package ownership before push
         shell: bash
-        env:
-          INITIALIZED: ${{ steps.beta_repo.outputs.initialized }}
         run: |
           set -euo pipefail
-          if [ "$INITIALIZED" = "true" ]; then
-            jq 'del(.packages["mindwtr-beta-bin"])' aur/trusted-packages.json > "$RUNNER_TEMP/aur-existing-packages.json"
-            node scripts/ci/audit-aur-state.mjs --policy "$RUNNER_TEMP/aur-existing-packages.json"
-          else
-            node scripts/ci/audit-aur-state.mjs
-          fi
+          node scripts/ci/audit-aur-state.mjs
 
       - name: Commit and push beta package
         id: publish
         shell: bash
-        working-directory: aur-mindwtr-beta-bin
+        working-directory: ${{ matrix.directory }}
         env:
+          AUR_PACKAGE: ${{ matrix.package }}
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
         run: |
@@ -235,7 +245,7 @@ jobs:
           git add PKGBUILD .SRCINFO
           git commit -m "Update to ${{ steps.version.outputs.tag }}"
 
-          PUSH_LOG="$RUNNER_TEMP/aur-beta-push.log"
+          PUSH_LOG="$RUNNER_TEMP/aur-${AUR_PACKAGE}-push.log"
           if git push origin master 2>&1 | tee "$PUSH_LOG"; then
             echo "status=published" >> "$GITHUB_OUTPUT"
             exit 0
@@ -245,18 +255,21 @@ jobs:
             echo "status=delayed" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "Failed to push mindwtr-beta-bin to AUR." >&2
+          echo "Failed to push ${AUR_PACKAGE} to AUR." >&2
           exit 1
 
-      - name: Verify newly created AUR package
-        if: ${{ steps.beta_repo.outputs.initialized == 'true' && steps.publish.outputs.status == 'published' }}
+      - name: Verify published AUR package
+        if: ${{ steps.publish.outputs.status == 'published' }}
         shell: bash
+        env:
+          AUR_PACKAGE: ${{ matrix.package }}
+          PACKAGE_DIR: ${{ matrix.directory }}
         run: |
           set -euo pipefail
-          LOCAL_HEAD="$(git -C aur-mindwtr-beta-bin rev-parse HEAD)"
-          REMOTE_HEAD="$(git ls-remote https://aur.archlinux.org/mindwtr-beta-bin.git refs/heads/master | awk '{print $1}')"
+          LOCAL_HEAD="$(git -C "$PACKAGE_DIR" rev-parse HEAD)"
+          REMOTE_HEAD="$(git ls-remote "https://aur.archlinux.org/${AUR_PACKAGE}.git" refs/heads/master | awk '{print $1}')"
           if [ "$REMOTE_HEAD" != "$LOCAL_HEAD" ]; then
-            echo "Published mindwtr-beta-bin head mismatch: local ${LOCAL_HEAD}, remote ${REMOTE_HEAD:-missing}." >&2
+            echo "Published ${AUR_PACKAGE} head mismatch: local ${LOCAL_HEAD}, remote ${REMOTE_HEAD:-missing}." >&2
             exit 1
           fi
           for attempt in 1 2 3 4 5 6; do
@@ -264,7 +277,7 @@ jobs:
               exit 0
             fi
             if [ "$attempt" -eq 6 ]; then
-              echo "::warning::AUR RPC has not indexed mindwtr-beta-bin yet; its public Git head matches the exact pushed commit. The next update will require the normal full ownership audit."
+              echo "::warning::AUR RPC has not indexed ${AUR_PACKAGE} yet; its public Git head matches the exact pushed commit. The next update will require the normal full ownership audit."
               exit 0
             fi
             sleep 5

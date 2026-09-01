@@ -1,17 +1,16 @@
 # Maintainer: dongdongbh <dongdongbhbh@gmail.com>
-pkgname=mindwtr-beta-bin
+pkgname=mindwtr-bin-beta
 pkgver=__PKGVER__
 epoch=1
 pkgrel=1
-pkgdesc="A complete Getting Things Done (GTD) productivity system - Mind Like Water (beta binary release)"
+pkgdesc="Mindwtr beta binary release (legacy name; migrate manually to mindwtr-beta-bin)"
 arch=('x86_64')
 url="https://github.com/dongdongbh/Mindwtr"
 license=('AGPL3')
 depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3')
 optdepends=('evolution-data-server: GNOME system calendar integration')
-provides=('mindwtr' 'mindwtr-bin' 'mindwtr-bin-beta')
-conflicts=('mindwtr' 'mindwtr-bin' 'mindwtr-bin-beta')
-replaces=('mindwtr-bin-beta')
+provides=('mindwtr' 'mindwtr-bin' 'mindwtr-beta-bin')
+conflicts=('mindwtr' 'mindwtr-bin' 'mindwtr-beta-bin')
 _release_tag=__RELEASE_TAG__
 _asset_version=__ASSET_VERSION__
 source_x86_64=("${url}/releases/download/${_release_tag}/mindwtr_${_asset_version}_amd64.deb")
