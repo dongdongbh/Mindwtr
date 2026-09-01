@@ -112,6 +112,23 @@ describe('getSystemCalendars', () => {
     });
 });
 
+// Mirrors the day bucketing in components/views/calendar/useCalendarViewController.ts
+// (`externalEventsByDate`): local days, end exclusive when it lands on local midnight.
+function countProjectedDays(event: { start: string; end: string } | undefined): number {
+    if (!event) return 0;
+    const start = new Date(event.start);
+    const end = new Date(event.end);
+    const day = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0);
+    const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 0, 0, 0, 0);
+    if (end.getTime() === endDay.getTime()) endDay.setDate(endDay.getDate() - 1);
+    let days = 0;
+    while (day.getTime() <= endDay.getTime() && days < 370) {
+        days += 1;
+        day.setDate(day.getDate() + 1);
+    }
+    return days;
+}
+
 describe('fetchExternalCalendarEvents', () => {
     it('loads Android local ICS files through content URIs', async () => {
         const rangeStart = new Date('2026-04-20T00:00:00.000Z');
@@ -258,9 +275,133 @@ describe('fetchExternalCalendarEvents', () => {
 
         const result = await fetchExternalCalendarEvents(rangeStart, rangeEnd);
 
-        expect(mockGetEventsAsync).toHaveBeenCalledWith(['google-primary'], rangeStart, rangeEnd);
+        expect(mockGetEventsAsync).toHaveBeenCalledWith(
+            ['google-primary'],
+            expect.any(Date),
+            expect.any(Date),
+        );
         expect(result.events.map((event) => event.title)).toEqual(['Team meeting']);
         expect(result.events[0]?.nativeEventId).toBe('external-meeting');
+    });
+
+    it('projects an all-day device event over exactly its own days, like the .ics import (#1133)', async () => {
+        // The reporter is east of UTC; Android hands all-day bounds back as UTC midnight, which
+        // reads as 02:00 local and used to paint a fourth day. Pinned so the assertion means the
+        // same thing on a UTC CI runner.
+        const originalTz = process.env.TZ;
+        process.env.TZ = 'Europe/Berlin';
+        try {
+            const rangeStart = new Date('2026-09-01T00:00:00.000Z');
+            const rangeEnd = new Date('2026-10-01T00:00:00.000Z');
+            mockGetItem.mockImplementation(async (key: string) => {
+                if (key === EXTERNAL_CALENDARS_KEY) {
+                    return JSON.stringify([
+                        { id: 'ics-feed', name: 'Feed', url: 'content://downloads/days.ics', enabled: true },
+                    ]);
+                }
+                if (key === SYSTEM_CALENDAR_SETTINGS_KEY) {
+                    return JSON.stringify({ enabled: true, selectAll: true, selectedCalendarIds: [] });
+                }
+                return null;
+            });
+            // Same three-day all-day event, once through each path.
+            mockReadSafString.mockResolvedValue(
+                [
+                    'BEGIN:VCALENDAR',
+                    'VERSION:2.0',
+                    'BEGIN:VEVENT',
+                    'UID:three-days',
+                    'SUMMARY:Days 1-3',
+                    'DTSTART;VALUE=DATE:20260901',
+                    'DTEND;VALUE=DATE:20260904',
+                    'END:VEVENT',
+                    'END:VCALENDAR',
+                ].join('\r\n'),
+            );
+            mockGetCalendarsAsync.mockResolvedValue([
+                { id: 'davx5', title: 'DAVx5', color: '#888888' },
+            ]);
+            mockGetEventsAsync.mockResolvedValue([
+                {
+                    id: 'three-days',
+                    calendarId: 'davx5',
+                    title: 'Days 1-3',
+                    startDate: new Date('2026-09-01T00:00:00.000Z'),
+                    endDate: new Date('2026-09-04T00:00:00.000Z'),
+                    allDay: true,
+                },
+            ]);
+
+            const result = await fetchExternalCalendarEvents(rangeStart, rangeEnd);
+
+            const device = result.events.find((event) => event.sourceId === 'system:davx5');
+            const ics = result.events.find((event) => event.sourceId === 'ics-feed');
+            expect(countProjectedDays(device)).toBe(3);
+            expect(countProjectedDays(ics)).toBe(3);
+            expect(device?.start).toBe(ics?.start);
+            expect(device?.end).toBe(ics?.end);
+        } finally {
+            process.env.TZ = originalTz;
+        }
+    });
+
+    it('keeps device-calendar events that span the queried window (#1134)', async () => {
+        // Android's provider query only returns events fully contained in the window, so the fetch
+        // has to over-query and clip; a multi-day event crossing the month edge must survive both.
+        const rangeStart = new Date('2026-04-01T00:00:00.000Z');
+        const rangeEnd = new Date('2026-05-01T00:00:00.000Z');
+        mockGetCalendarsAsync.mockResolvedValue([
+            { id: 'google-primary', title: 'Google', color: '#888888' },
+        ]);
+        mockGetEventsAsync.mockResolvedValue([
+            {
+                id: 'crosses-month-end',
+                calendarId: 'google-primary',
+                title: 'Day 4',
+                startDate: new Date('2026-04-29T00:00:00.000Z'),
+                endDate: new Date('2026-05-03T00:00:00.000Z'),
+                allDay: true,
+            },
+            {
+                id: 'crosses-month-start',
+                calendarId: 'google-primary',
+                title: 'Trip',
+                startDate: new Date('2026-03-28T00:00:00.000Z'),
+                endDate: new Date('2026-04-02T00:00:00.000Z'),
+                allDay: true,
+            },
+            {
+                id: 'spans-whole-window',
+                calendarId: 'google-primary',
+                title: 'Sabbatical',
+                startDate: new Date('2026-03-10T00:00:00.000Z'),
+                endDate: new Date('2026-06-10T00:00:00.000Z'),
+                allDay: true,
+            },
+            {
+                id: 'entirely-before',
+                calendarId: 'google-primary',
+                title: 'Last month',
+                startDate: new Date('2026-03-05T09:00:00.000Z'),
+                endDate: new Date('2026-03-05T10:00:00.000Z'),
+                allDay: false,
+            },
+        ]);
+
+        const result = await fetchExternalCalendarEvents(rangeStart, rangeEnd);
+
+        const [, queriedStart, queriedEnd] = mockGetEventsAsync.mock.calls[0] as unknown as [
+            string[],
+            Date,
+            Date,
+        ];
+        expect(queriedStart.getTime()).toBeLessThan(rangeStart.getTime());
+        expect(queriedEnd.getTime()).toBeGreaterThan(rangeEnd.getTime());
+        expect(result.events.map((event) => event.title).sort()).toEqual([
+            'Day 4',
+            'Sabbatical',
+            'Trip',
+        ]);
     });
 
     it('surfaces a system calendar\'s own color as a feed hint, not an explicit pick (#974)', async () => {

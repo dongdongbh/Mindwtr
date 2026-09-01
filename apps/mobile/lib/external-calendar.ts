@@ -134,6 +134,10 @@ export async function openExternalCalendarEvent(event: ExternalCalendarEvent): P
     return false;
 }
 
+function toLocalMidnightOfUtcDate(value: Date): Date {
+    return new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate(), 0, 0, 0, 0);
+}
+
 function toDateSafe(value: unknown): Date | null {
     if (!value) return null;
     const date = value instanceof Date ? value : new Date(String(value));
@@ -420,7 +424,23 @@ async function fetchSystemCalendarEvents(rangeStart: Date, rangeEnd: Date, signa
     }
 
     const selectedIds = selectedCalendars.map((calendar) => calendar.id);
-    const rawEvents = await withAbortSignal(Calendar.getEventsAsync(selectedIds, rangeStart, rangeEnd), signal);
+    // expo-calendar's Android query selects `Instances.BEGIN >= start AND Instances.END <= end`
+    // (expo-calendar/android/.../CalendarModule.kt `findEvents`), i.e. only events *contained* in
+    // the window. A multi-day event that crosses either edge — the classic one spanning a month
+    // boundary — is dropped by the provider before we ever see it (#1134). iOS uses
+    // `predicateForEvents`, which already matches on overlap. So widen the Android query and clip
+    // to the requested window below, the same overlap rule the .ics path uses (core `ics.ts`).
+    // ponytail: fixed 92-day pad; an event hanging more than a quarter past an edge is still
+    // missed. Proper fix is our own CalendarContract.Instances query in native code.
+    const queryPadMs = Platform.OS === 'android' ? 92 * 24 * 60 * 60 * 1000 : 0;
+    const rawEvents = await withAbortSignal(
+        Calendar.getEventsAsync(
+            selectedIds,
+            new Date(rangeStart.getTime() - queryPadMs),
+            new Date(rangeEnd.getTime() + queryPadMs),
+        ),
+        signal,
+    );
 
     const calendars: ExternalCalendarSubscription[] = selectedCalendars.map((calendar) => ({
         id: getSystemCalendarSourceId(calendar.id),
@@ -439,13 +459,27 @@ async function fetchSystemCalendarEvents(rangeStart: Date, rangeEnd: Date, signa
             : selectedIds[0];
 
         const sourceId = getSystemCalendarSourceId(eventCalendarId);
-        const start = toDateSafe(event.startDate);
-        if (!start) continue;
+        const rawStart = toDateSafe(event.startDate);
+        if (!rawStart) continue;
 
         const endCandidate = toDateSafe(event.endDate);
-        const end = endCandidate && endCandidate.getTime() > start.getTime()
+        const rawEnd = endCandidate && endCandidate.getTime() > rawStart.getTime()
             ? endCandidate
-            : new Date(start.getTime() + (event.allDay ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000));
+            : new Date(rawStart.getTime() + (event.allDay ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000));
+
+        // An all-day event's bounds are calendar dates, not instants. Android's provider stores
+        // them as UTC midnight (CalendarContract requires it) and expo-calendar formats them with a
+        // GMT formatter, so east of UTC they read back as mid-day and paint an extra day, west of
+        // UTC they slide a day earlier (#1133). Re-read the date parts in UTC and rebuild local
+        // midnights — the exact shape the .ics path produces (core `ics.ts` parses a DATE value as
+        // local midnight, with DTEND left exclusive), so day projection needs no platform knowledge.
+        // iOS already hands back local all-day bounds, so it must not be shifted.
+        const allDayDates = Platform.OS === 'android' && event.allDay === true;
+        const start = allDayDates ? toLocalMidnightOfUtcDate(rawStart) : rawStart;
+        const end = allDayDates ? toLocalMidnightOfUtcDate(rawEnd) : rawEnd;
+        // Overlap, not containment: an event that starts before the window or ends after it still
+        // belongs to it. Never stricter than the native query, so nothing that loaded before drops.
+        if (end.getTime() <= rangeStart.getTime() || start.getTime() >= rangeEnd.getTime()) continue;
         const startIso = start.toISOString();
         const endIso = end.toISOString();
         const rawTitle = typeof event.title === 'string' ? event.title.trim() : '';

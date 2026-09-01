@@ -4,6 +4,10 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 ## Full Change List
 
+- Android calendar: all-day events from a device calendar covered one day too many — a three-day event was painted across four days, and an all-day event could linger in the next day's daily review. Android reports an all-day event's start and end in UTC, so east of UTC they landed a couple of hours into the day and spilled into the following one (west of UTC they would have slid a day earlier). All-day bounds from a device calendar are now read as calendar dates, the same way the `.ics` import already read them. (#1133)
+
+- Android calendar: an event spanning several days was missing from the calendar view whenever it crossed the edge of the shown month or week — a trip starting on the 30th and ending on the 2nd appeared in other calendar apps but not in Mindwtr, and the calendar settings test button counted it as missing. Android only, and only for device calendars; the same event imported as an `.ics` file always showed. Events that merely overlap the shown window are now loaded instead of only those that fit entirely inside it. (#1134)
+
 - Android sync: attachment uploads failed with "Call to function 'ExponentFileSystem.uploadTaskStartAsync' has been rejected", so the file's bytes never reached the sync location. Files added on a phone stayed local, and verifying a sync location could end with "Sync setup could not be verified ... Candidate attachment proof failed for <id>" when the phone held a file the location did not. The upload was missing an option that Android requires and iOS supplies a default for, which is why only Android was affected. (#1136)
 
 - Settings → Data → Diagnostics: on Microsoft Store installs the log file path shown was the plain `%APPDATA%` location, where the file never exists — Windows silently redirects a Store app's AppData writes into the package's `LocalCache` folder. The path shown now points at the file's real location. (#1135)
