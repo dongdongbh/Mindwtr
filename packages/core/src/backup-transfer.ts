@@ -310,9 +310,10 @@ const sanitizeRestoredAttachments = <T extends { attachments?: Attachment[] }>(i
  * refresh the backup children and explicitly tombstone children the replaced local
  * parent knew about but the backup omitted. Otherwise the next sync can immediately
  * resurrect an omitted attachment or let a stale remote tombstone re-delete a file
- * the user just restored.
+ * the user just restored. Every live file also remains a durable upload candidate
+ * until the transfer lifecycle proves and publishes those exact restored bytes.
  */
-const prepareRestoredAttachmentsForSync = <T extends { attachments?: Attachment[] }>(
+const prepareRestoredAttachmentsForSync = <T extends { attachments?: Attachment[]; deletedAt?: string }>(
     item: T,
     restoredAt: string,
     previous?: T,
@@ -324,11 +325,27 @@ const prepareRestoredAttachmentsForSync = <T extends { attachments?: Attachment[
     }
 
     const restoredIds = new Set(restoredAttachments.map((attachment) => attachment.id));
-    const refreshed = restoredAttachments.map((attachment) => ({
-        ...attachment,
-        ...(attachment.deletedAt ? { deletedAt: restoredAt } : {}),
-        updatedAt: restoredAt,
-    }));
+    const previousAttachmentsById = new Map(
+        previousAttachments.map((attachment) => [attachment.id, attachment]),
+    );
+    const refreshed = restoredAttachments.map((attachment) => {
+        const previousAttachment = previousAttachmentsById.get(attachment.id);
+        const shouldPublishRestoredBytes = attachment.kind === 'file'
+            && !item.deletedAt
+            && !attachment.deletedAt;
+        return {
+            ...attachment,
+            ...(attachment.kind === 'file' ? {
+                contentRev: nextRevision(Math.max(
+                    normalizeRevision(attachment.contentRev),
+                    normalizeRevision(previousAttachment?.contentRev),
+                )),
+            } : {}),
+            ...(shouldPublishRestoredBytes ? { pendingContentUpload: true } : {}),
+            ...(attachment.deletedAt ? { deletedAt: restoredAt } : {}),
+            updatedAt: restoredAt,
+        };
+    });
     const carriedTombstones = previousAttachments
         .filter((attachment) => !restoredIds.has(attachment.id))
         .map((attachment) => ({

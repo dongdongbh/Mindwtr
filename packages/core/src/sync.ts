@@ -892,8 +892,18 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
             const contentSource = localRev === incomingRev
                 ? winner
                 : (localRev > incomingRev ? localAttachment : incomingAttachment);
-            const fileHash = contentSource.fileHash || localAttachment.fileHash || incomingAttachment.fileHash;
             const contentRev = contentSource.contentRev;
+            // An unproven local replacement is its own content generation. Falling
+            // back to the incoming digest here would falsely label its bytes as the
+            // previous remote blob and then let the restored metadata escape without
+            // a hash-bound upload. Keep the digest absent until the prepare lifecycle
+            // snapshots these local bytes; the durable pending marker blocks remote
+            // publication if that proof cannot be obtained.
+            const localPendingCandidateWon = localAttachment.pendingContentUpload === true
+                && contentSource === localAttachment;
+            const fileHash = localPendingCandidateWon
+                ? localAttachment.fileHash
+                : contentSource.fileHash || localAttachment.fileHash || incomingAttachment.fileHash;
             const normalizedLocalFileHash = localAttachment.fileHash?.trim().toLowerCase();
             const normalizedResolvedFileHash = fileHash?.trim().toLowerCase();
             // Merge kept the exact local content identity: same contentRev, same
@@ -901,8 +911,13 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
             // own stripped remote twin, and the attachment-level tie can still hand
             // `winner` to the incoming copy.
             const localIdentitySurvived = (contentRev ?? 0) === localRev
-                && Boolean(normalizedLocalFileHash)
-                && normalizedResolvedFileHash === normalizedLocalFileHash;
+                && (
+                    (Boolean(normalizedLocalFileHash)
+                        && normalizedResolvedFileHash === normalizedLocalFileHash)
+                    || (localPendingCandidateWon
+                        && !normalizedLocalFileHash
+                        && !normalizedResolvedFileHash)
+                );
             // `pendingContentUpload` is device-local retry state, never an LWW
             // field. Preserve this device's marker whenever merge kept the exact
             // local content identity, even if an otherwise-identical remote record
@@ -982,7 +997,9 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
                 cloudKey: resolveCloudKey(attachment, localFile, incomingFile),
                 fileHash: attachment.deletedAt
                     ? attachment.fileHash
-                    : attachment.fileHash || localFile?.fileHash || incomingFile?.fileHash,
+                    : attachment.pendingContentUpload === true
+                        ? attachment.fileHash
+                        : attachment.fileHash || localFile?.fileHash || incomingFile?.fileHash,
                 localStatus: attachment.deletedAt
                     ? attachment.localStatus
                     : uriAvailable

@@ -491,6 +491,40 @@ export async function runAttachmentTransferLifecycle(
         }
     };
 
+    // A restored generation from an older backup may have a recorded stat but no
+    // digest. Snapshot it during the pre-merge pass so contentRev can remain the
+    // restore's authority while fileHash becomes proof of the exact bytes that the
+    // post-merge pass is allowed to upload. A missing/unreadable/unsnapshotable file
+    // keeps its durable marker and is rejected by the remote-write pending gate.
+    const provePendingUploadIdentity = async (
+        attachment: Attachment,
+        localPath: string,
+    ): Promise<boolean> => {
+        if (!options.createUploadSnapshot) return false;
+        if (options.getLocalFileStat) {
+            const candidateStat = await options.getLocalFileStat(localPath, attachment).catch(() => null);
+            if (candidateStat) assertUploadStatAllowed(candidateStat);
+        }
+        const snapshot = await options.createUploadSnapshot(localPath, attachment);
+        if (!snapshot) return false;
+        try {
+            const snapshotHash = snapshot.fileHash.trim().toLowerCase();
+            if (!isSha256Hex(snapshotHash)) {
+                options.onLocalEditRace?.(attachment);
+                return false;
+            }
+            assertUploadStatAllowed(snapshot.stat);
+            applyAttachmentContentStat(attachment, snapshot.stat, snapshotHash);
+            return true;
+        } finally {
+            try {
+                await snapshot.dispose();
+            } catch (error) {
+                options.onUploadError(attachment, error);
+            }
+        }
+    };
+
     for (const original of options.attachmentsById.values()) {
         await options.beforeEachAttachment?.();
         if (original.kind !== 'file') continue;
@@ -536,6 +570,22 @@ export async function runAttachmentTransferLifecycle(
 
         // Refused paths still reconcile localStatus above; what they never do is get read.
         const mayReadForSync = existsLocally && (options.canUploadFrom?.(localPath, attachment) ?? true);
+
+        if (
+            hasPendingContentUpload
+            && options.deferUploads
+            && mayReadForSync
+            && !isSha256Hex(attachment.fileHash)
+        ) {
+            try {
+                if (await provePendingUploadIdentity(attachment, localPath)) {
+                    itemMutated = true;
+                }
+            } catch (error) {
+                if (options.isFatalError?.(error)) throw error;
+                options.onUploadError(attachment, error);
+            }
+        }
 
         // The durable marker, not the current remote-presence observation, owns the
         // candidate identity. A backend may discover that the previous blob is absent,

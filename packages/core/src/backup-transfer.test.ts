@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import {
+    applyAttachmentPatches,
+    runAttachmentTransferLifecycle,
+    type AttachmentUploadSnapshot,
+} from './attachment-transfer';
 import {
     assertBackupSourceFileSize,
     countActiveRecords,
@@ -11,9 +16,13 @@ import {
     validateBackupJson,
 } from './backup-transfer';
 import { mergeAppData } from './sync';
+import { assertNoPendingAttachmentUploads, sanitizeAppDataForRemote } from './sync-helpers';
 import { SYNC_BACKUP_RESTORE_REV_BY } from './sync-revision';
 import { purgeExpiredTombstones } from './sync-tombstones';
-import type { AppData } from './types';
+import type { AppData, Attachment } from './types';
+
+const RESTORED_CONTENT_HASH = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+const PRE_RESTORE_CONTENT_HASH = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 const buildAppData = (): AppData => {
     const now = '2026-03-30T12:00:00.000Z';
@@ -494,6 +503,8 @@ describe('backup transfer', () => {
                 kind: 'file' as const,
                 title: 'Restored file',
                 uri: 'attachments/restored.txt',
+                fileHash: RESTORED_CONTENT_HASH,
+                contentRev: 3,
                 createdAt: '2026-03-01T00:00:00.000Z',
                 updatedAt: '2026-03-01T00:00:00.000Z',
             };
@@ -510,6 +521,8 @@ describe('backup transfer', () => {
                 {
                     ...restoredAttachment,
                     uri: '',
+                    fileHash: PRE_RESTORE_CONTENT_HASH,
+                    contentRev: 9,
                     updatedAt: '2026-03-31T00:00:00.000Z',
                     deletedAt: '2026-03-31T00:00:00.000Z',
                 },
@@ -521,6 +534,9 @@ describe('backup transfer', () => {
             expect(restoredParent.attachments).toEqual([
                 expect.objectContaining({
                     id: 'attachment-restored',
+                    contentRev: 10,
+                    fileHash: RESTORED_CONTENT_HASH,
+                    pendingContentUpload: true,
                     updatedAt: restoredAt,
                 }),
                 expect.objectContaining({
@@ -530,12 +546,21 @@ describe('backup transfer', () => {
                 }),
             ]);
             expect(restoredParent.attachments?.[0].deletedAt).toBeUndefined();
+            expect(restoredParent.attachments?.[1].pendingContentUpload).toBeUndefined();
 
             const forward = mergeAppData(restored, previousData);
             const reverse = mergeAppData(previousData, restored);
-            expect(forward[collection][0]).toEqual(reverse[collection][0]);
+            expect(sanitizeAppDataForRemote(forward)[collection][0]).toEqual(
+                sanitizeAppDataForRemote(reverse)[collection][0],
+            );
             expect(forward[collection][0].attachments).toEqual([
-                expect.objectContaining({ id: 'attachment-restored', updatedAt: restoredAt }),
+                expect.objectContaining({
+                    id: 'attachment-restored',
+                    contentRev: 10,
+                    fileHash: RESTORED_CONTENT_HASH,
+                    pendingContentUpload: true,
+                    updatedAt: restoredAt,
+                }),
                 expect.objectContaining({
                     id: 'attachment-absent',
                     updatedAt: restoredAt,
@@ -543,7 +568,359 @@ describe('backup transfer', () => {
                 }),
             ]);
             expect(forward[collection][0].attachments?.[0].deletedAt).toBeUndefined();
+            expect(reverse[collection][0].attachments?.[0]).toMatchObject({
+                id: 'attachment-restored',
+                contentRev: 10,
+                fileHash: RESTORED_CONTENT_HASH,
+                pendingContentUpload: undefined,
+            });
             expect(mergeAppData(forward, previousData)[collection][0]).toEqual(forward[collection][0]);
+            expect(mergeAppData(previousData, reverse)[collection][0]).toEqual(reverse[collection][0]);
+        },
+    );
+
+    it('publishes restored attachment bytes after merge before clearing their local upload marker', async () => {
+        const restoredAt = '2026-04-01T00:00:10.000Z';
+        const backupCloudKey = 'attachments/attachment-restored-rev3.txt';
+        const currentCloudKey = 'attachments/attachment-restored-rev9.txt';
+        const publishedCloudKey = 'attachments/attachment-restored-rev10.txt';
+        const backup = buildAppData();
+        backup.tasks[0].attachments = [{
+            id: 'attachment-restored',
+            kind: 'file',
+            title: 'Restored file',
+            uri: '/managed/restored.txt',
+            cloudKey: backupCloudKey,
+            fileHash: RESTORED_CONTENT_HASH,
+            contentRev: 3,
+            contentMtimeMs: 1000,
+            contentSize: 3,
+            localStatus: 'available',
+            createdAt: '2026-03-01T00:00:00.000Z',
+            updatedAt: '2026-03-01T00:00:00.000Z',
+        }];
+        const previousData = buildAppData();
+        previousData.tasks[0].attachments = [{
+            ...backup.tasks[0].attachments[0],
+            uri: '/managed/current.txt',
+            cloudKey: currentCloudKey,
+            fileHash: PRE_RESTORE_CONTENT_HASH,
+            contentRev: 9,
+            contentMtimeMs: 2000,
+            contentSize: 4,
+            updatedAt: '2026-03-31T00:00:00.000Z',
+        }];
+
+        const restored = prepareRestoredBackupDataForSync(backup, { previousData, restoredAt });
+        const merged = mergeAppData(restored, previousData, { nowIso: restoredAt });
+        const mergedAttachment = merged.tasks[0].attachments?.[0];
+        expect(mergedAttachment).toMatchObject({
+            cloudKey: backupCloudKey,
+            fileHash: RESTORED_CONTENT_HASH,
+            contentRev: 10,
+            pendingContentUpload: true,
+        });
+
+        const restoredBytes = new Uint8Array([97, 98, 99]);
+        const remoteBlobs = new Map<string, { bytes: number[]; fileHash: string }>();
+        const dispose = vi.fn(async () => undefined);
+        const onUpload = vi.fn(async (
+            attachment: Attachment,
+            sourcePath: string,
+            snapshot?: AttachmentUploadSnapshot,
+        ) => {
+            expect(sourcePath).toBe('/staged/restored.txt');
+            expect(snapshot?.fileHash).toBe(RESTORED_CONTENT_HASH);
+            expect(snapshot?.bytes).toEqual(restoredBytes);
+            remoteBlobs.set(publishedCloudKey, {
+                bytes: [...snapshot!.bytes!],
+                fileHash: snapshot!.fileHash,
+            });
+            attachment.cloudKey = publishedCloudKey;
+            return true;
+        });
+        const lifecycleOptions = {
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
+            getLocalFileStat: vi.fn(async () => ({ mtimeMs: 1000, size: 3 })),
+            computeLocalFileHash: vi.fn(async () => RESTORED_CONTENT_HASH),
+            createUploadSnapshot: vi.fn(async () => ({
+                sourcePath: '/staged/restored.txt',
+                bytes: restoredBytes,
+                fileHash: RESTORED_CONTENT_HASH,
+                stat: { mtimeMs: 1000, size: 3 },
+                dispose,
+            })),
+            requireUploadSnapshot: true,
+            contentChangePhase: 'post-merge' as const,
+            onUpload,
+            onUploadError: vi.fn(),
+            onDownload: vi.fn(async () => false),
+            onDownloadError: vi.fn(),
+        };
+        for (const localPresence of ['confirmed-not-found', 'unreadable'] as const) {
+            const guardedUpload = vi.fn(async () => true);
+            const guardedDownload = vi.fn(async () => true);
+            const guardedSnapshot = vi.fn(async () => null);
+            const guarded = await runAttachmentTransferLifecycle({
+                ...lifecycleOptions,
+                attachmentsById: new Map([[mergedAttachment!.id, mergedAttachment!]]),
+                getLocalFilePresence: vi.fn(async () => localPresence),
+                createUploadSnapshot: guardedSnapshot,
+                allowPendingRemoteRecovery: false,
+                onUpload: guardedUpload,
+                onDownload: guardedDownload,
+            });
+            const after = guarded.patches.get(mergedAttachment!.id) ?? mergedAttachment!;
+            expect(guarded.changed).toBe(false);
+            expect(guardedUpload).not.toHaveBeenCalled();
+            expect(guardedDownload).not.toHaveBeenCalled();
+            expect(guardedSnapshot).not.toHaveBeenCalled();
+            expect(after.pendingContentUpload).toBe(true);
+        }
+        const transferred = await runAttachmentTransferLifecycle({
+            ...lifecycleOptions,
+            attachmentsById: new Map([[mergedAttachment!.id, mergedAttachment!]]),
+        });
+        const published = transferred.patches.get(mergedAttachment!.id);
+
+        expect(transferred.changed).toBe(true);
+        expect(published).toMatchObject({
+            cloudKey: publishedCloudKey,
+            fileHash: RESTORED_CONTENT_HASH,
+            contentRev: 10,
+            pendingContentUpload: undefined,
+        });
+        expect(remoteBlobs).toEqual(new Map([[
+            publishedCloudKey,
+            { bytes: [97, 98, 99], fileHash: RESTORED_CONTENT_HASH },
+        ]]));
+        expect(remoteBlobs.has(backupCloudKey)).toBe(false);
+        expect(remoteBlobs.has(currentCloudKey)).toBe(false);
+        expect(dispose).toHaveBeenCalledOnce();
+
+        const nextCycle = await runAttachmentTransferLifecycle({
+            ...lifecycleOptions,
+            attachmentsById: new Map([[published!.id, published!]]),
+        });
+        expect(nextCycle.changed).toBe(false);
+        expect(onUpload).toHaveBeenCalledOnce();
+    });
+
+    it('proves and uploads a hashless legacy restored attachment before publishing its generation', async () => {
+        const restoredAt = '2026-04-01T00:00:10.000Z';
+        const backupCloudKey = 'attachments/attachment-restored-rev3.txt';
+        const currentCloudKey = 'attachments/attachment-restored-rev9.txt';
+        const publishedCloudKey = 'attachments/attachment-restored-rev10.txt';
+        const backup = buildAppData();
+        backup.tasks[0].attachments = [{
+            id: 'attachment-restored',
+            kind: 'file',
+            title: 'Legacy restored file',
+            uri: '/managed/restored.txt',
+            cloudKey: backupCloudKey,
+            contentRev: 3,
+            contentMtimeMs: 1000,
+            contentSize: 3,
+            localStatus: 'available',
+            createdAt: '2026-03-01T00:00:00.000Z',
+            updatedAt: '2026-03-01T00:00:00.000Z',
+        }];
+        const previousData = buildAppData();
+        previousData.tasks[0].attachments = [{
+            ...backup.tasks[0].attachments[0],
+            uri: '/managed/current.txt',
+            cloudKey: currentCloudKey,
+            fileHash: PRE_RESTORE_CONTENT_HASH,
+            contentRev: 9,
+            contentMtimeMs: 2000,
+            contentSize: 4,
+            updatedAt: '2026-03-31T00:00:00.000Z',
+        }];
+
+        const restored = prepareRestoredBackupDataForSync(backup, { previousData, restoredAt });
+        const restoredAttachment = restored.tasks[0].attachments?.[0];
+        expect(restoredAttachment).toMatchObject({
+            cloudKey: backupCloudKey,
+            contentRev: 10,
+            pendingContentUpload: true,
+        });
+        expect(restoredAttachment?.fileHash).toBeUndefined();
+
+        const restoredBytes = new Uint8Array([97, 98, 99]);
+        const snapshotDispose = vi.fn(async () => undefined);
+        const createUploadSnapshot = vi.fn(async () => ({
+            sourcePath: '/staged/restored.txt',
+            bytes: restoredBytes,
+            fileHash: RESTORED_CONTENT_HASH,
+            stat: { mtimeMs: 1000, size: 3 },
+            dispose: snapshotDispose,
+        }));
+        const onUpload = vi.fn(async () => false);
+        const baseLifecycleOptions = {
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
+            getLocalFileStat: vi.fn(async () => ({ mtimeMs: 1000, size: 3 })),
+            computeLocalFileHash: vi.fn(async () => RESTORED_CONTENT_HASH),
+            createUploadSnapshot,
+            requireUploadSnapshot: true,
+            onUpload,
+            onUploadError: vi.fn(),
+            onDownload: vi.fn(async () => false),
+            onDownloadError: vi.fn(),
+        };
+        const preparedTransfer = await runAttachmentTransferLifecycle({
+            ...baseLifecycleOptions,
+            attachmentsById: new Map([[restoredAttachment!.id, restoredAttachment!]]),
+            contentChangePhase: 'prepare',
+            deferUploads: true,
+        });
+        const prepared = applyAttachmentPatches(restored, preparedTransfer.patches);
+        const preparedAttachment = prepared.tasks[0].attachments?.[0];
+
+        expect(preparedTransfer.changed).toBe(true);
+        expect(preparedAttachment).toMatchObject({
+            cloudKey: backupCloudKey,
+            fileHash: RESTORED_CONTENT_HASH,
+            contentRev: 10,
+            contentMtimeMs: 1000,
+            contentSize: 3,
+            pendingContentUpload: true,
+        });
+        expect(onUpload).not.toHaveBeenCalled();
+        expect(createUploadSnapshot).toHaveBeenCalledOnce();
+        expect(snapshotDispose).toHaveBeenCalledOnce();
+
+        const merged = mergeAppData(
+            prepared,
+            sanitizeAppDataForRemote(previousData),
+            { nowIso: restoredAt },
+        );
+        const mergedAttachment = merged.tasks[0].attachments?.[0];
+        expect(mergedAttachment).toMatchObject({
+            cloudKey: backupCloudKey,
+            fileHash: RESTORED_CONTENT_HASH,
+            contentRev: 10,
+            pendingContentUpload: true,
+        });
+        expect(mergedAttachment?.fileHash).not.toBe(PRE_RESTORE_CONTENT_HASH);
+
+        const remoteBlobs = new Map<string, { bytes: number[]; fileHash: string }>([[
+            currentCloudKey,
+            { bytes: [98, 98, 98, 98], fileHash: PRE_RESTORE_CONTENT_HASH },
+        ]]);
+        onUpload.mockImplementation(async (
+            attachment: Attachment,
+            sourcePath: string,
+            snapshot?: AttachmentUploadSnapshot,
+        ) => {
+            expect(sourcePath).toBe('/staged/restored.txt');
+            expect(snapshot?.bytes).toEqual(restoredBytes);
+            expect(snapshot?.fileHash).toBe(RESTORED_CONTENT_HASH);
+            remoteBlobs.set(publishedCloudKey, {
+                bytes: [...snapshot!.bytes!],
+                fileHash: snapshot!.fileHash,
+            });
+            attachment.cloudKey = publishedCloudKey;
+            return true;
+        });
+        const transferred = await runAttachmentTransferLifecycle({
+            ...baseLifecycleOptions,
+            attachmentsById: new Map([[mergedAttachment!.id, mergedAttachment!]]),
+            contentChangePhase: 'post-merge',
+        });
+        const published = transferred.patches.get(mergedAttachment!.id);
+
+        expect(published).toMatchObject({
+            cloudKey: publishedCloudKey,
+            fileHash: RESTORED_CONTENT_HASH,
+            contentRev: 10,
+            pendingContentUpload: undefined,
+        });
+        expect(remoteBlobs.get(publishedCloudKey)).toEqual({
+            bytes: [97, 98, 99],
+            fileHash: RESTORED_CONTENT_HASH,
+        });
+        expect(remoteBlobs.get(currentCloudKey)?.fileHash).toBe(PRE_RESTORE_CONTENT_HASH);
+        expect(remoteBlobs.has(backupCloudKey)).toBe(false);
+        expect(onUpload).toHaveBeenCalledOnce();
+        expect(createUploadSnapshot).toHaveBeenCalledTimes(2);
+        expect(snapshotDispose).toHaveBeenCalledTimes(2);
+
+        const nextCycle = await runAttachmentTransferLifecycle({
+            ...baseLifecycleOptions,
+            attachmentsById: new Map([[published!.id, published!]]),
+            contentChangePhase: 'post-merge',
+        });
+        expect(nextCycle.changed).toBe(false);
+        expect(onUpload).toHaveBeenCalledOnce();
+        expect(createUploadSnapshot).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+        ['an empty restored URI', '', 'confirmed-not-found'],
+        ['confirmed missing restored bytes', '/managed/missing.txt', 'confirmed-not-found'],
+    ] as const)(
+        'keeps %s pending and blocks its restored metadata from remote publication',
+        async (_label, uri, localPresence) => {
+            const restoredAt = '2026-04-01T00:00:10.000Z';
+            const backup = buildAppData();
+            backup.tasks[0].attachments = [{
+                id: 'attachment-restored',
+                kind: 'file',
+                title: 'Unavailable restored file',
+                uri,
+                contentRev: 3,
+                contentMtimeMs: 1000,
+                contentSize: 3,
+                createdAt: '2026-03-01T00:00:00.000Z',
+                updatedAt: '2026-03-01T00:00:00.000Z',
+            }];
+            const previousData = buildAppData();
+            previousData.tasks[0].attachments = [{
+                ...backup.tasks[0].attachments[0],
+                uri: '/managed/current.txt',
+                cloudKey: 'attachments/attachment-restored-rev9.txt',
+                fileHash: PRE_RESTORE_CONTENT_HASH,
+                contentRev: 9,
+                contentMtimeMs: 2000,
+                contentSize: 4,
+                localStatus: 'available',
+                updatedAt: '2026-03-31T00:00:00.000Z',
+            }];
+
+            const restored = prepareRestoredBackupDataForSync(backup, { previousData, restoredAt });
+            const restoredAttachment = restored.tasks[0].attachments?.[0];
+            const createUploadSnapshot = vi.fn(async () => null);
+            const preparedTransfer = await runAttachmentTransferLifecycle({
+                attachmentsById: new Map([[restoredAttachment!.id, restoredAttachment!]]),
+                getLocalFilePresence: vi.fn(async () => localPresence),
+                getLocalFileStat: vi.fn(async () => null),
+                computeLocalFileHash: vi.fn(async () => null),
+                createUploadSnapshot,
+                requireUploadSnapshot: true,
+                contentChangePhase: 'prepare',
+                deferUploads: true,
+                onUpload: vi.fn(async () => false),
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(async () => false),
+                onDownloadError: vi.fn(),
+            });
+            const prepared = applyAttachmentPatches(restored, preparedTransfer.patches);
+            const merged = mergeAppData(
+                prepared,
+                sanitizeAppDataForRemote(previousData),
+                { nowIso: restoredAt },
+            );
+            const mergedAttachment = merged.tasks[0].attachments?.[0];
+
+            expect(createUploadSnapshot).not.toHaveBeenCalled();
+            expect(mergedAttachment).toMatchObject({
+                contentRev: 10,
+                pendingContentUpload: true,
+            });
+            expect(mergedAttachment?.fileHash).toBeUndefined();
+            expect(() => assertNoPendingAttachmentUploads(merged)).toThrow(
+                'Attachment upload incomplete: 1 file attachment(s) are still pending upload',
+            );
         },
     );
 

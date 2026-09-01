@@ -144,7 +144,11 @@ export const syncDropboxAttachments = async (
       && existsLocally
       && !isHttp
       && canUploadAttachmentFrom(uri);
-    if (options.phase === 'prepare' && attachment.cloudKey && mayUploadLocalFile) {
+    if (
+      options.phase === 'prepare'
+      && (attachment.cloudKey || attachment.pendingContentUpload === true)
+      && mayUploadLocalFile
+    ) {
       if (await prepareBespokeAttachmentContentCandidate(attachment, uri)) {
         recordPatch(attachment);
       }

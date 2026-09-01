@@ -32,6 +32,7 @@ import {
   createAttachmentLocalMigrationLimiter,
   DEFAULT_CONTENT_TYPE,
   getLocalAttachmentPresence,
+  logAttachmentWarn,
   readFileAsBytes,
   reportProgress,
   statAttachmentFile,
@@ -534,6 +535,23 @@ export const prepareBespokeAttachmentContentCandidate = async (
   attachment: Attachment,
   localPath: string,
 ): Promise<boolean> => {
+  if (
+    attachment.pendingContentUpload === true
+    && !isSha256Hex(attachment.fileHash?.trim().toLowerCase())
+  ) {
+    const snapshot = await createMobileAttachmentUploadSnapshot(localPath, attachment);
+    if (!snapshot) return false;
+    try {
+      const snapshotHash = snapshot.fileHash.trim().toLowerCase();
+      if (!isSha256Hex(snapshotHash)) return false;
+      applyAttachmentContentStat(attachment, snapshot.stat, snapshotHash);
+      return true;
+    } finally {
+      await snapshot.dispose().catch((error) => {
+        logAttachmentWarn(`Failed to clean up attachment upload snapshot ${attachment.id}`, error);
+      });
+    }
+  }
   const stat = await statAttachmentFile(localPath);
   if (!stat) return false;
   const check = await checkAttachmentContentChange(

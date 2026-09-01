@@ -2214,11 +2214,10 @@ describe('attachment sync', () => {
   });
 
   it('defers missing pending Cloud bytes without reading or replacing the remote generation', async () => {
-    const bytes = new Uint8Array([4, 5, 6]);
     const appData = singleAttachmentData({
       id: 'recover-cloud',
       cloudKey: 'attachments/recover-cloud.txt',
-      fileHash: sha256Hex(bytes),
+      fileHash: undefined,
       localStatus: 'available',
       pendingContentUpload: true,
     });
@@ -2235,10 +2234,10 @@ describe('attachment sync', () => {
     expect(result).toBe(false);
     expect(appData.tasks[0].attachments?.[0]).toMatchObject({
       cloudKey: 'attachments/recover-cloud.txt',
-      fileHash: sha256Hex(bytes),
       localStatus: 'available',
       pendingContentUpload: true,
     });
+    expect(appData.tasks[0].attachments?.[0]?.fileHash).toBeUndefined();
     expect(core.cloudGetFile).not.toHaveBeenCalled();
     expect(core.cloudPutFile).not.toHaveBeenCalled();
   });
@@ -2308,6 +2307,40 @@ describe('attachment sync', () => {
       sha256Hex(bytes),
     );
     expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+  });
+
+  it('defers missing hashless pending Dropbox bytes without fetching or uploading', async () => {
+    const appData = singleAttachmentData({
+      id: 'recover-dropbox-no-hash',
+      cloudKey: 'attachments/recover-dropbox-rev9.txt',
+      fileHash: undefined,
+      localStatus: 'available',
+      pendingContentUpload: true,
+    });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    const dropbox = await import('./dropbox-sync');
+
+    const result = syncResult(
+      await attachmentSync.syncDropboxAttachments(
+        appData,
+        'dropbox-client-id',
+        fetch,
+        { phase: 'post-merge' },
+      ),
+      appData,
+    );
+
+    expect(result.didMutate).toBe(true);
+    expect(result.data.tasks[0].attachments?.[0]).toMatchObject({
+      cloudKey: 'attachments/recover-dropbox-rev9.txt',
+      localStatus: 'missing',
+      pendingContentUpload: true,
+    });
+    expect(result.data.tasks[0].attachments?.[0]?.fileHash).toBeUndefined();
+    expect(dropbox.getDropboxFileMetadata).not.toHaveBeenCalled();
+    expect(dropbox.downloadDropboxFile).not.toHaveBeenCalled();
+    expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+    expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
   });
 
   it('restores matching pending bytes from File Sync before clearing the marker', async () => {
@@ -3003,12 +3036,12 @@ describe('attachment sync', () => {
     });
   });
 
-  it('preserves an unreadable content attachment and performs no transfer across every backend', async () => {
+  it('preserves an unreadable hashless content attachment and performs no transfer across every backend', async () => {
     const attachment = {
       id: 'unreadable-local',
       uri: 'content://provider/document/unreadable-local',
       cloudKey: 'attachments/unreadable-local.txt',
-      fileHash: 'ab'.repeat(32),
+      fileHash: undefined,
       pendingContentUpload: true,
       localStatus: 'available' as const,
       contentMtimeMs: 123,
@@ -3828,6 +3861,75 @@ describe('attachment sync', () => {
       });
     });
 
+    it('proves and publishes a hashless pending Cloud restore, then converges', async () => {
+      const id = 'restored-cloud-no-hash';
+      const localUri = `file://document/attachments/${id}.txt`;
+      const freshCloudKey = `attachments/${id}.txt`;
+      const restoredHash = sha256Hex(NEW_BYTES);
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')
+          ? { exists: true, size: NEW_BYTES.length, modificationTime: 1 }
+          : { exists: false }
+      ));
+      fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(NEW_BYTES));
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.cloudPutFile).mockResolvedValue(undefined);
+      const restored = makeEditedAppData(id, {
+        cloudKey: undefined,
+        fileHash: undefined,
+        contentRev: 10,
+        contentMtimeMs: 1000,
+        contentSize: NEW_BYTES.length,
+        pendingContentUpload: true,
+      });
+
+      const prepared = syncResult(
+        await attachmentSync.syncCloudAttachments(
+          restored,
+          { url: 'https://cloud.example/v1/data', token: 'token' },
+          'https://cloud.example/v1',
+          { phase: 'prepare' },
+        ),
+        restored,
+      );
+      expect(prepared.data.tasks[0].attachments?.[0]).toMatchObject({
+        fileHash: restoredHash,
+        contentRev: 10,
+        pendingContentUpload: true,
+      });
+      expect(prepared.data.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+
+      const published = syncResult(
+        await attachmentSync.syncCloudAttachments(
+          prepared.data,
+          { url: 'https://cloud.example/v1/data', token: 'token' },
+          'https://cloud.example/v1',
+          { phase: 'post-merge' },
+        ),
+        prepared.data,
+      );
+      const uploadCall = vi.mocked(core.cloudPutFile).mock.calls[0];
+      expect(uploadCall?.[0]).toBe(`https://cloud.example/v1/${freshCloudKey}`);
+      expect(new Uint8Array(uploadCall?.[1] as ArrayBuffer)).toEqual(NEW_BYTES);
+      expect(published.data.tasks[0].attachments?.[0]).toMatchObject({
+        cloudKey: freshCloudKey,
+        fileHash: restoredHash,
+        contentRev: 10,
+        pendingContentUpload: undefined,
+      });
+
+      vi.clearAllMocks();
+      await expect(attachmentSync.syncCloudAttachments(
+        published.data,
+        { url: 'https://cloud.example/v1/data', token: 'token' },
+        'https://cloud.example/v1',
+        { phase: 'post-merge' },
+      )).resolves.toBe(false);
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+      expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
+    });
+
     it('defers a Dropbox edit and refuses to upload different bytes that land after prepare', async () => {
       const localUri = 'file://document/attachments/edited-dropbox.txt';
       const dropbox = await import('./dropbox-sync');
@@ -3880,6 +3982,77 @@ describe('attachment sync', () => {
         contentRev: 1,
         pendingContentUpload: true,
       });
+    });
+
+    it('proves and publishes a hashless pending Dropbox restore, then converges', async () => {
+      const id = 'restored-dropbox-no-hash';
+      const localUri = `file://document/attachments/${id}.txt`;
+      const oldCloudKey = `attachments/${id}-rev9.txt`;
+      const freshCloudKey = `attachments/${id}.txt`;
+      const restoredHash = sha256Hex(NEW_BYTES);
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')
+          ? { exists: true, size: NEW_BYTES.length, modificationTime: 1 }
+          : { exists: false }
+      ));
+      fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(NEW_BYTES));
+      const dropbox = await import('./dropbox-sync');
+      vi.mocked(dropbox.uploadDropboxFileVersioned).mockResolvedValue({ rev: 'fresh-rev' });
+      const restored = makeEditedAppData(id, {
+        cloudKey: oldCloudKey,
+        fileHash: undefined,
+        contentRev: 10,
+        contentMtimeMs: 1000,
+        contentSize: NEW_BYTES.length,
+        pendingContentUpload: true,
+      });
+
+      const prepared = syncResult(
+        await attachmentSync.syncDropboxAttachments(
+          restored,
+          'dropbox-client-id',
+          fetch,
+          { phase: 'prepare' },
+        ),
+        restored,
+      );
+      expect(prepared.data.tasks[0].attachments?.[0]).toMatchObject({
+        cloudKey: oldCloudKey,
+        fileHash: restoredHash,
+        contentRev: 10,
+        pendingContentUpload: true,
+      });
+      expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+
+      const published = syncResult(
+        await attachmentSync.syncDropboxAttachments(
+          prepared.data,
+          'dropbox-client-id',
+          fetch,
+          { phase: 'post-merge' },
+        ),
+        prepared.data,
+      );
+      const uploadCall = vi.mocked(dropbox.uploadDropboxFileVersioned).mock.calls[0];
+      expect(uploadCall?.[1]).toBe(freshCloudKey);
+      expect(new Uint8Array(uploadCall?.[2] as ArrayBuffer)).toEqual(NEW_BYTES);
+      expect(published.data.tasks[0].attachments?.[0]).toMatchObject({
+        cloudKey: freshCloudKey,
+        fileHash: restoredHash,
+        contentRev: 10,
+        pendingContentUpload: undefined,
+      });
+
+      vi.clearAllMocks();
+      await expect(attachmentSync.syncDropboxAttachments(
+        published.data,
+        'dropbox-client-id',
+        fetch,
+        { phase: 'post-merge' },
+      )).resolves.toBe(false);
+      expect(dropbox.getDropboxFileMetadata).not.toHaveBeenCalled();
+      expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+      expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
     });
 
     it('installs a self-hosted Cloud remote winner over the exact stale local generation and makes the next prepare a no-op', async () => {
