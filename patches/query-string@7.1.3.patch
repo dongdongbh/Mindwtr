@@ -1,0 +1,12 @@
+diff --git a/index.js b/index.js
+index ecb6f3f..5292abf 100644
+--- a/index.js
++++ b/index.js
+@@ -1,5 +1,6 @@
+ 'use strict';
+ const strictUriEncode = require('strict-uri-encode');
+-const decodeComponent = require('decode-uri-component');
++const decodeComponentModule = require('decode-uri-component');
++const decodeComponent = decodeComponentModule.default ?? decodeComponentModule;
+ const splitOnFirst = require('split-on-first');
+ const filterObject = require('filter-obj');

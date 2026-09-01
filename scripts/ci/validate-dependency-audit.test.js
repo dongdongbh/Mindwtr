@@ -1,9 +1,12 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname } from "node:path";
 
 import { validateMobileAuditReport } from "./validate-mobile-npm-audit.js";
+
+const rootRequire = createRequire(import.meta.url);
 
 const IMAGE_SIZE_ADVISORIES = ["GHSA-5p2g-fcmc-qvqq", "GHSA-w3rx-r6r6-pgpr"];
 
@@ -45,6 +48,75 @@ test("Bun audit exceptions stay limited to Metro's unpatched build dependency", 
   expect(lockfile).toMatch(
     /\["metro@[^\n]+"[^\n]+"dependencies": \{[^\n]+"image-size": "\^1\.0\.2"/,
   );
+});
+
+test("mobile query parsing keeps a patched CommonJS-compatible resolution", () => {
+  const rootManifest = JSON.parse(readFileSync("package.json", "utf8"));
+  const mobileManifest = JSON.parse(readFileSync("apps/mobile/package.json", "utf8"));
+  const mobileLock = JSON.parse(readFileSync("apps/mobile/package-lock.json", "utf8"));
+  const bunLock = readFileSync("bun.lock", "utf8");
+  const compatibilityPatch = readFileSync(
+    "patches/query-string@7.1.3.patch",
+    "utf8",
+  );
+
+  expect(rootManifest.dependencies["decode-uri-component"]).toBe("0.5.0");
+  expect(rootManifest.dependencies["query-string"]).toBe("^9.3.1");
+  expect(rootManifest.overrides["decode-uri-component"]).toBe("0.5.0");
+  expect(rootManifest.resolutions["decode-uri-component"]).toBe("0.5.0");
+  expect(rootManifest.patchedDependencies["query-string@7.1.3"]).toBe(
+    "patches/query-string@7.1.3.patch",
+  );
+  expect(mobileManifest.dependencies["decode-uri-component"]).toBe("0.5.0");
+  expect(mobileManifest.dependencies["query-string"]).toBe("7.1.3");
+  expect(mobileManifest.overrides["decode-uri-component"]).toBe("0.5.0");
+  expect(mobileManifest.overrides["query-string"]).toBe("7.1.3");
+  expect(mobileManifest.scripts.postinstall).toBe(
+    "node scripts/patch_query_string_cjs.js",
+  );
+  expect(compatibilityPatch).toContain(
+    "const decodeComponent = decodeComponentModule.default ?? decodeComponentModule;",
+  );
+
+  const decodeVersions = new Set();
+  const queryStringVersions = new Set();
+  for (const [path, metadata] of Object.entries(mobileLock.packages)) {
+    if (
+      path === "node_modules/decode-uri-component" ||
+      path.endsWith("/node_modules/decode-uri-component")
+    ) {
+      decodeVersions.add(metadata.version);
+    }
+    if (
+      path === "node_modules/query-string" ||
+      path.endsWith("/node_modules/query-string")
+    ) {
+      queryStringVersions.add(metadata.version);
+    }
+  }
+  expect([...decodeVersions]).toEqual(["0.5.0"]);
+  expect([...queryStringVersions]).toEqual(["7.1.3"]);
+  expect(bunLock).toContain('["decode-uri-component@0.5.0"');
+  expect(bunLock).not.toMatch(/decode-uri-component@(?:0\.[0-4](?:\.|\")|0\.4\.2)/);
+  expect(new Set(bunLock.match(/\["query-string@[^\"]+"/g))).toEqual(new Set([
+    '["query-string@7.1.3"',
+    '["query-string@9.3.1"',
+  ]));
+
+  const { patchQueryString } = rootRequire(
+    "../../apps/mobile/scripts/patch_query_string_cjs.js",
+  );
+  expect(() => patchQueryString()).not.toThrow();
+
+  const navigationRequire = createRequire(
+    rootRequire.resolve("@react-navigation/core/package.json"),
+  );
+  const queryString = navigationRequire("query-string");
+  expect(typeof queryString.parse).toBe("function");
+  expect(queryString.parse("screen=Inbox%20Today&tag=next")).toEqual({
+    screen: "Inbox Today",
+    tag: "next",
+  });
 });
 
 test("dependency changes run the audit before merge", () => {

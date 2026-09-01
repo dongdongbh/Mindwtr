@@ -197,6 +197,7 @@
     "expo-calendar@15.0.8": "patches/expo-calendar@15.0.8.patch",
     "react-native-draggable-flatlist@4.0.3": "patches/react-native-draggable-flatlist@4.0.3.patch",
     "expo-share-intent@5.1.1": "patches/expo-share-intent@5.1.1.patch",
-    "@op-engineering/op-sqlite@17.1.2": "patches/@op-engineering%2Fop-sqlite@17.1.2.patch"
+    "@op-engineering/op-sqlite@17.1.2": "patches/@op-engineering%2Fop-sqlite@17.1.2.patch",
+    "query-string@7.1.3": "patches/query-string@7.1.3.patch"
   }
 }
