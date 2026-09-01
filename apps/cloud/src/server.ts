@@ -1131,7 +1131,14 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
             return currentStat.isDirectory()
                 && currentRealPath === initialDataDirRealPath
                 && currentStat.dev === initialDataDirStat.dev
-                && currentStat.ino === initialDataDirStat.ino;
+                && currentStat.ino === initialDataDirStat.ino
+                // ext4 hands the freed inode straight back to the next directory
+                // created, so a data dir removed and recreated between checks can
+                // return with the original dev+ino. The birth timestamp only
+                // survives on the original directory; skip it on filesystems
+                // that do not report one.
+                && (initialDataDirStat.birthtimeMs <= 0
+                    || currentStat.birthtimeMs === initialDataDirStat.birthtimeMs);
         } catch {
             return false;
         }
