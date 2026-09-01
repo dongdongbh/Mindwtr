@@ -1,22 +1,37 @@
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { flushPendingSave } from '@mindwtr/core';
 
 import type { SyncBackend } from './sync-service-utils';
 import { logInfo, logWarn } from './app-log';
 import { quiesceMobileStorage } from './storage-adapter';
 import { getMobileSyncConfigurationStatus, performMobileSync } from './sync-service';
+import {
+  BACKGROUND_SYNC_INTERVAL_KEY,
+  BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY,
+  type BackgroundSyncInterval,
+} from './sync-constants';
+
+export type { BackgroundSyncInterval };
 
 export const MOBILE_BACKGROUND_SYNC_TASK_NAME = 'mindwtr-background-sync';
 export const MOBILE_BACKGROUND_SYNC_MINIMUM_INTERVAL_MINUTES = 15;
 
 type MobileBackgroundSyncRegistrationAction = 'registered' | 'unregistered' | 'unchanged';
 
+const MOBILE_BACKGROUND_SYNC_INTERVAL_MINUTES: Record<Exclude<BackgroundSyncInterval, 'off'>, number> = {
+  '15m': MOBILE_BACKGROUND_SYNC_MINIMUM_INTERVAL_MINUTES,
+  '1h': MOBILE_BACKGROUND_SYNC_MINIMUM_INTERVAL_MINUTES * 4,
+  '6h': MOBILE_BACKGROUND_SYNC_MINIMUM_INTERVAL_MINUTES * 24,
+};
+
 export type MobileBackgroundSyncRegistrationResult = {
   action: MobileBackgroundSyncRegistrationAction;
   available: boolean;
   backend: SyncBackend;
   configured: boolean;
+  interval: BackgroundSyncInterval;
   registered: boolean;
   status: BackgroundTask.BackgroundTaskStatus | null;
 };
@@ -54,6 +69,53 @@ const isTaskManagerAvailable = async (): Promise<boolean> => {
   } catch (error) {
     logBackgroundSyncWarning('Failed to read task manager availability', error);
     return false;
+  }
+};
+
+const isBackgroundSyncInterval = (value: unknown): value is BackgroundSyncInterval => (
+  value === 'off' || value === '15m' || value === '1h' || value === '6h'
+);
+
+export const getMobileBackgroundSyncInterval = async (): Promise<BackgroundSyncInterval> => {
+  try {
+    const stored = await AsyncStorage.getItem(BACKGROUND_SYNC_INTERVAL_KEY);
+    return isBackgroundSyncInterval(stored) ? stored : '15m';
+  } catch (error) {
+    logBackgroundSyncWarning('Failed to read mobile background sync interval setting', error);
+    return '15m';
+  }
+};
+
+export const setMobileBackgroundSyncInterval = async (interval: BackgroundSyncInterval): Promise<void> => {
+  await AsyncStorage.setItem(BACKGROUND_SYNC_INTERVAL_KEY, interval);
+};
+
+// expo-background-task keeps the previously registered interval on a repeat
+// registerTaskAsync call, so the registration loop needs its own record of
+// what interval is actually live to know when it must unregister first.
+const getLastRegisteredBackgroundSyncInterval = async (): Promise<BackgroundSyncInterval | null> => {
+  try {
+    const stored = await AsyncStorage.getItem(BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY);
+    return isBackgroundSyncInterval(stored) ? stored : null;
+  } catch (error) {
+    logBackgroundSyncWarning('Failed to read the last registered background sync interval', error);
+    return null;
+  }
+};
+
+const setLastRegisteredBackgroundSyncInterval = async (interval: BackgroundSyncInterval): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY, interval);
+  } catch (error) {
+    logBackgroundSyncWarning('Failed to persist the last registered background sync interval', error);
+  }
+};
+
+const clearLastRegisteredBackgroundSyncInterval = async (): Promise<void> => {
+  try {
+    await AsyncStorage.removeItem(BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY);
+  } catch (error) {
+    logBackgroundSyncWarning('Failed to clear the last registered background sync interval', error);
   }
 };
 
@@ -106,32 +168,42 @@ const defineMobileBackgroundSyncTask = () => {
 defineMobileBackgroundSyncTask();
 
 export async function syncMobileBackgroundSyncRegistration(): Promise<MobileBackgroundSyncRegistrationResult> {
-  const [configuration, status, taskManagerAvailable, registered] = await Promise.all([
+  const [configuration, status, taskManagerAvailable, registered, interval] = await Promise.all([
     getMobileSyncConfigurationStatus(),
     getBackgroundTaskStatus(),
     isTaskManagerAvailable(),
     isBackgroundTaskRegistered(),
+    getMobileBackgroundSyncInterval(),
   ]);
   const available = taskManagerAvailable && status === BackgroundTask.BackgroundTaskStatus.Available;
   const shouldRegister = available
     && configuration.configured
-    && supportsMobileScheduledBackgroundSync(configuration.backend);
+    && supportsMobileScheduledBackgroundSync(configuration.backend)
+    && interval !== 'off';
 
   if (shouldRegister) {
-    await BackgroundTask.registerTaskAsync(MOBILE_BACKGROUND_SYNC_TASK_NAME, {
-      minimumInterval: MOBILE_BACKGROUND_SYNC_MINIMUM_INTERVAL_MINUTES,
-    });
-    if (!registered) {
+    const minimumInterval = MOBILE_BACKGROUND_SYNC_INTERVAL_MINUTES[interval];
+    const lastRegisteredInterval = await getLastRegisteredBackgroundSyncInterval();
+    const intervalChanged = registered && lastRegisteredInterval !== interval;
+    if (intervalChanged) {
+      // expo-background-task ignores a changed minimumInterval on a plain
+      // re-registration; only unregister-then-register actually applies it.
+      await BackgroundTask.unregisterTaskAsync(MOBILE_BACKGROUND_SYNC_TASK_NAME);
+    }
+    await BackgroundTask.registerTaskAsync(MOBILE_BACKGROUND_SYNC_TASK_NAME, { minimumInterval });
+    await setLastRegisteredBackgroundSyncInterval(interval);
+    if (!registered || intervalChanged) {
       void logInfo('Mobile background sync registered', {
         scope: 'sync',
-        extra: { backend: configuration.backend },
+        extra: { backend: configuration.backend, interval },
       });
     }
     return {
-      action: registered ? 'unchanged' : 'registered',
+      action: (!registered || intervalChanged) ? 'registered' : 'unchanged',
       available,
       backend: configuration.backend,
       configured: configuration.configured,
+      interval,
       registered: true,
       status,
     };
@@ -139,15 +211,17 @@ export async function syncMobileBackgroundSyncRegistration(): Promise<MobileBack
 
   if (registered) {
     await BackgroundTask.unregisterTaskAsync(MOBILE_BACKGROUND_SYNC_TASK_NAME);
+    await clearLastRegisteredBackgroundSyncInterval();
     void logInfo('Mobile background sync unregistered', {
       scope: 'sync',
-      extra: { backend: configuration.backend, available: String(available), configured: String(configuration.configured) },
+      extra: { backend: configuration.backend, available: String(available), configured: String(configuration.configured), interval },
     });
     return {
       action: 'unregistered',
       available,
       backend: configuration.backend,
       configured: configuration.configured,
+      interval,
       registered: false,
       status,
     };
@@ -158,6 +232,7 @@ export async function syncMobileBackgroundSyncRegistration(): Promise<MobileBack
     available,
     backend: configuration.backend,
     configured: configuration.configured,
+    interval,
     registered: false,
     status,
   };

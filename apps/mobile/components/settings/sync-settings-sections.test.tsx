@@ -1,12 +1,13 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { ActivityIndicator, Text } from 'react-native';
+import { ActivityIndicator, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 import {
+  BackgroundSyncInfoCard,
   RecoverySnapshotsCard,
   SyncBackupSection,
   SyncPreferencesCard,
@@ -374,5 +375,73 @@ describe('sync settings disclosure accessibility', () => {
     expect(chevron.props.accessible).toBe(false);
     expect(chevron.props.accessibilityElementsHidden).toBe(true);
     expect(chevron.props.importantForAccessibility).toBe('no-hide-descendants');
+  });
+});
+
+describe('BackgroundSyncInfoCard', () => {
+  const findIntervalButton = (tree: renderer.ReactTestRenderer, labelKey: string) =>
+    tree.root.findAllByType(TouchableOpacity).find((candidate) => (
+      candidate.findAllByType(Text).some((textNode) => textNode.props.children === labelKey)
+    ));
+
+  it('shows the interval picker for a backend that supports scheduled background sync', () => {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <BackgroundSyncInfoCard
+          interval="15m"
+          isRemoteBackend
+          onSelectInterval={vi.fn()}
+          tr={translate}
+          tc={tc}
+        />,
+      );
+    });
+
+    expect(findIntervalButton(tree, 'settings.syncMobile.backgroundSyncIntervalOff')).toBeTruthy();
+    expect(findIntervalButton(tree, 'settings.syncMobile.backgroundSyncIntervalEvery15Minutes')).toBeTruthy();
+    expect(findIntervalButton(tree, 'settings.syncMobile.backgroundSyncIntervalEveryHour')).toBeTruthy();
+    expect(findIntervalButton(tree, 'settings.syncMobile.backgroundSyncIntervalEvery6Hours')).toBeTruthy();
+  });
+
+  it('calls onSelectInterval with the tapped option', () => {
+    const onSelectInterval = vi.fn();
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <BackgroundSyncInfoCard
+          interval="15m"
+          isRemoteBackend
+          onSelectInterval={onSelectInterval}
+          tr={translate}
+          tc={tc}
+        />,
+      );
+    });
+
+    const hourButton = findIntervalButton(tree, 'settings.syncMobile.backgroundSyncIntervalEveryHour');
+    act(() => {
+      hourButton?.props.onPress();
+    });
+
+    expect(onSelectInterval).toHaveBeenCalledWith('1h');
+  });
+
+  it('hides the interval picker for a backend without scheduled background sync', () => {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <BackgroundSyncInfoCard
+          interval="15m"
+          isRemoteBackend={false}
+          onSelectInterval={vi.fn()}
+          tr={translate}
+          tc={tc}
+        />,
+      );
+    });
+
+    expect(findIntervalButton(tree, 'settings.syncMobile.backgroundSyncIntervalOff')).toBeFalsy();
+    expect(renderedText(tree)).toContain('settings.syncMobile.scheduledBackgroundSyncIsAvailableForWebdavSelfHostedCloud');
   });
 });

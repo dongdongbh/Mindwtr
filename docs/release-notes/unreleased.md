@@ -4,6 +4,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 ## Full Change List
 
+- Android and iOS: Settings → Sync gains a Background sync option for WebDAV, self-hosted cloud, Dropbox and iCloud: Off, every 15 minutes (the default and the platform minimum), every hour, or every 6 hours. It controls only the scheduled job that runs while the app is closed; syncing while the app is open, when you leave it, and shortly after edits is unchanged. The choice is per device and is not synced. (#1001)
+
 - Sync encryption: a phone or desktop that had once found an encrypted sync location it had no passphrase for kept refusing every sync afterwards, on every backend, with "This sync folder is encrypted. Enter the sync passphrase to continue", even after the location was emptied or the backend switched to a plain folder; Unlock could not help because it needs the encrypted document to still exist at the current location. The lock is now tied to the location it was found on: a different or emptied location is checked instead of refused, a device already stuck on 1.2.6 recovers with one manual Sync, and Unlock at a location that no longer holds encrypted data clears the stale lock and says so. (#1138)
 
 - Android performance: on large libraries every task edit rebuilt all task indexes (contexts, tags, projects, focus, and more) on the spot, because each visible row asked the store for today's focus count and that count only existed inside the full derived index. On a 7,000-task library that was about 100 ms of blocked UI per tap. The focus count now comes from a single cached scan, so an edit no longer triggers the rebuild. (#1001)

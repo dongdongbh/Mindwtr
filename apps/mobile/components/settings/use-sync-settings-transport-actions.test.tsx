@@ -66,6 +66,8 @@ const mocked = vi.hoisted(() => ({
     rememberWebdavCapabilityProof: vi.fn(),
     revokeDropboxTokens: vi.fn(),
     saveDropboxTokens: vi.fn(),
+    getMobileBackgroundSyncInterval: vi.fn(),
+    setMobileBackgroundSyncInterval: vi.fn(),
     syncMobileBackgroundSyncRegistration: vi.fn(),
     showSettingsErrorToast: vi.fn(),
     showSettingsWarning: vi.fn(),
@@ -157,6 +159,8 @@ vi.mock('@/lib/sync-service', () => ({
 }));
 
 vi.mock('@/lib/background-sync-task', () => ({
+    getMobileBackgroundSyncInterval: mocked.getMobileBackgroundSyncInterval,
+    setMobileBackgroundSyncInterval: mocked.setMobileBackgroundSyncInterval,
     syncMobileBackgroundSyncRegistration: mocked.syncMobileBackgroundSyncRegistration,
 }));
 
@@ -340,6 +344,10 @@ beforeEach(() => {
     mocked.resetSyncStatusForBackendSwitch.mockReset();
     mocked.syncMobileBackgroundSyncRegistration.mockReset();
     mocked.syncMobileBackgroundSyncRegistration.mockResolvedValue({ action: 'unchanged' });
+    mocked.getMobileBackgroundSyncInterval.mockReset();
+    mocked.getMobileBackgroundSyncInterval.mockResolvedValue('15m');
+    mocked.setMobileBackgroundSyncInterval.mockReset();
+    mocked.setMobileBackgroundSyncInterval.mockResolvedValue(undefined);
     mocked.showSettingsErrorToast.mockReset();
     mocked.showSettingsWarning.mockReset();
     mocked.showToast.mockReset();
@@ -381,6 +389,37 @@ describe('useSyncSettingsTransportActions', () => {
         expect(latestHookResult?.cloudToken).toBe('token-123');
         expect(mocked.asyncStorage.setItem).toHaveBeenCalledWith(SYNC_BACKEND_KEY, 'off');
         expect(mocked.asyncStorage.setItem).toHaveBeenCalledWith(CLOUD_PROVIDER_KEY, 'selfhosted');
+    });
+
+    it('loads the persisted background sync interval on mount', async () => {
+        mocked.getMobileBackgroundSyncInterval.mockResolvedValue('1h');
+
+        await renderHarness();
+
+        expect(latestHookResult?.backgroundSyncInterval).toBe('1h');
+    });
+
+    it('defaults the background sync interval to 15m when nothing is stored', async () => {
+        mocked.getMobileBackgroundSyncInterval.mockResolvedValue('15m');
+
+        await renderHarness();
+
+        expect(latestHookResult?.backgroundSyncInterval).toBe('15m');
+    });
+
+    it('persists a selected background sync interval and reconciles the registration', async () => {
+        await renderHarness();
+        mocked.syncMobileBackgroundSyncRegistration.mockClear();
+
+        await act(async () => {
+            latestHookResult?.handleSetBackgroundSyncInterval('6h');
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(latestHookResult?.backgroundSyncInterval).toBe('6h');
+        expect(mocked.setMobileBackgroundSyncInterval).toHaveBeenCalledWith('6h');
+        expect(mocked.syncMobileBackgroundSyncRegistration).toHaveBeenCalledTimes(1);
     });
 
     it('disables a persisted Dropbox backend when this build has no Dropbox client', async () => {

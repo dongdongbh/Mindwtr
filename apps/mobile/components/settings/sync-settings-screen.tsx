@@ -457,6 +457,7 @@ function SyncSettingsView({
         updateSettings,
     });
     const {
+        backgroundSyncInterval,
         cloudKitAccountStatus,
         cloudAllowInsecureHttp,
         cloudProvider,
@@ -469,6 +470,7 @@ function SyncSettingsView({
         handleSaveSelfHostedSettings,
         handleSelectCloudProvider,
         handleSelectSyncBackend,
+        handleSetBackgroundSyncInterval,
         handleSaveWebDavSettings,
         handleSetSyncPath,
         handleSync,
@@ -866,7 +868,9 @@ function SyncSettingsView({
                         />
 
                         <BackgroundSyncInfoCard
+                            interval={backgroundSyncInterval}
                             isRemoteBackend={isScheduledBackgroundSyncBackend}
+                            onSelectInterval={handleSetBackgroundSyncInterval}
                             tr={tr}
                             tc={tc}
                         />
