@@ -3,6 +3,54 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(path, "utf8");
 
+const dockerfiles = ["docker/app/Dockerfile", "docker/cloud/Dockerfile"];
+
+const externalDockerBases = (dockerfile) => {
+  const stages = new Set();
+  const bases = [];
+
+  for (const line of dockerfile.split("\n")) {
+    const from = line.match(/^FROM\s+(\S+)(?:\s+AS\s+(\S+))?$/i);
+    if (!from) continue;
+
+    const [, base, stage] = from;
+    if (!stages.has(base)) bases.push(base);
+    if (stage) stages.add(stage);
+  }
+
+  return bases;
+};
+
+test("Docker bases and Bun installs follow the repository release pins", () => {
+  const bunVersion = read(".bun-version").trim();
+  const app = read("docker/app/Dockerfile");
+  const cloud = read("docker/cloud/Dockerfile");
+
+  for (const path of dockerfiles) {
+    const dockerfile = read(path);
+    const externalBases = externalDockerBases(dockerfile);
+
+    expect(externalBases.length).toBeGreaterThan(0);
+    for (const base of externalBases) {
+      expect(base).toMatch(/@sha256:[a-f0-9]{64}$/);
+    }
+
+    expect(
+      externalBases.some((base) =>
+        base.startsWith(`oven/bun:${bunVersion}-alpine@sha256:`),
+      ),
+    ).toBe(true);
+  }
+
+  expect(
+    externalDockerBases(app).some((base) =>
+      base.startsWith("nginx:1.31.4-alpine@sha256:"),
+    ),
+  ).toBe(true);
+  expect(app).toContain("RUN bun install --frozen-lockfile");
+  expect(cloud).toContain("RUN bun install --production --frozen-lockfile");
+});
+
 test("MCP publisher is versioned and checksum-verified before credentials are used", () => {
   const workflow = read(".github/workflows/publish-mcp.yml");
 

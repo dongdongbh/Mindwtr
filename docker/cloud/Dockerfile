@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.3-alpine@sha256:d2bc1fbc3afcd3d70afc2bb2544235bf559caae2a3084e9abed126e233797511 AS base
+FROM oven/bun:1.3.5-alpine@sha256:7156fcc0cee0194d390bfaf7f0eeda9a5e383e70cc90f31aad3a2440a033d7dc AS base
 WORKDIR /app
 
 FROM base AS deps
@@ -11,7 +11,7 @@ ENV npm_config_disturl="https://nodejs.org/dist"
 COPY --chown=1000:1000 . .
 RUN chown bun:bun /app
 USER bun
-RUN bun install --production
+RUN bun install --production --frozen-lockfile
 
 FROM base AS cloud
 RUN apk add --no-cache curl
