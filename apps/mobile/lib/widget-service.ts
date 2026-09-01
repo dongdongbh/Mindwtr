@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { type AppData, type Language, useTaskStore } from '@mindwtr/core';
 import { requestWidgetUpdate, type WidgetInfo } from 'react-native-android-widget';
@@ -24,6 +25,7 @@ import {
 } from './widget-data';
 import { logError, logInfo, logWarn } from './app-log';
 import { isExpoGo } from './expo-go';
+import { getLocalDayKey } from '@/hooks/use-local-day-key';
 import { getSystemColorSchemeForWidget } from './system-color-scheme';
 import {
     getAdaptiveAndroidWidgetTaskLimit,
@@ -236,22 +238,70 @@ async function updateIosShortcutsSnapshotFromData(snapshot: ShortcutsSnapshot): 
 // changed. System events for new/resized widgets render through
 // widget-task-handler directly, so they never depend on this path.
 const WIDGET_FINGERPRINT_MAX_ITEMS = 50;
+// Folded into the fingerprint (not just the storage key) so an app upgrade
+// that changes what a render writes without changing the payload data still
+// forces a render: a persisted fingerprint from an older build never matches
+// the newly computed one (correction #4).
+const WIDGET_RENDER_APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 let lastRenderedWidgetFingerprint: string | null = null;
 let lastRenderedShortcutsSnapshotFingerprint: string | null = null;
+
+// The rendered fingerprint above only lives in module scope, which is cold on
+// every invocation of the scheduled background sync (a headless RN instance):
+// the #766 native-render skip never fired there. Persist it so a background
+// cycle that changed nothing still skips the native render (#766 follow-up).
+const WIDGET_FINGERPRINT_STORAGE_KEY = 'mindwtr-widget-render-fingerprint';
+let widgetFingerprintLoadedFromStorage = false;
+let widgetFingerprintLoadPromise: Promise<void> | null = null;
+
+async function ensureLastRenderedWidgetFingerprintLoaded(): Promise<void> {
+    if (widgetFingerprintLoadedFromStorage) return;
+    if (!widgetFingerprintLoadPromise) {
+        widgetFingerprintLoadPromise = (async () => {
+            try {
+                const stored = await AsyncStorage.getItem(WIDGET_FINGERPRINT_STORAGE_KEY);
+                if (stored !== null) lastRenderedWidgetFingerprint = stored;
+            } catch {
+                // Read failure: treat as null (render).
+            } finally {
+                widgetFingerprintLoadedFromStorage = true;
+            }
+        })();
+    }
+    await widgetFingerprintLoadPromise;
+}
+
+// Gate 0's cache: {lastDataChangeAt, language, localDayKey} of the last
+// successful render, so a repeated store-driven update (the immediate + 800ms
+// pair after a foreground transition) can skip building/stringifying the
+// widget payload entirely when nothing that could change it moved. Only
+// `updateMobileWidgetFromStore` has `lastDataChangeAt`, so this gate lives
+// there rather than in `updateMobileWidgetFromData`.
+type WidgetRenderContext = {
+    lastDataChangeAt: number;
+    language: Language;
+    localDayKey: string;
+    systemColorScheme: ReturnType<typeof getSystemColorSchemeForWidget>;
+};
+let lastRenderContext: WidgetRenderContext | null = null;
 
 export function resetMobileWidgetRenderCache(): void {
     lastRenderedWidgetFingerprint = null;
     lastRenderedShortcutsSnapshotFingerprint = null;
+    lastRenderContext = null;
+    widgetFingerprintLoadedFromStorage = false;
+    widgetFingerprintLoadPromise = null;
 }
 
 export async function updateMobileWidgetFromData(data: AppData): Promise<boolean> {
     if (Platform.OS !== 'android' && Platform.OS !== 'ios') return false;
+    await ensureLastRenderedWidgetFingerprintLoaded();
     const language = await resolvePayloadLanguage(data);
 
     // Gate 1: the widget's own payload fingerprint, exactly as before #980 --
     // this is the #766 skip and must not fire on changes the widget doesn't
     // show.
-    const widgetFingerprint = `${language}:${JSON.stringify(
+    const widgetFingerprint = `${WIDGET_RENDER_APP_VERSION}:${language}:${JSON.stringify(
         buildPayloadFromData(data, language, WIDGET_FINGERPRINT_MAX_ITEMS),
     )}`;
     let widgetUpdated = true;
@@ -261,6 +311,11 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
             : await updateIosWidgetPayloadsFromData(data, language);
         if (widgetUpdated) {
             lastRenderedWidgetFingerprint = widgetFingerprint;
+            // Awaited (still error-swallowed): the headless background-sync
+            // instance this cache targets can tear down as soon as this
+            // function's promise settles, so a fire-and-forget write could
+            // never land (correction #5).
+            await AsyncStorage.setItem(WIDGET_FINGERPRINT_STORAGE_KEY, widgetFingerprint).catch(() => undefined);
         }
     }
 
@@ -284,7 +339,7 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
 
 export async function updateMobileWidgetFromStore(): Promise<boolean> {
     if (Platform.OS !== 'android' && Platform.OS !== 'ios') return false;
-    const { _allTasks, _allProjects, _allSections, _allAreas, tasks, projects, sections, areas, settings } = useTaskStore.getState();
+    const { _allTasks, _allProjects, _allSections, _allAreas, tasks, projects, sections, areas, settings, lastDataChangeAt } = useTaskStore.getState();
     const ensureArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
     const allTasks = ensureArray<AppData['tasks'][number]>(_allTasks);
     const allProjects = ensureArray<AppData['projects'][number]>(_allProjects);
@@ -301,7 +356,34 @@ export async function updateMobileWidgetFromStore(): Promise<boolean> {
         areas: allAreas.length ? allAreas : visibleAreas,
         settings: settings ?? {},
     };
-    return await updateMobileWidgetFromData(data);
+
+    // Gate 0: cheap pre-check before building/stringifying the widget payload.
+    // `language` still needs its own (cheap, single-key) AsyncStorage read to
+    // compare -- the JSON-heavy gate 1 fingerprint below is what this skips.
+    // The system colour scheme is included because the payload's palette
+    // depends on it (widget-data.ts reads getSystemColorSchemeForWidget) but
+    // nothing else in this key moves when it flips (correction #2).
+    const language = await resolvePayloadLanguage(data);
+    const localDayKey = getLocalDayKey();
+    const systemColorScheme = getSystemColorSchemeForWidget();
+    if (
+        lastRenderContext
+        && lastRenderContext.lastDataChangeAt === lastDataChangeAt
+        && lastRenderContext.language === language
+        && lastRenderContext.localDayKey === localDayKey
+        && lastRenderContext.systemColorScheme === systemColorScheme
+    ) {
+        return true;
+    }
+
+    const result = await updateMobileWidgetFromData(data);
+    // Only remember this context on a successful render -- a failed render
+    // (native call threw, iOS widget API unavailable) must not disable the
+    // callers' retry (immediate + 800ms) via gate 0 (correction #1, blocking).
+    if (result) {
+        lastRenderContext = { lastDataChangeAt, language, localDayKey, systemColorScheme };
+    }
+    return result;
 }
 
 // Backwards-compatible aliases for older imports.

@@ -50,9 +50,11 @@ type SyncUiCopy = {
 const AUTO_SYNC_BACKEND_CACHE_TTL_MS = 5_000;
 const APP_STATE_TRIGGER_DEDUPE_MS = 1_000;
 // Auto-sync pacing adapts to how long cycles actually take on this device/dataset:
-// the idle gap after a cycle is at least twice the cycle duration (capped), so slow
-// cycles cannot occupy the app back-to-back while the user is working (#766).
-const ADAPTIVE_SYNC_DURATION_MULTIPLIER = 2;
+// period = cycle duration T + idle gap, and share = T / period is the fraction of
+// time sync occupies the JS thread. Gap = 9T (capped) makes period = 10T, so a
+// continuously-editing device spends ~10% of its time syncing instead of ~33%
+// at gap = 2T (#766).
+const ADAPTIVE_SYNC_DURATION_MULTIPLIER = 9;
 const MAX_ADAPTIVE_SYNC_INTERVAL_MS = 5 * 60_000;
 // Same base and ceiling as the desktop auto-sync controller.
 const AUTO_SYNC_FAILURE_COOLDOWN_MS = 60_000;
@@ -175,7 +177,7 @@ export function useRootLayoutSyncEffects({
     // Device-local bookkeeping (lastSync*, pendingRemoteWrite*, network) is not
     // part of a sync payload, so the change fingerprint ignores it for free —
     // no separate strip pass needed.
-    const readCurrentSyncPayloadFingerprint = useCallback((): string | null => {
+    const readCurrentSyncChangeFingerprint = useCallback((): string | null => {
         try {
             return getInMemorySyncChangeFingerprint();
         } catch (error) {
@@ -185,7 +187,7 @@ export function useRootLayoutSyncEffects({
     }, []);
 
     const shouldDedupeAppStateSyncTrigger = useCallback((now: number): boolean => {
-        const currentFingerprint = readCurrentSyncPayloadFingerprint();
+        const currentFingerprint = readCurrentSyncChangeFingerprint();
         const previousFingerprint = lastAutoSyncPayloadFingerprint.current;
         if (currentFingerprint) {
             lastAutoSyncPayloadFingerprint.current = currentFingerprint;
@@ -194,7 +196,7 @@ export function useRootLayoutSyncEffects({
             return false;
         }
         return now - lastAppStateSyncTriggerAt.current < APP_STATE_TRIGGER_DEDUPE_MS;
-    }, [readCurrentSyncPayloadFingerprint]);
+    }, [readCurrentSyncChangeFingerprint]);
 
     const markAppStateSyncTrigger = useCallback((now: number) => {
         lastAppStateSyncTriggerAt.current = now;
@@ -371,7 +373,7 @@ export function useRootLayoutSyncEffects({
     useEffect(() => {
         void refreshSyncCadence().catch(logAppError);
         reconcileBackgroundSyncTask();
-        lastAutoSyncPayloadFingerprint.current = readCurrentSyncPayloadFingerprint();
+        lastAutoSyncPayloadFingerprint.current = readCurrentSyncChangeFingerprint();
         const unsubscribe = useTaskStore.subscribe(nameNotifyListener('auto-sync-trigger', (state, prevState) => {
             const currentSyncStatus = state.settings?.lastSyncStatus;
             const previousSyncStatus = prevState.settings?.lastSyncStatus;
@@ -390,9 +392,10 @@ export function useRootLayoutSyncEffects({
                 consecutiveSyncFailures.current = 0;
                 clearSyncThrottleTimer();
             }
-            // Cheap check first: the fingerprint is a full-dataset serialize and must
-            // not run on every store update (#766). Data writes always bump
-            // lastDataChangeAt, so skipping the fingerprint here is safe.
+            // Cheap check first: the fingerprint reads a small tuple digest, not the
+            // whole dataset, but it still must not run on every store update (#766).
+            // Data writes always bump lastDataChangeAt, so skipping the fingerprint
+            // here is safe.
             if (state.lastDataChangeAt === prevState.lastDataChangeAt) return;
             const cadence = syncCadenceRef.current;
             const hadTimer = !!syncDebounceTimer.current;
@@ -402,10 +405,10 @@ export function useRootLayoutSyncEffects({
             const debounceMs = hadTimer ? cadence.debounceContinuousChangeMs : cadence.debounceFirstChangeMs;
             syncDebounceTimer.current = setTimeout(() => {
                 if (!isActive.current) return;
-                // The fingerprint dedupe runs here, once per quiet period: even
-                // gated to data writes it serializes the whole library, which cost
-                // ~0.4s inside every done/save tap on a 7k-task device (#766).
-                const currentFingerprint = readCurrentSyncPayloadFingerprint();
+                // The fingerprint dedupe runs here, once per quiet period, so a burst
+                // of edits pays for the tuple digest once instead of on every write
+                // (#766).
+                const currentFingerprint = readCurrentSyncChangeFingerprint();
                 const previousFingerprint = lastAutoSyncPayloadFingerprint.current;
                 if (currentFingerprint) {
                     lastAutoSyncPayloadFingerprint.current = currentFingerprint;
@@ -422,7 +425,7 @@ export function useRootLayoutSyncEffects({
             }
             clearSyncThrottleTimer();
         };
-    }, [clearSyncThrottleTimer, readCurrentSyncPayloadFingerprint, requestSync, refreshSyncCadence]);
+    }, [clearSyncThrottleTimer, readCurrentSyncChangeFingerprint, requestSync, refreshSyncCadence]);
 
     useEffect(() => {
         const handleAppStateChange = (nextAppState: AppStateStatus) => {

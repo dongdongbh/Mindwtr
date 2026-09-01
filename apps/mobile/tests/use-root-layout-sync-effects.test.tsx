@@ -562,7 +562,7 @@ describe('useRootLayoutSyncEffects', () => {
     });
   });
 
-  it('stretches the auto-sync interval after a slow sync cycle', async () => {
+  it('stretches the auto-sync interval to min(9x cycle duration, 5 min) after a slow sync cycle', async () => {
     vi.useFakeTimers();
     const storeListeners: Array<(state: { lastDataChangeAt: number }, prevState: { lastDataChangeAt: number }) => void> = [];
     storeSubscribe.mockImplementation((...args: unknown[]) => {
@@ -572,7 +572,8 @@ describe('useRootLayoutSyncEffects', () => {
     });
     let fingerprintVersion = 0;
     getInMemorySyncChangeFingerprint.mockImplementation(() => `sync-change:${fingerprintVersion}`);
-    // Each sync cycle takes 20s, so the adaptive interval becomes 40s from cycle end.
+    // Each sync cycle takes 20s, so the adaptive interval becomes 180s (9x) from
+    // cycle end -- well under the 5-minute cap.
     performMobileSync.mockImplementation(
       () => new Promise((resolve) => setTimeout(() => resolve({ success: true }), 20_000)),
     );
@@ -598,14 +599,16 @@ describe('useRootLayoutSyncEffects', () => {
     await act(async () => {
       fingerprintVersion += 1;
       storeListener?.({ lastDataChangeAt: 3 }, { lastDataChangeAt: 2 });
-      // Well past the 5s base interval, but within the 40s adaptive interval.
-      await vi.advanceTimersByTimeAsync(20_000);
+      // Well past the 5s base interval, but comfortably within the 180s adaptive
+      // interval measured from the end of the prior cycle.
+      await vi.advanceTimersByTimeAsync(170_000);
       await flushMicrotasks();
     });
     expect(performMobileSync).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(45_000);
+      // Crosses the 9x adaptive interval (180s) from the prior cycle's end.
+      await vi.advanceTimersByTimeAsync(40_000);
       await flushMicrotasks();
     });
     expect(performMobileSync).toHaveBeenCalledTimes(2);
