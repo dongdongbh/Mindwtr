@@ -490,7 +490,7 @@ describe('Layout sync conflict surface', () => {
     it.each([
         {
             deferred: 'busy' as const,
-            message: 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+            message: 'Another Mindwtr device is holding this sync location for a moment. Sync will retry on its own.',
         },
         {
             deferred: 'cleanup' as const,
