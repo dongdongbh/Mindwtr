@@ -391,6 +391,75 @@ export const computeCoveredSettingsFingerprint = (settings: AppData['settings'])
     return computeStableValueFingerprint(comparable);
 };
 
+/**
+ * JSON-value equality with no intermediate object graph and an exit at the
+ * first difference — the cheap way to ask "are these two documents the same"
+ * when the answer is usually no. A missing key and an explicitly-undefined one
+ * compare equal, matching what a stable serialize emits: the sync merge
+ * normalizers deliberately emit explicit-undefined keys (#766), which must not
+ * read as a difference against a JSON round-tripped twin.
+ */
+export const isDeepJsonEqual = (left: unknown, right: unknown): boolean => {
+    if (left === right) return true;
+    if (left === null || right === null) return false;
+    if (Array.isArray(left) || Array.isArray(right)) {
+        if (!Array.isArray(left) || !Array.isArray(right)) return false;
+        if (left.length !== right.length) return false;
+        for (let index = 0; index < left.length; index += 1) {
+            if (!isDeepJsonEqual(left[index], right[index])) return false;
+        }
+        return true;
+    }
+    if (typeof left !== 'object' || typeof right !== 'object') return false;
+    const leftRecord = left as Record<string, unknown>;
+    const rightRecord = right as Record<string, unknown>;
+    let definedInLeft = 0;
+    for (const key of Object.keys(leftRecord)) {
+        const leftValue = leftRecord[key];
+        if (leftValue === undefined) {
+            if (rightRecord[key] !== undefined) return false;
+            continue;
+        }
+        if (!isDeepJsonEqual(leftValue, rightRecord[key])) return false;
+        definedInLeft += 1;
+    }
+    let definedInRight = 0;
+    for (const key of Object.keys(rightRecord)) {
+        if (rightRecord[key] !== undefined) definedInRight += 1;
+    }
+    return definedInLeft === definedInRight;
+};
+
+const withoutSyncStatusBookkeeping = (settings: AppData['settings']): Record<string, unknown> => {
+    const comparable: Record<string, unknown> = { ...(settings ?? {}) };
+    for (const key of SYNC_STATUS_BOOKKEEPING_SETTINGS_KEYS) {
+        delete comparable[key];
+    }
+    return comparable;
+};
+
+/**
+ * True when persisting `candidate` over `stored` would change nothing durable.
+ *
+ * Everything a local write persists is compared, not just the transport
+ * payload: `sanitizeAppDataForRemote` strips attachment `uri`, `localStatus`,
+ * the recorded content stats, `pendingContentUpload`, the uncompacted half of
+ * a purged tombstone and every device-local setting, all of which are real
+ * local content that a skipped write would silently drop. Only the sync
+ * bookkeeping the running cycle rewrites by design is excluded.
+ */
+export const isLocalPersistEquivalent = (candidate: AppData, stored: AppData): boolean => {
+    if (candidate === stored) return true;
+    if (!isDeepJsonEqual(
+        withoutSyncStatusBookkeeping(candidate.settings),
+        withoutSyncStatusBookkeeping(stored.settings),
+    )) return false;
+    return isDeepJsonEqual(
+        { ...candidate, settings: undefined },
+        { ...stored, settings: undefined },
+    );
+};
+
 type RevisionedEntity = {
     id: string;
     rev?: number;

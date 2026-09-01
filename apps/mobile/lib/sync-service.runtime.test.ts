@@ -1921,6 +1921,29 @@ describe('mobile sync-service runtime', () => {
     expect(logMocks.logSyncError).not.toHaveBeenCalled();
   });
 
+  it('skips the post-sync store refresh when the cycle wrote nothing locally', async () => {
+    coreMocks.webdavGetJson.mockResolvedValue(remoteChangedData);
+    coreMocks.performSyncCycle.mockImplementation(async (io: any) => {
+      const local = await io.readLocal();
+      const remote = await io.readRemote();
+      const base = remote ?? local;
+      // Keep the daily attachment cleanup out of it: a cleanup write is a real
+      // local change and must still refresh the store.
+      const data = {
+        ...base,
+        settings: { ...base.settings, attachments: { lastCleanupAt: new Date().toISOString() } },
+      };
+      await io.writeRemote(data);
+      // What the core cycle reports when the merged document matches storage.
+      return { status: 'success', stats: emptyStats, data, localWriteSkipped: true };
+    });
+
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result).toEqual({ success: true, stats: emptyStats, localWriteSkipped: true });
+    expect(storeStateRef.current.fetchData).not.toHaveBeenCalled();
+  });
+
   it('stops cloud attachment pre-sync when the app lifecycle aborts the sync', async () => {
     const dataWithAttachment: AppData = {
       tasks: [

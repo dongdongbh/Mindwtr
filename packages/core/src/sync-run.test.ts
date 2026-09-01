@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppData, Project, Task } from './types';
 import type {
@@ -11,7 +11,7 @@ import type {
     SyncStatusUpdates,
 } from './sync-run-ports';
 import { SyncRemoteWriteConflict } from './sync-run-ports';
-import { normalizeRemoteWriteResult, runSharedSyncCycle } from './sync-run';
+import { clearIdleSyncCycleSnapshot, normalizeRemoteWriteResult, runSharedSyncCycle } from './sync-run';
 import { normalizeAppData } from './sync-normalization';
 import { cloneAppData } from './sync-runtime-utils';
 import { toRemoteSyncDocument } from './sync-document';
@@ -30,6 +30,13 @@ import {
     type SyncRemoteMutationFenceLease,
 } from './sync-remote-fence';
 import { AttachmentUploadTooLargeError } from './attachment-transfer';
+
+// Each harness stands up its own fake store, so the process-wide idle-cycle
+// snapshot (keyed on sync scope + the store's change stamp, unique inside a
+// real app) would otherwise leak one harness's document into the next.
+beforeEach(() => {
+    clearIdleSyncCycleSnapshot();
+});
 
 const NOW = new Date('2026-07-13T10:00:00.000Z');
 const STAMP = '2026-07-01T00:00:00.000Z';
@@ -1354,7 +1361,13 @@ describe('runSharedSyncCycle', () => {
         const { io, storage, run } = createHarness({
             io: {
                 acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease),
-                syncAttachments: vi.fn().mockResolvedValue(false),
+                // The fence is taken on the first mutation, so a pass that never
+                // reaches for it never meets the lost lease. Every real backend
+                // calls this immediately before it writes.
+                syncAttachments: vi.fn(async (_data, helpers) => {
+                    await helpers.assertRemoteMutationFenceHeld();
+                    return false;
+                }),
             },
         });
 
@@ -2673,5 +2686,180 @@ describe('activation proof with metadata-only attachments (no blob anywhere)', (
             error: '[cloud] Candidate attachment proof failed for attachment-unreadable',
         });
         expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+});
+
+describe('sync cycle cost cuts', () => {
+    it('does not acquire the remote mutation fence for a pre-sync pass with nothing to mutate', async () => {
+        const acquireRemoteMutationFence = vi.fn(async () => createFenceLease());
+        const { run } = createHarness({
+            fastSyncScope: 'scope-idle-fence',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: {
+                acquireRemoteMutationFence,
+                syncAttachments: vi.fn(async () => false),
+            },
+        });
+
+        await run();
+        const afterFirstMerge = acquireRemoteMutationFence.mock.calls.length;
+        const second = await run();
+
+        expect(second.skipped).toBe('unchanged');
+        expect(acquireRemoteMutationFence.mock.calls.length).toBe(afterFirstMerge);
+    });
+
+    it('acquires the fence before an attachment pass that does mutate', async () => {
+        const acquireRemoteMutationFence = vi.fn(async () => createFenceLease());
+        const { run } = createHarness({
+            fastSyncScope: 'scope-mutating-fence',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: {
+                acquireRemoteMutationFence,
+                syncAttachments: vi.fn(async (_data, helpers) => {
+                    await helpers.assertRemoteMutationFenceHeld();
+                    return false;
+                }),
+            },
+        });
+
+        await run();
+
+        expect(acquireRemoteMutationFence).toHaveBeenCalled();
+    });
+
+    it('skips the local document write when the merge produced nothing new', async () => {
+        const bundle = createHarness({ fastSyncScope: 'scope-local-write' });
+        // Settle: the first cycles publish the normalized document and absorb
+        // the sanitized settings the remote copy materializes. Each one is
+        // followed by what mobile's post-sync refresh does, so the next cycle's
+        // reconcile takes the aligned path.
+        await bundle.run();
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        await bundle.run({ manual: true });
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        vi.mocked(bundle.storage.persistLocal).mockClear();
+        bundle.harness.statusUpdates.length = 0;
+        // Force the merge phase: a manual run never takes the fast-check skip.
+        const second = await bundle.run({ manual: true });
+
+        expect(second).toMatchObject({ success: true, localWriteSkipped: true });
+        expect(bundle.storage.persistLocal).not.toHaveBeenCalled();
+        expect(bundle.harness.statusUpdates.at(-1)).toMatchObject({ lastSyncStatus: 'success' });
+        const info = vi.mocked(bundle.hooks.finalizeSuccess).mock.calls.at(-1)?.[1];
+        expect(info?.wroteLocal).toBe(false);
+        // The signal mobile's post-sync refresh reads.
+        expect(info?.localWriteSkipped).toBe(true);
+    });
+
+    it('still writes locally when the merge brings in a remote change', async () => {
+        const bundle = createHarness({ fastSyncScope: 'scope-local-write-needed' });
+        await bundle.run();
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        await bundle.run({ manual: true });
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        vi.mocked(bundle.storage.persistLocal).mockClear();
+        bundle.harness.remote = createData([
+            createTask('t-local', 'Local task'),
+            createTask('t-remote', 'Arrived from another device'),
+        ]);
+
+        const second = await bundle.run({ manual: true });
+
+        expect(second.localWriteSkipped).toBeUndefined();
+        expect(bundle.storage.persistLocal).toHaveBeenCalled();
+        expect(bundle.harness.persisted.tasks.map((task) => task.id)).toContain('t-remote');
+    });
+
+    it('reuses the previous cycle\'s local snapshot for a back-to-back idle cycle', async () => {
+        const bundle = createHarness({ fastSyncScope: 'scope-idle-cache', policy: { carryIdleCycleSnapshot: true } });
+        await bundle.run();
+        await bundle.run();
+        vi.mocked(bundle.storage.readPersistedLocal).mockClear();
+        const third = await bundle.run();
+
+        expect(third.skipped).toBe('unchanged');
+        expect(bundle.storage.readPersistedLocal).not.toHaveBeenCalled();
+    });
+
+    it('re-reads the local snapshot when a write lands between idle cycles', async () => {
+        const bundle = createHarness({
+            fastSyncScope: 'scope-idle-cache-invalidated',
+            policy: { carryIdleCycleSnapshot: true },
+        });
+        await bundle.run();
+        await bundle.run();
+        vi.mocked(bundle.storage.readPersistedLocal).mockClear();
+        bundle.harness.lastDataChangeAt += 1;
+
+        await bundle.run();
+
+        expect(bundle.storage.readPersistedLocal).toHaveBeenCalled();
+    });
+});
+
+describe('attachment pre-sync reconcile short-circuit', () => {
+    const withAttachment = (data: AppData, cloudKey: string | undefined): AppData => ({
+        ...data,
+        tasks: data.tasks.map((task, index) => (index === 0
+            ? {
+                ...task,
+                attachments: [{
+                    id: 'a-1',
+                    kind: 'file' as const,
+                    title: 'file.txt',
+                    uri: 'file:///local/file.txt',
+                    localStatus: 'available' as const,
+                    cloudKey,
+                    createdAt: STAMP,
+                    updatedAt: STAMP,
+                }],
+            }
+            : task)),
+    });
+
+    it('hands back the pre-synced side without merging when both sides align', async () => {
+        // Diverged content at identical revision metadata: only the
+        // short-circuit yields the pre-synced title.
+        const inMemory = createData([createTask('t-1', 'Zebra title')]);
+        const preSynced = createData([createTask('t-1', 'Apple title')]);
+        let capturedLocal: AppData | null = null;
+        const { run } = createHarness({
+            local: inMemory,
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: { syncAttachments: vi.fn(async () => cloneAppData(preSynced)) },
+            performSyncCycle: async (io) => {
+                capturedLocal = await io.readLocal();
+                return performSyncCycle(io);
+            },
+        });
+
+        await run();
+
+        expect(capturedLocal!.tasks.map((task) => task.title)).toEqual(['Apple title']);
+    });
+
+    it('still merges when only the attachment fields differ', async () => {
+        // Identical revision tuples on both sides; the cloudKey lives only on
+        // the IN-MEMORY side, so the assertion discriminates — a short-circuit
+        // on the change fingerprint alone hands back the pre-synced side and
+        // drops it.
+        const base = createData([createTask('t-1', 'Shared task')]);
+        const inMemory = withAttachment(base, 'attachments/a-1.txt');
+        const preSynced = withAttachment(base, undefined);
+        let capturedLocal: AppData | null = null;
+        const { run } = createHarness({
+            local: inMemory,
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: { syncAttachments: vi.fn(async () => cloneAppData(preSynced)) },
+            performSyncCycle: async (io) => {
+                capturedLocal = await io.readLocal();
+                return performSyncCycle(io);
+            },
+        });
+
+        await run();
+
+        expect(capturedLocal!.tasks[0].attachments?.[0].cloudKey).toBe('attachments/a-1.txt');
     });
 });

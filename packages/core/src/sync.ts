@@ -1360,6 +1360,52 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
         }
     }
 
+    // The merge produced nothing the local store does not already hold. Both
+    // document writes below would rewrite the same bytes, and the pending
+    // remote-write marker they carry has nothing to protect: it exists so a
+    // crash between the local write and the remote write cannot leave local
+    // holding merged-in remote changes that were never published, and here
+    // local absorbed nothing. Persist the cycle's own bookkeeping and go
+    // straight to the remote write, which keeps its own unchanged-guard.
+    if (
+        !pendingRemoteWriteMeta
+        && typeof io.isLocalPersistUnchanged === 'function'
+        && typeof io.persistSyncStatusOnly === 'function'
+        && io.isLocalPersistUnchanged(finalData)
+    ) {
+        io.onStep?.('write-remote');
+        await yieldToUi();
+        try {
+            await io.writeRemote(finalData);
+        } catch (error) {
+            if (!isLocalSyncAbortError(error)) {
+                // Nothing durable to roll back, but the retry schedule still
+                // has to land or the next cycle hammers a failing backend.
+                io.onStep?.('write-local');
+                await yieldToUi();
+                await io.writeLocal(withPendingRemoteWriteRetry(finalData, nowIso, error));
+            }
+            throw error;
+        }
+        try {
+            await io.persistSyncStatusOnly(finalData);
+        } catch (error) {
+            // The remote write already succeeded and no document changed locally;
+            // a failed status write must not report the whole cycle as an error
+            // (same swallow-and-warn as persistUnchangedSyncStatus).
+            logWarn('Failed to persist sync status after an unchanged local write', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+        return {
+            data: finalData,
+            stats: mergeResult.stats,
+            status: nextSyncStatus,
+            clockSkewWarning: mergeResult.clockSkewWarning,
+            localWriteSkipped: true,
+        };
+    }
+
     const finalDataWithPendingRemoteWrite = withPendingRemoteWriteFlag(
         finalData,
         pendingRemoteWriteMeta?.pendingAt ?? nowIso,

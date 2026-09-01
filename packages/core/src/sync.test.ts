@@ -2345,3 +2345,49 @@ describe('Sync Logic', () => {
 
     });
 });
+
+describe('mergeAppDataWithStats normalizes even when the two sides are identical', () => {
+    // A verbatim early-out here is tempting and wrong: mergeAppData is
+    // contractually a normalizer, and its output shape is pinned across
+    // implementations by sync-entity-arbitration-parity.fixtures.json. Handing
+    // back the local object would let two devices running different code paths
+    // store different bytes for the same content. Skips belong at the call
+    // sites that can prove both sides are already merge output — see the local
+    // reconcile in sync-run.ts.
+    it('emits the normalized shape rather than the input object', () => {
+        const local = mockAppData([createMockTask('t-1')]);
+        const incoming = mockAppData([createMockTask('t-1')]);
+
+        const result = mergeAppDataWithStats(local, incoming);
+
+        expect(result.data).not.toBe(local);
+        expect(result.data.tasks[0]).not.toBe(local.tasks[0]);
+        expect(result.data.tasks[0]).toEqual(mergeAppData(local, mockAppData([])).tasks[0]);
+    });
+
+    it('still compacts an uncompacted purged tombstone present on both sides', () => {
+        const purged = {
+            ...createMockTask('t-purged'),
+            title: 'Still carrying its payload',
+            description: 'uncompacted',
+            purgedAt: '2023-02-01T00:00:00.000Z',
+        } as Task;
+        const local = mockAppData([{ ...purged }]);
+        const incoming = mockAppData([{ ...purged }]);
+
+        const result = mergeAppDataWithStats(local, incoming);
+
+        expect(result.stats.tombstoneRepairs).toBeGreaterThan(0);
+        expect(result.data.tasks[0].description).toBeUndefined();
+    });
+
+    it('still resolves a content conflict at equal revision metadata', () => {
+        const local = mockAppData([createMockTask('t-1')]);
+        const incoming = mockAppData([createMockTask('t-1')]);
+        incoming.tasks[0] = { ...incoming.tasks[0], title: 'Diverged content, same rev' };
+
+        const result = mergeAppDataWithStats(local, incoming);
+
+        expect(result.stats.tasks.conflicts).toBeGreaterThan(0);
+    });
+});

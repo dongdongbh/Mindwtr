@@ -101,6 +101,15 @@ export type SyncCycleIO = {
     flushPendingLocalBeforeRetryRead?: () => Promise<void>;
     prepareRemoteWrite?: (data: AppData) => Promise<AppData | void>;
     writeRemote: (data: AppData) => Promise<void>;
+    /** True when persisting `data` locally would change nothing durable — the
+     *  stored document already carries this content and differs only in the
+     *  sync bookkeeping this cycle rewrites. The cycle then writes the
+     *  bookkeeping through `persistSyncStatusOnly` instead of rewriting the
+     *  whole document twice. Omit to keep the unconditional local writes. */
+    isLocalPersistUnchanged?: (data: AppData) => boolean;
+    /** Persist just this cycle's own sync bookkeeping. Only called when
+     *  `isLocalPersistUnchanged` returned true for the same document. */
+    persistSyncStatusOnly?: (data: AppData) => Promise<void>;
     /** The remote was just written by a successful candidate probe. For live
      *  attachments present on both sides, its destination-specific cloud key
      *  is authoritative during this one merge; local URI/status still win as
@@ -122,6 +131,10 @@ export type SyncCycleWriteResult = {
     stats: MergeStats;
     status: 'success' | 'conflict';
     clockSkewWarning?: ClockSkewWarning;
+    /** The merge produced nothing new for local storage, so the document write
+     *  was skipped and only the sync bookkeeping was persisted. Absent means
+     *  the cycle wrote the document as usual. */
+    localWriteSkipped?: boolean;
 };
 
 export type SyncCycleSkippedResult = {
