@@ -474,6 +474,13 @@ class SharedSyncRunMachine {
             acquire,
         );
         if (!lease) return;
+        if (lease.reclaimedFrom) {
+            const from = lease.reclaimedFrom;
+            this.notifier.logWarning(
+                'Reclaimed an abandoned remote sync reservation',
+                new Error(`${from.ownerId} (${from.purpose}, lease ${from.leaseId}) stopped renewing with ${Math.ceil(from.remainingMs / 1000)}s left`),
+            );
+        }
         this.remoteMutationFence = lease;
         this.state.readCheckRemoteData = undefined;
         this.state.remoteDataForCompare = null;
@@ -1300,6 +1307,9 @@ class SharedSyncRunMachine {
             };
         }
         if (error instanceof SyncRemoteMutationFenceBusyError) {
+            // Attributable in the log: a holder with seconds left is a dead lease
+            // (a live one renews every ttl/3), not a device actively syncing.
+            this.notifier.logWarning('Remote sync location is reserved; retrying after the lease lapses', error);
             if (!this.options.activationProbe) this.requestFollowUpAfter(error.retryAfterMs);
             return {
                 success: true,

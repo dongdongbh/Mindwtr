@@ -2542,7 +2542,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': '{{count}}件の日付は対応づけられなかったため、取り込みませんでした。',
         'settings.importDiagnostics.unmappedStatus': '{{count}}件のステータスは対応づけられなかったため、安全な既定値を使いました。',
         'settings.importDiagnostics.unsupportedRecurrence': '対応していない繰り返しルール{{count}}件は、メモとして残しました。',
-        'settings.syncRemoteBusy': '別の互換性のある Mindwtr デバイスがこの同期先を更新しています。完了するまで待ってから、もう一度同期してください。',
+        'settings.syncRemoteBusy': '別の Mindwtr デバイスがこの同期先を一時的に確保しています。同期は自動的に再試行されます。',
         'settings.syncRemoteCleanupDeferred': '同期処理は完了しました。Mindwtr は一時的な同期ロックを削除できませんでしたが、ロックは自動的に期限切れになります。再試行は不要です。',
         'settings.syncAttachmentWriteDeferred': '一部の添付ファイルの変更を完了できませんでした。不足しているローカルファイルを復元するか、該当する添付ファイルを削除してから、もう一度同期してください。',
         'settings.syncFileAttachmentTooLarge': 'Mindwtr はローカルの添付ファイルを保持しました。File Sync で同期できる添付ファイルは 100 MB 未満です。小さいファイルに置き換えるか添付ファイルを削除してから、もう一度同期してください。',

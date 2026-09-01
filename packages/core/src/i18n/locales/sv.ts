@@ -2499,7 +2499,7 @@ export const svOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} datumvärden kunde inte mappas och utelämnades.",
         'settings.importDiagnostics.unmappedStatus': "{{count}} statusvärden kunde inte mappas; ett säkert standardvärde användes.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} upprepningsregler som inte stöds sparades som anteckningar.",
-        'settings.syncRemoteBusy': 'En annan kompatibel Mindwtr-enhet uppdaterar den här synkroniseringsplatsen. Vänta tills den är klar och synkronisera sedan igen.',
+        'settings.syncRemoteBusy': 'En annan Mindwtr-enhet håller den här synkroniseringsplatsen en kort stund. Synkroniseringen försöker igen av sig själv.',
         'settings.syncRemoteCleanupDeferred': 'Synkroniseringen slutfördes. Mindwtr kunde inte ta bort det tillfälliga synkroniseringslåset, men det upphör automatiskt. Du behöver inte försöka igen.',
         'settings.syncAttachmentWriteDeferred': 'Vissa ändringar av bilagor kunde inte slutföras. Återställ saknade lokala filer eller ta bort de berörda bilagorna och synkronisera sedan igen.',
         'settings.syncFileAttachmentTooLarge': 'Mindwtr behöll den lokala bilagan. File Sync kan bara synkronisera bilagor som är mindre än 100 MB. Ersätt den med en mindre fil eller ta bort bilagan och synkronisera igen.',

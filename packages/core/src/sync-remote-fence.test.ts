@@ -77,6 +77,101 @@ describe('remote sync mutation fence', () => {
         expect(remote.snapshot()).toBeNull();
     });
 
+    it('reclaims a lease whose holder stopped renewing, by CAS over its exact version', async () => {
+        // Holder advertised a 5s heartbeat and last renewed 60s ago (server time),
+        // yet its 5-minute expiry is still far away: dead, not busy.
+        const remote = createPort({
+            version: 'v1',
+            bytes: new TextEncoder().encode(JSON.stringify({
+                schema: 1,
+                leaseId: 'lease-dead-0001',
+                ownerId: 'mindwtr-desktop',
+                purpose: 'ordinary-sync',
+                expiresAt: 1_240_000,
+                heartbeatMs: 5_000,
+                renewedAt: 940_000,
+            })),
+        });
+
+        const lease = await acquire(remote.port);
+        expect(remote.writes).toHaveLength(1);
+        expect(remote.writes[0]?.expected).toBe('v1');
+        expect(lease.reclaimedFrom).toMatchObject({ ownerId: 'mindwtr-desktop', leaseId: 'lease-dead-0001' });
+        expect(JSON.parse(remote.writes[0]!.value)).toMatchObject({ leaseId: 'lease-aaaaaaaa', renewedAt: 1_000_000 });
+        await lease.release();
+    });
+
+    it('does not reclaim a lease whose holder renewed within its heartbeat window', async () => {
+        const remote = createPort({
+            version: 'v1',
+            bytes: new TextEncoder().encode(JSON.stringify({
+                schema: 1,
+                leaseId: 'lease-live-0001',
+                ownerId: 'mindwtr-desktop',
+                purpose: 'ordinary-sync',
+                expiresAt: 1_240_000,
+                heartbeatMs: 20_000,
+                renewedAt: 990_000,
+            })),
+        });
+
+        await expect(acquire(remote.port)).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+        expect(remote.writes).toHaveLength(0);
+    });
+
+    it('only waits out records from clients that do not advertise a heartbeat', async () => {
+        const remote = createPort({
+            version: 'v1',
+            bytes: new TextEncoder().encode(JSON.stringify({
+                schema: 1,
+                leaseId: 'lease-old-00001',
+                ownerId: 'mindwtr-mobile',
+                purpose: 'ordinary-sync',
+                expiresAt: 1_240_000,
+            })),
+        });
+
+        await expect(acquire(remote.port)).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+        expect(remote.writes).toHaveLength(0);
+    });
+
+    it('loses a reclaim race to a holder that renews in between and reports busy', async () => {
+        const remote = createPort({
+            version: 'v1',
+            bytes: new TextEncoder().encode(JSON.stringify({
+                schema: 1,
+                leaseId: 'lease-slow-0001',
+                ownerId: 'mindwtr-desktop',
+                purpose: 'ordinary-sync',
+                expiresAt: 1_240_000,
+                heartbeatMs: 5_000,
+                renewedAt: 940_000,
+            })),
+        });
+        // The paused holder wakes up and renews right after our read.
+        const originalRead = remote.port.read;
+        let reads = 0;
+        remote.port.read = async () => {
+            const snapshot = await originalRead();
+            reads += 1;
+            if (reads === 1) {
+                remote.replace({
+                    schema: 1,
+                    leaseId: 'lease-slow-0001',
+                    ownerId: 'mindwtr-desktop',
+                    purpose: 'ordinary-sync',
+                    expiresAt: 1_300_000,
+                    heartbeatMs: 5_000,
+                    renewedAt: 1_000_000,
+                });
+            }
+            return snapshot;
+        };
+
+        await expect(acquire(remote.port)).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+        expect(remote.writes).toHaveLength(0);
+    });
+
     it('returns a bounded busy error for a live peer lease without writing', async () => {
         const remote = createPort({
             version: 'v1',
@@ -92,6 +187,15 @@ describe('remote sync mutation fence', () => {
         const error = await acquire(remote.port).then(() => null, (value) => value);
         expect(error).toBeInstanceOf(SyncRemoteMutationFenceBusyError);
         expect((error as SyncRemoteMutationFenceBusyError).retryAfterMs).toBe(4_000);
+        // The holder rides along so a stall is attributable in the app log:
+        // seconds left means a dead lease, not a device actively syncing.
+        expect((error as SyncRemoteMutationFenceBusyError).holder).toMatchObject({
+            ownerId: expect.any(String),
+            leaseId: expect.any(String),
+            purpose: expect.any(String),
+            remainingMs: 4_000,
+        });
+        expect((error as SyncRemoteMutationFenceBusyError).message).toContain('4s left');
         expect(remote.writes).toHaveLength(0);
     });
 

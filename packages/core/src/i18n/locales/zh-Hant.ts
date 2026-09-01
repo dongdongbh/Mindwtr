@@ -2470,7 +2470,7 @@ export const zhHant: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} 個日期值無法轉換，已省略。",
         'settings.importDiagnostics.unmappedStatus': "{{count}} 個狀態值無法轉換，已使用安全預設值。",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} 條不支援的重複規則已保留為備註。",
-        'settings.syncRemoteBusy': '另一台相容的 Mindwtr 裝置正在更新此同步位置。請等待其完成，然後再次同步。',
+        'settings.syncRemoteBusy': '另一台 Mindwtr 裝置暫時佔用了此同步位置。同步將自動重試。',
         'settings.syncRemoteCleanupDeferred': '同步作業已完成。Mindwtr 無法移除暫時同步鎖，但該鎖會自動失效。無需重試。',
         'settings.syncAttachmentWriteDeferred': '部分附件變更未能完成。請還原缺少的本機檔案或移除受影響的附件，然後再次同步。',
         'settings.syncFileAttachmentTooLarge': 'Mindwtr 已保留本機附件。File Sync 只能同步小於 100 MB 的附件。請改用較小的檔案或移除該附件，然後再次同步。',

@@ -4,6 +4,7 @@ export const SYNC_REMOTE_MUTATION_FENCE_NAME = '.mindwtr-sync-fence-v1.json';
  * It covers the bounded 30-second request plus a small scheduling margin. */
 export const SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS = 35_000;
 
+
 export type SyncRemoteMutationFencePurpose = 'ordinary-sync' | 'encryption-transition';
 
 export type SyncRemoteMutationFenceSnapshot = {
@@ -23,6 +24,8 @@ export type SyncRemoteMutationFencePort = {
 };
 
 export type SyncRemoteMutationFenceLease = {
+    /** Set when acquisition reclaimed a lease whose holder stopped renewing. */
+    readonly reclaimedFrom?: SyncRemoteMutationFenceHolder | null;
     /** Revalidates ownership and renews when less than `minRemainingMs` remains. */
     assertHeld(minRemainingMs?: number): Promise<void>;
     renew(): Promise<void>;
@@ -39,15 +42,34 @@ type SyncRemoteMutationFenceRecord = {
     ownerId: string;
     purpose: SyncRemoteMutationFencePurpose;
     expiresAt: number;
+    /** Liveness advertisement (absent on records from older clients): the
+     * holder's renewal cadence and the server time of its last write. A waiter
+     * that sees no renewal for several cadences may reclaim the lease by CAS
+     * instead of waiting out `expiresAt`. */
+    heartbeatMs?: number;
+    renewedAt?: number;
+};
+
+export type SyncRemoteMutationFenceHolder = {
+    ownerId: string;
+    leaseId: string;
+    purpose: SyncRemoteMutationFencePurpose;
+    /** Server-observed remaining life. A live holder renews at ttl/3, so a few
+     * seconds left means the holder died and the lease is about to lapse. */
+    remainingMs: number;
 };
 
 export class SyncRemoteMutationFenceBusyError extends Error {
     readonly retryAfterMs: number;
+    readonly holder: SyncRemoteMutationFenceHolder | null;
 
-    constructor(retryAfterMs: number) {
-        super('Remote sync is temporarily reserved by another compatible client');
+    constructor(retryAfterMs: number, holder: SyncRemoteMutationFenceHolder | null = null) {
+        super(holder
+            ? `Remote sync is temporarily reserved by ${holder.ownerId} (${holder.purpose}, lease ${holder.leaseId}, ${Math.ceil(holder.remainingMs / 1000)}s left)`
+            : 'Remote sync is temporarily reserved by another compatible client');
         this.name = 'SyncRemoteMutationFenceBusyError';
         this.retryAfterMs = Math.max(0, Math.floor(retryAfterMs));
+        this.holder = holder;
     }
 }
 
@@ -80,6 +102,12 @@ const MAX_TTL_MS = 15 * 60_000;
 const MAX_FUTURE_EXPIRY_TOLERANCE_MS = 60_000;
 const MAX_RECORD_BYTES = 4_096;
 const DEFAULT_ACQUIRE_ATTEMPTS = 4;
+/** Renewal cadence advertised in the record. Decoupled from the TTL so a dead
+ * holder is detected by missed heartbeats (seconds), not by lease expiry
+ * (minutes); the TTL stays the safety backstop for older clients' records. */
+const DEFAULT_HEARTBEAT_MS = 20_000;
+const ABANDONED_AFTER_MISSED_HEARTBEATS = 3;
+const ABANDONED_JITTER_MARGIN_MS = 5_000;
 
 // Constructed per call, not once at module scope: on React Native the global
 // TextDecoder only exists after Expo's winter runtime installs it, which is
@@ -100,6 +128,16 @@ const requireServerNow = (snapshot: SyncRemoteMutationFenceSnapshot): number => 
 const isImpossibleFutureExpiry = (expiresAt: number, serverNowMs: number): boolean => (
     expiresAt - serverNowMs > MAX_TTL_MS + MAX_FUTURE_EXPIRY_TOLERANCE_MS
 );
+
+/** A holder that advertises a heartbeat and has not renewed for several of
+ * them is presumed dead. Records without the advertisement (older clients)
+ * can only be waited out. */
+const isAbandonedRecord = (record: SyncRemoteMutationFenceRecord, serverNowMs: number): boolean => {
+    if (typeof record.heartbeatMs !== 'number' || record.heartbeatMs <= 0) return false;
+    if (typeof record.renewedAt !== 'number') return false;
+    const silentForMs = serverNowMs - record.renewedAt;
+    return silentForMs > record.heartbeatMs * ABANDONED_AFTER_MISSED_HEARTBEATS + ABANDONED_JITTER_MARGIN_MS;
+};
 
 const parseRecord = (bytes: Uint8Array): SyncRemoteMutationFenceRecord => {
     if (bytes.length === 0 || bytes.length > MAX_RECORD_BYTES) {
@@ -127,7 +165,16 @@ const parseRecord = (bytes: Uint8Array): SyncRemoteMutationFenceRecord => {
     ) {
         throw new SyncRemoteMutationFenceUnavailableError('Remote sync mutation fence record is malformed');
     }
-    return record as SyncRemoteMutationFenceRecord;
+    const parsedRecord = record as SyncRemoteMutationFenceRecord;
+    // Liveness fields are optional and advisory: anything malformed is
+    // dropped rather than rejecting a record an older client wrote.
+    if (typeof parsedRecord.heartbeatMs !== 'number' || !Number.isFinite(parsedRecord.heartbeatMs) || parsedRecord.heartbeatMs < 0) {
+        delete parsedRecord.heartbeatMs;
+    }
+    if (typeof parsedRecord.renewedAt !== 'number' || !Number.isFinite(parsedRecord.renewedAt)) {
+        delete parsedRecord.renewedAt;
+    }
+    return parsedRecord;
 };
 
 const encodeRecord = (record: SyncRemoteMutationFenceRecord): Uint8Array => encodeUtf8(JSON.stringify(record));
@@ -162,7 +209,7 @@ export async function acquireSyncRemoteMutationFence(
     if (!Number.isFinite(ttlMs) || ttlMs < MIN_TTL_MS || ttlMs > MAX_TTL_MS) {
         throw new Error(`Remote sync mutation fence ttlMs must be between ${MIN_TTL_MS} and ${MAX_TTL_MS}`);
     }
-    const heartbeatMs = options.heartbeatMs ?? Math.max(1_000, Math.floor(ttlMs / 3));
+    const heartbeatMs = options.heartbeatMs ?? Math.max(1_000, Math.min(DEFAULT_HEARTBEAT_MS, Math.floor(ttlMs / 3)));
     if (!Number.isFinite(heartbeatMs) || heartbeatMs < 0 || heartbeatMs >= ttlMs) {
         throw new Error('Remote sync mutation fence heartbeatMs must be zero or shorter than ttlMs');
     }
@@ -175,9 +222,11 @@ export async function acquireSyncRemoteMutationFence(
 
     let acquiredVersion: string | null = null;
     let acquiredRemainingMs = ttlMs;
+    let reclaimedFrom: SyncRemoteMutationFenceHolder | null = null;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const snapshot = await port.read();
         const serverNowMs = requireServerNow(snapshot);
+        reclaimedFrom = null;
         if (snapshot.bytes) {
             if (!snapshot.version) {
                 throw new SyncRemoteMutationFenceUnavailableError(
@@ -186,7 +235,19 @@ export async function acquireSyncRemoteMutationFence(
             }
             const current = parseRecord(snapshot.bytes);
             if (current.expiresAt > serverNowMs && !isImpossibleFutureExpiry(current.expiresAt, serverNowMs)) {
-                throw new SyncRemoteMutationFenceBusyError(current.expiresAt - serverNowMs);
+                const holder: SyncRemoteMutationFenceHolder = {
+                    ownerId: current.ownerId,
+                    leaseId: current.leaseId,
+                    purpose: current.purpose,
+                    remainingMs: current.expiresAt - serverNowMs,
+                };
+                if (!isAbandonedRecord(current, serverNowMs)) {
+                    throw new SyncRemoteMutationFenceBusyError(current.expiresAt - serverNowMs, holder);
+                }
+                // Presumed dead: fall through to a CAS write over its exact
+                // version. A holder that was merely paused loses that race (or
+                // fails its next ownership check) and aborts before mutating.
+                reclaimedFrom = holder;
             }
         } else if (snapshot.version !== null) {
             throw new SyncRemoteMutationFenceUnavailableError(
@@ -200,6 +261,8 @@ export async function acquireSyncRemoteMutationFence(
             ownerId,
             purpose: options.purpose,
             expiresAt: serverNowMs + ttlMs,
+            heartbeatMs,
+            renewedAt: serverNowMs,
         };
         try {
             await port.write(encodeRecord(record), snapshot.version);
@@ -286,6 +349,8 @@ export async function acquireSyncRemoteMutationFence(
             ownerId,
             purpose: options.purpose,
             expiresAt: serverNowMs + ttlMs,
+            heartbeatMs,
+            renewedAt: serverNowMs,
         };
         try {
             await port.write(encodeRecord(replacement), snapshot.version);
@@ -336,6 +401,7 @@ export async function acquireSyncRemoteMutationFence(
     scheduleHeartbeat();
 
     return {
+        reclaimedFrom,
         assertHeld: (minRemainingMs = 0) => serialize(async () => {
             if (!Number.isFinite(minRemainingMs) || minRemainingMs < 0 || minRemainingMs >= ttlMs) {
                 throw new Error('Remote sync mutation fence remaining-time requirement is invalid');

@@ -2538,7 +2538,7 @@ export const en: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} date value(s) could not be mapped and were omitted.",
         'settings.importDiagnostics.unmappedStatus': "{{count}} status value(s) could not be mapped and used a safe default.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} unsupported repeat rule(s) were kept as notes.",
-        'settings.syncRemoteBusy': 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+        'settings.syncRemoteBusy': 'Another Mindwtr device is holding this sync location for a moment. Sync will retry on its own.',
         'settings.syncRemoteCleanupDeferred': 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
         'settings.syncAttachmentWriteDeferred': 'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
         'settings.syncFileAttachmentTooLarge': 'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
