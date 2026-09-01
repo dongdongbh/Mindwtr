@@ -307,6 +307,11 @@ export function useRootLayoutExternalCapture({
 
     useEffect(() => {
         if (!hasShareIntent) return;
+        // Cold start: navigating before the root navigator and store are up
+        // swallows the replace and the share dies silently (#1117). The provider
+        // holds the intent, so waiting for dataReady just re-runs this effect —
+        // the same gate the deep-link effect below has always used.
+        if (!dataReady) return;
         if (shareHandlingRef.current) return;
         shareHandlingRef.current = true;
         const finish = (params: Record<string, string> | null) => {
@@ -362,7 +367,7 @@ export function useRootLayoutExternalCapture({
                 resetShareIntent();
                 shareHandlingRef.current = false;
             });
-    }, [hasShareIntent, resolveText, resetShareIntent, router, shareFiles, shareSubject, shareText, shareWebUrl, showToast]);
+    }, [dataReady, hasShareIntent, resolveText, resetShareIntent, router, shareFiles, shareSubject, shareText, shareWebUrl, showToast]);
 
     useEffect(() => {
         if (!dataReady) return;

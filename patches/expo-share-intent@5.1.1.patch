@@ -1,11 +1,126 @@
+diff --git a/node_modules/expo-share-intent/.bun-tag-4757cf14a66e9c66 b/.bun-tag-4757cf14a66e9c66
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/expo-share-intent/.bun-tag-601e0f8963bd1aab b/.bun-tag-601e0f8963bd1aab
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/expo-share-intent/.bun-tag-6f28883a9e7c233b b/.bun-tag-6f28883a9e7c233b
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/expo-share-intent/.bun-tag-aaddfbd4bcc34984 b/.bun-tag-aaddfbd4bcc34984
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/node_modules/expo-share-intent/.bun-tag-e41fe540720f8071 b/.bun-tag-e41fe540720f8071
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/expo-share-intent/.bun-tag-faed239bdb186319 b/.bun-tag-faed239bdb186319
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..ccb31f0343bd6cb0c57429ee9c63f5a25957b654 100644
+index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..8cd5db2903ff751747cefd996a5de6cde77bc784 100644
 --- a/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 +++ b/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-@@ -129,7 +129,8 @@ class ExpoShareIntentModule : Module() {
+@@ -44,15 +44,26 @@ class ExpoShareIntentModule : Module() {
+     companion object {
+         private var instance: ExpoShareIntentModule? = null
+ 
++        // Cold start races: JS calls getShareIntent before its event listeners are
++        // attached natively, so the resulting onChange is dropped and the share
++        // dies silently (#1117). Buffer the last payload and replay it when the
++        // first observer attaches (OnStartObserving below).
++        private var pendingChangeEvent: Map<String, Any?>? = null
++        private var pendingErrorEvent: Map<String, Any?>? = null
++
+         private fun notifyShareIntent(value: Any) {
+             notifyState("pending")
+-            instance!!.sendEvent("onChange", mapOf("value" to value))
++            val payload = mapOf("value" to value)
++            pendingChangeEvent = payload
++            instance!!.sendEvent("onChange", payload)
+         }
+         private fun notifyState(state: String) {
+             instance!!.sendEvent("onStateChange", mapOf("value" to state))
+         }
+         private fun notifyError(message: String) {
+-            instance!!.sendEvent("onError", mapOf("value" to message))
++            val payload = mapOf("value" to message)
++            pendingErrorEvent = payload
++            instance!!.sendEvent("onError", payload)
+         }
+ 
+         @SuppressLint("Range")
+@@ -66,26 +77,49 @@ class ExpoShareIntentModule : Module() {
+                     "filePath" to instance?.getAbsolutePath(uri),
+                 )
+             }
+-            val queryResult: Cursor = resolver.query(uri, null, null, null, null)!!
+-            queryResult.moveToFirst()
+-            val fileName = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME))
+-            val fileSize = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.SIZE))
+-            queryResult.close()
++            // A cold-started process can get an empty cursor for a just-granted
++            // content URI (#1117): the unchecked moveToFirst/getString threw
++            // CursorIndexOutOfBoundsException and silently killed the whole share.
++            // Fall back to URI-derived metadata instead.
++            var fileName: String? = null
++            var fileSize: String? = null
++            val queryResult: Cursor? = try {
++                resolver.query(uri, null, null, null, null)
++            } catch (e: Exception) {
++                null
++            }
++            if (queryResult != null) {
++                try {
++                    if (queryResult.moveToFirst()) {
++                        val nameIndex = queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME)
++                        if (nameIndex >= 0) fileName = queryResult.getString(nameIndex)
++                        val sizeIndex = queryResult.getColumnIndex(OpenableColumns.SIZE)
++                        if (sizeIndex >= 0) fileSize = queryResult.getString(sizeIndex)
++                    }
++                } finally {
++                    queryResult.close()
++                }
++            }
++            if (fileName == null) fileName = uri.lastPathSegment
+ 
+-            val mimeType = resolver.getType(uri)!!
++            val mimeType = resolver.getType(uri) ?: "application/octet-stream"
+ 
+             var mediaWidth: String? = null;
+             var mediaHeight: String? = null;
+             var mediaDuration: String? = null;
+             if (mimeType.startsWith("image/")) {
+-                val options = BitmapFactory.Options().apply {
+-                    inJustDecodeBounds = true
++                try {
++                    val options = BitmapFactory.Options().apply {
++                        inJustDecodeBounds = true
++                    }
++                    BitmapFactory.decodeStream(resolver.openInputStream(uri), null, options)
++                    mediaHeight = options.outHeight.toString()
++                    mediaWidth = options.outWidth.toString()
++                } catch (e: Exception) {
++                    // Dimensions are optional; never fail the share over them.
+                 }
+-                BitmapFactory.decodeStream(resolver.openInputStream(uri), null, options)
+-                mediaHeight = options.outHeight.toString()
+-                mediaWidth = options.outWidth.toString()
+             }
+-            if (mimeType.startsWith("video/")) {
++            if (mimeType.startsWith("video/")) try {
+                 val retriever = MediaMetadataRetriever()
+                 retriever.setDataSource(instance?.getAbsolutePath(uri))
+                 mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
+@@ -97,6 +131,8 @@ class ExpoShareIntentModule : Module() {
+                     mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
+                 }
+                 mediaDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toInt().toString() ?: null
++            } catch (e: Exception) {
++                // Dimensions are optional; never fail the share over them.
+             }
+ 
+             return mapOf(
+@@ -129,7 +165,8 @@ class ExpoShareIntentModule : Module() {
                          "text" to intent.getStringExtra(Intent.EXTRA_TEXT),
                          "type" to "text",
                          "meta" to mapOf(
@@ -15,7 +130,7 @@ index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..ccb31f0343bd6cb0c57429ee9c63f5a2
                          )
                      ))
                  } else if (intent.action == Intent.ACTION_VIEW) {
-@@ -142,7 +143,10 @@ class ExpoShareIntentModule : Module() {
+@@ -142,7 +179,10 @@ class ExpoShareIntentModule : Module() {
                  if (intent.action == Intent.ACTION_SEND) {
                      val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
                      if (uri != null) {
@@ -27,3 +142,68 @@ index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..ccb31f0343bd6cb0c57429ee9c63f5a2
                      } else {
                          notifyError("empty uri for file sharing: " + intent.action)
                      }
+@@ -186,10 +226,17 @@ class ExpoShareIntentModule : Module() {
+                 handleShareIntent(ExpoShareIntentSingleton.intent!!);
+                 ExpoShareIntentSingleton.intent = null
+             }
++            // Cold start: the onChange event raced JS listener attachment and was
++            // dropped (#1117); returning the payload lets JS consume it directly.
++            val result = pendingChangeEvent
++            pendingChangeEvent = null
++            return@AsyncFunction result
+         }
+ 
+         Function("clearShareIntent") { _: String ->
+             ExpoShareIntentSingleton.intent = null
++            pendingChangeEvent = null
++            pendingErrorEvent = null
+         }
+ 
+         Function("hasShareIntent") { _: String ->
+@@ -200,6 +247,20 @@ class ExpoShareIntentModule : Module() {
+             handleShareIntent(it)
+         }
+ 
++        OnStartObserving {
++            // Replay an event that fired before JS finished attaching listeners
++            // (cold-start share). Cleared after replay so a later resubscribe
++            // cannot re-deliver a stale share.
++            pendingChangeEvent?.let {
++                sendEvent("onChange", it)
++                pendingChangeEvent = null
++            }
++            pendingErrorEvent?.let {
++                sendEvent("onError", it)
++                pendingErrorEvent = null
++            }
++        }
++
+         OnCreate {
+             instance = this@ExpoShareIntentModule
+         }
+diff --git a/build/useShareIntent.js b/build/useShareIntent.js
+index 1ab12c4c9e429ef8adfdac61c096acc906063dcf..4562fc6fce078529698773ee85efbbd65f14db34 100644
+--- a/build/useShareIntent.js
++++ b/build/useShareIntent.js
+@@ -42,7 +42,20 @@ export default function useShareIntent(options = SHAREINTENT_OPTIONS_DEFAULT) {
+             ExpoShareIntentModule?.getShareIntent(url);
+         }
+         else if (Platform.OS === "android") {
+-            ExpoShareIntentModule?.getShareIntent("");
++            // Patched (#1117): consume the returned payload directly — the cold-start
++            // onChange event races listener attachment and can be dropped.
++            ExpoShareIntentModule?.getShareIntent("").then((event) => {
++                if (!event?.value)
++                    return;
++                options.debug && console.debug("useShareIntent[getShareIntent]", JSON.stringify(event));
++                try {
++                    setSharedIntent(parseShareIntent(event.value, options));
++                }
++                catch (e) {
++                    options.debug && console.error("useShareIntent[getShareIntent]", e);
++                    setError("Cannot parse share intent value !");
++                }
++            }).catch(() => undefined);
+         }
+         else if (Platform.OS === "ios") {
+             options.debug &&
