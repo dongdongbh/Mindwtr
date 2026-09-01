@@ -13,7 +13,9 @@ const asyncStorageMock = vi.hoisted(() => ({
 
 const routeParams = vi.hoisted(() => ({ current: {} as Record<string, string> }));
 const detailModal = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
+const taskEditModal = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
 const focusEffect = vi.hoisted(() => ({ callback: null as null | (() => void | (() => void)) }));
+const consumePendingCaptureTaskOpenMock = vi.hoisted(() => vi.fn());
 
 const createDeferred = <T,>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -62,7 +64,9 @@ const storeState: {
   [key: string]: any;
 } = {
   projects: [testProject],
+  _allProjects: [testProject],
   tasks: [],
+  _allTasks: [],
   sections: [],
   settings: {},
   addProject: vi.fn(),
@@ -95,7 +99,15 @@ const storeState: {
 beforeEach(() => {
   routeParams.current = {};
   detailModal.props = null;
+  taskEditModal.props = null;
   focusEffect.callback = null;
+  consumePendingCaptureTaskOpenMock.mockReset();
+  consumePendingCaptureTaskOpenMock.mockReturnValue(null);
+  storeState.projects = [testProject];
+  storeState._allProjects = [testProject];
+  storeState.tasks = [];
+  storeState._allTasks = [];
+  storeState.updateTask.mockReset();
   asyncStorageMock.getItem.mockReset();
   asyncStorageMock.getItem.mockResolvedValue(null);
   asyncStorageMock.setItem.mockReset();
@@ -268,7 +280,12 @@ vi.mock('@/components/projects-screen/ProjectOverlayModals', () => ({
   ProjectLinkModal: () => null,
   ProjectTagPickerModal: () => null,
 }));
-vi.mock('@/components/task-edit-modal', () => ({ TaskEditModal: () => null }));
+vi.mock('@/components/task-edit-modal', () => ({
+  TaskEditModal: (props: Record<string, any>) => {
+    taskEditModal.props = props;
+    return null;
+  },
+}));
 vi.mock('@/components/list-layout', () => ({
   ListSectionHeader: ({ title }: { title: string }) => <Text>{title}</Text>,
   defaultListContentStyle: {},
@@ -281,7 +298,7 @@ vi.mock('@/components/projects-screen/ProjectRow', () => ({
 vi.mock('@/lib/task-meta-navigation', () => ({
   openContextsScreen: vi.fn(),
   openProjectScreen: vi.fn(),
-  consumePendingCaptureTaskOpen: vi.fn(() => null),
+  consumePendingCaptureTaskOpen: consumePendingCaptureTaskOpenMock,
 }));
 vi.mock('../lib/app-log', () => ({
   logError: vi.fn(),
@@ -323,6 +340,112 @@ describe('ProjectsScreen project quick add', () => {
     await act(async () => {
       tree.unmount();
     });
+  });
+});
+
+describe('ProjectsScreen archived task inspection', () => {
+  const archivedTask: Task = {
+    id: 'task-archived-project',
+    title: 'Historical task',
+    description: 'Long notes remain inspectable',
+    status: 'done',
+    projectId: testProject.id,
+    checklist: [{ id: 'check-1', title: 'Completed detail', isCompleted: true }],
+    tags: [],
+    contexts: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  it('opens a direct archived task route read-only and rejects every save at the live boundary', async () => {
+    const archivedProject = { ...testProject, status: 'archived' as const };
+    routeParams.current = {
+      projectId: archivedProject.id,
+      taskId: archivedTask.id,
+      openToken: 'archived-route',
+      taskTab: 'task',
+    };
+    storeState.projects = [archivedProject];
+    storeState._allProjects = [archivedProject];
+    storeState.tasks = [];
+    storeState._allTasks = [archivedTask];
+
+    await act(async () => {
+      create(<ProjectsScreen />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(taskEditModal.props).toEqual(expect.objectContaining({
+      visible: true,
+      task: archivedTask,
+      readOnly: true,
+    }));
+    act(() => {
+      taskEditModal.props?.onSave(archivedTask.id, {
+        title: 'No title write',
+        dueDate: '2026-07-01',
+        status: 'next',
+        description: 'No notes write',
+        attachments: [],
+      });
+    });
+    expect(storeState.updateTask).not.toHaveBeenCalled();
+  });
+
+  it('keeps an open task inspector visible and flips it read-only when sync archives the project', async () => {
+    routeParams.current = {
+      projectId: testProject.id,
+      taskId: archivedTask.id,
+      openToken: 'live-transition',
+      taskTab: 'task',
+    };
+    storeState.tasks = [archivedTask];
+    storeState._allTasks = [archivedTask];
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<ProjectsScreen />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(taskEditModal.props).toEqual(expect.objectContaining({ visible: true, readOnly: false }));
+
+    const archivedProject = { ...testProject, status: 'archived' as const };
+    storeState.projects = [archivedProject];
+    storeState._allProjects = [archivedProject];
+    await act(async () => {
+      tree.update(<ProjectsScreen />);
+      await Promise.resolve();
+    });
+
+    expect(taskEditModal.props).toEqual(expect.objectContaining({ visible: true, readOnly: true }));
+    act(() => taskEditModal.props?.onSave(archivedTask.id, { title: 'No stale save' }));
+    expect(storeState.updateTask).not.toHaveBeenCalled();
+  });
+
+  it('opens a capture-return task from an archived project for read-only inspection', async () => {
+    const archivedProject = { ...testProject, status: 'archived' as const };
+    routeParams.current = { projectId: archivedProject.id };
+    storeState.projects = [archivedProject];
+    storeState._allProjects = [archivedProject];
+    storeState.tasks = [];
+    storeState._allTasks = [archivedTask];
+    consumePendingCaptureTaskOpenMock.mockReturnValueOnce({
+      taskId: archivedTask.id,
+      taskTab: 'view',
+    });
+
+    await act(async () => {
+      create(<ProjectsScreen />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(taskEditModal.props).toEqual(expect.objectContaining({
+      visible: true,
+      task: archivedTask,
+      readOnly: true,
+    }));
   });
 });
 

@@ -467,8 +467,6 @@ function TaskListComponent({
     if (!projectReadOnly) return;
     if (selectionMode) exitSelectionMode();
     if (projectReorderMode) setProjectReorderMode(false);
-    setIsModalVisible(false);
-    setEditingTask(null);
   }, [exitSelectionMode, projectReadOnly, projectReorderMode, selectionMode, setProjectReorderMode]);
 
   const taskListDeriveStartedAt = Date.now();
@@ -1135,12 +1133,19 @@ function TaskListComponent({
   }, []);
 
   const onSaveTask = useCallback((taskId: string, updates: Partial<Task>) => {
+    const state = useTaskStore.getState();
+    const liveTask = state._allTasks?.find((task) => task.id === taskId);
+    const owningProjectId = liveTask?.projectId ?? projectId;
+    if (owningProjectId) {
+      const liveProject = state._allProjects?.find((project) => project.id === owningProjectId);
+      if (!liveProject || liveProject.deletedAt || liveProject.status === 'archived') return { success: false };
+    }
     const diagnostic = beginMobilePerformanceDiagnostic({
       operation: 'task_save_to_list',
       route: performanceRoute,
       listItemCount: listItemCountForDiagnostics,
     });
-    const result = updateTask(taskId, updates);
+    const result = state.updateTask(taskId, updates);
     setIsModalVisible(false);
     setEditingTask(null);
     void Promise.resolve(result).finally(() => {
@@ -1151,7 +1156,7 @@ function TaskListComponent({
     // The editor closes above, so the save result has to reach `reportSaveResult`
     // or a `{ success: false }` write reads as saved.
     return result;
-  }, [listItemCountForDiagnostics, performanceRoute, updateTask]);
+  }, [listItemCountForDiagnostics, performanceRoute, projectId]);
 
   const sortOptions = statusFilter === 'done'
     ? DONE_TASK_LIST_SORT_OPTIONS
@@ -1195,7 +1200,7 @@ function TaskListComponent({
     toggleMultiSelect,
   };
   const rowActions = useMemo<TaskRowActions>(() => ({
-    edit: projectReadOnly ? () => undefined : (task) => rowActionSourcesRef.current.handleEditTask(task),
+    edit: (task) => rowActionSourcesRef.current.handleEditTask(task),
     changeStatus: projectReadOnly
       ? () => undefined
       : (task, status) => rowActionSourcesRef.current.handleTaskStatusChange(task.id, status),
@@ -1220,6 +1225,7 @@ function TaskListComponent({
           isDark={isDark}
           isHighlighted={item.id === highlightTaskId}
           interactionDisabled={projectReadOnly}
+          allowInspectionWhenDisabled={projectReadOnly}
           isMultiSelected={effectiveBulkActions && multiSelectedIds.has(item.id)}
           onProjectPress={projectId ? undefined : openProjectScreen}
           onContextPress={openContextsScreen}
@@ -1687,8 +1693,9 @@ function TaskListComponent({
 
       <ErrorBoundary>
         <TaskEditModal
-          visible={isModalVisible && !projectReadOnly}
+          visible={isModalVisible}
           task={editingTask}
+          readOnly={projectReadOnly}
           onClose={() => setIsModalVisible(false)}
           onSave={onSaveTask}
           defaultTab={defaultEditTab}

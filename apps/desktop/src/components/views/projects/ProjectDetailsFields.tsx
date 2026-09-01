@@ -28,6 +28,8 @@ type ProjectDetailsFieldsProps = {
     onDueDateChange: (value: string) => void;
     reviewAtValue: string;
     onReviewAtChange: (value: string) => void;
+    readOnly?: boolean;
+    readOnlyHint?: string;
 };
 
 export function ProjectDetailsFields({
@@ -53,6 +55,8 @@ export function ProjectDetailsFields({
     onDueDateChange,
     reviewAtValue,
     onReviewAtChange,
+    readOnly = false,
+    readOnlyHint,
 }: ProjectDetailsFieldsProps) {
     const resolveText = (key: string, fallback: string) => {
         const value = t(key);
@@ -64,6 +68,17 @@ export function ProjectDetailsFields({
 
     return (
         <section className="py-5 border-b border-border/50">
+            {readOnly ? (
+                <p id="archived-project-details-hint" className="mb-3 text-xs text-muted-foreground" role="note">
+                    {readOnlyHint}
+                </p>
+            ) : null}
+            <fieldset
+                aria-describedby={readOnly ? 'archived-project-details-hint' : undefined}
+                className="m-0 min-w-0 border-0 p-0 disabled:opacity-70"
+                disabled={readOnly}
+                title={readOnly ? readOnlyHint : undefined}
+            >
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-12">
                 <div className="space-y-2 min-w-0 2xl:col-span-2">
                     <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5 truncate">
@@ -228,6 +243,7 @@ export function ProjectDetailsFields({
             <p className="mt-3 text-xs text-muted-foreground">
                 {t('projects.reviewAtHint')}
             </p>
+            </fieldset>
         </section>
     );
 }

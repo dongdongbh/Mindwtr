@@ -35,6 +35,8 @@ type ProjectNotesSectionProps = {
     onUpdateNotes: (notes: string) => void;
     t: (key: string) => string;
     language: string;
+    readOnly?: boolean;
+    readOnlyHint?: string;
 };
 
 export function ProjectNotesSection({
@@ -51,7 +53,18 @@ export function ProjectNotesSection({
     onUpdateNotes,
     t,
     language,
+    readOnly = false,
+    readOnlyHint,
 }: ProjectNotesSectionProps) {
+    const projectRef = useRef(project);
+    projectRef.current = project;
+    const readOnlyRef = useRef(readOnly);
+    readOnlyRef.current = readOnly;
+    const isProjectReadOnly = () => {
+        const current = projectRef.current;
+        if (readOnlyRef.current || current.status === 'archived') return true;
+        return useTaskStore.getState()._allProjects?.find((item) => item.id === current.id)?.status === 'archived';
+    };
     const markdownEditorAssist = useTaskStore((state) => isMarkdownEditorAssistEnabled(state.settings));
     const isBareFileReference = useBareFileReferenceCheck();
     const [draftNotes, setDraftNotes] = useState(project.supportNotes || '');
@@ -80,7 +93,7 @@ export function ProjectNotesSection({
         if (textareaRef.current) {
             textareaRef.current.scrollTop = 0;
         }
-    }, [project.id, project.supportNotes]);
+    }, [project.id, project.supportNotes, readOnly]);
 
     const pushNotesUndoEntry = (value: string, selection: MarkdownSelection) => {
         const previousEntry = notesUndoRef.current[notesUndoRef.current.length - 1];
@@ -107,6 +120,7 @@ export function ProjectNotesSection({
             baseSelection?: MarkdownSelection;
         },
     ) => {
+        if (isProjectReadOnly()) return;
         if ((options?.recordUndo ?? true) && value !== draftNotesRef.current) {
             pushNotesUndoEntry(draftNotesRef.current, options?.baseSelection ?? notesSelectionRef.current);
         }
@@ -122,6 +136,7 @@ export function ProjectNotesSection({
     };
 
     const handleNotesUndo = () => {
+        if (isProjectReadOnly()) return undefined;
         const previousEntry = notesUndoRef.current[notesUndoRef.current.length - 1];
         if (!previousEntry) return undefined;
         notesUndoRef.current = notesUndoRef.current.slice(0, -1);
@@ -134,6 +149,9 @@ export function ProjectNotesSection({
     };
 
     const handleNotesApplyAction = (actionId: MarkdownToolbarActionId, selection: MarkdownSelection): MarkdownToolbarResult => {
+        if (isProjectReadOnly()) {
+            return { value: draftNotesRef.current, selection };
+        }
         const next = applyMarkdownToolbarAction(draftNotesRef.current, selection, actionId);
         applyNotesValue(next.value, {
             baseSelection: selection,
@@ -193,20 +211,29 @@ export function ProjectNotesSection({
                 {t('project.notes')}
             </div>
             <div className="pt-4 space-y-3">
+                {readOnly ? (
+                    <p className="text-xs text-muted-foreground" role="note">
+                        {readOnlyHint}
+                    </p>
+                ) : null}
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <button
                             type="button"
                             onClick={onTogglePreview}
-                            className="h-7 text-xs px-2.5 rounded-md border border-border bg-background hover:bg-muted/40 transition-colors text-muted-foreground"
+                            className="h-7 text-xs px-2.5 rounded-md border border-border bg-background hover:bg-muted/40 transition-colors text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={readOnly}
+                            title={readOnly ? readOnlyHint : undefined}
                         >
-                            {showNotesPreview ? t('markdown.edit') : t('markdown.preview')}
+                            {(showNotesPreview || readOnly) ? t('markdown.edit') : t('markdown.preview')}
                         </button>
                         <button
                             type="button"
                             onClick={() => setNotesExpanded(true)}
-                            className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
                             aria-label={t('markdown.expand')}
+                            disabled={readOnly}
+                            title={readOnly ? readOnlyHint : undefined}
                         >
                             <Maximize2 className="h-4 w-4" />
                         </button>
@@ -216,8 +243,9 @@ export function ProjectNotesSection({
                             type="button"
                             onClick={onAddFile}
                             className="h-7 text-xs px-2.5 rounded-md border border-border bg-background hover:bg-muted/40 transition-colors flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
-                            disabled={attachmentsBusy}
+                            disabled={attachmentsBusy || readOnly}
                             aria-busy={attachmentsBusy}
+                            title={readOnly ? readOnlyHint : undefined}
                         >
                             <Paperclip className="w-3 h-3" />
                             {t('attachments.addFile')}
@@ -226,8 +254,9 @@ export function ProjectNotesSection({
                             type="button"
                             onClick={onAddLink}
                             className="h-7 text-xs px-2.5 rounded-md border border-border bg-background hover:bg-muted/40 transition-colors flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
-                            disabled={attachmentsBusy}
+                            disabled={attachmentsBusy || readOnly}
                             aria-busy={attachmentsBusy}
+                            title={readOnly ? readOnlyHint : undefined}
                         >
                             <Link2 className="w-3 h-3" />
                             {t('attachments.addLink')}
@@ -235,7 +264,7 @@ export function ProjectNotesSection({
                     </div>
                 </div>
 
-                {showNotesPreview ? (
+                {(showNotesPreview || readOnly) ? (
                     <div className={`text-xs border border-border rounded-md px-2.5 py-2.5 ${isRtl ? 'text-right' : ''}`} dir={resolvedDirection}>
                         <Markdown markdown={draftNotes} className={isRtl ? 'text-right' : undefined} />
                     </div>
@@ -269,7 +298,7 @@ export function ProjectNotesSection({
                             }}
                             onKeyDown={handleNotesKeyDown}
                             onBlur={(event) => {
-                                onUpdateNotes(event.target.value);
+                                if (!isProjectReadOnly()) onUpdateNotes(event.target.value);
                                 event.currentTarget.scrollTop = 0;
                             }}
                         />
@@ -320,7 +349,9 @@ export function ProjectNotesSection({
                                         <button
                                             type="button"
                                             onClick={() => onRemoveAttachment(attachment.id)}
-                                            className="text-muted-foreground hover:text-foreground text-[11px]"
+                                            className="text-muted-foreground hover:text-foreground text-[11px] disabled:cursor-not-allowed disabled:opacity-60"
+                                            disabled={readOnly}
+                                            title={readOnly ? readOnlyHint : undefined}
                                         >
                                             {t('attachments.remove')}
                                         </button>
@@ -331,11 +362,13 @@ export function ProjectNotesSection({
                     )}
                 </div>
                 <ExpandedMarkdownEditor
-                    isOpen={notesExpanded}
+                    isOpen={!readOnly && notesExpanded}
                     onClose={() => setNotesExpanded(false)}
                     value={draftNotes}
                     onChange={handleNotesChange}
-                    onCommit={() => onUpdateNotes(draftNotesRef.current)}
+                    onCommit={() => {
+                        if (!isProjectReadOnly()) onUpdateNotes(draftNotesRef.current);
+                    }}
                     title={t('project.notes')}
                     headerTitle={project.title || t('project.notes')}
                     placeholder={t('projects.notesPlaceholder')}

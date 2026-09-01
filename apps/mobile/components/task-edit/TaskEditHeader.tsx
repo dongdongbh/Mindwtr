@@ -18,6 +18,7 @@ type TaskEditHeaderProps = {
   showConvertToReference?: boolean;
   onConvertToSection?: () => void;
   showConvertToSection?: boolean;
+  readOnly?: boolean;
 };
 
 export function TaskEditHeader({
@@ -30,6 +31,7 @@ export function TaskEditHeader({
   showConvertToReference = false,
   onConvertToSection,
   showConvertToSection = false,
+  readOnly = false,
 }: TaskEditHeaderProps) {
   const { t } = useLanguage();
   const tc = useThemeColors();
@@ -39,13 +41,13 @@ export function TaskEditHeader({
   const moreLabel = t('common.more');
   // "Save", not "Done": the button commits the draft, and "Done" reads as the
   // task status one line below it.
-  const saveLabel = t('common.save');
+  const doneLabel = readOnly ? t('common.close') : t('common.save');
 
   return (
     <>
       <View style={[styles.header, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
         <View style={[styles.headerSide, styles.headerLeft]}>
-          <TouchableOpacity
+          {!readOnly ? <TouchableOpacity
             style={[styles.headerActionTouchable, styles.headerActionLeft]}
             onPress={() => setMenuVisible(true)}
             accessibilityRole="button"
@@ -53,21 +55,21 @@ export function TaskEditHeader({
             accessibilityState={{ expanded: menuVisible }}
           >
             <MoreHorizontal size={24} strokeWidth={2.25} color={tc.tint} accessible={false} />
-          </TouchableOpacity>
+          </TouchableOpacity> : null}
         </View>
         <View style={[styles.headerSide, styles.headerRight]}>
           <TouchableOpacity
             style={[styles.headerActionTouchable, styles.headerActionRight]}
             onPress={onDone}
             accessibilityRole="button"
-            accessibilityLabel={saveLabel}
+            accessibilityLabel={doneLabel}
           >
-            <Text style={[styles.headerBtn, { color: tc.tint }]}>{saveLabel}</Text>
+            <Text style={[styles.headerBtn, { color: tc.tint }]}>{doneLabel}</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {menuVisible ? (
+      {!readOnly && menuVisible ? (
         <Modal
           visible
           transparent

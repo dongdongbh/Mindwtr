@@ -175,6 +175,102 @@ describe('TaskEditModal', () => {
     }).not.toThrow();
   });
 
+  it('keeps an archived-project task open as a read-only inspection surface', async () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn();
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <TaskEditModal
+          visible
+          readOnly
+          task={{
+            id: 'archived-task',
+            title: 'Historical task',
+            description: 'Full historical notes',
+            status: 'done',
+            projectId: 'project-1',
+            checklist: [{ id: 'item-1', title: 'Kept detail', isCompleted: true }],
+            attachments: [{
+              id: 'attachment-1',
+              kind: 'link',
+              title: 'Reference',
+              uri: 'https://example.com',
+              createdAt: '2025-01-01T00:00:00.000Z',
+              updatedAt: '2025-01-01T00:00:00.000Z',
+            }],
+            tags: [],
+            contexts: [],
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+          }}
+          onClose={onClose}
+          onSave={onSave}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    expect(tree.root.findAllByType('TaskEditFormTab' as any)).toHaveLength(0);
+    expect(tree.root.findAll((node) => node.props.accessibilityRole === 'tab')).toHaveLength(0);
+    const preview = tree.root.findByType('TaskEditViewTab' as any);
+    expect(preview.props.readOnly).toBe(true);
+    expect(preview.props.mergedTask).toEqual(expect.objectContaining({
+      title: 'Historical task',
+      description: 'Full historical notes',
+      checklist: [expect.objectContaining({ title: 'Kept detail' })],
+      attachments: [expect.objectContaining({ id: 'attachment-1' })],
+    }));
+    expect(tree.root.findByProps({ children: 'Archived project. Reactivate it to edit this task.' })).toBeTruthy();
+
+    const close = tree.root.find((node) => (
+      node.props.accessibilityRole === 'button'
+      && node.props.accessibilityLabel === 'common.close'
+    ));
+    act(() => close.props.onPress());
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('rejects a delayed save callback after an open editor becomes read-only', async () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn();
+    const task: Task = {
+      id: 'transition-task',
+      title: 'Before archive',
+      status: 'next',
+      projectId: 'project-1',
+      tags: [],
+      contexts: [],
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    };
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <TaskEditModal visible task={task} onClose={onClose} onSave={onSave} />
+      );
+      await Promise.resolve();
+    });
+
+    const delayedSave = tree.root.find((node) => (
+      node.props.accessibilityRole === 'button'
+      && node.props.accessibilityLabel === 'common.save'
+    )).props.onPress;
+
+    await act(async () => {
+      tree.update(
+        <TaskEditModal visible readOnly task={task} onClose={onClose} onSave={onSave} />
+      );
+      await Promise.resolve();
+    });
+    act(() => delayedSave());
+
+    expect(tree.root.findByType('TaskEditViewTab' as any).props.readOnly).toBe(true);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('mounts a themed alert host inside its modal', () => {
     // Alerts raised from the editor (e.g. the layout help button) are invisible
     // on iOS without a host inside the presented modal (#940).

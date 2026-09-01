@@ -103,6 +103,12 @@ function ProjectSectionManagerModal({
     updateSection: (id: string, updates: Partial<Section>) => Promise<unknown> | unknown;
     visible: boolean;
 }) {
+    const canManageRef = React.useRef(canManage);
+    canManageRef.current = canManage;
+    const canMutateProject = React.useCallback(() => {
+        if (!canManageRef.current) return false;
+        return useTaskStore.getState()._allProjects?.find((project) => project.id === projectId)?.status !== 'archived';
+    }, [projectId]);
     const filledButton = useFilledButtonColors();
     const [draft, setDraft] = React.useState('');
     const [editingSectionId, setEditingSectionId] = React.useState<string | null>(null);
@@ -134,14 +140,16 @@ function ProjectSectionManagerModal({
     }, [visible]);
 
     const openCreate = React.useCallback(() => {
+        if (!canMutateProject()) return;
         setEditingSectionId('');
         setDraft('');
-    }, []);
+    }, [canMutateProject]);
 
     const openEdit = React.useCallback((section: Section) => {
+        if (!canMutateProject()) return;
         setEditingSectionId(section.id);
         setDraft(section.title);
-    }, []);
+    }, [canMutateProject]);
 
     const closeEditor = React.useCallback(() => {
         setEditingSectionId(null);
@@ -149,7 +157,7 @@ function ProjectSectionManagerModal({
     }, []);
 
     const saveSection = React.useCallback(async () => {
-        if (!canManage || saving) return;
+        if (!canMutateProject() || saving) return;
         const title = draft.trim();
         if (!title) return;
         setSaving(true);
@@ -163,10 +171,10 @@ function ProjectSectionManagerModal({
         } finally {
             setSaving(false);
         }
-    }, [addSection, canManage, closeEditor, draft, editingSectionId, projectId, saving, updateSection]);
+    }, [addSection, canMutateProject, closeEditor, draft, editingSectionId, projectId, saving, updateSection]);
 
     const confirmDeleteSection = React.useCallback((section: Section) => {
-        if (!canManage) return;
+        if (!canMutateProject()) return;
         Alert.alert(
             sectionTitle,
             deleteConfirm,
@@ -176,16 +184,17 @@ function ProjectSectionManagerModal({
                     text: deleteLabel,
                     style: 'destructive',
                     onPress: () => {
+                        if (!canMutateProject()) return;
                         void Promise.resolve(deleteSection(section.id));
                         if (editingSectionId === section.id) closeEditor();
                     },
                 },
             ],
         );
-    }, [canManage, cancelLabel, closeEditor, deleteConfirm, deleteLabel, deleteSection, editingSectionId, sectionTitle]);
+    }, [canMutateProject, cancelLabel, closeEditor, deleteConfirm, deleteLabel, deleteSection, editingSectionId, sectionTitle]);
 
     const moveSection = React.useCallback((sectionId: string, offset: -1 | 1) => {
-        if (!canManage) return;
+        if (!canMutateProject()) return;
         const currentIndex = sections.findIndex((section) => section.id === sectionId);
         const nextIndex = currentIndex + offset;
         if (currentIndex < 0 || nextIndex < 0 || nextIndex >= sections.length) return;
@@ -198,7 +207,7 @@ function ProjectSectionManagerModal({
         void Promise.resolve(reorderSections(projectId, nextIds)).catch(() => {
             Alert.alert(sectionTitle, sectionReorderFailed);
         });
-    }, [canManage, projectId, reorderSections, sectionReorderFailed, sectionTitle, sections]);
+    }, [canMutateProject, projectId, reorderSections, sectionReorderFailed, sectionTitle, sections]);
 
     return (
         <Modal
@@ -444,6 +453,7 @@ function ProjectOptionsModal({
 }
 
 function ProjectOptionRow({
+    accessibilityHint,
     description,
     disabled = false,
     icon,
@@ -454,6 +464,7 @@ function ProjectOptionRow({
     value,
     tc,
 }: {
+    accessibilityHint?: string;
     description?: string;
     disabled?: boolean;
     icon: React.ComponentProps<typeof Ionicons>['name'];
@@ -466,6 +477,7 @@ function ProjectOptionRow({
 }) {
     return (
         <TouchableOpacity
+            accessibilityHint={accessibilityHint}
             accessibilityRole="button"
             accessibilityState={{ selected, disabled }}
             disabled={disabled}
@@ -521,6 +533,7 @@ export function ProjectDetailModal({
         updateProject,
         updateSection,
         settings,
+        allProjects,
     } = useTaskStore((state) => ({
         addSection: state.addSection,
         deleteSection: state.deleteSection,
@@ -528,7 +541,29 @@ export function ProjectDetailModal({
         updateProject: state.updateProject,
         updateSection: state.updateSection,
         settings: state.settings,
+        allProjects: state._allProjects,
     }), shallow);
+    const selectedProjectRef = React.useRef(selectedProject);
+    selectedProjectRef.current = selectedProject;
+    const liveSelectedProject = allProjects?.find((project) => project.id === selectedProject?.id);
+    const liveSelectedProjectStatus = liveSelectedProject?.status;
+    const isArchivedProject = selectedProject?.status === 'archived' || liveSelectedProjectStatus === 'archived';
+    const isArchivedProjectRef = React.useRef(isArchivedProject);
+    isArchivedProjectRef.current = isArchivedProject;
+    const getMutableSelectedProject = React.useCallback(() => {
+        const current = selectedProjectRef.current;
+        if (!current || current.status === 'archived' || isArchivedProjectRef.current) return null;
+        const stored = useTaskStore.getState()._allProjects?.find((project) => project.id === current.id);
+        return stored?.status === 'archived' ? null : current;
+    }, []);
+    const updateMutableSelectedProject = React.useCallback((updates: Partial<Project>) => {
+        const current = getMutableSelectedProject();
+        if (!current) return null;
+        updateProject(current.id, updates);
+        const next = { ...current, ...updates };
+        onProjectChange(next);
+        return next;
+    }, [getMutableSelectedProject, onProjectChange, updateProject]);
     // A stored 'timeEstimate' project sort reverts to default order while the
     // feature is off — list, sort sheet and label all read this one value (#1107).
     const projectTaskSortBy = resolveTaskSortByForFeatures(storedProjectTaskSortBy, settings);
@@ -613,8 +648,11 @@ export function ProjectDetailModal({
     const projectTaskBulkBarPropsRef = React.useRef<TaskListBulkBarProps | null>(null);
     const [projectDetailKeyboardBottomInset, setProjectDetailKeyboardBottomInset] = React.useState(0);
     const safeAreaEdges = getProjectDetailModalSafeAreaEdges(presentationStyle);
-    const taskListOptions = getProjectDetailTaskListOptions(selectedProject, showCompletedTasks);
-    const canManageProjectSections = selectedProject?.status !== 'archived';
+    const taskListProject = selectedProject && isArchivedProject && selectedProject.status !== 'archived'
+        ? { ...selectedProject, status: 'archived' as const }
+        : selectedProject;
+    const taskListOptions = getProjectDetailTaskListOptions(taskListProject, showCompletedTasks);
+    const canManageProjectSections = !isArchivedProject;
     // Reorder mode always renders one self-scrolling DraggableFlatList (section
     // headers are fixed rows inside it), so it owns the scroll for every project.
     const projectReorderOwnsScroll = projectTaskReorderMode;
@@ -671,9 +709,10 @@ export function ProjectDetailModal({
         ))
     );
     const openProjectQuickAdd = React.useCallback(() => {
-        if (!selectedProject || !taskListOptions.allowAdd) return;
-        onOpenQuickAdd(selectedProject);
-    }, [onOpenQuickAdd, selectedProject, taskListOptions.allowAdd]);
+        const current = getMutableSelectedProject();
+        if (!current || !taskListOptions.allowAdd) return;
+        onOpenQuickAdd(current);
+    }, [getMutableSelectedProject, onOpenQuickAdd, taskListOptions.allowAdd]);
     const openProjectTaskFilters = React.useCallback(() => {
         setProjectTaskFilterOpenSignal((value) => value + 1);
     }, []);
@@ -684,6 +723,11 @@ export function ProjectDetailModal({
         []
     );
     const handleProjectBulkBarPropsChange = React.useCallback((props: TaskListBulkBarProps | null) => {
+        if (isArchivedProjectRef.current && props) {
+            projectTaskBulkBarPropsRef.current = null;
+            setProjectTaskBulkBarProps(null);
+            return;
+        }
         const hadBulkBar = projectTaskBulkBarPropsRef.current !== null;
         const hasBulkBar = props !== null;
         if (hadBulkBar !== hasBulkBar && projectDetailScrollOffsetRef.current > 0) {
@@ -696,15 +740,22 @@ export function ProjectDetailModal({
         projectDetailScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
     }, []);
     const openProjectTaskSort = React.useCallback(() => {
+        if (!getMutableSelectedProject()) return;
         setProjectSortModalVisible(true);
-    }, []);
+    }, [getMutableSelectedProject]);
     const handleProjectTaskSortSelect = React.useCallback((option: TaskSortBy) => {
         setProjectSortModalVisible(false);
+        if (!getMutableSelectedProject()) return;
         onTaskSortByChange(option);
-    }, [onTaskSortByChange]);
+    }, [getMutableSelectedProject, onTaskSortByChange]);
     const toggleProjectTaskReorderMode = React.useCallback(() => {
+        if (!getMutableSelectedProject()) return;
         setProjectTaskReorderMode((value) => !value);
-    }, []);
+    }, [getMutableSelectedProject]);
+    const handleProjectTaskReorderModeChange = React.useCallback((value: boolean) => {
+        if (value && !getMutableSelectedProject()) return;
+        setProjectTaskReorderMode(value);
+    }, [getMutableSelectedProject]);
     const filterButtonLabel = tFallback(t, 'filters.label', 'Filters');
     const doneButtonLabel = tFallback(t, 'common.done', 'Done');
     const projectTypeLabel = tFallback(t, 'projects.projectTypeLabel', 'Type');
@@ -714,12 +765,13 @@ export function ProjectDetailModal({
         'projects.archiveHelp',
         'Completing a project files it in Archived — reactivate it anytime.'
     );
+    const projectDisplayStatus = isArchivedProject ? 'archived' : selectedProject?.status;
     const projectStatusLabel = selectedProject
-        ? (selectedProject.status === 'active'
+        ? (projectDisplayStatus === 'active'
             ? t('status.active')
-            : selectedProject.status === 'waiting'
+            : projectDisplayStatus === 'waiting'
                 ? t('status.waiting')
-                : selectedProject.status === 'someday'
+                : projectDisplayStatus === 'someday'
                     ? t('status.someday')
                     : tFallback(t, 'status.archived', 'Archived'))
         : '';
@@ -807,20 +859,26 @@ export function ProjectDetailModal({
             ) : null}
         </View>
     ) : null;
-    const projectTaskSelectionBulkBar = projectTaskBulkBarProps ? (
+    const projectTaskSelectionBulkBar = !isArchivedProject && projectTaskBulkBarProps ? (
         <View testID="project-task-selection-bulk-bar">
             <TaskListBulkBar {...projectTaskBulkBarProps} />
         </View>
     ) : null;
     const setSelectedProjectSequentialScope = (sequentialScope: Project['sequentialScope']) => {
-        if (!selectedProject) return;
-        updateProject(selectedProject.id, { sequentialScope });
-        onProjectChange({ ...selectedProject, sequentialScope });
+        updateMutableSelectedProject({ sequentialScope });
     };
     const handleSetProjectStatus = (status: Project['status']) => {
-        if (!selectedProject) return;
-        updateProject(selectedProject.id, { status });
-        onProjectChange({ ...selectedProject, status });
+        const current = liveSelectedProjectStatus === 'archived'
+            ? liveSelectedProject
+            : selectedProjectRef.current;
+        if (!current) return;
+        if (current.status === 'archived' || isArchivedProjectRef.current) {
+            if (status !== 'active') return;
+            updateProject(current.id, { status: 'active' });
+            onProjectChange({ ...current, status: 'active' });
+        } else {
+            updateMutableSelectedProject({ status });
+        }
         setShowStatusMenu(false);
     };
     // Archive without a native confirm: the action is fully reversible (the same
@@ -828,15 +886,15 @@ export function ProjectDetailModal({
     // can present behind the pageSheet detail modal on iOS, leaving the button
     // apparently dead.
     const handleArchiveSelectedProject = () => {
-        if (!selectedProject) return;
-        updateProject(selectedProject.id, { status: 'archived' });
-        onProjectChange({ ...selectedProject, status: 'archived' });
+        updateMutableSelectedProject({ status: 'archived' });
     };
     const openAreaPicker = () => {
+        if (!getMutableSelectedProject()) return;
         setShowStatusMenu(false);
         onOpenAreaPicker();
     };
     const openTagPicker = () => {
+        if (!getMutableSelectedProject()) return;
         setShowStatusMenu(false);
         onOpenTagPicker();
     };
@@ -910,6 +968,26 @@ export function ProjectDetailModal({
     }, [overlayVisible, selectedProject?.id]);
 
     React.useEffect(() => {
+        if (!isArchivedProject) return;
+        setProjectTaskReorderMode(false);
+        setProjectSortModalVisible(false);
+        setProjectViewOptionsVisible(false);
+        setShowStatusMenu(false);
+        setShowDueDatePicker(false);
+        setShowReviewPicker(false);
+        setNotesFullscreen(false);
+        setShowNotesPreview(true);
+        setLinkModalVisible(false);
+        setLinkInput('');
+    }, [isArchivedProject, setLinkInput, setLinkModalVisible, setNotesFullscreen, setShowNotesPreview]);
+
+    React.useEffect(() => {
+        if (!isArchivedProject || !liveSelectedProject) return;
+        if (selectedProjectRef.current?.status === 'archived') return;
+        onProjectChange(liveSelectedProject);
+    }, [isArchivedProject, liveSelectedProject, onProjectChange]);
+
+    React.useEffect(() => {
         if (Platform.OS !== 'android') return;
         if (typeof Keyboard?.addListener !== 'function') return;
         const updateKeyboardInset = (event: { endCoordinates?: { screenY?: number; height?: number } }) => {
@@ -967,19 +1045,23 @@ export function ProjectDetailModal({
                                                 <Text style={[styles.reviewLabel, { color: tc.text }]}>{t('projects.statusLabel')}</Text>
                                                 <TouchableOpacity
                                                     onPress={() => setShowStatusMenu((prev) => !prev)}
+                                                    disabled={isArchivedProject}
+                                                    accessibilityRole="button"
+                                                    accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                    accessibilityState={{ disabled: isArchivedProject, expanded: showStatusMenu }}
                                                     style={[
                                                         styles.statusPicker,
                                                         {
-                                                            backgroundColor: statusPalette[selectedProject.status]?.bg ?? tc.filterBg,
-                                                            borderColor: statusPalette[selectedProject.status]?.border ?? tc.border,
+                                                            backgroundColor: statusPalette[projectDisplayStatus ?? 'archived']?.bg ?? tc.filterBg,
+                                                            borderColor: statusPalette[projectDisplayStatus ?? 'archived']?.border ?? tc.border,
                                                         },
                                                     ]}
                                                     testID="project-status-picker"
                                                 >
-                                                    <Text style={[styles.statusPickerText, { color: statusPalette[selectedProject.status]?.text ?? tc.text }]}>
+                                                    <Text style={[styles.statusPickerText, { color: statusPalette[projectDisplayStatus ?? 'archived']?.text ?? tc.text }]}>
                                                         {projectStatusLabel}
                                                     </Text>
-                                                    <Text style={[styles.statusPickerText, { color: statusPalette[selectedProject.status]?.text ?? tc.text }]}>▾</Text>
+                                                    <Text style={[styles.statusPickerText, { color: statusPalette[projectDisplayStatus ?? 'archived']?.text ?? tc.text }]}>▾</Text>
                                                 </TouchableOpacity>
                                             </View>
                                             {showStatusMenu && (
@@ -1014,9 +1096,11 @@ export function ProjectDetailModal({
                                                     <TouchableOpacity
                                                         accessibilityRole="button"
                                                         onPress={() => {
-                                                            updateProject(selectedProject.id, { isSequential: !selectedProject.isSequential });
-                                                            onProjectChange({ ...selectedProject, isSequential: !selectedProject.isSequential });
+                                                            updateMutableSelectedProject({ isSequential: !selectedProjectRef.current?.isSequential });
                                                         }}
+                                                        disabled={isArchivedProject}
+                                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                        accessibilityState={{ disabled: isArchivedProject }}
                                                         style={[
                                                             styles.sequentialToggle,
                                                             {
@@ -1077,8 +1161,10 @@ export function ProjectDetailModal({
                                                             <TouchableOpacity
                                                                 key={scope}
                                                                 accessibilityRole="button"
-                                                                accessibilityState={{ selected }}
                                                                 onPress={() => setSelectedProjectSequentialScope(scope)}
+                                                                disabled={isArchivedProject}
+                                                                accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                                accessibilityState={{ selected, disabled: isArchivedProject }}
                                                                 style={[
                                                                     styles.sequentialScopeButton,
                                                                     {
@@ -1147,6 +1233,10 @@ export function ProjectDetailModal({
                                                 <TouchableOpacity
                                                     style={[styles.projectMetadataValueButton, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
                                                     onPress={openAreaPicker}
+                                                    disabled={isArchivedProject}
+                                                    accessibilityRole="button"
+                                                    accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                    accessibilityState={{ disabled: isArchivedProject }}
                                                     testID="project-area-picker"
                                                 >
                                                     <Text style={[styles.projectMetadataValueText, { color: tc.text }]} numberOfLines={1}>
@@ -1159,6 +1249,11 @@ export function ProjectDetailModal({
                                                 <TouchableOpacity
                                                     style={[styles.projectMetadataValueButton, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
                                                     onPress={openTagPicker}
+                                                    disabled={isArchivedProject}
+                                                    accessibilityRole="button"
+                                                    accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                    accessibilityState={{ disabled: isArchivedProject }}
+                                                    testID="project-tag-picker"
                                                 >
                                                     <Text style={[styles.projectMetadataValueText, { color: tc.text }]} numberOfLines={1}>
                                                         {selectedProject.tagIds?.length ? selectedProject.tagIds.join(', ') : t('common.none')}
@@ -1184,6 +1279,10 @@ export function ProjectDetailModal({
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                                                         <TouchableOpacity
                                                             onPress={() => setShowNotesPreview((value) => !value)}
+                                                            disabled={isArchivedProject}
+                                                            accessibilityRole="button"
+                                                            accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                            accessibilityState={{ disabled: isArchivedProject }}
                                                             style={[styles.smallButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
                                                         >
                                                             <Text style={[styles.smallButtonText, { color: tc.tint }]}>
@@ -1195,6 +1294,9 @@ export function ProjectDetailModal({
                                                             accessibilityRole="button"
                                                             accessibilityLabel={t('markdown.expand')}
                                                             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                                            disabled={isArchivedProject}
+                                                            accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                            accessibilityState={{ disabled: isArchivedProject }}
                                                         >
                                                             <Ionicons name="expand-outline" size={20} color={tc.tint} />
                                                         </TouchableOpacity>
@@ -1202,7 +1304,7 @@ export function ProjectDetailModal({
                                                 )}
                                             </View>
                                             {notesExpanded && (
-                                                showNotesPreview ? (
+                                                (showNotesPreview || isArchivedProject) ? (
                                                     <View style={[styles.markdownPreview, { borderColor: tc.border, backgroundColor: tc.filterBg }]}>
                                                         <MarkdownText markdown={selectedProjectNotes} tc={tc} direction={selectedProjectNotesDirection} />
                                                     </View>
@@ -1262,15 +1364,24 @@ export function ProjectDetailModal({
                                                 <View style={styles.attachmentsActions}>
                                                     <TouchableOpacity
                                                         onPress={addProjectFileAttachment}
+                                                        disabled={isArchivedProject}
+                                                        accessibilityRole="button"
+                                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                        accessibilityState={{ disabled: isArchivedProject }}
                                                         style={[styles.smallButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
                                                     >
                                                         <Text style={[styles.smallButtonText, { color: tc.tint }]}>{t('attachments.addFile')}</Text>
                                                     </TouchableOpacity>
                                                     <TouchableOpacity
                                                         onPress={() => {
+                                                            if (isArchivedProject) return;
                                                             setLinkModalVisible(true);
                                                             setLinkInput('');
                                                         }}
+                                                        disabled={isArchivedProject}
+                                                        accessibilityRole="button"
+                                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                        accessibilityState={{ disabled: isArchivedProject }}
                                                         style={[styles.smallButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
                                                     >
                                                         <Text style={[styles.smallButtonText, { color: tc.tint }]}>{t('attachments.addLink')}</Text>
@@ -1313,7 +1424,15 @@ export function ProjectDetailModal({
                                                                             {t('attachments.missing')}
                                                                         </Text>
                                                                     ) : null}
-                                                                    <TouchableOpacity onPress={() => removeProjectAttachment(attachment.id)}>
+                                                                    <TouchableOpacity
+                                                                        onPress={() => {
+                                                                            if (!isArchivedProject) removeProjectAttachment(attachment.id);
+                                                                        }}
+                                                                        disabled={isArchivedProject}
+                                                                        accessibilityRole="button"
+                                                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                                        accessibilityState={{ disabled: isArchivedProject }}
+                                                                    >
                                                                         <Text style={[styles.attachmentRemove, { color: tc.secondaryText }]}>
                                                                             {t('attachments.remove')}
                                                                         </Text>
@@ -1332,6 +1451,10 @@ export function ProjectDetailModal({
                                                     <TouchableOpacity
                                                         style={[styles.projectMetadataValueButton, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
                                                         onPress={() => setShowDueDatePicker(true)}
+                                                        disabled={isArchivedProject}
+                                                        accessibilityRole="button"
+                                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                        accessibilityState={{ disabled: isArchivedProject }}
                                                         testID="project-due-date-picker"
                                                     >
                                                         <Text style={[styles.projectMetadataValueText, { color: tc.text }]} numberOfLines={1}>
@@ -1344,9 +1467,11 @@ export function ProjectDetailModal({
                                                             accessibilityLabel={`${t('common.clear')} ${tFallback(t, 'taskEdit.dueDateLabel', 'Due Date')}`}
                                                             style={styles.projectMetadataClearButton}
                                                             onPress={() => {
-                                                                updateProject(selectedProject.id, { dueDate: undefined });
-                                                                onProjectChange({ ...selectedProject, dueDate: undefined });
+                                                                updateMutableSelectedProject({ dueDate: undefined });
                                                             }}
+                                                            disabled={isArchivedProject}
+                                                            accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                            accessibilityState={{ disabled: isArchivedProject }}
                                                         >
                                                             <Ionicons name="close-circle-outline" size={19} color={tc.secondaryText} />
                                                         </TouchableOpacity>
@@ -1362,8 +1487,7 @@ export function ProjectDetailModal({
                                                         setShowDueDatePicker(false);
                                                         if (date) {
                                                             const iso = date.toISOString().slice(0, 10);
-                                                            updateProject(selectedProject.id, { dueDate: iso });
-                                                            onProjectChange({ ...selectedProject, dueDate: iso });
+                                                            updateMutableSelectedProject({ dueDate: iso });
                                                         }
                                                     }}
                                                 />
@@ -1374,6 +1498,10 @@ export function ProjectDetailModal({
                                                     <TouchableOpacity
                                                         style={[styles.projectMetadataValueButton, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
                                                         onPress={() => setShowReviewPicker(true)}
+                                                        disabled={isArchivedProject}
+                                                        accessibilityRole="button"
+                                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                        accessibilityState={{ disabled: isArchivedProject }}
                                                         testID="project-review-date-picker"
                                                     >
                                                         <Text style={[styles.projectMetadataValueText, { color: tc.text }]} numberOfLines={1}>
@@ -1386,9 +1514,11 @@ export function ProjectDetailModal({
                                                             accessibilityLabel={`${t('common.clear')} ${tFallback(t, 'projects.reviewAt', 'Review Date')}`}
                                                             style={styles.projectMetadataClearButton}
                                                             onPress={() => {
-                                                                updateProject(selectedProject.id, { reviewAt: undefined });
-                                                                onProjectChange({ ...selectedProject, reviewAt: undefined });
+                                                                updateMutableSelectedProject({ reviewAt: undefined });
                                                             }}
+                                                            disabled={isArchivedProject}
+                                                            accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                            accessibilityState={{ disabled: isArchivedProject }}
                                                         >
                                                             <Ionicons name="close-circle-outline" size={19} color={tc.secondaryText} />
                                                         </TouchableOpacity>
@@ -1404,8 +1534,7 @@ export function ProjectDetailModal({
                                                         setShowReviewPicker(false);
                                                         if (date) {
                                                             const iso = date.toISOString();
-                                                            updateProject(selectedProject.id, { reviewAt: iso });
-                                                            onProjectChange({ ...selectedProject, reviewAt: iso });
+                                                            updateMutableSelectedProject({ reviewAt: iso });
                                                         }
                                                     }}
                                                 />
@@ -1445,18 +1574,28 @@ export function ProjectDetailModal({
                                     <TextInput
                                         style={[styles.modalTitle, { color: tc.text, marginLeft: 8, flex: 1 }]}
                                         value={selectedProject.title}
-                                        onChangeText={(text) => onProjectChange({ ...selectedProject, title: text })}
+                                        editable={!isArchivedProject}
+                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                        accessibilityState={{ disabled: isArchivedProject }}
+                                        onChangeText={(text) => {
+                                            const current = getMutableSelectedProject();
+                                            if (current) onProjectChange({ ...current, title: text });
+                                        }}
                                         onSubmitEditing={() => {
-                                            const title = selectedProject.title.trim();
+                                            const current = getMutableSelectedProject();
+                                            if (!current) return;
+                                            const title = current.title.trim();
                                             if (!title) return;
-                                            updateProject(selectedProject.id, { title });
-                                            onProjectChange({ ...selectedProject, title });
+                                            updateProject(current.id, { title });
+                                            onProjectChange({ ...current, title });
                                         }}
                                         onEndEditing={() => {
-                                            const title = selectedProject.title.trim();
+                                            const current = getMutableSelectedProject();
+                                            if (!current) return;
+                                            const title = current.title.trim();
                                             if (!title) return;
-                                            updateProject(selectedProject.id, { title });
-                                            onProjectChange({ ...selectedProject, title });
+                                            updateProject(current.id, { title });
+                                            onProjectChange({ ...current, title });
                                         }}
                                         returnKeyType="done"
                                     />
@@ -1479,14 +1618,14 @@ export function ProjectDetailModal({
 
                                 <View style={styles.projectReorderListFill}>
                                     <ProjectTaskList
-                                        project={selectedProject}
+                                        project={taskListProject ?? selectedProject}
                                         tasks={selectedProjectTasks}
                                         showCompletedTasks={showCompletedTasks}
                                         sortBy={projectTaskSortBy}
                                         getTaskSequenceCue={getTaskSequenceCue}
                                         sequenceCueLabels={sequenceCueLabels}
                                         reorderMode={projectTaskReorderMode}
-                                        onReorderModeChange={setProjectTaskReorderMode}
+                                        onReorderModeChange={handleProjectTaskReorderModeChange}
                                         listHeaderComponent={projectTaskReorderMode ? null : projectDetailListHeader}
                                         listRef={projectDetailListRef}
                                         onListScroll={handleProjectListScroll}
@@ -1514,6 +1653,9 @@ export function ProjectDetailModal({
                                     tc={tc}
                                 >
                                     <ProjectOptionRow
+                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                        description={isArchivedProject ? t('projects.reactivate') : undefined}
+                                        disabled={isArchivedProject}
                                         icon="swap-vertical-outline"
                                         label={sortLabel}
                                         onPress={() => {
@@ -1525,7 +1667,7 @@ export function ProjectDetailModal({
                                         value={t(`sort.${projectTaskSortBy}`)}
                                         tc={tc}
                                     />
-                                    {selectedProject.status !== 'archived' ? (
+                                    {!isArchivedProject ? (
                                         <ProjectOptionRow
                                             icon={showCompletedTasks ? 'eye-outline' : 'eye-off-outline'}
                                             label={showCompletedLabel}
@@ -1577,18 +1719,18 @@ export function ProjectDetailModal({
                                         tc={tc}
                                     />
                                     <ProjectOptionRow
-                                        description={selectedProject.status === 'archived' ? undefined : projectActionsHelpText}
-                                        icon={selectedProject.status === 'archived' ? 'refresh-outline' : 'archive-outline'}
-                                        label={selectedProject.status === 'archived' ? t('projects.reactivate') : t('projects.archive')}
+                                        description={isArchivedProject ? undefined : projectActionsHelpText}
+                                        icon={isArchivedProject ? 'refresh-outline' : 'archive-outline'}
+                                        label={isArchivedProject ? t('projects.reactivate') : t('projects.archive')}
                                         onPress={() => {
                                             setProjectActionsVisible(false);
-                                            if (selectedProject.status === 'archived') {
+                                            if (isArchivedProject) {
                                                 handleSetProjectStatus('active');
                                             } else {
                                                 handleArchiveSelectedProject();
                                             }
                                         }}
-                                        testID={selectedProject.status === 'archived'
+                                        testID={isArchivedProject
                                             ? 'project-reactivate-button'
                                             : 'project-archive-button'}
                                         tc={tc}
@@ -1608,7 +1750,7 @@ export function ProjectDetailModal({
                                     visible={sectionManagerVisible}
                                 />
                                 <ExpandedMarkdownEditor
-                                    isOpen={notesFullscreen}
+                                    isOpen={!isArchivedProject && notesFullscreen}
                                     onClose={() => setNotesFullscreen(false)}
                                     value={selectedProjectNotes}
                                     onChange={handleSelectedProjectNotesChange}

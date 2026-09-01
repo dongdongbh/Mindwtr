@@ -91,4 +91,39 @@ describe('useProjectSectionActions', () => {
         expect(withProject.params.setSectionDraft).toHaveBeenCalledWith('');
         expect(withProject.params.setShowSectionPrompt).toHaveBeenCalledWith(true);
     });
+
+    it('does not settle a pending delete after the project becomes read-only', async () => {
+        let resolveConfirmation!: (confirmed: boolean) => void;
+        const requestConfirmation = vi.fn(() => new Promise<boolean>((resolve) => {
+            resolveConfirmation = resolve;
+        }));
+        const deleteSection = vi.fn();
+        const baseParams: Parameters<typeof useProjectSectionActions>[0] = {
+            t: (key) => key,
+            selectedProject: baseProject,
+            setEditingSectionId: vi.fn(),
+            setSectionDraft: vi.fn(),
+            setShowSectionPrompt: vi.fn(),
+            deleteSection,
+            updateSection: vi.fn(),
+            setSectionNotesOpen: vi.fn(),
+            requestConfirmation,
+        };
+        const { result, rerender } = renderHook(
+            ({ readOnly }: { readOnly: boolean }) => useProjectSectionActions({ ...baseParams, readOnly }),
+            { initialProps: { readOnly: false } },
+        );
+
+        let deleteRun!: Promise<void>;
+        act(() => {
+            deleteRun = result.current.handleDeleteSection(baseSection);
+        });
+        rerender({ readOnly: true });
+        await act(async () => {
+            resolveConfirmation(true);
+            await deleteRun;
+        });
+
+        expect(deleteSection).not.toHaveBeenCalled();
+    });
 });

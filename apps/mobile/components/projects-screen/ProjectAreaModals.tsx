@@ -4,6 +4,7 @@ import { Ban } from 'lucide-react-native';
 import { tFallback, type Area, type Project } from '@mindwtr/core';
 
 import { projectsScreenStyles as styles } from './projects-screen.styles';
+import { applyLiveProjectUpdate, getLiveMutableProject } from './project-meta-pickers';
 import { useAndroidKeyboardInset } from '../../lib/use-android-keyboard-inset';
 
 type ThemeColors = {
@@ -79,6 +80,29 @@ export function ProjectAreaModals({
     updateProject,
 }: ProjectAreaModalsProps) {
     const keyboardInset = useAndroidKeyboardInset(showAreaManager);
+    const dismissProjectPickers = React.useCallback(() => {
+        onSetShowAreaPicker(false);
+        onSetShowAreaManager(false);
+    }, [onSetShowAreaManager, onSetShowAreaPicker]);
+    const setProjectArea = React.useCallback((areaId?: string) => {
+        if (!selectedProject) {
+            dismissProjectPickers();
+            return false;
+        }
+        return applyLiveProjectUpdate({
+            projectId: selectedProject.id,
+            updates: { areaId },
+            updateProject,
+            setSelectedProject: onSetSelectedProject,
+            onBlocked: dismissProjectPickers,
+        });
+    }, [dismissProjectPickers, onSetSelectedProject, selectedProject, updateProject]);
+
+    React.useEffect(() => {
+        if (selectedProject?.status !== 'archived') return;
+        dismissProjectPickers();
+    }, [dismissProjectPickers, selectedProject?.status]);
+
     return (
         <>
             <Modal
@@ -97,6 +121,10 @@ export function ProjectAreaModals({
                         <TouchableOpacity
                             style={[styles.pickerRow, { borderColor: tc.border }]}
                             onPress={() => {
+                                if (!selectedProject || !getLiveMutableProject(selectedProject.id)) {
+                                    dismissProjectPickers();
+                                    return;
+                                }
                                 onSetShowAreaPicker(false);
                                 onSetNewAreaName('');
                                 onSetNewAreaColor(colors[0] || '#3b82f6');
@@ -108,9 +136,7 @@ export function ProjectAreaModals({
                         <TouchableOpacity
                             style={[styles.pickerRow, { borderColor: tc.border }]}
                             onPress={() => {
-                                if (!selectedProject) return;
-                                updateProject(selectedProject.id, { areaId: undefined });
-                                onSetSelectedProject({ ...selectedProject, areaId: undefined });
+                                if (!setProjectArea(undefined)) return;
                                 onSetShowAreaPicker(false);
                             }}
                         >
@@ -122,9 +148,7 @@ export function ProjectAreaModals({
                                     key={area.id}
                                     style={[styles.pickerRow, { borderColor: tc.border }]}
                                     onPress={() => {
-                                        if (!selectedProject) return;
-                                        updateProject(selectedProject.id, { areaId: area.id });
-                                        onSetSelectedProject({ ...selectedProject, areaId: area.id });
+                                        if (!setProjectArea(area.id)) return;
                                         onSetShowAreaPicker(false);
                                     }}
                                 >
@@ -280,6 +304,10 @@ export function ProjectAreaModals({
                                 onPress={() => {
                                     const name = newAreaName.trim();
                                     if (!name) return;
+                                    if (!selectedProject || !getLiveMutableProject(selectedProject.id)) {
+                                        dismissProjectPickers();
+                                        return;
+                                    }
                                     void addArea(name, { color: newAreaColor });
                                     onCloseAreaManager();
                                     onSetNewAreaName('');

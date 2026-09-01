@@ -22,7 +22,12 @@ import {
   normalizeProjectTag,
   resolveAttachmentValidationMessage,
 } from '@/components/projects-screen/projects-screen.utils';
-import { openProjectAreaPicker, openProjectTagPicker } from '@/components/projects-screen/project-meta-pickers';
+import {
+  applyLiveProjectUpdate,
+  getLiveMutableProject,
+  openProjectAreaPicker,
+  openProjectTagPicker,
+} from '@/components/projects-screen/project-meta-pickers';
 import { ProjectAreaModals } from '@/components/projects-screen/ProjectAreaModals';
 import { ProjectDetailModal } from '@/components/projects-screen/ProjectDetailModal';
 import { ProjectImagePreviewModal, ProjectLinkModal, ProjectTagPickerModal } from '@/components/projects-screen/ProjectOverlayModals';
@@ -58,6 +63,7 @@ function resolveTaskRouteTab(value?: string | string[]): TaskEditTab {
 export default function ProjectsScreen() {
   const {
     projects,
+    allProjects,
     tasks,
     allTasks,
     sections,
@@ -71,11 +77,11 @@ export default function ProjectsScreen() {
     updateArea,
     deleteArea,
     reorderAreas,
-    updateTask,
     setHighlightTask,
     projectTaskSummaryById,
   } = useTaskStore((state) => ({
     projects: state.projects,
+    allProjects: state._allProjects,
     tasks: state.tasks,
     allTasks: state._allTasks,
     sections: state.sections,
@@ -89,7 +95,6 @@ export default function ProjectsScreen() {
     updateArea: state.updateArea,
     deleteArea: state.deleteArea,
     reorderAreas: state.reorderAreas,
-    updateTask: state.updateTask,
     setHighlightTask: state.setHighlightTask,
     projectTaskSummaryById: state.getDerivedState().projectTaskSummaryById,
   }), shallow);
@@ -309,6 +314,18 @@ export default function ProjectsScreen() {
         return a.title.localeCompare(b.title);
       });
   }, [sections, selectedProjectIdForLists]);
+  const liveSelectedProject = selectedProject
+    ? allProjects?.find((project) => project.id === selectedProject.id)
+    : null;
+  const selectedProjectIsArchived = selectedProject?.status === 'archived'
+    || liveSelectedProject?.status === 'archived';
+
+  useEffect(() => {
+    if (!selectedProjectIsArchived) return;
+    setShowAreaPicker(false);
+    setShowAreaManager(false);
+    setShowTagPicker(false);
+  }, [selectedProjectIsArchived]);
 
   const openProject = useCallback((project: Project) => {
     setSelectedProject(project);
@@ -331,11 +348,13 @@ export default function ProjectsScreen() {
   // Persist the chosen sort on the project so it survives reopening the project
   // and syncs across devices; core normalizes 'default' to an absent field.
   const handleProjectTaskSortByChange = useCallback((next: ProjectTaskSortBy) => {
+    if (selectedProject?.status === 'archived') return;
+    if (projects.find((project) => project.id === selectedProject?.id)?.status === 'archived') return;
     setProjectTaskSortBy(next);
     if (selectedProject) {
       updateProject(selectedProject.id, { taskSortBy: next });
     }
-  }, [selectedProject, updateProject]);
+  }, [projects, selectedProject, updateProject]);
 
   const reopenProjectIdAfterCaptureRef = useRef<string | null>(null);
 
@@ -364,14 +383,14 @@ export default function ProjectsScreen() {
     const nextTaskTab = resolveTaskRouteTab(taskTab);
     const openKey = `${taskId}:${typeof openToken === 'string' ? openToken : ''}:${nextTaskTab}`;
     if (lastOpenedTaskKeyRef.current === openKey) return;
-    const task = tasks.find((item) => item.id === taskId && !item.deletedAt);
+    const task = allTasks?.find((item) => item.id === taskId && !item.deletedAt);
     if (!task || task.projectId !== selectedProject.id) return;
     lastOpenedTaskKeyRef.current = openKey;
     setHighlightTask(task.id);
     setTaskModalDefaultTab(nextTaskTab);
     setTaskModalOpenKey(`route:${openKey}`);
     setEditingTask(task);
-  }, [openToken, taskId, projectId, selectedProject, taskTab, tasks, setHighlightTask]);
+  }, [allTasks, openToken, taskId, projectId, selectedProject, taskTab, setHighlightTask]);
 
   const sortAreasByName = () => {
     const reordered = [...sortedAreas]
@@ -398,11 +417,17 @@ export default function ProjectsScreen() {
     if (!selectedProject) return;
     const normalized = normalizeProjectTag(tag);
     if (!normalized) return;
-    const current = selectedProject.tagIds || [];
-    const exists = current.includes(normalized);
-    const next = exists ? current.filter((t) => t !== normalized) : [...current, normalized];
-    updateProject(selectedProject.id, { tagIds: next });
-    setSelectedProject({ ...selectedProject, tagIds: next });
+    applyLiveProjectUpdate({
+      projectId: selectedProject.id,
+      updates: (project) => {
+        const current = project.tagIds || [];
+        const exists = current.includes(normalized);
+        return { tagIds: exists ? current.filter((value) => value !== normalized) : [...current, normalized] };
+      },
+      updateProject,
+      setSelectedProject,
+      onBlocked: () => setShowTagPicker(false),
+    });
   };
 
   const handleDeleteProject = useCallback((projectIdToDelete: string) => {
@@ -608,9 +633,9 @@ export default function ProjectsScreen() {
   };
 
   const persistSelectedProjectEdits = (project: Project | null) => {
-    if (!project) return;
+    if (!project || project.status === 'archived') return;
     const original = projects.find((p) => p.id === project.id);
-    if (!original) return;
+    if (!original || original.status === 'archived') return;
 
     const nextTitle = project.title.trim();
     const nextArea = project.areaId || undefined;
@@ -661,8 +686,8 @@ export default function ProjectsScreen() {
   openProjectRef.current = openProject;
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
-  const tasksRef = useRef(tasks);
-  tasksRef.current = tasks;
+  const tasksRef = useRef(allTasks ?? []);
+  tasksRef.current = allTasks ?? [];
   const routeProjectIdRef = useRef(typeof projectId === 'string' ? projectId : undefined);
   routeProjectIdRef.current = typeof projectId === 'string' ? projectId : undefined;
 
@@ -706,6 +731,7 @@ export default function ProjectsScreen() {
   };
 
   const openAreaPicker = () => {
+    if (!selectedProject || !getLiveMutableProject(selectedProject.id)) return;
     openProjectAreaPicker({
       addArea,
       areaUsage,
@@ -726,6 +752,7 @@ export default function ProjectsScreen() {
   };
 
   const openTagPicker = () => {
+    if (!selectedProject || !getLiveMutableProject(selectedProject.id)) return;
     openProjectTagPicker({
       projectTagOptions,
       selectedProject,
@@ -963,9 +990,27 @@ export default function ProjectsScreen() {
       <TaskEditModal
         key={taskModalOpenKey}
         visible={editingTask !== null}
-        task={editingTask}
+        task={editingTask
+          ? (allTasks?.find((task) => task.id === editingTask.id) ?? editingTask)
+          : null}
+        readOnly={Boolean(
+          editingTask?.projectId
+          && (
+            allProjects?.find((project) => project.id === editingTask.projectId)?.status === 'archived'
+            || (selectedProject?.id === editingTask.projectId && selectedProject.status === 'archived')
+          )
+        )}
         onClose={() => setEditingTask(null)}
-        onSave={(taskId, updates) => updateTask(taskId, updates)}
+        onSave={(taskId, updates) => {
+          const state = useTaskStore.getState();
+          const liveTask = state._allTasks?.find((task) => task.id === taskId);
+          if (!liveTask) return { success: false };
+          if (liveTask.projectId) {
+            const liveProject = state._allProjects?.find((project) => project.id === liveTask.projectId);
+            if (!liveProject || liveProject.deletedAt || liveProject.status === 'archived') return { success: false };
+          }
+          return state.updateTask(taskId, updates);
+        }}
         defaultTab={taskModalDefaultTab}
         onProjectNavigate={(projectId) => {
           if (!selectedProject || selectedProject.id !== projectId) {

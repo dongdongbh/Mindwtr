@@ -91,6 +91,7 @@ vi.mock('../../contexts/language-context', () => ({
 // zustand hook cannot run here (mobile vitest resolves a second React copy), so
 // the store is a plain selector over spies.
 const storeActions = vi.hoisted(() => ({
+    _allProjects: [] as Project[],
     addSection: vi.fn(),
     deleteSection: vi.fn(),
     reorderSections: vi.fn(),
@@ -318,7 +319,10 @@ const expandProjectDetails = (tree: ReturnType<typeof create>) => {
 };
 
 beforeEach(() => {
-    for (const action of Object.values(storeActions)) action.mockReset();
+    storeActions._allProjects = [];
+    for (const action of Object.values(storeActions)) {
+        if (typeof action === 'function') action.mockReset();
+    }
 });
 
 afterEach(() => {
@@ -1203,6 +1207,101 @@ describe('ProjectDetailModal archived projects', () => {
             includeDone: true,
             readOnly: false,
         });
+    });
+
+    it('keeps archived project metadata, notes, attachments, and sort controls read-only', () => {
+        const notes = createNotesEditor();
+        const attachments = createAttachments();
+        const onProjectChange = vi.fn();
+        const onTaskSortByChange = vi.fn();
+        const archivedProject: Project = {
+            ...project('archived'),
+            supportNotes: 'Historical notes',
+            dueDate: '2026-09-01',
+            reviewAt: '2026-09-02T12:00:00.000Z',
+            attachments: [{
+                id: 'attachment-1',
+                kind: 'link',
+                title: 'Reference',
+                uri: 'https://example.com',
+                createdAt: '2026-08-31T00:00:00.000Z',
+                updatedAt: '2026-08-31T00:00:00.000Z',
+            }],
+        };
+        let tree!: ReturnType<typeof create>;
+
+        act(() => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps({
+                attachments,
+                notes,
+                onProjectChange,
+                onTaskSortByChange,
+                project: archivedProject,
+            })} />);
+        });
+
+        const titleInput = tree.root.findAllByType(TextInput).find((input) => input.props.value === 'Launch');
+        expect(titleInput?.props.editable).toBe(false);
+
+        expandProjectDetails(tree);
+
+        expect(tree.root.findByProps({ testID: 'project-status-picker' }).props.disabled).toBe(true);
+        expect(tree.root.findByProps({ testID: 'project-type-toggle' }).props.disabled).toBe(true);
+        expect(tree.root.findByProps({ testID: 'project-area-picker' }).props.disabled).toBe(true);
+        expect(tree.root.findByProps({ testID: 'project-due-date-picker' }).props.disabled).toBe(true);
+        expect(tree.root.findByProps({ testID: 'project-review-date-picker' }).props.disabled).toBe(true);
+        expect(tree.root.findAllByType(TextInput).some((input) => input.props.placeholder === 'Notes')).toBe(false);
+
+        act(() => {
+            tree.root.findByProps({ testID: 'project-task-view-options-button' }).props.onPress();
+        });
+        const sortOption = findOptionButton(tree.root, 'project-view-sort-option');
+        expect(sortOption.props.disabled).toBe(true);
+        expect(sortOption.props.accessibilityHint).toBe('Reactivate');
+
+        act(() => {
+            titleInput?.props.onEndEditing();
+            tree.root.findByProps({ testID: 'project-type-toggle' }).props.onPress();
+            sortOption.props.onPress();
+        });
+
+        expect(storeActions.updateProject).not.toHaveBeenCalled();
+        expect(onProjectChange).not.toHaveBeenCalled();
+        expect(onTaskSortByChange).not.toHaveBeenCalled();
+        expect(notes.commitSelectedProjectNotes).not.toHaveBeenCalled();
+        expect(attachments.addProjectFileAttachment).not.toHaveBeenCalled();
+        expect(attachments.removeProjectAttachment).not.toHaveBeenCalled();
+    });
+
+    it('blocks stale task creation as soon as the live project becomes archived', () => {
+        const activeProject = project('active');
+        const archivedProject = { ...activeProject, status: 'archived' as const };
+        const onOpenQuickAdd = vi.fn();
+        const onProjectChange = vi.fn();
+        const props = createProjectDetailModalProps({
+            onOpenQuickAdd,
+            onProjectChange,
+            project: activeProject,
+        });
+        storeActions._allProjects = [activeProject];
+        let tree!: ReturnType<typeof create>;
+
+        act(() => {
+            tree = create(<ProjectDetailModal {...props} />);
+        });
+        const staleOpenQuickAdd = tree.root.findByProps({ testID: 'project-add-task-button' }).props.onPress;
+
+        storeActions._allProjects = [archivedProject];
+        act(() => {
+            staleOpenQuickAdd();
+            tree.update(<ProjectDetailModal {...props} />);
+        });
+
+        expect(onOpenQuickAdd).not.toHaveBeenCalled();
+        const taskListProps = taskListPropsSpy.mock.calls.at(-1)?.[0];
+        expect(taskListProps.project.readOnly).toBe(true);
+        expect(taskListProps.enableBulkActions).toBe(false);
+        expect(onProjectChange).toHaveBeenCalledWith(archivedProject);
     });
 });
 

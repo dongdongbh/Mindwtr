@@ -2020,6 +2020,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     } as any;
     storeState._allTasks = [task];
     getChecklistProgress.mockReturnValue({ completed: 0, total: 1, percent: 0 });
+    const onPress = vi.fn();
 
     let tree!: renderer.ReactTestRenderer;
     renderer.act(() => {
@@ -2035,10 +2036,11 @@ it('can keep the focus star without adding a redundant focus outline', () => {
             tint: '#3b82f6',
             warning: '#f59e0b',
           } as any}
-          onPress={vi.fn()}
+          onPress={onPress}
           onStatusChange={vi.fn()}
           onDelete={vi.fn()}
           interactionDisabled
+          allowInspectionWhenDisabled
           showFocusToggle
         />
       );
@@ -2068,6 +2070,16 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(() => tree.root.find((node) => node.props.accessibilityLabel === 'Remove from focus')).toThrow();
     expect(() => tree.root.findByType('CompletedAtPicker' as any)).toThrow();
     expect(updateTask).not.toHaveBeenCalled();
+
+    const inspectionButton = tree.root.find((node) => (
+      typeof node.props.accessibilityLabel === 'string'
+      && node.props.accessibilityLabel.startsWith('Archived release notes')
+      && Array.isArray(node.props.accessibilityActions)
+    ));
+    expect(inspectionButton.props.disabled).not.toBe(true);
+    expect(inspectionButton.props.accessibilityActions).toEqual([{ name: 'activate', label: 'View' }]);
+    renderer.act(() => inspectionButton.props.onPress());
+    expect(onPress).toHaveBeenCalledTimes(1);
   });
 
   it('cancels a pending checklist write when a task row becomes read-only', () => {

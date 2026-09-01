@@ -16,7 +16,7 @@ import { Attachment,
     stripMarkdown,
     resolveTaskSortByForFeatures,
     sortTasksBy,
-    splitCompletedTasks, tFallback, } from '@mindwtr/core';
+    splitCompletedTasks, tFallback, useTaskStore, } from '@mindwtr/core';
 import { useDndMonitor } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
@@ -444,11 +444,14 @@ export function ProjectWorkspace({
         () => projects.find((project) => project.id === selectedProjectId),
         [projects, selectedProjectId],
     );
+    const selectedProjectRef = useRef<Project | undefined>(selectedProject);
+    selectedProjectRef.current = selectedProject;
     const [showNotesPreview, setShowNotesPreview] = useState(true);
     const [showSectionPrompt, setShowSectionPrompt] = useState(false);
     const [sectionDraft, setSectionDraft] = useState('');
     const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
     const [sectionNotesOpen, setSectionNotesOpen] = useState<Record<string, boolean>>({});
+    const [archivedSectionCollapsed, setArchivedSectionCollapsed] = useState<Record<string, boolean>>({});
     const [tagDraft, setTagDraft] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const [editProjectTitle, setEditProjectTitle] = useState('');
@@ -479,6 +482,18 @@ export function ProjectWorkspace({
         const value = t(key);
         return value && value !== key ? value : fallback;
     }, [t]);
+    const archivedReadOnlyHint = `${resolveText('status.archived', 'Archived')}. ${resolveText('projects.reactivate', 'Reactivate')}.`;
+    const getMutableSelectedProject = useCallback(() => {
+        const current = selectedProjectRef.current;
+        if (!current || current.status === 'archived') return null;
+        const stored = useTaskStore.getState()._allProjects?.find((project) => project.id === current.id);
+        return stored?.status === 'archived' ? null : current;
+    }, []);
+    const updateMutableSelectedProject = useCallback((updates: Partial<Project>) => {
+        const current = getMutableSelectedProject();
+        if (!current) return;
+        return updateProject(current.id, updates);
+    }, [getMutableSelectedProject, updateProject]);
 
     useLayoutEffect(() => {
         selectedProjectIdRef.current = selectedProjectId;
@@ -526,17 +541,18 @@ export function ProjectWorkspace({
     }, []);
 
     const openProjectQuickAdd = useCallback((sectionId?: string | null) => {
-        if (!selectedProject) return;
+        const current = getMutableSelectedProject();
+        if (!current) return;
         window.dispatchEvent(new CustomEvent('mindwtr:quick-add', {
             detail: {
                 initialProps: {
-                    projectId: selectedProject.id,
+                    projectId: current.id,
                     status: 'next',
                     ...(sectionId ? { sectionId } : {}),
                 },
             },
         }));
-    }, [selectedProject]);
+    }, [getMutableSelectedProject]);
 
     const {
         handleAddSection,
@@ -547,6 +563,7 @@ export function ProjectWorkspace({
     } = useProjectSectionActions({
         t,
         selectedProject,
+        readOnly: isArchivedProject,
         setEditingSectionId,
         setSectionDraft,
         setShowSectionPrompt,
@@ -560,7 +577,7 @@ export function ProjectWorkspace({
 
     useEffect(() => {
         setEditProjectTitle(selectedProject?.title ?? '');
-    }, [selectedProject?.id, selectedProject?.title]);
+    }, [isArchivedProject, selectedProject?.id, selectedProject?.title]);
 
     useEffect(() => {
         if (!selectedProject) {
@@ -568,7 +585,7 @@ export function ProjectWorkspace({
             return;
         }
         setTagDraft((selectedProject.tagIds || []).join(', '));
-    }, [selectedProject?.id, selectedProject?.tagIds]);
+    }, [isArchivedProject, selectedProject?.id, selectedProject?.tagIds]);
 
     useEffect(() => {
         setProjectDetailsExpanded(false);
@@ -580,7 +597,15 @@ export function ProjectWorkspace({
 
     useEffect(() => {
         setSectionNotesOpen({});
-    }, [selectedProjectId]);
+        setArchivedSectionCollapsed({});
+    }, [isArchivedProject, selectedProjectId]);
+
+    useEffect(() => {
+        if (!isArchivedProject) return;
+        setShowSectionPrompt(false);
+        setEditingSectionId(null);
+        setSectionDraft('');
+    }, [isArchivedProject]);
 
     const projectTaskSource = selectedProjectTasks;
     const projectAllTasks = useMemo(() => {
@@ -598,11 +623,12 @@ export function ProjectWorkspace({
     );
 
     const handleProjectTaskSortByChange = useCallback((next: TaskSortBy) => {
-        if (!selectedProject) return;
-        void Promise.resolve(updateProject(selectedProject.id, { taskSortBy: next })).catch((error) => {
+        const current = getMutableSelectedProject();
+        if (!current) return;
+        void Promise.resolve(updateProject(current.id, { taskSortBy: next })).catch((error) => {
             reportError('Failed to update project task sort', error);
         });
-    }, [selectedProject, updateProject]);
+    }, [getMutableSelectedProject, updateProject]);
 
     const sortProjectTasks = useCallback((items: Task[]) => {
         if (projectTaskSortBy !== 'default') {
@@ -647,7 +673,8 @@ export function ProjectWorkspace({
     const handleColumnsPointerDown = useMiddleMousePan(columnsScrollRef);
 
     const handleMoveSection = useCallback((sectionId: string, offset: -1 | 1) => {
-        if (!selectedProject) return;
+        const current = getMutableSelectedProject();
+        if (!current) return;
         const currentIndex = projectSections.findIndex((section) => section.id === sectionId);
         const nextIndex = currentIndex + offset;
         if (currentIndex < 0 || nextIndex < 0 || nextIndex >= projectSections.length) return;
@@ -655,11 +682,11 @@ export function ProjectWorkspace({
         const [moved] = nextSections.splice(currentIndex, 1);
         if (!moved) return;
         nextSections.splice(nextIndex, 0, moved);
-        void Promise.resolve(reorderSections(selectedProject.id, nextSections.map((section) => section.id))).catch((error) => {
+        void Promise.resolve(reorderSections(current.id, nextSections.map((section) => section.id))).catch((error) => {
             reportError('Failed to reorder sections', error);
             showToast(resolveText('projects.sectionReorderFailed', 'Failed to reorder sections.'), 'error');
         });
-    }, [projectSections, reorderSections, resolveText, selectedProject, showToast]);
+    }, [getMutableSelectedProject, projectSections, reorderSections, resolveText, showToast]);
 
     const sectionTaskGroups = useMemo(() => {
         if (!selectedProjectId || projectSections.length === 0) {
@@ -807,34 +834,45 @@ export function ProjectWorkspace({
         exitSelectionMode();
     }, [exitSelectionMode, isArchivedProject, selectedProjectId]);
 
-    const handleBatchMove = moveSelectedTasks;
+    const handleBatchMove = useCallback((...args: Parameters<typeof moveSelectedTasks>) => {
+        if (!getMutableSelectedProject()) return;
+        return moveSelectedTasks(...args);
+    }, [getMutableSelectedProject, moveSelectedTasks]);
 
-    const handleBatchAssignArea = assignAreaToSelectedTasks;
+    const handleBatchAssignArea = useCallback((...args: Parameters<typeof assignAreaToSelectedTasks>) => {
+        if (!getMutableSelectedProject()) return;
+        return assignAreaToSelectedTasks(...args);
+    }, [assignAreaToSelectedTasks, getMutableSelectedProject]);
 
     const handleApplyTaskBulkOrganize = useCallback(async (input: BulkOrganizeTaskUpdateInput) => {
+        if (!getMutableSelectedProject()) return;
         await organizeSelectedTasks(input, {
             afterSuccess: () => setBulkOrganizeOpen(false),
         });
-    }, [organizeSelectedTasks]);
+    }, [getMutableSelectedProject, organizeSelectedTasks]);
 
     const handleBatchDelete = useCallback(async () => {
+        if (!getMutableSelectedProject()) return;
         await deleteSelectedTasks({
-            confirm: () => requestConfirmation({
-                title: tFallback(t, 'common.delete', 'Delete'),
-                description: tFallback(t, 'list.confirmBatchDelete', 'Delete selected tasks?'),
-                confirmLabel: tFallback(t, 'common.delete', 'Delete'),
-                cancelLabel: tFallback(t, 'common.cancel', 'Cancel'),
-            }),
+            confirm: async () => {
+                const confirmed = await requestConfirmation({
+                    title: tFallback(t, 'common.delete', 'Delete'),
+                    description: tFallback(t, 'list.confirmBatchDelete', 'Delete selected tasks?'),
+                    confirmLabel: tFallback(t, 'common.delete', 'Delete'),
+                    cancelLabel: tFallback(t, 'common.cancel', 'Cancel'),
+                });
+                return confirmed && Boolean(getMutableSelectedProject());
+            },
         });
-    }, [deleteSelectedTasks, requestConfirmation, t]);
+    }, [deleteSelectedTasks, getMutableSelectedProject, requestConfirmation, t]);
 
     const handleBatchTokenPick = useCallback((field: 'tags' | 'contexts', action: 'add' | 'remove') => {
-        if (selectedIdsArray.length === 0) return;
+        if (!getMutableSelectedProject() || selectedIdsArray.length === 0) return;
         setBulkTokenPicker({ field, action });
-    }, [selectedIdsArray.length]);
+    }, [getMutableSelectedProject, selectedIdsArray.length]);
 
     const handleBulkTokenConfirm = useCallback(async (values: string[]) => {
-        if (!bulkTokenPicker || selectedIdsArray.length === 0) return;
+        if (!getMutableSelectedProject() || !bulkTokenPicker || selectedIdsArray.length === 0) return;
         await updateSelectedTaskTokens(
             bulkTokenPicker.field,
             values,
@@ -844,7 +882,7 @@ export function ProjectWorkspace({
                 afterSuccess: () => setBulkTokenPicker(null),
             },
         );
-    }, [bulkTokenPicker, selectedIdsArray.length, updateSelectedTaskTokens]);
+    }, [bulkTokenPicker, getMutableSelectedProject, selectedIdsArray.length, updateSelectedTaskTokens]);
 
     const projectReferenceTasks = useMemo(() => {
         if (!selectedProject) return [] as Task[];
@@ -941,7 +979,8 @@ export function ProjectWorkspace({
     const canReorderProjectTasks = !isArchivedProject && projectTaskSortBy === 'default';
 
     const handleTaskDragEnd = useCallback((event: DragEndEvent) => {
-        if (!selectedProject || isArchivedProject) return;
+        const current = getMutableSelectedProject();
+        if (!current || !selectedProject || isArchivedProject) return;
         // In non-default sort modes the list is not a drop target; tasks can only
         // be dragged out to the sidebar (handled by the Projects view).
         if (!canReorderProjectTasks) return;
@@ -974,7 +1013,7 @@ export function ProjectWorkspace({
             if (newIndex === -1 || oldIndex === newIndex) return;
             const reordered = arrayMove(sourceItems, oldIndex, newIndex);
             void Promise.resolve(
-                reorderProjectTasks(selectedProject.id, reordered, getSectionIdFromContainer(sourceContainer)),
+                reorderProjectTasks(current.id, reordered, getSectionIdFromContainer(sourceContainer)),
             ).catch(failTaskMove);
             return;
         }
@@ -995,16 +1034,18 @@ export function ProjectWorkspace({
             if (updateResult && updateResult.success === false) {
                 throw new Error(updateResult.error || 'Failed to move task');
             }
+            if (getMutableSelectedProject()?.id !== current.id) return;
             if (nextSourceItems.length > 0) {
                 await Promise.resolve(
-                    reorderProjectTasks(selectedProject.id, nextSourceItems, getSectionIdFromContainer(sourceContainer)),
+                    reorderProjectTasks(current.id, nextSourceItems, getSectionIdFromContainer(sourceContainer)),
                 );
             }
+            if (getMutableSelectedProject()?.id !== current.id) return;
             await Promise.resolve(
-                reorderProjectTasks(selectedProject.id, nextDestinationItems, getSectionIdFromContainer(destinationContainer)),
+                reorderProjectTasks(current.id, nextDestinationItems, getSectionIdFromContainer(destinationContainer)),
             );
         })().catch(failTaskMove);
-    }, [canReorderProjectTasks, isArchivedProject, reorderProjectTasks, selectedProject, showToast, taskIdToContainer, taskIdsByContainer, updateTask]);
+    }, [canReorderProjectTasks, getMutableSelectedProject, isArchivedProject, reorderProjectTasks, selectedProject, showToast, taskIdToContainer, taskIdsByContainer, updateTask]);
 
     useEffect(() => {
         taskDragEndRef.current = handleTaskDragEnd;
@@ -1140,7 +1181,9 @@ export function ProjectWorkspace({
         index: number,
         orientation: 'vertical' | 'horizontal',
     ) => {
-        const isCollapsed = group.section.isCollapsed;
+        const isCollapsed = isArchivedProject
+            ? (archivedSectionCollapsed[group.section.id] ?? group.section.isCollapsed ?? false)
+            : Boolean(group.section.isCollapsed);
         const hasNotes = Boolean(group.section.description?.trim());
         const notesOpen = sectionNotesOpen[group.section.id] ?? false;
         const canMoveBack = index > 0;
@@ -1175,7 +1218,16 @@ export function ProjectWorkspace({
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <button
                     type="button"
-                    onClick={() => handleToggleSection(group.section)}
+                    onClick={() => {
+                        if (isArchivedProject) {
+                            setArchivedSectionCollapsed((current) => ({
+                                ...current,
+                                [group.section.id]: !isCollapsed,
+                            }));
+                            return;
+                        }
+                        handleToggleSection(group.section);
+                    }}
                     className="flex min-w-0 items-center gap-2 text-sm font-semibold"
                 >
                     {isCollapsed ? (
@@ -1192,26 +1244,26 @@ export function ProjectWorkspace({
                             <button
                                 type="button"
                                 onClick={() => handleMoveSection(group.section.id, -1)}
-                                disabled={!canMoveBack}
+                                disabled={isArchivedProject || !canMoveBack}
                                 className={cn(
                                     "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground",
-                                    !canMoveBack && disabledArrow,
+                                    (isArchivedProject || !canMoveBack) && disabledArrow,
                                 )}
                                 aria-label={`${moveBackLabel}: ${group.section.title}`}
-                                title={moveBackLabel}
+                                title={isArchivedProject ? archivedReadOnlyHint : moveBackLabel}
                             >
                                 <MoveBackIcon className="h-3.5 w-3.5" />
                             </button>
                             <button
                                 type="button"
                                 onClick={() => handleMoveSection(group.section.id, 1)}
-                                disabled={!canMoveForward}
+                                disabled={isArchivedProject || !canMoveForward}
                                 className={cn(
                                     "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground",
-                                    !canMoveForward && disabledArrow,
+                                    (isArchivedProject || !canMoveForward) && disabledArrow,
                                 )}
                                 aria-label={`${moveForwardLabel}: ${group.section.title}`}
-                                title={moveForwardLabel}
+                                title={isArchivedProject ? archivedReadOnlyHint : moveForwardLabel}
                             >
                                 <MoveForwardIcon className="h-3.5 w-3.5" />
                             </button>
@@ -1242,7 +1294,9 @@ export function ProjectWorkspace({
                     <button
                         type="button"
                         onClick={() => handleRenameSection(group.section)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                        disabled={isArchivedProject}
+                        title={isArchivedProject ? archivedReadOnlyHint : undefined}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label={t('common.edit')}
                     >
                         <Pencil className="h-3.5 w-3.5" />
@@ -1250,7 +1304,9 @@ export function ProjectWorkspace({
                     <button
                         type="button"
                         onClick={() => handleDeleteSection(group.section)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        disabled={isArchivedProject}
+                        title={isArchivedProject ? archivedReadOnlyHint : undefined}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label={t('common.delete')}
                     >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -1279,6 +1335,13 @@ export function ProjectWorkspace({
 
     const renderSectionNotes = (section: Section) => {
         if (!(sectionNotesOpen[section.id] ?? false)) return null;
+        if (isArchivedProject) {
+            return (
+                <div className="border-b border-border/50 px-3 py-2 text-xs text-muted-foreground">
+                    <InlineMarkdown markdown={section.description || ''} interactiveLinks={false} />
+                </div>
+            );
+        }
         return (
             <div className="border-b border-border/50 px-3 py-2">
                 <textarea
@@ -1286,6 +1349,7 @@ export function ProjectWorkspace({
                     placeholder={t('projects.sectionNotesPlaceholder')}
                     defaultValue={section.description || ''}
                     onBlur={(event) => {
+                        if (!getMutableSelectedProject()) return;
                         const nextValue = event.target.value.trimEnd();
                         updateSection(section.id, { description: nextValue || undefined });
                     }}
@@ -1312,7 +1376,9 @@ export function ProjectWorkspace({
                         id={getSectionContainerId(group.section.id)}
                         header={renderSectionHeader(group, index, 'horizontal')}
                         notes={renderSectionNotes(group.section)}
-                        collapsed={group.section.isCollapsed}
+                        collapsed={isArchivedProject
+                            ? (archivedSectionCollapsed[group.section.id] ?? group.section.isCollapsed ?? false)
+                            : Boolean(group.section.isCollapsed)}
                     >
                         {(scrollRef) => (group.tasks.length > 0 ? (
                             renderTasks(group.tasks, scrollRef)
@@ -1379,7 +1445,9 @@ export function ProjectWorkspace({
                             {renderSectionHeader(group, index, 'vertical')}
                         </div>
                         {renderSectionNotes(group.section)}
-                        {!group.section.isCollapsed && (
+                        {!(isArchivedProject
+                            ? (archivedSectionCollapsed[group.section.id] ?? group.section.isCollapsed ?? false)
+                            : Boolean(group.section.isCollapsed)) && (
                             <div className="p-3">
                                 {group.tasks.length > 0 ? (
                                     renderTasks(group.tasks)
@@ -1456,14 +1524,18 @@ export function ProjectWorkspace({
     })();
 
     const handleCommitProjectTitle = () => {
-        if (!selectedProject) return;
-        const nextTitle = editProjectTitle.trim();
-        if (!nextTitle) {
-            setEditProjectTitle(selectedProject.title);
+        const current = getMutableSelectedProject();
+        if (!current) {
+            if (selectedProjectRef.current) setEditProjectTitle(selectedProjectRef.current.title);
             return;
         }
-        if (nextTitle !== selectedProject.title) {
-            updateProject(selectedProject.id, { title: nextTitle });
+        const nextTitle = editProjectTitle.trim();
+        if (!nextTitle) {
+            setEditProjectTitle(current.title);
+            return;
+        }
+        if (nextTitle !== current.title) {
+            updateProject(current.id, { title: nextTitle });
         }
     };
 
@@ -1476,9 +1548,10 @@ export function ProjectWorkspace({
     // same header slot (the button becomes Reactivate and task statuses are
     // restored), matching the mobile editor. Delete keeps its confirmation.
     const handleArchiveProject = async () => {
-        if (!selectedProject) return;
+        const current = getMutableSelectedProject();
+        if (!current) return;
         try {
-            await Promise.resolve(updateProject(selectedProject.id, { status: 'archived' }));
+            await Promise.resolve(updateProject(current.id, { status: 'archived' }));
         } catch (error) {
             reportError('Failed to archive project', error);
             showToast(tFallback(t, 'projects.archiveFailed', 'Failed to archive project'), 'error');
@@ -1486,9 +1559,10 @@ export function ProjectWorkspace({
     };
 
     const handleDeleteProject = async () => {
-        if (!selectedProject) return;
-        const projectId = selectedProject.id;
-        const projectTitle = selectedProject.title;
+        const current = getMutableSelectedProject();
+        if (!current) return;
+        const projectId = current.id;
+        const projectTitle = current.title;
         try {
             const confirmed = await requestConfirmation({
                 title: tFallback(t, 'common.delete', 'Delete'),
@@ -1496,7 +1570,7 @@ export function ProjectWorkspace({
                 confirmLabel: tFallback(t, 'common.delete', 'Delete'),
                 cancelLabel: tFallback(t, 'common.cancel', 'Cancel'),
             });
-            if (confirmed) {
+            if (confirmed && getMutableSelectedProject()?.id === projectId) {
                 setIsProjectDeleting(true);
                 try {
                     await Promise.resolve(deleteProject(projectId));
@@ -1532,6 +1606,7 @@ export function ProjectWorkspace({
     } = useProjectAttachmentActions({
         t,
         selectedProject,
+        readOnly: isArchivedProject,
         updateProject,
     });
 
@@ -1698,6 +1773,8 @@ export function ProjectWorkspace({
                                 }}
                                 onDelete={handleDeleteProject}
                                 isDeleting={isProjectDeleting}
+                                readOnly={isArchivedProject}
+                                readOnlyHint={archivedReadOnlyHint}
                                 projectProgress={projectProgress}
                                 t={t}
                             />
@@ -1718,23 +1795,28 @@ export function ProjectWorkspace({
                                         tagSuggestions={addTagOptions}
                                         onTagDraftChange={setTagDraft}
                                         onCommitTags={() => {
-                                            updateProject(selectedProject.id, { tagIds: parseTagInput(tagDraft) });
+                                            updateMutableSelectedProject({ tagIds: parseTagInput(tagDraft) });
                                         }}
-                                        onNewArea={() => onRequestQuickArea(selectedProject.id)}
+                                        onNewArea={() => {
+                                            const current = getMutableSelectedProject();
+                                            if (current) onRequestQuickArea(current.id);
+                                        }}
                                         onManageAreas={onManageAreas}
                                         onAreaChange={(value) => {
-                                            updateProject(selectedProject.id, { areaId: value === noAreaId ? undefined : value });
+                                            updateMutableSelectedProject({ areaId: value === noAreaId ? undefined : value });
                                         }}
                                         isSequential={selectedProject.isSequential === true}
-                                        onToggleSequential={() => updateProject(selectedProject.id, { isSequential: !selectedProject.isSequential })}
+                                        onToggleSequential={() => updateMutableSelectedProject({ isSequential: !selectedProjectRef.current?.isSequential })}
                                         sequentialScope={selectedProject.sequentialScope ?? 'project'}
-                                        onSequentialScopeChange={(sequentialScope) => updateProject(selectedProject.id, { sequentialScope })}
+                                        onSequentialScopeChange={(sequentialScope) => updateMutableSelectedProject({ sequentialScope })}
                                         status={selectedProject.status}
-                                        onChangeStatus={(status) => updateProject(selectedProject.id, { status })}
+                                        onChangeStatus={(status) => updateMutableSelectedProject({ status })}
                                         dueDateValue={toDateInputValue(selectedProject.dueDate)}
-                                        onDueDateChange={(value) => updateProject(selectedProject.id, { dueDate: value || undefined })}
+                                        onDueDateChange={(value) => updateMutableSelectedProject({ dueDate: value || undefined })}
                                         reviewAtValue={toDateTimeLocalValue(selectedProject.reviewAt)}
-                                        onReviewAtChange={(value) => updateProject(selectedProject.id, { reviewAt: value || undefined })}
+                                        onReviewAtChange={(value) => updateMutableSelectedProject({ reviewAt: value || undefined })}
+                                        readOnly={isArchivedProject}
+                                        readOnlyHint={archivedReadOnlyHint}
                                     />
 
                                     <ProjectNotesSection
@@ -1748,9 +1830,11 @@ export function ProjectWorkspace({
                                         attachmentError={attachmentError}
                                         onOpenAttachment={openAttachment}
                                         onRemoveAttachment={removeProjectAttachment}
-                                        onUpdateNotes={(value) => updateProject(selectedProject.id, { supportNotes: value })}
+                                        onUpdateNotes={(value) => updateMutableSelectedProject({ supportNotes: value })}
                                         t={t}
                                         language={language}
+                                        readOnly={isArchivedProject}
+                                        readOnlyHint={archivedReadOnlyHint}
                                     />
                                 </>
                             )}
@@ -1776,11 +1860,17 @@ export function ProjectWorkspace({
                                         </div>
                                         <div className="flex flex-wrap items-center justify-end gap-2">
                                             {projectTaskToolbarCompact && projectAddTaskButton}
-                                            <SortBySelect
-                                                value={projectTaskSortBy}
-                                                onChange={handleProjectTaskSortByChange}
-                                                t={t}
-                                            />
+                                            <fieldset
+                                                className="m-0 min-w-0 border-0 p-0 disabled:cursor-not-allowed disabled:opacity-60"
+                                                disabled={isArchivedProject}
+                                                title={isArchivedProject ? archivedReadOnlyHint : undefined}
+                                            >
+                                                <SortBySelect
+                                                    value={projectTaskSortBy}
+                                                    onChange={handleProjectTaskSortByChange}
+                                                    t={t}
+                                                />
+                                            </fieldset>
                                             {projectLayoutToggle}
                                             {selectProjectTasksButton}
                                             {!isArchivedProject && (
@@ -1898,13 +1988,14 @@ export function ProjectWorkspace({
                     setSectionDraft('');
                 }}
                 onConfirm={(value) => {
-                    if (!selectedProject) return;
+                    const current = getMutableSelectedProject();
+                    if (!current) return;
                     const trimmed = value.trim();
                     if (!trimmed) return;
                     if (editingSectionId) {
                         updateSection(editingSectionId, { title: trimmed });
                     } else {
-                        addSection(selectedProject.id, trimmed);
+                        addSection(current.id, trimmed);
                     }
                     setShowSectionPrompt(false);
                     setEditingSectionId(null);
@@ -1924,7 +2015,8 @@ export function ProjectWorkspace({
                 cancelLabel={t('common.cancel')}
                 onCancel={() => setShowLinkPrompt(false)}
                 onConfirm={(value) => {
-                    if (!selectedProject) return;
+                    const current = getMutableSelectedProject();
+                    if (!current) return;
                     const normalized = normalizeAttachmentInput(value);
                     if (!normalized.uri) return;
                     const now = new Date().toISOString();
@@ -1936,8 +2028,8 @@ export function ProjectWorkspace({
                         createdAt: now,
                         updatedAt: now,
                     };
-                    updateProject(selectedProject.id, {
-                        attachments: [...(selectedProject.attachments || []), attachment],
+                    updateProject(current.id, {
+                        attachments: [...(current.attachments || []), attachment],
                     });
                     setShowLinkPrompt(false);
                 }}

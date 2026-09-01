@@ -29,6 +29,8 @@ export function useProjectNotesEditor({
   updateProject,
   language,
 }: UseProjectNotesEditorParams) {
+  const selectedProjectRef = useRef(selectedProject);
+  selectedProjectRef.current = selectedProject;
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [showNotesPreview, setShowNotesPreview] = useState(false);
   const [notesFullscreen, setNotesFullscreen] = useState(false);
@@ -42,6 +44,10 @@ export function useProjectNotesEditor({
   const selectedProjectNotesSelectionRef = useRef<MarkdownSelection>({ start: 0, end: 0 });
   const pendingSelectedProjectNotesSelectionRef = useRef<MarkdownSelection | null>(null);
   const selectedProjectNotes = selectedProject?.supportNotes || '';
+  const isProjectReadOnly = useCallback((project: Project | null | undefined) => {
+    if (!project || project.status === 'archived') return true;
+    return useTaskStore.getState()._allProjects?.find((item) => item.id === project.id)?.status === 'archived';
+  }, []);
   const selectedProjectNotesDirection = selectedProject
     ? resolveAutoTextDirection(`${selectedProject.title ?? ''}\n${selectedProjectNotes}`.trim(), language)
     : 'ltr';
@@ -58,13 +64,15 @@ export function useProjectNotesEditor({
     selectedProjectNotesUndoRef.current = [];
     setSelectedProjectNotesUndoDepth(0);
     setIsSelectedProjectNotesFocused(false);
+    setNotesFullscreen(false);
+    setShowNotesPreview(selectedProject?.status === 'archived');
     pendingSelectedProjectNotesSelectionRef.current = null;
     selectedProjectNotesSelectionRef.current = { start: selectionEnd, end: selectionEnd };
     setSelectedProjectNotesSelection({ start: selectionEnd, end: selectionEnd });
     // supportNotes is a one-time snapshot for the newly selected project; keying this
     // reset on it would wipe the undo stack and selection on every notes keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProject?.id]);
+  }, [selectedProject?.id, selectedProject?.status]);
 
   const pushSelectedProjectNotesUndoEntry = useCallback((value: string, selection: MarkdownSelection) => {
     const previousEntry = selectedProjectNotesUndoRef.current[selectedProjectNotesUndoRef.current.length - 1];
@@ -91,17 +99,19 @@ export function useProjectNotesEditor({
       baseSelection?: MarkdownSelection;
     },
   ) => {
-    if (!selectedProject) return;
-    if ((options?.recordUndo ?? true) && text !== selectedProjectNotes) {
-      pushSelectedProjectNotesUndoEntry(selectedProjectNotes, options?.baseSelection ?? selectedProjectNotesSelectionRef.current);
+    const current = selectedProjectRef.current;
+    if (!current || isProjectReadOnly(current)) return;
+    const currentNotes = current.supportNotes || '';
+    if ((options?.recordUndo ?? true) && text !== currentNotes) {
+      pushSelectedProjectNotesUndoEntry(currentNotes, options?.baseSelection ?? selectedProjectNotesSelectionRef.current);
     }
     selectedProjectNotesRef.current = text;
-    setSelectedProject({ ...selectedProject, supportNotes: text });
+    setSelectedProject({ ...current, supportNotes: text });
     if (options?.nextSelection) {
       selectedProjectNotesSelectionRef.current = options.nextSelection;
       setSelectedProjectNotesSelection(options.nextSelection);
     }
-  }, [pushSelectedProjectNotesUndoEntry, selectedProject, selectedProjectNotes, setSelectedProject]);
+  }, [isProjectReadOnly, pushSelectedProjectNotesUndoEntry, setSelectedProject]);
 
   const restoreSelectedProjectNotesSelection = useCallback((selection: MarkdownSelection) => {
     pendingSelectedProjectNotesSelectionRef.current = selection;
@@ -136,6 +146,7 @@ export function useProjectNotesEditor({
   }, []);
 
   const handleSelectedProjectNotesChange = useCallback((text: string) => {
+    if (isProjectReadOnly(selectedProjectRef.current)) return;
     const assistEnabled = isMarkdownEditorAssistEnabled(useTaskStore.getState().settings);
     const continued = continueMarkdownOnTextChange(
       selectedProjectNotesRef.current,
@@ -152,7 +163,7 @@ export function useProjectNotesEditor({
       return;
     }
     applySelectedProjectNotesValue(text);
-  }, [applySelectedProjectNotesValue, restoreSelectedProjectNotesSelection]);
+  }, [applySelectedProjectNotesValue, isProjectReadOnly, restoreSelectedProjectNotesSelection]);
 
   useEffect(() => {
     selectedProjectNotesSelectionRef.current = selectedProjectNotesSelection;
@@ -182,6 +193,7 @@ export function useProjectNotesEditor({
   }, [selectedProjectNotes.length]);
 
   const handleSelectedProjectNotesUndo = useCallback(() => {
+    if (isProjectReadOnly(selectedProjectRef.current)) return undefined;
     const previousEntry = selectedProjectNotesUndoRef.current[selectedProjectNotesUndoRef.current.length - 1];
     if (!previousEntry) return undefined;
     selectedProjectNotesUndoRef.current = selectedProjectNotesUndoRef.current.slice(0, -1);
@@ -191,37 +203,40 @@ export function useProjectNotesEditor({
       recordUndo: false,
     });
     return previousEntry.selection;
-  }, [applySelectedProjectNotesValue]);
+  }, [applySelectedProjectNotesValue, isProjectReadOnly]);
 
   const handleSelectedProjectNotesApplyAction = useCallback((actionId: MarkdownToolbarActionId, selection: MarkdownSelection): MarkdownToolbarResult => {
+    if (isProjectReadOnly(selectedProjectRef.current)) {
+      return { value: selectedProjectNotesRef.current, selection };
+    }
     const next = applyMarkdownToolbarAction(selectedProjectNotesRef.current, selection, actionId);
     applySelectedProjectNotesValue(next.value, {
       baseSelection: selection,
       nextSelection: next.selection,
     });
     return next;
-  }, [applySelectedProjectNotesValue]);
+  }, [applySelectedProjectNotesValue, isProjectReadOnly]);
 
-  const selectedProjectIdForCommit = selectedProject?.id;
   const commitSelectedProjectNotes = useCallback(() => {
-    if (!selectedProjectIdForCommit) return;
+    const current = selectedProjectRef.current;
+    if (!current || isProjectReadOnly(current)) return;
     const nextNotes = selectedProjectNotesRef.current;
     if (nextNotes === committedProjectNotesRef.current) return;
     committedProjectNotesRef.current = nextNotes;
-    updateProject(selectedProjectIdForCommit, { supportNotes: nextNotes });
-  }, [selectedProjectIdForCommit, updateProject]);
+    updateProject(current.id, { supportNotes: nextNotes });
+  }, [isProjectReadOnly, updateProject]);
 
   const handleSelectedProjectNotesApplyAutocomplete = useCallback((next: { value: string; selection: MarkdownSelection }) => {
+    const current = selectedProjectRef.current;
+    if (!current || isProjectReadOnly(current)) return;
     applySelectedProjectNotesValue(next.value, {
       baseSelection: selectedProjectNotesSelectionRef.current,
       nextSelection: next.selection,
     });
     selectedProjectNotesSelectionRef.current = next.selection;
-    if (selectedProject) {
-      committedProjectNotesRef.current = next.value;
-      updateProject(selectedProject.id, { supportNotes: next.value });
-    }
-  }, [applySelectedProjectNotesValue, selectedProject, updateProject]);
+    committedProjectNotesRef.current = next.value;
+    updateProject(current.id, { supportNotes: next.value });
+  }, [applySelectedProjectNotesValue, isProjectReadOnly, updateProject]);
 
   const resetProjectNotesUi = useCallback(() => {
     setNotesExpanded(false);

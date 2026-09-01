@@ -3,11 +3,15 @@ import { Alert } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Attachment, type Project } from '@mindwtr/core';
+import * as DocumentPicker from 'expo-document-picker';
 
 import { useProjectAttachments } from './use-project-attachments';
 
 const availabilityMock = vi.hoisted(() => ({
   ensureAttachmentAvailableDetailed: vi.fn(),
+}));
+const attachmentPersistenceMock = vi.hoisted(() => ({
+  persistAttachmentLocally: vi.fn(),
 }));
 const coreStoreState = vi.hoisted(() => ({ _allProjects: [] as Project[] }));
 
@@ -48,7 +52,7 @@ vi.mock('../../lib/attachment-sync-availability', () => ({
 }));
 
 vi.mock('../../lib/attachment-sync', () => ({
-  persistAttachmentLocally: vi.fn(async (attachment: Attachment) => attachment),
+  persistAttachmentLocally: attachmentPersistenceMock.persistAttachmentLocally,
 }));
 vi.mock('expo-document-picker', () => ({
   getDocumentAsync: vi.fn().mockResolvedValue({ canceled: true, assets: [] }),
@@ -99,6 +103,7 @@ const makeProject = (attachment: Attachment, overrides: Partial<Project> = {}): 
 
 type HarnessApi = {
   selectedProject: Project | null;
+  addProjectFileAttachment: ReturnType<typeof useProjectAttachments>['addProjectFileAttachment'];
   downloadAttachment: ReturnType<typeof useProjectAttachments>['downloadAttachment'];
   replaceProject: (project: Project) => void;
 };
@@ -122,6 +127,7 @@ function Harness({ expose, initial }: {
   });
   expose.current = {
     selectedProject,
+    addProjectFileAttachment: hook.addProjectFileAttachment,
     downloadAttachment: hook.downloadAttachment,
     replaceProject: (project) => {
       coreStoreState._allProjects = [project];
@@ -135,6 +141,10 @@ describe('useProjectAttachments download settlement', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    attachmentPersistenceMock.persistAttachmentLocally.mockImplementation(async (attachment: Attachment) => ({
+      ...attachment,
+      uri: `file:///managed/${attachment.id}`,
+    }));
   });
 
   afterEach(() => {
@@ -313,6 +323,34 @@ describe('useProjectAttachments download settlement', () => {
       }],
     });
     expect(coreStoreState._allProjects[0]).toEqual(expose.current!.selectedProject);
+    act(() => tree.unmount());
+  });
+
+  it('does not attach a picked file after the project becomes archived', async () => {
+    const originalAttachment = makeAttachment(1);
+    const activeProject = makeProject(originalAttachment, { attachments: [] });
+    const archivedProject = { ...activeProject, status: 'archived' as const };
+    const picker = deferred<any>();
+    vi.mocked(DocumentPicker.getDocumentAsync).mockReturnValueOnce(picker.promise);
+    coreStoreState._allProjects = [activeProject];
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={activeProject} />); });
+
+    let addRun!: Promise<void>;
+    act(() => { addRun = expose.current!.addProjectFileAttachment(); });
+    act(() => { expose.current!.replaceProject(archivedProject); });
+
+    await act(async () => {
+      picker.resolve({
+        canceled: false,
+        assets: [{ name: 'history.pdf', uri: 'file:///picked/history.pdf', mimeType: 'application/pdf' }],
+      });
+      await addRun;
+    });
+
+    expect(expose.current!.selectedProject).toEqual(archivedProject);
+    expect(coreStoreState._allProjects).toEqual([archivedProject]);
     act(() => tree.unmount());
   });
 });

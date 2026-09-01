@@ -84,6 +84,8 @@ export interface SwipeableTaskItemProps {
     sequenceLabel?: string;
     disableSwipe?: boolean;
     interactionDisabled?: boolean;
+    /** Keep the primary row press available for historical inspection only. */
+    allowInspectionWhenDisabled?: boolean;
     hideChecklistProgress?: boolean;
     hideProjectMeta?: boolean;
     /** Title-only row: suppress the description preview and metadata parts row. */
@@ -244,6 +246,7 @@ function SwipeableTaskItemInner({
     sequenceLabel,
     disableSwipe = false,
     interactionDisabled = false,
+    allowInspectionWhenDisabled = false,
     hideChecklistProgress = false,
     hideProjectMeta = false,
     hideDetails = false,
@@ -500,7 +503,9 @@ function SwipeableTaskItemInner({
     const leftAction = getLeftAction();
     const recurrenceLabel = formatRecurrenceLabel({ recurrence: task.recurrence, t });
     const swipeAccessibilityHint = interactionDisabled
-        ? tFallback(t, 'projects.taskOrder', 'Task order')
+        ? (allowInspectionWhenDisabled
+            ? tFallback(t, 'projects.archivedTaskInspectionHint', 'Double-tap to inspect this task. Reactivate the project to edit it.')
+            : tFallback(t, 'projects.taskOrder', 'Task order'))
         : selectionMode
             ? tFallback(t, 'task.aria.selectionHint', 'Double-tap to toggle task selection.')
             : tFallback(
@@ -586,7 +591,10 @@ function SwipeableTaskItemInner({
     ].filter(Boolean).join('. ');
 
     const handlePress = () => {
-        if (interactionDisabled) return;
+        if (interactionDisabled) {
+            if (allowInspectionWhenDisabled) onPress();
+            return;
+        }
         if (Date.now() < ignorePressUntil.current) return;
         if (selectionMode && onToggleSelect) {
             onToggleSelect();
@@ -636,7 +644,11 @@ function SwipeableTaskItemInner({
         if (onToggleSelect) onToggleSelect();
     };
 
-    const accessibilityActions = interactionDisabled ? [] : [
+    const accessibilityActions = interactionDisabled
+        ? (allowInspectionWhenDisabled
+            ? [{ name: 'activate', label: tFallback(t, 'common.view', 'View') }]
+            : [])
+        : [
         {
             name: 'activate',
             label: selectionMode
@@ -657,8 +669,11 @@ function SwipeableTaskItemInner({
     ];
 
     const handleAccessibilityAction = (event: { nativeEvent: { actionName: string } }) => {
-        if (interactionDisabled) return;
         const { actionName } = event.nativeEvent;
+        if (interactionDisabled) {
+            if (allowInspectionWhenDisabled && actionName === 'activate') handlePress();
+            return;
+        }
         if (actionName === 'activate') {
             handlePress();
             return;
@@ -696,6 +711,7 @@ function SwipeableTaskItemInner({
             isMultiSelected={isMultiSelected}
             showFocusHighlight={showFocusHighlight}
             interactionDisabled={interactionDisabled}
+            allowInspectionWhenDisabled={allowInspectionWhenDisabled}
             language={language}
             localChecklist={localChecklist}
             onAccessibilityAction={handleAccessibilityAction}

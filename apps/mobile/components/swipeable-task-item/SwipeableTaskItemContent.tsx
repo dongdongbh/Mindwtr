@@ -60,6 +60,7 @@ interface SwipeableTaskItemContentProps {
     language: string;
     localChecklist: Task['checklist'];
     interactionDisabled?: boolean;
+    allowInspectionWhenDisabled?: boolean;
     onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => void;
     onAddChecklistItem: (title: string) => void;
     onContextPress?: (context: string) => void;
@@ -106,6 +107,7 @@ export function SwipeableTaskItemContent({
     isMultiSelected,
     showFocusHighlight,
     interactionDisabled = false,
+    allowInspectionWhenDisabled = false,
     language,
     localChecklist,
     onAccessibilityAction,
@@ -491,13 +493,13 @@ export function SwipeableTaskItemContent({
             onPress={onPress}
             onLongPress={onLongPress}
             delayLongPress={300}
-            disabled={interactionDisabled}
+            disabled={interactionDisabled && !allowInspectionWhenDisabled}
             accessibilityLabel={accessibilityLabel}
             accessibilityHint={accessibilityHint}
             accessibilityRole="button"
-            accessibilityState={interactionDisabled || selectionMode
+            accessibilityState={(interactionDisabled && !allowInspectionWhenDisabled) || selectionMode
                 ? {
-                    ...(interactionDisabled ? { disabled: true } : {}),
+                    ...(interactionDisabled && !allowInspectionWhenDisabled ? { disabled: true } : {}),
                     ...(selectionMode ? { selected: isMultiSelected } : {}),
                 }
                 : undefined}

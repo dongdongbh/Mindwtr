@@ -358,7 +358,7 @@ describe('TaskEditViewTab', () => {
   // #1055: the read-only preview can grow the checklist it already renders.
   it('adds checklist items from the preview without opening the form tab', () => {
     const applyChecklistUpdate = vi.fn();
-    const renderPreview = (checklist: any[], onApply = applyChecklistUpdate) => {
+    const renderPreview = (checklist: any[], onApply = applyChecklistUpdate, readOnly = false) => {
       let tree!: renderer.ReactTestRenderer;
       renderer.act(() => {
         tree = renderer.create(
@@ -394,6 +394,7 @@ describe('TaskEditViewTab', () => {
             getRecurrenceRuleValue={() => ''}
             getRecurrenceStrategyValue={() => 'strict'}
             applyChecklistUpdate={onApply}
+            readOnly={readOnly}
             visibleAttachments={[]}
             openAttachment={vi.fn()}
             isImageAttachment={() => false}
@@ -437,6 +438,16 @@ describe('TaskEditViewTab', () => {
       findAddInputs(tree)[0].props.onSubmitEditing();
     });
     expect(applyChecklistUpdate).toHaveBeenCalledTimes(1);
+
+    const readOnlyApply = vi.fn();
+    const readOnlyTree = renderPreview(
+      [{ id: 'item-1', title: 'Bread', isCompleted: false }],
+      readOnlyApply,
+      true,
+    );
+    expect(findAddInputs(readOnlyTree)).toHaveLength(0);
+    expect(readOnlyTree.root.findAll((node) => node.props.accessibilityRole === 'checkbox')).toHaveLength(0);
+    expect(readOnlyApply).not.toHaveBeenCalled();
   });
 
   it('hides the status row when the task editor layout hides status', () => {

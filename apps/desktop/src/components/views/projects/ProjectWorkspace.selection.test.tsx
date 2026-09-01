@@ -62,15 +62,61 @@ vi.mock('../../TokenPickerModal', () => ({
 }));
 
 vi.mock('./ProjectDetailsHeader', () => ({
-    ProjectDetailsHeader: ({ project }: { project: Project }) => <div>{project.title}</div>,
+    ProjectDetailsHeader: ({
+        detailsExpanded,
+        editTitle,
+        onCommitTitle,
+        onDelete,
+        onEditTitleChange,
+        onToggleDetails,
+        readOnly,
+    }: {
+        detailsExpanded: boolean;
+        editTitle: string;
+        onCommitTitle: () => void;
+        onDelete: () => void;
+        onEditTitleChange: (value: string) => void;
+        onToggleDetails: () => void;
+        readOnly?: boolean;
+    }) => (
+        <div>
+            <button type="button" onClick={onToggleDetails}>Details</button>
+            <input
+                aria-label="Project title"
+                data-testid="project-title-input"
+                readOnly={readOnly}
+                value={editTitle}
+                onChange={(event) => onEditTitleChange(event.target.value)}
+                onBlur={onCommitTitle}
+            />
+            <button type="button" disabled={readOnly} onClick={onDelete}>Delete project</button>
+            <span data-testid="details-expanded">{String(detailsExpanded)}</span>
+        </div>
+    ),
 }));
 
 vi.mock('./ProjectDetailsFields', () => ({
-    ProjectDetailsFields: () => null,
+    ProjectDetailsFields: ({ onToggleSequential, readOnly }: { onToggleSequential: () => void; readOnly?: boolean }) => (
+        <button
+            type="button"
+            data-testid="project-type-toggle"
+            disabled={readOnly}
+            onClick={onToggleSequential}
+        >
+            Project type
+        </button>
+    ),
 }));
 
 vi.mock('./ProjectNotesSection', () => ({
-    ProjectNotesSection: () => null,
+    ProjectNotesSection: ({ onUpdateNotes, readOnly }: { onUpdateNotes: (value: string) => void; readOnly?: boolean }) => (
+        <textarea
+            aria-label="Project notes"
+            data-testid="project-notes-input"
+            readOnly={readOnly}
+            onBlur={(event) => onUpdateNotes(event.currentTarget.value)}
+        />
+    ),
 }));
 
 // The workspace now reads store data/actions through useProjectWorkspaceStore.
@@ -105,6 +151,8 @@ const translations: Record<string, string> = {
     'projects.addTaskPlaceholder': 'Add task',
     'projects.areaLabel': 'Area',
     'projects.noActiveTasks': 'No active tasks',
+    'projects.reactivate': 'Reactivate',
+    'projects.sectionNotes': 'Section notes',
     'projects.sectionsLabel': 'Tasks',
     'sort.default': 'Default',
     'sort.due': 'Due date',
@@ -311,6 +359,41 @@ describe('ProjectWorkspace Select mode', () => {
         });
         expect(updateTask).not.toHaveBeenCalled();
         expect(reorderProjectTasks).not.toHaveBeenCalled();
+    });
+
+    it('keeps archived project details and delayed section notes read-only until Reactivate', () => {
+        const archivedProject = { ...project, status: 'archived' as const };
+        const archivedSection = { ...projectSection, description: 'Historical section notes' };
+        const updateProject = vi.fn();
+        const updateSection = vi.fn();
+        const deleteProject = vi.fn();
+
+        const { getByRole, getByTestId, queryByPlaceholderText } = renderWorkspace({
+            selectedProject: archivedProject,
+            sections: [archivedSection],
+            updateProject,
+            updateSection,
+            deleteProject,
+        });
+
+        fireEvent.click(getByRole('button', { name: 'Details' }));
+
+        const titleInput = getByTestId('project-title-input');
+        const notesInput = getByTestId('project-notes-input');
+        expect(titleInput).toHaveAttribute('readonly');
+        expect(notesInput).toHaveAttribute('readonly');
+        expect(getByTestId('project-type-toggle')).toBeDisabled();
+        expect(getByRole('button', { name: 'Delete project' })).toBeDisabled();
+
+        fireEvent.change(titleInput, { target: { value: 'Rewritten history' } });
+        fireEvent.blur(titleInput);
+        fireEvent.blur(notesInput, { target: { value: 'Changed notes' } });
+        fireEvent.click(getByRole('button', { name: 'Section notes' }));
+        expect(queryByPlaceholderText('projects.sectionNotesPlaceholder')).not.toBeInTheDocument();
+
+        expect(updateProject).not.toHaveBeenCalled();
+        expect(updateSection).not.toHaveBeenCalled();
+        expect(deleteProject).not.toHaveBeenCalled();
     });
 
     it('opens global quick add with the selected project defaults', () => {

@@ -28,6 +28,8 @@ type ProjectDetailsHeaderProps = {
     onReactivate: () => void;
     onDelete: () => Promise<void> | void;
     isDeleting?: boolean;
+    readOnly?: boolean;
+    readOnlyHint?: string;
     projectProgress?: ProjectProgress | null;
     t: (key: string) => string;
 };
@@ -50,6 +52,8 @@ export function ProjectDetailsHeader({
     onReactivate,
     onDelete,
     isDeleting = false,
+    readOnly = false,
+    readOnlyHint,
     projectProgress,
     t,
 }: ProjectDetailsHeaderProps) {
@@ -136,9 +140,11 @@ export function ProjectDetailsHeader({
                                     e.currentTarget.blur();
                                 }
                             }}
-                            title={editTitle || project.title}
+                            title={readOnly ? readOnlyHint : (editTitle || project.title)}
                             rows={1}
-                            className="project-details-header__titleInput min-w-0 w-full resize-none overflow-hidden break-words bg-transparent border-b border-transparent text-2xl font-bold leading-tight focus:border-border focus:outline-none"
+                            readOnly={readOnly}
+                            aria-readonly={readOnly}
+                            className="project-details-header__titleInput min-w-0 w-full resize-none overflow-hidden break-words bg-transparent border-b border-transparent text-2xl font-bold leading-tight focus:border-border focus:outline-none read-only:cursor-default read-only:focus:border-transparent"
                             aria-label={t('projects.title')}
                         />
                     <div className="flex flex-wrap gap-1.5">
@@ -229,9 +235,9 @@ export function ProjectDetailsHeader({
                         type="button"
                         onClick={onDelete}
                         className="text-destructive hover:bg-destructive/10 h-8 w-8 rounded-md transition-colors flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
-                        title={t('common.delete')}
+                        title={readOnly ? readOnlyHint : t('common.delete')}
                         aria-label={t('common.delete')}
-                        disabled={isDeleting}
+                        disabled={isDeleting || readOnly}
                         aria-busy={isDeleting}
                     >
                         {isDeleting ? (

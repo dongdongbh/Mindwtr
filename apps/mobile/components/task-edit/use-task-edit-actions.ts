@@ -74,6 +74,7 @@ type TaskEditActionsParams = {
     tasks: Task[];
     timeEstimatesEnabled: boolean;
     titleDraftRef: React.MutableRefObject<string>;
+    canMutate?: () => boolean;
 };
 
 export function useTaskEditActions({
@@ -108,6 +109,7 @@ export function useTaskEditActions({
     tasks,
     timeEstimatesEnabled,
     titleDraftRef,
+    canMutate = () => true,
 }: TaskEditActionsParams) {
     const showTaskWriteError = useCallback((message?: string) => showToast({
         title: tFallback(t, 'common.error', 'Error'),
@@ -120,6 +122,7 @@ export function useTaskEditActions({
         action: () => Promise<StoreActionResult>,
         logMessage: string,
     ): Promise<boolean> => {
+        if (!canMutate()) return false;
         const outcome = await settleStoreAction(action);
         if (outcome.ok) return true;
         if ('cause' in outcome) {
@@ -127,9 +130,10 @@ export function useTaskEditActions({
         }
         showTaskWriteError(outcome.message);
         return false;
-    }, [showTaskWriteError]);
+    }, [canMutate, showTaskWriteError]);
 
     const applyChecklistUpdate = useCallback((nextChecklist: NonNullable<Task['checklist']>) => {
+        if (!canMutate()) return;
         const currentStatus = taskEditDraft?.draft.status ?? task?.status ?? 'inbox';
         let nextStatus = currentStatus;
         if (task?.taskMode === 'list') {
@@ -142,7 +146,7 @@ export function useTaskEditActions({
         }
         setChecklist(nextChecklist);
         if (nextStatus !== currentStatus) setDraftField('status', nextStatus);
-    }, [setChecklist, setDraftField, task?.status, task?.taskMode, taskEditDraft?.draft.status]);
+    }, [canMutate, setChecklist, setDraftField, task?.status, task?.taskMode, taskEditDraft?.draft.status]);
 
     const handleResetChecklist = useCallback(async () => {
         const current = taskEditDraft?.checklist || [];
@@ -213,6 +217,10 @@ export function useTaskEditActions({
     }, [mergedTask, formatDate, formatDueDate, formatTimeEstimateLabel, prioritiesEnabled, t, task, timeEstimatesEnabled, titleDraftRef]);
 
     const handleAttemptClose = useCallback(() => {
+        if (!canMutate()) {
+            onClose();
+            return;
+        }
         if (!draftLifecycle.hasPendingChanges()) {
             draftLifecycle.discard();
             return;
@@ -240,14 +248,18 @@ export function useTaskEditActions({
             ],
             { cancelable: true },
         );
-    }, [draftLifecycle, t]);
+    }, [canMutate, draftLifecycle, onClose, t]);
 
     const handleDone = useCallback(() => {
+        if (!canMutate()) {
+            onClose();
+            return;
+        }
         void draftLifecycle.save();
-    }, [draftLifecycle]);
+    }, [canMutate, draftLifecycle, onClose]);
 
     const handleDuplicateTask = useCallback(async () => {
-        if (!task) return;
+        if (!task || !canMutate()) return;
         try {
             const result = await duplicateTask(task.id, false);
             if (!result.success || !result.id) {
@@ -268,10 +280,10 @@ export function useTaskEditActions({
                 tone: 'error',
             });
         }
-    }, [duplicateTask, onClose, showToast, t, task]);
+    }, [canMutate, duplicateTask, onClose, showToast, t, task]);
 
     const handlePromoteTaskToProject = useCallback(async () => {
-        if (!task || !promoteTaskToProject) return;
+        if (!task || !promoteTaskToProject || !canMutate()) return;
         try {
             const title = String(titleDraftRef.current || mergedTask.title || task.title || '').trim();
             const result = await promoteTaskToProject(task.id, { title });
@@ -300,10 +312,10 @@ export function useTaskEditActions({
                 tone: 'error',
             });
         }
-    }, [mergedTask, onClose, promoteTaskToProject, showToast, t, task, titleDraftRef]);
+    }, [canMutate, mergedTask, onClose, promoteTaskToProject, showToast, t, task, titleDraftRef]);
 
     const handleDeleteTask = useCallback(async () => {
-        if (!task) return;
+        if (!task || !canMutate()) return;
         const deleted = await runStoreAction(
             () => deleteTask(task.id),
             'Failed to delete task',
@@ -323,17 +335,18 @@ export function useTaskEditActions({
             durationMs: 5200,
         });
         onClose();
-    }, [deleteTask, onClose, restoreTask, runStoreAction, showToast, t, task]);
+    }, [canMutate, deleteTask, onClose, restoreTask, runStoreAction, showToast, t, task]);
 
     const handleConvertToReference = useCallback(() => {
+        if (!canMutate()) return;
         void draftLifecycle.convertToReference();
-    }, [draftLifecycle]);
+    }, [canMutate, draftLifecycle]);
 
     // The task is soft-deleted by the conversion, so the open draft is committed
     // first (save closes the editor) and only then does the section get built —
     // otherwise edits made in this session would be lost with the task (#1106).
     const handleConvertToSection = useCallback(async () => {
-        if (!task || !convertTaskToSection) return;
+        if (!task || !convertTaskToSection || !canMutate()) return;
         const saved = await draftLifecycle.save();
         if (!saved) return;
         const converted = await runStoreAction(
@@ -346,7 +359,7 @@ export function useTaskEditActions({
             message: t('task.convertToSectionCreated'),
             tone: 'success',
         });
-    }, [convertTaskToSection, draftLifecycle, runStoreAction, showToast, t, task]);
+    }, [canMutate, convertTaskToSection, draftLifecycle, runStoreAction, showToast, t, task]);
 
     const getAIProvider = useCallback(async () => {
         if (!aiEnabled) {
@@ -363,6 +376,7 @@ export function useTaskEditActions({
     }, [aiEnabled, settings, t]);
 
     const applyAISuggestion = useCallback((suggested: { title?: string; context?: string; timeEstimate?: TimeEstimate }) => {
+        if (!canMutate()) return;
         if (suggested.title) {
             setTitleImmediate(suggested.title);
         }
@@ -371,10 +385,10 @@ export function useTaskEditActions({
             const contexts = (taskEditDraft?.draft.contexts ?? '').split(',').map((value) => value.trim()).filter(Boolean);
             setDraftField('contexts', Array.from(new Set([...contexts, suggested.context])).join(', '));
         }
-    }, [setDraftField, setTitleImmediate, taskEditDraft?.draft.contexts]);
+    }, [canMutate, setDraftField, setTitleImmediate, taskEditDraft?.draft.contexts]);
 
     const handleAIClarify = useCallback(async () => {
-        if (!task || isAIWorking) return;
+        if (!task || isAIWorking || !canMutate()) return;
         const title = String(titleDraftRef.current ?? mergedTask.title ?? task.title ?? '').trim();
         if (!title) return;
         setIsAIWorking(true);
@@ -427,6 +441,7 @@ export function useTaskEditActions({
         }
     }, [
         applyAISuggestion,
+        canMutate,
         closeAIModal,
         mergedTask,
         getAIProvider,
@@ -442,7 +457,7 @@ export function useTaskEditActions({
     ]);
 
     const handleAIBreakdown = useCallback(async () => {
-        if (!task || isAIWorking) return;
+        if (!task || isAIWorking || !canMutate()) return;
         const title = String(titleDraftRef.current ?? mergedTask.title ?? task.title ?? '').trim();
         if (!title) return;
         setIsAIWorking(true);
@@ -488,6 +503,7 @@ export function useTaskEditActions({
         }
     }, [
         applyChecklistUpdate,
+        canMutate,
         closeAIModal,
         descriptionDraft,
         mergedTask,

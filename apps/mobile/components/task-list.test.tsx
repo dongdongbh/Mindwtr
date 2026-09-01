@@ -176,7 +176,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
 vi.mock('./task-edit-modal', () => ({
   TaskEditModal: (props: any) => {
     taskEditModalPropsSpy(props);
-    return React.createElement('TaskEditModal', { visible: props.visible, taskId: props.task?.id });
+    return React.createElement('TaskEditModal', props);
   },
 }));
 
@@ -569,7 +569,7 @@ describe('TaskList', () => {
     }));
   });
 
-  it('removes row, swipe, editor, bulk, and reorder mutations for a read-only project', async () => {
+  it('keeps read-only project rows inspectable while removing every mutation surface', async () => {
     const archivedTask = makeTask('archived-task', 'Historical task', { status: 'archived' });
     taskListSelectionState.current = {
       ...taskListSelectionState.current,
@@ -603,6 +603,7 @@ describe('TaskList', () => {
 
     const row = tree.root.findByType('SwipeableTaskItem' as unknown as React.ElementType);
     expect(row.props.interactionDisabled).toBe(true);
+    expect(row.props.allowInspectionWhenDisabled).toBe(true);
     expect(row.props.selectionMode).toBe(false);
     expect(row.props.actions.toggleSelect).toBeUndefined();
     expect(tree.root.findAll((node) => String(node.type) === 'DraggableFlatList')).toHaveLength(0);
@@ -615,7 +616,16 @@ describe('TaskList', () => {
     });
     expect(updateTaskMock).not.toHaveBeenCalled();
     expect(storeState.deleteTask).not.toHaveBeenCalled();
-    expect(taskEditModalPropsSpy.mock.calls.at(-1)?.[0].visible).toBe(false);
+    const editor = taskEditModalPropsSpy.mock.calls.at(-1)?.[0];
+    expect(editor).toEqual(expect.objectContaining({
+      visible: true,
+      readOnly: true,
+      task: archivedTask,
+    }));
+    act(() => {
+      editor.onSave(archivedTask.id, { title: 'Should not write' });
+    });
+    expect(updateTaskMock).not.toHaveBeenCalled();
 
     act(() => tree.unmount());
   });

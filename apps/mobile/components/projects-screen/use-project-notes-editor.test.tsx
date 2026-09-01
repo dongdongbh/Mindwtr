@@ -51,4 +51,38 @@ describe('useProjectNotesEditor', () => {
 
     expect(updateProject).toHaveBeenCalledTimes(1);
   });
+
+  it('discards a pending notes draft when the project becomes archived', () => {
+    const updateProject = vi.fn();
+    let editor!: ReturnType<typeof useProjectNotesEditor>;
+    let replaceProject!: (project: Project) => void;
+
+    function Harness() {
+      const [selectedProject, setSelectedProject] = React.useState<Project | null>(() => makeProject('Saved notes'));
+      replaceProject = setSelectedProject;
+      editor = useProjectNotesEditor({
+        selectedProject,
+        setSelectedProject,
+        updateProject,
+        language: 'en',
+      });
+      return null;
+    }
+
+    act(() => {
+      create(<Harness />);
+    });
+    act(() => {
+      editor.handleSelectedProjectNotesChange('Unsaved rewrite');
+    });
+    act(() => {
+      replaceProject({ ...makeProject('Saved notes'), status: 'archived' });
+    });
+    act(() => {
+      editor.commitSelectedProjectNotes();
+    });
+
+    expect(editor.selectedProjectNotes).toBe('Saved notes');
+    expect(updateProject).not.toHaveBeenCalled();
+  });
 });

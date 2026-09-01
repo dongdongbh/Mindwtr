@@ -46,6 +46,15 @@ export function useProjectAttachments({
   const [imagePreviewAttachment, setImagePreviewAttachment] = useState<Attachment | null>(null);
   const [linkInput, setLinkInput] = useState('');
 
+  const getMutableSelectedProject = useCallback((expectedId?: string): Project | null => {
+    const selected = selectedProjectRef.current;
+    if (!selected || selected.status === 'archived') return null;
+    if (expectedId && selected.id !== expectedId) return null;
+    const stored = useTaskStore.getState()._allProjects?.find((item) => item.id === selected.id);
+    if (stored?.status === 'archived') return null;
+    return selected;
+  }, []);
+
   const currentProjectAttachmentForIdentity = useCallback((
     projectId: string,
     attachmentId: string,
@@ -191,6 +200,10 @@ export function useProjectAttachments({
     if (!selectedProject) {
       setImagePreviewAttachment(null);
     }
+    if (selectedProject?.status === 'archived') {
+      setLinkModalVisible(false);
+      setLinkInput('');
+    }
   }, [selectedProject]);
 
   const downloadAttachment = useCallback(async (attachment: Attachment) => {
@@ -200,7 +213,8 @@ export function useProjectAttachments({
   }, [resolveProjectAttachment, selectedProject, showAttachmentResolutionError]);
 
   const addProjectFileAttachment = useCallback(async () => {
-    if (!selectedProject) return;
+    const projectAtStart = getMutableSelectedProject();
+    if (!projectAtStart) return;
     const result = await DocumentPicker.getDocumentAsync({
       copyToCacheDirectory: false,
       multiple: false,
@@ -243,13 +257,16 @@ export function useProjectAttachments({
       Alert.alert(t('attachments.title'), t('attachments.fileNotReadable'));
       return;
     }
-    const next = [...(selectedProject.attachments || []), cached];
-    updateProject(selectedProject.id, { attachments: next });
-    setSelectedProject({ ...selectedProject, attachments: next });
-  }, [selectedProject, setSelectedProject, t, updateProject]);
+    const current = getMutableSelectedProject(projectAtStart.id);
+    if (!current) return;
+    const next = [...(current.attachments || []), cached];
+    updateProject(current.id, { attachments: next });
+    setSelectedProject({ ...current, attachments: next });
+  }, [getMutableSelectedProject, setSelectedProject, t, updateProject]);
 
   const confirmAddProjectLink = useCallback(() => {
-    if (!selectedProject) return;
+    const current = getMutableSelectedProject();
+    if (!current) return;
     const normalized = normalizeLinkAttachmentInput(linkInput);
     if (!normalized.uri) return;
     const now = new Date().toISOString();
@@ -261,22 +278,23 @@ export function useProjectAttachments({
       createdAt: now,
       updatedAt: now,
     };
-    const next = [...(selectedProject.attachments || []), attachment];
-    updateProject(selectedProject.id, { attachments: next });
-    setSelectedProject({ ...selectedProject, attachments: next });
+    const next = [...(current.attachments || []), attachment];
+    updateProject(current.id, { attachments: next });
+    setSelectedProject({ ...current, attachments: next });
     setLinkModalVisible(false);
     setLinkInput('');
-  }, [linkInput, selectedProject, setSelectedProject, updateProject]);
+  }, [getMutableSelectedProject, linkInput, setSelectedProject, updateProject]);
 
   const removeProjectAttachment = useCallback((id: string) => {
-    if (!selectedProject) return;
+    const current = getMutableSelectedProject();
+    if (!current) return;
     const now = new Date().toISOString();
-    const next = (selectedProject.attachments || []).map((attachment) =>
+    const next = (current.attachments || []).map((attachment) =>
       attachment.id === id ? { ...attachment, deletedAt: now, updatedAt: now } : attachment
     );
-    updateProject(selectedProject.id, { attachments: next });
-    setSelectedProject({ ...selectedProject, attachments: next });
-  }, [selectedProject, setSelectedProject, updateProject]);
+    updateProject(current.id, { attachments: next });
+    setSelectedProject({ ...current, attachments: next });
+  }, [getMutableSelectedProject, setSelectedProject, updateProject]);
 
   const resetProjectAttachmentUi = useCallback(() => {
     setImagePreviewAttachment(null);

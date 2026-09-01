@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Modal, Animated, Platform } from 'react-native';
+import { View, Text, Modal, Animated, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Task,
     TaskEditorFieldId,
@@ -78,6 +78,8 @@ interface TaskEditModalProps {
     onProjectNavigate?: (projectId: string) => void;
     onContextNavigate?: (context: string) => void;
     onTagNavigate?: (tag: string) => void;
+    /** Archived-project tasks remain inspectable, but every mutation is disabled. */
+    readOnly?: boolean;
 }
 
 function TaskEditModalInner({
@@ -90,6 +92,7 @@ function TaskEditModalInner({
     onProjectNavigate,
     onContextNavigate,
     onTagNavigate,
+    readOnly = false,
 }: TaskEditModalProps) {
     const { showToast } = useToast();
     const {
@@ -152,6 +155,15 @@ function TaskEditModalInner({
         settleAttachmentDraftRef.current(input);
     }, []);
     const descriptionToolbarInteractionUntilRef = useRef(0);
+    const readOnlyRef = useRef(readOnly);
+    const onSaveRef = useRef(onSave);
+    readOnlyRef.current = readOnly;
+    onSaveRef.current = onSave;
+    const guardedOnSave = useCallback((taskId: string, updates: Partial<Task>) => {
+        if (readOnlyRef.current) return { success: false };
+        return onSaveRef.current(taskId, updates);
+    }, []);
+    const canMutate = useCallback(() => !readOnlyRef.current, []);
     const showTaskWriteError = useCallback((message?: string) => showToast({
         title: tFallback(t, 'common.error', 'Error'),
         message: message || tFallback(t, 'task.updateFailed', 'Could not update task.'),
@@ -205,7 +217,7 @@ function TaskEditModalInner({
     } = useTaskEditState({
         defaultTab,
         onClose,
-        onSave,
+        onSave: guardedOnSave,
         onSaveError: showTaskWriteError,
         resetCopilotStateRef,
         settleAttachmentDraft,
@@ -416,6 +428,7 @@ function TaskEditModalInner({
         );
     }, [setDraftField, taskEditDraft?.draft.viewSectionIds]);
     const handleCreateSomedaySection = useCallback(async (title: string) => {
+        if (!canMutate()) return null;
         try {
             return await createSomedaySection(title);
         } catch {
@@ -426,7 +439,7 @@ function TaskEditModalInner({
             });
             return null;
         }
-    }, [showToast, t]);
+    }, [canMutate, showToast, t]);
 
     const editedTaskProjectId = taskEditDraft?.draft.projectId;
     const editedTaskSectionId = taskEditDraft?.draft.sectionId;
@@ -611,12 +624,13 @@ function TaskEditModalInner({
         setDraftField('assignedTo', assignedTo);
     }, [setDraftField]);
     const createAssignedToPerson = useCallback(async (name: string) => {
+        if (!canMutate()) return null;
         const created = await addPerson(name);
-        if (created) {
+        if (created && canMutate()) {
             setDraftField('assignedTo', created.name);
         }
         return created;
-    }, [addPerson, setDraftField]);
+    }, [addPerson, canMutate, setDraftField]);
     const closeWaitingAssignmentModal = useCallback(() => {
         setWaitingAssignmentModalVisible(false);
     }, []);
@@ -717,6 +731,7 @@ function TaskEditModalInner({
         tasks,
         timeEstimatesEnabled,
         titleDraftRef,
+        canMutate,
     });
 
     const inputStyle = useMemo(
@@ -941,6 +956,11 @@ function TaskEditModalInner({
 
     if (!task) return null;
 
+    const previewTask = readOnly ? task : mergedTask;
+    const previewAttachments = readOnly
+        ? (task.attachments ?? []).filter((attachment) => !attachment.deletedAt)
+        : visibleAttachments;
+
     return (
         <>
         <Modal
@@ -948,7 +968,7 @@ function TaskEditModalInner({
             animationType="slide"
             presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
             allowSwipeDismissal
-            onRequestClose={handleAttemptClose}
+            onRequestClose={readOnly ? onClose : handleAttemptClose}
         >
             <KeyboardAccessoryHost>
                 <SafeAreaView
@@ -956,7 +976,7 @@ function TaskEditModalInner({
                     edges={['top']}
                 >
                     <TaskEditHeader
-                        onDone={handleDone}
+                        onDone={readOnly ? onClose : handleDone}
                         onShare={handleShare}
                         onDuplicate={handleDuplicateTask}
                         onPromoteToProject={handlePromoteTaskToProject}
@@ -965,8 +985,52 @@ function TaskEditModalInner({
                         showConvertToReference={!isReference}
                         onConvertToSection={handleConvertToSection}
                         showConvertToSection={hasProject}
+                        readOnly={readOnly}
                     />
 
+                    {readOnly ? (
+                        <View style={styles.tabContent}>
+                            <View
+                                accessible
+                                accessibilityRole="summary"
+                                style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: tc.inputBg }}
+                                testID="task-edit-read-only-hint"
+                            >
+                                <Text style={{ color: tc.secondaryText }}>
+                                    {tFallback(t, 'projects.archivedReadOnlyHint', 'Archived project. Reactivate it to edit this task.')}
+                                </Text>
+                            </View>
+                            <TaskEditViewTab
+                                t={t}
+                                tc={tc}
+                                styles={styles}
+                                mergedTask={previewTask}
+                                projects={projects}
+                                sections={projectSections}
+                                areas={areas}
+                                prioritiesEnabled={prioritiesEnabled}
+                                timeEstimatesEnabled={timeEstimatesEnabled}
+                                formatTimeEstimateLabel={formatTimeEstimateLabel}
+                                formatDate={formatDate}
+                                formatDueDate={formatDueDate}
+                                getRecurrenceRuleValue={getRecurrenceRuleValue}
+                                getRecurrenceStrategyValue={getRecurrenceStrategyValue}
+                                applyChecklistUpdate={applyChecklistUpdate}
+                                visibleAttachments={previewAttachments}
+                                openAttachment={stableOpenAttachment}
+                                isImageAttachment={isImageAttachment}
+                                textDirectionStyle={textDirectionStyle}
+                                resolvedDirection={resolvedDirection}
+                                nestedScrollEnabled
+                                onProjectPress={onProjectNavigate ? handlePreviewProjectPress : undefined}
+                                onContextPress={onContextNavigate ? handlePreviewContextPress : undefined}
+                                onTagPress={onTagNavigate ? handlePreviewTagPress : undefined}
+                                showStatusField={showStatusField}
+                                readOnly
+                            />
+                        </View>
+                    ) : (
+                    <>
                     <TaskEditTabs
                         editTab={editTab}
                         onTabPress={handleTabPress}
@@ -1162,13 +1226,15 @@ function TaskEditModalInner({
                             descriptionEditor.setIsDescriptionInputFocused(true);
                         }}
                     />
+                    </>
+                    )}
                 </SafeAreaView>
             </KeyboardAccessoryHost>
             <ToastViewport />
             {/* Last child so the alert covers the header and the toasts (#940). */}
             <ThemedAlertHost />
         </Modal>
-        {visible && completedAtPickerVisible ? (
+        {visible && !readOnly && completedAtPickerVisible ? (
             <CompletedAtPicker
                 initialValue={mergedTask.completedAt ?? (task.status === 'done' ? task.updatedAt : undefined)}
                 initialTimeSpentMinutes={mergedTask.timeSpentMinutes}
@@ -1179,7 +1245,7 @@ function TaskEditModalInner({
                 tc={tc}
             />
         ) : null}
-        {visible ? (
+        {visible && !readOnly ? (
             <ExpandedMarkdownEditor
                 isOpen={descriptionEditor.descriptionExpanded}
                 onClose={descriptionEditor.closeDescriptionExpandedEditor}
@@ -1205,6 +1271,7 @@ function TaskEditModalInner({
 
 const areTaskEditModalPropsEqual = (prev: TaskEditModalProps, next: TaskEditModalProps): boolean => (
     prev.visible === next.visible && prev.task === next.task && prev.onClose === next.onClose && prev.onSave === next.onSave
+    && prev.readOnly === next.readOnly
     && prev.onFocusMode === next.onFocusMode && prev.defaultTab === next.defaultTab
     && prev.onProjectNavigate === next.onProjectNavigate && prev.onContextNavigate === next.onContextNavigate && prev.onTagNavigate === next.onTagNavigate
 );

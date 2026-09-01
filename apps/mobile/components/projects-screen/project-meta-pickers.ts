@@ -1,4 +1,4 @@
-import { Area, Project, translateWithFallback, type TranslateFn, tFallback } from '@mindwtr/core';
+import { Area, Project, translateWithFallback, type TranslateFn, tFallback, useTaskStore } from '@mindwtr/core';
 import { ActionSheetIOS, Alert, Keyboard, Platform } from 'react-native';
 
 import type { ToastOptions } from '@/contexts/toast-context';
@@ -7,6 +7,48 @@ import { normalizeProjectTag } from '@/components/projects-screen/projects-scree
 type AreaColorMeta = {
     nameKey: string;
     swatch: string;
+};
+
+type ProjectLookup = (projectId: string) => Project | undefined;
+
+const readLiveProject: ProjectLookup = (projectId) => (
+    useTaskStore.getState()._allProjects?.find((project) => project.id === projectId)
+);
+
+export const getLiveMutableProject = (
+    projectId: string,
+    getProjectById: ProjectLookup = readLiveProject,
+): Project | null => {
+    const project = getProjectById(projectId);
+    if (!project || project.deletedAt || project.status === 'archived') return null;
+    return project;
+};
+
+export const applyLiveProjectUpdate = ({
+    getProjectById = readLiveProject,
+    onBlocked,
+    projectId,
+    setSelectedProject,
+    updateProject,
+    updates,
+}: {
+    getProjectById?: ProjectLookup;
+    onBlocked?: () => void;
+    projectId: string;
+    setSelectedProject: (project: Project | null) => void;
+    updateProject: (id: string, updates: Partial<Project>) => unknown;
+    updates: Partial<Project> | ((project: Project) => Partial<Project> | null);
+}): boolean => {
+    const project = getLiveMutableProject(projectId, getProjectById);
+    if (!project) {
+        onBlocked?.();
+        return false;
+    }
+    const patch = typeof updates === 'function' ? updates(project) : updates;
+    if (!patch) return false;
+    updateProject(project.id, patch);
+    setSelectedProject({ ...project, ...patch });
+    return true;
 };
 
 /**
@@ -96,10 +138,13 @@ export const openProjectAreaPicker = ({
     const renameAreaLabel = translateWithFallback(t, 'projects.renameArea', 'Rename area');
     const changeColorLabel = translateWithFallback(t, 'projects.changeColor', 'Change color');
 
-    const setProjectArea = (areaId?: string) => {
-        updateProject(selectedProject.id, { areaId });
-        setSelectedProject({ ...selectedProject, areaId });
-    };
+    const setProjectArea = (areaId?: string) => applyLiveProjectUpdate({
+        projectId: selectedProject.id,
+        updates: { areaId },
+        updateProject,
+        setSelectedProject,
+        onBlocked: () => setShowAreaPicker(false),
+    });
 
     const createAreaWithColor = (
         onCreated: (created: Area) => void,
@@ -129,10 +174,12 @@ export const openProjectAreaPicker = ({
                                 if (colorIndex <= 0) return;
                                 const color = colors[colorIndex - 1];
                                 if (!color) return;
+                                if (!getLiveMutableProject(selectedProject.id)) return;
 
                                 try {
                                     const created = await addArea(name, { color });
                                     if (!created) return;
+                                    if (!getLiveMutableProject(selectedProject.id)) return;
                                     onCreated(created);
                                 } catch (error) {
                                     logProjectError(logMessage, error);
@@ -372,9 +419,15 @@ export const openProjectTagPicker = ({
                             onPress: (value?: string) => {
                                 const normalized = normalizeProjectTag(value ?? '');
                                 if (!normalized) return;
-                                const next = Array.from(new Set([...(selectedProject.tagIds || []), normalized]));
-                                updateProject(selectedProject.id, { tagIds: next });
-                                setSelectedProject({ ...selectedProject, tagIds: next });
+                                applyLiveProjectUpdate({
+                                    projectId: selectedProject.id,
+                                    updates: (project) => ({
+                                        tagIds: Array.from(new Set([...(project.tagIds || []), normalized])),
+                                    }),
+                                    updateProject,
+                                    setSelectedProject,
+                                    onBlocked: () => setShowTagPicker(false),
+                                });
                             },
                         },
                     ],
@@ -383,8 +436,13 @@ export const openProjectTagPicker = ({
                 return;
             }
             if (buttonIndex === 2) {
-                updateProject(selectedProject.id, { tagIds: [] });
-                setSelectedProject({ ...selectedProject, tagIds: [] });
+                applyLiveProjectUpdate({
+                    projectId: selectedProject.id,
+                    updates: { tagIds: [] },
+                    updateProject,
+                    setSelectedProject,
+                    onBlocked: () => setShowTagPicker(false),
+                });
                 return;
             }
             const pickedTag = tagOptions[buttonIndex - 3];

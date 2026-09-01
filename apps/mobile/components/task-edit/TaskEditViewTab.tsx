@@ -53,6 +53,7 @@ type TaskEditViewTabProps = {
   onBackdatedComplete?: () => void;
   onStatusUpdate?: (status: TaskStatus) => void;
   showStatusField?: boolean;
+  readOnly?: boolean;
 };
 
 function TaskEditViewTabComponent({
@@ -81,6 +82,7 @@ function TaskEditViewTabComponent({
   onBackdatedComplete,
   onStatusUpdate,
   showStatusField = true,
+  readOnly = false,
 }: TaskEditViewTabProps) {
   const [checklistDraft, setChecklistDraft] = React.useState('');
   const checklistDraftRef = React.useRef<TextInput>(null);
@@ -197,7 +199,7 @@ function TaskEditViewTabComponent({
       {showStatusField && statusLabel ? (
         <View style={[styles.viewRow, { backgroundColor: tc.inputBg, borderColor: tc.border }]}>
           <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{t('taskEdit.statusLabel')}</Text>
-          {onStatusUpdate && mergedTask.status ? (
+          {!readOnly && onStatusUpdate && mergedTask.status ? (
             <TaskStatusBadge
               status={mergedTask.status as TaskStatus}
               onUpdate={onStatusUpdate}
@@ -256,20 +258,9 @@ function TaskEditViewTabComponent({
         <View style={styles.viewSection}>
           <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{t('taskEdit.checklist')}</Text>
           <View style={styles.viewChecklist}>
-            {checklist.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.viewChecklistItem}
-                onPress={() => {
-                  const nextChecklist = checklist.map((entry) =>
-                    entry.id === item.id ? { ...entry, isCompleted: !entry.isCompleted } : entry
-                  );
-                  applyChecklistUpdate(nextChecklist);
-                }}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: item.isCompleted }}
-                accessibilityLabel={item.title}
-              >
+            {checklist.map((item) => {
+              const content = (
+                <>
                 {item.isCompleted ? (
                   <CheckSquare size={18} color={tc.tint} strokeWidth={2} />
                 ) : (
@@ -281,9 +272,38 @@ function TaskEditViewTabComponent({
                   direction={resolvedDirection}
                   style={[styles.viewChecklistText, textDirectionStyle, { color: tc.text }]}
                 />
-              </TouchableOpacity>
-            ))}
-            <TextInput
+                </>
+              );
+              if (readOnly) {
+                return (
+                  <View
+                    key={item.id}
+                    style={styles.viewChecklistItem}
+                    accessibilityLabel={`${item.title}. ${item.isCompleted ? t('common.done') : t('status.active')}`}
+                  >
+                    {content}
+                  </View>
+                );
+              }
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.viewChecklistItem}
+                  onPress={() => {
+                    const nextChecklist = checklist.map((entry) =>
+                      entry.id === item.id ? { ...entry, isCompleted: !entry.isCompleted } : entry
+                    );
+                    applyChecklistUpdate(nextChecklist);
+                  }}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: item.isCompleted }}
+                  accessibilityLabel={item.title}
+                >
+                  {content}
+                </TouchableOpacity>
+              );
+            })}
+            {!readOnly ? <TextInput
               ref={checklistDraftRef}
               value={checklistDraft}
               onChangeText={setChecklistDraft}
@@ -303,7 +323,7 @@ function TaskEditViewTabComponent({
               returnKeyType="done"
               blurOnSubmit={false}
               submitBehavior="submit"
-            />
+            /> : null}
           </View>
         </View>
       ) : null}
