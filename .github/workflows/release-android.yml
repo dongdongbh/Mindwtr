@@ -137,39 +137,15 @@ jobs:
         if: ${{ inputs.version_code == '' && (inputs.play_track != 'none' || inputs.internal_test_release) }}
         id: version_code
         env:
-          ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
+          GOOGLE_PLAY_ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
         run: |
           set -euo pipefail
           PACKAGE="tech.dongdongbh.mindwtr"
-          EDIT_ID=$(curl -sS -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits" \
-            -d '{}' | jq -r '.id')
-          if [ -z "$EDIT_ID" ] || [ "$EDIT_ID" = "null" ]; then
-            echo "Failed to create Google Play edit" >&2
-            exit 1
-          fi
-          TRACKS_FILE=$(mktemp)
-          TRACKS_CODE=$(curl -sS -o "$TRACKS_FILE" -w "%{http_code}" \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/tracks")
-          TRACKS_JSON=$(cat "$TRACKS_FILE")
-          if [ "$TRACKS_CODE" != "200" ]; then
-            echo "Failed to fetch Google Play tracks (HTTP $TRACKS_CODE): $TRACKS_JSON" >&2
-            exit 1
-          fi
-          if echo "$TRACKS_JSON" | jq -e '.error' >/dev/null; then
-            echo "Failed to fetch Google Play tracks: $TRACKS_JSON" >&2
-            exit 1
-          fi
-          MAX_CODE=$(echo "$TRACKS_JSON" | jq -r '[(.tracks // [])[]? | (.releases // [])[]? | (.versionCodes // [])[]? | tonumber] | max // 0')
-          if [ -z "$MAX_CODE" ] || [ "$MAX_CODE" = "null" ]; then
-            MAX_CODE=0
-          fi
-          curl -sS -X DELETE \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID" >/dev/null
+          RESULT_FILE=$(mktemp)
+          python3 scripts/ci/google-play-edit.py max-version-code \
+            --package "$PACKAGE" \
+            --result "$RESULT_FILE"
+          MAX_CODE=$(jq -er '.maxVersionCode | numbers' "$RESULT_FILE")
           LOCAL_CODE=$(jq -r '.expo.android.versionCode' apps/mobile/app.json)
           if [ -z "$LOCAL_CODE" ] || [ "$LOCAL_CODE" = "null" ]; then
             echo "Missing expo.android.versionCode in apps/mobile/app.json" >&2
@@ -634,495 +610,228 @@ jobs:
       - name: Publish to Google Play Store (Production)
         if: ${{ !inputs.internal_test_release && needs.preflight.outputs.normal_play_track == 'production' && startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && !contains(github.ref_name, '-') }}
         env:
-          ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
+          GOOGLE_PLAY_ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
         run: |
           set -euo pipefail
           PACKAGE="tech.dongdongbh.mindwtr"
           VERSION="${{ needs.preflight.outputs.version }}"
+          EXPECTED_VERSION_CODE="${{ needs.preflight.outputs.version_code }}"
           AAB_PATH="apps/mobile/build/mindwtr-${VERSION}.aab"
           NOTES_DIR="apps/mobile/build/play-release-notes"
           LISTING_ASSETS_FILE="apps/mobile/build/play-listing-assets.json"
           LISTING_METADATA_FILE="apps/mobile/build/play-listing-metadata.json"
+          PLAN_FILE=$(mktemp)
+          RESULT_FILE=$(mktemp)
 
-          if [ ! -f "$AAB_PATH" ]; then
-            echo "Missing AAB artifact: $AAB_PATH" >&2
-            exit 1
-          fi
-
-          EDIT_FILE=$(mktemp)
-          EDIT_CODE=$(curl -sS -o "$EDIT_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits" \
-            -d '{}')
-          if [ "$EDIT_CODE" != "200" ]; then
-            echo "Failed to create Google Play edit (HTTP $EDIT_CODE): $(cat "$EDIT_FILE")" >&2
-            exit 1
-          fi
-          EDIT_ID=$(jq -r '.id' "$EDIT_FILE")
-          if [ -z "$EDIT_ID" ] || [ "$EDIT_ID" = "null" ]; then
-            echo "Failed to parse Google Play edit id: $(cat "$EDIT_FILE")" >&2
-            exit 1
-          fi
-
-          UPLOAD_FILE=$(mktemp)
-          UPLOAD_CODE=$(curl -sS -o "$UPLOAD_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary @"$AAB_PATH" \
-            "https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/bundles?uploadType=media")
-          if [ "$UPLOAD_CODE" != "200" ]; then
-            echo "Failed to upload AAB to Google Play (HTTP $UPLOAD_CODE): $(cat "$UPLOAD_FILE")" >&2
-            exit 1
-          fi
-          VERSION_CODE=$(jq -r '.versionCode' "$UPLOAD_FILE")
-          if [ -z "$VERSION_CODE" ] || [ "$VERSION_CODE" = "null" ]; then
-            echo "Failed to parse uploaded versionCode: $(cat "$UPLOAD_FILE")" >&2
-            exit 1
-          fi
-
-          if [ -f "$LISTING_ASSETS_FILE" ] && [ "$(jq 'length' "$LISTING_ASSETS_FILE")" -gt 0 ]; then
-            declare -A RESET_GROUPS=()
-            while IFS=$'\t' read -r LANGUAGE IMAGE_TYPE ASSET_PATH; do
-              if [ -z "$LANGUAGE" ] || [ -z "$IMAGE_TYPE" ] || [ -z "$ASSET_PATH" ]; then
-                continue
-              fi
-              if [ ! -f "$ASSET_PATH" ]; then
-                echo "Missing Google Play listing asset: $ASSET_PATH" >&2
-                exit 1
-              fi
-
-              GROUP_KEY="${LANGUAGE}/${IMAGE_TYPE}"
-              if [ -z "${RESET_GROUPS[$GROUP_KEY]:-}" ]; then
-                DELETE_FILE=$(mktemp)
-                DELETE_CODE=$(curl -sS -o "$DELETE_FILE" -w "%{http_code}" -X DELETE \
-                  -H "Authorization: Bearer $ACCESS_TOKEN" \
-                  "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/listings/$LANGUAGE/$IMAGE_TYPE")
-                if [ "$DELETE_CODE" != "200" ]; then
-                  echo "Failed to clear Google Play listing assets for $GROUP_KEY (HTTP $DELETE_CODE): $(cat "$DELETE_FILE")" >&2
-                  exit 1
-                fi
-                RESET_GROUPS[$GROUP_KEY]=1
-              fi
-
-              case "${ASSET_PATH##*.}" in
-                png|PNG) CONTENT_TYPE="image/png" ;;
-                jpg|JPG|jpeg|JPEG) CONTENT_TYPE="image/jpeg" ;;
-                *)
-                  echo "Unsupported Google Play listing asset type: $ASSET_PATH" >&2
-                  exit 1
-                  ;;
-              esac
-
-              IMAGE_FILE=$(mktemp)
-              IMAGE_CODE=$(curl -sS -o "$IMAGE_FILE" -w "%{http_code}" -X POST \
-                -H "Authorization: Bearer $ACCESS_TOKEN" \
-                -H "Content-Type: $CONTENT_TYPE" \
-                --data-binary @"$ASSET_PATH" \
-                "https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/listings/$LANGUAGE/$IMAGE_TYPE?uploadType=media")
-              if [ "$IMAGE_CODE" != "200" ]; then
-                echo "Failed to upload Google Play listing asset $ASSET_PATH for $GROUP_KEY (HTTP $IMAGE_CODE): $(cat "$IMAGE_FILE")" >&2
-                exit 1
-              fi
-              echo "Uploaded Google Play listing asset $ASSET_PATH -> $GROUP_KEY"
-            done < <(jq -r '.[] | [.language, .imageType, .path] | @tsv' "$LISTING_ASSETS_FILE")
-          else
-            echo "No Google Play listing assets found; skipping listing image upload."
-          fi
-
-          if [ -f "$LISTING_METADATA_FILE" ] && [ "$(jq 'length' "$LISTING_METADATA_FILE")" -gt 0 ]; then
-            while IFS= read -r LISTING_JSON; do
-              LISTING_PAYLOAD_FILE=$(mktemp)
-              printf '%s\n' "$LISTING_JSON" > "$LISTING_PAYLOAD_FILE"
-              LANGUAGE=$(jq -r '.language' "$LISTING_PAYLOAD_FILE")
-              if [ -z "$LANGUAGE" ] || [ "$LANGUAGE" = "null" ]; then
-                echo "Missing Google Play listing language in $LISTING_METADATA_FILE" >&2
-                exit 1
-              fi
-
-              LISTING_FILE=$(mktemp)
-              LISTING_CODE=$(curl -sS -o "$LISTING_FILE" -w "%{http_code}" -X PUT \
-                -H "Authorization: Bearer $ACCESS_TOKEN" \
-                -H "Content-Type: application/json" \
-                "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/listings/$LANGUAGE" \
-                -d @"$LISTING_PAYLOAD_FILE")
-              if [ "$LISTING_CODE" != "200" ]; then
-                echo "Failed to update Google Play listing metadata for $LANGUAGE (HTTP $LISTING_CODE): $(cat "$LISTING_FILE")" >&2
-                exit 1
-              fi
-              echo "Updated Google Play listing metadata for $LANGUAGE"
-            done < <(jq -c '.[]' "$LISTING_METADATA_FILE")
-          else
-            echo "No Google Play listing metadata found; skipping listing metadata upload."
-          fi
-
-          PAYLOAD_FILE=$(mktemp)
-          python3 - "$VERSION" "$VERSION_CODE" "$NOTES_DIR" > "$PAYLOAD_FILE" <<'PY'
+          python3 - \
+            "$PLAN_FILE" \
+            "$PACKAGE" \
+            "$VERSION" \
+            "$EXPECTED_VERSION_CODE" \
+            "$AAB_PATH" \
+            "$NOTES_DIR" \
+            "$LISTING_ASSETS_FILE" \
+            "$LISTING_METADATA_FILE" <<'PY'
           import json
           import pathlib
           import sys
 
-          version = sys.argv[1]
-          version_code = sys.argv[2]
-          notes_dir = pathlib.Path(sys.argv[3])
+          (
+              plan_file,
+              package_name,
+              version,
+              expected_version_code,
+              artifact_path,
+              notes_directory,
+              assets_file,
+              listings_file,
+          ) = sys.argv[1:]
 
-          release = {
-              "name": version,
-              "status": "completed",
-              "versionCodes": [version_code],
-          }
+          def read_array(path_value):
+              path = pathlib.Path(path_value)
+              if not path.is_file():
+                  return []
+              value = json.loads(path.read_text(encoding="utf-8"))
+              if not isinstance(value, list):
+                  raise SystemExit(f"Expected a JSON array in {path}")
+              return value
 
           release_notes = []
-          if notes_dir.is_dir():
-              for path in sorted(notes_dir.glob("whatsnew-*")):
+          notes_path = pathlib.Path(notes_directory)
+          if notes_path.is_dir():
+              for path in sorted(notes_path.glob("whatsnew-*")):
                   text = path.read_text(encoding="utf-8").strip()
-                  if not text:
-                      continue
-                  release_notes.append({
-                      "language": path.name.replace("whatsnew-", "", 1),
-                      "text": text,
-                  })
-          if release_notes:
-              release["releaseNotes"] = release_notes
+                  if text:
+                      release_notes.append({
+                          "language": path.name.replace("whatsnew-", "", 1),
+                          "text": text,
+                      })
 
-          print(json.dumps({
+          production_release = {
               "track": "production",
-              "releases": [release],
-          }))
+              "name": version,
+              "status": "completed",
+          }
+          if release_notes:
+              production_release["releaseNotes"] = release_notes
+
+          plan = {
+              "package": package_name,
+              "artifactPath": artifact_path,
+              "expectedVersionCode": int(expected_version_code),
+              "tracks": [
+                  production_release,
+                  {
+                      "track": "beta",
+                      "name": f"{version} stable beta",
+                      "status": "completed",
+                  },
+              ],
+              "listingAssets": read_array(assets_file),
+              "listings": read_array(listings_file),
+          }
+          pathlib.Path(plan_file).write_text(
+              json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
           PY
 
-          TRACK_FILE=$(mktemp)
-          TRACK_CODE=$(curl -sS -o "$TRACK_FILE" -w "%{http_code}" -X PUT \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/tracks/production" \
-            -d @"$PAYLOAD_FILE")
-          if [ "$TRACK_CODE" != "200" ]; then
-            echo "Failed to update production track (HTTP $TRACK_CODE): $(cat "$TRACK_FILE")" >&2
-            exit 1
-          fi
-
-          COMMIT_FILE=$(mktemp)
-          COMMIT_CODE=$(curl -sS -o "$COMMIT_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID:commit")
-          if [ "$COMMIT_CODE" != "200" ]; then
-            echo "Failed to commit production-track edit (HTTP $COMMIT_CODE): $(cat "$COMMIT_FILE")" >&2
-            exit 1
-          fi
-          echo "Published versionCode $VERSION_CODE to Google Play production."
+          python3 scripts/ci/google-play-edit.py publish \
+            --plan "$PLAN_FILE" \
+            --result "$RESULT_FILE"
+          VERSION_CODE=$(jq -er '.versionCode | numbers' "$RESULT_FILE")
+          echo "Published versionCode $VERSION_CODE to Google Play production and beta."
 
       - name: Publish to Google Play testing tracks
         if: ${{ !inputs.internal_test_release && needs.preflight.outputs.normal_play_track != 'production' && needs.preflight.outputs.normal_play_track != 'none' }}
         env:
-          ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
+          GOOGLE_PLAY_ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
           PLAY_TRACKS: ${{ needs.preflight.outputs.normal_play_track }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
           set -euo pipefail
           PACKAGE="tech.dongdongbh.mindwtr"
           VERSION="${{ needs.preflight.outputs.version }}"
+          EXPECTED_VERSION_CODE="${{ needs.preflight.outputs.version_code }}"
           AAB_PATH="apps/mobile/build/mindwtr-${VERSION}.aab"
+          PLAN_FILE=$(mktemp)
+          RESULT_FILE=$(mktemp)
 
-          IFS=',' read -r -a RAW_TRACKS <<< "$PLAY_TRACKS"
-          TRACKS=()
-          for raw_track in "${RAW_TRACKS[@]}"; do
-            track="${raw_track//[[:space:]]/}"
-            if [ -z "$track" ]; then
-              continue
-            fi
-            if [ "$track" = "production" ] || [ "$track" = "none" ]; then
-              echo "Production and none are not valid testing-track entries: $track" >&2
-              exit 1
-            fi
-            if [[ ! "$track" =~ ^[A-Za-z0-9._-]+$ ]]; then
-              echo "Invalid Google Play track name: $track" >&2
-              exit 1
-            fi
+          python3 - "$PLAN_FILE" "$PACKAGE" "$VERSION" "$EXPECTED_VERSION_CODE" "$AAB_PATH" <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
 
-            duplicate=false
-            for existing in "${TRACKS[@]}"; do
-              if [ "$existing" = "$track" ]; then
-                duplicate=true
-                break
-              fi
-            done
-            if [ "$duplicate" = "false" ]; then
-              TRACKS+=("$track")
-            fi
-          done
+          plan_file, package_name, version, expected_version_code, artifact_path = sys.argv[1:]
+          tracks = []
+          seen_tracks = set()
+          for raw_track in os.environ["PLAY_TRACKS"].split(","):
+              track = raw_track.strip()
+              if not track:
+                  continue
+              if track in {"production", "none"}:
+                  raise SystemExit(
+                      f"Production and none are not valid testing-track entries: {track}"
+                  )
+              if track in seen_tracks:
+                  continue
+              seen_tracks.add(track)
+              release = {
+                  "track": track,
+                  "name": f"{version} release candidate",
+                  "status": "completed",
+              }
+              release_notes = os.environ.get("RELEASE_NOTES", "").strip()
+              if release_notes:
+                  release["releaseNotes"] = [
+                      {"language": "en-US", "text": release_notes}
+                  ]
+              tracks.append(release)
 
-          if [ "${#TRACKS[@]}" -eq 0 ]; then
-            echo "No Google Play testing tracks were configured." >&2
-            exit 1
-          fi
-          if [ ! -f "$AAB_PATH" ]; then
-            echo "Missing AAB artifact: $AAB_PATH" >&2
-            exit 1
-          fi
+          if not tracks:
+              raise SystemExit("No Google Play testing tracks were configured.")
 
-          EDIT_FILE=$(mktemp)
-          EDIT_CODE=$(curl -sS -o "$EDIT_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits" \
-            -d '{}')
-          if [ "$EDIT_CODE" != "200" ]; then
-            echo "Failed to create Google Play edit (HTTP $EDIT_CODE): $(cat "$EDIT_FILE")" >&2
-            exit 1
-          fi
-          EDIT_ID=$(jq -r '.id' "$EDIT_FILE")
-          if [ -z "$EDIT_ID" ] || [ "$EDIT_ID" = "null" ]; then
-            echo "Failed to parse Google Play edit id: $(cat "$EDIT_FILE")" >&2
-            exit 1
-          fi
+          plan = {
+              "package": package_name,
+              "artifactPath": artifact_path,
+              "expectedVersionCode": int(expected_version_code),
+              "tracks": tracks,
+          }
+          pathlib.Path(plan_file).write_text(
+              json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
 
-          UPLOAD_FILE=$(mktemp)
-          UPLOAD_CODE=$(curl -sS -o "$UPLOAD_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary @"$AAB_PATH" \
-            "https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/bundles?uploadType=media")
-          if [ "$UPLOAD_CODE" != "200" ]; then
-            echo "Failed to upload AAB to Google Play (HTTP $UPLOAD_CODE): $(cat "$UPLOAD_FILE")" >&2
-            exit 1
-          fi
-          VERSION_CODE=$(jq -r '.versionCode' "$UPLOAD_FILE")
-          if [ -z "$VERSION_CODE" ] || [ "$VERSION_CODE" = "null" ]; then
-            echo "Failed to parse uploaded versionCode: $(cat "$UPLOAD_FILE")" >&2
-            exit 1
-          fi
-
-          for TRACK in "${TRACKS[@]}"; do
-            PAYLOAD_FILE=$(mktemp)
-            jq -n \
-              --arg track "$TRACK" \
-              --arg version "$VERSION" \
-              --arg version_code "$VERSION_CODE" \
-              --arg release_notes "$RELEASE_NOTES" \
-              '{
-                track: $track,
-                releases: [{
-                  name: ($version + " release candidate"),
-                  status: "completed",
-                  versionCodes: [$version_code],
-                  releaseNotes: [{
-                    language: "en-US",
-                    text: $release_notes
-                  }]
-                }]
-              }' > "$PAYLOAD_FILE"
-
-            TRACK_FILE=$(mktemp)
-            TRACK_CODE=$(curl -sS -o "$TRACK_FILE" -w "%{http_code}" -X PUT \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
-              -H "Content-Type: application/json" \
-              "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/tracks/$TRACK" \
-              -d @"$PAYLOAD_FILE")
-            if [ "$TRACK_CODE" != "200" ]; then
-              echo "Failed to update Google Play $TRACK track (HTTP $TRACK_CODE): $(cat "$TRACK_FILE")" >&2
-              exit 1
-            fi
-          done
-
-          COMMIT_FILE=$(mktemp)
-          COMMIT_CODE=$(curl -sS -o "$COMMIT_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID:commit")
-          if [ "$COMMIT_CODE" != "200" ]; then
-            echo "Failed to commit Google Play testing-track edit (HTTP $COMMIT_CODE): $(cat "$COMMIT_FILE")" >&2
-            exit 1
-          fi
-          TRACK_LIST="$(IFS=,; echo "${TRACKS[*]}")"
+          python3 scripts/ci/google-play-edit.py publish \
+            --plan "$PLAN_FILE" \
+            --result "$RESULT_FILE"
+          VERSION_CODE=$(jq -er '.versionCode | numbers' "$RESULT_FILE")
+          TRACK_LIST=$(jq -er '.tracks | join(",")' "$RESULT_FILE")
           echo "Published versionCode $VERSION_CODE to Google Play testing tracks: $TRACK_LIST."
 
       - name: Publish profileable build to Google Play internal track
         if: ${{ needs.preflight.outputs.internal_profileable == 'true' }}
         id: internal_publish
         env:
-          ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
+          GOOGLE_PLAY_ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
           set -euo pipefail
           PACKAGE="tech.dongdongbh.mindwtr"
           VERSION="${{ needs.preflight.outputs.version }}"
-          AAB_PATH=$(find apps/mobile/build -maxdepth 1 -name "mindwtr-${VERSION}-internal-*.aab" -print -quit)
-          if [ -z "$AAB_PATH" ] || [ ! -f "$AAB_PATH" ]; then
-            echo "Missing internal profileable AAB artifact in apps/mobile/build" >&2
-            exit 1
-          fi
+          EXPECTED_VERSION_CODE="${{ needs.preflight.outputs.internal_version_code }}"
+          PLAN_FILE=$(mktemp)
+          RESULT_FILE=$(mktemp)
 
-          EDIT_FILE=$(mktemp)
-          EDIT_CODE=$(curl -sS -o "$EDIT_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits" \
-            -d '{}')
-          if [ "$EDIT_CODE" != "200" ]; then
-            echo "Failed to create Google Play edit (HTTP $EDIT_CODE): $(cat "$EDIT_FILE")" >&2
-            exit 1
-          fi
-          EDIT_ID=$(jq -r '.id' "$EDIT_FILE")
-          if [ -z "$EDIT_ID" ] || [ "$EDIT_ID" = "null" ]; then
-            echo "Failed to parse Google Play edit id: $(cat "$EDIT_FILE")" >&2
-            exit 1
-          fi
+          python3 - "$PLAN_FILE" "$PACKAGE" "$VERSION" "$EXPECTED_VERSION_CODE" <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
 
-          UPLOAD_FILE=$(mktemp)
-          UPLOAD_CODE=$(curl -sS -o "$UPLOAD_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary @"$AAB_PATH" \
-            "https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/bundles?uploadType=media")
-          if [ "$UPLOAD_CODE" != "200" ]; then
-            echo "Failed to upload AAB (HTTP $UPLOAD_CODE): $(cat "$UPLOAD_FILE")" >&2
-            exit 1
-          fi
-          VERSION_CODE=$(jq -r '.versionCode' "$UPLOAD_FILE")
-          if [ -z "$VERSION_CODE" ] || [ "$VERSION_CODE" = "null" ]; then
-            echo "Failed to parse uploaded versionCode: $(cat "$UPLOAD_FILE")" >&2
-            exit 1
-          fi
+          plan_file, package_name, version, expected_version_code = sys.argv[1:]
+          candidates = sorted(
+              pathlib.Path("apps/mobile/build").glob(
+                  f"mindwtr-{version}-internal-*.aab"
+              )
+          )
+          if len(candidates) != 1:
+              raise SystemExit(
+                  "Expected exactly one internal profileable AAB artifact, "
+                  f"found {len(candidates)}"
+              )
 
-          PAYLOAD_FILE=$(mktemp)
-          jq -n \
-            --arg version "$VERSION" \
-            --arg run_number "$GITHUB_RUN_NUMBER" \
-            --arg version_code "$VERSION_CODE" \
-            --arg release_notes "$RELEASE_NOTES" \
-            '{
-              track: "internal",
-              releases: [{
-                name: ($version + " internal diagnostic " + $run_number),
-                status: "completed",
-                versionCodes: [$version_code],
-                releaseNotes: [{
-                  language: "en-US",
-                  text: $release_notes
-                }]
-              }]
-            }' > "$PAYLOAD_FILE"
+          release = {
+              "track": "internal",
+              "name": f"{version} internal diagnostic {os.environ['GITHUB_RUN_NUMBER']}",
+              "status": "completed",
+          }
+          release_notes = os.environ.get("RELEASE_NOTES", "").strip()
+          if release_notes:
+              release["releaseNotes"] = [
+                  {"language": "en-US", "text": release_notes}
+              ]
 
-          TRACK_FILE=$(mktemp)
-          TRACK_CODE=$(curl -sS -o "$TRACK_FILE" -w "%{http_code}" -X PUT \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/tracks/internal" \
-            -d @"$PAYLOAD_FILE")
-          if [ "$TRACK_CODE" != "200" ]; then
-            echo "Failed to update internal track (HTTP $TRACK_CODE): $(cat "$TRACK_FILE")" >&2
-            exit 1
-          fi
+          plan = {
+              "package": package_name,
+              "artifactPath": str(candidates[0]),
+              "expectedVersionCode": int(expected_version_code),
+              "tracks": [release],
+          }
+          pathlib.Path(plan_file).write_text(
+              json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
 
-          COMMIT_FILE=$(mktemp)
-          COMMIT_CODE=$(curl -sS -o "$COMMIT_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID:commit")
-          if [ "$COMMIT_CODE" != "200" ]; then
-            echo "Failed to commit Google Play edit (HTTP $COMMIT_CODE): $(cat "$COMMIT_FILE")" >&2
-            exit 1
-          fi
-
+          python3 scripts/ci/google-play-edit.py publish \
+            --plan "$PLAN_FILE" \
+            --result "$RESULT_FILE"
+          VERSION_CODE=$(jq -er '.versionCode | numbers' "$RESULT_FILE")
           echo "Published profileable versionCode $VERSION_CODE to Google Play internal track."
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
-
-      - name: Publish same production versionCode to beta track (no re-upload)
-        if: ${{ !inputs.internal_test_release && needs.preflight.outputs.normal_play_track == 'production' && startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && !contains(github.ref_name, '-') }}
-        env:
-          ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
-          TESTING_TRACKS: beta
-        run: |
-          set -euo pipefail
-          PACKAGE="tech.dongdongbh.mindwtr"
-          VERSION=${{ needs.preflight.outputs.version }}
-          VERSION_CODE=${{ needs.preflight.outputs.version_code }}
-          if [ -z "$VERSION_CODE" ] || [ "$VERSION_CODE" = "null" ]; then
-            echo "Missing preflight Android versionCode output" >&2
-            exit 1
-          fi
-
-          IFS=',' read -r -a RAW_TRACKS <<< "$TESTING_TRACKS"
-          TRACKS=()
-          for raw_track in "${RAW_TRACKS[@]}"; do
-            track="${raw_track//[[:space:]]/}"
-            [ -n "$track" ] || continue
-            if [ "$track" = "production" ] || [ "$track" = "none" ]; then
-              echo "Production and none are not valid stable testing-track entries: $track" >&2
-              exit 1
-            fi
-            if [[ ! "$track" =~ ^[A-Za-z0-9._-]+$ ]]; then
-              echo "Invalid Google Play track name: $track" >&2
-              exit 1
-            fi
-            duplicate=false
-            for existing in "${TRACKS[@]}"; do
-              if [ "$existing" = "$track" ]; then
-                duplicate=true
-                break
-              fi
-            done
-            if [ "$duplicate" = "false" ]; then
-              TRACKS+=("$track")
-            fi
-          done
-          if [ "${#TRACKS[@]}" -eq 0 ]; then
-            echo "No stable testing tracks configured." >&2
-            exit 1
-          fi
-
-          EDIT_FILE=$(mktemp)
-          EDIT_CODE=$(curl -sS -o "$EDIT_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits" \
-            -d '{}')
-          if [ "$EDIT_CODE" != "200" ]; then
-            echo "Failed to create Google Play edit (HTTP $EDIT_CODE): $(cat "$EDIT_FILE")" >&2
-            exit 1
-          fi
-          EDIT_ID=$(jq -r '.id' "$EDIT_FILE")
-          if [ -z "$EDIT_ID" ] || [ "$EDIT_ID" = "null" ]; then
-            echo "Failed to parse edit id: $(cat "$EDIT_FILE")" >&2
-            exit 1
-          fi
-
-          for TRACK in "${TRACKS[@]}"; do
-            PAYLOAD_FILE=$(mktemp)
-            jq -n \
-              --arg track "$TRACK" \
-              --arg version "$VERSION" \
-              --arg version_code "$VERSION_CODE" \
-              '{
-                track: $track,
-                releases: [{
-                  name: ($version + " stable " + $track),
-                  status: "completed",
-                  versionCodes: [$version_code]
-                }]
-              }' > "$PAYLOAD_FILE"
-
-            TRACK_FILE=$(mktemp)
-            TRACK_CODE=$(curl -sS -o "$TRACK_FILE" -w "%{http_code}" -X PUT \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
-              -H "Content-Type: application/json" \
-              "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/tracks/$TRACK" \
-              -d @"$PAYLOAD_FILE")
-            if [ "$TRACK_CODE" != "200" ]; then
-              echo "Failed to update $TRACK track (HTTP $TRACK_CODE): $(cat "$TRACK_FILE")" >&2
-              exit 1
-            fi
-          done
-
-          COMMIT_FILE=$(mktemp)
-          COMMIT_CODE=$(curl -sS -o "$COMMIT_FILE" -w "%{http_code}" -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID:commit")
-          if [ "$COMMIT_CODE" != "200" ]; then
-            echo "Failed to commit stable testing-track edit (HTTP $COMMIT_CODE): $(cat "$COMMIT_FILE")" >&2
-            exit 1
-          fi
-          TRACK_LIST="$(IFS=,; echo "${TRACKS[*]}")"
-          echo "Published stable versionCode $VERSION_CODE to Google Play beta track without uploading a second AAB: $TRACK_LIST."
 
       - name: Collect Android internal test artifacts
         if: ${{ needs.preflight.outputs.internal_profileable == 'true' }}

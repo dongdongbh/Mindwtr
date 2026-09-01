@@ -259,6 +259,42 @@ test("direct-download Android APK build gives R8 a release-sized heap", () => {
   expect(workflow.jobs["build-apk"].env.GRADLE_OPTS).toContain("-Xmx6144m");
 });
 
+test("Android release centralizes Google Play edit transactions", () => {
+  const text = readFileSync(".github/workflows/release-android.yml", "utf8");
+  const workflow = parse(text);
+  const publishSteps = workflow.jobs.publish.steps;
+  const production = publishSteps.find(
+    (step) => step.name === "Publish to Google Play Store (Production)",
+  );
+
+  expect(text).not.toContain("androidpublisher.googleapis.com");
+  expect(text).not.toContain("curl ");
+  expect(text).not.toContain("EDIT_ID");
+  expect(text).not.toContain("/edits/");
+  expect(text).toContain("scripts/ci/google-play-edit.py max-version-code");
+  expect(text).toContain("scripts/ci/google-play-edit.py publish");
+  expect(production.run).toContain('"track": "production"');
+  expect(production.run).toContain('"track": "beta"');
+  expect(
+    production.run.match(/scripts\/ci\/google-play-edit\.py publish/g),
+  ).toHaveLength(1);
+  expect(
+    text.match(/scripts\/ci\/google-play-edit\.py publish/g),
+  ).toHaveLength(3);
+  expect(
+    publishSteps.some(
+      (step) =>
+        step.name ===
+        "Publish same production versionCode to beta track (no re-upload)",
+    ),
+  ).toBe(false);
+
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+  expect(packageJson.scripts["test:governance"]).toContain(
+    "scripts/ci/google-play-edit.test.py",
+  );
+});
+
 test("RC validation checks the committed FOSS version before platform builds start", () => {
   const workflow = parse(
     readFileSync(".github/workflows/release-rc.yml", "utf8"),
