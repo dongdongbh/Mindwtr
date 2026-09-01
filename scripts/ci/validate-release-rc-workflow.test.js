@@ -14,6 +14,90 @@ import { parse } from "yaml";
 
 const asNeedsList = (needs) => (Array.isArray(needs) ? needs : [needs]);
 
+test("Docker app builds receive only validated release identities", () => {
+  const workflow = parse(
+    readFileSync(".github/workflows/docker-image-reusable.yml", "utf8"),
+  );
+  const steps = workflow.jobs["build-and-push-image"].steps;
+  const resolveStep = steps.find(
+    (step) => step.name === "Resolve Docker release identity",
+  );
+  expect(resolveStep).toBeDefined();
+
+  const resolveVersion = ({ inputTag = "", ref, refName }) => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "mindwtr-docker-version-"));
+    const outputPath = join(fixtureRoot, "github-output");
+    try {
+      execFileSync("bash", ["-c", resolveStep.run], {
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: outputPath,
+          GITHUB_REF: ref,
+          GITHUB_REF_NAME: refName,
+          INPUT_TAG: inputTag,
+        },
+        stdio: "pipe",
+      });
+      return Object.fromEntries(
+        readFileSync(outputPath, "utf8")
+          .trimEnd()
+          .split("\n")
+          .map((line) => line.split("=", 2)),
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  };
+
+  expect(resolveVersion({
+    inputTag: "v1.2.5",
+    ref: "refs/heads/main",
+    refName: "main",
+  })).toEqual({ tag: "v1.2.5", version: "1.2.5" });
+  expect(resolveVersion({
+    ref: "refs/tags/v1.2.6-rc.3",
+    refName: "v1.2.6-rc.3",
+  })).toEqual({ tag: "v1.2.6-rc.3", version: "1.2.6-rc.3" });
+  expect(resolveVersion({
+    ref: "refs/heads/main",
+    refName: "main",
+  })).toEqual({ tag: "", version: "" });
+
+  expect(() => resolveVersion({
+    inputTag: "release-candidate",
+    ref: "refs/heads/main",
+    refName: "main",
+  })).toThrow();
+
+  const buildStep = steps.find((step) => step.name === "Build and push Docker image");
+  expect(buildStep.with["build-args"]).toContain("VITE_RELEASE_VERSION");
+  expect(buildStep.with["build-args"]).toContain("mindwtr-app");
+
+  const dockerfile = readFileSync("docker/app/Dockerfile", "utf8");
+  expect(dockerfile).toContain("ARG VITE_RELEASE_VERSION");
+  expect(dockerfile).toContain('VITE_RELEASE_VERSION="$VITE_RELEASE_VERSION" bun desktop:web:build');
+});
+
+test("later RC app images rebuild for their embedded release identity", () => {
+  const workflow = parse(
+    readFileSync(".github/workflows/docker-image-reusable.yml", "utf8"),
+  );
+  const rcStep = workflow.jobs["build-and-push-image"].steps.find(
+    (step) => step.name === "Check Docker-relevant changes since previous RC",
+  );
+  expect(rcStep).toBeDefined();
+
+  const appIdentityGate = rcStep.run.indexOf(
+    'if [[ "$IMAGE_SUFFIX" == "mindwtr-app" ]]; then',
+  );
+  const previousTagFetch = rcStep.run.indexOf("git fetch --force --tags origin");
+  expect(appIdentityGate).toBeGreaterThanOrEqual(0);
+  expect(appIdentityGate).toBeLessThan(previousTagFetch);
+  expect(rcStep.run).toContain(
+    "the embedded PWA release identity changes for every RC tag",
+  );
+});
+
 test("tag-accepting release workflows queue by effective release tag", () => {
   const workflowDirectory = ".github/workflows";
   const effectiveTag = "${{ inputs.tag || github.ref_name }}";

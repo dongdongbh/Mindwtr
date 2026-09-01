@@ -40,6 +40,26 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
+      - name: Resolve Docker release identity
+        id: release_identity
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="${INPUT_TAG:-}"
+          if [[ -z "$RELEASE_TAG" && "$GITHUB_REF" == refs/tags/* ]]; then
+            RELEASE_TAG="$GITHUB_REF_NAME"
+          fi
+          if [[ -z "$RELEASE_TAG" ]]; then
+            printf 'tag=\nversion=\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "Invalid Docker release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          scripts/ci/resolve-release-version.sh "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
       - name: Check Docker-relevant changes since previous RC
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-rc.') }}
         id: rc_changes
@@ -58,6 +78,12 @@ jobs:
           if [[ "$RC_NUMBER" == "1" ]]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "reason=first RC for ${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$IMAGE_SUFFIX" == "mindwtr-app" ]]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "reason=the embedded PWA release identity changes for every RC tag" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -172,6 +198,8 @@ jobs:
           push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ${{ inputs.image_name == 'mindwtr-app' && format('VITE_RELEASE_VERSION={0}', steps.release_identity.outputs.version) || '' }}
           cache-from: |
             type=gha,scope=${{ github.ref_name }}
             type=gha,scope=main

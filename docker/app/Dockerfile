@@ -11,7 +11,8 @@ COPY --chown=1000:1000 . .
 RUN chown bun:bun /app
 USER bun
 RUN bun install --frozen-lockfile
-RUN bun desktop:web:build
+ARG VITE_RELEASE_VERSION=""
+RUN VITE_RELEASE_VERSION="$VITE_RELEASE_VERSION" bun desktop:web:build
 
 FROM nginx:1.31.4-alpine@sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913 AS web
 RUN apk add --no-cache curl
