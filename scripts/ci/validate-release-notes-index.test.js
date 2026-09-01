@@ -17,4 +17,27 @@ describe("release notes index", () => {
 
     expect(indexed).toEqual(filenames);
   });
+
+  it("starts unreleased notes after the latest indexed stable release", async () => {
+    const index = await readFile(path.join(releaseNotesDir, "README.md"), "utf8");
+    const stableVersions = Array.from(
+      index.matchAll(/\]\(\.\/(\d+)\.(\d+)\.(\d+)\.md\)/g),
+      (match) => match.slice(1, 4).map(Number),
+    ).sort((left, right) => {
+      for (let index = 0; index < 3; index += 1) {
+        if (left[index] !== right[index]) return right[index] - left[index];
+      }
+      return 0;
+    });
+    const latest = stableVersions[0];
+    expect(latest).toBeDefined();
+
+    const unreleased = await readFile(
+      path.join(releaseNotesDir, "unreleased.md"),
+      "utf8",
+    );
+    expect(unreleased).toContain(
+      `Changes collected after \`v${latest.join(".")}\` and before the next version tag.`,
+    );
+  });
 });
