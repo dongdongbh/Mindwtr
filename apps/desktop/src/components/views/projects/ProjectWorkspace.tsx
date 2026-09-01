@@ -4,6 +4,7 @@ import { Attachment,
     Task,
     collectBulkTaskTokens,
     compareTasksByProjectOrder,
+    getProjectSectionsForView,
     getSequentialProjectTaskCues,
     isTaskFinished,
     type BulkOrganizeTaskUpdateInput,
@@ -406,6 +407,7 @@ export function ProjectWorkspace({
     const {
         projects,
         sections,
+        allSections,
         areas,
         allTasks,
         settings,
@@ -653,17 +655,10 @@ export function ProjectWorkspace({
         };
     }, [shouldGroupCompletedTasks, sortedProjectTasks]);
 
-    const projectSections = useMemo(() => {
-        if (!selectedProjectId) return [];
-        return sections
-            .filter((section) => section.projectId === selectedProjectId && !section.deletedAt)
-            .sort((a, b) => {
-                const aOrder = Number.isFinite(a.order) ? a.order : 0;
-                const bOrder = Number.isFinite(b.order) ? b.order : 0;
-                if (aOrder !== bOrder) return aOrder - bOrder;
-                return a.title.localeCompare(b.title);
-            });
-    }, [sections, selectedProjectId]);
+    const projectSections = useMemo(
+        () => getProjectSectionsForView(selectedProject, sections, allSections),
+        [allSections, sections, selectedProject],
+    );
 
     // Progressive disclosure: the layout toggle exists only where sections do,
     // and a project that loses its last section falls back to the list.

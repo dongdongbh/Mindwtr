@@ -3,9 +3,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { KeyboardSensor } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
+import { useTaskStore, type Area, type Project } from '@mindwtr/core';
 
 import { ProjectsView } from './ProjectsView';
 
+const initialTaskState = useTaskStore.getState();
 const dndSensorCalls: Array<{ sensor: unknown; options: unknown }> = [];
 
 vi.mock('@dnd-kit/core', async () => {
@@ -25,6 +27,15 @@ const requestConfirmation = vi.fn();
 let resizeObserverCallback: ResizeObserverCallback | null = null;
 let animationFrameId = 0;
 const queuedAnimationFrames = new Map<number, FrameRequestCallback>();
+const projectsViewStoreOverrides = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+
+const createDeferred = <T,>() => {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    const promise = new Promise<T>((resolvePromise) => {
+        resolve = resolvePromise;
+    });
+    return { promise, resolve };
+};
 
 const flushAnimationFrames = () => {
     const callbacks = Array.from(queuedAnimationFrames.values());
@@ -37,7 +48,11 @@ vi.mock('../ErrorBoundary', () => ({
 }));
 
 vi.mock('../PromptModal', () => ({
-    PromptModal: () => null,
+    PromptModal: ({ isOpen, onConfirm }: { isOpen: boolean; onConfirm: (value: string) => void }) => (
+        isOpen
+            ? <button type="button" onClick={() => onConfirm('Created area')}>Confirm quick area</button>
+            : null
+    ),
 }));
 
 vi.mock('./projects/AreaManagerModal', () => ({
@@ -67,12 +82,17 @@ vi.mock('./projects/ProjectWorkspace', () => ({
     ProjectWorkspace: ({
         projectsSidebarCollapsed,
         onToggleProjectsSidebar,
+        onRequestQuickArea,
     }: {
         projectsSidebarCollapsed?: boolean;
         onToggleProjectsSidebar?: () => void;
+        onRequestQuickArea?: (projectId: string) => void;
     }) => (
         <div data-testid="project-workspace">
             Workspace
+            {onRequestQuickArea && (
+                <button type="button" onClick={() => onRequestQuickArea('project-1')}>Request quick area</button>
+            )}
             {projectsSidebarCollapsed && onToggleProjectsSidebar && (
                 <button type="button" aria-label="Expand projects panel" onClick={onToggleProjectsSidebar}>
                     Expand
@@ -167,11 +187,13 @@ vi.mock('./projects/useProjectsViewStore', () => ({
             allTags: [],
         }),
         projectTaskSummaryById: new Map(),
+        ...projectsViewStoreOverrides.current,
     }),
 }));
 
 describe('ProjectsView', () => {
     beforeEach(() => {
+        useTaskStore.setState(initialTaskState, true);
         setProjectView.mockReset();
         showToast.mockReset();
         requestConfirmation.mockReset();
@@ -179,6 +201,7 @@ describe('ProjectsView', () => {
         resizeObserverCallback = null;
         animationFrameId = 0;
         queuedAnimationFrames.clear();
+        projectsViewStoreOverrides.current = {};
         window.localStorage.clear();
         Object.defineProperty(window, 'requestAnimationFrame', {
             configurable: true,
@@ -223,6 +246,57 @@ describe('ProjectsView', () => {
         expect(keyboardSensor?.options).toMatchObject({
             coordinateGetter: sortableKeyboardCoordinates,
         });
+    });
+
+    it('does not assign a newly created area after the target project archives', async () => {
+        const now = '2026-08-31T12:00:00.000Z';
+        const activeProject: Project = {
+            id: 'project-1',
+            title: 'Launch',
+            status: 'active',
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            createdAt: now,
+            updatedAt: now,
+        };
+        const createdArea: Area = {
+            id: 'area-created',
+            name: 'Created area',
+            order: 0,
+            createdAt: now,
+            updatedAt: now,
+        };
+        const areaCreation = createDeferred<void>();
+        const addArea = vi.fn(() => areaCreation.promise);
+        const updateProject = vi.fn();
+        projectsViewStoreOverrides.current = { addArea, updateProject };
+        act(() => {
+            useTaskStore.setState({
+                _allProjects: [activeProject],
+                areas: [],
+            });
+        });
+
+        render(<ProjectsView />);
+        fireEvent.click(screen.getByRole('button', { name: 'Request quick area' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm quick area' }));
+        expect(addArea).toHaveBeenCalledWith('Created area', { color: '#94a3b8' });
+
+        act(() => {
+            useTaskStore.setState({
+                _allProjects: [{ ...activeProject, status: 'archived' }],
+                areas: [createdArea],
+                _allAreas: [createdArea],
+            });
+        });
+        await act(async () => {
+            areaCreation.resolve();
+            await areaCreation.promise;
+        });
+
+        await waitFor(() => expect(updateProject).not.toHaveBeenCalled());
+        expect(useTaskStore.getState()._allAreas).toContainEqual(createdArea);
     });
 
     it('allows keyboard resizing of the projects sidebar and persists the width', async () => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, Text, TextInput, TouchableOpacity, FlatList, Dimensions } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { AREA_PRESET_COLORS, Attachment, DEFAULT_PROJECT_COLOR, Project, shallow, Task, type Section, type TaskSortBy, useTaskStore } from '@mindwtr/core';
+import { AREA_PRESET_COLORS, Attachment, DEFAULT_PROJECT_COLOR, getProjectSectionsForView, Project, shallow, Task, type Section, type TaskSortBy, useTaskStore } from '@mindwtr/core';
 import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react-native';
 
@@ -67,6 +67,7 @@ export default function ProjectsScreen() {
     tasks,
     allTasks,
     sections,
+    allSections,
     addProject,
     updateProject,
     deleteProject,
@@ -85,6 +86,7 @@ export default function ProjectsScreen() {
     tasks: state.tasks,
     allTasks: state._allTasks,
     sections: state.sections,
+    allSections: state._allSections,
     addProject: state.addProject,
     updateProject: state.updateProject,
     deleteProject: state.deleteProject,
@@ -303,17 +305,10 @@ export default function ProjectsScreen() {
       (task) => task.projectId === selectedProjectIdForLists && !task.deletedAt
     );
   }, [allTasks, selectedProjectIdForLists]);
-  const selectedProjectSections = useMemo<Section[]>(() => {
-    if (!selectedProjectIdForLists) return [];
-    return sections
-      .filter((section) => section.projectId === selectedProjectIdForLists && !section.deletedAt)
-      .sort((a, b) => {
-        const aOrder = Number.isFinite(a.order) ? a.order : 0;
-        const bOrder = Number.isFinite(b.order) ? b.order : 0;
-        if (aOrder !== bOrder) return aOrder - bOrder;
-        return a.title.localeCompare(b.title);
-      });
-  }, [sections, selectedProjectIdForLists]);
+  const selectedProjectSections = useMemo<Section[]>(
+    () => getProjectSectionsForView(selectedProject, sections, allSections),
+    [allSections, sections, selectedProject],
+  );
   const liveSelectedProject = selectedProject
     ? allProjects?.find((project) => project.id === selectedProject.id)
     : null;

@@ -1,4 +1,4 @@
-import type { Project, Task, TaskSortBy } from './types';
+import type { Project, Section, Task, TaskSortBy } from './types';
 import { isTaskActionable } from './task-status';
 
 export function normalizeProjectSequentialScope(value: unknown): Project['sequentialScope'] {
@@ -35,6 +35,41 @@ export function normalizeProjectTaskSortBy(value: unknown): TaskSortBy | undefin
         return value as TaskSortBy;
     }
     return undefined;
+}
+
+const compareProjectSections = (a: Section, b: Section): number => {
+    const aOrder = Number.isFinite(a.order) ? a.order : 0;
+    const bOrder = Number.isFinite(b.order) ? b.order : 0;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return a.title.localeCompare(b.title);
+};
+
+/**
+ * Sections shown inside one project workspace.
+ *
+ * Active projects use the normal visible projection. Archiving a project
+ * intentionally tombstones its then-visible sections so sync and Reactivate
+ * remain reversible; an archived historical workspace may read those marked
+ * tombstones from the all-entity collection without changing their state.
+ * Sections deleted before the project archive remain omitted.
+ */
+export function getProjectSectionsForView(
+    project: Pick<Project, 'id' | 'status'> | null | undefined,
+    visibleSections: readonly Section[],
+    allSections: readonly Section[] = visibleSections,
+): Section[] {
+    if (!project) return [];
+    const archivedHistory = project.status === 'archived';
+    const source = archivedHistory ? allSections : visibleSections;
+    return source
+        .filter((section) => {
+            if (section.projectId !== project.id) return false;
+            if (!section.deletedAt) return true;
+            return archivedHistory
+                && section.projectArchivedAt === section.deletedAt
+                && section.deletedAtBeforeProjectArchive === null;
+        })
+        .sort(compareProjectSections);
 }
 
 export type ProjectSequenceTaskCue = 'available' | 'later';

@@ -151,6 +151,7 @@ export const TaskItem = memo(function TaskItem({
         sections,
         areas,
         project: storeProject,
+        mutationProject,
         section: storeSection,
         projectArea,
         taskArea: storeTaskArea,
@@ -248,6 +249,9 @@ export const TaskItem = memo(function TaskItem({
     }, [showWaitingAssignmentPrompt]);
     const [completedAtPrompt, setCompletedAtPrompt] = useState<null | 'complete' | 'editor-complete' | 'edit'>(null);
     const [projectNextActionPrompt, setProjectNextActionPrompt] = useState<ProjectNextActionPromptState | null>(null);
+    const projectNextActionPromptRef = useRef<ProjectNextActionPromptState | null>(null);
+    projectNextActionPromptRef.current = projectNextActionPrompt;
+    const mutationPromptOwnerTaskIdRef = useRef(task.id);
     const [projectNextActionTitle, setProjectNextActionTitle] = useState('');
     const resolvedFeatureFlags = resolveFeatureFlags(settings);
     const prioritiesEnabled = resolvedFeatureFlags.priorities;
@@ -264,6 +268,57 @@ export const TaskItem = memo(function TaskItem({
     const recurrenceStrategy = getRecurrenceStrategyValue(task.recurrence);
     const isStagnant = (task.pushCount ?? 0) > 3;
     const effectiveReadOnly = interactionDisabled || readOnly || task.status === 'done';
+    const mutationOwnerRef = useRef({
+        taskId: task.id,
+        interactionDisabled,
+        readOnly,
+    });
+    mutationOwnerRef.current = {
+        taskId: task.id,
+        interactionDisabled,
+        readOnly,
+    };
+    const getLiveMutableTask = useCallback((
+        expectedTaskId: string,
+        options?: { allowCompleted?: boolean },
+    ): Task | null => {
+        const owner = mutationOwnerRef.current;
+        if (
+            owner.taskId !== expectedTaskId
+            || owner.interactionDisabled
+            || owner.readOnly
+        ) {
+            return null;
+        }
+        const state = useTaskStore.getState();
+        const liveTask = state._tasksById.get(expectedTaskId)
+            ?? state._allTasks.find((candidate) => candidate.id === expectedTaskId);
+        if (
+            !liveTask
+            || liveTask.deletedAt
+            || liveTask.status === 'archived'
+            || (!options?.allowCompleted && liveTask.status === 'done')
+        ) {
+            return null;
+        }
+        if (liveTask.projectId) {
+            const liveProject = state._projectsById.get(liveTask.projectId)
+                ?? state._allProjects.find((candidate) => candidate.id === liveTask.projectId);
+            if (!liveProject || liveProject.deletedAt || liveProject.status === 'archived') {
+                return null;
+            }
+        }
+        return liveTask;
+    }, []);
+    const projectMutationPromptsReadOnly = interactionDisabled
+        || readOnly
+        || task.status === 'archived'
+        || Boolean(task.projectId && (
+            !mutationProject
+            || mutationProject.deletedAt
+            || mutationProject.status === 'archived'
+        ));
+    const taskMutationPromptsReadOnly = projectMutationPromptsReadOnly || task.status === 'done';
     const effectiveFocusToggle = effectiveReadOnly ? undefined : focusToggle;
     // Time tracking is opt-in: every time-spent surface (editor field, badge,
     // quick-start) stays hidden unless the Pomodoro timer and its task linking
@@ -501,9 +556,9 @@ export const TaskItem = memo(function TaskItem({
     }, [addPerson, setDraftField]);
     const createWaitingAssignmentPerson = useCallback(async (name: string) => {
         const trimmed = name.trim();
-        if (!trimmed) return;
+        if (!trimmed || !getLiveMutableTask(task.id)) return;
         await addPerson(trimmed);
-    }, [addPerson]);
+    }, [addPerson, getLiveMutableTask, task.id]);
     const handleCreateSection = useCallback(async (title: string) => {
         const trimmed = title.trim();
         if (!trimmed) return null;
@@ -786,10 +841,30 @@ export const TaskItem = memo(function TaskItem({
     }, [setHighlightTask, task.id]);
     const undoLabel = useMemo(() => tFallback(t, 'common.undo', 'Undo'), [t]);
     const closeProjectNextActionPrompt = useCallback(() => {
+        projectNextActionPromptRef.current = null;
         setProjectNextActionPrompt(null);
         setProjectNextActionTitle('');
     }, []);
+    useEffect(() => {
+        const taskChanged = mutationPromptOwnerTaskIdRef.current !== task.id;
+        if (taskChanged) {
+            mutationPromptOwnerTaskIdRef.current = task.id;
+        }
+        if (taskChanged || taskMutationPromptsReadOnly) {
+            setShowWaitingAssignmentPrompt(false);
+            setCompletedAtPrompt(null);
+        }
+        if (taskChanged || projectMutationPromptsReadOnly) {
+            closeProjectNextActionPrompt();
+        }
+    }, [
+        closeProjectNextActionPrompt,
+        projectMutationPromptsReadOnly,
+        task.id,
+        taskMutationPromptsReadOnly,
+    ]);
     const openProjectNextActionPromptIfNeeded = useCallback((completedTaskId: string) => {
+        if (!getLiveMutableTask(completedTaskId, { allowCompleted: true })) return;
         const storeState = useTaskStore.getState();
         const completedTask = storeState._tasksById.get(completedTaskId)
             ?? storeState._allTasks.find((candidate) => candidate.id === completedTaskId)
@@ -801,7 +876,7 @@ export const TaskItem = memo(function TaskItem({
         );
         if (!promptData) return;
         setProjectNextActionTitle('');
-        setProjectNextActionPrompt({
+        const nextPrompt = {
             candidates: promptData.candidates,
             projectId: promptData.project.id,
             projectTitle: promptData.project.title,
@@ -810,20 +885,58 @@ export const TaskItem = memo(function TaskItem({
             sectionTitle: promptData.scope === 'section' && completedTask.sectionId
                 ? storeState.sections.find((section) => section.id === completedTask.sectionId)?.title
                 : undefined,
-        });
-    }, [task]);
+        } satisfies ProjectNextActionPromptState;
+        projectNextActionPromptRef.current = nextPrompt;
+        setProjectNextActionPrompt(nextPrompt);
+    }, [getLiveMutableTask, task]);
     const handlePromoteProjectNextAction = useCallback((nextTaskId: string) => {
+        const prompt = projectNextActionPrompt;
+        const liveOwner = getLiveMutableTask(task.id, { allowCompleted: true });
+        if (
+            !prompt
+            || projectNextActionPromptRef.current !== prompt
+            || !liveOwner
+            || liveOwner.projectId !== prompt.projectId
+        ) {
+            return;
+        }
+        const state = useTaskStore.getState();
+        const liveCandidate = state._tasksById.get(nextTaskId)
+            ?? state._allTasks.find((candidate) => candidate.id === nextTaskId);
+        if (
+            !liveCandidate
+            || liveCandidate.deletedAt
+            || liveCandidate.projectId !== prompt.projectId
+            || liveCandidate.status === 'done'
+            || liveCandidate.status === 'archived'
+        ) {
+            return;
+        }
         void moveTask(nextTaskId, 'next')
             .then((result) => {
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to choose next action');
                 }
-                closeProjectNextActionPrompt();
+                if (
+                    projectNextActionPromptRef.current === prompt
+                    && getLiveMutableTask(task.id, { allowCompleted: true })
+                ) {
+                    closeProjectNextActionPrompt();
+                }
             })
             .catch((error) => reportError('Failed to choose project next action', error));
-    }, [closeProjectNextActionPrompt, moveTask]);
+    }, [closeProjectNextActionPrompt, getLiveMutableTask, moveTask, projectNextActionPrompt, task.id]);
     const handleAddProjectNextAction = useCallback(() => {
-        if (!projectNextActionPrompt) return;
+        const prompt = projectNextActionPrompt;
+        const liveOwner = getLiveMutableTask(task.id, { allowCompleted: true });
+        if (
+            !prompt
+            || projectNextActionPromptRef.current !== prompt
+            || !liveOwner
+            || liveOwner.projectId !== prompt.projectId
+        ) {
+            return;
+        }
         const rawTitle = projectNextActionTitle.trim();
         if (!rawTitle) return;
         // Same quick-add grammar as the quick-add box, so "/waiting" and
@@ -831,24 +944,44 @@ export const TaskItem = memo(function TaskItem({
         // component must not subscribe to the whole store.
         const state = useTaskStore.getState();
         const { title, props } = parseProjectNextActionInput(rawTitle, {
-            projectId: projectNextActionPrompt.projectId,
-            sectionId: projectNextActionPrompt.sectionId,
+            projectId: prompt.projectId,
+            sectionId: prompt.sectionId,
             projects: state.projects,
             areas: state.areas,
             parseOptions: buildQuickAddParseOptions(state.settings, state),
         });
+        if (
+            projectNextActionPromptRef.current !== prompt
+            || !getLiveMutableTask(task.id, { allowCompleted: true })
+        ) {
+            return;
+        }
         void addTask(title, props)
             .then((result) => {
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to add next action');
                 }
-                closeProjectNextActionPrompt();
+                if (
+                    projectNextActionPromptRef.current === prompt
+                    && getLiveMutableTask(task.id, { allowCompleted: true })
+                ) {
+                    closeProjectNextActionPrompt();
+                }
             })
             .catch((error) => reportError('Failed to add project next action', error));
-    }, [addTask, closeProjectNextActionPrompt, projectNextActionPrompt, projectNextActionTitle]);
+    }, [addTask, closeProjectNextActionPrompt, getLiveMutableTask, projectNextActionPrompt, projectNextActionTitle, task.id]);
     const handleCompleteProjectNextAction = useCallback(() => {
-        if (!projectNextActionPrompt) return;
-        const { projectId } = projectNextActionPrompt;
+        const prompt = projectNextActionPrompt;
+        const liveOwner = getLiveMutableTask(task.id, { allowCompleted: true });
+        if (
+            !prompt
+            || projectNextActionPromptRef.current !== prompt
+            || !liveOwner
+            || liveOwner.projectId !== prompt.projectId
+        ) {
+            return;
+        }
+        const { projectId } = prompt;
         // Archiving is the same reversible call the Archive button makes and
         // completes the project's remaining tasks in core (no confirmation, see
         // handleArchiveProject in ProjectWorkspace). Read the store lazily so
@@ -858,28 +991,33 @@ export const TaskItem = memo(function TaskItem({
                 if (result && result.success === false) {
                     throw new Error(result.error || 'Failed to complete project');
                 }
-                closeProjectNextActionPrompt();
+                if (projectNextActionPromptRef.current === prompt) {
+                    closeProjectNextActionPrompt();
+                }
             })
             .catch((error) => reportError('Failed to complete project from next-action prompt', error));
-    }, [closeProjectNextActionPrompt, projectNextActionPrompt]);
+    }, [closeProjectNextActionPrompt, getLiveMutableTask, projectNextActionPrompt, task.id]);
     const closeWaitingAssignmentPrompt = useCallback(() => {
         setShowWaitingAssignmentPrompt(false);
     }, []);
     const applyWaitingAssignment = useCallback((value: string) => {
+        const expectedTaskId = task.id;
+        if (!getLiveMutableTask(expectedTaskId)) return;
         const assignedTo = value.trim() || undefined;
         setShowWaitingAssignmentPrompt(false);
-        void moveTask(task.id, 'waiting')
+        void moveTask(expectedTaskId, 'waiting')
             .then(async (result) => {
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to change task status');
                 }
-                const updateResult = await updateTask(task.id, { assignedTo });
+                if (!getLiveMutableTask(expectedTaskId)) return;
+                const updateResult = await updateTask(expectedTaskId, { assignedTo });
                 if (!updateResult.success) {
                     throw new Error(updateResult.error || 'Failed to update waiting assignee');
                 }
             })
             .catch((error) => reportError('Failed to move task to waiting', error));
-    }, [moveTask, task.id, updateTask]);
+    }, [getLiveMutableTask, moveTask, task.id, updateTask]);
     // Deleting is a recoverable move to Trash, so it happens immediately with an
     // undo toast instead of a confirmation prompt. Permanent purge (in Trash)
     // keeps its confirmation.
@@ -930,9 +1068,11 @@ export const TaskItem = memo(function TaskItem({
     const closeCompletedAtPrompt = useCallback(() => setCompletedAtPrompt(null), []);
     const applyCompletedAtPrompt = useCallback((value: string, timeSpentMinutes?: number) => {
         const mode = completedAtPrompt;
+        const expectedTaskId = task.id;
+        if (!mode || !getLiveMutableTask(expectedTaskId, { allowCompleted: mode === 'edit' })) return;
         setCompletedAtPrompt(null);
         const parsed = new Date(value);
-        if (!mode || Number.isNaN(parsed.getTime())) return;
+        if (Number.isNaN(parsed.getTime())) return;
         const completedAt = parsed.toISOString();
         // Mirrors mobile's `mode === 'complete' && timeSpentEnabled` gate
         // (swipeable-task-item.tsx), plus desktop's editor-complete mode.
@@ -947,6 +1087,7 @@ export const TaskItem = memo(function TaskItem({
             })
                 .then((result) => {
                     if (!result?.success) return;
+                    if (!getLiveMutableTask(expectedTaskId, { allowCompleted: true })) return;
                     handleTaskCompleted(previousStatus, wasFocusedToday);
                 })
                 .catch((error) => reportError('Failed to mark task done from editor', error));
@@ -959,11 +1100,13 @@ export const TaskItem = memo(function TaskItem({
             if (includeTimeSpent) {
                 updates.timeSpentMinutes = timeSpentMinutes;
             }
-            void updateTask(task.id, updates)
+            if (!getLiveMutableTask(expectedTaskId)) return;
+            void updateTask(expectedTaskId, updates)
                 .then((result) => {
                     if (!result.success) {
                         throw new Error(result.error || 'Failed to complete task');
                     }
+                    if (!getLiveMutableTask(expectedTaskId, { allowCompleted: true })) return;
                     if (previousStatus !== 'done') {
                         handleTaskCompleted(previousStatus, wasFocusedToday);
                     }
@@ -971,14 +1114,15 @@ export const TaskItem = memo(function TaskItem({
                 .catch((error) => reportError('Failed to complete task', error));
             return;
         }
-        void updateTask(task.id, { completedAt })
+        if (!getLiveMutableTask(expectedTaskId, { allowCompleted: true })) return;
+        void updateTask(expectedTaskId, { completedAt })
             .then((result) => {
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to update completion time');
                 }
             })
             .catch((error) => reportError('Failed to update completion time', error));
-    }, [completedAtPrompt, handleSubmit, handleTaskCompleted, task.id, task.isFocusedToday, task.status, timeSpentEnabled, updateTask]);
+    }, [completedAtPrompt, getLiveMutableTask, handleSubmit, handleTaskCompleted, task.id, task.isFocusedToday, task.status, timeSpentEnabled, updateTask]);
     const handleStatusChange = useCallback((nextStatus: TaskStatus) => {
         if (nextStatus === 'waiting' && task.status !== 'waiting') {
             setShowWaitingAssignmentPrompt(true);

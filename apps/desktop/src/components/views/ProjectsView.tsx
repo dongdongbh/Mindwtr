@@ -894,6 +894,7 @@ export function ProjectsView() {
                     onConfirm={async (value) => {
                         const name = value.trim();
                         if (!name) return;
+                        const targetProjectId = pendingAreaAssignProjectId;
                         setIsAreaCreating(true);
                         try {
                             await addArea(name, { color: newAreaColor });
@@ -902,8 +903,16 @@ export function ProjectsView() {
                                 .filter((area) => area.name.trim().toLowerCase() === name.toLowerCase())
                                 .sort((a, b) => (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''));
                             const created = matching[0];
-                            if (created && pendingAreaAssignProjectId) {
-                                await Promise.resolve(updateProject(pendingAreaAssignProjectId, { areaId: created.id }));
+                            const liveTargetProject = targetProjectId
+                                ? state._allProjects.find((project) => project.id === targetProjectId)
+                                : undefined;
+                            if (
+                                created
+                                && liveTargetProject
+                                && !liveTargetProject.deletedAt
+                                && liveTargetProject.status !== 'archived'
+                            ) {
+                                await Promise.resolve(updateProject(liveTargetProject.id, { areaId: created.id }));
                             }
                         } catch (error) {
                             reportError('Failed to create quick area', error);

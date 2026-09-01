@@ -2,18 +2,35 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useTaskStore, type Attachment, type Task } from '@mindwtr/core';
+import { useTaskStore, type Attachment, type Project, type Task } from '@mindwtr/core';
 
 import { useTaskEditAttachments } from './use-task-edit-attachments';
 
 const availabilityMock = vi.hoisted(() => ({
   ensureAttachmentAvailableDetailed: vi.fn(),
 }));
-const coreStoreState = vi.hoisted(() => ({ _allTasks: [] as Task[] }));
+const speechMocks = vi.hoisted(() => ({
+  buildTaskUpdatesFromSpeechResult: vi.fn(),
+  ensureWhisperModelPathForConfigAsync: vi.fn(),
+  processAudioCapture: vi.fn(),
+  resolveSpeechToTextRuntimeSettings: vi.fn(),
+}));
+const draftFieldMock = vi.hoisted(() => ({ setDraftField: vi.fn() }));
+const coreStoreState = vi.hoisted(() => ({
+  tasks: [] as Task[],
+  _allTasks: [] as Task[],
+  projects: [] as Project[],
+  _allProjects: [] as Project[],
+  settings: {} as Record<string, any>,
+  addProject: vi.fn(),
+  updateTask: vi.fn(),
+}));
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const { mockCore } = await import('../../test-support/mock-core');
-  return mockCore(importOriginal, () => coreStoreState);
+  return mockCore(importOriginal, () => coreStoreState, {
+    buildTaskUpdatesFromSpeechResult: speechMocks.buildTaskUpdatesFromSpeechResult,
+  });
 });
 
 vi.mock('../../lib/attachment-sync-availability', () => ({
@@ -76,9 +93,9 @@ vi.mock('../../lib/open-file-externally', () => ({
   tryOpenWithAndroidViewer: vi.fn().mockResolvedValue(false),
 }));
 vi.mock('../../lib/speech-to-text', () => ({
-  ensureWhisperModelPathForConfigAsync: vi.fn(),
-  processAudioCapture: vi.fn(),
-  resolveSpeechToTextRuntimeSettings: vi.fn(),
+  ensureWhisperModelPathForConfigAsync: speechMocks.ensureWhisperModelPathForConfigAsync,
+  processAudioCapture: speechMocks.processAudioCapture,
+  resolveSpeechToTextRuntimeSettings: speechMocks.resolveSpeechToTextRuntimeSettings,
 }));
 vi.mock('../../lib/speech-to-text.helpers', () => ({ normalizeAudioUri: (value: string) => value }));
 
@@ -116,13 +133,19 @@ const makeTask = (attachment: Attachment): Task => ({
 
 type HarnessApi = {
   attachments: Attachment[];
+  audioAttachment: Attachment | null;
+  audioModalVisible: boolean;
   downloadAttachment: ReturnType<typeof useTaskEditAttachments>['downloadAttachment'];
+  openAttachment: ReturnType<typeof useTaskEditAttachments>['openAttachment'];
   replaceAttachment: (attachment: Attachment) => void;
+  retryAudioTranscription: ReturnType<typeof useTaskEditAttachments>['retryAudioTranscription'];
 };
 
-function Harness({ expose, initial }: {
+function Harness({ expose, initial, taskId = 'task-1', canMutate = () => true }: {
   expose: React.MutableRefObject<HarnessApi | null>;
   initial: Attachment;
+  taskId?: string;
+  canMutate?: () => boolean;
 }) {
   const [attachments, setAttachmentState] = React.useState<Attachment[]>([initial]);
   const setAttachments = React.useCallback((
@@ -135,15 +158,20 @@ function Harness({ expose, initial }: {
   const hook = useTaskEditAttachments({
     attachments,
     setAttachments,
-    setDraftField: vi.fn(),
-    taskId: 'task-1',
+    setDraftField: draftFieldMock.setDraftField,
+    taskId,
     t: (key) => key,
     visible: true,
+    canMutate,
   });
   expose.current = {
     attachments,
+    audioAttachment: hook.audioAttachment,
+    audioModalVisible: hook.audioModalVisible,
     downloadAttachment: hook.downloadAttachment,
+    openAttachment: hook.openAttachment,
     replaceAttachment: (attachment) => setAttachmentState([attachment]),
+    retryAudioTranscription: hook.retryAudioTranscription,
   };
   return null;
 }
@@ -292,6 +320,139 @@ describe('useTaskEditAttachments download settlement', () => {
       localStatus: 'available',
     });
     expect(Alert.alert).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+});
+
+describe('useTaskEditAttachments transcription ownership', () => {
+  const activeProject: Project = {
+    id: 'project-1',
+    title: 'Active project',
+    status: 'active',
+    color: '#3b82f6',
+    order: 0,
+    tagIds: [],
+    createdAt: '2026-08-27T00:00:00.000Z',
+    updatedAt: '2026-08-27T00:00:00.000Z',
+  };
+
+  const makeAudioAttachment = (id: string): Attachment => ({
+    id,
+    kind: 'file',
+    title: `${id}.m4a`,
+    mimeType: 'audio/m4a',
+    uri: `file://${id}.m4a`,
+    localStatus: 'available',
+    createdAt: '2026-08-27T00:00:00.000Z',
+    updatedAt: '2026-08-27T00:00:00.000Z',
+  });
+
+  const makeAudioTask = (id: string, attachment: Attachment, projectId = activeProject.id): Task => ({
+    id,
+    title: `Task ${id}`,
+    status: 'next',
+    projectId,
+    tags: [],
+    contexts: [],
+    attachments: [attachment],
+    createdAt: '2026-08-27T00:00:00.000Z',
+    updatedAt: '2026-08-27T00:00:00.000Z',
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    draftFieldMock.setDraftField.mockReset();
+    coreStoreState.tasks = [];
+    coreStoreState._allTasks = [];
+    coreStoreState.projects = [activeProject];
+    coreStoreState._allProjects = [activeProject];
+    coreStoreState.settings = { ai: { speechToText: { enabled: true } } };
+    coreStoreState.addProject.mockReset();
+    coreStoreState.updateTask.mockReset();
+    coreStoreState.updateTask.mockResolvedValue({ success: true });
+    speechMocks.resolveSpeechToTextRuntimeSettings.mockReturnValue({
+      enabled: true,
+      provider: 'openai',
+      baseUrl: 'https://speech.example.test/v1',
+      model: 'whisper-1',
+      mode: 'task',
+      fieldStrategy: 'replace',
+      isFossBuild: false,
+    });
+    speechMocks.buildTaskUpdatesFromSpeechResult.mockReturnValue({
+      updates: { title: 'Transcribed title' },
+      suggestedProjectTitle: undefined,
+    });
+    availabilityMock.ensureAttachmentAvailableDetailed.mockImplementation(async (attachment: Attachment) => ({
+      status: 'available',
+      attachment,
+    }));
+  });
+
+  it('drops a retry result when the owning project archives while transcription is in flight', async () => {
+    const audio = makeAudioAttachment('audio-archive');
+    const task = makeAudioTask('task-1', audio);
+    const transcription = deferred<any>();
+    speechMocks.processAudioCapture.mockReturnValue(transcription.promise);
+    coreStoreState.tasks = [task];
+    coreStoreState._allTasks = [task];
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={audio} taskId={task.id} />); });
+
+    await act(async () => { await expose.current!.openAttachment(audio); });
+    let retry!: Promise<void>;
+    act(() => { retry = expose.current!.retryAudioTranscription(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(speechMocks.processAudioCapture).toHaveBeenCalledTimes(1);
+
+    coreStoreState.projects = [{ ...activeProject, status: 'archived' }];
+    coreStoreState._allProjects = coreStoreState.projects;
+    await act(async () => {
+      transcription.resolve({ text: 'Transcribed title' });
+      await retry;
+    });
+
+    expect(coreStoreState.updateTask).not.toHaveBeenCalled();
+    expect(draftFieldMock.setDraftField).not.toHaveBeenCalled();
+    expect(expose.current!.attachments).toEqual([audio]);
+    act(() => tree.unmount());
+  });
+
+  it('cannot settle an old retry into a different task modal', async () => {
+    const firstAudio = makeAudioAttachment('audio-first');
+    const secondAudio = makeAudioAttachment('audio-second');
+    const firstTask = makeAudioTask('task-1', firstAudio);
+    const secondTask = makeAudioTask('task-2', secondAudio);
+    const transcription = deferred<any>();
+    speechMocks.processAudioCapture.mockReturnValue(transcription.promise);
+    coreStoreState.tasks = [firstTask, secondTask];
+    coreStoreState._allTasks = [firstTask, secondTask];
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={firstAudio} taskId={firstTask.id} />); });
+
+    await act(async () => { await expose.current!.openAttachment(firstAudio); });
+    let retry!: Promise<void>;
+    act(() => { retry = expose.current!.retryAudioTranscription(); });
+
+    act(() => {
+      tree.update(<Harness expose={expose} initial={secondAudio} taskId={secondTask.id} />);
+      expose.current!.replaceAttachment(secondAudio);
+    });
+    await act(async () => { await expose.current!.openAttachment(secondAudio); });
+    expect(expose.current!.audioAttachment?.id).toBe(secondAudio.id);
+    expect(expose.current!.audioModalVisible).toBe(true);
+
+    await act(async () => {
+      transcription.resolve({ text: 'Stale first result' });
+      await retry;
+    });
+
+    expect(coreStoreState.updateTask).not.toHaveBeenCalled();
+    expect(draftFieldMock.setDraftField).not.toHaveBeenCalled();
+    expect(expose.current!.audioAttachment?.id).toBe(secondAudio.id);
+    expect(expose.current!.audioModalVisible).toBe(true);
     act(() => tree.unmount());
   });
 });

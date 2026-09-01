@@ -3,12 +3,19 @@ import { Alert, Modal, Text } from 'react-native';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import renderer, { act } from 'react-test-renderer';
 
-import type { Task } from '@mindwtr/core';
+import {
+  archiveSectionForProjectArchive,
+  type Project,
+  type Section,
+  type Task,
+} from '@mindwtr/core';
 
 import { TaskEditModal } from './task-edit-modal';
 import { TaskEditCustomRecurrenceModal } from './task-edit/TaskEditCustomRecurrenceModal';
 import { MarkdownFormatToolbar } from './markdown-format-toolbar';
 import { syncTaskEditPagerPosition } from './task-edit/task-edit-modal.utils';
+
+const taskEditStore = vi.hoisted(() => ({ current: null as Record<string, any> | null }));
 
 vi.mock('@mindwtr/core', async () => {
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
@@ -24,8 +31,11 @@ vi.mock('@mindwtr/core', async () => {
       areaId: 'area-1',
       createdAt: '2025-01-01T00:00:00.000Z',
       updatedAt: '2025-01-01T00:00:00.000Z',
-    }],
+    }] as Project[],
     sections: [],
+    _allSections: [],
+    _allTasks: [],
+    _allProjects: [] as Project[],
     areas: [],
     settings: { features: {}, ai: {}, gtd: { taskEditor: { order: [], hidden: [] } } },
     duplicateTask: vi.fn(),
@@ -34,8 +44,18 @@ vi.mock('@mindwtr/core', async () => {
     addSection: vi.fn(),
     addArea: vi.fn(),
     deleteTask: vi.fn(),
+    getDerivedState: () => ({
+      allContexts: [],
+      allTags: [],
+      contextTokenUsage: [],
+      tagTokenUsage: [],
+    }),
   };
-  const useTaskStore = Object.assign(() => storeState, {
+  storeState._allProjects = storeState.projects;
+  taskEditStore.current = storeState;
+  const useTaskStore = Object.assign((selector?: (state: typeof storeState) => unknown) => (
+    selector ? selector(storeState) : storeState
+  ), {
     getState: () => storeState,
   });
   return {
@@ -150,6 +170,15 @@ describe('TaskEditModal', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.mocked(syncTaskEditPagerPosition).mockClear();
+    if (taskEditStore.current) {
+      const project = (taskEditStore.current._allProjects[0]
+        ?? taskEditStore.current.projects[0]) as Project;
+      taskEditStore.current.projects = [{ ...project, status: 'active' }];
+      taskEditStore.current._allProjects = taskEditStore.current.projects;
+      taskEditStore.current.sections = [];
+      taskEditStore.current._allSections = [];
+      taskEditStore.current._allTasks = [];
+    }
   });
 
   it('renders without crashing', () => {
@@ -230,6 +259,56 @@ describe('TaskEditModal', () => {
     act(() => close.props.onPress());
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('resolves an archived task section from the project-archive tombstone', async () => {
+    const archivedProject = {
+      ...(taskEditStore.current?.projects[0] as Project),
+      status: 'archived' as const,
+    };
+    const section: Section = {
+      id: 'section-history',
+      projectId: archivedProject.id,
+      title: 'Historical planning',
+      description: 'Recorded decisions',
+      order: 0,
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    };
+    const archivedSection = archiveSectionForProjectArchive(
+      section,
+      '2025-01-02T00:00:00.000Z',
+      'mobile-device',
+    );
+    const task: Task = {
+      id: 'archived-section-task',
+      title: 'Historical task',
+      status: 'done',
+      projectId: archivedProject.id,
+      sectionId: archivedSection.id,
+      tags: [],
+      contexts: [],
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-02T00:00:00.000Z',
+    };
+    taskEditStore.current!.projects = [];
+    taskEditStore.current!._allProjects = [archivedProject];
+    taskEditStore.current!.sections = [];
+    taskEditStore.current!._allSections = [archivedSection];
+    taskEditStore.current!._allTasks = [task];
+
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <TaskEditModal visible readOnly task={task} onClose={vi.fn()} onSave={vi.fn()} />
+      );
+      await Promise.resolve();
+    });
+
+    const preview = tree.root.findByType('TaskEditViewTab' as any);
+    expect(preview.props.sections).toEqual([archivedSection]);
+    expect(preview.props.mergedTask.sectionId).toBe(archivedSection.id);
+    expect(archivedSection.deletedAt).toBe('2025-01-02T00:00:00.000Z');
   });
 
   it('rejects a delayed save callback after an open editor becomes read-only', async () => {

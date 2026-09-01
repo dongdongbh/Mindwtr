@@ -2,7 +2,14 @@ import React from 'react';
 import { FlatList, Text } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Area, AppSettings, Project, Task } from '@mindwtr/core';
+import {
+  archiveSectionForProjectArchive,
+  type Area,
+  type AppSettings,
+  type Project,
+  type Section,
+  type Task,
+} from '@mindwtr/core';
 
 import ProjectsScreen from '../app/(drawer)/projects-screen';
 
@@ -68,6 +75,7 @@ const storeState: {
   tasks: [],
   _allTasks: [],
   sections: [],
+  _allSections: [],
   settings: {},
   addProject: vi.fn(),
   updateProject: vi.fn(),
@@ -107,6 +115,8 @@ beforeEach(() => {
   storeState._allProjects = [testProject];
   storeState.tasks = [];
   storeState._allTasks = [];
+  storeState.sections = [];
+  storeState._allSections = [];
   storeState.updateTask.mockReset();
   asyncStorageMock.getItem.mockReset();
   asyncStorageMock.getItem.mockResolvedValue(null);
@@ -356,6 +366,42 @@ describe('ProjectsScreen archived task inspection', () => {
     createdAt: now,
     updatedAt: now,
   };
+
+  it('passes project-archive section tombstones to the archived detail view', async () => {
+    const archivedProject = { ...testProject, status: 'archived' as const };
+    const section: Section = {
+      id: 'section-history',
+      projectId: archivedProject.id,
+      title: 'Historical planning',
+      description: 'Recorded decisions',
+      order: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const archivedSection = archiveSectionForProjectArchive(
+      section,
+      '2026-06-16T00:00:00.000Z',
+      'mobile-device',
+    );
+    routeParams.current = { projectId: archivedProject.id };
+    storeState.projects = [archivedProject];
+    storeState._allProjects = [archivedProject];
+    storeState.sections = [];
+    storeState._allSections = [archivedSection];
+    storeState._allTasks = [{ ...archivedTask, sectionId: archivedSection.id }];
+
+    await act(async () => {
+      create(<ProjectsScreen />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(detailModal.props?.sections).toEqual([archivedSection]);
+    expect(detailModal.props?.tasks).toEqual([
+      expect.objectContaining({ id: archivedTask.id, sectionId: archivedSection.id }),
+    ]);
+    expect(archivedSection.deletedAt).toBe('2026-06-16T00:00:00.000Z');
+  });
 
   it('opens a direct archived task route read-only and rejects every save at the live boundary', async () => {
     const archivedProject = { ...testProject, status: 'archived' as const };

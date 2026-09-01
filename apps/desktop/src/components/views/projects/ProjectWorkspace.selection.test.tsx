@@ -1,7 +1,7 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project, Section, Task } from '@mindwtr/core';
+import { archiveSectionForProjectArchive, type Project, type Section, type Task } from '@mindwtr/core';
 
 import { useUiStore } from '../../../store/ui-store';
 import { DndContext } from '@dnd-kit/core';
@@ -226,7 +226,7 @@ const defaultProps: ProjectWorkspaceProps = {
 // Store keys the workspace now reads through useProjectWorkspaceStore; render
 // helpers route these overrides to the seeded store instead of to props.
 const STORE_OVERRIDE_KEYS = new Set([
-    'projects', 'sections', 'areas', 'allTasks', 'undoNotificationsEnabled',
+    'projects', 'sections', 'allSections', 'areas', 'allTasks', 'undoNotificationsEnabled',
     'addSection', 'updateSection', 'deleteSection', 'reorderSections', 'reorderProjectTasks',
     'updateProject', 'deleteProject', 'restoreProject', 'updateTask',
     'batchMoveTasks', 'batchDeleteTasks', 'batchUpdateTasks', 'setHighlightTask',
@@ -238,6 +238,7 @@ const makeStore = (overrides: Record<string, unknown> = {}) => {
     return {
         projects: [project],
         sections: [],
+        allSections: [],
         areas: [],
         allTasks,
         undoNotificationsEnabled: true,
@@ -363,14 +364,19 @@ describe('ProjectWorkspace Select mode', () => {
 
     it('keeps archived project details and delayed section notes read-only until Reactivate', () => {
         const archivedProject = { ...project, status: 'archived' as const };
-        const archivedSection = { ...projectSection, description: 'Historical section notes' };
+        const archivedSection = archiveSectionForProjectArchive(
+            { ...projectSection, description: 'Historical section notes' },
+            '2026-05-13T00:00:00.000Z',
+            'desktop-device',
+        );
         const updateProject = vi.fn();
         const updateSection = vi.fn();
         const deleteProject = vi.fn();
 
         const { getByRole, getByTestId, queryByPlaceholderText } = renderWorkspace({
             selectedProject: archivedProject,
-            sections: [archivedSection],
+            sections: [],
+            allSections: [archivedSection],
             updateProject,
             updateSection,
             deleteProject,
@@ -394,6 +400,33 @@ describe('ProjectWorkspace Select mode', () => {
         expect(updateProject).not.toHaveBeenCalled();
         expect(updateSection).not.toHaveBeenCalled();
         expect(deleteProject).not.toHaveBeenCalled();
+    });
+
+    it('groups archived history under the section tombstones created by project archive', () => {
+        const archivedProject = { ...project, status: 'archived' as const };
+        const archivedSection = archiveSectionForProjectArchive(
+            { ...projectSection, description: 'Historical section notes' },
+            '2026-05-13T00:00:00.000Z',
+            'desktop-device',
+        );
+        const archivedTask = task('archived-section-task', 'Historical task', {
+            status: 'done',
+            sectionId: archivedSection.id,
+        });
+
+        const { getByText, queryByText } = renderWorkspace({
+            selectedProject: archivedProject,
+            sections: [],
+            allSections: [archivedSection],
+            allTasks: [archivedTask],
+            selectedProjectTasks: [archivedTask],
+        });
+
+        expect(getByText('Planning')).toBeInTheDocument();
+        expect(getByText('Historical section notes')).toBeInTheDocument();
+        expect(getByText('Historical task')).toBeInTheDocument();
+        expect(queryByText('projects.noSection')).not.toBeInTheDocument();
+        expect(archivedSection.deletedAt).toBe('2026-05-13T00:00:00.000Z');
     });
 
     it('opens global quick add with the selected project defaults', () => {

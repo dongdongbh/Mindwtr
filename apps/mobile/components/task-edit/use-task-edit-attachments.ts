@@ -54,6 +54,7 @@ const EMPTY_ATTACHMENTS: Attachment[] = [];
 
 type UseTaskEditAttachmentsParams = {
     attachments: Attachment[] | undefined;
+    canMutate?: () => boolean;
     setAttachments: SetTaskEditDraftValue<Attachment[] | undefined>;
     setDraftField: SetTaskEditDraftField;
     taskId: string | undefined;
@@ -74,6 +75,7 @@ const applySpeechUpdatesToDraft = (updates: Partial<Task>, setDraftField: SetTas
 
 export function useTaskEditAttachments({
     attachments = EMPTY_ATTACHMENTS,
+    canMutate = () => true,
     setAttachments,
     setDraftField,
     taskId,
@@ -97,6 +99,24 @@ export function useTaskEditAttachments({
     const [linkInput, setLinkInput] = React.useState('');
     const [linkInputTouched, setLinkInputTouched] = React.useState(false);
     const [editingLinkAttachmentId, setEditingLinkAttachmentId] = React.useState<string | null>(null);
+    const ownerRef = React.useRef({ taskId, visible, canMutate });
+    ownerRef.current = { taskId, visible, canMutate };
+    const audioAttachmentRef = React.useRef(audioAttachment);
+    audioAttachmentRef.current = audioAttachment;
+
+    const getLiveMutableTask = React.useCallback((expectedTaskId: string): Task | null => {
+        const owner = ownerRef.current;
+        if (!owner.visible || owner.taskId !== expectedTaskId || !owner.canMutate()) return null;
+        const state = useTaskStore.getState();
+        const currentTask = (state._allTasks ?? state.tasks).find((candidate) => candidate.id === expectedTaskId);
+        if (!currentTask || currentTask.deletedAt) return null;
+        if (currentTask.projectId) {
+            const currentProject = (state._allProjects ?? state.projects)
+                .find((candidate) => candidate.id === currentTask.projectId);
+            if (!currentProject || currentProject.deletedAt || currentProject.status === 'archived') return null;
+        }
+        return currentTask;
+    }, []);
 
     const audioPlayer = useAudioPlayer(null, { updateInterval: 500 });
     const audioStatus = useAudioPlayerStatus(audioPlayer);
@@ -417,22 +437,34 @@ export function useTaskEditAttachments({
         if (!currentAttachment || currentAttachment.kind !== 'file' || !currentAttachment.uri || !taskId || audioTranscribing) {
             return;
         }
+        const retryOwner = {
+            taskId,
+            attachmentId: currentAttachment.id,
+            attachmentUri: currentAttachment.uri,
+        };
+        const isRetryUiOwnerCurrent = () => {
+            const owner = ownerRef.current;
+            const currentAudio = audioAttachmentRef.current;
+            return owner.visible
+                && owner.taskId === retryOwner.taskId
+                && currentAudio?.id === retryOwner.attachmentId
+                && currentAudio.uri === retryOwner.attachmentUri;
+        };
+        const currentMutableTask = () => (
+            isRetryUiOwnerCurrent() ? getLiveMutableTask(retryOwner.taskId) : null
+        );
+        if (!currentMutableTask()) return;
 
         setAudioTranscribing(true);
         setAudioTranscriptionError(null);
         try {
             await unloadAudio();
-            const {
-                tasks: currentTasks,
-                projects: currentProjects,
-                addProject: addProjectNow,
-                updateTask: updateTaskNow,
-                settings: currentSettings,
-            } = useTaskStore.getState();
-            const existing = currentTasks.find((task) => task.id === taskId);
+            let existing = currentMutableTask();
             if (!existing) {
-                throw new Error(resolveText('attachments.transcriptionFailed', 'Transcription failed. Please try again.'));
+                return;
             }
+            const initialState = useTaskStore.getState();
+            const currentSettings = initialState.settings;
 
             const speech = currentSettings.ai?.speechToText;
             const speechRuntime = resolveSpeechToTextRuntimeSettings(speech);
@@ -441,10 +473,16 @@ export function useTaskEditAttachments({
             }
 
             const { provider, model, modelPath } = speechRuntime;
-            const apiKey = provider === 'whisper' ? '' : await loadAIKey(provider).catch(() => '');
-            const whisperResolved = provider === 'whisper'
-                ? await ensureWhisperModelPathForConfigAsync(model, modelPath)
-                : null;
+            let apiKey = '';
+            if (provider !== 'whisper') {
+                apiKey = await loadAIKey(provider).catch(() => '');
+                if (!currentMutableTask()) return;
+            }
+            let whisperResolved: Awaited<ReturnType<typeof ensureWhisperModelPathForConfigAsync>> | null = null;
+            if (provider === 'whisper') {
+                whisperResolved = await ensureWhisperModelPathForConfigAsync(model, modelPath);
+                if (!currentMutableTask()) return;
+            }
             const whisperModelReady = provider === 'whisper' ? Boolean(whisperResolved?.exists) : false;
             const resolvedModelPath = provider === 'whisper'
                 ? (whisperResolved?.exists ? whisperResolved.path : modelPath)
@@ -474,19 +512,24 @@ export function useTaskEditAttachments({
                 now: new Date(),
                 timeZone,
             });
+            existing = currentMutableTask();
+            if (!existing) return;
 
             const { updates, suggestedProjectTitle } = buildTaskUpdatesFromSpeechResult(existing, result, currentSettings);
             if (suggestedProjectTitle && !existing.projectId) {
+                const currentState = useTaskStore.getState();
                 const targetAreaId = updates.areaId ?? existing.areaId;
-                const match = findSelectableProjectByTitleAndArea(currentProjects, suggestedProjectTitle, targetAreaId);
+                const match = findSelectableProjectByTitleAndArea(currentState.projects, suggestedProjectTitle, targetAreaId);
                 if (match) {
                     updates.projectId = match.id;
                 } else {
-                    const created = await addProjectNow(
+                    if (!currentMutableTask()) return;
+                    const created = await currentState.addProject(
                         suggestedProjectTitle,
                         DEFAULT_PROJECT_COLOR,
                         targetAreaId ? { areaId: targetAreaId } : undefined
                     );
+                    if (!currentMutableTask()) return;
                     if (!created) {
                         throw new Error(resolveText('attachments.transcriptionFailed', 'Transcription failed. Please try again.'));
                     }
@@ -495,17 +538,20 @@ export function useTaskEditAttachments({
             }
 
             if (Object.keys(updates).length > 0) {
-                await updateTaskNow(taskId, updates);
+                if (!currentMutableTask()) return;
+                await useTaskStore.getState().updateTask(retryOwner.taskId, updates);
+                if (!currentMutableTask()) return;
                 applySpeechUpdatesToDraft(updates, setDraftField);
             }
-            closeAudioModal();
+            if (currentMutableTask()) closeAudioModal();
         } catch (error) {
+            if (!isRetryUiOwnerCurrent()) return;
             const message = error instanceof Error ? error.message : String(error);
             setAudioTranscriptionError(message || resolveText('attachments.transcriptionFailed', 'Transcription failed. Please try again.'));
         } finally {
-            setAudioTranscribing(false);
+            if (isRetryUiOwnerCurrent()) setAudioTranscribing(false);
         }
-    }, [audioAttachment, audioTranscribing, closeAudioModal, resolveText, setDraftField, taskId, unloadAudio]);
+    }, [audioAttachment, audioTranscribing, closeAudioModal, getLiveMutableTask, resolveText, setDraftField, taskId, unloadAudio]);
 
     const currentAttachmentForIdentity = React.useCallback((
         attachmentId: string,
@@ -648,6 +694,18 @@ export function useTaskEditAttachments({
             closeImagePreview();
         }
     }, [closeAudioModal, closeImagePreview, visible]);
+
+    const previousTaskIdRef = React.useRef(taskId);
+    React.useEffect(() => {
+        if (previousTaskIdRef.current === taskId) return;
+        previousTaskIdRef.current = taskId;
+        setAudioModalVisible(false);
+        setAudioAttachment(null);
+        setAudioLoading(false);
+        setAudioTranscribing(false);
+        setAudioTranscriptionError(null);
+        void unloadAudio();
+    }, [taskId, unloadAudio]);
 
     React.useEffect(() => {
         if (!audioStatus?.isLoaded) {

@@ -19,6 +19,14 @@ const mockTask: Task = {
 const initialTaskState = useTaskStore.getState();
 const initialUiState = useUiStore.getState();
 
+const createDeferred = <T,>() => {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    const promise = new Promise<T>((resolvePromise) => {
+        resolve = resolvePromise;
+    });
+    return { promise, resolve };
+};
+
 // The completion dialog now uses the shared date control (#944): a locale-formatted
 // date field plus a separate time input, rather than one datetime-local box. jsdom
 // reports en-US, so the display order is month/day/year.
@@ -1726,6 +1734,194 @@ describe('TaskItem', () => {
         });
     });
 
+    it('closes a waiting prompt and rejects its stale confirmation after the project archives', async () => {
+        const activeProject: Project = {
+            id: 'project-waiting-guard',
+            title: 'Waiting guard',
+            status: 'active',
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            createdAt: mockTask.createdAt,
+            updatedAt: mockTask.updatedAt,
+        };
+        const guardedTask: Task = {
+            ...mockTask,
+            id: 'waiting-guard-task',
+            status: 'next',
+            projectId: activeProject.id,
+        };
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                tasks: [guardedTask],
+                _allTasks: [guardedTask],
+                _tasksById: new Map([[guardedTask.id, guardedTask]]),
+                projects: [activeProject],
+                _allProjects: [activeProject],
+                _projectsById: new Map([[activeProject.id, activeProject]]),
+            }));
+        });
+
+        const view = render(
+            <LanguageProvider>
+                <TaskItem task={guardedTask} project={activeProject} />
+            </LanguageProvider>
+        );
+        fireEvent.change(view.getByLabelText(/task status/i), { target: { value: 'waiting' } });
+        fireEvent.change(view.getByPlaceholderText('Who is this waiting for?'), { target: { value: 'Alex' } });
+        const staleSave = view.getByRole('button', { name: 'Save' });
+        const archivedProject = { ...activeProject, status: 'archived' as const };
+
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                projects: [archivedProject],
+                _allProjects: [archivedProject],
+                _projectsById: new Map([[archivedProject.id, archivedProject]]),
+            }));
+        });
+        view.rerender(
+            <LanguageProvider>
+                <TaskItem task={guardedTask} project={archivedProject} interactionDisabled />
+            </LanguageProvider>
+        );
+        fireEvent.click(staleSave);
+        await act(async () => { await Promise.resolve(); });
+
+        expect(view.queryByText('Who/what are you waiting for?')).not.toBeInTheDocument();
+        const storedTask = useTaskStore.getState()._tasksById.get(guardedTask.id);
+        expect(storedTask?.status).toBe('next');
+        expect(storedTask?.assignedTo).toBeUndefined();
+    });
+
+    it('rechecks project ownership after the waiting status move resolves', async () => {
+        const activeProject: Project = {
+            id: 'project-waiting-continuation',
+            title: 'Waiting continuation',
+            status: 'active',
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            createdAt: mockTask.createdAt,
+            updatedAt: mockTask.updatedAt,
+        };
+        const guardedTask: Task = {
+            ...mockTask,
+            id: 'waiting-continuation-task',
+            status: 'next',
+            projectId: activeProject.id,
+        };
+        const moved = createDeferred<{ success: boolean }>();
+        const moveTask = vi.fn(() => moved.promise);
+        const updateTask = vi.fn().mockResolvedValue({ success: true });
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                tasks: [guardedTask],
+                _allTasks: [guardedTask],
+                _tasksById: new Map([[guardedTask.id, guardedTask]]),
+                projects: [activeProject],
+                _allProjects: [activeProject],
+                _projectsById: new Map([[activeProject.id, activeProject]]),
+                moveTask,
+                updateTask,
+            }));
+        });
+
+        const view = render(
+            <LanguageProvider>
+                <TaskItem task={guardedTask} project={activeProject} />
+            </LanguageProvider>
+        );
+        fireEvent.change(view.getByLabelText(/task status/i), { target: { value: 'waiting' } });
+        fireEvent.change(view.getByPlaceholderText('Who is this waiting for?'), { target: { value: 'Alex' } });
+        fireEvent.click(view.getByRole('button', { name: 'Save' }));
+        expect(moveTask).toHaveBeenCalledWith(guardedTask.id, 'waiting');
+
+        const archivedProject = { ...activeProject, status: 'archived' as const };
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                projects: [archivedProject],
+                _allProjects: [archivedProject],
+                _projectsById: new Map([[archivedProject.id, archivedProject]]),
+            }));
+        });
+        view.rerender(
+            <LanguageProvider>
+                <TaskItem task={guardedTask} project={archivedProject} interactionDisabled />
+            </LanguageProvider>
+        );
+        await act(async () => {
+            moved.resolve({ success: true });
+            await moved.promise;
+        });
+
+        expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('closes a completion-time prompt and rejects its stale confirmation after archive', async () => {
+        const activeProject: Project = {
+            id: 'project-completion-guard',
+            title: 'Completion guard',
+            status: 'active',
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            createdAt: mockTask.createdAt,
+            updatedAt: mockTask.updatedAt,
+        };
+        const guardedTask: Task = {
+            ...mockTask,
+            id: 'completion-guard-task',
+            status: 'next',
+            projectId: activeProject.id,
+        };
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                tasks: [guardedTask],
+                _allTasks: [guardedTask],
+                _tasksById: new Map([[guardedTask.id, guardedTask]]),
+                projects: [activeProject],
+                _allProjects: [activeProject],
+                _projectsById: new Map([[activeProject.id, activeProject]]),
+            }));
+        });
+        const view = render(
+            <LanguageProvider>
+                <TaskItem task={guardedTask} project={activeProject} />
+            </LanguageProvider>
+        );
+        fireEvent.contextMenu(view.getAllByRole('button', { name: 'Done' })[0]);
+        const dialog = view.getByRole('dialog', { name: 'Completion time' });
+        setCompletionDateTime(dialog, '2026-08-31T09:30');
+        const staleSave = within(dialog).getByRole('button', { name: 'Save' });
+        const archivedProject = { ...activeProject, status: 'archived' as const };
+
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                projects: [archivedProject],
+                _allProjects: [archivedProject],
+                _projectsById: new Map([[archivedProject.id, archivedProject]]),
+            }));
+        });
+        view.rerender(
+            <LanguageProvider>
+                <TaskItem task={guardedTask} project={archivedProject} interactionDisabled />
+            </LanguageProvider>
+        );
+        fireEvent.click(staleSave);
+        await act(async () => { await Promise.resolve(); });
+
+        expect(view.queryByRole('dialog', { name: 'Completion time' })).not.toBeInTheDocument();
+        const storedTask = useTaskStore.getState()._tasksById.get(guardedTask.id);
+        expect(storedTask?.status).toBe('next');
+        expect(storedTask?.completedAt).toBeUndefined();
+    });
+
     it('prompts for a new next action after completing the last next project task', async () => {
         const projectTask: Task = {
             ...mockTask,
@@ -1779,6 +1975,73 @@ describe('TaskItem', () => {
                 projectId: 'project-1',
             });
         });
+    });
+
+    it('closes the project next-action prompt and rejects a stale add after archive', async () => {
+        const projectTask: Task = {
+            ...mockTask,
+            id: 'project-next-action-guard-task',
+            title: 'Finish guarded step',
+            status: 'next',
+            projectId: 'project-next-action-guard',
+        };
+        const activeProject: Project = {
+            id: 'project-next-action-guard',
+            title: 'Guarded launch',
+            status: 'active',
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            createdAt: projectTask.createdAt,
+            updatedAt: projectTask.updatedAt,
+        };
+        const addTask = vi.fn().mockResolvedValue({ success: true, id: 'should-not-exist' });
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                tasks: [projectTask],
+                _allTasks: [projectTask],
+                _tasksById: new Map([[projectTask.id, projectTask]]),
+                projects: [activeProject],
+                _allProjects: [activeProject],
+                _projectsById: new Map([[activeProject.id, activeProject]]),
+                sections: [],
+                _allSections: [],
+                areas: [],
+                _allAreas: [],
+                addTask,
+            }));
+        });
+
+        const view = render(
+            <LanguageProvider>
+                <TaskItem task={projectTask} project={activeProject} />
+            </LanguageProvider>
+        );
+        fireEvent.click(view.getByRole('button', { name: 'Done' }));
+        await waitFor(() => {
+            expect(view.getByRole('dialog', { name: /what's the next action/i })).toBeInTheDocument();
+        });
+        fireEvent.change(view.getByPlaceholderText('New next action...'), {
+            target: { value: 'Must not be created' },
+        });
+        const staleAdd = view.getByRole('button', { name: 'Add next action' });
+
+        const archivedProject = { ...activeProject, status: 'archived' as const };
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                projects: [],
+                _allProjects: [archivedProject],
+                _projectsById: new Map([[archivedProject.id, archivedProject]]),
+            }));
+        });
+        expect(view.queryByRole('dialog', { name: /what's the next action/i })).not.toBeInTheDocument();
+        fireEvent.click(staleAdd);
+        await act(async () => { await Promise.resolve(); });
+
+        expect(addTask).not.toHaveBeenCalled();
+        expect(useTaskStore.getState()._allTasks).toHaveLength(1);
     });
 
     it('can promote an existing project task from the next-action prompt', async () => {

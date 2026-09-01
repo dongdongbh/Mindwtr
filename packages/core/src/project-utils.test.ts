@@ -6,6 +6,7 @@ import {
     getProjectNextActionCandidates,
     getProjectNextActionPromptData,
     getProjectChoiceState,
+    getProjectSectionsForView,
     getProjectsByArea,
     getProjectsByTag,
     isTaskInActiveProject,
@@ -14,7 +15,8 @@ import {
     projectHasNextAction,
     shouldPromptForProjectNextAction,
 } from './project-utils';
-import type { Project, Task } from './types';
+import { archiveSectionForProjectArchive } from './store-helpers';
+import type { Project, Section, Task } from './types';
 
 describe('project-utils', () => {
     const projects: Project[] = [
@@ -29,6 +31,44 @@ describe('project-utils', () => {
         { id: 't1', title: 'Next action', status: 'next', projectId: 'p1', tags: [], contexts: [], createdAt: '', updatedAt: '' },
         { id: 't2', title: 'Waiting action', status: 'waiting', projectId: 'p2', tags: [], contexts: [], createdAt: '', updatedAt: '' },
     ];
+
+    it('uses project-archive section tombstones only for archived history', () => {
+        const activeProject = projects[0];
+        const archivedProject = { ...activeProject, status: 'archived' as const };
+        const section: Section = {
+            id: 'section-history',
+            projectId: activeProject.id,
+            title: 'Historical planning',
+            description: 'Decisions made before archive',
+            order: 2,
+            createdAt: '2026-08-30T10:00:00.000Z',
+            updatedAt: '2026-08-30T10:00:00.000Z',
+        };
+        const archivedSection = archiveSectionForProjectArchive(
+            section,
+            '2026-08-31T10:00:00.000Z',
+            'device-a',
+        );
+        const previouslyDeleted: Section = {
+            ...section,
+            id: 'section-deleted-before-archive',
+            title: 'Discarded outline',
+            deletedAt: '2026-08-29T10:00:00.000Z',
+            updatedAt: '2026-08-29T10:00:00.000Z',
+        };
+
+        expect(getProjectSectionsForView(activeProject, [section], [archivedSection, previouslyDeleted]))
+            .toEqual([section]);
+        expect(getProjectSectionsForView(archivedProject, [], [archivedSection, previouslyDeleted]))
+            .toEqual([archivedSection]);
+        expect(archivedSection).toMatchObject({
+            deletedAt: '2026-08-31T10:00:00.000Z',
+            deletedAtBeforeProjectArchive: null,
+            projectArchivedAt: '2026-08-31T10:00:00.000Z',
+            title: 'Historical planning',
+            description: 'Decisions made before archive',
+        });
+    });
 
     it('detects projects with next actions', () => {
         expect(projectHasNextAction(projects[0], tasks)).toBe(true);

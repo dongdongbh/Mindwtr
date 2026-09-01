@@ -15,6 +15,7 @@ import { Task,
     DEFAULT_PROJECT_COLOR,
     getLocalizedWeekdayButtons,
     getLocalizedWeekdayLabels,
+    getProjectSectionsForView,
     normalizeClockTimeInput,
     resolveTaskViewSection,
     resolveFeatureFlags,
@@ -98,7 +99,9 @@ function TaskEditModalInner({
     const {
         tasks,
         projects,
+        allProjects,
         sections,
+        allSections,
         areas,
         people,
         settings,
@@ -121,7 +124,9 @@ function TaskEditModalInner({
         return {
             tasks: state.tasks,
             projects: state.projects,
+            allProjects: state._allProjects,
             sections: state.sections,
+            allSections: state._allSections,
             areas: state.areas,
             people: state.people,
             settings: state.settings,
@@ -322,6 +327,7 @@ function TaskEditModalInner({
         visibleAttachments,
     } = useTaskEditAttachments({
         attachments: taskEditDraft?.attachments,
+        canMutate,
         setAttachments,
         setDraftField,
         taskId: task?.id,
@@ -413,6 +419,11 @@ function TaskEditModalInner({
         t,
     });
     const isReference = (taskEditDraft?.draft.status ?? task?.status) === 'reference';
+    const readOnlyProjectSections = useMemo(() => {
+        if (!readOnly || !task?.projectId) return [];
+        const project = allProjects.find((candidate) => candidate.id === task.projectId);
+        return getProjectSectionsForView(project, sections, allSections);
+    }, [allProjects, allSections, readOnly, sections, task?.projectId]);
     const hasProject = taskEditDraft ? Boolean(taskEditDraft.draft.projectId) : Boolean(task?.projectId);
     const somedaySections = useMemo(
         () => sortViewSectionDefinitions(settings.gtd?.viewSections?.someday ?? []),
@@ -1006,7 +1017,7 @@ function TaskEditModalInner({
                                 styles={styles}
                                 mergedTask={previewTask}
                                 projects={projects}
-                                sections={projectSections}
+                                sections={readOnly ? readOnlyProjectSections : projectSections}
                                 areas={areas}
                                 prioritiesEnabled={prioritiesEnabled}
                                 timeEstimatesEnabled={timeEstimatesEnabled}

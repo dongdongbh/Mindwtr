@@ -11,6 +11,7 @@ export const useProjectWorkspaceStore = (selectedProjectId: string | null) => {
         (state) => ({
             projects: state.projects,
             sections: state.sections,
+            allSections: state._allSections,
             areas: state.areas,
             allTasks: state._allTasks,
             settings: state.settings,
