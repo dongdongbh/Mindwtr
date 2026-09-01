@@ -326,6 +326,7 @@ export const SETTINGS_LABEL_KEYS = [
     'gettingStartedContentContinueDesc',
     'syncSetupGuideTitle',
     'syncSetupGuideDesc',
+    'syncEncryptionGuideTitle',
     'importSetupGuideTitle',
     'importSetupGuideDesc',
     'exportBackup',

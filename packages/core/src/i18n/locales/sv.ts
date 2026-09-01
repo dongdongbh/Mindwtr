@@ -2477,6 +2477,8 @@ export const svOverrides: Record<string, string> = {
         'settings.gettingStartedContentContinueDesc': 'När du är klar här kan du fortfarande lägga till det guidade Kom igång-projektet och exempelposter i inkorgen.',
         'settings.syncSetupGuideTitle': 'Guide för data- och synkroniseringsinställning',
         'settings.syncSetupGuideDesc': 'Inställningsanteckningar för Dropbox, iCloud, WebDAV, filsynkronisering och återställning.',
+        'settings.syncEncryptionGuideTitle': 'Guide till synkroniseringskryptering',
+        'settings.syncEncryptionGuideDesc': 'Vad den skyddar, vilka servrar som stöder den och hur lösenfrasen fungerar.',
         'settings.importSetupGuideTitle': 'Guide för importinställning',
         'settings.importSetupGuideDesc': 'Importvägar som stöds för Todoist, TickTick, DGT GTD, OmniFocus, Mindwtr CSV, Apple Påminnelser och säkerhetskopior.',
         'settings.backupDiagnostics.newerVersion': "Den här säkerhetskopian skapades med en nyare version av Mindwtr ({{version}}).",

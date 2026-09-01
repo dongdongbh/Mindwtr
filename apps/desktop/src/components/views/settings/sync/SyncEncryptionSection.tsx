@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Eye, EyeOff, Lock } from 'lucide-react';
+import { Eye, EyeOff, Lock, ExternalLink } from 'lucide-react';
 
 import { SettingField } from '../SettingRow';
 import type { SettingsSyncPageProps } from './types';
@@ -181,6 +181,15 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                 {t.syncEncryption}
             </h2>
             <div className="bg-card border border-border rounded-lg p-6 space-y-4">
+                <a
+                    href="https://docs.mindwtr.app/data-sync/#sync-encryption"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                >
+                    {t.syncEncryptionGuideTitle}
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                </a>
                 {state === 'off' && (
                     <>
                         <p className="text-sm text-muted-foreground">{t.syncEncryptionDesc}</p>

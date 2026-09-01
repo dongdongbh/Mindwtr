@@ -2516,6 +2516,8 @@ export const en: Record<string, string> = {
         'settings.gettingStartedContentContinueDesc': 'When you are done here, you can still add the guided Getting Started project and sample inbox items.',
         'settings.syncSetupGuideTitle': 'Data & Sync setup guide',
         'settings.syncSetupGuideDesc': 'Setup notes for Dropbox, iCloud, WebDAV, File Sync, and recovery.',
+        'settings.syncEncryptionGuideTitle': 'Sync encryption guide',
+        'settings.syncEncryptionGuideDesc': 'What it protects, which servers support it, and how the passphrase works.',
         'settings.importSetupGuideTitle': 'Import setup guide',
         'settings.importSetupGuideDesc': 'Supported Todoist, TickTick, DGT GTD, OmniFocus, Mindwtr CSV, Apple Reminders, and backup import paths.',
         'settings.backupDiagnostics.newerVersion': "This backup was created by a newer Mindwtr version ({{version}}).",

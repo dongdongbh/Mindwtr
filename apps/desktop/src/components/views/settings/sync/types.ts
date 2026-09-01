@@ -20,6 +20,7 @@ export type SettingsSyncLabels = {
     gettingStartedContentContinueDesc: string;
     syncSetupGuideTitle: string;
     syncSetupGuideDesc: string;
+    syncEncryptionGuideTitle: string;
     importSetupGuideTitle: string;
     importSetupGuideDesc: string;
     exportBackup: string;

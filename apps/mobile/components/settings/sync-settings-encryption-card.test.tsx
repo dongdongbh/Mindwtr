@@ -37,6 +37,29 @@ vi.mock('@/lib/sync-crypto-native', () => ({
   },
 }));
 vi.mock('@/lib/settings-utils', () => ({ logSettingsError: vi.fn() }));
+// settings.shell (SettingsGuideLink) pulls in router/icon/inset modules the
+// card itself never needs; mock them the way settings.shell.test does.
+vi.mock('expo-router', () => ({
+  useRouter: () => ({ back: vi.fn(), canGoBack: () => false }),
+}));
+vi.mock('lucide-react-native', async () => {
+  const ReactModule = await vi.importActual<typeof import('react')>('react');
+  const Icon = (props: Record<string, unknown>) => ReactModule.createElement('Icon', props);
+  return { ChevronRight: Icon, ExternalLink: Icon };
+});
+vi.mock('@expo/vector-icons', async () => {
+  const ReactModule = await vi.importActual<typeof import('react')>('react');
+  return { Ionicons: (props: Record<string, unknown>) => ReactModule.createElement('Icon', props) };
+});
+vi.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
+vi.mock('@/hooks/use-theme-colors', () => ({
+  useThemeColors: () => ({ text: '#f8fafc', secondaryText: '#94a3b8', tint: '#3b82f6', border: '#334155' }),
+}));
+vi.mock('@/contexts/language-context', () => ({
+  useLanguage: () => ({ t: (key: string) => key }),
+}));
 
 import { SyncEncryptionCard } from './sync-settings-encryption-card';
 

@@ -2448,6 +2448,8 @@ export const zhHant: Record<string, string> = {
         'settings.gettingStartedContentContinueDesc': '完成這裡的設定後，你仍可加入引導式「快速上手」專案和範例收集箱項目。',
         'settings.syncSetupGuideTitle': '資料與同步設定指南',
         'settings.syncSetupGuideDesc': 'Dropbox、iCloud、WebDAV、檔案同步和還原的設定說明。',
+        'settings.syncEncryptionGuideTitle': '同步加密指南',
+        'settings.syncEncryptionGuideDesc': '它保護什麼、哪些伺服器支援它，以及密語如何運作。',
         'settings.importSetupGuideTitle': '匯入設定指南',
         'settings.importSetupGuideDesc': '支援 Todoist、TickTick、DGT GTD、OmniFocus、Mindwtr CSV、Apple 提醒事項和備份匯入路徑。',
         'settings.backupDiagnostics.newerVersion': "此備份由較新版本的 Mindwtr（{{version}}）建立。",

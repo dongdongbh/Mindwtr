@@ -2478,6 +2478,8 @@ export const faOverrides: Record<string, string> = {
         'settings.gettingStartedContentContinueDesc': 'پس از پایان کار در اینجا نیز می‌توانید پروژه راهنمای «شروع کار» و موارد نمونه صندوق ورودی را اضافه کنید.',
         'settings.syncSetupGuideTitle': 'راهنمای راه‌اندازی داده و همگام‌سازی',
         'settings.syncSetupGuideDesc': 'نکات راه‌اندازی برای Dropbox، iCloud، WebDAV، همگام‌سازی فایل و بازیابی.',
+        'settings.syncEncryptionGuideTitle': 'راهنمای رمزگذاری همگام‌سازی',
+        'settings.syncEncryptionGuideDesc': 'چه چیزی را محافظت می‌کند، کدام سرورها از آن پشتیبانی می‌کنند و عبارت عبور چگونه کار می‌کند.',
         'settings.importSetupGuideTitle': 'راهنمای راه‌اندازی واردکردن',
         'settings.importSetupGuideDesc': 'روش‌های واردکردن پشتیبانی‌شده برای Todoist، TickTick، DGT GTD، OmniFocus، Mindwtr CSV، یادآورهای Apple و نسخه‌های پشتیبان.',
         'settings.backupDiagnostics.newerVersion': "این نسخه پشتیبان با نسخه جدیدتری از Mindwtr ({{version}}) ساخته شده است.",

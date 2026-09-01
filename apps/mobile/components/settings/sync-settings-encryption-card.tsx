@@ -23,7 +23,10 @@ import {
     provideSyncEncryptionPassphrase,
 } from '@/lib/sync-encryption-service';
 
+import { SettingsGuideLink } from './settings.shell';
 import { styles } from './settings.styles';
+
+const SYNC_ENCRYPTION_GUIDE_URL = 'https://docs.mindwtr.app/data-sync/#sync-encryption';
 
 type Translate = (key: string) => string;
 
@@ -403,6 +406,12 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
             <Text style={[styles.sectionTitle, { color: tc.text, marginTop: 16 }]}>
                 {t('settings.syncEncryption')}
             </Text>
+            <SettingsGuideLink
+                title={t('settings.syncEncryptionGuideTitle')}
+                description={t('settings.syncEncryptionGuideDesc')}
+                url={SYNC_ENCRYPTION_GUIDE_URL}
+                testID="sync-encryption-guide-link"
+            />
             <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
                 {state === 'off' && (
                     <>

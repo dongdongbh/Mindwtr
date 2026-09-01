@@ -2520,6 +2520,8 @@ export const jaOverrides: Record<string, string> = {
         'settings.gettingStartedContentContinueDesc': 'ここでの作業が終わったあとでも、ガイド付きの「はじめかた」プロジェクトとサンプルのインボックス項目を追加できます。',
         'settings.syncSetupGuideTitle': 'データと同期の設定ガイド',
         'settings.syncSetupGuideDesc': 'Dropbox・iCloud・WebDAV・フォルダ同期・復旧についての手引き。',
+        'settings.syncEncryptionGuideTitle': '同期の暗号化ガイド',
+        'settings.syncEncryptionGuideDesc': '何を保護するか、対応するサーバー、パスフレーズの仕組み。',
         'settings.importSetupGuideTitle': '読み込みの設定ガイド',
         'settings.importSetupGuideDesc': 'Todoist・TickTick・DGT GTD・OmniFocus・Mindwtr CSV・Apple リマインダー・バックアップからの読み込み方法。',
         'settings.backupDiagnostics.newerVersion': 'このバックアップは、より新しいバージョンの Mindwtr（{{version}}）で作成されています。',

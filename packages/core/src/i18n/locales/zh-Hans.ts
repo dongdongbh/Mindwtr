@@ -2448,6 +2448,8 @@ export const zhHans: Record<string, string> = {
         'settings.gettingStartedContentContinueDesc': '完成此处的设置后，你仍可添加引导式“快速上手”项目和示例收集箱项目。',
         'settings.syncSetupGuideTitle': '数据与同步设置指南',
         'settings.syncSetupGuideDesc': 'Dropbox、iCloud、WebDAV、文件同步和恢复的设置说明。',
+        'settings.syncEncryptionGuideTitle': '同步加密指南',
+        'settings.syncEncryptionGuideDesc': '它保护什么、哪些服务器支持它，以及口令如何工作。',
         'settings.importSetupGuideTitle': '导入设置指南',
         'settings.importSetupGuideDesc': '支持 Todoist、TickTick、DGT GTD、OmniFocus、Mindwtr CSV、Apple 提醒事项和备份导入路径。',
         'settings.backupDiagnostics.newerVersion': "此备份由较新版本的 Mindwtr（{{version}}）创建。",
