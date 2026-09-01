@@ -18,6 +18,7 @@ import {
     restoreTaskFromProjectArchive,
     reuseArrayIfShallowEqual,
     reuseSettingsIfEquivalent,
+    selectFocusedCount,
 } from './store-helpers';
 import type { Project, Section, Task } from './types';
 import type { SaveBaseState } from './store-types';
@@ -640,6 +641,30 @@ describe('derived store state helpers', () => {
         ]);
 
         expect(derived.focusedCount).toBe(1);
+    });
+
+    it('selectFocusedCount agrees with computeTaskDerivedState.focusedCount on a mixed fixture', () => {
+        const tasks = [
+            createTask('active-focused', 'project-1', 0, { status: 'next', isFocusedToday: true }),
+            createTask('active-unfocused', 'project-1', 1, { status: 'next', isFocusedToday: false }),
+            createTask('done-focused', 'project-1', 2, { status: 'done', isFocusedToday: true }),
+            createTask('reference-focused', 'project-1', 3, { status: 'reference', isFocusedToday: true }),
+            createTask('archived-focused', 'project-1', 4, { status: 'archived', isFocusedToday: true }),
+            createTask('waiting-focused', 'project-1', 5, { status: 'waiting', isFocusedToday: true }),
+            createTask('deleted-focused', 'project-1', 6, {
+                status: 'next',
+                isFocusedToday: true,
+                deletedAt: '2026-01-02T00:00:00.000Z',
+            }),
+        ];
+
+        expect(selectFocusedCount(tasks)).toBe(computeTaskDerivedState(tasks).focusedCount);
+        expect(selectFocusedCount(tasks)).toBe(2);
+        // Same array identity: cached hit still agrees.
+        expect(selectFocusedCount(tasks)).toBe(computeTaskDerivedState(tasks).focusedCount);
+        // A different array identity recomputes and still agrees.
+        const fewer = tasks.slice(0, 1);
+        expect(selectFocusedCount(fewer)).toBe(computeTaskDerivedState(fewer).focusedCount);
     });
 
     // A-04 pin, written BEFORE folding token accumulation into the main loop:

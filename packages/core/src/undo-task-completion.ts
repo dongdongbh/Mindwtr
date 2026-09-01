@@ -77,7 +77,7 @@ export async function undoTaskCompletion(
 
     const current = useTaskStore.getState();
     const focusTaskLimit = normalizeFocusTaskLimit(current.settings.gtd?.focusTaskLimit);
-    if (current.getDerivedState().focusedCount >= focusTaskLimit) return;
+    if (current.getFocusedCount() >= focusTaskLimit) return;
     const focusResult = await Promise.resolve(current.updateTask(taskId, {
         isFocusedToday: true,
         ...(previousFocusOrder !== undefined ? { focusOrder: previousFocusOrder } : {}),

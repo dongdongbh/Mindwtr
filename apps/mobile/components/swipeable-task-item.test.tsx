@@ -29,6 +29,7 @@ const { addTask, updateTask, restoreTask, undoTaskCompletion, showToast, getChec
     areas: [] as any[],
     settings: { features: {}, appearance: {} },
     getDerivedState: () => ({ focusedCount: 0 }),
+    getFocusedCount: () => 0,
     getFocusStarAction: (task: any) => (
       task.isFocusedToday
         ? { isFocused: true, canToggle: true, blockedReason: null, labelKey: 'agenda.removeFromFocus', patch: { isFocusedToday: false } }

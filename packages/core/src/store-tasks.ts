@@ -375,7 +375,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
         const now = new Date().toISOString();
         const projectOrderReserver = createProjectOrderReserver(currentState._allTasks);
         const focusTaskLimit = normalizeFocusTaskLimit(currentState.settings.gtd?.focusTaskLimit);
-        let focusedCount = currentState.getDerivedState().focusedCount;
+        let focusedCount = currentState.getFocusedCount();
         const nextAllTasks = [...currentState._allTasks];
         const newTasks: Task[] = [];
 
@@ -518,7 +518,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
         const isPromotingTaskFocus = preparedUpdates.updates.isFocusedToday === true && existingTask.isFocusedToday !== true;
         if (isPromotingTaskFocus) {
             const focusTaskLimit = normalizeFocusTaskLimit(currentState.settings.gtd?.focusTaskLimit);
-            const focusedCount = currentState.getDerivedState().focusedCount;
+            const focusedCount = currentState.getFocusedCount();
             if (focusedCount >= focusTaskLimit) {
                 const message = `Focus limit of ${focusTaskLimit} reached`;
                 set({ error: message });

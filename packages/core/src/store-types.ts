@@ -198,6 +198,9 @@ export interface TaskStore {
 
     /** Derived state selector (cached by data references) */
     getDerivedState: () => DerivedState;
+    /** Cheap focused-task count (cached by `tasks` array identity); prefer this
+     *  over getDerivedState().focusedCount when nothing else derived is needed. */
+    getFocusedCount: () => number;
 }
 
 export type DerivedState = {

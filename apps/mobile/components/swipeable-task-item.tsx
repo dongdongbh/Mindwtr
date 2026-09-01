@@ -202,7 +202,7 @@ function StoreBackedSwipeableTaskItem(props: Omit<SwipeableTaskItemInnerProps, '
             projects: state.projects,
             sectionById: state._sectionsById,
             areas: state.areas,
-            focusedCount: state.getDerivedState().focusedCount,
+            focusedCount: state.getFocusedCount(),
             focusTaskLimit: normalizeFocusTaskLimit(state.settings?.gtd?.focusTaskLimit),
             prioritiesEnabled: resolvedFeatureFlags.priorities,
             timeEstimatesEnabled: resolvedFeatureFlags.timeEstimates,

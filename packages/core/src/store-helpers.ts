@@ -720,6 +720,40 @@ export const computeProjectDerivedState = (
     };
 };
 
+// Shared by computeTaskDerivedState's focusedCount tally and selectFocusedCount
+// below so the two can never drift. Mirrors computeTaskDerivedState's early
+// `if (task.deletedAt) return` (a deleted task never counts, even if fed an
+// unfiltered array) plus its focus rule: done/reference/archived tasks keep
+// their historical focus flag but should not consume today's focus limit —
+// the Focus views never show them, so a counted-but-invisible star would eat
+// a slot the user cannot free.
+const isTaskCountedAsFocused = (task: Task): boolean => (
+    !task.deletedAt
+    && task.isFocusedToday === true
+    && task.status !== 'done' && task.status !== 'reference' && task.status !== 'archived'
+);
+
+let focusedCountCache: { tasks: Task[]; count: number } | null = null;
+
+// Cheap alternative to getDerivedState().focusedCount for callers that only
+// need the count: a single linear scan, cached by array identity so repeat
+// reads against the same `tasks` array (the common case within one render/
+// notify) are free. Unlike getDerivedState's cache, this never misses on a
+// task write that leaves the focus set alone — it only recomputes when the
+// `tasks` array identity itself changes. Must read the SAME collection
+// (visible tasks) with the SAME predicate as computeTaskDerivedState.
+export const selectFocusedCount = (tasks: Task[]): number => {
+    if (focusedCountCache && focusedCountCache.tasks === tasks) {
+        return focusedCountCache.count;
+    }
+    let count = 0;
+    for (const task of tasks) {
+        if (isTaskCountedAsFocused(task)) count += 1;
+    }
+    focusedCountCache = { tasks, count };
+    return count;
+};
+
 export const computeTaskDerivedState = (
     tasks: Task[],
     tasksById?: Map<string, Task>
@@ -777,10 +811,7 @@ export const computeTaskDerivedState = (
         if (dateCoherenceIssues.length > 0) {
             dateCoherenceIssuesByTaskId.set(task.id, dateCoherenceIssues);
         }
-        // Done/reference/archived tasks keep their historical focus flag but should
-        // not consume today's focus limit — the Focus views never show them, so a
-        // counted-but-invisible star would eat a slot the user cannot free.
-        if (task.isFocusedToday && task.status !== 'done' && task.status !== 'reference' && task.status !== 'archived') {
+        if (isTaskCountedAsFocused(task)) {
             focusedCount += 1;
             focusedTasks.push(task);
         }
