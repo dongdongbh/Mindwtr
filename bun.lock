@@ -28,7 +28,7 @@
         "color-name": "^2.1.0",
         "color-string": "^2.1.4",
         "debug": "^4.4.3",
-        "decode-uri-component": "^0.5.0",
+        "decode-uri-component": "0.5.0",
         "escape-string-regexp": "^5.0.0",
         "event-target-shim": "^6.0.2",
         "fast-deep-equal": "^3.1.3",
