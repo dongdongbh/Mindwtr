@@ -42,6 +42,7 @@ type UseRootLayoutExternalCaptureParams = {
     resolveText: ResolveText;
     resetShareIntent: () => void;
     router: RouterLike;
+    shareError?: string | null;
     shareFiles?: SharedIntentFile[] | null;
     shareSubject?: string | null;
     shareText?: string | null;
@@ -236,6 +237,7 @@ export function useRootLayoutExternalCapture({
     resolveText,
     resetShareIntent,
     router,
+    shareError,
     shareFiles,
     shareSubject,
     shareText,
@@ -286,6 +288,22 @@ export function useRootLayoutExternalCapture({
             });
         }
     }, [router]);
+
+    // The native module reports failures (unreadable URI, resolver errors) on a
+    // separate error channel that used to vanish silently: the app just opened
+    // with no sheet and no clue (#1117). Surface it so a broken share is at
+    // least visible and diagnosable from the log.
+    const lastShareErrorRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!shareError || lastShareErrorRef.current === shareError) return;
+        lastShareErrorRef.current = shareError;
+        void logError(new Error(`Share intent failed: ${shareError}`), { scope: 'share-intent' });
+        showToast({
+            title: resolveText('share.unavailable', 'Share unavailable'),
+            message: resolveText('share.readFailed', 'Mindwtr could not read text, a URL, or a file from the shared item.'),
+            tone: 'warning',
+        });
+    }, [resolveText, shareError, showToast]);
 
     useEffect(() => {
         if (!hasShareIntent) return;

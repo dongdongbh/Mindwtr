@@ -1,5 +1,8 @@
+diff --git a/node_modules/expo-share-intent/.bun-tag-e41fe540720f8071 b/.bun-tag-e41fe540720f8071
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..5b0e9fdee27c7f08881f0e6d2dc30843bec0cb61 100644
+index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..ccb31f0343bd6cb0c57429ee9c63f5a25957b654 100644
 --- a/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 +++ b/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 @@ -129,7 +129,8 @@ class ExpoShareIntentModule : Module() {
@@ -12,3 +15,15 @@ index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..5b0e9fdee27c7f08881f0e6d2dc30843
                          )
                      ))
                  } else if (intent.action == Intent.ACTION_VIEW) {
+@@ -142,7 +143,10 @@ class ExpoShareIntentModule : Module() {
+                 if (intent.action == Intent.ACTION_SEND) {
+                     val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
+                     if (uri != null) {
+-                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri), "type" to "file")))
++                        // Upstream misplaces the closing paren: the "type" Pair lands INSIDE the
++                        // files array, and expo-modules-core cannot convert a kotlin.Pair to a JS
++                        // value, so single-file shares never reach JS at all (#1117).
++                        notifyShareIntent(mapOf("files" to arrayOf(getFileInfo(uri)), "type" to "file"))
+                     } else {
+                         notifyError("empty uri for file sharing: " + intent.action)
+                     }
