@@ -12,7 +12,9 @@ services:
     cpus: "1.0"
     mem_limit: 512m
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8787/ready >/dev/null || exit 1"]
+      # Released images predate /ready (404 -> fall back to liveness); on newer
+      # images a real /ready failure (503) still reads unhealthy. (#1127)
+      test: ["CMD-SHELL", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8787/ready); [ \"$$code\" = 200 ] || { [ \"$$code\" = 404 ] && curl -fsS http://localhost:8787/health >/dev/null; }"]
       interval: 1m30s
       timeout: 10s
       retries: 3
