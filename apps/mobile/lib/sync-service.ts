@@ -566,6 +566,10 @@ class MobileSyncRun {
   private fileSyncLease: Awaited<ReturnType<typeof acquireMobileFileSyncLease>> | null = null;
   private activationProof: MobileSyncResult['activationProof'];
   private allowLegacyWebdavPlaintext = false;
+  /** Sync encryption is exactly off for this cycle (state 'off', no incomplete
+   *  transition). Gates every "no safe backend version" refusal — those protect
+   *  encrypted CAS, and a plaintext cycle degrades instead of failing. */
+  private syncEncryptionOff = false;
   /** #1056: resolved once per cycle in setupCycle. `null` is the encryption-off path and
    *  every seam below then behaves byte-for-byte as it did before the feature. */
   private encryptionMaterial: SyncKeyMaterial | null = null;
@@ -1103,6 +1107,7 @@ class MobileSyncRun {
           }
           this.encryptionMaterial = await getSyncEncryptionMaterial();
         }
+        this.syncEncryptionOff = legacyWebdavPostureAllowed;
         if (backend === 'webdav') {
           const webdavConfig = this.webdavConfig!;
           const compatibility = await ensureWebdavCapabilityProof(webdavConfig, async () => {
@@ -1350,6 +1355,7 @@ class MobileSyncRun {
       dropboxAppKey: this.dropboxClientId,
       dropboxRev: this.dropboxLastRev,
       allowLegacyWebdavPlaintext: this.allowLegacyWebdavPlaintext,
+      syncEncryptionOff: this.syncEncryptionOff,
     };
   }
 
@@ -1360,7 +1366,7 @@ class MobileSyncRun {
    *  `runDropboxTransientRetry`) is mobile's own policy and stays here —
    *  `createSyncBackendIO` calls these methods without adding or removing
    *  retries of its own. */
-  private createBackendTransport(): SyncTransport {
+  private createBackendTransport(ctx: SyncBackendContext): SyncTransport {
     return {
       acquireWebdavRemoteMutationFence: async () => {
         const webdavConfig = this.webdavConfig;
@@ -1429,12 +1435,20 @@ class MobileSyncRun {
             this.markCandidateEncryptedRemoteProven();
             throw new SyncEncryptionNoKeyError();
           }
-          if (
-            result.exists
-            && !normalizeStrongWebdavEtag(result.strongEtag)
-            && !this.allowLegacyWebdavPlaintext
-          ) {
-            throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV encrypted sync document');
+          if (result.exists && !normalizeStrongWebdavEtag(result.strongEtag)) {
+            if (!this.syncEncryptionOff) {
+              // Encrypted CAS depends on the strong ETag; refuse the cycle.
+              throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV encrypted sync document');
+            }
+            if (!ctx.allowLegacyWebdavPlaintext) {
+              // Plaintext cycle: the ladder degrades to the bounded legacy write
+              // (packages/core/src/sync-backend-io.ts). Log the validator we actually
+              // saw so the next report says what the server sent.
+              void logInfo('WebDAV read returned no strong ETag; using the plaintext compatibility write', {
+                scope: 'sync',
+                extra: { etag: String(result.strongEtag ?? 'none') },
+              });
+            }
           }
           return {
             data: result.data,
@@ -1485,7 +1499,9 @@ class MobileSyncRun {
       webdavPutLegacyPlaintext: async (sanitized, assertRemoteMutationFenceHeld) => {
         const webdavConfig = this.webdavConfig;
         if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
-        if (!this.allowLegacyWebdavPlaintext || this.encryptionMaterial) {
+        // `ctx`, not `this`: the ladder may have degraded this cycle to the plaintext
+        // write after a read arrived without a strong ETag.
+        if (!ctx.allowLegacyWebdavPlaintext || this.encryptionMaterial) {
           throw new SyncEncryptionRemoteVersionUnavailableError('Encrypted WebDAV sync document');
         }
         const requestOptions = {
@@ -1719,7 +1735,7 @@ class MobileSyncRun {
    *  `createSyncBackendIO`; this only supplies mobile's transport truths. */
   private createBackendIO(): SyncBackendIO {
     const ctx = this.createBackendContext();
-    const io = createSyncBackendIO(ctx, this.createBackendTransport());
+    const io = createSyncBackendIO(ctx, this.createBackendTransport(ctx));
     return {
       ...io,
       // `this.syncUrl` is set during `resolveWebdavBackendConfig`/

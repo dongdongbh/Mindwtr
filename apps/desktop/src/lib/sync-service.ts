@@ -733,6 +733,10 @@ type DesktopSyncCycleContext = {
     fileBaseDir: string;
     fileSyncLeaseToken: string | null;
     allowLegacyWebdavPlaintext: boolean;
+    /** Sync encryption is exactly off for this cycle (state 'off', no incomplete
+     *  transition). Gates every "no safe backend version" refusal — those protect
+     *  encrypted CAS, and a plaintext cycle degrades instead of failing. */
+    syncEncryptionOff: boolean;
 };
 
 const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
@@ -751,6 +755,7 @@ const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
     fileBaseDir: '',
     fileSyncLeaseToken: null,
     allowLegacyWebdavPlaintext: false,
+    syncEncryptionOff: false,
 });
 
 const createFetchWithAbortForContext = async (context: DesktopSyncCycleContext): Promise<typeof fetch> => {
@@ -2073,6 +2078,7 @@ export class SyncService {
         const encryptionStatus = await readSyncEncryptionStatus();
         const legacyWebdavPostureAllowed = isLegacyWebdavPlaintextPostureAllowed(encryptionStatus);
         context.allowLegacyWebdavPlaintext = false;
+        context.syncEncryptionOff = legacyWebdavPostureAllowed;
         if (encryptionStatus.incompleteTransition) {
             if (!options.manual && !options.activationProbe) return { kind: 'disabled' };
             throw new SyncEncryptionTransitionIncompleteError(encryptionStatus.incompleteTransition);
@@ -2190,6 +2196,7 @@ export class SyncService {
             dropboxAppKey: context.dropboxAppKey,
             dropboxRev: null,
             allowLegacyWebdavPlaintext: context.allowLegacyWebdavPlaintext,
+            syncEncryptionOff: context.syncEncryptionOff,
         };
     }
 
@@ -2249,11 +2256,26 @@ export class SyncService {
                         WEBDAV_READ_RETRY_OPTIONS,
                     );
                     if (
-                        !context.allowLegacyWebdavPlaintext
+                        !context.syncEncryptionOff
                         && remote.exists
                         && !normalizeStrongWebdavEtag(remote.strongEtag)
                     ) {
+                        // Encrypted CAS depends on the strong ETag; refuse the cycle.
                         throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV encrypted sync document');
+                    }
+                    if (
+                        context.syncEncryptionOff
+                        && !ctx.allowLegacyWebdavPlaintext
+                        && remote.exists
+                        && !normalizeStrongWebdavEtag(remote.strongEtag)
+                    ) {
+                        // Plaintext cycle: the ladder degrades to the bounded legacy write
+                        // (packages/core/src/sync-backend-io.ts). Log the validator we actually
+                        // saw so the next report says what the server sent.
+                        logSyncInfo('WebDAV read returned no strong ETag; using the plaintext compatibility write', {
+                            url: normalizedUrl,
+                            etag: String(remote.strongEtag ?? 'none'),
+                        });
                     }
                     return logMissingRemote(remote);
                 }
@@ -2331,7 +2353,9 @@ export class SyncService {
                 });
             },
             webdavPutLegacyPlaintext: async (sanitized, assertRemoteMutationFenceHeld) => {
-                if (!context.allowLegacyWebdavPlaintext) {
+                // `ctx`, not `context`: the ladder may have degraded this cycle to the
+                // plaintext write after a read arrived without a strong ETag.
+                if (!ctx.allowLegacyWebdavPlaintext) {
                     throw new SyncEncryptionRemoteVersionUnavailableError('Encrypted WebDAV sync document');
                 }
                 await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);

@@ -42,6 +42,10 @@ export type SyncBackendContext = {
     /** True only when the platform has proven both that sync encryption is exactly
      * off and that this endpoint is the legacy weak/no-ETag compatibility case. */
     allowLegacyWebdavPlaintext?: boolean;
+    /** True when the platform has proven sync encryption is exactly off for this cycle
+     * (state 'off', no incomplete transition). Only this posture may degrade to the
+     * legacy plaintext write when a read arrives without a strong ETag. */
+    syncEncryptionOff?: boolean;
 };
 
 /** One remote-write transport result (webdav/cloud PUT response shape). */
@@ -191,6 +195,23 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
                     const remote = await transport.webdavGet();
                     webdavDocumentVersion = { exists: remote.exists, strongEtag: remote.strongEtag };
                     webdavDocumentSnapshot = snapshotWebdavRead(remote);
+                    // A plaintext endpoint that answered this read without a strong ETag cannot
+                    // support the conditional write the cycle would otherwise demand — whatever
+                    // the capability probe concluded earlier (#1113's observational posture, and
+                    // a server/proxy can drop the validator on one response). With encryption off
+                    // the pre-1.2.5 posture applies: degrade THIS cycle to the bounded legacy
+                    // plaintext write instead of failing it. The legacy write still rereads and
+                    // byte-compares first, and prefers a conditional write when the ETag is back,
+                    // so a transient blip costs nothing and nothing is demoted beyond this cycle.
+                    // Encryption-on cycles never reach here: their read seams fail closed first.
+                    if (
+                        ctx.syncEncryptionOff
+                        && !ctx.allowLegacyWebdavPlaintext
+                        && remote.exists
+                        && !remote.strongEtag
+                    ) {
+                        ctx.allowLegacyWebdavPlaintext = true;
+                    }
                     return remote.data;
                 } catch (error) {
                     // Invalid JSON still enters the shared repair path. Preserve the GET

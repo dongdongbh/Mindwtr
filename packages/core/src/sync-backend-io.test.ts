@@ -174,6 +174,66 @@ describe('createSyncBackendIO', () => {
             expect(transport.webdavPut).not.toHaveBeenCalled();
         });
 
+        it('degrades an encryption-off cycle to the plaintext write when the read has no strong ETag', async () => {
+            // A Nextcloud-class server behind a proxy answered one GET without a usable
+            // validator while the capability probe had already classed it strong-ETag.
+            // Encryption is off, so the cycle degrades to the bounded plaintext write
+            // instead of failing with SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE.
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                syncEncryptionOff: true,
+            };
+            const webdavGet = vi.fn()
+                .mockResolvedValue({ data: APP_DATA, exists: true, strongEtag: null });
+            const transport = makeTransport({ webdavGet });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            expect(ctx.allowLegacyWebdavPlaintext).toBe(true);
+            await expect(io.writeRemote(APP_DATA)).resolves.toEqual({
+                fingerprint: 'webdav-legacy-fp',
+                serverMergedRemoteData: false,
+            });
+            expect(transport.webdavPut).not.toHaveBeenCalled();
+        });
+
+        it('prefers strong-ETag CAS when the degraded cycle rereads a validator back', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                syncEncryptionOff: true,
+            };
+            const webdavGet = vi.fn()
+                .mockResolvedValueOnce({ data: APP_DATA, exists: true, strongEtag: null })
+                .mockResolvedValueOnce({ data: APP_DATA, exists: true, strongEtag: '"back-v2"' });
+            const transport = makeTransport({ webdavGet });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            await io.writeRemote(APP_DATA);
+
+            expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA, '"back-v2"');
+            expect(transport.webdavPutLegacyPlaintext).not.toHaveBeenCalled();
+        });
+
+        it('leaves an encryption-off cycle on strong-ETag CAS while the read carries a validator', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                syncEncryptionOff: true,
+            };
+            const transport = makeTransport();
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            expect(ctx.allowLegacyWebdavPlaintext).toBeFalsy();
+            await io.writeRemote(APP_DATA);
+
+            expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA, '"webdav-read-v1"');
+            expect(transport.webdavPutLegacyPlaintext).not.toHaveBeenCalled();
+        });
+
         it('uses one explicit legacy plaintext write after a matching bounded reread', async () => {
             const ctx: SyncBackendContext = {
                 backend: 'webdav', cloudProvider: 'selfhosted',
