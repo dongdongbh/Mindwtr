@@ -80,13 +80,28 @@ class FallbackURLSearchParams {
 class FallbackURL {
     constructor(url, base) {
         const href = base ? new FallbackURL(base).href + String(url || '') : String(url || '');
-        this.href = href;
-        const match = href.match(/^(?:([a-z0-9.+-]+:))?(?:\/\/[^\/?#]*)?([^?#]*)(?:\?([^#]*))?(?:#(.*))?/i);
+        const match = href.match(/^(?:([a-z0-9.+-]+:))?(\/\/[^\/?#]*)?([^?#]*)(?:\?([^#]*))?(?:#(.*))?/i);
         this.protocol = match ? (match[1] || '') : '';
-        this.pathname = match ? (match[2] || '/') : '/';
-        this.search = match && match[3] ? '?' + match[3] : '';
-        this.hash = match && match[4] ? '#' + match[4] : '';
+        this._authority = match ? (match[2] || '') : '';
+        this.pathname = match ? (match[3] || '/') : '/';
+        this.search = match && match[4] ? '?' + match[4] : '';
+        this.hash = match && match[5] ? '#' + match[5] : '';
         this.searchParams = new FallbackURLSearchParams(this.search);
+    }
+    // href is derived from the components so that `pathname = ...` and friends
+    // survive serialization; a stored href silently discarded such edits and
+    // resolved sibling files (the sync fence) back to the document URL (#1132).
+    get href() {
+        return `${this.protocol}${this._authority}${this.pathname}${this.search}${this.hash}`;
+    }
+    set href(value) {
+        const next = new FallbackURL(value);
+        this.protocol = next.protocol;
+        this._authority = next._authority;
+        this.pathname = next.pathname;
+        this.search = next.search;
+        this.hash = next.hash;
+        this.searchParams = next.searchParams;
     }
     toString() {
         return this.href;

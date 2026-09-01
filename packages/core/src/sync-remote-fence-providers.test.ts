@@ -26,6 +26,22 @@ describe('remote mutation fence provider ports', () => {
 
         expect(webdavMutationFenceUrl('https://dav.example/root/data.json?ignored=1'))
             .toBe('https://dav.example/root/.mindwtr-sync-fence-v1.json');
+        // React Native URL classes accept component writes but serialize the
+        // original href; the derivation must not depend on URL mutation (#1132).
+        const OriginalURL = globalThis.URL;
+        class InertURL extends OriginalURL {
+            override set pathname(_value: string) { /* swallowed, like RN */ }
+            override get pathname(): string { return super.pathname; }
+        }
+        globalThis.URL = InertURL as unknown as typeof URL;
+        try {
+            expect(webdavMutationFenceUrl('https://dav.example/root/data.json'))
+                .toBe('https://dav.example/root/.mindwtr-sync-fence-v1.json');
+            expect(webdavMutationFenceUrl('https://dav.example/data.json'))
+                .toBe('https://dav.example/.mindwtr-sync-fence-v1.json');
+        } finally {
+            globalThis.URL = OriginalURL;
+        }
         await expect(port.read()).resolves.toEqual({
             bytes: new Uint8Array([1]),
             version: '"f1"',

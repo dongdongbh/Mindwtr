@@ -298,16 +298,20 @@ export const __webdavTestUtils = {
     resetWeakFingerprintWarnings: () => warnedWeakFingerprintSources.clear(),
 };
 
+// String surgery, not URL component mutation: React Native's URL classes
+// serialize the original href after `pathname = ...`, so the parent of
+// `/dav/data.json` came back as `/dav/data.json` on mobile (#1132).
 const getWebdavParentCollectionUrl = (url: string): string | null => {
     try {
-        const parsed = new URL(url);
-        const trimmedPath = parsed.pathname.replace(/\/+$/, '');
-        const lastSlash = trimmedPath.lastIndexOf('/');
-        if (lastSlash <= 0) return null;
-        parsed.pathname = trimmedPath.slice(0, lastSlash);
-        parsed.search = '';
-        parsed.hash = '';
-        return parsed.toString().replace(/\/+$/, '');
+        const suffixStart = url.search(/[?#]/);
+        const withoutSuffix = (suffixStart === -1 ? url : url.slice(0, suffixStart)).replace(/\/+$/, '');
+        const schemeEnd = withoutSuffix.indexOf('://');
+        if (schemeEnd === -1) return null;
+        const pathStart = withoutSuffix.indexOf('/', schemeEnd + 3);
+        if (pathStart === -1) return null;
+        const lastSlash = withoutSuffix.lastIndexOf('/');
+        if (lastSlash <= pathStart) return null;
+        return withoutSuffix.slice(0, lastSlash);
     } catch {
         return null;
     }

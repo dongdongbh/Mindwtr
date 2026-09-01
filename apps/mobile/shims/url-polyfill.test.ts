@@ -106,6 +106,31 @@ describe('URL Polyfill Shim', () => {
         }
     });
 
+    test('fallback URL keeps the sync mutation fence and parent collection off data.json', async () => {
+        const OriginalURL = globalThis.URL;
+        const OriginalURLSearchParams = globalThis.URLSearchParams;
+        try {
+            vi.resetModules();
+            globalThis.URL = undefined as unknown as typeof URL;
+            await import('./url-polyfill');
+            const { webdavMutationFenceUrl } = await import('@mindwtr/core');
+
+            expect(webdavMutationFenceUrl('https://example.com/dav/data.json'))
+                .toBe('https://example.com/dav/.mindwtr-sync-fence-v1.json');
+
+            // The polyfill itself must honor component writes too (#1132).
+            const parsed = new URL('https://example.com/dav/data.json?x=1#h');
+            parsed.pathname = '/dav/other.json';
+            parsed.search = '';
+            parsed.hash = '';
+            expect(parsed.toString()).toBe('https://example.com/dav/other.json');
+        } finally {
+            vi.resetModules();
+            globalThis.URL = OriginalURL;
+            globalThis.URLSearchParams = OriginalURLSearchParams;
+        }
+    });
+
     test('fallback URL keeps the WebDAV capability probe off data.json', async () => {
         const OriginalURL = globalThis.URL;
         const OriginalURLSearchParams = globalThis.URLSearchParams;

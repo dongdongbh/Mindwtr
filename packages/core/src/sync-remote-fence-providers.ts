@@ -19,13 +19,19 @@ import {
 
 const FENCE_MAX_BYTES = 4_096;
 
+// String surgery on purpose, never URL component mutation: React Native's URL
+// implementations accept `pathname = ...` and then serialize the ORIGINAL href,
+// which silently resolved the fence to data.json itself on Android and iOS
+// (#1132; the capability probe already avoids the URL class for the same reason).
 export const webdavMutationFenceUrl = (documentUrl: string): string => {
-    const parsed = new URL(documentUrl);
-    const slash = parsed.pathname.lastIndexOf('/');
-    parsed.pathname = `${parsed.pathname.slice(0, slash + 1)}${SYNC_REMOTE_MUTATION_FENCE_NAME}`;
-    parsed.search = '';
-    parsed.hash = '';
-    return parsed.toString();
+    const suffixStart = documentUrl.search(/[?#]/);
+    const withoutSuffix = suffixStart === -1 ? documentUrl : documentUrl.slice(0, suffixStart);
+    const pathStart = withoutSuffix.indexOf('/', withoutSuffix.indexOf('://') + 3);
+    const slash = withoutSuffix.lastIndexOf('/');
+    if (pathStart === -1 || slash < pathStart) {
+        return `${withoutSuffix}/${SYNC_REMOTE_MUTATION_FENCE_NAME}`;
+    }
+    return `${withoutSuffix.slice(0, slash + 1)}${SYNC_REMOTE_MUTATION_FENCE_NAME}`;
 };
 
 export const createWebdavSyncRemoteMutationFencePort = (
