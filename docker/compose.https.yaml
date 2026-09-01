@@ -20,7 +20,8 @@ services:
     environment:
       # One or more access tokens, comma-separated; each distinct token gets its
       # own private dataset (see docker/compose.yaml for examples).
-      - MINDWTR_CLOUD_AUTH_TOKENS=${MINDWTR_CLOUD_AUTH_TOKENS:?MINDWTR_CLOUD_AUTH_TOKENS must be set}
+      # Leave this empty only when using docker/compose.secrets.yaml.
+      - MINDWTR_CLOUD_AUTH_TOKENS=${MINDWTR_CLOUD_AUTH_TOKENS:-}
       - MINDWTR_CLOUD_CORS_ORIGIN=${MINDWTR_CLOUD_CORS_ORIGIN:?MINDWTR_CLOUD_CORS_ORIGIN must be set}
       - MINDWTR_CLOUD_MAX_BODY_BYTES=${MINDWTR_CLOUD_MAX_BODY_BYTES:-2000000}
       - MINDWTR_CLOUD_MAX_ATTACHMENT_BYTES=${MINDWTR_CLOUD_MAX_ATTACHMENT_BYTES:-50000000}

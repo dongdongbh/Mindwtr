@@ -26,8 +26,8 @@ services:
       # Devices that should sync together must use the same token.
       #   one person, all devices:    MINDWTR_CLOUD_AUTH_TOKENS=alices-long-random-token
       #   several people, one server: MINDWTR_CLOUD_AUTH_TOKENS=alices-long-random-token,bobs-long-random-token
-      # For Docker secrets, set MINDWTR_CLOUD_AUTH_TOKENS_FILE to a mounted file instead.
-      - MINDWTR_CLOUD_AUTH_TOKENS=${MINDWTR_CLOUD_AUTH_TOKENS:?MINDWTR_CLOUD_AUTH_TOKENS must be set}
+      # Leave this empty only when using docker/compose.secrets.yaml.
+      - MINDWTR_CLOUD_AUTH_TOKENS=${MINDWTR_CLOUD_AUTH_TOKENS:-}
       - MINDWTR_CLOUD_CORS_ORIGIN=${MINDWTR_CLOUD_CORS_ORIGIN:?MINDWTR_CLOUD_CORS_ORIGIN must be set}
     volumes:
       - ./data:/app/cloud_data

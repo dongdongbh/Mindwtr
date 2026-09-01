@@ -129,10 +129,33 @@ Each distinct token gets its own private dataset on the server, so several peopl
 
 `MINDWTR_CLOUD_TOKEN` is still accepted for backward compatibility, but deprecated.
 
-For Docker secrets, you can point to a mounted file instead:
+For a file-backed Docker secret, remove `MINDWTR_CLOUD_AUTH_TOKENS` from the
+Compose environment file, put the token in a host file readable only by its
+owner, and start Compose with the secret overlay.
+`MINDWTR_CLOUD_AUTH_TOKENS_FILE_HOST` must be an absolute host path:
 
+```bash
+printf '%s\n' 'replace_with_a_token_at_least_20_characters_long' > /absolute/path/mindwtr-cloud-tokens
+chmod 600 /absolute/path/mindwtr-cloud-tokens
+MINDWTR_CLOUD_AUTH_TOKENS_FILE_HOST=/absolute/path/mindwtr-cloud-tokens \
+  docker compose -f docker/compose.yaml -f docker/compose.secrets.yaml up -d
 ```
-MINDWTR_CLOUD_AUTH_TOKENS_FILE=/run/secrets/mindwtr_cloud_tokens
+
+The overlay mounts that file read-only at
+`/run/secrets/mindwtr_cloud_tokens`; the token bytes are not copied into the
+rendered Compose environment. Keep the host file at mode `0600`, even when its
+owner has a different UID from the container. The entrypoint makes a private
+mode-`0400` copy owned by the container's `bun` user, then immediately starts
+Cloud as UID/GID 1000. The server still refuses to start if neither the inline
+setting nor a readable token file provides a valid token.
+
+The same overlay works with the HTTPS stack. Remove the inline token from
+`docker/.env.https.local`, then run:
+
+```bash
+MINDWTR_CLOUD_AUTH_TOKENS_FILE_HOST=/absolute/path/mindwtr-cloud-tokens \
+  docker compose --env-file docker/.env.https.local \
+    -f docker/compose.https.yaml -f docker/compose.secrets.yaml up -d
 ```
 
 Use the **same token** in Mindwtr Settings → Sync → Self-Hosted.
