@@ -2438,7 +2438,10 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
         updatedAt: STAMP,
     });
 
-    it('refuses activation when the trial tombstones a blob that is gone from the candidate', async () => {
+    it('activates when the trial tombstones a candidate blob this device never held bytes for', async () => {
+        // The #1119 shape: a fresh device, one of the candidate's blobs is gone.
+        // No local bytes exist, so the tombstone cannot be a misread local file;
+        // it is the outcome every established device converges to.
         const remoteTask = createTask('t-two-attachments', 'Two attachments');
         remoteTask.attachments = [fileAttachment('attachment-ok', 'Fine'), fileAttachment('attachment-404', 'Gone')];
         const syncAttachments = vi.fn(async (data: AppData) => {
@@ -2455,8 +2458,55 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
             }
             return data;
         });
-        const { io, run } = createHarness({
+        const { harness, io, run } = createHarness({
             local: createData(),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
+        expect(harness.remote?.tasks[0]?.attachments).toEqual([
+            expect.objectContaining({ id: 'attachment-ok', cloudKey: 'attachments/attachment-ok.txt' }),
+            expect.objectContaining({ id: 'attachment-404', deletedAt: '2026-07-02T00:00:00.000Z' }),
+        ]);
+    });
+
+    it('refuses activation when the trial tombstones a record this device held bytes for', async () => {
+        const localTask = createTask('t-held-bytes', 'Held bytes');
+        localTask.attachments = [{
+            id: 'attachment-held',
+            kind: 'file',
+            title: 'Held locally',
+            uri: '/managed/held.txt',
+            localStatus: 'available',
+            fileHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const remoteTask = cloneAppData(createData([localTask])).tasks[0]!;
+        remoteTask.attachments![0] = {
+            ...remoteTask.attachments![0]!,
+            uri: '',
+            cloudKey: 'attachments/attachment-held.txt',
+            fileHash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            localStatus: 'missing',
+        };
+        const syncAttachments = vi.fn(async (data: AppData) => {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            if (attachment) {
+                attachment.cloudKey = undefined;
+                attachment.fileHash = undefined;
+                attachment.localStatus = 'missing';
+                attachment.deletedAt = '2026-07-02T00:00:00.000Z';
+            }
+            return data;
+        });
+        const { io, run } = createHarness({
+            local: createData([localTask]),
             remote: createData([remoteTask]),
             activationProbe: true,
             io: { syncAttachments },
@@ -2466,7 +2516,7 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
 
         expect(result).toMatchObject({
             success: false,
-            error: '[cloud] Candidate attachment proof failed for attachment-404',
+            error: '[cloud] Candidate attachment proof failed for attachment-held',
         });
         expect(io.writeRemote).not.toHaveBeenCalled();
     });
@@ -2551,22 +2601,22 @@ describe('activation proof with metadata-only attachments (no blob anywhere)', (
             updatedAt: STAMP,
         }];
         const syncAttachments = vi.fn(async (data: AppData) => data);
-        const harness = createHarness({
+        const { harness, io, run } = createHarness({
             local: createData(),
             remote: createData([remoteTask]),
             activationProbe: true,
             io: { syncAttachments },
         });
 
-        const result = await harness.run();
+        const result = await run();
 
         expect(result.success).toBe(true);
-        expect(harness.io.writeRemote).toHaveBeenCalledTimes(1);
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
         // Same outcome an established device converges to: the written document
-        // never carries the missing record as a live attachment.
-        const liveRemoteAttachments = (harness.remote?.tasks[0]?.attachments ?? [])
-            .filter((attachment) => !attachment.deletedAt);
-        expect(liveRemoteAttachments).toEqual([]);
+        // carries the record as a tombstone, never as a live attachment.
+        expect(harness.remote?.tasks[0]?.attachments).toEqual([
+            expect.objectContaining({ id: 'attachment-orphan', deletedAt: STAMP }),
+        ]);
     });
 
     it('still refuses when the record was reachable on the previous backend', async () => {

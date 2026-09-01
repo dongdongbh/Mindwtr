@@ -221,6 +221,7 @@ const prepareActivationAttachmentSnapshot = (
     expectedIds: Set<string>;
     localFallbacks: Map<string, Attachment>;
     metadataOnlyIds: Set<string>;
+    noLocalBytesIds: Set<string>;
 } => {
     const candidateAttachments = new Map<string, Attachment>();
     if (candidateRemoteData) {
@@ -238,19 +239,18 @@ const prepareActivationAttachmentSnapshot = (
     const expectedIds = new Set<string>();
     const localFallbacks = new Map<string, Attachment>();
     const metadataOnlyIds = new Set<string>();
+    const noLocalBytesIds = new Set<string>();
     const count = visitLiveFileAttachments(candidate, (attachment) => {
         expectedIds.add(attachment.id);
         const candidateAttachment = candidateAttachments.get(attachment.id);
         const localAttachment = localAttachments.get(attachment.id);
-        // No blob on the candidate, none on the previous backend, and this device
-        // already knew it holds no bytes (or never had the record at all).
-        if (
-            !candidateAttachment?.cloudKey
-            && !localAttachment?.cloudKey
-            && (!localAttachment || localAttachment.localStatus === 'missing')
-        ) {
-            metadataOnlyIds.add(attachment.id);
-        }
+        // This device holds no bytes for the record (never had it, or already knew
+        // the file is missing) and cannot reach it on the previous backend either.
+        const noLocalBytes = !localAttachment?.cloudKey
+            && (!localAttachment || !localAttachment.uri?.trim() || localAttachment.localStatus === 'missing');
+        if (noLocalBytes) noLocalBytesIds.add(attachment.id);
+        // ...and the candidate has no blob for it: metadata only, nowhere to fetch from.
+        if (noLocalBytes && !candidateAttachment?.cloudKey) metadataOnlyIds.add(attachment.id);
         const mustReplaceCandidateBlob = Boolean(
             candidateAttachment?.cloudKey
             && mergedContentMustReplaceCandidateBlob(attachment, candidateAttachment),
@@ -281,7 +281,7 @@ const prepareActivationAttachmentSnapshot = (
         }
         attachment.localStatus = 'missing';
     });
-    return { data: candidate, count, expectedIds, localFallbacks, metadataOnlyIds };
+    return { data: candidate, count, expectedIds, localFallbacks, metadataOnlyIds, noLocalBytesIds };
 };
 
 const prepareActivationFallbackRetry = (
@@ -312,6 +312,7 @@ const assertActivationAttachmentsProven = (
     data: AppData,
     expectedIds: ReadonlySet<string>,
     metadataOnlyIds: ReadonlySet<string>,
+    noLocalBytesIds: ReadonlySet<string>,
 ): void => {
     const resolved = new Set<string>();
     for (const owner of [...data.tasks, ...data.projects]) {
@@ -319,7 +320,16 @@ const assertActivationAttachmentsProven = (
             if (attachment.kind !== 'file') continue;
             if (owner.deletedAt || attachment.deletedAt) {
                 if (expectedIds.has(attachment.id)) {
-                    throw new Error(`Candidate attachment proof failed for ${attachment.id}`);
+                    // Adapters expose a terminal remote 404 and a local-read failure
+                    // as the same untyped tombstone. Without local bytes there is
+                    // nothing to misread, so the tombstone can only be the remote
+                    // outcome every established device converges to (#1119). With
+                    // local bytes involved it stays a refusal (the exact-copy retry
+                    // above already had its one attempt).
+                    if (!noLocalBytesIds.has(attachment.id)) {
+                        throw new Error(`Candidate attachment proof failed for ${attachment.id}`);
+                    }
+                    resolved.add(attachment.id);
                 }
                 continue;
             }
@@ -1028,6 +1038,7 @@ class SharedSyncRunMachine {
                 provenData,
                 activationSnapshot.expectedIds,
                 activationSnapshot.metadataOnlyIds,
+                activationSnapshot.noLocalBytesIds,
             );
             this.ensureLocalSnapshotFresh();
             this.notifier.onDiagnostic?.({
