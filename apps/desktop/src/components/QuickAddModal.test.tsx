@@ -1305,6 +1305,8 @@ describe('QuickAddModal', () => {
 
         expect(addTask).not.toHaveBeenCalled();
         expect(screen.getByPlaceholderText('Add Task')).toHaveValue('Second capture');
+        expect(fsMocks.remove).toHaveBeenCalledWith('/data/audio-a.wav');
+        expect(fsMocks.remove).toHaveBeenCalledTimes(1);
     });
 
     it('cancels an active audio recorder when the modal owner unmounts', async () => {

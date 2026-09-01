@@ -56,6 +56,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    vi.useRealTimers();
     delete (window as any).__TAURI_INTERNALS__;
     delete (navigator as any).mediaDevices;
     delete (window as any).AudioContext;
@@ -107,6 +108,23 @@ describe('startAudioCapture — native backend', () => {
 });
 
 describe('startAudioCapture — fallback', () => {
+    it('uses distinct default paths for captures stopped in the same second', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-08-31T12:00:00.000Z'));
+        const firstGraph = installFakeWebAudio();
+        const firstSession = await startAudioCapture();
+        pushSamples(firstGraph.processor, new Float32Array([0.1]));
+        const firstCapture = await firstSession.stop();
+
+        const secondGraph = installFakeWebAudio();
+        const secondSession = await startAudioCapture();
+        pushSamples(secondGraph.processor, new Float32Array([0.1]));
+        const secondCapture = await secondSession.stop();
+
+        expect(firstCapture.path).not.toBe(secondCapture.path);
+        expect(firstCapture.name).not.toBe(secondCapture.name);
+    });
+
     it('falls back to web capture when the native recorder refuses to start', async () => {
         // This is the defect the shared module fixes: the task editor used to
         // hard-fail here instead of recording through the page.

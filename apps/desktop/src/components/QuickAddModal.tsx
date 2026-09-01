@@ -649,7 +649,6 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                 const audioSession = await queueRecordingDeviceOperation(async () => {
                     if (!isStartCurrent()) return null;
                     const acquired = await startAudioCapture({
-                        defaultName: () => `mindwtr-audio-${safeFormatDate(new Date(), 'yyyyMMdd-HHmmss')}.wav`,
                         isCurrent: isStartCurrent,
                     });
                     if (!isStartCurrent()) {
@@ -702,6 +701,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         const isSubmissionCurrent = () => (
             captureSurfaceSession === null || submissionCoordinatorRef.current.isCurrent(captureSurfaceSession)
         );
+        let stoppedCapturePath: string | null = null;
+        let stoppedCaptureAdopted = false;
         setRecordingBusy(true);
         setIsRecording(false);
         const audioSession = captureSessionRef.current;
@@ -715,6 +716,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             }
 
             const capture = await queueRecordingDeviceOperation(() => audioSession.stop());
+            stoppedCapturePath = capture.path;
             if (!isSubmissionCurrent()) return;
             const fileName = capture.name;
             const absolutePath = capture.path;
@@ -753,6 +755,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             }
             if (!isSubmissionCurrent()) return;
             const addTaskResult = await addTask(displayTitle, props);
+            if (addTaskResult.success && addTaskResult.id) stoppedCaptureAdopted = true;
             if (!isSubmissionCurrent()) return;
             if (addTaskResult.success && standaloneWindow) {
                 await flushPendingSave().catch((error) => reportError('Failed to save quick add task', error));
@@ -827,6 +830,14 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             const message = error instanceof Error ? error.message : String(error);
             setRecordingError(`${t('quickAdd.audioErrorBody')} (${message})`);
         } finally {
+            if (stoppedCapturePath && !stoppedCaptureAdopted && !isSubmissionCurrent()) {
+                await remove(stoppedCapturePath).catch((error) => {
+                    void logWarn('Stale audio cleanup failed', {
+                        scope: 'audio',
+                        extra: { error: error instanceof Error ? error.message : String(error) },
+                    });
+                });
+            }
             if (submissionSession === null) {
                 if (captureSurfaceSession === null || submissionCoordinatorRef.current.isCurrent(captureSurfaceSession)) {
                     setRecordingBusy(false);

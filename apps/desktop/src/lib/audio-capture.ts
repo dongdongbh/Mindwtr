@@ -1,5 +1,6 @@
 import { join } from '@tauri-apps/api/path';
 import { mkdir, readFile, remove, writeFile } from '@tauri-apps/plugin-fs';
+import { generateUUID } from '@mindwtr/core';
 
 import { logWarn } from './app-log';
 import { appendAudioChunkWithLimit, getMaxAudioSamples } from './audio-capture-buffer';
@@ -243,7 +244,7 @@ export async function startAudioCapture(
     options: { defaultName?: () => string; isCurrent?: () => boolean } = {},
 ): Promise<AudioCaptureSession> {
     const timestampedName = options.defaultName
-        ?? (() => `mindwtr-audio-${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '')}.wav`);
+        ?? (() => `mindwtr-audio-${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '')}-${generateUUID()}.wav`);
     const isCurrent = options.isCurrent ?? (() => true);
 
     if (!isCurrent()) throw new Error('Audio capture start was cancelled');

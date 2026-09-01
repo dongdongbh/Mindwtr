@@ -22,12 +22,14 @@ Stopping audio starts a chain of recorder shutdown, attachment preparation, task
 7. Invalidating or reopening a capture drops only the old start owner's continuations. Stale success, error, `finally`, and auto-stop setup must not record, report into, clear busy state for, or save through the newer capture.
 8. Keep acquired and active recorder ownership explicit through handoff and teardown. If ownership changes after acquisition, or the owning component unmounts, enqueue stop/release cleanup before a later capture can acquire the shared device.
 9. Delete temporary Expo audio only on stale, canceled, or unmounted ownership paths; a valid current session that adopts and saves the recording keeps its verified file for attachment/transcription handling.
+10. Keep the stopped submission's exact raw and managed-cache files under its lease until a task adopts them. Give app-authored capture files UUID-qualified names so a same-second reopened session cannot reuse the stale path. A stale save deletes only that abandoned set, and every Whisper model resolution uses its capture/effect lease before persisting speech settings.
 
 ## Verification
 
 - Desktop Quick Add and core capture-session regressions for busy dismissal and stale A / reopened B ownership.
 - Mobile audio-hook and quick-capture-sheet regressions with deferred audio preparation and a reopened capture.
 - Desktop and mobile deferred-start A / dismiss / B regressions covering stale success, error, busy-finally ownership, recorder cleanup ordering, and desktop auto-save timeout installation.
+- Desktop and mobile stopped-save A / reopened B regressions covering exact raw/cache cleanup, preservation of adopted captures, and stale speech-setting writes.
 - Desktop and mobile typechecks plus changed-file lint.
 - `git diff --check v1.2.5-rc.2..HEAD` and a clean worktree after the single finding commit.
 

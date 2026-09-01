@@ -69,6 +69,10 @@ const fileMocks = vi.hoisted(() => ({
   delete: vi.fn(),
 }));
 
+const coreMocks = vi.hoisted(() => ({
+  generateUUID: vi.fn(),
+}));
+
 const appLogMock = vi.hoisted(() => ({
   logInfo: vi.fn(),
 }));
@@ -146,7 +150,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   // Only the id and clock are pinned, so attachment names stay deterministic;
   // `buildTaskUpdatesFromSpeechResult` runs for real.
   return mockCore(importOriginal, () => ({}), {
-    generateUUID: () => 'attachment-1',
+    generateUUID: coreMocks.generateUUID,
     safeFormatDate: (_value: Date | string, format: string) => {
       if (format === 'yyyyMMdd-HHmmss') return '20260629-090027';
       if (format === 'Pp') return '06/29/2026, 9:00 AM';
@@ -269,6 +273,8 @@ describe('useQuickCaptureAudio', () => {
     latest = null;
     submissionCoordinator = new CaptureSessionCoordinator();
     activeSubmissionSession = submissionCoordinator.beginSession();
+    let uuidSequence = 0;
+    coreMocks.generateUUID.mockImplementation(() => `capture-${uuidSequence += 1}`);
     storeMocks.state.areas = [];
     storeMocks.state.projects = [];
     storeMocks.state.settings = settings;
@@ -280,9 +286,9 @@ describe('useQuickCaptureAudio', () => {
     audioMocks.release.mockReturnValue(undefined);
     audioMocks.stop.mockResolvedValue(undefined);
     attachmentMocks.getAttachmentsDir.mockResolvedValue('file:///document/attachments/');
-    attachmentMocks.persistAttachmentLocally.mockImplementation(async (attachment: { uri: string }) => ({
+    attachmentMocks.persistAttachmentLocally.mockImplementation(async (attachment: { id: string; uri: string }) => ({
       ...attachment,
-      uri: 'file:///document/attachments/attachment-1.wav',
+      uri: `file:///document/attachments/${attachment.id}.wav`,
     }));
     buildTaskProps.mockImplementation(async (fallbackTitle: string, extraProps?: Record<string, unknown>) => ({
       title: fallbackTitle,
@@ -339,6 +345,7 @@ describe('useQuickCaptureAudio', () => {
     // so this line asserted behaviour the app does not have.
     expect(storeMocks.updateTask).toHaveBeenCalledWith('task-1', { title: 'Buy milk' });
     expect(handleClose).toHaveBeenCalledOnce();
+    expect(fileMocks.delete).not.toHaveBeenCalled();
   });
 
   it('shows a notice and never starts the recorder when speech-to-text is unconfigured', async () => {
@@ -694,6 +701,12 @@ describe('useQuickCaptureAudio', () => {
     expect(stopAHandler).toHaveBeenCalledTimes(1);
     expect(speechMocks.startWhisperRealtimeCapture).toHaveBeenCalledTimes(2);
     expect(audioMocks.setAudioModeAsync).toHaveBeenCalledTimes(2);
+    const firstOutputPath = String(speechMocks.startWhisperRealtimeCapture.mock.calls[0]?.[0]);
+    const secondOutputPath = String(speechMocks.startWhisperRealtimeCapture.mock.calls[1]?.[0]);
+    expect(firstOutputPath).not.toBe(secondOutputPath);
+    expect(fileMocks.delete).toHaveBeenCalledWith(`file://${firstOutputPath}`);
+    expect(fileMocks.delete).not.toHaveBeenCalledWith(`file://${secondOutputPath}`);
+    expect(fileMocks.delete).toHaveBeenCalledTimes(1);
     expect(latest?.recording).toEqual(expect.objectContaining({ kind: 'whisper', stop: stopBHandler }));
     expect(latest?.recordingBusy).toBe(false);
   });
@@ -737,5 +750,143 @@ describe('useQuickCaptureAudio', () => {
     expect(handleClose).not.toHaveBeenCalled();
     expect(submissionCoordinator.isSubmitting(reopenedSession)).toBe(true);
     expect(latest?.recordingBusy).toBe(false);
+    expect(fileMocks.delete).toHaveBeenCalledWith(
+      'file:///document/audio-captures/mindwtr-audio-20260629-090027-capture-1.wav',
+    );
+    expect(fileMocks.delete).toHaveBeenCalledWith(
+      'file:///document/attachments/capture-2.wav',
+    );
+    expect(fileMocks.delete).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps reopened capture settings when stopped audio A resolves its model late', async () => {
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValueOnce(new Error('use Expo fallback'));
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness submissionKey={1} />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest?.startRecording();
+      await flushPromises();
+    });
+
+    const modelResolution = deferred<{
+      exists: boolean;
+      path: string;
+      uri: string;
+      size: number;
+    }>();
+    speechMocks.ensureWhisperModelPathForConfigAsync.mockReturnValueOnce(modelResolution.promise);
+    updateSpeechSettings.mockClear();
+    let stopRun!: Promise<void>;
+    await act(async () => {
+      stopRun = latest!.stopRecording({ saveTask: true });
+      await flushPromises();
+    });
+
+    const audioSession = activeSubmissionSession!;
+    submissionCoordinator.invalidateSession(audioSession);
+    activeSubmissionSession = submissionCoordinator.beginSession();
+    await act(async () => {
+      tree.update(<Harness submissionKey={2} />);
+      modelResolution.resolve({
+        exists: true,
+        path: '/document/whisper-models/reopened-b.bin',
+        uri: 'file:///document/whisper-models/reopened-b.bin',
+        size: 77704715,
+      });
+      await stopRun;
+      await flushPromises();
+    });
+
+    expect(updateSpeechSettings).not.toHaveBeenCalled();
+    expect(addTask).not.toHaveBeenCalled();
+    expect(fileMocks.delete).toHaveBeenCalledWith('file:///recording.m4a');
+    expect(fileMocks.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a newer speech model selected while the same audio save is resolving', async () => {
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValueOnce(new Error('use Expo fallback'));
+    await act(async () => {
+      create(<Harness />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest?.startRecording();
+      await flushPromises();
+    });
+
+    const modelResolution = deferred<{
+      exists: boolean;
+      path: string;
+      uri: string;
+      size: number;
+    }>();
+    speechMocks.ensureWhisperModelPathForConfigAsync.mockReturnValueOnce(modelResolution.promise);
+    updateSpeechSettings.mockClear();
+    let stopRun!: Promise<void>;
+    await act(async () => {
+      stopRun = latest!.stopRecording({ saveTask: true });
+      await flushPromises();
+    });
+
+    storeMocks.state.settings = {
+      ...settings,
+      ai: {
+        speechToText: {
+          ...settings.ai.speechToText,
+          model: 'whisper-base',
+          offlineModelPath: 'file:///document/whisper-models/newer-b.bin',
+        },
+      },
+    };
+    await act(async () => {
+      modelResolution.resolve({
+        exists: true,
+        path: '/document/whisper-models/obsolete-a.bin',
+        uri: 'file:///document/whisper-models/obsolete-a.bin',
+        size: 77704715,
+      });
+      await stopRun;
+      await flushPromises();
+    });
+
+    expect(updateSpeechSettings).not.toHaveBeenCalled();
+    expect(addTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not persist a model path from a canceled Whisper preload', async () => {
+    const modelResolution = deferred<{
+      exists: boolean;
+      path: string;
+      uri: string;
+      size: number;
+    }>();
+    speechMocks.ensureWhisperModelPathForConfigAsync.mockReturnValueOnce(modelResolution.promise);
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness />);
+      await flushPromises();
+    });
+    updateSpeechSettings.mockClear();
+
+    await act(async () => {
+      tree.unmount();
+      await flushPromises();
+    });
+    await act(async () => {
+      modelResolution.resolve({
+        exists: true,
+        path: '/document/whisper-models/obsolete-a.bin',
+        uri: 'file:///document/whisper-models/obsolete-a.bin',
+        size: 77704715,
+      });
+      await modelResolution.promise;
+      await flushPromises();
+    });
+
+    expect(updateSpeechSettings).not.toHaveBeenCalled();
+    expect(speechMocks.preloadWhisperContext).not.toHaveBeenCalled();
   });
 });

@@ -279,6 +279,18 @@ export function useQuickCaptureAudio({
   }, [isUnsafeDeleteTarget, onWarn]);
   safeDeleteFileRef.current = safeDeleteFile;
 
+  const isSpeechSettingsLeaseCurrent = useCallback((
+    expectedProvider: string,
+    expectedModel: string,
+    expectedModelPath?: string,
+  ) => {
+    const latestSettings = selectQuickCaptureSettings(settings, useTaskStore.getState().settings);
+    const latestRuntime = resolveSpeechToTextRuntimeSettings(latestSettings.ai?.speechToText);
+    return latestRuntime.provider === expectedProvider
+      && latestRuntime.model === expectedModel
+      && stripFileScheme(latestRuntime.modelPath ?? '') === stripFileScheme(expectedModelPath ?? '');
+  }, [settings, stripFileScheme]);
+
   const resolveWhisperModelAsync = useCallback(async (
     modelId: string,
     storedPath?: string,
@@ -302,7 +314,9 @@ export function useQuickCaptureAudio({
     if (!speechRuntime.enabled || speechRuntime.provider !== 'whisper') return;
     const { model, modelPath } = speechRuntime;
     let cancelled = false;
-    void resolveWhisperModelAsync(model, modelPath)
+    void resolveWhisperModelAsync(model, modelPath, () => (
+      !cancelled && isSpeechSettingsLeaseCurrent('whisper', model, modelPath)
+    ))
       .then((resolved) => {
         if (cancelled || !resolved.exists) return undefined;
         return preloadWhisperContext({ model, modelPath: resolved.path });
@@ -314,7 +328,7 @@ export function useQuickCaptureAudio({
     return () => {
       cancelled = true;
     };
-  }, [onWarn, resolveWhisperModelAsync, settings.ai?.speechToText, visible]);
+  }, [isSpeechSettingsLeaseCurrent, onWarn, resolveWhisperModelAsync, settings.ai?.speechToText, visible]);
 
   const applySpeechResult = useCallback(async (taskId: string, result: SpeechToTextResult): Promise<SpeechApplyResult> => {
     const { tasks: currentTasks, projects: currentProjects, addProject: addProjectNow, updateTask: updateTaskNow, settings: currentSettings } = useTaskStore.getState();
@@ -387,7 +401,10 @@ export function useQuickCaptureAudio({
           : await loadAIKey(guardRuntime.provider).catch(() => '');
         if (!isStartCurrent()) return;
         const guardWhisper = guardRuntime.provider === 'whisper'
-          ? await resolveWhisperModelAsync(guardRuntime.model, guardRuntime.modelPath, isStartCurrent).catch(() => null)
+          ? await resolveWhisperModelAsync(guardRuntime.model, guardRuntime.modelPath, () => (
+            isStartCurrent()
+            && isSpeechSettingsLeaseCurrent(guardRuntime.provider, guardRuntime.model, guardRuntime.modelPath)
+          )).catch(() => null)
           : null;
         if (!isStartCurrent()) return;
         const speechConfigured = isQuickCaptureSpeechReady({
@@ -418,7 +435,9 @@ export function useQuickCaptureAudio({
         const speechRuntime = resolveSpeechToTextRuntimeSettings(speech);
         const { provider, model, modelPath } = speechRuntime;
         const whisperResolved = provider === 'whisper'
-          ? await resolveWhisperModelAsync(model, modelPath, isStartCurrent)
+          ? await resolveWhisperModelAsync(model, modelPath, () => (
+            isStartCurrent() && isSpeechSettingsLeaseCurrent(provider, model, modelPath)
+          ))
           : null;
         if (!isStartCurrent()) return;
         const whisperModelReady = provider === 'whisper' ? Boolean(whisperResolved?.exists) : false;
@@ -434,7 +453,7 @@ export function useQuickCaptureAudio({
             const timestamp = safeFormatDate(now, 'yyyyMMdd-HHmmss');
             const directory = await ensureAudioDirectory();
             if (!isStartCurrent()) return;
-            const fileName = `mindwtr-audio-${timestamp}.wav`;
+            const fileName = `mindwtr-audio-${timestamp}-${generateUUID()}.wav`;
             const buildOutputFile = (base?: Directory | null) => {
               if (!base?.uri) return null;
               return new File(buildCaptureFileUri(base.uri, fileName));
@@ -562,6 +581,7 @@ export function useQuickCaptureAudio({
   }, [
     ensureAudioDirectory,
     getActiveSubmissionSession,
+    isSpeechSettingsLeaseCurrent,
     onError,
     onWarn,
     recording,
@@ -579,6 +599,21 @@ export function useQuickCaptureAudio({
     if (recordingBusy) return;
     const currentRecording = activeRecordingRef.current ?? recording;
     if (!currentRecording) return;
+    const ownedSubmissionFiles = new Map<string, File>();
+    let submissionFilesAdopted = false;
+    const trackSubmissionFile = (file: File): File => {
+      if (file.uri) ownedSubmissionFiles.set(file.uri, new File(file.uri));
+      return file;
+    };
+    const forgetSubmissionFile = (uri: string) => {
+      ownedSubmissionFiles.delete(uri);
+    };
+    const cleanupAbandonedSubmissionFiles = (reason: string) => {
+      for (const file of ownedSubmissionFiles.values()) {
+        safeDeleteFile(file, reason);
+      }
+      ownedSubmissionFiles.clear();
+    };
     const captureSurfaceSession = getActiveSubmissionSession();
     const submissionSession = saveTask ? captureSurfaceSession : null;
     if (saveTask) {
@@ -599,16 +634,17 @@ export function useQuickCaptureAudio({
         } catch (error) {
           onWarn('Failed to stop whisper recording', error);
         }
+        const finalFile = trackSubmissionFile(currentRecording.file);
         if (!saveTask) {
           if (currentRecording.allowRealtimeFallback) {
             void currentRecording.result.catch((error) => onWarn('Speech-to-text failed', error));
           }
           safeDeleteFile(currentRecording.file, 'whisper_cancel');
+          forgetSubmissionFile(finalFile.uri);
           return;
         }
         if (!isSubmissionCurrent()) return;
 
-        const finalFile = currentRecording.file;
         let fileInfo: { exists?: boolean; size?: number } | null = null;
         try {
           fileInfo = finalFile.info();
@@ -624,7 +660,9 @@ export function useQuickCaptureAudio({
         const { provider, model, modelPath } = speechRuntime;
         const apiKey = provider === 'whisper' ? '' : await loadAIKey(provider).catch(() => '');
         const whisperResolved = provider === 'whisper'
-          ? await resolveWhisperModelAsync(model, modelPath)
+          ? await resolveWhisperModelAsync(model, modelPath, () => (
+            isSubmissionCurrent() && isSpeechSettingsLeaseCurrent(provider, model, modelPath)
+          ))
           : null;
         const whisperModelReady = provider === 'whisper' ? Boolean(whisperResolved?.exists) : false;
         const resolvedModelPath = provider === 'whisper'
@@ -681,6 +719,7 @@ export function useQuickCaptureAudio({
         if (attachment) {
           try {
             attachment = await cacheAudioAttachmentOrThrow(attachment);
+            trackSubmissionFile(new File(attachment.uri));
           } catch (error) {
             onWarn('Failed to persist audio attachment', error);
             throw error;
@@ -699,6 +738,7 @@ export function useQuickCaptureAudio({
         if (!title.trim()) return;
 
         const addTaskResult = await addTask(title, props);
+        if (addTaskResult.success && addTaskResult.id) submissionFilesAdopted = true;
         if (!isSubmissionCurrent()) return;
         handleClose();
 
@@ -801,8 +841,10 @@ export function useQuickCaptureAudio({
       if (!uri) {
         throw new Error('Recording URI missing');
       }
+      const sourceFile = trackSubmissionFile(new File(uri));
       if (!saveTask) {
-        safeDeleteFile(new File(uri), 'expo_cancel');
+        safeDeleteFile(sourceFile, 'expo_cancel');
+        forgetSubmissionFile(uri);
         return;
       }
       if (!isSubmissionCurrent()) return;
@@ -812,23 +854,26 @@ export function useQuickCaptureAudio({
       const extension = getCaptureFileExtension(uri);
       const shouldRelocateRecording = Platform.OS !== 'ios';
       const directory = shouldRelocateRecording ? await ensureAudioDirectory() : null;
-      const fileName = `mindwtr-audio-${timestamp}${extension}`;
-      const sourceFile = new File(uri);
+      const fileName = `mindwtr-audio-${timestamp}-${generateUUID()}${extension}`;
       const destinationFile = directory ? new File(buildCaptureFileUri(directory.uri, fileName)) : null;
       let captureCandidates: (File | null)[] = [sourceFile];
 
       if (destinationFile) {
         try {
           sourceFile.move(destinationFile);
+          forgetSubmissionFile(uri);
+          trackSubmissionFile(destinationFile);
           captureCandidates = [sourceFile, destinationFile];
         } catch (error) {
           onWarn('Move recording failed, falling back to copy', error);
           try {
             sourceFile.copy(destinationFile);
+            trackSubmissionFile(destinationFile);
             captureCandidates = [destinationFile, sourceFile];
             const copiedDestination = selectExistingCaptureFile([destinationFile]);
             if (copiedDestination) {
               safeDeleteFile(sourceFile, 'recording_copy_cleanup');
+              forgetSubmissionFile(uri);
             }
           } catch (copyError) {
             onWarn('Copy recording failed, using original file', copyError);
@@ -842,6 +887,7 @@ export function useQuickCaptureAudio({
         throw new Error(`Recording file missing after save: ${captureCandidates.map((file) => file?.uri ?? '').filter(Boolean).join(', ')}`);
       }
       const finalFile = verifiedCapture.file;
+      trackSubmissionFile(finalFile);
       const fileInfo = verifiedCapture.info;
       const nowIso = now.toISOString();
       const displayTitle = `${t('quickAdd.audioNoteTitle')} ${safeFormatDate(now, 'Pp')}`;
@@ -851,7 +897,9 @@ export function useQuickCaptureAudio({
       const { provider, model, modelPath } = speechRuntime;
       const apiKey = provider === 'whisper' ? '' : await loadAIKey(provider).catch(() => '');
       const whisperResolved = provider === 'whisper'
-        ? await resolveWhisperModelAsync(model, modelPath)
+        ? await resolveWhisperModelAsync(model, modelPath, () => (
+          isSubmissionCurrent() && isSpeechSettingsLeaseCurrent(provider, model, modelPath)
+        ))
         : null;
       const whisperModelReady = provider === 'whisper' ? Boolean(whisperResolved?.exists) : false;
       const resolvedModelPath = provider === 'whisper'
@@ -894,6 +942,7 @@ export function useQuickCaptureAudio({
       if (attachment) {
         try {
           attachment = await cacheAudioAttachmentOrThrow(attachment);
+          trackSubmissionFile(new File(attachment.uri));
         } catch (error) {
           onWarn('Failed to persist audio attachment', error);
           throw error;
@@ -912,6 +961,7 @@ export function useQuickCaptureAudio({
       if (!title.trim()) return;
 
       const addTaskResult = await addTask(title, props);
+      if (addTaskResult.success && addTaskResult.id) submissionFilesAdopted = true;
       if (!isSubmissionCurrent()) return;
       handleClose();
 
@@ -965,6 +1015,9 @@ export function useQuickCaptureAudio({
       onError('Failed to save recording', error);
       Alert.alert(t('quickAdd.audioErrorTitle'), t('quickAdd.audioErrorBody'));
     } finally {
+      if (!submissionFilesAdopted && !isSubmissionCurrent()) {
+        cleanupAbandonedSubmissionFiles('stale_audio_submission');
+      }
       if (submissionSession === null) {
         if (captureSurfaceSession === null || submissionCoordinator.isCurrent(captureSurfaceSession)) {
           setRecordingBusy(false);
@@ -983,6 +1036,7 @@ export function useQuickCaptureAudio({
     getActiveSubmissionSession,
     handleClose,
     initialAttachments,
+    isSpeechSettingsLeaseCurrent,
     onError,
     onSubmissionBusyChange,
     onWarn,
