@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { CaptureSessionCoordinator, type CaptureSessionId } from '@mindwtr/core';
 
 const storeMocks = vi.hoisted(() => {
   const updateTask = vi.fn();
@@ -179,6 +180,14 @@ const flushPromises = async () => {
   await Promise.resolve();
 };
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
 describe('useQuickCaptureAudio', () => {
   let latest: ReturnType<typeof useQuickCaptureAudio> | null = null;
   const addTask = vi.fn();
@@ -187,6 +196,9 @@ describe('useQuickCaptureAudio', () => {
   const onError = vi.fn();
   const onWarn = vi.fn();
   const updateSpeechSettings = vi.fn();
+  const onSubmissionBusyChange = vi.fn();
+  let submissionCoordinator = new CaptureSessionCoordinator();
+  let activeSubmissionSession: CaptureSessionId | null = null;
 
   const settings = {
     ai: {
@@ -203,15 +215,19 @@ describe('useQuickCaptureAudio', () => {
     },
   } as const;
 
-  function Harness() {
+  function Harness({ submissionKey = 1 }: { submissionKey?: number }) {
     latest = useQuickCaptureAudio({
       addTask,
       buildTaskProps,
+      getActiveSubmissionSession: () => activeSubmissionSession,
       handleClose,
       onError,
       onWarn,
       settings,
+      submissionCoordinator,
+      submissionKey,
       t: (key: string) => key,
+      onSubmissionBusyChange,
       updateSpeechSettings,
       visible: true,
     });
@@ -221,6 +237,8 @@ describe('useQuickCaptureAudio', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     latest = null;
+    submissionCoordinator = new CaptureSessionCoordinator();
+    activeSubmissionSession = submissionCoordinator.beginSession();
     storeMocks.state.areas = [];
     storeMocks.state.projects = [];
     storeMocks.state.settings = settings;
@@ -310,11 +328,15 @@ describe('useQuickCaptureAudio', () => {
       latest = useQuickCaptureAudio({
         addTask,
         buildTaskProps,
+        getActiveSubmissionSession: () => activeSubmissionSession,
         handleClose,
         onError,
         onWarn,
         settings: unconfiguredSettings,
+        submissionCoordinator,
+        submissionKey: 1,
         t: (key: string) => key,
+        onSubmissionBusyChange,
         updateSpeechSettings,
         visible: true,
       });
@@ -338,5 +360,46 @@ describe('useQuickCaptureAudio', () => {
     expect(audioMocks.audioRecorder.prepareToRecordAsync).not.toHaveBeenCalled();
     expect(latest?.recording).toBeNull();
     expect(handleClose).not.toHaveBeenCalled();
+  });
+
+  it('does not create or close from stale audio A after capture B opens', async () => {
+    const preparedTask = deferred<{
+      title: string;
+      props: Record<string, unknown>;
+      invalidDateCommands: string[];
+    }>();
+    buildTaskProps.mockReturnValueOnce(preparedTask.promise);
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness submissionKey={1} />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest?.startRecording();
+      await flushPromises();
+    });
+
+    let stopRun!: Promise<void>;
+    await act(async () => {
+      stopRun = latest!.stopRecording({ saveTask: true });
+      await flushPromises();
+    });
+    expect(buildTaskProps).toHaveBeenCalled();
+    const audioSession = activeSubmissionSession!;
+    submissionCoordinator.invalidateSession(audioSession);
+    activeSubmissionSession = submissionCoordinator.beginSession();
+    const reopenedSession = activeSubmissionSession;
+    expect(submissionCoordinator.tryBeginSubmission(reopenedSession)).toBe(true);
+    await act(async () => {
+      tree.update(<Harness submissionKey={2} />);
+      preparedTask.resolve({ title: 'Stale audio A', props: {}, invalidDateCommands: [] });
+      await stopRun;
+      await flushPromises();
+    });
+
+    expect(addTask).not.toHaveBeenCalled();
+    expect(handleClose).not.toHaveBeenCalled();
+    expect(submissionCoordinator.isSubmitting(reopenedSession)).toBe(true);
+    expect(latest?.recordingBusy).toBe(false);
   });
 });

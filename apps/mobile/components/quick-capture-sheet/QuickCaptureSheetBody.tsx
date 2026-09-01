@@ -337,6 +337,17 @@ export function QuickCaptureSheetBody({
                 </CompactText>
               </View>
             )}
+            {recordingBusy ? (
+              <View style={styles.recordingRow}>
+                <CompactText
+                  style={[styles.recordingText, { color: tc.secondaryText }]}
+                  numberOfLines={2}
+                  accessibilityLiveRegion="polite"
+                >
+                  {tFallback(t, 'quickAdd.audioProcessing', 'Processing audio capture...')}
+                </CompactText>
+              </View>
+            ) : null}
 
             <View style={styles.optionsHeaderRow}>
               {!optionsExpanded && projectSelected ? (

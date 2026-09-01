@@ -48,6 +48,7 @@ describe('Quick capture modal composition', () => {
       'common.save': 'Save',
       'nav.addTask': 'Add Task',
       'quickAdd.addAnother': 'Add another',
+      'quickAdd.audioProcessing': 'Processing audio capture...',
       'quickAdd.audioRecord': 'Record',
       'quickAdd.inputHint': 'Capture task title',
       'quickAdd.inputLabel': 'Task title',
@@ -92,7 +93,7 @@ describe('Quick capture modal composition', () => {
           priorityLabel="Priority"
           projectLabel="Project"
           recording={false}
-          recordingBusy={false}
+          recordingBusy
           recordingReady={false}
           saving
           sheetMaxHeight={500}
@@ -113,6 +114,7 @@ describe('Quick capture modal composition', () => {
     expect(save?.props.disabled).toBe(true);
     expect(save?.props.accessibilityState).toEqual({ busy: true, disabled: true });
     expect(tree.root.findByType(Modal).props.onRequestClose).not.toBe(handleClose);
+    expect(tree.root.findAllByType(Text).some((node) => node.props.children === 'Processing audio capture...')).toBe(true);
   });
 
   it('does not mount picker modals while every picker is closed', () => {

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickCaptureSheet } from './quick-capture-sheet';
 
 const selectedAreaIdForNewTasksMock = vi.hoisted(() => ({ current: undefined as string | null | undefined }));
+const audioHookMock = vi.hoisted(() => ({ params: null as Record<string, any> | null }));
 
 const {
   addTask,
@@ -229,13 +230,16 @@ vi.mock('react-native-safe-area-context', () => ({
 }));
 
 vi.mock('./use-quick-capture-audio', () => ({
-  useQuickCaptureAudio: () => ({
+  useQuickCaptureAudio: (params: Record<string, any>) => {
+    audioHookMock.params = params;
+    return {
     recording: false,
     recordingBusy: false,
     recordingReady: false,
     startRecording: vi.fn(),
     stopRecording: vi.fn(),
-  }),
+    };
+  },
 }));
 
 vi.mock('./quick-capture-sheet/QuickCaptureSheetBody', () => ({
@@ -279,6 +283,7 @@ describe('QuickCaptureSheet save handling', () => {
     selectStore.getState().tasks = [];
     selectStore.getState().settings = {};
     selectedAreaIdForNewTasksMock.current = undefined;
+    audioHookMock.params = null;
     getDerivedState.mockClear();
     getDerivedState.mockReturnValue({ focusedCount: 0 });
     getUsedTaskTokens.mockClear();
@@ -749,6 +754,71 @@ describe('QuickCaptureSheet save handling', () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(reopenedBody.props.value).toBe('Second capture');
     expect(reopenedBody.props.saving).toBe(false);
+  });
+
+  it('blocks dismissal while audio owns the session and preserves reopened capture B', async () => {
+    const onClose = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <QuickCaptureSheet
+          visible
+          openRequestId={1}
+          initialValue="First capture"
+          onClose={onClose}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    const audioA = audioHookMock.params;
+    if (!audioA) throw new Error('audio hook params unavailable');
+    const firstSession = audioA.getActiveSubmissionSession();
+    expect(firstSession).not.toBeNull();
+    expect(audioA.submissionCoordinator.tryBeginSubmission(firstSession)).toBe(true);
+    await act(async () => {
+      audioA.onSubmissionBusyChange(true);
+      await Promise.resolve();
+    });
+    const busyBody = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+    if (!busyBody) throw new Error('QuickCaptureSheetBody not found');
+    expect(busyBody.props.saving).toBe(true);
+    await act(async () => {
+      busyBody.props.handleClose();
+      await Promise.resolve();
+    });
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree.update(
+        <QuickCaptureSheet
+          visible={false}
+          openRequestId={1}
+          initialValue="First capture"
+          onClose={onClose}
+        />
+      );
+      tree.update(
+        <QuickCaptureSheet
+          visible
+          openRequestId={2}
+          initialValue="Second capture"
+          onClose={onClose}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    const audioB = audioHookMock.params;
+    if (!audioB) throw new Error('reopened audio hook params unavailable');
+    const reopenedSession = audioB.getActiveSubmissionSession();
+    expect(reopenedSession).not.toBe(firstSession);
+    expect(audioB.submissionCoordinator.finishSubmission(firstSession)).toBe(false);
+    expect(audioB.submissionCoordinator.isCurrent(reopenedSession)).toBe(true);
+    const reopenedBody = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+    expect(reopenedBody?.props.value).toBe('Second capture');
+    expect(reopenedBody?.props.saving).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("stars a task for Today's Focus from the capture sheet", async () => {

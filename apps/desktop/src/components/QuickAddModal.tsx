@@ -197,6 +197,12 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const openRequestInFlightRef = useRef(false);
     const standaloneDataRefreshRef = useRef<Promise<void> | null>(null);
     const pastedImageAttachmentsRef = useRef<PastedImageAttachment[]>([]);
+
+    useEffect(() => () => {
+        const session = activeSubmissionSessionRef.current;
+        if (session !== null) submissionCoordinatorRef.current.invalidateSession(session);
+        activeSubmissionSessionRef.current = null;
+    }, []);
     const sortedAreas = useMemo(() => [...areas].filter((area) => !area.deletedAt).sort((a, b) => a.order - b.order), [areas]);
     const defaultAreaMode = getDefaultTaskAreaMode(settings);
     const resolvedAreaFilter = useMemo(
@@ -300,6 +306,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         try {
             activeSubmissionSessionRef.current = submissionCoordinatorRef.current.beginSession();
             setIsSubmitting(false);
+            setRecordingBusy(false);
+            setIsRecording(false);
             setInitialProps(detail?.initialProps ?? null);
             setFocusNewTask(Boolean(detail?.initialProps?.isFocusedToday));
             setValue(detail?.initialValue ?? '');
@@ -447,6 +455,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         if (session !== null) submissionCoordinatorRef.current.invalidateSession(session);
         activeSubmissionSessionRef.current = null;
         setIsSubmitting(false);
+        setRecordingBusy(false);
+        setIsRecording(false);
         isOpenRef.current = false;
         openRequestInFlightRef.current = false;
         setIsOpen(false);
@@ -628,19 +638,29 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const stopRecording = useCallback(async ({ saveTask }: { saveTask: boolean }) => {
         if (recordingBusy) return;
         if (!isRecording) return;
+        const captureSurfaceSession = activeSubmissionSessionRef.current;
+        const submissionSession = saveTask ? captureSurfaceSession : null;
+        if (saveTask) {
+            if (submissionSession === null || !submissionCoordinatorRef.current.tryBeginSubmission(submissionSession)) return;
+            setIsSubmitting(true);
+        }
+        const isSubmissionCurrent = () => (
+            captureSurfaceSession === null || submissionCoordinatorRef.current.isCurrent(captureSurfaceSession)
+        );
         setRecordingBusy(true);
         setIsRecording(false);
-        const session = captureSessionRef.current;
+        const audioSession = captureSessionRef.current;
         captureSessionRef.current = null;
         try {
-            if (!session) return;
+            if (!audioSession) return;
             const now = new Date();
             if (!saveTask) {
-                await session.cancel();
+                await audioSession.cancel();
                 return;
             }
 
-            const capture = await session.stop();
+            const capture = await audioSession.stop();
+            if (!isSubmissionCurrent()) return;
             const fileName = capture.name;
             const absolutePath = capture.path;
             const audioByteSize = capture.size;
@@ -648,6 +668,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             const nowIso = now.toISOString();
             const displayTitle = `${t('quickAdd.audioNoteTitle')} ${safeFormatDate(now, 'Pp')}`;
             const { ready: speechReady, config: speechConfig } = await resolveSpeechCapture(settings.ai);
+            if (!isSubmissionCurrent()) return;
             const saveAudioAttachments = settings.gtd?.saveAudioAttachments !== false || !speechReady;
 
             const attachment: Attachment | null = saveAudioAttachments
@@ -675,10 +696,14 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             if (standaloneWindow) {
                 await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
             }
+            if (!isSubmissionCurrent()) return;
             const addTaskResult = await addTask(displayTitle, props);
+            if (!isSubmissionCurrent()) return;
             if (addTaskResult.success && standaloneWindow) {
                 await flushPendingSave().catch((error) => reportError('Failed to save quick add task', error));
+                if (!isSubmissionCurrent()) return;
                 await notifyStandaloneTaskSaved();
+                if (!isSubmissionCurrent()) return;
             }
             close();
 
@@ -742,11 +767,19 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                 });
             }
         } catch (error) {
+            if (!isSubmissionCurrent()) return;
             reportError('Failed to save recording', error);
             const message = error instanceof Error ? error.message : String(error);
             setRecordingError(`${t('quickAdd.audioErrorBody')} (${message})`);
         } finally {
-            setRecordingBusy(false);
+            if (submissionSession === null) {
+                if (captureSurfaceSession === null || submissionCoordinatorRef.current.isCurrent(captureSurfaceSession)) {
+                    setRecordingBusy(false);
+                }
+            } else if (submissionCoordinatorRef.current.finishSubmission(submissionSession)) {
+                setRecordingBusy(false);
+                setIsSubmitting(false);
+            }
         }
     }, [
         addTask,
@@ -1054,6 +1087,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         ? tFallback(t, 'quickAdd.pastedImageAttached', '1 image attached')
         : tFallback(t, 'quickAdd.pastedImagesAttached', '{{count}} images attached').replace('{{count}}', String(pastedImageAttachments.length));
     const saveDisabled = isSubmitting || isPastingImage || (!value.trim() && pastedImageAttachments.length === 0);
+    const captureModeLocked = isRecording || recordingBusy || isSubmitting;
     const bulkTaskCount = bulkQuickAddLines?.length ?? 0;
     const bulkConfirmTitle = tFallback(t, 'quickAdd.bulkConfirmTitle', 'Create {{count}} tasks?')
         .replace('{{count}}', String(bulkTaskCount));
@@ -1087,7 +1121,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                         disabled={isSubmitting}
                         tabIndex={-1}
                         aria-label={t('common.close')}
-                        className="text-sm text-muted-foreground hover:text-foreground"
+                        className="text-sm text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         Esc
                     </button>
@@ -1097,9 +1131,11 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                         <button
                             type="button"
                             onClick={() => setCaptureMode('text')}
+                            disabled={captureModeLocked}
                             className={cn(
                                 'px-3 py-1 text-xs rounded-md transition-colors',
-                                captureMode === 'text' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                                captureMode === 'text' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                                captureModeLocked && 'cursor-not-allowed opacity-50',
                             )}
                         >
                             {t('settings.captureDefaultText')}
@@ -1107,9 +1143,11 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                         <button
                             type="button"
                             onClick={() => setCaptureMode('audio')}
+                            disabled={captureModeLocked}
                             className={cn(
                                 'px-3 py-1 text-xs rounded-md transition-colors',
-                                captureMode === 'audio' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                                captureMode === 'audio' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                                captureModeLocked && 'cursor-not-allowed opacity-50',
                             )}
                         >
                             {t('settings.captureDefaultAudio')}
@@ -1331,7 +1369,12 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             <button
                                 type="button"
                                 onClick={handleClose}
-                                className="px-3 py-1.5 rounded-md text-sm bg-muted hover:bg-muted/80"
+                                disabled={recordingBusy || isSubmitting}
+                                aria-busy={recordingBusy || isSubmitting}
+                                className={cn(
+                                    'px-3 py-1.5 rounded-md text-sm bg-muted hover:bg-muted/80',
+                                    (recordingBusy || isSubmitting) && 'opacity-50 cursor-not-allowed',
+                                )}
                             >
                                 {t('common.cancel')}
                             </button>

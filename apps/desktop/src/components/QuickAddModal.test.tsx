@@ -11,7 +11,7 @@ import { useUiStore } from '../store/ui-store';
 const tauriMocks = vi.hoisted(() => ({
     emitTo: vi.fn(async () => undefined),
     hide: vi.fn(async () => undefined),
-    invoke: vi.fn(async () => false),
+    invoke: vi.fn<(_command?: string) => Promise<unknown>>(async () => false),
     listen: vi.fn(async () => () => undefined),
 }));
 const fsMocks = vi.hoisted(() => ({
@@ -933,6 +933,139 @@ describe('QuickAddModal', () => {
         expect(useUiStore.getState().toasts.some((toast) => (
             toast.message === 'Enable a speech-to-text model in Settings to use voice input.'
         ))).toBe(false);
+    });
+
+    it('owns audio processing as a non-dismissible capture submission', async () => {
+        const stoppedCapture = createDeferred<{
+            path: string;
+            sampleRate: number;
+            channels: number;
+            size: number;
+        }>();
+        const addTask = vi.fn(async () => ({ success: true, id: 'audio-task' }));
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        tauriMocks.invoke.mockImplementation(async (command?: string) => {
+            if (command === 'start_audio_recording') return undefined;
+            if (command === 'stop_audio_recording') return stoppedCapture.promise;
+            return false;
+        });
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                addTask,
+                settings: {
+                    ...state.settings,
+                    ai: {
+                        ...state.settings?.ai,
+                        speechToText: {
+                            enabled: true,
+                            provider: 'whisper',
+                            offlineModelPath: '/models/whisper.bin',
+                        },
+                    },
+                },
+            }));
+        });
+        renderQuickAddModal();
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { captureMode: 'audio' } }));
+            await Promise.resolve();
+        });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+            await Promise.resolve();
+        });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+            await Promise.resolve();
+        });
+
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled();
+        fireEvent.keyDown(window, { key: 'Escape' });
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+        await act(async () => {
+            stoppedCapture.resolve({
+                path: '/data/audio-a.wav',
+                sampleRate: 16_000,
+                channels: 1,
+                size: 128,
+            });
+            await stoppedCapture.promise;
+        });
+        await waitFor(() => expect(addTask).toHaveBeenCalledTimes(1));
+    });
+
+    it('does not let an unmounted audio capture create into a reopened session', async () => {
+        const stoppedCapture = createDeferred<{
+            path: string;
+            sampleRate: number;
+            channels: number;
+            size: number;
+        }>();
+        const addTask = vi.fn(async () => ({ success: true, id: 'stale-audio-task' }));
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        tauriMocks.invoke.mockImplementation(async (command?: string) => {
+            if (command === 'start_audio_recording') return undefined;
+            if (command === 'stop_audio_recording') return stoppedCapture.promise;
+            return false;
+        });
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                addTask,
+                settings: {
+                    ...state.settings,
+                    ai: {
+                        ...state.settings?.ai,
+                        speechToText: {
+                            enabled: true,
+                            provider: 'whisper',
+                            offlineModelPath: '/models/whisper.bin',
+                        },
+                    },
+                },
+            }));
+        });
+        const first = renderQuickAddModal();
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { captureMode: 'audio' } }));
+            await Promise.resolve();
+        });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+            await Promise.resolve();
+        });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+            await Promise.resolve();
+        });
+
+        first.unmount();
+        renderQuickAddModal();
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', {
+                detail: { initialValue: 'Second capture' },
+            }));
+            await Promise.resolve();
+        });
+
+        await act(async () => {
+            stoppedCapture.resolve({
+                path: '/data/audio-a.wav',
+                sampleRate: 16_000,
+                channels: 1,
+                size: 128,
+            });
+            await stoppedCapture.promise;
+            await Promise.resolve();
+        });
+
+        expect(addTask).not.toHaveBeenCalled();
+        expect(screen.getByPlaceholderText('Add Task')).toHaveValue('Second capture');
     });
 
     it('creates a bulk import in a single store commit (#942)', async () => {

@@ -10,6 +10,8 @@ import {
   safeFormatDate,
   type AppSettings,
   type Attachment,
+  type CaptureSessionCoordinator,
+  type CaptureSessionId,
   type SpeechToTextSettings,
   type Task,
   useTaskStore,
@@ -63,11 +65,15 @@ type UseQuickCaptureAudioParams = {
   addTask: (title: string, props?: Partial<Task>) => Promise<{ success: boolean; id?: string }>;
   autoRecord?: boolean;
   buildTaskProps: (fallbackTitle: string, extraProps?: Partial<Task>) => Promise<BuildTaskPropsResult>;
+  getActiveSubmissionSession: () => CaptureSessionId | null;
   handleClose: () => void;
   initialAttachments?: Attachment[];
   onError: (message: string, error?: unknown) => void;
+  onSubmissionBusyChange: (busy: boolean) => void;
   onWarn: (message: string, error?: unknown) => void;
   settings: AppSettings;
+  submissionCoordinator: CaptureSessionCoordinator;
+  submissionKey?: string | number;
   t: (key: string) => string;
   updateSpeechSettings: (next: Partial<SpeechSettings>) => void;
   visible: boolean;
@@ -112,11 +118,15 @@ export function useQuickCaptureAudio({
   addTask,
   autoRecord,
   buildTaskProps,
+  getActiveSubmissionSession,
   handleClose,
   initialAttachments,
   onError,
+  onSubmissionBusyChange,
   onWarn,
   settings,
+  submissionCoordinator,
+  submissionKey,
   t,
   updateSpeechSettings,
   visible,
@@ -126,6 +136,11 @@ export function useQuickCaptureAudio({
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [recordingReady, setRecordingReady] = useState(false);
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+
+  useEffect(() => {
+    setRecordingBusy(false);
+    onSubmissionBusyChange(false);
+  }, [onSubmissionBusyChange, submissionKey, visible]);
 
   const ensureAudioDirectory = useCallback(async () => {
     const candidates: Directory[] = [];
@@ -403,6 +418,15 @@ export function useQuickCaptureAudio({
     if (recordingBusy) return;
     const currentRecording = recording;
     if (!currentRecording) return;
+    const captureSurfaceSession = getActiveSubmissionSession();
+    const submissionSession = saveTask ? captureSurfaceSession : null;
+    if (saveTask) {
+      if (submissionSession === null || !submissionCoordinator.tryBeginSubmission(submissionSession)) return;
+      onSubmissionBusyChange(true);
+    }
+    const isSubmissionCurrent = () => (
+      captureSurfaceSession === null || submissionCoordinator.isCurrent(captureSurfaceSession)
+    );
     setRecordingBusy(true);
     setRecordingReady(false);
     setRecording(null);
@@ -420,6 +444,7 @@ export function useQuickCaptureAudio({
           safeDeleteFile(currentRecording.file, 'whisper_cancel');
           return;
         }
+        if (!isSubmissionCurrent()) return;
 
         const finalFile = currentRecording.file;
         let fileInfo: { exists?: boolean; size?: number } | null = null;
@@ -443,6 +468,7 @@ export function useQuickCaptureAudio({
         const resolvedModelPath = provider === 'whisper'
           ? (whisperResolved?.exists ? whisperResolved.path : modelPath)
           : undefined;
+        if (!isSubmissionCurrent()) return;
 
         const speechReady = isQuickCaptureSpeechReady({
           speechEnabled: speechRuntime.enabled,
@@ -473,6 +499,7 @@ export function useQuickCaptureAudio({
             extension: '.wav',
           })
           : null;
+        if (!isSubmissionCurrent()) return;
         const canTranscribeSpeech = provider === 'whisper'
           ? realtimeTranscriptReady || Boolean(localWhisperInput)
           : speechReady;
@@ -497,10 +524,12 @@ export function useQuickCaptureAudio({
             throw error;
           }
         }
+        if (!isSubmissionCurrent()) return;
 
         const attachments = [...(initialAttachments ?? [])];
         if (attachment) attachments.push(attachment);
         const { title, props, invalidDateCommands } = await buildTaskProps(displayTitle, { attachments });
+        if (!isSubmissionCurrent()) return;
         if (invalidDateCommands && invalidDateCommands.length > 0) {
           showInvalidDateCommandToast(showToast, t, invalidDateCommands);
           return;
@@ -508,6 +537,7 @@ export function useQuickCaptureAudio({
         if (!title.trim()) return;
 
         const addTaskResult = await addTask(title, props);
+        if (!isSubmissionCurrent()) return;
         handleClose();
 
         if (!addTaskResult.success || !addTaskResult.id) return;
@@ -608,6 +638,7 @@ export function useQuickCaptureAudio({
         throw new Error('Recording URI missing');
       }
       if (!saveTask) return;
+      if (!isSubmissionCurrent()) return;
 
       const now = new Date();
       const timestamp = safeFormatDate(now, 'yyyyMMdd-HHmmss');
@@ -659,6 +690,7 @@ export function useQuickCaptureAudio({
       const resolvedModelPath = provider === 'whisper'
         ? (whisperResolved?.exists ? whisperResolved.path : modelPath)
         : undefined;
+      if (!isSubmissionCurrent()) return;
 
       const speechReady = isQuickCaptureSpeechReady({
         speechEnabled: speechRuntime.enabled,
@@ -677,6 +709,7 @@ export function useQuickCaptureAudio({
           extension,
         })
         : null;
+      if (!isSubmissionCurrent()) return;
       const canTranscribeSpeech = provider === 'whisper' ? Boolean(localWhisperInput) : speechReady;
       const saveAudioAttachments = currentSettings.gtd?.saveAudioAttachments !== false || !canTranscribeSpeech;
 
@@ -699,10 +732,12 @@ export function useQuickCaptureAudio({
           throw error;
         }
       }
+      if (!isSubmissionCurrent()) return;
 
       const attachments = [...(initialAttachments ?? [])];
       if (attachment) attachments.push(attachment);
       const { title, props, invalidDateCommands } = await buildTaskProps(displayTitle, { attachments });
+      if (!isSubmissionCurrent()) return;
       if (invalidDateCommands && invalidDateCommands.length > 0) {
         showInvalidDateCommandToast(showToast, t, invalidDateCommands);
         return;
@@ -710,6 +745,7 @@ export function useQuickCaptureAudio({
       if (!title.trim()) return;
 
       const addTaskResult = await addTask(title, props);
+      if (!isSubmissionCurrent()) return;
       handleClose();
 
       if (!addTaskResult.success || !addTaskResult.id) return;
@@ -758,10 +794,18 @@ export function useQuickCaptureAudio({
         }
       }
     } catch (error) {
+      if (!isSubmissionCurrent()) return;
       onError('Failed to save recording', error);
       Alert.alert(t('quickAdd.audioErrorTitle'), t('quickAdd.audioErrorBody'));
     } finally {
-      setRecordingBusy(false);
+      if (submissionSession === null) {
+        if (captureSurfaceSession === null || submissionCoordinator.isCurrent(captureSurfaceSession)) {
+          setRecordingBusy(false);
+        }
+      } else if (submissionCoordinator.finishSubmission(submissionSession)) {
+        setRecordingBusy(false);
+        onSubmissionBusyChange(false);
+      }
     }
   }, [
     addTask,
@@ -770,9 +814,11 @@ export function useQuickCaptureAudio({
     buildTaskProps,
     discardEmptySpeechTask,
     ensureAudioDirectory,
+    getActiveSubmissionSession,
     handleClose,
     initialAttachments,
     onError,
+    onSubmissionBusyChange,
     onWarn,
     recording,
     recordingBusy,
@@ -781,6 +827,7 @@ export function useQuickCaptureAudio({
     settings,
     showToast,
     stripFileScheme,
+    submissionCoordinator,
     t,
   ]);
 

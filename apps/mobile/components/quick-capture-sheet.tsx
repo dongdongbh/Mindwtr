@@ -651,6 +651,11 @@ export function QuickCaptureSheet({
     onClose();
   }, [clearInitialFocusTimer, onClose, resetState]);
 
+  const getActiveSubmissionSession = useCallback(
+    () => activeSubmissionSessionRef.current,
+    [],
+  );
+
   const {
     recording,
     recordingBusy,
@@ -661,11 +666,15 @@ export function QuickCaptureSheet({
     addTask,
     autoRecord,
     buildTaskProps,
+    getActiveSubmissionSession,
     handleClose: finalizeClose,
     initialAttachments: initialProps?.attachments,
     onError: logCaptureError,
+    onSubmissionBusyChange: setSaving,
     onWarn: logCaptureWarn,
     settings,
+    submissionCoordinator: submissionCoordinatorRef.current,
+    submissionKey: openRequestId,
     t,
     updateSpeechSettings,
     visible,
@@ -1192,7 +1201,7 @@ export function QuickCaptureSheet({
         recording={Boolean(recording)}
         recordingBusy={recordingBusy}
         recordingReady={recordingReady}
-        saving={saving}
+        saving={saving || recordingBusy}
         saveButtonBackgroundColor={saveButtonBackgroundColor}
         saveButtonTextColor={saveButtonTextColor}
         sheetMaxHeight={sheetMaxHeight}
