@@ -114,9 +114,14 @@ const buildBearerAuthHeader = (token?: string): string | null => {
   return `Bearer ${token}`;
 };
 
-const resolveUploadType = (): any => {
-  const types = (FileSystem as any).FileSystemUploadType;
-  return types?.BINARY_CONTENT ?? types?.BINARY ?? undefined;
+/** #1136: the enum lives in `expo-file-system/legacy`, never in the local wrapper.
+ *  Android's native `FileSystemUploadOptions.uploadType` has no default and expo's
+ *  `UploadTask` spreads our options over its own default, so an undefined value
+ *  reaches Kotlin as null and `uploadTaskStartAsync` dies on `Enum.ordinal()`.
+ *  Never return undefined: 0 is BINARY_CONTENT on both sides. */
+const resolveUploadType = (): number => {
+  const types = (LegacyFileSystem as any).FileSystemUploadType;
+  return types?.BINARY_CONTENT ?? types?.BINARY ?? 0;
 };
 
 export const createAttachmentAbortError = (

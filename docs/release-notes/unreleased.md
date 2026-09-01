@@ -4,6 +4,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 ## Full Change List
 
+- Android sync: attachment uploads failed with "Call to function 'ExponentFileSystem.uploadTaskStartAsync' has been rejected", so the file's bytes never reached the sync location. Files added on a phone stayed local, and verifying a sync location could end with "Sync setup could not be verified ... Candidate attachment proof failed for <id>" when the phone held a file the location did not. The upload was missing an option that Android requires and iOS supplies a default for, which is why only Android was affected. (#1136)
+
 - Settings → Data → Diagnostics: on Microsoft Store installs the log file path shown was the plain `%APPDATA%` location, where the file never exists — Windows silently redirects a Store app's AppData writes into the package's `LocalCache` folder. The path shown now points at the file's real location. (#1135)
 
 - Android and iOS WebDAV sync: since 1.2.5 the phone resolved the sync reservation file's address to `data.json` itself, so every sync failed with "Remote sync mutation fence record is malformed" or "Response exceeds the 4096 byte download limit", or reported another device holding the location. Desktop was unaffected. The address is now derived without relying on the platform's URL implementation, and the mobile URL polyfill honors edits. This is the real cause behind the Koofr, mailbox.org, Nextcloud-on-iPad and Fastmail-adjacent reports; on 1.2.6 the same defect could also write the reservation record over `data.json` on servers that ignore conditional writes, so update every phone promptly. (#1132, #1126, #1128, #1113)

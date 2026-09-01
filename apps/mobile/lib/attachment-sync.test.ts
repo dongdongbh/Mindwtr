@@ -48,6 +48,8 @@ const fileSystemMock = vi.hoisted(() => ({
   moveAsync: vi.fn().mockResolvedValue(undefined),
   uploadAsync: vi.fn(),
   createUploadTask: vi.fn(),
+  // Mirrors expo-file-system/legacy: the enum is exported here and nowhere else (#1136).
+  FileSystemUploadType: { BINARY_CONTENT: 0, MULTIPART: 1 },
 }));
 
 const modernFileSystemMock = vi.hoisted(() => {
@@ -4406,6 +4408,39 @@ describe('attachment sync', () => {
         100,
       )).resolves.toBe(true);
       expect(nextUploadAsync).toHaveBeenCalledOnce();
+    });
+
+    it('sends a defined uploadType to the native uploader (#1136)', async () => {
+      // Android's FileSystemUploadOptions.uploadType has no native default and expo's
+      // UploadTask spreads our options over its own, so an undefined value here reached
+      // Kotlin as null and killed uploadTaskStartAsync with an Enum.ordinal() NPE.
+      fileSystemMock.createUploadTask.mockReturnValue({
+        uploadAsync: vi.fn().mockResolvedValue({ status: 200 }),
+        cancelAsync: vi.fn(),
+      });
+      const { uploadCloudFileWithFileSystem, uploadWebdavFileWithFileSystem } =
+        await import('./attachment-sync-backends/common');
+
+      await expect(uploadCloudFileWithFileSystem(
+        'https://sync.example/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'token',
+      )).resolves.toBe(true);
+      await expect(uploadWebdavFileWithFileSystem(
+        'https://example.com/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'u',
+        'p',
+        false,
+      )).resolves.toBe(true);
+
+      expect(fileSystemMock.createUploadTask).toHaveBeenCalledTimes(2);
+      for (const call of fileSystemMock.createUploadTask.mock.calls) {
+        expect(call[2]).toMatchObject({ uploadType: fileSystemMock.FileSystemUploadType.BINARY_CONTENT });
+        expect(call[2].uploadType).toBeDefined();
+      }
     });
 
     it('does not finish after cancellation acknowledgement while the native upload is still live', async () => {
