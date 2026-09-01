@@ -45,12 +45,16 @@ export const readCalendarFeed = (dataDir: string, key: string): CalendarFeedReco
 );
 
 /** Creates the namespace's feed token, replacing any existing one. */
-export const rotateCalendarFeed = (dataDir: string, key: string): CalendarFeedRecord => {
+export const rotateCalendarFeed = (
+    dataDir: string,
+    key: string,
+    assertStorageRoot?: () => void,
+): CalendarFeedRecord => {
     const record: CalendarFeedRecord = {
         token: randomBytes(32).toString('hex'),
         createdAt: new Date().toISOString(),
     };
-    writeData(feedFilePath(dataDir, key), record);
+    writeData(feedFilePath(dataDir, key), record, { assertStorageRoot });
     return record;
 };
 

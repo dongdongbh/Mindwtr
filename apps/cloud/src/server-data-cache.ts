@@ -7,6 +7,7 @@ import {
     loadAppDataUncached,
     writeData,
     type AppDataForWriteResult,
+    type WriteDataOptions,
 } from './server-storage';
 
 const DATA_CACHE_MAX_ENTRIES = 64;
@@ -193,9 +194,9 @@ export const rememberValidatedDataFile = (filePath: string): void => {
     }
 };
 
-export const writeCloudData = (filePath: string, data: AppData): void => {
+export const writeCloudData = (filePath: string, data: AppData, options: WriteDataOptions = {}): void => {
     try {
-        writeData(filePath, data);
+        writeData(filePath, data, options);
     } catch (error) {
         parsedDataCache.delete(filePath);
         throw error;

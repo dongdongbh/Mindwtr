@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { spawn, type ChildProcess } from 'child_process';
+import { connect } from 'net';
 import {
     closeSync,
     existsSync,
@@ -9,6 +10,7 @@ import {
     openSync,
     readFileSync,
     readdirSync,
+    renameSync,
     rmSync,
     symlinkSync,
     unlinkSync,
@@ -956,6 +958,39 @@ describe('cloud server utils', () => {
         expect(withWriteLock.getPendingLockCount()).toBe(0);
     });
 
+    test('write lock runner rechecks storage authority before creating lock state', async () => {
+        const dataRoot = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-lock-authority-'));
+        let storageCurrent = true;
+        let handlerCalled = false;
+        const withWriteLock = createWriteLockRunner(dataRoot, () => {
+            if (!storageCurrent) throw new Error('storage root changed');
+        });
+        storageCurrent = false;
+
+        await expect(withWriteLock('namespace', async () => {
+            handlerCalled = true;
+        })).rejects.toThrow('storage root changed');
+        expect(handlerCalled).toBe(false);
+        expect(readdirSync(dataRoot)).toEqual([]);
+
+        rmSync(dataRoot, { recursive: true, force: true });
+    });
+
+    test('write lock runner rejects a serialized result after storage authority changes', async () => {
+        const dataRoot = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-lock-result-authority-'));
+        let storageCurrent = true;
+        const withWriteLock = createWriteLockRunner(dataRoot, () => {
+            if (!storageCurrent) throw new Error('storage root changed');
+        });
+
+        await expect(withWriteLock('namespace', async () => {
+            storageCurrent = false;
+            return 'replacement-root-data';
+        })).rejects.toThrow('storage root changed');
+
+        rmSync(dataRoot, { recursive: true, force: true });
+    });
+
     test('bounds cross-process lock files independently of attacker-controlled keys', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-lock-shards-'));
         try {
@@ -1137,6 +1172,17 @@ describe('cloud server utils', () => {
         expect(readdirSync(dir)).toEqual(['data.json']);
 
         rmSync(dir, { recursive: true, force: true });
+    });
+
+    test('writeData never recreates a missing storage root', () => {
+        const parent = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-missing-root-'));
+        const missingRoot = join(parent, 'data');
+
+        expect(() => writeData(join(missingRoot, 'namespace.json'), { ok: true }))
+            .toThrow('Cloud data directory is unsafe');
+        expect(existsSync(missingRoot)).toBe(false);
+
+        rmSync(parent, { recursive: true, force: true });
     });
 
     test('caches parsed app data for unchanged data files without leaking caller mutations', () => {
@@ -1822,6 +1868,57 @@ describe('cloud server api', () => {
         });
 
         rmSync(dataDir, { recursive: true, force: true });
+
+        const missingStorage = await fetch(`${baseUrl}/ready`);
+        expect(missingStorage.status).toBe(503);
+        expect(await missingStorage.json()).toEqual({ ok: false });
+        expect(existsSync(dataDir)).toBe(false);
+        expectCompletion(completionRecords.at(-1)!, {
+            requestId: getRequestId(missingStorage),
+            method: 'GET',
+            route: '/ready',
+            status: 503,
+        });
+
+        const missingRead = await fetch(`${baseUrl}/v1/data`, { headers: authHeaders });
+        expect(missingRead.status).toBe(503);
+        const missingWrite = await fetch(`${baseUrl}/v1/data`, {
+            method: 'PUT',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} }),
+        });
+        expect(missingWrite.status).toBe(503);
+        const missingAttachmentWrite = await fetch(`${baseUrl}/v1/attachments/tasks/test.txt`, {
+            method: 'PUT',
+            headers: authHeaders,
+            body: 'must not be written',
+        });
+        expect(missingAttachmentWrite.status).toBe(503);
+        expect(existsSync(dataDir)).toBe(false);
+
+        mkdirSync(dataDir, { recursive: true });
+        const replacementSentinel = join(dataDir, 'replacement-sentinel');
+        writeFileSync(replacementSentinel, 'keep');
+        const replacedStorage = await fetch(`${baseUrl}/ready`);
+        expect(replacedStorage.status).toBe(503);
+        expect(await replacedStorage.json()).toEqual({ ok: false });
+        const replacedRead = await fetch(`${baseUrl}/v1/data`, { headers: authHeaders });
+        expect(replacedRead.status).toBe(503);
+        const replacedWrite = await fetch(`${baseUrl}/v1/data`, {
+            method: 'PUT',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} }),
+        });
+        expect(replacedWrite.status).toBe(503);
+        const replacedAttachmentWrite = await fetch(`${baseUrl}/v1/attachments/tasks/test.txt`, {
+            method: 'PUT',
+            headers: authHeaders,
+            body: 'must not be written',
+        });
+        expect(replacedAttachmentWrite.status).toBe(503);
+        expect(readdirSync(dataDir)).toEqual(['replacement-sentinel']);
+
+        rmSync(dataDir, { recursive: true, force: true });
         writeFileSync(dataDir, 'storage unavailable');
 
         const liveWithoutStorage = await fetch(`${baseUrl}/health`);
@@ -1839,6 +1936,90 @@ describe('cloud server api', () => {
             route: '/ready',
             status: 503,
         });
+    });
+
+    test('fails a large data merge when the configured storage root is replaced mid-write', async () => {
+        stopServer?.();
+        const isolatedServer = await startCloudServer({
+            host: '127.0.0.1',
+            port: 0,
+            dataDir,
+            maxBodyBytes: 20_000_000,
+            requestTimeoutMs: 30_000,
+            allowedAuthTokens: new Set([integrationToken]),
+        });
+        baseUrl = `http://127.0.0.1:${isolatedServer.port}`;
+        stopServer = isolatedServer.stop;
+
+        const emptyData = { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
+        const seedResponse = await fetch(`${baseUrl}/v1/data`, {
+            method: 'PUT',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify(emptyData),
+        });
+        expect(seedResponse.status).toBe(200);
+
+        const key = tokenToKey(integrationToken);
+        const controlDir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-root-replacer-'));
+        const readyPath = join(controlDir, 'ready');
+        const resultPath = join(controlDir, 'result');
+        const displacedDataDir = `${dataDir}-data-write-displaced`;
+        const workerPath = join(testDirectory, 'test-fixtures', 'cloud-storage-root-replacer.ts');
+        const replacer = spawn(process.execPath, [
+            workerPath,
+            dataDir,
+            displacedDataDir,
+            key,
+            readyPath,
+            resultPath,
+        ], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const replacerStderr = collectChildStderr(replacer);
+
+        try {
+            for (let attempt = 0; attempt < 200 && !existsSync(readyPath); attempt += 1) {
+                await delay(5);
+            }
+            expect(existsSync(readyPath)).toBe(true);
+
+            const iso = '2026-01-01T00:00:00.000Z';
+            const tasks = Array.from({ length: 50_000 }, (_, index) => makeTestTask({
+                id: `large-root-race-${index}`,
+                title: `Large root race ${index}`,
+                createdAt: iso,
+                updatedAt: iso,
+            }));
+            const request = fetch(`${baseUrl}/v1/data`, {
+                method: 'PUT',
+                headers: { ...authHeaders, 'content-type': 'application/json' },
+                body: JSON.stringify({ ...emptyData, tasks }),
+            });
+            const [response, replacerExit] = await Promise.all([
+                request,
+                waitForChildExit(replacer, 15_000),
+            ]);
+            if (replacerExit.timedOut) replacer.kill('SIGKILL');
+
+            expect({ ...replacerExit, stderr: replacerStderr() }).toEqual({
+                timedOut: false,
+                code: 0,
+                stderr: '',
+            });
+            expect(readFileSync(resultPath, 'utf8')).toBe('stage-observed');
+            expect(response.status).toBe(503);
+            expect(readdirSync(dataDir)).toEqual(['replacement-sentinel']);
+            expect(existsSync(join(dataDir, `${key}.json`))).toBe(false);
+            expect(existsSync(join(dataDir, '.locks'))).toBe(false);
+
+            const originalData = JSON.parse(readFileSync(join(displacedDataDir, `${key}.json`), 'utf8'));
+            expect(originalData.tasks).toHaveLength(0);
+        } finally {
+            if (replacer.exitCode === null && replacer.signalCode === null) {
+                replacer.kill('SIGKILL');
+                await waitForChildExit(replacer, 2_000);
+            }
+            rmSync(controlDir, { recursive: true, force: true });
+            rmSync(displacedDataDir, { recursive: true, force: true });
+        }
     });
 
     test('correlates success, validation, authorization, and internal-error responses without sensitive route data', async () => {
@@ -3585,6 +3766,77 @@ describe('cloud server api', () => {
             headers: authHeaders,
         });
         expect(missingResponse.status).toBe(404);
+    });
+
+    test('fails a partial attachment upload when the configured storage root is replaced', async () => {
+        const key = tokenToKey(integrationToken);
+        const relativePath = 'stream/replaced-root.bin';
+        const attachmentParent = join(dataDir, key, 'attachments', 'stream');
+        const replacementTarget = join(dataDir, key, 'attachments', relativePath);
+        const displacedDataDir = `${dataDir}-displaced`;
+        const firstChunk = 'first-half-';
+        const secondChunk = 'second-half';
+        const contentLength = Buffer.byteLength(firstChunk) + Buffer.byteLength(secondChunk);
+        const serverPort = Number(new URL(baseUrl).port);
+        const socket = connect({ host: '127.0.0.1', port: serverPort });
+        let rawResponse = '';
+        socket.setEncoding('utf8');
+        socket.on('data', (chunk) => {
+            rawResponse += chunk;
+        });
+
+        try {
+            await new Promise<void>((resolve, reject) => {
+                socket.once('connect', resolve);
+                socket.once('error', reject);
+            });
+            const responseFinished = new Promise<void>((resolve, reject) => {
+                socket.once('end', resolve);
+                socket.once('error', reject);
+            });
+            socket.write([
+                `PUT /v1/attachments/${relativePath} HTTP/1.1`,
+                `Host: 127.0.0.1:${serverPort}`,
+                `Authorization: Bearer ${integrationToken}`,
+                'Content-Type: application/octet-stream',
+                `Content-Length: ${contentLength}`,
+                'Connection: close',
+                '',
+                firstChunk,
+            ].join('\r\n'));
+
+            let stagedBeforeReplacement = false;
+            for (let attempt = 0; attempt < 200; attempt += 1) {
+                if (
+                    existsSync(attachmentParent)
+                    && readdirSync(attachmentParent).some((name) => name.startsWith('.mindwtr-upload-'))
+                ) {
+                    stagedBeforeReplacement = true;
+                    break;
+                }
+                await delay(5);
+            }
+            expect(stagedBeforeReplacement).toBe(true);
+
+            renameSync(dataDir, displacedDataDir);
+            mkdirSync(dataDir);
+            writeFileSync(join(dataDir, 'replacement-sentinel'), 'keep');
+            socket.write(secondChunk);
+
+            await Promise.race([
+                responseFinished,
+                delay(2_000).then(() => {
+                    throw new Error('Timed out waiting for partial attachment upload response');
+                }),
+            ]);
+
+            expect(rawResponse.split('\r\n', 1)[0]).toContain(' 503 ');
+            expect(existsSync(replacementTarget)).toBe(false);
+            expect(readdirSync(dataDir)).toEqual(['replacement-sentinel']);
+        } finally {
+            socket.destroy();
+            rmSync(displacedDataDir, { recursive: true, force: true });
+        }
     });
 
     test('returns redacted retryable 5xx for attachment directory durability failures while unsafe paths stay 400', async () => {

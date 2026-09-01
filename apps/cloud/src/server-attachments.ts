@@ -14,6 +14,7 @@ import {
 import { corsOrigin, errorResponse, jsonResponse, logFailureWarn } from './server-config';
 import { loadAppDataForWrite } from './server-data-cache';
 import {
+    abandonPreparedFilePublication,
     durablyRemoveDirectory,
     durablyRemoveFile,
     durablySyncDirectory,
@@ -21,10 +22,12 @@ import {
     isBodyReadError,
     isPathWithinRoot,
     normalizeAttachmentRelativePath,
+    prepareFilePublicationSafely,
+    publishPreparedFilePublication,
     readRequestBytes,
     throwIfRequestAborted,
-    writeAttachmentFileSafely,
     type DurableRemovalFileSystem,
+    type PreparedFilePublication,
 } from './server-storage';
 import { validateAppData } from './server-validation';
 
@@ -278,23 +281,31 @@ export async function handleAttachmentPathRequest(
         maxAttachmentBytes: number;
         abortSignal: AbortSignal;
         removalFileSystem?: DurableRemovalFileSystem;
+        assertStorageRoot?: () => void;
     },
 ): Promise<Response> {
     const { rootRealPath, filePath } = resolved;
 
     if (req.method === 'GET') {
-        if (!existsSync(filePath)) return errorResponse('Not found', 404);
+        options.assertStorageRoot?.();
+        if (!existsSync(filePath)) {
+            options.assertStorageRoot?.();
+            return errorResponse('Not found', 404);
+        }
         try {
             const realFilePath = realpathSync(filePath);
             if (!isPathWithinRoot(realFilePath, rootRealPath)) {
+                options.assertStorageRoot?.();
                 return errorResponse('Invalid attachment path', 400);
             }
             const file = readFileSync(realFilePath);
+            options.assertStorageRoot?.();
             const headers = new Headers();
             headers.set('Access-Control-Allow-Origin', corsOrigin);
             headers.set('Content-Type', 'application/octet-stream');
             return new Response(file, { status: 200, headers });
         } catch {
+            options.assertStorageRoot?.();
             return errorResponse('Failed to read attachment', 500);
         }
     }
@@ -317,37 +328,74 @@ export async function handleAttachmentPathRequest(
                 return errorResponse(`Blocked attachment content type: ${validation.details}`, 400);
             }
         }
-        const body = await readRequestBytes(req, options.maxAttachmentBytes, options.abortSignal);
-        if (isBodyReadError(body)) {
-            return errorResponse(body.__mindwtrError.message, body.__mindwtrError.status);
+        options.assertStorageRoot?.();
+        let prepared: PreparedFilePublication | null;
+        try {
+            prepared = prepareFilePublicationSafely(rootRealPath, filePath, 'upload');
+        } catch (error) {
+            options.assertStorageRoot?.();
+            throw error;
         }
-        const blockedSignature = getBlockedAttachmentSignature(body);
-        if (blockedSignature) {
-            return errorResponse(`Blocked executable attachment signature: ${blockedSignature}`, 400);
+        if (!prepared) {
+            options.assertStorageRoot?.();
+            return errorResponse('Invalid attachment path', 400);
         }
-        throwIfRequestAborted(options.abortSignal);
-        const wrote = writeAttachmentFileSafely(rootRealPath, filePath, body);
-        if (!wrote) return errorResponse('Invalid attachment path', 400);
-        return jsonResponse({ ok: true });
+
+        try {
+            // Reserve the exact staged inode under the verified root before the
+            // request body can suspend this handler. Publication later accepts
+            // only this stage and the same startup-pinned storage identity.
+            const body = await readRequestBytes(req, options.maxAttachmentBytes, options.abortSignal);
+            if (isBodyReadError(body)) {
+                return errorResponse(body.__mindwtrError.message, body.__mindwtrError.status);
+            }
+            const blockedSignature = getBlockedAttachmentSignature(body);
+            if (blockedSignature) {
+                return errorResponse(`Blocked executable attachment signature: ${blockedSignature}`, 400);
+            }
+            throwIfRequestAborted(options.abortSignal);
+            let wrote: boolean;
+            try {
+                wrote = publishPreparedFilePublication(prepared, body, options.assertStorageRoot);
+            } catch (error) {
+                options.assertStorageRoot?.();
+                throw error;
+            }
+            if (!wrote) {
+                options.assertStorageRoot?.();
+                return errorResponse('Invalid attachment path', 400);
+            }
+            return jsonResponse({ ok: true });
+        } finally {
+            abandonPreparedFilePublication(prepared);
+        }
     }
 
     if (req.method === 'DELETE') {
+        options.assertStorageRoot?.();
         if (!existsSync(filePath)) {
             try {
+                options.assertStorageRoot?.();
                 durablyRemoveFile(filePath, options.removalFileSystem);
+                options.assertStorageRoot?.();
                 return jsonResponse({ ok: true });
             } catch {
+                options.assertStorageRoot?.();
                 return errorResponse('Failed to delete attachment', 500);
             }
         }
         try {
             const realFilePath = realpathSync(filePath);
             if (!isPathWithinRoot(realFilePath, rootRealPath)) {
+                options.assertStorageRoot?.();
                 return errorResponse('Invalid attachment path', 400);
             }
+            options.assertStorageRoot?.();
             durablyRemoveFile(realFilePath, options.removalFileSystem);
+            options.assertStorageRoot?.();
             return jsonResponse({ ok: true });
         } catch {
+            options.assertStorageRoot?.();
             return errorResponse('Failed to delete attachment', 500);
         }
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readFileSync, realpathSync, statSync } from 'fs';
+import { basename, join } from 'path';
 import {
     applyTaskUpdates,
     areSyncPayloadsEqual,
@@ -59,6 +59,7 @@ import {
 } from './server-config';
 import { resolveCloudRuntimeConfig } from './server-runtime-config';
 import {
+    abandonPreparedFilePublication,
     createRequestAbortError,
     createWriteLockRunner,
     ensureWritableDir,
@@ -66,8 +67,11 @@ import {
     isRequestAbortError,
     readData,
     readJsonBody,
+    probeExistingWritableDir,
+    prepareFilePublicationSafely,
     resolveAttachmentPath,
     throwIfRequestAborted,
+    type PreparedFilePublication,
 } from './server-storage';
 import {
     appendPendingRemoteAttachmentDeletes,
@@ -384,6 +388,7 @@ type EntityRouteDefinition<T extends CloudEntity> = {
 };
 
 type EntityRouteContext = {
+    assertStorageRoot: () => void;
     key: string;
     filePath: string;
     maxBodyBytes: number;
@@ -459,7 +464,9 @@ const handleEntityRoute = async <T extends CloudEntity>(
             const finalized = finalizeCloudDataForWrite(data, nowIso, route.finalizeOptions);
             if ('error' in finalized) return finalized.error;
             throwIfRequestAborted(context.signal);
-            writeCloudData(context.filePath, finalized);
+            writeCloudData(context.filePath, finalized, {
+                assertStorageRoot: context.assertStorageRoot,
+            });
             const savedEntity = getEntityCollection(finalized, route).find((item) => item.id === entity.id) ?? entity;
             return jsonResponse({ [route.itemKey]: savedEntity }, { status: 201 });
         });
@@ -502,7 +509,9 @@ const handleEntityRoute = async <T extends CloudEntity>(
             const finalized = finalizeCloudDataForWrite(data, nowIso, route.finalizeOptions);
             if ('error' in finalized) return finalized.error;
             throwIfRequestAborted(context.signal);
-            writeCloudData(context.filePath, finalized);
+            writeCloudData(context.filePath, finalized, {
+                assertStorageRoot: context.assertStorageRoot,
+            });
             const entity = getEntityCollection(finalized, route).find((item) => item.id === entityId);
             return jsonResponse({ [route.itemKey]: entity });
         });
@@ -529,7 +538,9 @@ const handleEntityRoute = async <T extends CloudEntity>(
             const finalized = finalizeCloudDataForWrite(data, nowIso, route.finalizeOptions);
             if ('error' in finalized) return finalized.error;
             throwIfRequestAborted(context.signal);
-            writeCloudData(context.filePath, finalized);
+            writeCloudData(context.filePath, finalized, {
+                assertStorageRoot: context.assertStorageRoot,
+            });
             return jsonResponse({ ok: true });
         });
     }
@@ -946,6 +957,8 @@ type CloudServerHandle = {
     port: number;
 };
 
+class CloudStorageUnavailableError extends Error {}
+
 export async function startCloudServer(options: CloudServerOptions = {}): Promise<CloudServerHandle> {
     const flags = parseArgs(process.argv.slice(2));
     const runtimeConfig = resolveCloudRuntimeConfig(process.env, {
@@ -977,7 +990,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
     const trustProxyHeaders = options.trustProxyHeaders ?? parseBoolEnv(process.env.MINDWTR_CLOUD_TRUST_PROXY_HEADERS);
     const trustedProxyIps = options.trustedProxyIps ?? parseTrustedProxyIps(process.env.MINDWTR_CLOUD_TRUSTED_PROXY_IPS);
     const maxAnyTokenNamespaces = runtimeConfig.anyTokenMaxNamespaces;
-    const withWriteLock = createWriteLockRunner(dataDir);
+    let assertStorageRoot: () => void = () => undefined;
+    const withWriteLock = createWriteLockRunner(dataDir, () => assertStorageRoot());
     const rateLimitCleanupMs = runtimeConfig.rateCleanupMs;
     const requestTimeoutMs = runtimeConfig.requestTimeoutMs;
     const logAllRequests = options.logAllRequests
@@ -1029,7 +1043,9 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
         maxPerWindow,
         unauthorizedResponse,
         initializeNamespace: (filePath) => {
-            if (!existsSync(filePath)) writeCloudData(filePath, createEmptyCloudData());
+            if (!existsSync(filePath)) {
+                writeCloudData(filePath, createEmptyCloudData(), { assertStorageRoot });
+            }
         },
         runWithNamespaceAdmission: (handler, signal) => (
             withWriteLock(NAMESPACE_ADMISSION_LOCK_KEY, handler, signal)
@@ -1106,6 +1122,25 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
     if (!ensureWritableDir(dataDir)) {
         throw new Error('Cloud data directory is not writable');
     }
+    const initialDataDirRealPath = realpathSync(dataDir);
+    const initialDataDirStat = statSync(initialDataDirRealPath);
+    const isOriginalDataDirectory = (): boolean => {
+        try {
+            const currentRealPath = realpathSync(dataDir);
+            const currentStat = statSync(currentRealPath);
+            return currentStat.isDirectory()
+                && currentRealPath === initialDataDirRealPath
+                && currentStat.dev === initialDataDirStat.dev
+                && currentStat.ino === initialDataDirStat.ino;
+        } catch {
+            return false;
+        }
+    };
+    assertStorageRoot = () => {
+        if (!isOriginalDataDirectory()) {
+            throw new CloudStorageUnavailableError('Cloud storage is unavailable');
+        }
+    };
     logInfo('cloud data directory ready');
     if (allowedAuthTokens) {
         const { pruned: prunedFeedCount, failed: failedFeedCount } = pruneOrphanedCalendarFeeds(
@@ -1161,8 +1196,17 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                 }
 
                 if (req.method === 'GET' && pathname === '/ready') {
-                    const ready = ensureWritableDir(dataDir);
+                    const ready = isOriginalDataDirectory()
+                        && probeExistingWritableDir(dataDir)
+                        && isOriginalDataDirectory();
                     return jsonResponse({ ok: ready }, ready ? {} : { status: 503 });
+                }
+
+                // Every route below can read or mutate the configured storage
+                // tree. Refuse the request before auth, admission, lock, or path
+                // helpers can observe a missing or same-path replacement root.
+                if (!isOriginalDataDirectory()) {
+                    return errorResponse('Cloud storage unavailable', 503);
                 }
 
                 if (
@@ -1209,13 +1253,14 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                                 if ('error' in finalized) return finalized.error;
                                 const finalizedTask = finalized.tasks.find((item) => item.id === updatedTask.id) || updatedTask;
                                 throwIfRequestAborted(requestAbortController.signal);
-                                writeCloudData(ctx.filePath, finalized);
+                                writeCloudData(ctx.filePath, finalized, { assertStorageRoot });
                                 return jsonResponse({ task: finalizedTask });
                             });
                         }
 
                         for (const entityRoute of ENTITY_ROUTES) {
                             const entityRouteResponse = await handleEntityRoute(entityRoute, req, pathname, url, {
+                                assertStorageRoot,
                                 key: ctx.key,
                                 filePath: ctx.filePath,
                                 maxBodyBytes,
@@ -1294,7 +1339,9 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                             if (!existsSync(filePath)) {
                                 const emptyData = createEmptyCloudData();
                                 throwIfRequestAborted(requestAbortController.signal);
-                                if (!existsSync(filePath)) writeCloudData(filePath, emptyData);
+                                if (!existsSync(filePath)) {
+                                    writeCloudData(filePath, emptyData, { assertStorageRoot });
+                                }
                                 return jsonResponse(emptyData);
                             }
                             let rawData: Uint8Array;
@@ -1333,56 +1380,82 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                         const validated = validateAppData(body);
                         if (!validated.ok) return errorResponse(validated.error, 400);
                         return await withRequestWriteLock(key, async () => {
-                            throwIfRequestAborted(requestAbortController.signal);
-                            const existingDataResult = loadExistingDataForMerge(filePath);
-                            if ('error' in existingDataResult) return existingDataResult.error;
-                            const existingData = existingDataResult;
-                            const incomingData = validated.data;
-                            const mergeTimestamp = resolveServerMergeTimestamp(existingData, incomingData);
-                            const mergeResult = mergeAppDataWithStats(existingData, incomingData, {
-                                nowIso: mergeTimestamp,
-                            });
-                            throwIfRequestAborted(requestAbortController.signal);
-                            writeCloudData(filePath, mergeResult.data);
-                            const metadata = getDataFileMetadata(filePath);
-                            const contentLength = String(metadata.size);
-                            const remoteFingerprint = buildHttpRemoteFileFingerprint('cloud', {
-                                etag: metadata.etag,
-                                lastModified: metadata.lastModified,
-                                contentLength,
-                            });
-                            // Deliberate second merge: serverMergedRemoteData must be true
-                            // whenever the SERVER's stored data contributed anything to the
-                            // merged result — including settings-level and normalization-level
-                            // contributions that per-entity MergeStats cannot express. Merging
-                            // the incoming payload against an empty base yields the exact
-                            // "client-only" normal form to compare against. Do not replace this
-                            // with a stats-derived heuristic: a false negative makes clients
-                            // skip a needed re-read and diverge silently.
-                            const incomingOnlyMerge = mergeAppDataWithStats({
-                                tasks: [],
-                                projects: [],
-                                sections: [],
-                                areas: [],
-                                people: [],
-                                settings: {},
-                            }, incomingData, { nowIso: mergeTimestamp });
-                            const serverMergedRemoteData = !areSyncPayloadsEqual(mergeResult.data, incomingOnlyMerge.data);
-                            return jsonResponse({
-                                ok: true,
-                                stats: mergeResult.stats,
-                                clockSkewWarning: mergeResult.clockSkewWarning ?? null,
-                                remoteFingerprint,
-                                etag: metadata.etag,
-                                lastModified: metadata.lastModified,
-                                contentLength,
-                                serverMergedRemoteData,
-                            }, {
-                                headers: {
-                                    ETag: metadata.etag,
-                                    'Last-Modified': metadata.lastModified,
-                                },
-                            });
+                            let publication: PreparedFilePublication | null = null;
+                            try {
+                                throwIfRequestAborted(requestAbortController.signal);
+                                assertStorageRoot();
+                                publication = prepareFilePublicationSafely(
+                                    initialDataDirRealPath,
+                                    join(initialDataDirRealPath, basename(filePath)),
+                                    'data',
+                                );
+                                assertStorageRoot();
+                                if (!publication) {
+                                    throw new Error('Cloud data file publication is unsafe');
+                                }
+
+                                const existingDataResult = loadExistingDataForMerge(filePath);
+                                if ('error' in existingDataResult) return existingDataResult.error;
+                                const existingData = existingDataResult;
+                                const incomingData = validated.data;
+                                const mergeTimestamp = resolveServerMergeTimestamp(existingData, incomingData);
+                                const mergeResult = mergeAppDataWithStats(existingData, incomingData, {
+                                    nowIso: mergeTimestamp,
+                                });
+                                throwIfRequestAborted(requestAbortController.signal);
+                                writeCloudData(filePath, mergeResult.data, {
+                                    assertStorageRoot,
+                                    publication,
+                                });
+                                assertStorageRoot();
+                                const metadata = getDataFileMetadata(filePath);
+                                assertStorageRoot();
+                                const contentLength = String(metadata.size);
+                                const remoteFingerprint = buildHttpRemoteFileFingerprint('cloud', {
+                                    etag: metadata.etag,
+                                    lastModified: metadata.lastModified,
+                                    contentLength,
+                                });
+                                // Deliberate second merge: serverMergedRemoteData must be true
+                                // whenever the SERVER's stored data contributed anything to the
+                                // merged result — including settings-level and normalization-level
+                                // contributions that per-entity MergeStats cannot express. Merging
+                                // the incoming payload against an empty base yields the exact
+                                // "client-only" normal form to compare against. Do not replace this
+                                // with a stats-derived heuristic: a false negative makes clients
+                                // skip a needed re-read and diverge silently.
+                                const incomingOnlyMerge = mergeAppDataWithStats({
+                                    tasks: [],
+                                    projects: [],
+                                    sections: [],
+                                    areas: [],
+                                    people: [],
+                                    settings: {},
+                                }, incomingData, { nowIso: mergeTimestamp });
+                                const serverMergedRemoteData = !areSyncPayloadsEqual(mergeResult.data, incomingOnlyMerge.data);
+                                return jsonResponse({
+                                    ok: true,
+                                    stats: mergeResult.stats,
+                                    clockSkewWarning: mergeResult.clockSkewWarning ?? null,
+                                    remoteFingerprint,
+                                    etag: metadata.etag,
+                                    lastModified: metadata.lastModified,
+                                    contentLength,
+                                    serverMergedRemoteData,
+                                }, {
+                                    headers: {
+                                        ETag: metadata.etag,
+                                        'Last-Modified': metadata.lastModified,
+                                    },
+                                });
+                            } catch (error) {
+                                assertStorageRoot();
+                                throw error;
+                            } finally {
+                                if (publication) {
+                                    abandonPreparedFilePublication(publication);
+                                }
+                            }
                         });
                     }
 
@@ -1406,7 +1479,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                             return await withRequestWriteLock(ctx.key, async () => {
                                 throwIfRequestAborted(requestAbortController.signal);
                                 return jsonResponse(
-                                    { feed: describeCalendarFeed(rotateCalendarFeed(dataDir, ctx.key)) },
+                                    { feed: describeCalendarFeed(rotateCalendarFeed(dataDir, ctx.key, assertStorageRoot)) },
                                     { status: 201 },
                                 );
                             });
@@ -1479,12 +1552,16 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                         // Only PUT may create the namespace's attachment directory; GET and
                         // DELETE must never plant it (see resolveAttachmentPath's doc comment).
                         const resolvedAttachmentPath = attachmentPathResolver(dataDir, ctx.key, pathname.slice('/v1/attachments/'.length), { create: req.method === 'PUT' });
+                        if (!isOriginalDataDirectory()) {
+                            return errorResponse('Cloud storage unavailable', 503);
+                        }
                         if (!resolvedAttachmentPath) {
                             return errorResponse('Invalid attachment path', 400);
                         }
                         return handleAttachmentPathRequest(req, pathname, resolvedAttachmentPath, {
                             maxAttachmentBytes,
                             abortSignal: requestAbortController.signal,
+                            assertStorageRoot,
                         });
                     }, requestAbortController.signal);
                     if (attachmentPathResponse) return attachmentPathResponse;
@@ -1492,6 +1569,9 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
 
                         return errorResponse('Not found', 404);
                     } catch (error) {
+                        if (error instanceof CloudStorageUnavailableError) {
+                            return errorResponse('Cloud storage unavailable', 503);
+                        }
                         if (isRequestAbortError(error)) {
                             return errorResponse(error.message, error.status);
                         }

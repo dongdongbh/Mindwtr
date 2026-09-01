@@ -8,6 +8,7 @@ import {
     ensureDirectoryWithinRoot,
     ensureWritableDir,
     normalizeAttachmentRelativePath,
+    probeExistingWritableDir,
     type DurableDirectoryFileSystem,
     type DurableFileSystem,
     type DurableRemovalFileSystem,
@@ -640,6 +641,21 @@ describe('ensureWritableDir', () => {
             createProbeId: () => 'unused',
         })).toBe(false);
 
+        expect(probeHarness.events).toEqual([]);
+    });
+
+    test('readiness probe never creates a missing configured directory', () => {
+        const directoryHarness = createDurableDirectoryFileSystem(['/cloud']);
+        const probeHarness = createWritableDirectoryProbeFileSystem();
+
+        expect(probeExistingWritableDir('/cloud/data', {
+            directoryFileSystem: directoryHarness.fileSystem,
+            probeFileSystem: probeHarness.fileSystem,
+            createProbeId: () => 'unused',
+        })).toBe(false);
+
+        expect(directoryHarness.directories.has('/cloud/data')).toBe(false);
+        expect(directoryHarness.events).toEqual([]);
         expect(probeHarness.events).toEqual([]);
     });
 });

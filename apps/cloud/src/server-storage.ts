@@ -1,6 +1,7 @@
 import {
     closeSync,
     existsSync,
+    fstatSync,
     fsyncSync,
     lstatSync,
     mkdirSync,
@@ -9,6 +10,7 @@ import {
     realpathSync,
     renameSync,
     rmdirSync,
+    statSync,
     unlinkSync,
     writeFileSync,
 } from 'fs';
@@ -413,6 +415,25 @@ export function ensureDurableDirectory(
     }
 }
 
+function resolveExistingDirectory(
+    targetDir: string,
+    fileSystem: DurableDirectoryFileSystem = nodeDurableDirectoryFileSystem,
+): string | null {
+    const absoluteTarget = resolve(targetDir);
+    try {
+        const entry = fileSystem.lstatSync(absoluteTarget);
+        const realPath = fileSystem.realpathSync(absoluteTarget);
+        const realEntry = entry.isSymbolicLink()
+            ? fileSystem.lstatSync(realPath)
+            : entry;
+        if (realEntry.isSymbolicLink() || !realEntry.isDirectory()) return null;
+        return realPath;
+    } catch (error) {
+        if (isFsErrorWithCode(error, 'ENOENT')) return null;
+        throw error;
+    }
+}
+
 export function normalizeAttachmentRelativePath(rawPath: string): string | null {
     const decoded = decodeAttachmentPath(rawPath);
     if (!decoded) return null;
@@ -445,16 +466,11 @@ export function resolveAttachmentPath(
     const relativePath = normalizeAttachmentRelativePath(rawPath);
     if (!relativePath) return null;
     const dataRoot = resolve(dataDir);
-    let dataRootRealPath: string;
-    if (options.create) {
-        const durableDataRoot = ensureDurableDirectory(dataRoot);
-        if (!durableDataRoot) return null;
-        dataRootRealPath = durableDataRoot;
-    } else if (!existsSync(dataRoot)) {
-        return null;
-    } else {
-        dataRootRealPath = realpathSync(dataRoot);
-    }
+    // Startup owns creation of the configured storage root. Request paths may
+    // create only descendants inside that already-existing root, otherwise a
+    // lost mount could be silently replaced with a fresh local directory.
+    const dataRootRealPath = resolveExistingDirectory(dataRoot);
+    if (!dataRootRealPath) return null;
     const rootDir = resolve(join(dataRootRealPath, key, 'attachments'));
     if (!ensureDirectoryWithinRoot(dataRootRealPath, rootDir, options.create)) return null;
     // rootDir may not exist yet when options.create is false (nothing was ever
@@ -552,54 +568,179 @@ export function durablyPublishFile(
     }
 }
 
-export function writeAttachmentFileSafely(rootRealPath: string, filePath: string, body: Uint8Array): boolean {
+type FilePublicationIdentity = {
+    dev: number;
+    ino: number;
+};
+
+export type PreparedFilePublication = {
+    rootRealPath: string;
+    rootIdentity: FilePublicationIdentity;
+    parentRealPath: string;
+    parentIdentity: FilePublicationIdentity;
+    safeFilePath: string;
+    tempPath: string;
+    tempHandle: number | null;
+    tempIdentity: FilePublicationIdentity;
+};
+
+const filePublicationIdentity = (stat: { dev: number; ino: number }): FilePublicationIdentity => ({
+    dev: stat.dev,
+    ino: stat.ino,
+});
+
+const filePublicationIdentityMatches = (
+    actual: { dev: number; ino: number },
+    expected: FilePublicationIdentity,
+): boolean => actual.dev === expected.dev && actual.ino === expected.ino;
+
+const resolveSafePublicationTarget = (
+    rootRealPath: string,
+    filePath: string,
+): {
+    rootIdentity: FilePublicationIdentity;
+    parentRealPath: string;
+    parentIdentity: FilePublicationIdentity;
+    safeFilePath: string;
+} | null => {
     const parentPath = dirname(filePath);
-    if (!ensureDirectoryWithinRoot(rootRealPath, parentPath)) return false;
-    if (pathContainsSymlink(rootRealPath, parentPath)) return false;
+    if (!ensureDirectoryWithinRoot(rootRealPath, parentPath)) return null;
+    if (pathContainsSymlink(rootRealPath, parentPath)) return null;
+    const currentRootRealPath = realpathSync(rootRealPath);
+    if (currentRootRealPath !== rootRealPath) return null;
+    const rootIdentity = filePublicationIdentity(statSync(currentRootRealPath));
     const parentRealPath = realpathSync(parentPath);
     if (!isPathWithinRoot(parentRealPath, rootRealPath)) {
-        return false;
+        return null;
     }
+    const parentIdentity = filePublicationIdentity(statSync(parentRealPath));
 
     const safeFilePath = join(parentRealPath, basename(filePath));
     if (existsSync(safeFilePath)) {
         const stat = lstatSync(safeFilePath);
         if (stat.isSymbolicLink()) {
-            return false;
+            return null;
         }
         const realFilePath = realpathSync(safeFilePath);
         if (!isPathWithinRoot(realFilePath, rootRealPath)) {
-            return false;
+            return null;
         }
     }
 
-    return durablyPublishFile(safeFilePath, body, {
-        tempName: `.mindwtr-upload-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
-        beforeRename: (tempPath) => {
-            const tempRealPath = realpathSync(tempPath);
-            if (!isPathWithinRoot(tempRealPath, rootRealPath)) {
-                return false;
-            }
-            if (pathContainsSymlink(rootRealPath, parentPath)) {
-                return false;
-            }
-            const currentParentRealPath = realpathSync(parentPath);
-            if (currentParentRealPath !== parentRealPath || !isPathWithinRoot(currentParentRealPath, rootRealPath)) {
-                return false;
-            }
-            if (existsSync(safeFilePath)) {
-                const stat = lstatSync(safeFilePath);
-                if (stat.isSymbolicLink()) {
-                    return false;
-                }
-                const currentRealFilePath = realpathSync(safeFilePath);
-                if (!isPathWithinRoot(currentRealFilePath, rootRealPath)) {
-                    return false;
-                }
-            }
-            return true;
-        },
-    });
+    return { rootIdentity, parentRealPath, parentIdentity, safeFilePath };
+};
+
+export function prepareFilePublicationSafely(
+    rootRealPath: string,
+    filePath: string,
+    kind: 'data' | 'upload',
+): PreparedFilePublication | null {
+    const target = resolveSafePublicationTarget(rootRealPath, filePath);
+    if (!target) return null;
+    const tempPath = join(
+        target.parentRealPath,
+        `.mindwtr-${kind}-${process.pid}-${Date.now()}-${randomBytes(16).toString('hex')}.tmp`,
+    );
+    const tempHandle = openSync(tempPath, 'wx', 0o600);
+    try {
+        const tempStat = fstatSync(tempHandle);
+        if (!tempStat.isFile()) {
+            throw new Error('Cloud file publication stage is not a regular file');
+        }
+
+        return {
+            rootRealPath,
+            rootIdentity: target.rootIdentity,
+            parentRealPath: target.parentRealPath,
+            parentIdentity: target.parentIdentity,
+            safeFilePath: target.safeFilePath,
+            tempPath,
+            tempHandle,
+            tempIdentity: filePublicationIdentity(tempStat),
+        };
+    } catch (error) {
+        try {
+            closeSync(tempHandle);
+        } catch {
+            // Preserve the stage-validation error.
+        }
+        try {
+            unlinkSync(tempPath);
+        } catch {
+            // Preserve the stage-validation error.
+        }
+        throw error;
+    }
+}
+
+const isPreparedFilePublicationCurrent = (prepared: PreparedFilePublication): boolean => {
+    if (realpathSync(prepared.rootRealPath) !== prepared.rootRealPath) return false;
+    if (!filePublicationIdentityMatches(statSync(prepared.rootRealPath), prepared.rootIdentity)) return false;
+    if (pathContainsSymlink(prepared.rootRealPath, prepared.parentRealPath)) return false;
+    if (realpathSync(prepared.parentRealPath) !== prepared.parentRealPath) return false;
+    if (!filePublicationIdentityMatches(statSync(prepared.parentRealPath), prepared.parentIdentity)) return false;
+
+    const tempStat = lstatSync(prepared.tempPath);
+    if (tempStat.isSymbolicLink() || !tempStat.isFile()) return false;
+    if (!filePublicationIdentityMatches(tempStat, prepared.tempIdentity)) return false;
+    if (!isPathWithinRoot(realpathSync(prepared.tempPath), prepared.rootRealPath)) return false;
+
+    if (existsSync(prepared.safeFilePath)) {
+        const targetStat = lstatSync(prepared.safeFilePath);
+        if (targetStat.isSymbolicLink()) return false;
+        if (!isPathWithinRoot(realpathSync(prepared.safeFilePath), prepared.rootRealPath)) return false;
+    }
+    return true;
+};
+
+export function abandonPreparedFilePublication(prepared: PreparedFilePublication): void {
+    if (prepared.tempHandle !== null) {
+        try {
+            closeSync(prepared.tempHandle);
+        } catch {
+            // Best effort. The request failure remains authoritative.
+        }
+        prepared.tempHandle = null;
+    }
+    try {
+        const current = lstatSync(prepared.tempPath);
+        if (
+            !current.isSymbolicLink()
+            && current.isFile()
+            && filePublicationIdentityMatches(current, prepared.tempIdentity)
+        ) {
+            unlinkSync(prepared.tempPath);
+        }
+    } catch {
+        // The stage may have disappeared with the original storage root.
+    }
+}
+
+export function publishPreparedFilePublication(
+    prepared: PreparedFilePublication,
+    data: string | Uint8Array,
+    assertStorageRoot?: () => void,
+): boolean {
+    if (prepared.tempHandle === null) return false;
+    writeFileSync(prepared.tempHandle, data);
+    fsyncSync(prepared.tempHandle);
+    const writtenStat = fstatSync(prepared.tempHandle);
+    if (!filePublicationIdentityMatches(writtenStat, prepared.tempIdentity)) return false;
+    closeSync(prepared.tempHandle);
+    prepared.tempHandle = null;
+
+    assertStorageRoot?.();
+    if (!isPreparedFilePublicationCurrent(prepared)) return false;
+    // Keep the startup-pinned data root and this exact staged inode authoritative
+    // at the publication boundary. A same-path replacement must never inherit a
+    // publication operation that began against the old storage instance.
+    assertStorageRoot?.();
+    if (!isPreparedFilePublicationCurrent(prepared)) return false;
+
+    renameSync(prepared.tempPath, prepared.safeFilePath);
+    syncDirectoryEntryParent(prepared.parentRealPath, nodeDurableFileSystem);
+    assertStorageRoot?.();
+    return true;
 }
 
 export function readData(filePath: string): AppData | null {
@@ -658,12 +799,51 @@ export function loadAppDataUncached(filePath: string): AppData {
     return result.state === 'ok' ? result.data : createDefaultData();
 }
 
-export function writeData(filePath: string, data: unknown) {
-    if (!ensureDurableDirectory(dirname(filePath))) {
-        throw new Error('Cloud data directory is unsafe');
+export type WriteDataOptions = {
+    assertStorageRoot?: () => void;
+    publication?: PreparedFilePublication;
+};
+
+export function writeData(filePath: string, data: unknown, options: WriteDataOptions = {}) {
+    let publication = options.publication ?? null;
+    const ownsPublication = publication === null;
+    if (!publication) {
+        options.assertStorageRoot?.();
+        const parentRealPath = resolveExistingDirectory(dirname(filePath));
+        options.assertStorageRoot?.();
+        if (!parentRealPath) {
+            throw new Error('Cloud data directory is unsafe');
+        }
+        publication = prepareFilePublicationSafely(
+            parentRealPath,
+            join(parentRealPath, basename(filePath)),
+            'data',
+        );
+        options.assertStorageRoot?.();
+        if (!publication) {
+            throw new Error('Cloud data file publication is unsafe');
+        }
     }
-    const serialized = JSON.stringify(data, null, 2);
-    durablyPublishFile(filePath, serialized);
+
+    try {
+        const serialized = JSON.stringify(data, null, 2);
+        const published = publishPreparedFilePublication(
+            publication,
+            serialized,
+            options.assertStorageRoot,
+        );
+        if (!published) {
+            options.assertStorageRoot?.();
+            throw new Error('Cloud data file publication lost storage authority');
+        }
+    } catch (error) {
+        options.assertStorageRoot?.();
+        throw error;
+    } finally {
+        if (ownsPublication) {
+            abandonPreparedFilePublication(publication);
+        }
+    }
 }
 
 const CLOUD_LOCK_SHARD_COUNT = 64;
@@ -709,12 +889,21 @@ async function withCloudFileLock<T>(
     key: string,
     fn: () => Promise<T>,
     signal?: AbortSignal,
+    assertStorageRoot?: () => void,
 ): Promise<T> {
     throwIfRequestAborted(signal);
-    const lockPath = getCloudLockPath(dataDir, key);
-    if (!ensureDurableDirectory(dirname(lockPath))) {
+    assertStorageRoot?.();
+    const dataRootRealPath = resolveExistingDirectory(dataDir);
+    assertStorageRoot?.();
+    if (!dataRootRealPath) {
+        throw new Error('Cloud data directory is unsafe');
+    }
+    const lockDirectory = join(dataRootRealPath, '.locks');
+    if (!ensureDirectoryWithinRoot(dataRootRealPath, lockDirectory, true)) {
         throw new Error('Cloud lock directory is unsafe');
     }
+    assertStorageRoot?.();
+    const lockPath = getCloudLockPath(dataRootRealPath, key);
     const startedAt = Date.now();
     let attempt = 0;
     const { Database } = await import('bun:sqlite');
@@ -722,6 +911,7 @@ async function withCloudFileLock<T>(
 
     while (true) {
         throwIfRequestAborted(signal);
+        assertStorageRoot?.();
         const candidate = new Database(lockPath);
         try {
             // Poll with a zero SQLite busy timeout instead of blocking Bun's event
@@ -744,7 +934,16 @@ async function withCloudFileLock<T>(
 
     try {
         throwIfRequestAborted(signal);
-        return await fn();
+        assertStorageRoot?.();
+        const result = await fn();
+        // The callback may read, validate, or merge for long enough that an
+        // external remount can replace the same configured path. Never let a
+        // serialized operation return data from that replacement instance.
+        assertStorageRoot?.();
+        return result;
+    } catch (error) {
+        assertStorageRoot?.();
+        throw error;
     } finally {
         try {
             lockDatabase?.exec('ROLLBACK;');
@@ -756,8 +955,9 @@ async function withCloudFileLock<T>(
     }
 }
 
-export function ensureWritableDir(
+function probeWritableDirectory(
     dirPath: string,
+    createDirectory: boolean,
     options: WritableDirectoryProbeOptions = {},
 ): boolean {
     const directoryFileSystem = options.directoryFileSystem ?? nodeDurableDirectoryFileSystem;
@@ -769,7 +969,9 @@ export function ensureWritableDir(
     let writable = false;
 
     try {
-        const durableDirPath = ensureDurableDirectory(dirPath, directoryFileSystem);
+        const durableDirPath = createDirectory
+            ? ensureDurableDirectory(dirPath, directoryFileSystem)
+            : resolveExistingDirectory(dirPath, directoryFileSystem);
         if (durableDirPath) {
             probePath = join(durableDirPath, `.mindwtr-write-probe-${createProbeId()}.tmp`);
             probeHandle = probeFileSystem.openSync(probePath, 'wx', 0o600);
@@ -804,6 +1006,20 @@ export function ensureWritableDir(
         });
     }
     return writable;
+}
+
+export function ensureWritableDir(
+    dirPath: string,
+    options: WritableDirectoryProbeOptions = {},
+): boolean {
+    return probeWritableDirectory(dirPath, true, options);
+}
+
+export function probeExistingWritableDir(
+    dirPath: string,
+    options: WritableDirectoryProbeOptions = {},
+): boolean {
+    return probeWritableDirectory(dirPath, false, options);
 }
 
 export async function readRequestBytes(
@@ -891,7 +1107,10 @@ export async function readJsonBody(req: Request, maxBodyBytes: number, signal?: 
     }
 }
 
-export function createWriteLockRunner(dataDir?: string): WriteLockRunner {
+export function createWriteLockRunner(
+    dataDir?: string,
+    assertStorageRoot?: () => void,
+): WriteLockRunner {
     const writeLocks = new Map<string, Promise<void>>();
     const withWriteLock = async <T>(key: string, fn: () => Promise<T>, signal?: AbortSignal) => {
         const current = writeLocks.get(key) ?? Promise.resolve();
@@ -910,7 +1129,9 @@ export function createWriteLockRunner(dataDir?: string): WriteLockRunner {
         const run = current.catch(() => undefined).then(() => {
             removeQueuedAbortListener();
             throwIfRequestAborted(signal);
-            return dataDir ? withCloudFileLock(dataDir, key, fn, signal) : fn();
+            return dataDir
+                ? withCloudFileLock(dataDir, key, fn, signal, assertStorageRoot)
+                : fn();
         });
         const queueTail = run.then(() => undefined, () => undefined);
         writeLocks.set(key, queueTail);
