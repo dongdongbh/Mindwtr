@@ -27,10 +27,12 @@ import {
   getAttachmentsDir,
   getLocalAttachmentPresence,
   getWebdavDownloadBackoff,
+  isAttachmentPresenceReconciliationDue,
   isHttpAttachmentUri,
   describeAttachmentUriForLog,
   logAttachmentInfo,
   logAttachmentWarn,
+  markAttachmentPresenceReconciled,
   markAttachmentUnrecoverable,
   pruneWebdavDownloadBackoff,
   readAttachmentBytesForUpload,
@@ -108,30 +110,49 @@ export const syncWebdavAttachments = async (
   };
 
   const attachmentsDirUrl = `${baseSyncUrl}/${ATTACHMENTS_DIR_NAME}`;
-  // Outside the try below: a refused connection is not a "directory already exists"
-  // failure to shrug off, and swallowing it let the whole insecure pass continue (SEC-10a).
+  // Stays unconditional and outside the try below: it makes no request, and a refused
+  // connection is not a "directory already exists" failure to shrug off — swallowing it
+  // let the whole insecure pass continue (SEC-10a).
   assertMobileWebdavConnection(attachmentsDirUrl, webDavConfig.allowInsecureHttp);
-  try {
-    await options.assertRemoteMutationFenceHeld?.(35_000);
-    await webdavMakeDirectory(attachmentsDirUrl, {
-      ...getMobileWebDavRequestOptions(webDavConfig.allowInsecureHttp),
-      username: webDavConfig.username,
-      password: webDavConfig.password,
-      signal,
-    });
-  } catch (error) {
-    if (isAttachmentSyncAbortError(error, signal)) throw error;
-    if (isSyncRemoteMutationFenceError(error)) throw error;
-    logAttachmentWarn('Failed to ensure WebDAV attachments directory', error);
-  }
+  // Only a PUT needs the collection to exist; HEAD and GET do not. This used to run on
+  // every pass, which cost one MKCOL per idle cycle for anyone with a synced attachment
+  // (audit F3), so it is now deferred to just before the first upload of a pass.
+  let attachmentsDirEnsured = false;
+  const ensureRemoteAttachmentsDir = async (): Promise<void> => {
+    if (attachmentsDirEnsured) return;
+    try {
+      await options.assertRemoteMutationFenceHeld?.(35_000);
+      await webdavMakeDirectory(attachmentsDirUrl, {
+        ...getMobileWebDavRequestOptions(webDavConfig.allowInsecureHttp),
+        username: webDavConfig.username,
+        password: webDavConfig.password,
+        signal,
+      });
+    } catch (error) {
+      if (isAttachmentSyncAbortError(error, signal)) throw error;
+      if (isSyncRemoteMutationFenceError(error)) throw error;
+      logAttachmentWarn('Failed to ensure WebDAV attachments directory', error);
+    }
+    // Set only once the call did not throw a fatal error, so a fence loss that aborts
+    // this upload does not silently skip the MKCOL for a later retry.
+    attachmentsDirEnsured = true;
+  };
 
   const attachmentsDir = await getAttachmentsDir();
   if (!attachmentsDir) return false;
   const attachmentsById = collectAttachments(appData);
 
   pruneWebdavDownloadBackoff();
+  // See `isAttachmentPresenceReconciliationDue`: an uploaded attachment's key is derived
+  // from its id and its bytes never change, so the presence pass below can only ever
+  // discover a server-side deletion — worth proving daily, not hourly (audit F3). An
+  // activation probe is different: it has to prove the candidate backend holds every object
+  // right now, so it always reconciles and never writes the stamp (the stamp names the
+  // committed configuration, not the candidate one).
+  const reconcilePresence = options.activationProbe || await isAttachmentPresenceReconciliationDue();
   logAttachmentInfo('WebDAV attachment sync start', {
     count: String(attachmentsById.size),
+    presence: reconcilePresence ? 'reconcile' : 'skipped',
   });
 
   // Every pass writes only to per-attachment copies and records them here; the patches are
@@ -146,8 +167,9 @@ export const syncWebdavAttachments = async (
   // This runs as its own pass before the lifecycle: it's an async, network-calling,
   // state-mutating check, which doesn't fit the lifecycle's synchronous `hasCloudCopy` predicate
   // (mirrors desktop's shape in apps/desktop/src/lib/sync-attachment-backends.ts).
+  // ...but only when `reconcilePresence` above says the proof is due.
   for (const attachment of attachmentsById.values()) {
-    if (abortedByRateLimit) break;
+    if (!reconcilePresence || abortedByRateLimit) break;
     assertAttachmentSyncNotAborted(signal);
     if (attachment.kind !== 'file' || attachment.deletedAt) continue;
 
@@ -212,6 +234,10 @@ export const syncWebdavAttachments = async (
     }
   }
 
+  if (reconcilePresence && !abortedByRateLimit && !options.activationProbe) {
+    await markAttachmentPresenceReconciled();
+  }
+
   // Throttle policy: per-run upload/download caps, plus the same rate-limit abort the pre-pass
   // above already tripped. Passed to the shared lifecycle as optional `policy` hooks.
   let uploadCount = 0;
@@ -269,6 +295,7 @@ export const syncWebdavAttachments = async (
         },
     onUpload: async (attachment, localPath) => {
       try {
+        await ensureRemoteAttachmentsDir();
         let size = await getAttachmentByteSize(attachment, localPath);
         let fileData: Uint8Array | null = null;
         if (!Number.isFinite(size ?? NaN)) {

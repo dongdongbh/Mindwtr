@@ -12,7 +12,7 @@ import {
   type AttachmentDownloadExpectation,
   type LocalFileStat,
 } from '@mindwtr/core';
-import { logAttachmentWarn } from '../attachment-sync-utils';
+import { logAttachmentWarn, markAttachmentPresenceReconciled } from '../attachment-sync-utils';
 import { getMobileCloudRequestOptions } from '../webdav-request-options';
 import {
   buildCloudKey,
@@ -388,6 +388,13 @@ export const syncCloudAttachments = async (
     recordPatch(pending.attachment);
     reportProgress(pending.attachment.id, 'upload', pending.totalBytes, pending.totalBytes, 'completed');
   }
+
+  // A completed pass is this backend's whole reconciliation: it refreshed every
+  // attachment's local presence and settled every transfer. Stamping it lets
+  // `hasPendingAttachmentSyncWork` keep the steady state quiet until the next one is due
+  // (audit F3). Never stamped for an activation probe, whose subject is the candidate
+  // configuration rather than the committed one the stamp names.
+  if (!options.activationProbe) await markAttachmentPresenceReconciled();
 
   const nextData = applyAttachmentPatches(appData, allPatches);
   return nextData !== appData ? nextData : false;

@@ -32,6 +32,7 @@ import {
   isHttpAttachmentUri,
   logAttachmentInfo,
   logAttachmentWarn,
+  markAttachmentPresenceReconciled,
   markAttachmentUnrecoverable,
   readAttachmentBytesForUpload,
   reportProgress,
@@ -402,6 +403,13 @@ export const syncDropboxAttachments = async (
       logAttachmentWarn(`Failed to download attachment ${attachment.id}`, error);
     }
   }
+
+  // A completed pass is this backend's whole reconciliation: it refreshed every
+  // attachment's local presence and settled every transfer. Stamping it lets
+  // `hasPendingAttachmentSyncWork` keep the steady state quiet until the next one is due
+  // (audit F3). Never stamped for an activation probe, whose subject is the candidate
+  // configuration rather than the committed one the stamp names.
+  if (!options.activationProbe) await markAttachmentPresenceReconciled();
 
   return foldPatches();
 };
