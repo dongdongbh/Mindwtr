@@ -1921,7 +1921,7 @@ describe('attachment sync', () => {
     expect(data.tasks[0]?.attachments?.[0]).toMatchObject({ localStatus: 'missing' });
   });
 
-  it('publishes a downloaded attachment from JS in Expo Go, where the native installer cannot exist', async () => {
+  it('fails closed on a first attachment download in Expo Go when the native installer cannot exist', async () => {
     const { setExpoGoProbeForTests } = await import('./expo-go');
     setExpoGoProbeForTests(() => true);
     const unavailable = Object.assign(new Error('Attachment file installer native module is unavailable'), {
@@ -1972,15 +1972,124 @@ describe('attachment sync', () => {
         appData,
       );
 
-      expect(fileSystemMock.moveAsync).toHaveBeenCalledWith({
-        from: expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-download-/),
+      expect(fileSystemMock.moveAsync).not.toHaveBeenCalledWith(expect.objectContaining({
         to: 'file://document/attachments/report.pdf',
-      });
+      }));
+      expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-download-/),
+        expect.anything(),
+      );
       expect(data.tasks[0]?.attachments?.[0]).toMatchObject({
-        uri: 'file://document/attachments/report.pdf',
+        uri: '',
         fileHash: remoteHash,
-        localStatus: 'available',
+        localStatus: 'missing',
       });
+    } finally {
+      setExpoGoProbeForTests(null);
+    }
+  });
+
+  it('preserves an absent-target download when a local file appears after the Expo Go probe', async () => {
+    const { setExpoGoProbeForTests } = await import('./expo-go');
+    const { installStagedAttachmentDownload } = await import('./attachment-sync-backends/common');
+    setExpoGoProbeForTests(() => true);
+    const unavailable = Object.assign(new Error('Attachment file installer native module is unavailable'), {
+      code: 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE',
+    });
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockRejectedValueOnce(unavailable);
+    const downloadedBytes = new Uint8Array([4, 5, 6]);
+    const stagedPath = 'file://document/attachments/.mindwtr-download-report.staged';
+    const targetPath = 'file://document/attachments/report.pdf';
+    let targetAppeared = false;
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+      if (uri === stagedPath) {
+        return { exists: true, size: 3, modificationTime: 1 };
+      }
+      if (uri === targetPath) {
+        const result = targetAppeared
+          ? { exists: true, size: 3, modificationTime: 2 }
+          : { exists: false };
+        targetAppeared = true;
+        return result;
+      }
+      return { exists: false };
+    });
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(downloadedBytes));
+    const attachment: Attachment = {
+      id: 'report',
+      kind: 'file',
+      title: 'Report.pdf',
+      uri: '',
+      fileHash: sha256Hex(downloadedBytes),
+      createdAt: '2026-08-03T10:00:00.000Z',
+      updatedAt: '2026-08-03T10:00:00.000Z',
+    };
+
+    try {
+      await expect(installStagedAttachmentDownload({
+        attachment,
+        stagedPath,
+        targetPath,
+        expectation: { kind: 'absent' },
+        expectedStagedHash: sha256Hex(downloadedBytes),
+      })).resolves.toBe(false);
+
+      expect(fileSystemMock.moveAsync).not.toHaveBeenCalledWith(expect.objectContaining({
+        from: stagedPath,
+        to: targetPath,
+      }));
+      expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(targetPath, expect.anything());
+      expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(stagedPath, expect.anything());
+    } finally {
+      setExpoGoProbeForTests(null);
+    }
+  });
+
+  it('preserves both generations when Expo Go cannot atomically replace an existing attachment', async () => {
+    const { setExpoGoProbeForTests } = await import('./expo-go');
+    const { installStagedAttachmentDownload } = await import('./attachment-sync-backends/common');
+    setExpoGoProbeForTests(() => true);
+    const unavailable = Object.assign(new Error('Attachment file installer native module is unavailable'), {
+      code: 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE',
+    });
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockRejectedValueOnce(unavailable);
+    const staleBytes = new Uint8Array([1, 2, 3]);
+    const downloadedBytes = new Uint8Array([4, 5, 6]);
+    const stagedPath = 'file://document/attachments/.mindwtr-download-report.staged';
+    const targetPath = 'file://document/attachments/report.pdf';
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+      if (uri === stagedPath || uri === targetPath) {
+        return { exists: true, size: 3, modificationTime: 1 };
+      }
+      return { exists: false };
+    });
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(staleBytes));
+    const attachment: Attachment = {
+      id: 'report',
+      kind: 'file',
+      title: 'Report.pdf',
+      uri: targetPath,
+      fileHash: sha256Hex(downloadedBytes),
+      createdAt: '2026-08-03T10:00:00.000Z',
+      updatedAt: '2026-08-03T10:00:00.000Z',
+    };
+
+    try {
+      await expect(installStagedAttachmentDownload({
+        attachment,
+        stagedPath,
+        targetPath,
+        expectation: { kind: 'present', sha256: sha256Hex(staleBytes) },
+        expectedStagedHash: sha256Hex(downloadedBytes),
+      })).resolves.toBe(false);
+
+      expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(targetPath, expect.anything());
+      expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(stagedPath, expect.anything());
+      expect(fileSystemMock.moveAsync).not.toHaveBeenCalledWith(expect.objectContaining({
+        from: stagedPath,
+        to: targetPath,
+      }));
+      expect(attachment.fileHash).toBe(sha256Hex(downloadedBytes));
     } finally {
       setExpoGoProbeForTests(null);
     }
