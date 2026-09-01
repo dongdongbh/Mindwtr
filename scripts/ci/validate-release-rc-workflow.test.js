@@ -524,6 +524,22 @@ test("Windows release signs and publishes exactly the current NSIS installer", (
 // the installer chain gates on stage-unsigned-installer, which itself only
 // stages once stage-unsigned-exe succeeded — that link is what actually
 // prevents the installer from signing/uploading when the app binary wasn't.
+test("Windows release retries a failed Bun install after clearing its package cache", () => {
+  const windows = parse(
+    readFileSync(".github/workflows/release-windows.yml", "utf8"),
+  );
+  const install = windows.jobs.standalone.steps.find(
+    (step) => step.name === "Install dependencies",
+  );
+
+  expect(install).toBeDefined();
+  expect(install.shell).toBe("pwsh");
+  expect(install.run.match(/bun install --frozen-lockfile/g)).toHaveLength(2);
+  expect(install.run).toContain("bun pm cache rm");
+  expect(install.run).toContain("bun pm cache clean");
+  expect(install.run).toContain("exit $LASTEXITCODE");
+});
+
 test("Windows release SignPath submissions are gated end to end and target the pinned slugs", () => {
   const windows = parse(
     readFileSync(".github/workflows/release-windows.yml", "utf8"),

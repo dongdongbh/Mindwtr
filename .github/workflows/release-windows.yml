@@ -75,7 +75,20 @@ jobs:
           bun-version-file: ".bun-version"
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        shell: pwsh
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "bun install failed, clearing cache and retrying..."
+            bun pm cache rm
+            if ($LASTEXITCODE -ne 0) {
+              bun pm cache clean
+            }
+            bun install --frozen-lockfile
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
 
 
       - name: Resolve version
