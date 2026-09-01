@@ -160,6 +160,9 @@ export function QuickCaptureSheetBody({
   value,
   visible,
 }: QuickCaptureSheetBodyProps) {
+  // The full token reference is long; fold it so the More panel stays compact
+  // on a keyboard-shrunk sheet (#1120 follow-up). Resets per open on purpose.
+  const [syntaxHelpVisible, setSyntaxHelpVisible] = React.useState(false);
   const optionsToggleLabel = optionsExpanded ? t('taskEdit.hideOptions') : tFallback(t, 'common.more', 'More');
   const defaultProjectLabel = tFallback(t, 'taskEdit.projectLabel', 'Project');
   const focusDisabled = !focusNewTask && !canFocusNewTask;
@@ -525,13 +528,26 @@ export function QuickCaptureSheetBody({
                   )}
                 </View>
 
-                <CompactText
-                  style={[styles.syntaxHint, { color: tc.secondaryText }]}
-                  numberOfLines={4}
-                  ellipsizeMode="tail"
+                <TouchableOpacity
+                  style={styles.syntaxHelpToggle}
+                  onPress={() => setSyntaxHelpVisible((visible) => !visible)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('quickAdd.syntaxHelp')}
+                  accessibilityState={{ expanded: syntaxHelpVisible }}
+                  testID="quick-capture-syntax-help-toggle"
                 >
-                  {formatQuickAddHelp(t('quickAdd.help'), { priorities: prioritiesEnabled })}
-                </CompactText>
+                  {syntaxHelpVisible
+                    ? <ChevronUp size={14} color={tc.secondaryText} />
+                    : <ChevronDown size={14} color={tc.secondaryText} />}
+                  <CompactText style={[styles.syntaxHelpToggleText, { color: tc.secondaryText }]}>
+                    {t('quickAdd.syntaxHelp')}
+                  </CompactText>
+                </TouchableOpacity>
+                {syntaxHelpVisible && (
+                  <CompactText style={[styles.syntaxHint, { color: tc.secondaryText }]}>
+                    {formatQuickAddHelp(t('quickAdd.help'), { priorities: prioritiesEnabled })}
+                  </CompactText>
+                )}
 
                 {handleImportTextFile ? (
                   <TouchableOpacity

@@ -606,6 +606,79 @@ describe('Quick capture modal composition', () => {
     expect(tree.root.findAllByType(Text).some((node) => node.props.children === 'More')).toBe(true);
   });
 
+  it('folds the quick-add syntax reference behind a toggle in the expanded panel (#1120)', () => {
+    let tree!: ReturnType<typeof create>;
+    const t = (key: string) => ({
+      'common.close': 'Close',
+      'common.more': 'More',
+      'common.save': 'Save',
+      'nav.addTask': 'Add Task',
+      'quickAdd.help': 'Quick add supports /due:<when> and friends.',
+      'quickAdd.syntaxHelp': 'Quick Add syntax help',
+      'taskEdit.hideOptions': 'Hide options',
+    })[key] ?? key;
+
+    act(() => {
+      tree = create(
+        <QuickCaptureSheetBody
+          addAnother={false}
+          areaLabel="Work"
+          contextLabel="@computer"
+          dueDate={null}
+          dueLabel="Due"
+          dueTimeLabel="Change time"
+          handleClose={vi.fn()}
+          handleSave={vi.fn()}
+          insetsBottom={0}
+          inputRef={{ current: null }}
+          noteValue=""
+          onNoteChange={vi.fn()}
+          onOpenAreaPicker={vi.fn()}
+          onOpenContextPicker={vi.fn()}
+          onOpenDueDatePicker={vi.fn()}
+          onOpenDueTimePicker={vi.fn()}
+          onOpenPriorityPicker={vi.fn()}
+          onOpenProjectPicker={vi.fn()}
+          onQuickDueDateSelect={vi.fn()}
+          onResetArea={vi.fn()}
+          onResetContexts={vi.fn()}
+          onResetDueDate={vi.fn()}
+          onResetDueTime={vi.fn()}
+          onResetPriority={vi.fn()}
+          onResetProject={vi.fn()}
+          onToggleOptions={vi.fn()}
+          onToggleAddAnother={vi.fn()}
+          onToggleRecording={vi.fn()}
+          onValueChange={vi.fn()}
+          optionsExpanded
+          prioritiesEnabled
+          priorityLabel="High"
+          projectLabel="Project"
+          recording={false}
+          recordingBusy={false}
+          recordingReady={false}
+          sheetMaxHeight={500}
+          showDueTime={false}
+          t={t}
+          tc={tc}
+          value=""
+          visible
+        />
+      );
+    });
+
+    const helpText = 'Quick add supports /due:<when> and friends.';
+    const hasHelpText = () => tree.root.findAllByType(Text)
+      .some((node) => node.props.children === helpText);
+    expect(hasHelpText()).toBe(false);
+    const toggle = tree.root.findByProps({ testID: 'quick-capture-syntax-help-toggle' });
+    expect(toggle.props.accessibilityState).toEqual({ expanded: false });
+    act(() => {
+      toggle.props.onPress();
+    });
+    expect(hasHelpText()).toBe(true);
+  });
+
   it('shows a compact selected-project cue in collapsed capture', () => {
     let tree!: ReturnType<typeof create>;
     const longProjectName = 'Extremely Long Project Name That Should Not Crowd Quick Capture Controls';

@@ -213,8 +213,20 @@ export const styles = StyleSheet.create({
     flexShrink: 1,
     textAlign: 'center',
   },
-  syntaxHint: {
+  syntaxHelpToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 4,
     marginTop: 8,
+    paddingVertical: 4,
+  },
+  syntaxHelpToggleText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  syntaxHint: {
+    marginTop: 4,
     fontSize: 11,
     lineHeight: 15,
     fontWeight: '500',
