@@ -1274,17 +1274,18 @@ jobs:
 
           path = Path("PKGBUILD")
           text = path.read_text(encoding="utf-8")
-          if "  bun run test || :\n" in text:
-              print("PKGBUILD already uses bun run test")
-          elif "  bun test || :\n" in text:
+          if "  pnpm run test || :\n" in text:
+              print("PKGBUILD already uses pnpm run test")
+          elif "  bun run test || :\n" in text or "  bun test || :\n" in text:
               text = text.replace(
                   "  # Relax tests: 116 passed, 15 failed\n",
                   "  # Run the desktop Vitest suite, but do not fail the package build on test failures.\n",
                   1,
               )
-              text = text.replace("  bun test || :\n", "  bun run test || :\n", 1)
+              text = text.replace("  bun run test || :\n", "  pnpm run test || :\n", 1)
+              text = text.replace("  bun test || :\n", "  pnpm run test || :\n", 1)
               path.write_text(text, encoding="utf-8")
-              print("Updated PKGBUILD to use bun run test")
+              print("Updated PKGBUILD to use pnpm run test")
           else:
               raise SystemExit("Could not find the desktop test command in PKGBUILD")
           PY

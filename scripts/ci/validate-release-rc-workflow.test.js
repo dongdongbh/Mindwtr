@@ -710,6 +710,17 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   );
   expect(pnpmCompatibilityStep.run).not.toMatch(/^\s*bun install/m);
   expect(pnpmCompatibilityStep.run).not.toContain("--force");
+  const normalizeTestRunnerStep = sourceSteps.find(
+    (step) => step.name === "Normalize desktop test runner for source package",
+  );
+  expect(normalizeTestRunnerStep).toBeDefined();
+  expect(normalizeTestRunnerStep.run).toContain('"  pnpm run test || :\\n"');
+  expect(normalizeTestRunnerStep.run).toContain(
+    '"  bun run test || :\\n", "  pnpm run test || :\\n"',
+  );
+  expect(normalizeTestRunnerStep.run).toContain(
+    '"  bun test || :\\n", "  pnpm run test || :\\n"',
+  );
   const sourcePushStep = sourceSteps.find((step) =>
     step.name.startsWith("Commit and push"),
   );
