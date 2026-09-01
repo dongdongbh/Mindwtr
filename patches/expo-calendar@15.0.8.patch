@@ -1,8 +1,31 @@
+diff --git a/node_modules/expo-calendar/.bun-tag-1a113c16e3e48d3 b/.bun-tag-1a113c16e3e48d3
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/android/src/main/java/expo/modules/calendar/CalendarModule.kt b/android/src/main/java/expo/modules/calendar/CalendarModule.kt
-index 55797275ad434acf0e4dc66e311520d89842a26f..9b35f509c25e37ca159f7061ce12446348b82002 100644
+index 55797275ad434acf0e4dc66e311520d89842a26f..5fa1a574379bf25074ec3d77e792c4d0b6119682 100644
 --- a/android/src/main/java/expo/modules/calendar/CalendarModule.kt
 +++ b/android/src/main/java/expo/modules/calendar/CalendarModule.kt
-@@ -140,11 +140,7 @@ class CalendarModule : Module() {
+@@ -41,9 +41,17 @@ class CalendarModule : Module() {
+   private lateinit var createEventLauncher: AppContextActivityResultLauncher<CreatedEventOptions, CreateEventIntentResult>
+   private lateinit var viewEventLauncher: AppContextActivityResultLauncher<ViewedEventOptions, ViewEventIntentResult>
+ 
+-  private val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").apply {
+-    timeZone = TimeZone.getTimeZone("GMT")
++  // SimpleDateFormat is not thread-safe, and every JS call runs on the module
++  // scope's pooled dispatcher: two concurrent parses corrupt the shared
++  // GregorianCalendar (Play crash: ArrayIndexOutOfBoundsException in
++  // BaseCalendar.getCalendarDateFromFixedDate) or silently compute wrong dates.
++  private val sdfHolder = object : ThreadLocal<SimpleDateFormat>() {
++    override fun initialValue() = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").apply {
++      timeZone = TimeZone.getTimeZone("GMT")
++    }
+   }
++  private val sdf: SimpleDateFormat
++    get() = sdfHolder.get()!!
+ 
+   override fun definition() = ModuleDefinition {
+     Name("ExpoCalendar")
+@@ -140,11 +148,7 @@ class CalendarModule : Module() {
            try {
              val eventID = saveEvent(details)
              promise.resolve(eventID.toString())

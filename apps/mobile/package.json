@@ -113,6 +113,13 @@
     "fts5": true
   },
   "expo": {
+    "autolinking": {
+      "android": {
+        "buildFromSource": [
+          "expo-calendar"
+        ]
+      }
+    },
     "install": {
       "exclude": [
         "@expo/metro-runtime",
