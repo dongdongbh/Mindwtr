@@ -55,6 +55,70 @@ pub(crate) fn is_windows_store_install() -> bool {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn current_package_family_name() -> Option<String> {
+    use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+    use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFamilyName;
+
+    let mut len: u32 = 0;
+    let status = unsafe { GetCurrentPackageFamilyName(&mut len, std::ptr::null_mut()) };
+    if status != ERROR_INSUFFICIENT_BUFFER || len == 0 {
+        return None;
+    }
+    let mut buf = vec![0u16; len as usize];
+    let status = unsafe { GetCurrentPackageFamilyName(&mut len, buf.as_mut_ptr()) };
+    if status != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16(&buf[..end]).ok().filter(|s| !s.is_empty())
+}
+
+// MSIX file-system virtualization silently redirects the app's writes under
+// Roaming AppData into the package's LocalCache, so a path computed from the
+// OS data dir names a file that does not exist there (#1135).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn local_cache_redirected_path(
+    path: &Path,
+    roaming_dir: &Path,
+    local_dir: &Path,
+    package_family_name: &str,
+) -> Option<PathBuf> {
+    let rest = path.strip_prefix(roaming_dir).ok()?;
+    Some(
+        local_dir
+            .join("Packages")
+            .join(package_family_name)
+            .join("LocalCache")
+            .join("Roaming")
+            .join(rest),
+    )
+}
+
+/// For MS Store installs, the LocalCache path where MSIX virtualization
+/// actually lands `path`; `None` when the real path is the right one to show.
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+pub(crate) fn windows_store_display_path(path: &Path) -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        if !is_windows_store_install() {
+            return None;
+        }
+        let family = current_package_family_name()?;
+        let roaming = dirs::data_dir()?;
+        let local = dirs::data_local_dir()?;
+        let candidate = local_cache_redirected_path(path, &roaming, &local, &family)?;
+        // If write virtualization is off the redirected copy never exists;
+        // keep showing the real path then.
+        let exists = candidate.exists() || candidate.parent().is_some_and(|dir| dir.exists());
+        exists.then_some(candidate)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
 fn current_exe_path_lowercase() -> Option<String> {
     env::current_exe()
         .ok()
@@ -511,8 +575,38 @@ pub(crate) fn diagnostics_enabled() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        chocolatey_lib_dir_candidates, is_scoop_install_path, resolve_arch_package_install_source,
+        chocolatey_lib_dir_candidates, is_scoop_install_path, local_cache_redirected_path,
+        resolve_arch_package_install_source,
     };
+    use std::path::Path;
+
+    #[test]
+    fn local_cache_redirect_maps_roaming_paths_into_the_package_cache() {
+        let mapped = local_cache_redirected_path(
+            Path::new("/users/a/appdata/roaming/mindwtr/logs/mindwtr.log"),
+            Path::new("/users/a/appdata/roaming"),
+            Path::new("/users/a/appdata/local"),
+            "DongdaLi.Mindwtr_abc123",
+        )
+        .expect("path under the roaming dir should map");
+        assert_eq!(
+            mapped,
+            Path::new(
+                "/users/a/appdata/local/Packages/DongdaLi.Mindwtr_abc123/LocalCache/Roaming/mindwtr/logs/mindwtr.log"
+            )
+        );
+    }
+
+    #[test]
+    fn local_cache_redirect_leaves_paths_outside_roaming_alone() {
+        assert!(local_cache_redirected_path(
+            Path::new("/portable/profile/mindwtr/logs/mindwtr.log"),
+            Path::new("/users/a/appdata/roaming"),
+            Path::new("/users/a/appdata/local"),
+            "DongdaLi.Mindwtr_abc123",
+        )
+        .is_none());
+    }
 
     #[test]
     fn scoop_install_path_matches_default_root() {

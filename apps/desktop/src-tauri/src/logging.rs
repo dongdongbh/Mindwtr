@@ -63,6 +63,18 @@ pub(crate) fn append_log_line(app: tauri::AppHandle, line: String) -> Result<Str
     write_log_line(&app, &line)
 }
 
+// Diagnostics display only: under an MS Store (MSIX) install the OS silently
+// redirects our Roaming AppData writes into the package's LocalCache, so the
+// path the webview computes points at a file that does not exist there (#1135).
+#[tauri::command]
+pub(crate) fn get_log_file_path(app: tauri::AppHandle) -> String {
+    let log_path = get_data_dir(&app).join("logs").join("mindwtr.log");
+    crate::install::windows_store_display_path(&log_path)
+        .unwrap_or(log_path)
+        .to_string_lossy()
+        .to_string()
+}
+
 #[tauri::command(async)]
 pub(crate) fn clear_log_file(app: tauri::AppHandle) -> Result<String, String> {
     clear_log_files(&get_data_dir(&app).join("logs"))
