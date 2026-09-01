@@ -1,4 +1,5 @@
 import React from 'react';
+import { Alert } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CaptureSessionCoordinator, type CaptureSessionId } from '@mindwtr/core';
@@ -42,19 +43,30 @@ const speechMocks = vi.hoisted(() => ({
 }));
 
 const audioMocks = vi.hoisted(() => ({
-  audioRecorder: {
-    prepareToRecordAsync: vi.fn(),
-    record: vi.fn(),
-    stop: vi.fn(),
-    uri: 'file:///recording.m4a',
-  },
+  AudioRecorder: vi.fn(function MockAudioRecorder() {
+    return {
+      prepareToRecordAsync: audioMocks.prepareToRecordAsync,
+      record: audioMocks.record,
+      release: audioMocks.release,
+      stop: audioMocks.stop,
+      uri: 'file:///recording.m4a',
+    };
+  }),
+  prepareToRecordAsync: vi.fn(),
+  record: vi.fn(),
+  release: vi.fn(),
   requestRecordingPermissionsAsync: vi.fn(),
   setAudioModeAsync: vi.fn(),
+  stop: vi.fn(),
 }));
 
 const attachmentMocks = vi.hoisted(() => ({
   getAttachmentsDir: vi.fn(),
   persistAttachmentLocally: vi.fn(),
+}));
+
+const fileMocks = vi.hoisted(() => ({
+  delete: vi.fn(),
 }));
 
 const appLogMock = vi.hoisted(() => ({
@@ -71,10 +83,20 @@ vi.mock('react-native', () => ({
 }));
 
 vi.mock('expo-audio', () => ({
-  RecordingPresets: { HIGH_QUALITY: {} },
+  AudioModule: { AudioRecorder: audioMocks.AudioRecorder },
+  RecordingPresets: {
+    HIGH_QUALITY: {
+      android: {},
+      bitRate: 128000,
+      extension: '.m4a',
+      ios: {},
+      numberOfChannels: 2,
+      sampleRate: 44100,
+      web: {},
+    },
+  },
   requestRecordingPermissionsAsync: audioMocks.requestRecordingPermissionsAsync,
   setAudioModeAsync: audioMocks.setAudioModeAsync,
-  useAudioRecorder: () => audioMocks.audioRecorder,
 }));
 
 vi.mock('expo-file-system', () => ({
@@ -109,7 +131,7 @@ vi.mock('expo-file-system', () => ({
     }
 
     delete() {
-      return undefined;
+      return fileMocks.delete(this.uri);
     }
   },
   Paths: {
@@ -182,10 +204,12 @@ const flushPromises = async () => {
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 };
 
 describe('useQuickCaptureAudio', () => {
@@ -215,11 +239,17 @@ describe('useQuickCaptureAudio', () => {
     },
   } as const;
 
-  function Harness({ submissionKey = 1 }: { submissionKey?: number }) {
+  function Harness({
+    getSession = () => activeSubmissionSession,
+    submissionKey = 1,
+  }: {
+    getSession?: () => CaptureSessionId | null;
+    submissionKey?: number;
+  }) {
     latest = useQuickCaptureAudio({
       addTask,
       buildTaskProps,
-      getActiveSubmissionSession: () => activeSubmissionSession,
+      getActiveSubmissionSession: getSession,
       handleClose,
       onError,
       onWarn,
@@ -245,6 +275,10 @@ describe('useQuickCaptureAudio', () => {
     storeMocks.state.tasks = [];
     audioMocks.requestRecordingPermissionsAsync.mockResolvedValue({ granted: true });
     audioMocks.setAudioModeAsync.mockResolvedValue(undefined);
+    audioMocks.prepareToRecordAsync.mockResolvedValue(undefined);
+    audioMocks.record.mockReturnValue(undefined);
+    audioMocks.release.mockReturnValue(undefined);
+    audioMocks.stop.mockResolvedValue(undefined);
     attachmentMocks.getAttachmentsDir.mockResolvedValue('file:///document/attachments/');
     attachmentMocks.persistAttachmentLocally.mockImplementation(async (attachment: { uri: string }) => ({
       ...attachment,
@@ -357,9 +391,311 @@ describe('useQuickCaptureAudio', () => {
       expect.objectContaining({ message: 'quickAdd.speechNotConfigured' })
     );
     expect(audioMocks.requestRecordingPermissionsAsync).not.toHaveBeenCalled();
-    expect(audioMocks.audioRecorder.prepareToRecordAsync).not.toHaveBeenCalled();
+    expect(audioMocks.AudioRecorder).not.toHaveBeenCalled();
     expect(latest?.recording).toBeNull();
     expect(handleClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps deferred start A from recording or clearing busy after capture B opens', async () => {
+    const permissionA = deferred<{ granted: boolean }>();
+    const permissionB = deferred<{ granted: boolean }>();
+    audioMocks.requestRecordingPermissionsAsync
+      .mockReturnValueOnce(permissionA.promise)
+      .mockReturnValueOnce(permissionB.promise);
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness submissionKey={1} />);
+      await flushPromises();
+    });
+
+    let startA!: Promise<void>;
+    await act(async () => {
+      startA = latest!.startRecording();
+      await flushPromises();
+    });
+    expect(latest?.recordingBusy).toBe(true);
+
+    submissionCoordinator.invalidateSession(activeSubmissionSession!);
+    activeSubmissionSession = submissionCoordinator.beginSession();
+    await act(async () => {
+      tree.unmount();
+      await flushPromises();
+      tree = create(<Harness submissionKey={2} />);
+      await flushPromises();
+    });
+
+    let startB!: Promise<void>;
+    await act(async () => {
+      startB = latest!.startRecording();
+      await flushPromises();
+    });
+    expect(latest?.recordingBusy).toBe(true);
+
+    await act(async () => {
+      permissionA.resolve({ granted: true });
+      await flushPromises();
+    });
+    expect(audioMocks.setAudioModeAsync).not.toHaveBeenCalled();
+    expect(latest?.recordingBusy).toBe(true);
+
+    await act(async () => {
+      permissionB.resolve({ granted: true });
+      await Promise.all([startA, startB]);
+      await flushPromises();
+    });
+
+    expect(audioMocks.record).not.toHaveBeenCalled();
+    expect(speechMocks.startWhisperRealtimeCapture).toHaveBeenCalledTimes(1);
+    expect(latest?.recording).toEqual(expect.objectContaining({ kind: 'whisper' }));
+    expect(latest?.recordingBusy).toBe(false);
+    expect(onError).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('drops a deferred start error after capture B opens', async () => {
+    const permissionA = deferred<{ granted: boolean }>();
+    audioMocks.requestRecordingPermissionsAsync.mockReturnValueOnce(permissionA.promise);
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness submissionKey={1} />);
+      await flushPromises();
+    });
+
+    let startA!: Promise<void>;
+    await act(async () => {
+      startA = latest!.startRecording();
+      await flushPromises();
+    });
+    submissionCoordinator.invalidateSession(activeSubmissionSession!);
+    activeSubmissionSession = submissionCoordinator.beginSession();
+    await act(async () => {
+      tree.update(<Harness submissionKey={2} />);
+      permissionA.reject(new Error('permission bridge failed'));
+      await startA;
+      await flushPromises();
+    });
+
+    expect(latest?.recording).toBeNull();
+    expect(latest?.recordingBusy).toBe(false);
+    expect(onError).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('releases stale Expo preparation before fallback capture B records', async () => {
+    const preparedA = deferred<void>();
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
+    audioMocks.prepareToRecordAsync
+      .mockReturnValueOnce(preparedA.promise)
+      .mockResolvedValueOnce(undefined);
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness submissionKey={1} />);
+      await flushPromises();
+    });
+
+    let startA!: Promise<void>;
+    await act(async () => {
+      startA = latest!.startRecording();
+      await flushPromises();
+      await flushPromises();
+    });
+    expect(audioMocks.prepareToRecordAsync).toHaveBeenCalledTimes(1);
+
+    submissionCoordinator.invalidateSession(activeSubmissionSession!);
+    activeSubmissionSession = submissionCoordinator.beginSession();
+    await act(async () => {
+      tree.unmount();
+      await flushPromises();
+      tree = create(<Harness submissionKey={2} />);
+      await flushPromises();
+    });
+    let startB!: Promise<void>;
+    await act(async () => {
+      startB = latest!.startRecording();
+      await flushPromises();
+    });
+
+    await act(async () => {
+      preparedA.resolve();
+      await Promise.all([startA, startB]);
+      await flushPromises();
+    });
+
+    expect(audioMocks.stop).not.toHaveBeenCalled();
+    expect(audioMocks.release).toHaveBeenCalledTimes(1);
+    expect(audioMocks.AudioRecorder).toHaveBeenCalledTimes(2);
+    expect(audioMocks.prepareToRecordAsync).toHaveBeenCalledTimes(2);
+    expect(audioMocks.record).toHaveBeenCalledTimes(1);
+    expect(audioMocks.release.mock.invocationCallOrder[0])
+      .toBeLessThan(audioMocks.record.mock.invocationCallOrder[0]);
+    expect(fileMocks.delete).toHaveBeenCalledWith('file:///recording.m4a');
+    expect(latest?.recording).toEqual(expect.objectContaining({ kind: 'expo' }));
+    expect(onError).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('stops an acquired Whisper recorder when ownership changes before adoption', async () => {
+    const stopA = vi.fn().mockResolvedValue(undefined);
+    let acquired = false;
+    let ownershipChecksAfterAcquisition = 0;
+    speechMocks.startWhisperRealtimeCapture.mockImplementation(async () => {
+      acquired = true;
+      return {
+        stop: stopA,
+        result: Promise.resolve({ transcript: 'stale A' }),
+        hasRealtimeTranscript: true,
+      };
+    });
+    const getSession = () => {
+      if (acquired) {
+        ownershipChecksAfterAcquisition += 1;
+        if (ownershipChecksAfterAcquisition === 2 && activeSubmissionSession) {
+          submissionCoordinator.invalidateSession(activeSubmissionSession);
+          activeSubmissionSession = submissionCoordinator.beginSession();
+        }
+      }
+      return activeSubmissionSession;
+    };
+    await act(async () => {
+      create(<Harness getSession={getSession} />);
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+
+    expect(ownershipChecksAfterAcquisition).toBeGreaterThanOrEqual(2);
+    expect(stopA).toHaveBeenCalledTimes(1);
+    expect(latest?.recording).toBeNull();
+    expect(storeMocks.state.tasks).toHaveLength(0);
+  });
+
+  it('stops and releases an active Expo recorder on direct unmount', async () => {
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+    expect(latest?.recording).toEqual(expect.objectContaining({ kind: 'expo' }));
+    expect(audioMocks.stop).not.toHaveBeenCalled();
+    expect(audioMocks.release).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree.unmount();
+      await flushPromises();
+    });
+
+    expect(audioMocks.stop).toHaveBeenCalledTimes(1);
+    expect(audioMocks.release).toHaveBeenCalledTimes(1);
+    expect(fileMocks.delete).toHaveBeenCalledWith('file:///recording.m4a');
+  });
+
+  it('deletes an explicitly canceled Expo recording after stopping and releasing it', async () => {
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
+    await act(async () => {
+      create(<Harness />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await latest!.stopRecording({ saveTask: false });
+      await flushPromises();
+    });
+
+    expect(audioMocks.stop).toHaveBeenCalledTimes(1);
+    expect(audioMocks.release).toHaveBeenCalledTimes(1);
+    expect(fileMocks.delete).toHaveBeenCalledWith('file:///recording.m4a');
+    expect(addTask).not.toHaveBeenCalled();
+  });
+
+  it('does not delete an Expo recording adopted by a valid saved capture', async () => {
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
+    await act(async () => {
+      create(<Harness />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await latest!.stopRecording({ saveTask: true });
+      await flushPromises();
+    });
+
+    expect(addTask).toHaveBeenCalledTimes(1);
+    expect(audioMocks.release).toHaveBeenCalledTimes(1);
+    expect(fileMocks.delete).not.toHaveBeenCalled();
+  });
+
+  it('waits for active recording A cancellation before reopened capture B starts', async () => {
+    const stopA = deferred<void>();
+    const stopAHandler = vi.fn(() => stopA.promise);
+    const stopBHandler = vi.fn().mockResolvedValue(undefined);
+    speechMocks.startWhisperRealtimeCapture
+      .mockResolvedValueOnce({
+        stop: stopAHandler,
+        result: Promise.resolve({ transcript: 'A' }),
+        hasRealtimeTranscript: true,
+      })
+      .mockResolvedValueOnce({
+        stop: stopBHandler,
+        result: Promise.resolve({ transcript: 'B' }),
+        hasRealtimeTranscript: true,
+      });
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness submissionKey={1} />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+
+    let cancelA!: Promise<void>;
+    act(() => {
+      cancelA = latest!.stopRecording({ saveTask: false });
+    });
+    submissionCoordinator.invalidateSession(activeSubmissionSession!);
+    activeSubmissionSession = submissionCoordinator.beginSession();
+    await act(async () => {
+      tree.unmount();
+      await flushPromises();
+      tree = create(<Harness submissionKey={2} />);
+      await flushPromises();
+    });
+    let startB!: Promise<void>;
+    await act(async () => {
+      startB = latest!.startRecording();
+      await flushPromises();
+    });
+    expect(speechMocks.startWhisperRealtimeCapture).toHaveBeenCalledTimes(1);
+    expect(audioMocks.setAudioModeAsync).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      stopA.resolve();
+      await Promise.all([cancelA, startB]);
+      await flushPromises();
+    });
+
+    expect(stopAHandler).toHaveBeenCalledTimes(1);
+    expect(speechMocks.startWhisperRealtimeCapture).toHaveBeenCalledTimes(2);
+    expect(audioMocks.setAudioModeAsync).toHaveBeenCalledTimes(2);
+    expect(latest?.recording).toEqual(expect.objectContaining({ kind: 'whisper', stop: stopBHandler }));
+    expect(latest?.recordingBusy).toBe(false);
   });
 
   it('does not create or close from stale audio A after capture B opens', async () => {

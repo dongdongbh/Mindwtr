@@ -120,18 +120,27 @@ const startNativeCapture = async (): Promise<AudioCaptureSession> => {
     };
 };
 
-const startWebCapture = async (timestampedName: () => string): Promise<AudioCaptureSession> => {
+const startWebCapture = async (
+    timestampedName: () => string,
+    isCurrent: () => boolean,
+): Promise<AudioCaptureSession> => {
+    if (!isCurrent()) throw new Error('Audio capture start was cancelled');
     if (!navigator.mediaDevices?.getUserMedia) {
         throw new AudioCaptureError('unsupported', 'Audio capture is unavailable.');
     }
     if (navigator.mediaDevices.enumerateDevices) {
         const devices = await navigator.mediaDevices.enumerateDevices();
+        if (!isCurrent()) throw new Error('Audio capture start was cancelled');
         if (!devices.some((device) => device.kind === 'audioinput')) {
             throw new AudioCaptureError('no-microphone', 'No microphone detected');
         }
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (!isCurrent()) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error('Audio capture start was cancelled');
+    }
     const AudioContextConstructor = window.AudioContext
         || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextConstructor) {
@@ -141,6 +150,11 @@ const startWebCapture = async (timestampedName: () => string): Promise<AudioCapt
 
     const context = new AudioContextConstructor();
     await context.resume();
+    if (!isCurrent()) {
+        stream.getTracks().forEach((track) => track.stop());
+        if (context.state !== 'closed') await context.close();
+        throw new Error('Audio capture start was cancelled');
+    }
     const source = context.createMediaStreamSource(stream);
     const processor = context.createScriptProcessor(4096, 1, 1);
     const zeroGain = context.createGain();
@@ -226,10 +240,13 @@ const startWebCapture = async (timestampedName: () => string): Promise<AudioCapt
  * fallback both capture surfaces need, so neither hard-fails outside Tauri.
  */
 export async function startAudioCapture(
-    options: { defaultName?: () => string } = {},
+    options: { defaultName?: () => string; isCurrent?: () => boolean } = {},
 ): Promise<AudioCaptureSession> {
     const timestampedName = options.defaultName
         ?? (() => `mindwtr-audio-${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '')}.wav`);
+    const isCurrent = options.isCurrent ?? (() => true);
+
+    if (!isCurrent()) throw new Error('Audio capture start was cancelled');
 
     const preferredBackend = getPreferredDesktopAudioCaptureBackend({
         isTauriRuntime: isTauriRuntime(),
@@ -240,6 +257,7 @@ export async function startAudioCapture(
         try {
             return await startNativeCapture();
         } catch (error) {
+            if (!isCurrent()) throw error;
             void logWarn('Native audio recording failed, falling back to web capture', {
                 scope: 'audio',
                 extra: {
@@ -250,5 +268,5 @@ export async function startAudioCapture(
         }
     }
 
-    return startWebCapture(timestampedName);
+    return startWebCapture(timestampedName, isCurrent);
 }

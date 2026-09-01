@@ -6,6 +6,7 @@ import type { ComponentProps } from 'react';
 import { LanguageProvider } from '../contexts/language-context';
 import { QuickAddModal } from './QuickAddModal';
 import { QUICK_ADD_MAIN_WINDOW_LABEL, QUICK_ADD_SAVED_EVENT } from '../lib/quick-add-saved-event';
+import { MAX_AUDIO_RECORDING_SECONDS } from '../lib/audio-capture-buffer';
 import { useUiStore } from '../store/ui-store';
 
 const tauriMocks = vi.hoisted(() => ({
@@ -70,11 +71,14 @@ const renderQuickAddModal = (props?: ComponentProps<typeof QuickAddModal>) => re
 
 const createDeferred = <T = void>() => {
     let resolvePromise!: (value: T | PromiseLike<T>) => void;
-    const promise = new Promise<T>((done) => {
+    let rejectPromise!: (reason?: unknown) => void;
+    const promise = new Promise<T>((done, fail) => {
         resolvePromise = done;
+        rejectPromise = fail;
     });
     return {
         promise,
+        reject: rejectPromise,
         resolve: (value?: T) => resolvePromise(value as T),
     };
 };
@@ -935,6 +939,241 @@ describe('QuickAddModal', () => {
         ))).toBe(false);
     });
 
+    it('serializes deferred start A cleanup before recording in reopened capture B', async () => {
+        const startA = createDeferred();
+        const calls: string[] = [];
+        let startCount = 0;
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        tauriMocks.invoke.mockImplementation(async (command?: string) => {
+            if (command === 'start_audio_recording') {
+                startCount += 1;
+                calls.push(`start-${startCount}`);
+                if (startCount === 1) return startA.promise;
+                return undefined;
+            }
+            if (command === 'stop_audio_recording') {
+                calls.push('stop-stale-a');
+                return {
+                    path: '/data/stale-a.wav',
+                    sampleRate: 16_000,
+                    channels: 1,
+                    size: 64,
+                };
+            }
+            return false;
+        });
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                settings: {
+                    ...state.settings,
+                    ai: {
+                        ...state.settings?.ai,
+                        speechToText: {
+                            enabled: true,
+                            provider: 'whisper',
+                            offlineModelPath: '/models/whisper.bin',
+                        },
+                    },
+                },
+            }));
+        });
+        renderQuickAddModal();
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { captureMode: 'audio' } }));
+            await Promise.resolve();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+        await waitFor(() => expect(calls).toEqual(['start-1']));
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { captureMode: 'audio' } }));
+            await Promise.resolve();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+
+        await act(async () => {
+            startA.resolve();
+            await startA.promise;
+            await Promise.resolve();
+        });
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Stop recording' })).toBeInTheDocument());
+
+        expect(calls).toEqual(['start-1', 'stop-stale-a', 'start-2']);
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('waits for active recording A cancellation before starting reopened capture B', async () => {
+        const cancelA = createDeferred<{
+            path: string;
+            sampleRate: number;
+            channels: number;
+            size: number;
+        }>();
+        const calls: string[] = [];
+        let startCount = 0;
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        tauriMocks.invoke.mockImplementation(async (command?: string) => {
+            if (command === 'start_audio_recording') {
+                startCount += 1;
+                calls.push(`start-${startCount}`);
+                return undefined;
+            }
+            if (command === 'stop_audio_recording') {
+                calls.push('stop-a');
+                return cancelA.promise;
+            }
+            return false;
+        });
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                settings: {
+                    ...state.settings,
+                    ai: {
+                        ...state.settings?.ai,
+                        speechToText: {
+                            enabled: true,
+                            provider: 'whisper',
+                            offlineModelPath: '/models/whisper.bin',
+                        },
+                    },
+                },
+            }));
+        });
+        renderQuickAddModal();
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { captureMode: 'audio' } }));
+            await Promise.resolve();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Stop recording' })).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { captureMode: 'audio' } }));
+            await Promise.resolve();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(calls).toEqual(['start-1', 'stop-a']);
+
+        await act(async () => {
+            cancelA.resolve({
+                path: '/data/cancelled-a.wav',
+                sampleRate: 16_000,
+                channels: 1,
+                size: 64,
+            });
+            await cancelA.promise;
+            await Promise.resolve();
+        });
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Stop recording' })).toBeInTheDocument());
+        expect(calls).toEqual(['start-1', 'stop-a', 'start-2']);
+    });
+
+    it('does not surface a deferred start A error in reopened capture B', async () => {
+        const startA = createDeferred();
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        tauriMocks.invoke.mockImplementation(async (command?: string) => {
+            if (command === 'start_audio_recording') return startA.promise;
+            return false;
+        });
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                settings: {
+                    ...state.settings,
+                    ai: {
+                        ...state.settings?.ai,
+                        speechToText: {
+                            enabled: true,
+                            provider: 'whisper',
+                            offlineModelPath: '/models/whisper.bin',
+                        },
+                    },
+                },
+            }));
+        });
+        renderQuickAddModal();
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { captureMode: 'audio' } }));
+            await Promise.resolve();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+        await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith('start_audio_recording'));
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { captureMode: 'audio' } }));
+            startA.reject(new Error('microphone bridge failed'));
+            await Promise.resolve();
+        });
+
+        expect(screen.getByRole('button', { name: 'Start recording' })).toBeInTheDocument();
+        expect(screen.queryByText(/We could not record audio/)).not.toBeInTheDocument();
+    });
+
+    it('does not install an auto-save timeout for stale start A after capture B opens', async () => {
+        const startA = createDeferred();
+        let stopCount = 0;
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        tauriMocks.invoke.mockImplementation(async (command?: string) => {
+            if (command === 'start_audio_recording') return startA.promise;
+            if (command === 'stop_audio_recording') {
+                stopCount += 1;
+                return {
+                    path: '/data/stale-a.wav',
+                    sampleRate: 16_000,
+                    channels: 1,
+                    size: 64,
+                };
+            }
+            return false;
+        });
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                settings: {
+                    ...state.settings,
+                    ai: {
+                        ...state.settings?.ai,
+                        speechToText: {
+                            enabled: true,
+                            provider: 'whisper',
+                            offlineModelPath: '/models/whisper.bin',
+                        },
+                    },
+                },
+            }));
+        });
+        const timeoutSpy = vi.spyOn(window, 'setTimeout');
+        renderQuickAddModal();
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { captureMode: 'audio' } }));
+            await Promise.resolve();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+        await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith('start_audio_recording'));
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Capture B' } }));
+            startA.resolve();
+            await startA.promise;
+            await Promise.resolve();
+        });
+
+        expect(stopCount).toBe(1);
+        expect(timeoutSpy.mock.calls.some(([, delay]) => delay === MAX_AUDIO_RECORDING_SECONDS * 1000)).toBe(false);
+        expect(screen.getByPlaceholderText('Add Task')).toHaveValue('Capture B');
+        timeoutSpy.mockRestore();
+    });
+
     it('owns audio processing as a non-dismissible capture submission', async () => {
         const stoppedCapture = createDeferred<{
             path: string;
@@ -1066,6 +1305,54 @@ describe('QuickAddModal', () => {
 
         expect(addTask).not.toHaveBeenCalled();
         expect(screen.getByPlaceholderText('Add Task')).toHaveValue('Second capture');
+    });
+
+    it('cancels an active audio recorder when the modal owner unmounts', async () => {
+        const calls: string[] = [];
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        tauriMocks.invoke.mockImplementation(async (command?: string) => {
+            if (command === 'start_audio_recording') {
+                calls.push('start');
+                return undefined;
+            }
+            if (command === 'stop_audio_recording') {
+                calls.push('cancel');
+                return {
+                    path: '/data/unmounted.wav',
+                    sampleRate: 16_000,
+                    channels: 1,
+                    size: 64,
+                };
+            }
+            return false;
+        });
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                settings: {
+                    ...state.settings,
+                    ai: {
+                        ...state.settings?.ai,
+                        speechToText: {
+                            enabled: true,
+                            provider: 'whisper',
+                            offlineModelPath: '/models/whisper.bin',
+                        },
+                    },
+                },
+            }));
+        });
+        const view = renderQuickAddModal();
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { captureMode: 'audio' } }));
+            await Promise.resolve();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Stop recording' })).toBeInTheDocument());
+
+        view.unmount();
+        await waitFor(() => expect(calls).toEqual(['start', 'cancel']));
     });
 
     it('creates a bulk import in a single store commit (#942)', async () => {

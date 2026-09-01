@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform } from 'react-native';
-import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
+import {
+  AudioModule,
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  type AudioRecorder as ExpoAudioRecorder,
+} from 'expo-audio';
 import { Directory, File, Paths } from 'expo-file-system';
 import {
   DEFAULT_PROJECT_COLOR,
@@ -52,7 +58,7 @@ type BuildTaskPropsResult = {
 type SpeechApplyResult = 'applied' | 'empty' | 'skipped';
 
 export type RecordingState =
-  | { kind: 'expo' }
+  | { kind: 'expo'; recorder: ExpoAudioRecorder }
   | {
       kind: 'whisper';
       stop: () => Promise<void>;
@@ -80,6 +86,60 @@ type UseQuickCaptureAudioParams = {
 };
 
 const getWhisperCapturePlatform = (): 'ios' | 'android' => (Platform.OS === 'ios' ? 'ios' : 'android');
+
+let recordingDeviceQueue: Promise<void> = Promise.resolve();
+
+const queueRecordingDeviceOperation = <T,>(operation: () => Promise<T>): Promise<T> => {
+  const result = recordingDeviceQueue.catch(() => undefined).then(operation);
+  recordingDeviceQueue = result.then(() => undefined, () => undefined);
+  return result;
+};
+
+const createExpoAudioRecorder = (): ExpoAudioRecorder => {
+  const preset = RecordingPresets.HIGH_QUALITY;
+  const platformOptions = Platform.OS === 'ios'
+    ? preset.ios
+    : Platform.OS === 'android'
+      ? preset.android
+      : preset.web;
+  // Expo exports the native constructor through AudioModule at runtime, while
+  // eslint-plugin-import cannot follow the generated native-module shape.
+  // eslint-disable-next-line import/namespace
+  return new AudioModule.AudioRecorder({
+    extension: preset.extension,
+    sampleRate: preset.sampleRate,
+    numberOfChannels: preset.numberOfChannels,
+    bitRate: preset.bitRate,
+    isMeteringEnabled: false,
+    ...platformOptions,
+  });
+};
+
+const stopAndReleaseExpoRecorder = async (recorder: ExpoAudioRecorder) => {
+  let error: unknown;
+  try {
+    await recorder.stop();
+  } catch (stopError) {
+    error = stopError;
+  }
+  const uri = recorder.uri;
+  recorder.release();
+  return { error, uri };
+};
+
+const releaseRecordingOnTeardown = async (recording: RecordingState) => {
+  if (recording.kind === 'expo') {
+    const stopped = await stopAndReleaseExpoRecorder(recording.recorder);
+    return stopped.uri ? new File(stopped.uri) : null;
+  }
+  try {
+    await recording.stop();
+  } catch {
+    // Teardown is best-effort; the session is already invalid and cannot own UI errors.
+  }
+  void recording.result.catch(() => undefined);
+  return recording.file;
+};
 
 const runWhisperLocalTranscription = async (input: LocalWhisperAudio, config: SpeechToTextConfig): Promise<SpeechToTextResult> => ({
   transcript: await transcribeLocalWhisper(input, config),
@@ -135,9 +195,26 @@ export function useQuickCaptureAudio({
   const [recording, setRecording] = useState<RecordingState | null>(null);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [recordingReady, setRecordingReady] = useState(false);
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recordingStartOwnerRef = useRef<{ id: number; session: CaptureSessionId } | null>(null);
+  const recordingStartSequenceRef = useRef(0);
+  const activeRecordingRef = useRef<RecordingState | null>(null);
+  const safeDeleteFileRef = useRef<(file: File, reason: string) => void>(() => undefined);
+
+  useEffect(() => () => {
+    recordingStartOwnerRef.current = null;
+    const activeRecording = activeRecordingRef.current;
+    activeRecordingRef.current = null;
+    if (activeRecording) {
+      void queueRecordingDeviceOperation(() => releaseRecordingOnTeardown(activeRecording))
+        .then((file) => {
+          if (file) safeDeleteFileRef.current(file, 'recording_unmount');
+        })
+        .catch(() => undefined);
+    }
+  }, []);
 
   useEffect(() => {
+    recordingStartOwnerRef.current = null;
     setRecordingBusy(false);
     onSubmissionBusyChange(false);
   }, [onSubmissionBusyChange, submissionKey, visible]);
@@ -200,10 +277,15 @@ export function useQuickCaptureAudio({
       onWarn('Audio cleanup failed', error);
     }
   }, [isUnsafeDeleteTarget, onWarn]);
+  safeDeleteFileRef.current = safeDeleteFile;
 
-  const resolveWhisperModelAsync = useCallback(async (modelId: string, storedPath?: string) => {
+  const resolveWhisperModelAsync = useCallback(async (
+    modelId: string,
+    storedPath?: string,
+    canApply: () => boolean = () => true,
+  ) => {
     const resolved = await ensureWhisperModelPathForConfigAsync(modelId, storedPath);
-    if (resolved.exists) {
+    if (resolved.exists && canApply()) {
       const currentPath = storedPath ? stripFileScheme(storedPath) : '';
       const resolvedPath = stripFileScheme(resolved.uri);
       if (!currentPath || currentPath !== resolvedPath) {
@@ -279,144 +361,223 @@ export function useQuickCaptureAudio({
     }
   }, [onWarn, safeDeleteFile]);
 
-  const startRecording = useCallback(async () => {
-    if (recording || recordingBusy) return;
-    // Voice capture is speech-to-text: if no model/key is configured, transcription can
-    // never run. Guard before touching the recorder so the indicator never appears; keep
-    // the sheet open and point the user at Settings instead of silently aborting (#886).
-    const guardSettings = selectQuickCaptureSettings(settings, useTaskStore.getState().settings);
-    const guardRuntime = resolveSpeechToTextRuntimeSettings(guardSettings.ai?.speechToText);
-    const guardApiKey = guardRuntime.provider === 'whisper'
-      ? ''
-      : await loadAIKey(guardRuntime.provider).catch(() => '');
-    const guardWhisper = guardRuntime.provider === 'whisper'
-      ? await resolveWhisperModelAsync(guardRuntime.model, guardRuntime.modelPath).catch(() => null)
-      : null;
-    const speechConfigured = isQuickCaptureSpeechReady({
-      speechEnabled: guardRuntime.enabled,
-      provider: guardRuntime.provider,
-      apiKey: guardApiKey,
-      baseUrl: guardRuntime.baseUrl,
-      whisperModelReady: guardRuntime.provider === 'whisper' ? Boolean(guardWhisper?.exists) : false,
-      whisperModelPath: guardRuntime.modelPath,
-    });
-    if (!speechConfigured) {
-      showToast({
-        title: t('common.notice'),
-        message: t('quickAdd.speechNotConfigured'),
-        tone: 'warning',
-        durationMs: 4200,
-      });
-      return;
-    }
+  const startRecording = useCallback((): Promise<void> => {
+    if (recording || recordingBusy || recordingStartOwnerRef.current !== null) return Promise.resolve();
+    const session = getActiveSubmissionSession();
+    if (session === null || !submissionCoordinator.isCurrent(session)) return Promise.resolve();
+    const owner = { id: recordingStartSequenceRef.current + 1, session };
+    recordingStartSequenceRef.current = owner.id;
+    recordingStartOwnerRef.current = owner;
     setRecordingBusy(true);
     setRecordingReady(false);
-    try {
-      const permission = await requestRecordingPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert(t('quickAdd.audioPermissionTitle'), t('quickAdd.audioPermissionBody'));
-        return;
-      }
-      await setAudioModeAsync({
-        allowsRecording: true,
-        playsInSilentMode: true,
-        interruptionMode: 'duckOthers',
-        interruptionModeAndroid: 'duckOthers',
-      });
-      const currentSettings = selectQuickCaptureSettings(settings, useTaskStore.getState().settings);
-      const speech = currentSettings.ai?.speechToText;
-      const speechRuntime = resolveSpeechToTextRuntimeSettings(speech);
-      const { provider, model, modelPath } = speechRuntime;
-      const whisperResolved = provider === 'whisper'
-        ? await resolveWhisperModelAsync(model, modelPath)
-        : null;
-      const whisperModelReady = provider === 'whisper' ? Boolean(whisperResolved?.exists) : false;
-      const resolvedModelPath = provider === 'whisper'
-        ? (whisperResolved?.exists ? whisperResolved.path : modelPath)
-        : undefined;
-      const useWhisperRealtime = speechRuntime.enabled
-        && provider === 'whisper'
-        && whisperModelReady;
-      if (useWhisperRealtime) {
-        try {
-          const now = new Date();
-          const timestamp = safeFormatDate(now, 'yyyyMMdd-HHmmss');
-          const directory = await ensureAudioDirectory();
-          const fileName = `mindwtr-audio-${timestamp}.wav`;
-          const buildOutputFile = (base?: Directory | null) => {
-            if (!base?.uri) return null;
-            return new File(buildCaptureFileUri(base.uri, fileName));
-          };
-          let outputFile: File | null = buildOutputFile(directory);
-          if (!outputFile) {
-            try {
-              outputFile = buildOutputFile(Paths.cache);
-            } catch (error) {
-              onWarn('Whisper cache directory unavailable', error);
-            }
-          }
-          if (!outputFile) {
-            try {
-              outputFile = buildOutputFile(Paths.document);
-            } catch (error) {
-              onWarn('Whisper document directory unavailable', error);
-            }
-          }
-          if (!outputFile) {
-            throw new Error('Whisper audio output path unavailable');
-          }
-          const outputPath = stripFileScheme(outputFile.uri);
-          const handle = await startWhisperRealtimeCapture(outputPath, {
-            provider,
-            model,
-            modelPath: resolvedModelPath,
-            isFossBuild: speechRuntime.isFossBuild,
-            language: speechRuntime.language,
-            mode: speechRuntime.mode,
-            fieldStrategy: speechRuntime.fieldStrategy,
+    const isStartCurrent = () => (
+      recordingStartOwnerRef.current === owner
+      && getActiveSubmissionSession() === session
+      && submissionCoordinator.isCurrent(session)
+    );
+    const runStart = async () => {
+      try {
+        // Voice capture is speech-to-text: if no model/key is configured, transcription can
+        // never run. Resolve it under the current capture-session lease so a dismissed start
+        // cannot toast, record, or clear state belonging to the next sheet.
+        const guardSettings = selectQuickCaptureSettings(settings, useTaskStore.getState().settings);
+        const guardRuntime = resolveSpeechToTextRuntimeSettings(guardSettings.ai?.speechToText);
+        const guardApiKey = guardRuntime.provider === 'whisper'
+          ? ''
+          : await loadAIKey(guardRuntime.provider).catch(() => '');
+        if (!isStartCurrent()) return;
+        const guardWhisper = guardRuntime.provider === 'whisper'
+          ? await resolveWhisperModelAsync(guardRuntime.model, guardRuntime.modelPath, isStartCurrent).catch(() => null)
+          : null;
+        if (!isStartCurrent()) return;
+        const speechConfigured = isQuickCaptureSpeechReady({
+          speechEnabled: guardRuntime.enabled,
+          provider: guardRuntime.provider,
+          apiKey: guardApiKey,
+          baseUrl: guardRuntime.baseUrl,
+          whisperModelReady: guardRuntime.provider === 'whisper' ? Boolean(guardWhisper?.exists) : false,
+          whisperModelPath: guardRuntime.modelPath,
+        });
+        if (!speechConfigured) {
+          showToast({
+            title: t('common.notice'),
+            message: t('quickAdd.speechNotConfigured'),
+            tone: 'warning',
+            durationMs: 4200,
           });
-          setRecording({
-            kind: 'whisper',
-            stop: handle.stop,
-            result: handle.result,
-            file: outputFile,
-            allowRealtimeFallback: handle.hasRealtimeTranscript,
-          });
-          setRecordingReady(true);
           return;
-        } catch (error) {
-          onWarn('Whisper realtime start failed, falling back to audio recording', error);
+        }
+        const permission = await requestRecordingPermissionsAsync();
+        if (!isStartCurrent()) return;
+        if (!permission.granted) {
+          Alert.alert(t('quickAdd.audioPermissionTitle'), t('quickAdd.audioPermissionBody'));
+          return;
+        }
+        const currentSettings = selectQuickCaptureSettings(settings, useTaskStore.getState().settings);
+        const speech = currentSettings.ai?.speechToText;
+        const speechRuntime = resolveSpeechToTextRuntimeSettings(speech);
+        const { provider, model, modelPath } = speechRuntime;
+        const whisperResolved = provider === 'whisper'
+          ? await resolveWhisperModelAsync(model, modelPath, isStartCurrent)
+          : null;
+        if (!isStartCurrent()) return;
+        const whisperModelReady = provider === 'whisper' ? Boolean(whisperResolved?.exists) : false;
+        const resolvedModelPath = provider === 'whisper'
+          ? (whisperResolved?.exists ? whisperResolved.path : modelPath)
+          : undefined;
+        const useWhisperRealtime = speechRuntime.enabled
+          && provider === 'whisper'
+          && whisperModelReady;
+        if (useWhisperRealtime) {
+          try {
+            const now = new Date();
+            const timestamp = safeFormatDate(now, 'yyyyMMdd-HHmmss');
+            const directory = await ensureAudioDirectory();
+            if (!isStartCurrent()) return;
+            const fileName = `mindwtr-audio-${timestamp}.wav`;
+            const buildOutputFile = (base?: Directory | null) => {
+              if (!base?.uri) return null;
+              return new File(buildCaptureFileUri(base.uri, fileName));
+            };
+            let outputFile: File | null = buildOutputFile(directory);
+            if (!outputFile) {
+              try {
+                outputFile = buildOutputFile(Paths.cache);
+              } catch (error) {
+                onWarn('Whisper cache directory unavailable', error);
+              }
+            }
+            if (!outputFile) {
+              try {
+                outputFile = buildOutputFile(Paths.document);
+              } catch (error) {
+                onWarn('Whisper document directory unavailable', error);
+              }
+            }
+            if (!outputFile) throw new Error('Whisper audio output path unavailable');
+            const outputPath = stripFileScheme(outputFile.uri);
+            const handle = await queueRecordingDeviceOperation(async () => {
+              if (!isStartCurrent()) return null;
+              await setAudioModeAsync({
+                allowsRecording: true,
+                playsInSilentMode: true,
+                interruptionMode: 'duckOthers',
+                interruptionModeAndroid: 'duckOthers',
+              });
+              if (!isStartCurrent()) return null;
+              const acquired = await startWhisperRealtimeCapture(outputPath, {
+                provider,
+                model,
+                modelPath: resolvedModelPath,
+                isFossBuild: speechRuntime.isFossBuild,
+                language: speechRuntime.language,
+                mode: speechRuntime.mode,
+                fieldStrategy: speechRuntime.fieldStrategy,
+              });
+              if (!isStartCurrent()) {
+                await acquired.stop().catch((error) => onWarn('Failed to clean up stale Whisper start', error));
+                void acquired.result.catch((error) => onWarn('Stale Whisper result failed', error));
+                safeDeleteFile(outputFile, 'stale_whisper_start');
+                return null;
+              }
+              return acquired;
+            });
+            if (!handle) return;
+            if (!isStartCurrent()) {
+              await queueRecordingDeviceOperation(async () => {
+                await handle.stop().catch((error) => onWarn('Failed to clean up stale Whisper start', error));
+                void handle.result.catch((error) => onWarn('Stale Whisper result failed', error));
+                safeDeleteFile(outputFile, 'stale_whisper_start');
+              });
+              return;
+            }
+            const nextRecording: RecordingState = {
+              kind: 'whisper',
+              stop: handle.stop,
+              result: handle.result,
+              file: outputFile,
+              allowRealtimeFallback: handle.hasRealtimeTranscript,
+            };
+            activeRecordingRef.current = nextRecording;
+            setRecording(nextRecording);
+            setRecordingReady(true);
+            return;
+          } catch (error) {
+            if (!isStartCurrent()) return;
+            onWarn('Whisper realtime start failed, falling back to audio recording', error);
+          }
+        }
+
+        const recorder = await queueRecordingDeviceOperation(async () => {
+          if (!isStartCurrent()) return null;
+          await setAudioModeAsync({
+            allowsRecording: true,
+            playsInSilentMode: true,
+            interruptionMode: 'duckOthers',
+            interruptionModeAndroid: 'duckOthers',
+          });
+          if (!isStartCurrent()) return null;
+          const acquired = createExpoAudioRecorder();
+          try {
+            await acquired.prepareToRecordAsync();
+            if (!isStartCurrent()) {
+              const staleUri = acquired.uri;
+              acquired.release();
+              if (staleUri) safeDeleteFile(new File(staleUri), 'stale_expo_prepare');
+              return null;
+            }
+            acquired.record();
+            return acquired;
+          } catch (error) {
+            acquired.release();
+            throw error;
+          }
+        });
+        if (!recorder) return;
+        if (!isStartCurrent()) {
+          const stopped = await queueRecordingDeviceOperation(() => stopAndReleaseExpoRecorder(recorder));
+          if (stopped.error) onWarn('Failed to clean up stale Expo start', stopped.error);
+          if (stopped.uri) safeDeleteFile(new File(stopped.uri), 'stale_expo_start');
+          return;
+        }
+        const nextRecording: RecordingState = { kind: 'expo', recorder };
+        activeRecordingRef.current = nextRecording;
+        setRecording(nextRecording);
+        setRecordingReady(true);
+      } catch (error) {
+        if (!isStartCurrent()) return;
+        onError('Failed to start recording', error);
+        Alert.alert(t('quickAdd.audioErrorTitle'), t('quickAdd.audioErrorBody'));
+        setRecordingReady(false);
+      } finally {
+        if (recordingStartOwnerRef.current === owner) {
+          const ownsCurrentSurface = getActiveSubmissionSession() === session
+            && submissionCoordinator.isCurrent(session);
+          recordingStartOwnerRef.current = null;
+          if (ownsCurrentSurface) setRecordingBusy(false);
         }
       }
-
-      await audioRecorder.prepareToRecordAsync();
-      audioRecorder.record();
-      setRecording({ kind: 'expo' });
-      setRecordingReady(true);
-    } catch (error) {
-      onError('Failed to start recording', error);
-      Alert.alert(t('quickAdd.audioErrorTitle'), t('quickAdd.audioErrorBody'));
-      setRecordingReady(false);
-    } finally {
-      setRecordingBusy(false);
-    }
+    };
+    return runStart();
   }, [
-    audioRecorder,
     ensureAudioDirectory,
+    getActiveSubmissionSession,
     onError,
     onWarn,
     recording,
     recordingBusy,
     resolveWhisperModelAsync,
+    safeDeleteFile,
     settings,
     showToast,
     stripFileScheme,
+    submissionCoordinator,
     t,
   ]);
 
   const stopRecording = useCallback(async ({ saveTask }: { saveTask: boolean }) => {
     if (recordingBusy) return;
-    const currentRecording = recording;
+    const currentRecording = activeRecordingRef.current ?? recording;
     if (!currentRecording) return;
     const captureSurfaceSession = getActiveSubmissionSession();
     const submissionSession = saveTask ? captureSurfaceSession : null;
@@ -429,11 +590,12 @@ export function useQuickCaptureAudio({
     );
     setRecordingBusy(true);
     setRecordingReady(false);
+    activeRecordingRef.current = null;
     setRecording(null);
     try {
       if (currentRecording.kind === 'whisper') {
         try {
-          await currentRecording.stop();
+          await queueRecordingDeviceOperation(() => currentRecording.stop());
         } catch (error) {
           onWarn('Failed to stop whisper recording', error);
         }
@@ -625,19 +787,24 @@ export function useQuickCaptureAudio({
         return;
       }
 
-      try {
-        await audioRecorder.stop();
-      } catch (error) {
+      const stopped = await queueRecordingDeviceOperation(
+        () => stopAndReleaseExpoRecorder(currentRecording.recorder),
+      );
+      if (stopped.error) {
+        const error = stopped.error;
         const message = error instanceof Error ? error.message : String(error);
         if (!message.includes('not recording') && !message.includes('already')) {
           throw error;
         }
       }
-      const uri = audioRecorder.uri;
+      const uri = stopped.uri;
       if (!uri) {
         throw new Error('Recording URI missing');
       }
-      if (!saveTask) return;
+      if (!saveTask) {
+        safeDeleteFile(new File(uri), 'expo_cancel');
+        return;
+      }
       if (!isSubmissionCurrent()) return;
 
       const now = new Date();
@@ -810,7 +977,6 @@ export function useQuickCaptureAudio({
   }, [
     addTask,
     applySpeechResult,
-    audioRecorder,
     buildTaskProps,
     discardEmptySpeechTask,
     ensureAudioDirectory,

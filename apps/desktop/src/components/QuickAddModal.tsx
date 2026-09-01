@@ -74,6 +74,14 @@ type QuickAddModalProps = {
     standaloneWindow?: boolean;
 };
 
+let recordingDeviceQueue: Promise<void> = Promise.resolve();
+
+const queueRecordingDeviceOperation = <T,>(operation: () => Promise<T>): Promise<T> => {
+    const result = recordingDeviceQueue.catch(() => undefined).then(operation);
+    recordingDeviceQueue = result.then(() => undefined, () => undefined);
+    return result;
+};
+
 type QuickAddOpenDetail = {
     initialProps?: Partial<Task>;
     initialValue?: string;
@@ -193,12 +201,21 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const captureSessionRef = useRef<AudioCaptureSession | null>(null);
     const submissionCoordinatorRef = useRef(new CaptureSessionCoordinator());
     const activeSubmissionSessionRef = useRef<CaptureSessionId | null>(null);
+    const recordingStartOwnerRef = useRef<{ id: number; session: CaptureSessionId } | null>(null);
+    const recordingStartSequenceRef = useRef(0);
     const isOpenRef = useRef(false);
     const openRequestInFlightRef = useRef(false);
     const standaloneDataRefreshRef = useRef<Promise<void> | null>(null);
     const pastedImageAttachmentsRef = useRef<PastedImageAttachment[]>([]);
 
     useEffect(() => () => {
+        recordingStartOwnerRef.current = null;
+        const audioSession = captureSessionRef.current;
+        captureSessionRef.current = null;
+        if (audioSession) {
+            void queueRecordingDeviceOperation(() => audioSession.cancel())
+                .catch((error) => reportError('Failed to cancel audio recording during teardown', error));
+        }
         const session = activeSubmissionSessionRef.current;
         if (session !== null) submissionCoordinatorRef.current.invalidateSession(session);
         activeSubmissionSessionRef.current = null;
@@ -305,6 +322,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         openRequestInFlightRef.current = true;
         try {
             activeSubmissionSessionRef.current = submissionCoordinatorRef.current.beginSession();
+            recordingStartOwnerRef.current = null;
             setIsSubmitting(false);
             setRecordingBusy(false);
             setIsRecording(false);
@@ -451,6 +469,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     }, [standaloneWindow]);
 
     const close = useCallback((options?: { keepPastedImages?: boolean }) => {
+        recordingStartOwnerRef.current = null;
         const session = activeSubmissionSessionRef.current;
         if (session !== null) submissionCoordinatorRef.current.invalidateSession(session);
         activeSubmissionSessionRef.current = null;
@@ -598,41 +617,77 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         }
     }, [t]);
 
-    const startRecording = useCallback(async () => {
-        if (recordingBusy || isRecording) return;
+    const startRecording = useCallback((): Promise<void> => {
+        if (recordingBusy || isRecording || recordingStartOwnerRef.current !== null) return Promise.resolve();
+        const session = activeSubmissionSessionRef.current;
+        if (session === null || !submissionCoordinatorRef.current.isCurrent(session)) return Promise.resolve();
+        const owner = { id: recordingStartSequenceRef.current + 1, session };
+        recordingStartSequenceRef.current = owner.id;
+        recordingStartOwnerRef.current = owner;
+        setRecordingBusy(true);
         setRecordingError(null);
-        // Voice capture is speech-to-text: if no model/key is configured, transcription
-        // can never run, so guard before showing the recording indicator. Keep the dialog
-        // open and point the user at Settings instead of silently aborting (#886).
-        // This must derive from the same resolveSpeechCapture call the transcribe gate
-        // below uses, or the two can silently disagree.
-        const { ready: speechConfigured } = await resolveSpeechCapture(settings.ai);
-        if (!speechConfigured) {
-            showToast(
-                tFallback(t, 'quickAdd.speechNotConfigured', 'Enable a speech-to-text model in Settings to use voice input.'),
-                'info',
-                5000,
-            );
-            return;
-        }
-        try {
-            captureSessionRef.current = await startAudioCapture({
-                defaultName: () => `mindwtr-audio-${safeFormatDate(new Date(), 'yyyyMMdd-HHmmss')}.wav`,
-            });
-            setIsRecording(true);
-        } catch (error) {
-            if (error instanceof AudioCaptureError && error.reason === 'unsupported') {
-                setRecordingError(t('quickAdd.audioErrorBody'));
-                return;
+        const isStartCurrent = () => (
+            recordingStartOwnerRef.current === owner
+            && activeSubmissionSessionRef.current === session
+            && submissionCoordinatorRef.current.isCurrent(session)
+        );
+        const runStart = async () => {
+            try {
+                // Voice capture is speech-to-text: if no model/key is configured, transcription
+                // can never run. Resolve it under the capture-session lease so a late result from
+                // a dismissed surface cannot toast or mutate the next one.
+                const { ready: speechConfigured } = await resolveSpeechCapture(settings.ai);
+                if (!isStartCurrent()) return;
+                if (!speechConfigured) {
+                    showToast(
+                        tFallback(t, 'quickAdd.speechNotConfigured', 'Enable a speech-to-text model in Settings to use voice input.'),
+                        'info',
+                        5000,
+                    );
+                    return;
+                }
+                const audioSession = await queueRecordingDeviceOperation(async () => {
+                    if (!isStartCurrent()) return null;
+                    const acquired = await startAudioCapture({
+                        defaultName: () => `mindwtr-audio-${safeFormatDate(new Date(), 'yyyyMMdd-HHmmss')}.wav`,
+                        isCurrent: isStartCurrent,
+                    });
+                    if (!isStartCurrent()) {
+                        await acquired.cancel();
+                        return null;
+                    }
+                    return acquired;
+                });
+                if (!audioSession) return;
+                if (!isStartCurrent()) {
+                    await queueRecordingDeviceOperation(() => audioSession.cancel());
+                    return;
+                }
+                captureSessionRef.current = audioSession;
+                setIsRecording(true);
+            } catch (error) {
+                if (!isStartCurrent()) return;
+                if (error instanceof AudioCaptureError && error.reason === 'unsupported') {
+                    setRecordingError(t('quickAdd.audioErrorBody'));
+                    return;
+                }
+                if (error instanceof AudioCaptureError && error.reason === 'no-microphone') {
+                    setRecordingError(`${t('quickAdd.audioErrorBody')} (${error.message})`);
+                    return;
+                }
+                reportError('Audio recording failed', error);
+                const message = error instanceof Error ? error.message : String(error);
+                setRecordingError(`${t('quickAdd.audioErrorBody')} (${message})`);
+            } finally {
+                if (recordingStartOwnerRef.current === owner) {
+                    const ownsCurrentSurface = activeSubmissionSessionRef.current === session
+                        && submissionCoordinatorRef.current.isCurrent(session);
+                    recordingStartOwnerRef.current = null;
+                    if (ownsCurrentSurface) setRecordingBusy(false);
+                }
             }
-            if (error instanceof AudioCaptureError && error.reason === 'no-microphone') {
-                setRecordingError(`${t('quickAdd.audioErrorBody')} (${error.message})`);
-                return;
-            }
-            reportError('Audio recording failed', error);
-            const message = error instanceof Error ? error.message : String(error);
-            setRecordingError(`${t('quickAdd.audioErrorBody')} (${message})`);
-        }
+        };
+        return runStart();
     }, [isRecording, recordingBusy, settings.ai, showToast, t]);
 
     const stopRecording = useCallback(async ({ saveTask }: { saveTask: boolean }) => {
@@ -655,11 +710,11 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             if (!audioSession) return;
             const now = new Date();
             if (!saveTask) {
-                await audioSession.cancel();
+                await queueRecordingDeviceOperation(() => audioSession.cancel());
                 return;
             }
 
-            const capture = await audioSession.stop();
+            const capture = await queueRecordingDeviceOperation(() => audioSession.stop());
             if (!isSubmissionCurrent()) return;
             const fileName = capture.name;
             const absolutePath = capture.path;

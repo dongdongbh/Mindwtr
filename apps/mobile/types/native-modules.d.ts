@@ -1,6 +1,17 @@
 declare module 'expo-audio' {
+  export type RecordingOptions = {
+    extension: string;
+    sampleRate: number;
+    numberOfChannels: number;
+    bitRate: number;
+    isMeteringEnabled?: boolean;
+    android?: Record<string, unknown>;
+    ios?: Record<string, unknown>;
+    web?: Record<string, unknown>;
+  };
+
   export const RecordingPresets: {
-    HIGH_QUALITY: unknown;
+    HIGH_QUALITY: RecordingOptions;
   };
 
   export type AudioMode = {
@@ -18,8 +29,13 @@ declare module 'expo-audio' {
     uri?: string | null;
     prepareToRecordAsync(): Promise<void>;
     record(): void;
+    release(): void;
     stop(): Promise<void>;
   }
+
+  export const AudioModule: {
+    AudioRecorder: new (options: Partial<RecordingOptions>) => AudioRecorder;
+  };
 
   export interface AudioSource {
     uri: string;
