@@ -215,7 +215,13 @@ const prepareActivationAttachmentSnapshot = (
     data: AppData,
     candidateRemoteData: AppData | null,
     localData: AppData | null,
-): { data: AppData; count: number; expectedIds: Set<string>; localFallbacks: Map<string, Attachment> } => {
+): {
+    data: AppData;
+    count: number;
+    expectedIds: Set<string>;
+    localFallbacks: Map<string, Attachment>;
+    metadataOnlyIds: Set<string>;
+} => {
     const candidateAttachments = new Map<string, Attachment>();
     if (candidateRemoteData) {
         visitLiveFileAttachments(candidateRemoteData, (attachment) => {
@@ -231,9 +237,20 @@ const prepareActivationAttachmentSnapshot = (
     const candidate = cloneAppData(data);
     const expectedIds = new Set<string>();
     const localFallbacks = new Map<string, Attachment>();
+    const metadataOnlyIds = new Set<string>();
     const count = visitLiveFileAttachments(candidate, (attachment) => {
         expectedIds.add(attachment.id);
         const candidateAttachment = candidateAttachments.get(attachment.id);
+        const localAttachment = localAttachments.get(attachment.id);
+        // No blob on the candidate, none on the previous backend, and this device
+        // already knew it holds no bytes (or never had the record at all).
+        if (
+            !candidateAttachment?.cloudKey
+            && !localAttachment?.cloudKey
+            && (!localAttachment || localAttachment.localStatus === 'missing')
+        ) {
+            metadataOnlyIds.add(attachment.id);
+        }
         const mustReplaceCandidateBlob = Boolean(
             candidateAttachment?.cloudKey
             && mergedContentMustReplaceCandidateBlob(attachment, candidateAttachment),
@@ -264,7 +281,7 @@ const prepareActivationAttachmentSnapshot = (
         }
         attachment.localStatus = 'missing';
     });
-    return { data: candidate, count, expectedIds, localFallbacks };
+    return { data: candidate, count, expectedIds, localFallbacks, metadataOnlyIds };
 };
 
 const prepareActivationFallbackRetry = (
@@ -291,7 +308,11 @@ const prepareActivationFallbackRetry = (
     return count > 0 ? { data: retryData, count } : { data, count: 0 };
 };
 
-const assertActivationAttachmentsProven = (data: AppData, expectedIds: ReadonlySet<string>): void => {
+const assertActivationAttachmentsProven = (
+    data: AppData,
+    expectedIds: ReadonlySet<string>,
+    metadataOnlyIds: ReadonlySet<string>,
+): void => {
     const resolved = new Set<string>();
     for (const owner of [...data.tasks, ...data.projects]) {
         for (const attachment of owner.attachments ?? []) {
@@ -300,6 +321,20 @@ const assertActivationAttachmentsProven = (data: AppData, expectedIds: ReadonlyS
                 if (expectedIds.has(attachment.id)) {
                     throw new Error(`Candidate attachment proof failed for ${attachment.id}`);
                 }
+                continue;
+            }
+            // Metadata-only record that the trial could not turn into bytes either:
+            // nothing this device does can prove it, and the switch cannot strand it
+            // further. sanitizeAppDataForRemote tombstones exactly this shape at every
+            // write, so activation reaches the same outcome an established device
+            // would instead of refusing forever.
+            if (
+                metadataOnlyIds.has(attachment.id)
+                && !attachment.cloudKey
+                && attachment.localStatus === 'missing'
+                && attachment.pendingContentUpload !== true
+            ) {
+                if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
                 continue;
             }
             if (
@@ -989,7 +1024,11 @@ class SharedSyncRunMachine {
                     ? result
                     : fallbackRetry.data;
             }
-            assertActivationAttachmentsProven(provenData, activationSnapshot.expectedIds);
+            assertActivationAttachmentsProven(
+                provenData,
+                activationSnapshot.expectedIds,
+                activationSnapshot.metadataOnlyIds,
+            );
             this.ensureLocalSnapshotFresh();
             this.notifier.onDiagnostic?.({
                 event: 'attachments-prepare-complete',

@@ -2538,3 +2538,90 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
         });
     });
 });
+
+describe('activation proof with metadata-only attachments (no blob anywhere)', () => {
+    it('activates when a candidate record has no blob and this device holds no bytes', async () => {
+        const remoteTask = createTask('t-orphan', 'Orphan attachment');
+        remoteTask.attachments = [{
+            id: 'attachment-orphan',
+            kind: 'file',
+            title: 'Never uploaded by the holder',
+            uri: '',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const syncAttachments = vi.fn(async (data: AppData) => data);
+        const harness = createHarness({
+            local: createData(),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await harness.run();
+
+        expect(result.success).toBe(true);
+        expect(harness.io.writeRemote).toHaveBeenCalledTimes(1);
+        // Same outcome an established device converges to: the written document
+        // never carries the missing record as a live attachment.
+        const liveRemoteAttachments = (harness.remote?.tasks[0]?.attachments ?? [])
+            .filter((attachment) => !attachment.deletedAt);
+        expect(liveRemoteAttachments).toEqual([]);
+    });
+
+    it('still refuses when the record was reachable on the previous backend', async () => {
+        const localTask = createTask('t-old-backend', 'Old backend attachment');
+        localTask.attachments = [{
+            id: 'attachment-old-backend',
+            kind: 'file',
+            title: 'Only on the old backend',
+            uri: '',
+            cloudKey: 'cloudkit:old-backend',
+            localStatus: 'missing',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const syncAttachments = vi.fn(async (data: AppData) => data);
+        const { io, run } = createHarness({
+            local: createData([localTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            error: '[cloud] Candidate attachment proof failed for attachment-old-backend',
+        });
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('still refuses when this device claims the bytes but the transfer pass cannot read them', async () => {
+        const localTask = createTask('t-unreadable', 'Unreadable local attachment');
+        localTask.attachments = [{
+            id: 'attachment-unreadable',
+            kind: 'file',
+            title: 'Present but unreadable',
+            uri: '/managed/unreadable.txt',
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        // An unreadable path leaves the record untouched (attachment-transfer.ts).
+        const syncAttachments = vi.fn(async (data: AppData) => data);
+        const { io, run } = createHarness({
+            local: createData([localTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            error: '[cloud] Candidate attachment proof failed for attachment-unreadable',
+        });
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+});
