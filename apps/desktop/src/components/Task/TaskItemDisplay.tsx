@@ -168,6 +168,12 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const ageLabel = getTaskAgeLabel(task.createdAt, language);
     const isBareFileReference = useBareFileReferenceCheck();
     const showCompactMeta = compactMetaEnabled && !isViewOpen;
+    const collapsedPriorityAccessibilityLabel = !compactMetaEnabled
+        && !isViewOpen
+        && prioritiesEnabled
+        && task.priority
+        ? `${tFallback(t, 'taskEdit.priorityLabel', 'Priority')}: ${t(`priority.${task.priority}`)}`
+        : null;
     const descriptionPreview = useMemo(
         () => getInlineMarkdownPreview(task.description ?? ''),
         [task.description],
@@ -748,7 +754,10 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             isRtl && "text-right"
                         )}
                         aria-expanded={isViewOpen}
-                        aria-label={`${tFallback(t, 'task.toggleDetails', 'Toggle task details')}: ${task.title}`}
+                        aria-label={[
+                            `${tFallback(t, 'task.toggleDetails', 'Toggle task details')}: ${task.title}`,
+                            collapsedPriorityAccessibilityLabel,
+                        ].filter(Boolean).join('. ')}
                         title={!selectionMode && !readOnly && showHoverHint ? hoverHintText : undefined}
                         dir={resolvedDirection}
                     >

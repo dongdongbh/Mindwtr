@@ -1454,7 +1454,11 @@ describe('TaskItemDisplay', () => {
     });
 
     describe('priority strip', () => {
-        const renderStrip = (task: Task, prioritiesEnabled: boolean) => {
+        const renderRow = (
+            task: Task,
+            prioritiesEnabled: boolean,
+            compactMetaEnabled = true,
+        ) => {
             const { container, unmount } = render(
                 <LanguageProvider>
                     <TaskItemDisplay
@@ -1474,6 +1478,7 @@ describe('TaskItemDisplay', () => {
                         recurrenceRule=""
                         recurrenceStrategy="strict"
                         prioritiesEnabled={prioritiesEnabled}
+                        compactMetaEnabled={compactMetaEnabled}
                         timeEstimatesEnabled={false}
                         isStagnant={false}
                         showQuickDone={false}
@@ -1483,16 +1488,23 @@ describe('TaskItemDisplay', () => {
                 </LanguageProvider>
             );
             const strip = container.querySelector<HTMLElement>('[data-priority-strip]');
-            const result = strip && {
-                priority: strip.dataset.priorityStrip,
-                background: strip.style.backgroundColor,
-                className: strip.className,
-                ariaHidden: strip.getAttribute('aria-hidden'),
-                role: strip.getAttribute('role'),
+            const titleToggle = container.querySelector<HTMLElement>('[data-task-view-toggle]');
+            const result = {
+                strip: strip && {
+                    priority: strip.dataset.priorityStrip,
+                    background: strip.style.backgroundColor,
+                    className: strip.className,
+                    ariaHidden: strip.getAttribute('aria-hidden'),
+                    role: strip.getAttribute('role'),
+                },
+                titleToggleLabel: titleToggle?.getAttribute('aria-label'),
             };
             unmount();
             return result;
         };
+        const renderStrip = (task: Task, prioritiesEnabled: boolean) => (
+            renderRow(task, prioritiesEnabled).strip
+        );
 
         it('paints one strip per priority', () => {
             expect(renderStrip({ ...baseTask, priority: 'urgent' }, true)).toMatchObject({
@@ -1516,6 +1528,16 @@ describe('TaskItemDisplay', () => {
             const strip = renderStrip({ ...baseTask, priority: 'urgent' }, true);
             expect(strip?.ariaHidden).toBe('true');
             expect(strip?.role).toBeNull();
+        });
+
+        it('includes localized priority text in the collapsed row name when compact metadata is hidden', () => {
+            expect(renderRow({ ...baseTask, priority: 'urgent' }, true, false).titleToggleLabel)
+                .toContain('Priority: priority.urgent');
+        });
+
+        it('omits priority from the collapsed row name when the feature is disabled', () => {
+            expect(renderRow({ ...baseTask, priority: 'urgent' }, false, false).titleToggleLabel)
+                .not.toContain('priority.urgent');
         });
 
         it('renders no strip when the priorities feature is off or the task has none', () => {
