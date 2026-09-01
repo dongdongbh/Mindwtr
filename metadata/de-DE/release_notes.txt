@@ -1,4 +1,4 @@
-- Dateisynchronisierung, WebDAV und Dropbox vor dem ersten Sync mit einer Passphrase verschlüsseln.
-- Irgendwann/Vielleicht mit synchronisierten Abschnitten ordnen und den Posteingang mit der Schnellerfassungs-Syntax verarbeiten.
-- Fällige Durchsichten vor nächsten Aktionen sehen, die kommende Woche überblicken und an mehreren Monatstagen oder am letzten Tag wiederholen.
-- Vom Sperrbildschirm oder Kontrollzentrum erfassen, Anhänge sicherer synchronisieren und große Listen schneller öffnen.
+- Archivierte Projektansichten verhindern Änderungen an Aufgaben, Checklisten, Status, Abschluss und Fokus.
+- Sync und Sicherungswiederherstellung behalten die letzte verlässliche Anhangkopie und prüfen fehlende Remote-Dateien strenger.
+- Wiederholungen behalten Anker, Zeitzone und Regeldetails; Rückblicke wechseln um lokale Mitternacht zum neuen Tag.
+- Schalter für Prioritäten und Zeitschätzungen steuern nun Erfassung, Sortierung, Kalender und Widgets.

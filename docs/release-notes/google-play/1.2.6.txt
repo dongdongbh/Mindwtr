@@ -1,0 +1,30 @@
+<en-US>
+- Share files to Mindwtr after warm or cold starts, with clear errors when capture fails.
+- Quick Add keeps the title and Save controls visible; calendar exports avoid a date race.
+- Archived projects stay read-only, and sync recovery protects the last trusted attachment copy.
+- Recurrence and feature switches now behave consistently across capture, review, lists, calendars, and widgets.
+</en-US>
+<de-DE>
+- Dateien nach Warm- oder Kaltstart an Mindwtr teilen; Fehler werden angezeigt.
+- Schnellerfassung hält Titel und Speichern sichtbar; Kalenderexporte vermeiden ein Datumsrennen.
+- Archivierte Projekte bleiben schreibgeschützt; Sync schützt die letzte verlässliche Anhangkopie.
+- Wiederholungen und Funktionsschalter wirken einheitlich in Erfassung, Rückblick, Listen, Kalendern und Widgets.
+</de-DE>
+<es-ES>
+- Comparte archivos con Mindwtr tras un inicio en caliente o en frío, con errores visibles.
+- Captura rápida mantiene visibles el título y Guardar; el calendario evita una carrera de fechas.
+- Los proyectos archivados son de solo lectura y la sincronización protege la última copia fiable de adjuntos.
+- Repeticiones y opciones actúan igual en captura, revisión, listas, calendarios y widgets.
+</es-ES>
+<fr-FR>
+- Partagez des fichiers vers Mindwtr après un démarrage à chaud ou à froid, avec des erreurs visibles.
+- La saisie rapide garde le titre et Enregistrer visibles; le calendrier évite une course de dates.
+- Les projets archivés restent en lecture seule et la synchro protège la dernière copie fiable des pièces jointes.
+- Récurrences et options agissent de façon cohérente dans saisie, revue, listes, calendriers et widgets.
+</fr-FR>
+<zh-CN>
+- 无论 Mindwtr 是否已运行，都可从其他应用分享文件；失败时会显示原因。
+- 快速添加会保持标题和“保存”可见；日历导出修复了日期竞态。
+- 已归档项目保持只读；同步恢复会保护最后一份可信附件。
+- 重复任务和功能开关在收集、回顾、清单、日历和小组件中的行为更加一致。
+</zh-CN>

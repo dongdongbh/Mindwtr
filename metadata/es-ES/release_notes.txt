@@ -1,4 +1,4 @@
-- Cifra la sincronización de archivos, WebDAV y Dropbox con una contraseña antes de la primera sincronización.
-- Organiza Algún día/Quizá con secciones sincronizadas y procesa la bandeja con toda la sintaxis de captura rápida.
-- Consulta las revisiones antes que las próximas acciones, anticipa la semana y repite en varios días del mes o el último.
-- Captura desde la pantalla bloqueada o el Centro de control, sincroniza adjuntos con más seguridad y recorre listas grandes más rápido.
+- Las vistas de proyectos archivados impiden cambiar tareas, listas, estados, finalización y Enfoque.
+- La recuperación conserva la última copia fiable de los adjuntos y verifica mejor los archivos remotos ausentes.
+- Las repeticiones conservan ancla, zona horaria y reglas; las revisiones cambian de día a medianoche local.
+- Los interruptores de prioridad y tiempo controlan captura, ordenación, calendario y widgets.

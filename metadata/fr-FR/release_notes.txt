@@ -1,4 +1,4 @@
-- Chiffrez la synchronisation de fichiers, WebDAV et Dropbox avec une phrase secrète avant la première synchronisation.
-- Organisez Un jour/Peut-être en sections synchronisées et traitez la boîte de réception avec la saisie rapide.
-- Voyez les revues avant les prochaines actions, anticipez la semaine et répétez plusieurs jours du mois ou le dernier.
-- Capturez depuis l’écran verrouillé ou le Centre de contrôle, sécurisez les pièces jointes et accélérez les grandes listes.
+- Les projets archivés empêchent les changements de tâche, liste, état, achèvement et Focus.
+- La récupération garde la dernière copie fiable des pièces jointes et vérifie mieux les fichiers distants absents.
+- Les récurrences conservent ancre, fuseau et règles; les revues changent de jour à minuit local.
+- Les options de priorité et de durée contrôlent saisie, tri, calendrier et widgets.

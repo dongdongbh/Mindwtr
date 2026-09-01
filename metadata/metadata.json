@@ -30,7 +30,7 @@
           "列表、日历与看板视图，支持提醒与重复任务",
           "免费开源、无广告"
         ],
-        "ReleaseNotes": "• 用密码加密文件同步、WebDAV 和 Dropbox，并安全同步附件。\n• 用可同步的分区整理“将来/也许”，收集箱支持完整的快速添加语法。\n• “待回顾”优先显示，可预览未来一周，并支持每月多日或月末重复。\n• 可导出筛选后的 CSV、转换任务、按时间估算排序，大型清单更流畅。",
+        "ReleaseNotes": "• 新增可选只读时间线、侧边栏视图开关，并支持批量分配项目分区。\n• 已归档项目保持只读；同步恢复会保护最后一份可信附件。\n• 重复任务、WebDAV 与功能开关的行为更可靠。\n• 自托管网页可打开云端附件，并预填云端地址。",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -82,7 +82,7 @@
           "List, calendar, and kanban views with reminders and repeating tasks",
           "Free and open source, no ads"
         ],
-        "ReleaseNotes": "• Encrypt File Sync, WebDAV, and Dropbox with a passphrase, with safer attachment sync.\n• Organize Someday/Maybe with synced sections and process Inbox with the full quick-add syntax.\n• See Review Due first, preview the coming week, and repeat on several month days or the last day.\n• Export filtered CSV, convert tasks, sort by time estimate, and move through large lists faster.",
+        "ReleaseNotes": "• Add an optional read-only Timeline, hide sidebar views per device, and assign selected tasks to a project section.\n• Keep archived projects read-only and protect the last trusted attachment during sync recovery.\n• Improve recurrence editing, WebDAV compatibility, and feature-switch behavior.\n• Open Cloud-backed attachments in the self-hosted web app and prefill its Cloud URL.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -131,7 +131,7 @@
           "Listen-, Kalender- und Kanban-Ansichten mit Erinnerungen und Wiederholungen",
           "Kostenlos und Open Source, ohne Werbung"
         ],
-        "ReleaseNotes": "• Dateisynchronisierung, WebDAV und Dropbox mit einer Passphrase verschlüsseln und Anhänge sicherer synchronisieren.\n• Irgendwann/Vielleicht mit synchronisierten Abschnitten ordnen und den Posteingang mit der gesamten Schnellerfassungs-Syntax verarbeiten.\n• Fällige Durchsichten zuerst sehen, die kommende Woche überblicken und an mehreren Monatstagen oder am letzten Tag wiederholen.\n• Gefilterte CSV-Dateien exportieren, Aufgaben umwandeln, nach Zeitschätzung sortieren und große Listen schneller nutzen.",
+        "ReleaseNotes": "• Optionale schreibgeschützte Zeitleiste, ausblendbare Seitenleistenansichten und Sammelzuweisung zu Projektabschnitten.\n• Archivierte Projekte bleiben schreibgeschützt; Sync schützt die letzte verlässliche Anhangkopie.\n• Wiederholungen, WebDAV und Funktionsschalter arbeiten zuverlässiger.\n• Die selbst gehostete Web-App öffnet Cloud-Anhänge und kann die Cloud-URL vorgeben.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -161,7 +161,7 @@
           "Vues liste, calendrier et kanban, rappels et tâches répétées",
           "Gratuit et open source, sans publicité"
         ],
-        "ReleaseNotes": "• Chiffrez la synchronisation de fichiers, WebDAV et Dropbox avec une phrase secrète, avec des pièces jointes mieux protégées.\n• Organisez Un jour/Peut-être avec des sections synchronisées et traitez la boîte de réception avec toute la syntaxe de saisie rapide.\n• Voyez les revues en premier, anticipez la semaine et répétez plusieurs jours du mois ou le dernier.\n• Exportez la liste filtrée en CSV, convertissez des tâches, triez par durée estimée et parcourez plus vite les grandes listes.",
+        "ReleaseNotes": "• Ajoutez une chronologie facultative en lecture seule, masquez des vues et classez plusieurs tâches dans une section.\n• Gardez les projets archivés en lecture seule et protégez la dernière copie fiable des pièces jointes.\n• Améliorez les récurrences, WebDAV et les options de fonction.\n• Ouvrez les pièces jointes Cloud dans l’app web auto-hébergée et préremplissez son URL Cloud.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -190,7 +190,7 @@
           "Vistas de lista, calendario y kanban, con recordatorios y tareas repetidas",
           "Gratis y de código abierto, sin anuncios"
         ],
-        "ReleaseNotes": "• Cifra la sincronización de archivos, WebDAV y Dropbox con una contraseña, con adjuntos más seguros.\n• Organiza Algún día/Quizá con secciones sincronizadas y procesa la bandeja con toda la sintaxis de captura rápida.\n• Consulta primero las revisiones, anticipa la semana y repite varios días del mes o el último.\n• Exporta la lista filtrada en CSV, convierte tareas, ordena por tiempo estimado y recorre listas grandes más rápido.",
+        "ReleaseNotes": "• Añade una cronología opcional de solo lectura, oculta vistas y asigna varias tareas a una sección.\n• Mantén los proyectos archivados en solo lectura y protege la última copia fiable de los adjuntos.\n• Mejora las repeticiones, WebDAV y las opciones de función.\n• Abre adjuntos de Cloud en la app web autoalojada y rellena su URL de Cloud.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",

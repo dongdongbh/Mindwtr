@@ -1,0 +1,4 @@
+- Comparte archivos con Mindwtr tras un inicio en caliente o en frío, con errores visibles.
+- Captura rápida mantiene visibles el título y Guardar; el calendario evita una carrera de fechas.
+- Los proyectos archivados son de solo lectura y la sincronización protege la última copia fiable de adjuntos.
+- Repeticiones y opciones actúan igual en captura, revisión, listas, calendarios y widgets.

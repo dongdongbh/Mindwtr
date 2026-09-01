@@ -1,0 +1,4 @@
+- Share files to Mindwtr after warm or cold starts, with clear errors when capture fails.
+- Quick Add keeps the title and Save controls visible; calendar exports avoid a date race.
+- Archived projects stay read-only, and sync recovery protects the last trusted attachment copy.
+- Recurrence and feature switches now behave consistently across capture, review, lists, calendars, and widgets.

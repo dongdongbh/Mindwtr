@@ -1,0 +1,4 @@
+- Dateien nach Warm- oder Kaltstart an Mindwtr teilen; Fehler werden angezeigt.
+- Schnellerfassung hält Titel und Speichern sichtbar; Kalenderexporte vermeiden ein Datumsrennen.
+- Archivierte Projekte bleiben schreibgeschützt; Sync schützt die letzte verlässliche Anhangkopie.
+- Wiederholungen und Funktionsschalter wirken einheitlich in Erfassung, Rückblick, Listen, Kalendern und Widgets.

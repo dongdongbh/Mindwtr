@@ -88,6 +88,23 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="1.2.6" date="2026-09-01">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.6</url>
+      <description>
+        <p>Mindwtr 1.2.6 adds clearer desktop planning, safer archived projects, and more reliable sync and attachments.</p>
+        <p xml:lang="de">Mindwtr 1.2.6 bringt klarere Desktop-Planung, sicherere archivierte Projekte sowie zuverlaessigere Synchronisierung und Anhaenge.</p>
+        <ul>
+          <li>The optional read-only Timeline adds day, week, and month zoom, while sidebar views can be hidden per device.</li>
+          <li xml:lang="de">Die optionale schreibgeschuetzte Zeitleiste bietet Tages-, Wochen- und Monatszoom; Seitenleistenansichten lassen sich pro Geraet ausblenden.</li>
+          <li>Archived projects disable task mutations, and project task lists can assign several selected tasks to one section.</li>
+          <li xml:lang="de">Archivierte Projekte sperren Aufgabenaenderungen; Projektlisten koennen mehrere ausgewaehlte Aufgaben einem Abschnitt zuweisen.</li>
+          <li>WebDAV compatibility, attachment recovery, recurrence editing, and midnight refresh behavior are more reliable.</li>
+          <li xml:lang="de">WebDAV-Kompatibilitaet, Anhangwiederherstellung, Wiederholungsbearbeitung und Tageswechsel-Aktualisierung sind zuverlaessiger.</li>
+          <li>Feature switches now control matching quick-add, sorting, grouping, calendar, and widget behavior without deleting saved data.</li>
+          <li xml:lang="de">Funktionsschalter steuern nun Schnellerfassung, Sortierung, Gruppierung, Kalender und Widgets, ohne gespeicherte Daten zu loeschen.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.5" date="2026-08-31">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.5</url>
       <description>

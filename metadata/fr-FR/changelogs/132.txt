@@ -1,0 +1,4 @@
+- Partagez des fichiers vers Mindwtr après un démarrage à chaud ou à froid, avec des erreurs visibles.
+- La saisie rapide garde le titre et Enregistrer visibles; le calendrier évite une course de dates.
+- Les projets archivés restent en lecture seule et la synchro protège la dernière copie fiable des pièces jointes.
+- Récurrences et options agissent de façon cohérente dans saisie, revue, listes, calendriers et widgets.

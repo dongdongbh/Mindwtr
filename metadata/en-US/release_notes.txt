@@ -1,4 +1,4 @@
-- Encrypt File Sync, WebDAV, and Dropbox with a passphrase before the first sync.
-- Organize Someday/Maybe with synced sections and process Inbox with the full quick-add syntax.
-- See Review Due before Next Actions, preview the coming week, and repeat on several month days or the last day.
-- Capture from the Lock Screen or Control Center, use guarded attachment sync, and move through responsive large lists.
+- Archived project views now prevent task, checklist, status, completion, and Focus changes.
+- Sync and backup recovery keep the last trusted attachment copy and handle missing remote files with stricter evidence.
+- Recurrence edits preserve anchors, time zones, and rule details; reviews move to the new day at local midnight.
+- Priority and time-estimate switches now control their matching capture, sort, calendar, and widget behavior.
