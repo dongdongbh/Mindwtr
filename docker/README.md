@@ -129,6 +129,15 @@ Each distinct token gets its own private dataset on the server, so several peopl
 
 `MINDWTR_CLOUD_TOKEN` is still accepted for backward compatibility, but deprecated.
 
+## Preseed the web app's sync settings
+
+A fresh browser opening the PWA can have the Cloud URL filled in already, so people only enter their token:
+
+- **Same domain (recommended):** when the app and the cloud API are served from one domain (the HTTPS compose does this), the app detects the cloud on its own origin automatically. Nothing to configure.
+- **Split domains:** set `MINDWTR_DEFAULT_CLOUD_URL` on the `mindwtr-app` container (see the commented block in `docker/compose.yaml`) to the public cloud URL. Useful for Kubernetes or any deployment where the app and API live on different hosts.
+
+The value only prefills the setup form. It never overwrites a URL a browser has already configured, and sync stays off until the person saves with their token.
+
 For a file-backed Docker secret, remove `MINDWTR_CLOUD_AUTH_TOKENS` from the
 Compose environment file, put the token in a host file readable only by its
 owner, and start Compose with the secret overlay.

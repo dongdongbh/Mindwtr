@@ -48,6 +48,7 @@ import {
     mergeDesktopBackup,
     restoreDesktopBackup,
 } from '../../../lib/data-transfer';
+import { getWebDefaultCloudUrl } from '../../../lib/web-runtime-config';
 import { isValidHttpUrl } from './sync/sync-page-utils';
 import { useSyncEncryptionSettings } from './sync/useSyncEncryptionSettings';
 import type {
@@ -353,6 +354,16 @@ export const useSyncSettings = ({
                 setCloudRememberToken(configuration.cloud.rememberToken === true);
                 setCloudAllowInsecureHttp(configuration.cloud.allowInsecureHttp === true);
                 setCloudProvider(configuration.cloudProvider);
+                // Self-hosted web deployments preseed the Cloud URL (#1125): a
+                // prefill of the editor field only, never persisted here, and
+                // never over a configured value or a user's in-flight edit.
+                if (!isTauri && !configuration.cloud.url && !(configuration.cloud.token ?? '')) {
+                    void getWebDefaultCloudUrl().then((defaultUrl) => {
+                        if (!defaultUrl) return;
+                        if (syncConfigurationGeneration.current !== configurationLoadGeneration) return;
+                        setCloudUrl((current) => (current ? current : defaultUrl));
+                    });
+                }
             })
             .catch((error) => {
                 void logError(error, { scope: 'sync', step: 'loadConfiguration' });

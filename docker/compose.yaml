@@ -46,6 +46,11 @@ services:
     restart: always
     cpus: "1.0"
     mem_limit: 512m
+    # Preseed the sync setup for fresh browsers so users only enter their token.
+    # Optional: when the app and cloud share one domain (compose.https.yaml),
+    # the app detects the cloud on its own origin without this.
+    # environment:
+    #   MINDWTR_DEFAULT_CLOUD_URL: "https://mindwtr.example.com"
     depends_on:
       mindwtr-cloud:
         condition: service_healthy

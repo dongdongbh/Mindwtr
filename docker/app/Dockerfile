@@ -20,3 +20,4 @@ EXPOSE 5173/tcp
 HEALTHCHECK --interval=1m30s --timeout=10s --start-period=30s --retries=3 CMD curl -fsS http://localhost:5173/ >/dev/null || exit 1
 COPY --from=base /app/apps/desktop/dist /usr/share/nginx/html
 COPY docker/app/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chmod=755 docker/app/10-runtime-config.sh /docker-entrypoint.d/10-runtime-config.sh
