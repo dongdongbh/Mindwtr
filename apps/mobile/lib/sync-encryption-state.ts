@@ -22,6 +22,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
     SYNC_ENCRYPTION_KEYED_STATES,
+    isSyncEncryptionStateBlocked,
     type SyncCryptoKdfParams,
     type SyncEncryptionKeyCachePort,
     type SyncEncryptionLocalState,
@@ -109,6 +110,9 @@ const parseLocalState = (raw: string | null): SyncEncryptionLocalState | null =>
             state: parsed.state,
             discoveredSalt: typeof parsed.discoveredSalt === 'string' ? parsed.discoveredSalt : undefined,
             discoveredParams: isKdfParams(parsed.discoveredParams) ? parsed.discoveredParams : undefined,
+            // Absent on states written by 1.2.6 and earlier. Tolerated, never rejected: the
+            // block rule reads a missing scope as "re-check this location" (#1138).
+            discoveredScope: typeof parsed.discoveredScope === 'string' ? parsed.discoveredScope : undefined,
             incompleteTransition,
         };
     } catch (error) {
@@ -249,18 +253,27 @@ export const getMobileSyncEncryptionStatus = async (): Promise<SyncEncryptionSta
 export const getIncompleteSyncEncryptionTransition = async (): Promise<SyncEncryptionTransitionKind | null> =>
     (await loadSyncEncryptionLocalState())?.incompleteTransition ?? null;
 
-/** True when this device must NOT auto-sync: the remote is encrypted and we have no key
- *  (pinned decision #5 — automatic and background sync stay off until the user supplies
- *  the passphrase through an explicit manual action). */
-/** True when this device must NOT auto-sync. Two shapes: the remote is encrypted and we have
- *  no key, or the remote went back to plaintext while we hold one. Both are terminal until the
- *  user acts (supply the passphrase / turn encryption off here), and both would corrupt the
- *  remote's generation if a background cycle went ahead. */
-export const isSyncEncryptionBlocked = async (): Promise<boolean> => {
+/** True when this device must NOT sync against `activeScope`. Two shapes: the remote is
+ *  encrypted and we have no key, or the remote went back to plaintext while we hold one. Both
+ *  are terminal until the user acts (supply the passphrase / turn encryption off here), and
+ *  both would corrupt the remote's generation if a background cycle went ahead.
+ *
+ *  Scoped since #1138: the discovery describes ONE location, so a device pointed at a
+ *  different backend — or at the same folder after the user emptied it — re-checks instead of
+ *  refusing forever. The rule itself lives in core (`isSyncEncryptionStateBlocked`) so Rust
+ *  and mobile cannot drift apart. */
+export const isSyncEncryptionBlocked = async (activeScope: string | null): Promise<boolean> => (
+    isSyncEncryptionStateBlocked(await loadSyncEncryptionLocalState(), activeScope)
+);
+
+/** True when the persisted state is a discovery this device has not yet bound to a location
+ *  (written by 1.2.6 and earlier). Such a cycle runs like a fresh join: it must re-read the
+ *  document BEFORE it is allowed to upload anything, or a no-key device would push plaintext
+ *  attachments beside ciphertext. See the pre-sync attachment gate in sync-service.ts. */
+export const hasUnscopedSyncEncryptionDiscovery = async (): Promise<boolean> => {
     const localState = await loadSyncEncryptionLocalState();
-    return Boolean(localState?.incompleteTransition)
-        || localState?.state === 'remote-encrypted-no-key'
-        || localState?.state === 'remote-plaintext';
+    if (!localState || localState.discoveredScope) return false;
+    return localState.state === 'remote-encrypted-no-key' || localState.state === 'remote-plaintext';
 };
 
 export const __resetSyncEncryptionStateForTests = (): void => {

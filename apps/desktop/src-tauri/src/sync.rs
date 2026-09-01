@@ -52,7 +52,7 @@ use crate::sync_encryption::{
     begin_sync_encryption_transition, bytes_to_hex, clear_encryption_state_with_fence,
     encrypted_artifact_name, hex_to_bytes,
     is_encryption_enabled, is_terminal_error, mark_remote_encrypted_no_key,
-    mark_remote_plaintext, persist_enabled_material_with_fence,
+    clear_stale_remote_encrypted_no_key, mark_remote_plaintext, persist_enabled_material_with_fence,
     plaintext_artifact_name, read_local_state, resolve_key_material, terminal_error,
     TRANSITION_CHANGE_PASSPHRASE, TRANSITION_DISABLE, TRANSITION_ENABLE,
     STATE_OFF, SYNC_ENCRYPTION_REMOTE_ENCRYPTED, SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
@@ -3477,7 +3477,7 @@ pub(crate) async fn webdav_get_json(app: tauri::AppHandle) -> Result<WebdavSyncR
     })
     .await
     .map_err(|e| e.to_string())?;
-    persist_discovery_and_reduce(&app, result)
+    persist_discovery_and_reduce(&app, None, result)
 }
 
 fn webdav_put_json_blocking(
@@ -12946,6 +12946,7 @@ mod tests {
                 persisted.set(true);
                 Ok(())
             },
+            || Ok(false),
         )
         .expect("provision passphrase");
 
@@ -12956,6 +12957,59 @@ mod tests {
         }
         assert_eq!(outcome, "ok");
         assert!(persisted.get());
+    }
+
+    // #1138 (5): Unlock against a location with nothing encrypted on it. From a stale
+    // `remote-encrypted-no-key` state that is the exit -- without it the read below fails with
+    // "Failed to read .../data.json.enc" and the lock can never be cleared.
+    #[test]
+    fn passphrase_provisioning_clears_a_stale_no_key_state_when_nothing_is_encrypted_here() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let cleared = Cell::new(false);
+        let persisted = Cell::new(false);
+
+        let outcome = provide_sync_encryption_passphrase_in_dir_with(
+            dir.path(),
+            "anything",
+            || Ok(()),
+            |_, _| {
+                persisted.set(true);
+                Ok(())
+            },
+            || {
+                cleared.set(true);
+                Ok(true)
+            },
+        )
+        .expect("stale lock cleared");
+
+        assert_eq!(outcome, "no-encrypted-remote");
+        assert!(cleared.get());
+        assert!(!persisted.get(), "no key may be committed on this path");
+        assert!(!dir.path().join(encrypted_artifact_name(DATA_FILE_NAME)).exists());
+    }
+
+    // The negative half: a device holding a key finds no `.enc`, which is remote-plaintext's
+    // business, so nothing is cleared and the read error still surfaces.
+    #[test]
+    fn passphrase_provisioning_still_fails_when_no_stale_no_key_state_is_present() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let persisted = Cell::new(false);
+
+        let error = provide_sync_encryption_passphrase_in_dir_with(
+            dir.path(),
+            "anything",
+            || Ok(()),
+            |_, _| {
+                persisted.set(true);
+                Ok(())
+            },
+            || Ok(false),
+        )
+        .expect_err("a missing encrypted document is still an error from a keyed state");
+
+        assert!(error.contains("Failed to read"), "unexpected error: {error}");
+        assert!(!persisted.get());
     }
 
     #[test]
@@ -12982,6 +13036,7 @@ mod tests {
                 persisted.set(true);
                 Ok(())
             },
+            || Ok(false),
         )
         .expect_err("a changed authenticated generation must abort provisioning");
 
@@ -16999,14 +17054,64 @@ where
     }
 }
 
+/// #1138: the sync location a discovery persisted here is bound to. Mirrors core's
+/// `buildSyncLocationScope` byte-for-byte (`JSON.stringify([...])` and `serde_json` agree on
+/// an array of strings/nulls), so a state written by the Rust file/WebDAV seams and one
+/// written by the TS seams describe the same location the same way.
+///
+/// `path_override` is the candidate folder an activation probe reads instead of the persisted
+/// one -- the scope must name what this operation actually touched, or a probe's discovery
+/// would be bound to the configuration it is about to replace.
+fn sync_location_scope(app: &tauri::AppHandle, path_override: Option<&str>) -> Option<String> {
+    fn field(value: Option<&String>) -> Option<String> {
+        value.map(|value| value.trim()).filter(|value| !value.is_empty()).map(str::to_string)
+    }
+    fn encode(parts: Vec<Option<String>>) -> Option<String> {
+        serde_json::to_string(&parts).ok()
+    }
+
+    let config = read_config(app);
+    let backend = field(config.sync_backend.as_ref()).unwrap_or_else(|| "off".to_string());
+    match backend.as_str() {
+        "file" => encode(vec![
+            Some("file".to_string()),
+            path_override
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .or_else(|| field(config.sync_path.as_ref())),
+        ]),
+        "webdav" => encode(vec![
+            Some("webdav".to_string()),
+            field(config.webdav_url.as_ref()).map(|url| normalize_webdav_url(&url)),
+            field(config.webdav_username.as_ref()),
+        ]),
+        "cloud" => {
+            let provider =
+                field(config.sync_cloud_provider.as_ref()).unwrap_or_else(|| "selfhosted".to_string());
+            if provider == "dropbox" {
+                return encode(vec![Some("cloud".to_string()), Some("dropbox".to_string())]);
+            }
+            encode(vec![
+                Some("cloud".to_string()),
+                Some(provider),
+                field(config.cloud_url.as_ref()).map(|url| normalize_cloud_url(&url)),
+            ])
+        }
+        other => encode(vec![Some(other.to_string())]),
+    }
+}
+
 fn persist_discovery_and_reduce<T>(
     app: &tauri::AppHandle,
+    path_override: Option<&str>,
     result: Result<T, String>,
 ) -> Result<T, String> {
+    let scope = sync_location_scope(app, path_override);
     persist_discovery_and_reduce_with(
         result,
-        |salt, params| mark_remote_encrypted_no_key(app, salt, params),
-        || mark_remote_plaintext(app),
+        |salt, params| mark_remote_encrypted_no_key(app, salt, params, scope.as_deref()),
+        || mark_remote_plaintext(app, scope.as_deref()),
     )
 }
 
@@ -17018,6 +17123,8 @@ pub(crate) fn read_sync_file(
     path: Option<String>,
     lease_token: String,
 ) -> Result<serde_json::Value, String> {
+    // #1138: bind any discovery this read persists to the folder it actually read.
+    let path_scope = path.as_ref().map(|value| value.trim().to_string());
     let sync_dir = match path {
         Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
         None => {
@@ -17033,7 +17140,7 @@ pub(crate) fn read_sync_file(
         let root = RetainedSyncRoot::new(&lease.sync_dir, &lease._sync_lock);
         read_sync_file_from_retained_root_with(&root, crypto_for(&material))
     });
-    persist_discovery_and_reduce(&app, read)
+    persist_discovery_and_reduce(&app, path_scope.as_deref(), read)
 }
 
 #[tauri::command(async)]
@@ -17044,6 +17151,8 @@ pub(crate) fn read_sync_file_versioned(
     path: Option<String>,
     lease_token: String,
 ) -> Result<SyncFileReadResult, String> {
+    // #1138: bind any discovery this read persists to the folder it actually read.
+    let path_scope = path.as_ref().map(|value| value.trim().to_string());
     let sync_dir = match path {
         Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
         None => {
@@ -17059,7 +17168,7 @@ pub(crate) fn read_sync_file_versioned(
         let root = RetainedSyncRoot::new(&lease.sync_dir, &lease._sync_lock);
         read_sync_file_versioned_from_retained_root_with(&root, crypto_for(&material))
     });
-    persist_discovery_and_reduce(&app, read)
+    persist_discovery_and_reduce(&app, path_scope.as_deref(), read)
 }
 
 #[cfg(test)]
@@ -19440,15 +19549,21 @@ fn verify_sync_passphrase_with_reread(
     Ok(None)
 }
 
-fn provide_sync_encryption_passphrase_in_dir_with<BeforeFinalize, Persist>(
+fn provide_sync_encryption_passphrase_in_dir_with<BeforeFinalize, Persist, ClearStale>(
     sync_dir: &Path,
     passphrase: &str,
     before_finalize: BeforeFinalize,
     persist: Persist,
+    // #1138: called only when this folder holds no encrypted document at all. Returns true
+    // when it cleared a stale `remote-encrypted-no-key` state (the lock described a location
+    // this device has left behind, and it holds no key, so nothing is lost). Injected so the
+    // AppHandle-free directory tests can drive both answers.
+    clear_stale_no_key: ClearStale,
 ) -> Result<String, String>
 where
     BeforeFinalize: FnOnce() -> Result<(), String>,
     Persist: FnOnce(&SyncFileLock, &SyncKeyMaterial) -> Result<(), String>,
+    ClearStale: FnOnce() -> Result<bool, String>,
 {
     // Passphrase verification is a read-modify-persist operation over the remote folder's
     // exact generation. Hold the same lock as ordinary File Sync and transitions from the
@@ -19457,6 +19572,11 @@ where
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| {
         let encrypted = sync_dir.join(encrypted_artifact_name(DATA_FILE_NAME));
+        // Checked under the same folder lock the verification holds, so nothing can create the
+        // document between this look and the read below.
+        if !encrypted.exists() && clear_stale_no_key()? {
+            return Ok("no-encrypted-remote".to_string());
+        }
         let label = encrypted.display().to_string();
         let outcome = verify_sync_passphrase_with_reread(passphrase, &label, || {
             fs::read(&encrypted).map_err(|error| format!("Failed to read {label}: {error}"))
@@ -19504,6 +19624,7 @@ pub(crate) fn provide_sync_encryption_passphrase(
                 revalidate_sync_lock(lock, &sync_dir)
             })
         },
+        || clear_stale_remote_encrypted_no_key(&app),
     )
 }
 

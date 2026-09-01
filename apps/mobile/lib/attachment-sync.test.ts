@@ -900,11 +900,9 @@ describe('attachment sync', () => {
     const DAY_MS = 24 * 60 * 60 * 1000;
     const WEBDAV_CONFIG = { url: 'https://example.com/data.json', username: 'u', password: 'p' };
     const WEBDAV_BASE = 'https://example.com';
-    // Mirrors `readAttachmentPresenceScope`: backend, webdav url/username, cloud
-    // provider/url, file sync path — in that order.
-    const scopeFor = (webdavUrl: string): string => JSON.stringify([
-      'webdav', webdavUrl, 'u', null, null, null,
-    ]);
+    // Mirrors core's `buildSyncLocationScope` (shared with sync-encryption discovery scoping
+    // since #1138): only the dimensions the ACTIVE backend addresses, URLs normalized.
+    const scopeFor = (webdavUrl: string): string => JSON.stringify(['webdav', webdavUrl, 'u']);
     const STEADY_BYTES = new Uint8Array([1, 2, 3]);
 
     /** cloudKey set, a managed local file, `available`, and a recorded content stat that

@@ -239,6 +239,7 @@ import {
   SyncFileLockIdentityLostError,
 } from './sync-file-lock';
 import { SYNC_BACKEND_KEY, SYNC_ENCRYPTION_STATE_KEY, SYNC_PATH_KEY } from './sync-constants';
+import { readActiveSyncLocationScope } from './sync-location-scope';
 
 // Same node-backed stand-in for react-native-quick-crypto as sync-crypto-native.test.ts
 // (its Node-compatible cipher surface plus quick-crypto's argon2 callback shape).
@@ -1828,11 +1829,12 @@ describe('local-state persistence and the remote-plaintext state', () => {
       state: 'remote-plaintext',
       discoveredSalt: Array.from(material.salt, (byte) => byte.toString(16).padStart(2, '0')).join(''),
       discoveredParams: FAST_PARAMS,
+      discoveredScope: '["file","/sync"]',
     });
     await flushSyncEncryptionLocalState();
     __resetSyncEncryptionStateForTests(); // prove it survives a reload, not just the cache
 
-    await expect(isSyncEncryptionBlocked()).resolves.toBe(true);
+    await expect(isSyncEncryptionBlocked('["file","/sync"]')).resolves.toBe(true);
     await expect(getSyncEncryptionMaterial()).resolves.toMatchObject({ key: material.key });
     await expect(getMobileSyncEncryptionStatus()).resolves.toEqual({
       state: 'remote-plaintext',
@@ -1851,7 +1853,7 @@ describe('local-state persistence and the remote-plaintext state', () => {
       state: 'off',
       incompleteTransition: 'enable',
     });
-    await expect(isSyncEncryptionBlocked()).resolves.toBe(true);
+    await expect(isSyncEncryptionBlocked('["file","/sync"]')).resolves.toBe(true);
   });
 });
 
@@ -1897,5 +1899,102 @@ describe('SAF transition scratch name decoration (#1113)', () => {
       expectedFingerprint: baseline.fingerprint,
     })).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
     expect(fs.files.get(canonicalUri)).toEqual(baselineBytes);
+  });
+});
+
+// #1138: a `remote-encrypted-no-key` state refused EVERY sync on EVERY backend before
+// touching any remote, and the only exit (Unlock) needed an encrypted document at the
+// CURRENT location — so emptying the folder or switching backends wedged the device for
+// good. The lock is now bound to the location it was discovered on.
+describe('stale sync-encryption discovery scope (#1138)', () => {
+  const FOLDER_SCOPE = `["file","${SYNC_URI}"]`;
+
+  const persistNoKey = async (scope?: string) => {
+    syncEncryptionLocalState.write({
+      state: 'remote-encrypted-no-key',
+      discoveredSalt: '07'.repeat(16),
+      discoveredParams: FAST_PARAMS,
+      ...(scope ? { discoveredScope: scope } : {}),
+    });
+    await flushSyncEncryptionLocalState();
+    __resetSyncEncryptionStateForTests(); // prove it survives a reload, not just the cache
+  };
+
+  it('reads the active location from the persisted configuration', async () => {
+    asyncStorage.set(SYNC_BACKEND_KEY, 'file');
+    asyncStorage.set(SYNC_PATH_KEY, SYNC_URI);
+    await expect(readActiveSyncLocationScope()).resolves.toBe(FOLDER_SCOPE);
+
+    asyncStorage.set(SYNC_PATH_KEY, `${SYNC_DIR}/other/data.json`);
+    await expect(readActiveSyncLocationScope()).resolves.not.toBe(FOLDER_SCOPE);
+  });
+
+  // (3) unchanged behaviour for the location the discovery was actually made on.
+  it('still blocks the location the discovery was made on', async () => {
+    await persistNoKey(FOLDER_SCOPE);
+    await expect(isSyncEncryptionBlocked(FOLDER_SCOPE)).resolves.toBe(true);
+  });
+
+  // (4) the #1138 sequence: the user wiped Dropbox and switched to a plain folder.
+  it('does not block a different backend or folder', async () => {
+    await persistNoKey('["cloud","dropbox"]');
+    await expect(isSyncEncryptionBlocked(FOLDER_SCOPE)).resolves.toBe(false);
+  });
+
+  // (1)/(2) the 1.2.6 upgrade path — one manual "Sync now" re-checks instead of refusing.
+  it('does not block a discovery persisted before scopes existed', async () => {
+    await persistNoKey();
+    await expect(isSyncEncryptionBlocked(FOLDER_SCOPE)).resolves.toBe(false);
+    await expect(isSyncEncryptionBlocked(null)).resolves.toBe(false);
+  });
+
+  it('keeps blocking a scoped discovery when the active location is unknown', async () => {
+    await persistNoKey(FOLDER_SCOPE);
+    await expect(isSyncEncryptionBlocked(null)).resolves.toBe(true);
+  });
+
+  // (2) re-check against a still-encrypted folder: re-marked WITH the scope, NoKey thrown,
+  // and no plaintext document created beside the ciphertext.
+  it('re-discovers a still-encrypted folder and binds the lock to it', async () => {
+    await persistNoKey();
+    await seedEncrypted(appData('sealed'));
+
+    await expect(readSyncFile(SYNC_URI, { locationScope: FOLDER_SCOPE }))
+      .rejects.toBeInstanceOf(SyncEncryptionNoKeyError);
+    await flushSyncEncryptionLocalState();
+
+    expect(syncEncryptionLocalState.read()).toMatchObject({
+      state: 'remote-encrypted-no-key',
+      discoveredScope: FOLDER_SCOPE,
+    });
+    expect(fs.files.has(SYNC_URI)).toBe(false);
+  });
+
+  // (1) re-check against an emptied folder: nothing encrypted is found, so the read simply
+  // reports no remote data and the ordinary cycle proceeds.
+  it('reports no remote data for an emptied folder instead of refusing', async () => {
+    await persistNoKey();
+    await expect(readSyncFile(SYNC_URI, { locationScope: FOLDER_SCOPE })).resolves.toBeNull();
+  });
+
+  // (5) Unlock against a location with no encrypted document clears the stale lock.
+  it('unlock with nothing encrypted here clears the state and says so', async () => {
+    asyncStorage.set(SYNC_BACKEND_KEY, 'file');
+    asyncStorage.set(SYNC_PATH_KEY, SYNC_URI);
+    setSyncFileLockNativeModuleForTests({
+      acquireAsync: vi.fn(async () => 'lease-token'),
+      revalidateAsync: vi.fn(async () => undefined),
+      releaseAsync: vi.fn(async () => undefined),
+    }, 'android');
+    await persistNoKey('["cloud","dropbox"]');
+
+    await expect(provideSyncEncryptionPassphrase('anything')).resolves.toBe('no-encrypted-remote');
+    await flushSyncEncryptionLocalState();
+
+    expect(syncEncryptionLocalState.read()).toBeNull();
+    await expect(getMobileSyncEncryptionStatus()).resolves.toEqual({
+      state: 'off',
+      incompleteTransition: undefined,
+    });
   });
 });

@@ -467,6 +467,76 @@ describe('mobile sync-service runtime', () => {
     },
   );
 
+  // #1138: a `remote-encrypted-no-key` state refused every sync on every backend before
+  // touching a remote, and Unlock (the only exit) needed an encrypted document at the CURRENT
+  // location — so wiping the encrypted folder and switching backends wedged the device.
+  describe('stale no-key discovery scope (#1138)', () => {
+    const webdavConfig: Record<string, string | null> = {
+      '@mindwtr_sync_backend': 'webdav',
+      '@mindwtr_webdav_url': 'https://sync.example.com/data.json',
+      '@mindwtr_webdav_username': 'user',
+      '@mindwtr_webdav_password': 'pass',
+    };
+    const persistedNoKey = (discoveredScope?: string) => {
+      asyncStorageMocks.getItem.mockImplementation(async (key: string) => (
+        key === SYNC_ENCRYPTION_STATE_KEY
+          ? JSON.stringify({ state: 'remote-encrypted-no-key', ...(discoveredScope ? { discoveredScope } : {}) })
+          : webdavConfig[key] ?? null
+      ));
+    };
+
+    it.each([false, true])(
+      'still refuses the location the discovery was made on (manual=%s)',
+      async (manual) => {
+        persistedNoKey('["webdav","https://sync.example.com/data.json","user"]');
+
+        const result = await syncServiceModule.performMobileSync(undefined, { manual });
+
+        expect(result.success).toBe(manual ? false : true);
+        expect(coreMocks.webdavGetJson).not.toHaveBeenCalled();
+        expect(coreMocks.webdavPutJson).not.toHaveBeenCalled();
+      },
+    );
+
+    it('syncs normally against a location the discovery was not made on', async () => {
+      persistedNoKey('["cloud","dropbox"]');
+      coreMocks.webdavGetJson.mockResolvedValue(remoteChangedData);
+
+      const result = await syncServiceModule.performMobileSync(undefined, { manual: true });
+
+      expect(result.success).toBe(true);
+      expect(coreMocks.webdavGetJson).toHaveBeenCalled();
+    });
+
+    it('re-checks a discovery persisted before scopes existed instead of refusing', async () => {
+      persistedNoKey();
+      coreMocks.webdavGetJson.mockResolvedValue(remoteChangedData);
+
+      const result = await syncServiceModule.performMobileSync(undefined, { manual: true });
+
+      expect(result.success).toBe(true);
+      expect(coreMocks.webdavGetJson).toHaveBeenCalled();
+    });
+
+    // The attachment pre-sync phase runs BEFORE the document read. With no key resolved it
+    // would upload PLAINTEXT attachment bytes beside ciphertext this device cannot read, so
+    // an unscoped re-check must reach the read first.
+    it('uploads no attachments before the re-check read has settled the posture', async () => {
+      persistedNoKey();
+      attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
+      coreMocks.webdavGetJson.mockRejectedValue(
+        new Error('SYNC_ENCRYPTION_REMOTE_ENCRYPTED: the remote is encrypted and this device has no key'),
+      );
+
+      const result = await syncServiceModule.performMobileSync(undefined, { manual: true });
+
+      expect(result.success).toBe(false);
+      expect(coreMocks.webdavGetJson).toHaveBeenCalled();
+      expect(attachmentSyncMocks.syncWebdavAttachments).not.toHaveBeenCalled();
+      expect(coreMocks.webdavPutJson).not.toHaveBeenCalled();
+    });
+  });
+
   it('probes a candidate transport despite stale global no-key state', async () => {
     asyncStorageMocks.getItem.mockImplementation(async (key: string) => (
       key === SYNC_ENCRYPTION_STATE_KEY
@@ -1429,7 +1499,8 @@ describe('mobile sync-service runtime', () => {
     expect(asyncStorageMocks.setItem).toHaveBeenCalledWith('@mindwtr_sync_path', 'file:///resolved/MindWtr/data.json');
     expect(storageFileMocks.readSyncFileVersioned).toHaveBeenCalledWith(
       'file:///resolved/MindWtr/data.json',
-      { bookmark: 'bookmark-token' }
+      // #1138: the scope names the folder actually read, not the stale configured path.
+      { bookmark: 'bookmark-token', locationScope: '["file","file:///resolved/MindWtr/data.json"]' }
     );
     expect(storageFileMocks.writeSyncFile).toHaveBeenCalledWith(
       'file:///resolved/MindWtr/data.json',

@@ -42,7 +42,7 @@ type ErrorKind =
     | 'generic';
 
 type Flow = 'none' | 'enable' | 'change' | 'disable' | 'unlock';
-type WarningKind = 'cleanup-deferred' | 'file-cleanup-deferred';
+type WarningKind = 'cleanup-deferred' | 'file-cleanup-deferred' | 'no-encrypted-remote';
 
 export type SyncEncryptionCardProps = {
     /** Supplies the attachment worklist; phase 2 leaves attachments plaintext without it. */
@@ -244,8 +244,18 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
             let accepted = false;
             let cleanupDeferred: WarningKind | null = null;
             try {
-                accepted = (await provideSyncEncryptionPassphrase(currentPassphrase)) === 'ok';
-                if (!accepted) setError('wrong-passphrase');
+                const outcome = await provideSyncEncryptionPassphrase(currentPassphrase);
+                accepted = outcome === 'ok';
+                // #1138: nothing encrypted is here any more, so the lock described a location
+                // this device has left behind. Core already cleared it; close the flow and say
+                // what changed rather than reporting a wrong passphrase.
+                if (outcome === 'no-encrypted-remote') {
+                    accepted = true;
+                    cleanupDeferred = 'no-encrypted-remote';
+                    setWarning('no-encrypted-remote');
+                } else if (!accepted) {
+                    setError('wrong-passphrase');
+                }
             } catch (failure) {
                 logSettingsError(failure);
                 if (isSyncEncryptionCleanupDeferredError(failure)) {
@@ -349,7 +359,9 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
         ? t('settings.syncEncryptionCleanupDeferred')
         : warning === 'file-cleanup-deferred'
             ? t('settings.syncEncryptionFileCleanupDeferred')
-            : null;
+            : warning === 'no-encrypted-remote'
+                ? t('settings.syncEncryptionNoEncryptedRemote')
+                : null;
 
     const renderPassphraseInput = (label: string, value: string, onChange: (value: string) => void) => (
         <View style={[styles.inputGroup, { borderTopWidth: 1, borderTopColor: tc.border }]}>
@@ -528,6 +540,9 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                             </Text>
                             <Text style={[styles.settingDescription, { color: tc.secondaryText, marginTop: 8 }]}>
                                 {t('settings.syncEncryptionPausedDesc')}
+                            </Text>
+                            <Text style={[styles.settingDescription, { color: tc.secondaryText, marginTop: 8 }]}>
+                                {t('settings.syncEncryptionLockedRecheckHint')}
                             </Text>
                         </View>
                         {flow !== 'unlock'

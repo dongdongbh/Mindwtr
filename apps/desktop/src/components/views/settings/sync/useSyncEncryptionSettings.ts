@@ -168,8 +168,17 @@ export function useSyncEncryptionSettings(
         setWarning(null);
         let accepted = false;
         try {
-            accepted = (await SyncService.provideSyncEncryptionPassphrase(passphrase)) === 'ok';
-            if (!accepted) setError('wrong-passphrase');
+            const outcome = await SyncService.provideSyncEncryptionPassphrase(passphrase);
+            accepted = outcome === 'ok';
+            // #1138: nothing encrypted is at this location any more, so the lock described a
+            // location this device has left behind. The service already cleared it; report the
+            // change rather than a wrong passphrase.
+            if (outcome === 'no-encrypted-remote') {
+                accepted = true;
+                setWarning('no-encrypted-remote');
+            } else if (!accepted) {
+                setError('wrong-passphrase');
+            }
         } catch (failure) {
             void logError(failure, { scope: 'sync-encryption', step: 'unlock' });
             if (isSyncEncryptionCleanupDeferredError(failure)) {

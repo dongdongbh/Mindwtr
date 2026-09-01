@@ -154,6 +154,14 @@ pub(crate) struct SyncEncryptionLocalState {
     pub salt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kdf_params: Option<KdfParamsPayload>,
+    /// Which sync location the discovery states were discovered on (#1138). Mirrors core's
+    /// `SyncEncryptionLocalState.discoveredScope` and is built by the same derivation
+    /// (`file_sync_location_scope` in sync.rs for the file backend, core's
+    /// `buildSyncLocationScope` for the TS seams). `#[serde(default)]` so a sidecar written
+    /// before this field existed still parses -- strict parsing rejects unknown STATES, never
+    /// a missing optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovered_scope: Option<String>,
     /// Only ever populated when the OS keyring is unavailable (portable mode, or a keyring
     /// backend that refuses to store). See `store_cached_key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -531,6 +539,9 @@ pub(crate) fn persist_enabled_material(
             state: STATE_ENABLED.to_string(),
             salt: Some(bytes_to_hex(&material.salt)),
             kdf_params: Some(material.params.into()),
+            // A key proves this device owns the generation; the discovery scope described the
+            // lock it just left and must not linger.
+            discovered_scope: None,
             fallback_key,
             incomplete_transition: None,
         }),
@@ -629,6 +640,7 @@ pub(crate) fn mark_remote_encrypted_no_key(
     app: &tauri::AppHandle,
     salt: &[u8],
     params: SyncCryptoKdfParams,
+    scope: Option<&str>,
 ) -> Result<(), String> {
     if let Some(current) = read_local_state(app)? {
         if state_holds_key(&current.state)
@@ -643,6 +655,7 @@ pub(crate) fn mark_remote_encrypted_no_key(
             state: STATE_REMOTE_ENCRYPTED_NO_KEY.to_string(),
             salt: Some(bytes_to_hex(salt)),
             kdf_params: Some(params.into()),
+            discovered_scope: scope.map(str::to_string),
             fallback_key: None,
             incomplete_transition: None,
         }),
@@ -653,7 +666,10 @@ pub(crate) fn mark_remote_encrypted_no_key(
 /// state, and its salt/params/fallback key are carried over unchanged so the key stays
 /// resolvable -- running the disable transition is the only sanctioned way out and it needs
 /// one.
-pub(crate) fn mark_remote_plaintext(app: &tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn mark_remote_plaintext(
+    app: &tauri::AppHandle,
+    scope: Option<&str>,
+) -> Result<(), String> {
     let Some(current) = read_local_state(app)? else {
         return Ok(());
     };
@@ -662,8 +678,57 @@ pub(crate) fn mark_remote_plaintext(app: &tauri::AppHandle) -> Result<(), String
     }
     write_local_state(
         app,
-        Some(&SyncEncryptionLocalState { state: STATE_REMOTE_PLAINTEXT.to_string(), ..current }),
+        Some(&SyncEncryptionLocalState {
+            state: STATE_REMOTE_PLAINTEXT.to_string(),
+            discovered_scope: scope.map(str::to_string).or(current.discovered_scope.clone()),
+            ..current
+        }),
     )
+}
+
+/// Mirrors core's `isSyncEncryptionStateBlocked`: must this device refuse to sync against
+/// `active_scope` before touching the remote? A discovery with NO scope was written before
+/// #1138 and does NOT block -- the cycle re-checks the location like a fresh join and the read
+/// seams re-mark it with a scope. An unknown active scope blocks, because "don't know" must
+/// never license a plaintext write beside ciphertext.
+///
+/// The desktop file backend has no pre-read gate of its own today (a no-key state simply
+/// resolves no material, and the read seam re-discovers), so nothing in this crate calls this
+/// yet. It exists so that the rule has ONE definition per platform and a future gate cannot be
+/// written against the unscoped predicate that #1138 was.
+#[allow(dead_code)]
+pub(crate) fn sync_encryption_state_blocked(
+    state: Option<&SyncEncryptionLocalState>,
+    active_scope: Option<&str>,
+) -> bool {
+    let Some(state) = state else { return false };
+    if state.incomplete_transition.is_some() {
+        return true;
+    }
+    if state.state != STATE_REMOTE_ENCRYPTED_NO_KEY && state.state != STATE_REMOTE_PLAINTEXT {
+        return false;
+    }
+    let Some(discovered) = state.discovered_scope.as_deref() else { return false };
+    match active_scope {
+        None => true,
+        Some(active) => discovered == active,
+    }
+}
+
+/// #1138: Unlock against a location that holds no encrypted document. From
+/// `remote-encrypted-no-key` that is the stale-lock exit -- the discovery described a location
+/// this device is no longer pointed at (or one since emptied), and this device holds no key,
+/// so clearing back to off loses nothing. Returns false (and changes nothing) from any other
+/// state: a keyed device finding no `.enc` is `remote-plaintext`'s business.
+pub(crate) fn clear_stale_remote_encrypted_no_key(app: &tauri::AppHandle) -> Result<bool, String> {
+    let Some(current) = read_local_state(app)? else {
+        return Ok(false);
+    };
+    if current.state != STATE_REMOTE_ENCRYPTED_NO_KEY || current.incomplete_transition.is_some() {
+        return Ok(false);
+    }
+    clear_encryption_state(app)?;
+    Ok(true)
 }
 
 fn clear_encryption_state_with<PersistDisabled, ClearKey>(
@@ -831,16 +896,20 @@ pub(crate) fn mark_sync_encryption_remote_discovered(
     app: tauri::AppHandle,
     salt: String,
     kdf_params: KdfParamsPayload,
+    location_scope: Option<String>,
 ) -> Result<(), String> {
     let salt_bytes = hex_to_bytes(&salt).ok_or_else(|| "Sync encryption salt must be hex".to_string())?;
-    mark_remote_encrypted_no_key(&app, &salt_bytes, kdf_params.into())
+    mark_remote_encrypted_no_key(&app, &salt_bytes, kdf_params.into(), location_scope.as_deref())
 }
 
 /// Called by the TS seams (Dropbox / WebDAV-under-override) the moment they find the sync
 /// location back in plaintext while this device still holds a key.
 #[tauri::command(async)]
-pub(crate) fn mark_sync_encryption_remote_plaintext(app: tauri::AppHandle) -> Result<(), String> {
-    mark_remote_plaintext(&app)
+pub(crate) fn mark_sync_encryption_remote_plaintext(
+    app: tauri::AppHandle,
+    location_scope: Option<String>,
+) -> Result<(), String> {
+    mark_remote_plaintext(&app, location_scope.as_deref())
 }
 
 #[tauri::command(async)]
@@ -915,6 +984,58 @@ mod tests {
             .is_none());
     }
 
+    // #1138 (7): a sidecar written by 1.2.6 and earlier carries no `discoveredScope`. Strict
+    // parsing rejects unknown STATES, never a missing optional -- if this regressed, every
+    // existing desktop install would fail closed with StateUnavailable on first launch.
+    #[test]
+    fn state_file_parses_without_the_discovered_scope_field() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME);
+        std::fs::write(
+            &path,
+            r#"{"state":"remote-encrypted-no-key","salt":"00112233445566778899aabbccddeeff"}"#,
+        )
+        .expect("seed legacy state");
+        let parsed = read_state_file(&path).expect("read state").expect("state present");
+        assert_eq!(parsed.state, STATE_REMOTE_ENCRYPTED_NO_KEY);
+        assert_eq!(parsed.discovered_scope, None);
+        // ...and an unscoped discovery does NOT block, so the next cycle re-checks the
+        // location like a fresh join instead of refusing forever.
+        assert!(!sync_encryption_state_blocked(Some(&parsed), Some(r#"["file","/sync"]"#)));
+    }
+
+    // #1138 (7): the scope compare, mirroring core's `isSyncEncryptionStateBlocked`.
+    #[test]
+    fn blocked_only_for_the_location_the_discovery_was_made_on() {
+        let scoped = |scope: Option<&str>, state: &str| SyncEncryptionLocalState {
+            state: state.to_string(),
+            salt: Some("00".repeat(16)),
+            kdf_params: Some(SYNC_CRYPTO_DEFAULT_KDF_PARAMS.into()),
+            discovered_scope: scope.map(str::to_string),
+            fallback_key: None,
+            incomplete_transition: None,
+        };
+        let here = r#"["file","/sync"]"#;
+        let elsewhere = r#"["cloud","dropbox"]"#;
+
+        let no_key_here = scoped(Some(here), STATE_REMOTE_ENCRYPTED_NO_KEY);
+        assert!(sync_encryption_state_blocked(Some(&no_key_here), Some(here)));
+        assert!(!sync_encryption_state_blocked(Some(&no_key_here), Some(elsewhere)));
+        // An unknown active location is doubt, and doubt must not license a plaintext write.
+        assert!(sync_encryption_state_blocked(Some(&no_key_here), None));
+
+        assert!(sync_encryption_state_blocked(
+            Some(&scoped(Some(here), STATE_REMOTE_PLAINTEXT)),
+            Some(here),
+        ));
+        assert!(!sync_encryption_state_blocked(Some(&scoped(Some(here), STATE_ENABLED)), Some(here)));
+        assert!(!sync_encryption_state_blocked(None, Some(here)));
+
+        let mut interrupted = scoped(None, STATE_OFF);
+        interrupted.incomplete_transition = Some(TRANSITION_ENABLE.to_string());
+        assert!(sync_encryption_state_blocked(Some(&interrupted), Some(elsewhere)));
+    }
+
     #[test]
     fn state_file_round_trips_and_clears() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -923,6 +1044,7 @@ mod tests {
             state: STATE_ENABLED.to_string(),
             salt: Some("00112233445566778899aabbccddeeff".to_string()),
             kdf_params: Some(SYNC_CRYPTO_DEFAULT_KDF_PARAMS.into()),
+            discovered_scope: None,
             fallback_key: None,
             incomplete_transition: None,
         };

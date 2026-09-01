@@ -423,6 +423,8 @@ export const SETTINGS_LABEL_KEYS = [
     'syncEncryptionErrorBackendIncompatible',
     'syncEncryptionErrorTransitionIncomplete',
     'syncEncryptionCleanupDeferred',
+    'syncEncryptionNoEncryptedRemote',
+    'syncEncryptionLockedRecheckHint',
     'syncEncryptionStateUnavailable',
     'syncEncryptionRetry',
     'syncEncryptionEnableBeforeFirstSyncHint',

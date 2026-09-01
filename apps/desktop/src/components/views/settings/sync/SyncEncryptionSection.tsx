@@ -121,7 +121,9 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
         : null;
     const warningMessage = warning === 'cleanup-deferred'
         ? t.syncEncryptionCleanupDeferred
-        : null;
+        : warning === 'no-encrypted-remote'
+            ? t.syncEncryptionNoEncryptedRemote
+            : null;
 
     const passphraseInput = (
         label: string,
@@ -279,6 +281,7 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                         <p className="text-sm font-medium">{t.syncEncryptionLockedTitle}</p>
                         <p className="text-sm text-muted-foreground">{t.syncEncryptionLockedDesc}</p>
                         <p className="text-sm text-muted-foreground">{t.syncEncryptionPausedDesc}</p>
+                        <p className="text-sm text-muted-foreground">{t.syncEncryptionLockedRecheckHint}</p>
                         {flow !== 'unlock' ? (
                             <div className="flex justify-end">
                                 <button type="button" onClick={() => openFlow('unlock')} className={PRIMARY_BUTTON_CLS}>

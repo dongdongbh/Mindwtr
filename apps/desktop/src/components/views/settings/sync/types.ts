@@ -190,6 +190,8 @@ export type SettingsSyncLabels = {
     syncEncryptionErrorBackendIncompatible: string;
     syncEncryptionErrorTransitionIncomplete: string;
     syncEncryptionCleanupDeferred: string;
+    syncEncryptionNoEncryptedRemote: string;
+    syncEncryptionLockedRecheckHint: string;
     syncEncryptionStateUnavailable: string;
     syncEncryptionRetry: string;
     syncEncryptionEnableBeforeFirstSyncHint: string;
@@ -221,7 +223,7 @@ export type SyncEncryptionErrorKind =
     | 'transition-incomplete'
     | 'generic';
 
-export type SyncEncryptionWarningKind = 'cleanup-deferred';
+export type SyncEncryptionWarningKind = 'cleanup-deferred' | 'no-encrypted-remote';
 
 /**
  * Everything the Encryption section needs, as one object rather than a dozen flat

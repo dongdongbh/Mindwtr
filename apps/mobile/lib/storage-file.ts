@@ -588,6 +588,10 @@ export interface SyncFileAccessOptions {
     /** Raw generation returned by `readSyncFileVersioned`. Presence opts the write into
      * atomic quarantine/create-new CAS; the explicit absent sentinel means create-only. */
     expectedFingerprint?: string;
+    /** #1138: which sync location this read is against, stamped onto any encryption discovery
+     * it persists so the resulting lock cannot outlive the folder it was set for. Absent
+     * leaves the discovery unscoped, which re-checks on the next cycle rather than blocking. */
+    locationScope?: string | null;
 }
 
 const getUriLeafName = (uri: string): string => {
@@ -612,6 +616,7 @@ const encryptedLeafNameFor = (resolvedUri: string): string =>
 const discoverEncryptedSyncFolder = async (
     resolvedUri: string,
     plainBytes: Uint8Array | null,
+    locationScope?: string | null,
 ): Promise<boolean> => {
     const candidates: (Uint8Array | null)[] = [plainBytes];
     // Discovery is a safety check, not a best-effort enhancement. If the folder cannot
@@ -628,7 +633,7 @@ const discoverEncryptedSyncFolder = async (
         markRemoteEncryptionDiscovered(syncEncryptionLocalState, {
             salt: inspected.salt,
             params: inspected.params,
-        });
+        }, locationScope);
         return true;
     }
     return false;
@@ -637,6 +642,7 @@ const discoverEncryptedSyncFolder = async (
 const readEncryptedSyncFile = async (
     resolvedUri: string,
     material: SyncKeyMaterial,
+    locationScope?: string | null,
 ): Promise<AppData | null> => {
     const encUri = await resolveSyncArtifactSiblingUri(resolvedUri, encryptedLeafNameFor(resolvedUri), {
         createIfMissing: false,
@@ -652,7 +658,7 @@ const readEncryptedSyncFile = async (
         // peer-restored plaintext document is merely unreadable.
         const plain = await readSyncArtifactBytes(resolvedUri);
         if (isPlaintextSyncArtifact(plain)) {
-            markRemotePlaintextDiscovered(syncEncryptionLocalState);
+            markRemotePlaintextDiscovered(syncEncryptionLocalState, locationScope);
             await flushSyncEncryptionLocalState();
             throw new SyncEncryptionRemotePlaintextError();
         }
@@ -664,7 +670,7 @@ const readEncryptedSyncFile = async (
     // remote's own salt) surfaces, instead of decrypting into a dead-end Auth failure.
     const foreign = detectForeignSaltArtifact(bytes, material);
     if (foreign) {
-        markRemoteEncryptionDiscovered(syncEncryptionLocalState, foreign);
+        markRemoteEncryptionDiscovered(syncEncryptionLocalState, foreign, locationScope);
         await flushSyncEncryptionLocalState();
         throw new SyncEncryptionNoKeyError();
     }
@@ -682,7 +688,7 @@ export const readSyncFile = async (fileUri: string, options?: SyncFileAccessOpti
             // use the byte path against the already-bookmark-resolved URI, which is the
             // same access route the plaintext path falls back to when bookmarked IO fails.
             const resolvedEncryptedUri = await resolveSyncFileUri(fileUri, { createIfMissing: false });
-            return await readEncryptedSyncFile(resolvedEncryptedUri, material);
+            return await readEncryptedSyncFile(resolvedEncryptedUri, material, options?.locationScope);
         }
 
         const bookmark = options?.bookmark?.trim() || null;
@@ -739,7 +745,9 @@ export const readSyncFile = async (fileUri: string, options?: SyncFileAccessOpti
                     // and whose plaintext original it then removed — take one look before
                     // reporting no data (and, with no data, letting the cycle write a
                     // fresh plaintext file alongside the encrypted one).
-                    if (await discoverEncryptedSyncFolder(resolvedUri, null)) throw new SyncEncryptionNoKeyError();
+                    if (await discoverEncryptedSyncFolder(resolvedUri, null, options?.locationScope)) {
+                        throw new SyncEncryptionNoKeyError();
+                    }
                     return null;
                 }
                 return parseAppData(fileContent);
@@ -753,7 +761,9 @@ export const readSyncFile = async (fileUri: string, options?: SyncFileAccessOpti
         // Before the "invalid JSON" repair path can fire: ciphertext under the plain name
         // is not corrupt JSON (decision #4). Read the raw bytes and check for MWENC1.
         const rawBytes = await readSyncArtifactBytes(resolvedUri).catch(() => null);
-        if (await discoverEncryptedSyncFolder(resolvedUri, rawBytes)) throw new SyncEncryptionNoKeyError();
+        if (await discoverEncryptedSyncFolder(resolvedUri, rawBytes, options?.locationScope)) {
+            throw new SyncEncryptionNoKeyError();
+        }
         throw lastError;
     } catch (error) {
         // Fail closed: neither a no-key discovery nor a failed decrypt may reach the
@@ -812,7 +822,7 @@ export const readSyncFileVersioned = async (
         if (material) {
             const foreign = detectForeignSaltArtifact(snapshot.bytes, material);
             if (foreign) {
-                markRemoteEncryptionDiscovered(syncEncryptionLocalState, foreign);
+                markRemoteEncryptionDiscovered(syncEncryptionLocalState, foreign, options?.locationScope);
                 await flushSyncEncryptionLocalState();
                 throw new SyncEncryptionNoKeyError();
             }

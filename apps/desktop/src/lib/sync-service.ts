@@ -195,6 +195,7 @@ import {
     type PersistedSyncConfiguration as PersistedDesktopSyncConfiguration,
     type SyncConfigurationCommitResult,
     type SyncConfigurationSecretRequirements,
+    buildSyncLocationScope,
 } from '@mindwtr/core';
 import {
     buildFastSyncScope,
@@ -738,6 +739,18 @@ type DesktopSyncCycleContext = {
      *  encrypted CAS, and a plaintext cycle degrades instead of failing. */
     syncEncryptionOff: boolean;
 };
+
+/** #1138: the location identity a discovery persisted during this cycle is bound to. Only the
+ *  TS backends (WebDAV, Dropbox) need it here — the file backend's discoveries are persisted
+ *  by Rust, which derives the same `['file', <syncPath>]` shape itself. */
+const desktopSyncLocationScope = (context: DesktopSyncCycleContext): string => buildSyncLocationScope({
+    backend: context.backend,
+    syncPath: context.syncPath,
+    webdavUrl: context.webdavConfig?.url,
+    webdavUsername: context.webdavConfig?.username,
+    cloudProvider: context.cloudProvider,
+    cloudUrl: context.cloudConfig?.url,
+});
 
 const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
     backend: 'off',
@@ -1580,12 +1593,13 @@ export class SyncService {
 
     private static async provideSyncEncryptionPassphraseUnlocked(
         passphrase: string,
-    ): Promise<'ok' | 'wrong-passphrase'> {
+    ): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> {
         const target = await SyncService.resolveEncryptionTarget();
         if (target.kind === 'native') {
-            return invokeSyncNative<'ok' | 'wrong-passphrase'>('provide_sync_encryption_passphrase', {
-                passphrase,
-            });
+            return invokeSyncNative<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'>(
+                'provide_sync_encryption_passphrase',
+                { passphrase },
+            );
         }
         if (target.kind === 'local') {
             // A passphrase can only be VALIDATED against remote artifacts; with no
@@ -1596,8 +1610,13 @@ export class SyncService {
     }
 
     /** Validates against the remote's own header and caches the key on success. Never mutates
-     *  the remote, whichever way it answers. */
-    static async provideSyncEncryptionPassphrase(passphrase: string): Promise<'ok' | 'wrong-passphrase'> {
+     *  the remote, whichever way it answers.
+     *
+     *  `'no-encrypted-remote'` (#1138): nothing encrypted is at this location, so the no-key
+     *  state described somewhere this device has left behind. It is cleared back to off. */
+    static async provideSyncEncryptionPassphrase(
+        passphrase: string,
+    ): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> {
         return runSyncRestoreExclusive(() =>
             SyncService.provideSyncEncryptionPassphraseUnlocked(passphrase),
         );
@@ -2301,7 +2320,10 @@ export class SyncService {
                             'WebDAV encrypted sync document',
                         );
                     }
-                    await markRemoteSyncEncryptionDiscovered({ salt: result.salt, params: result.params });
+                    await markRemoteSyncEncryptionDiscovered(
+                        { salt: result.salt, params: result.params },
+                        desktopSyncLocationScope(context),
+                    );
                     // Carries the Rust-mirrored sentinel so string-form classification
                     // (classifySyncEncryptionFailure on a probe result's error text)
                     // recognizes this as no-key, same as the native path.
@@ -2310,7 +2332,7 @@ export class SyncService {
                     );
                 }
                 if (result.state === 'remote-plaintext') {
-                    await markRemoteSyncEncryptionPlaintext();
+                    await markRemoteSyncEncryptionPlaintext(desktopSyncLocationScope(context));
                     throw new SyncEncryptionRemotePlaintextError('the WebDAV remote is no longer encrypted');
                 }
                 if (
@@ -2554,7 +2576,7 @@ export class SyncService {
         // remote as empty and push a full plaintext document over it.
         const settle = async (result: DropboxDownloadResult): Promise<DropboxDownloadResult> => {
             if (result.encryptedNoKey) {
-                await markRemoteSyncEncryptionDiscovered(result.encryptedNoKey);
+                await markRemoteSyncEncryptionDiscovered(result.encryptedNoKey, desktopSyncLocationScope(context));
                 // Sentinel-prefixed for the same string-form classification as the
                 // WebDAV path above.
                 throw new SyncEncryptionTerminalError(
@@ -2566,7 +2588,7 @@ export class SyncService {
             // account into two generations, and writing plaintext would follow whoever removed
             // the ciphertext down to it.
             if (result.remotePlaintext) {
-                await markRemoteSyncEncryptionPlaintext();
+                await markRemoteSyncEncryptionPlaintext(desktopSyncLocationScope(context));
                 throw new SyncEncryptionRemotePlaintextError('the Dropbox remote is no longer encrypted');
             }
             return result;

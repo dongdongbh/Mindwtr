@@ -23,16 +23,14 @@ import {
 import {
   CLOUD_TOKEN_KEY,
   CLOUD_ALLOW_INSECURE_HTTP_KEY,
-  CLOUD_PROVIDER_KEY,
   CLOUD_URL_KEY,
-  SYNC_BACKEND_KEY,
-  SYNC_PATH_KEY,
   WEBDAV_PASSWORD_KEY,
   WEBDAV_URL_KEY,
   WEBDAV_USERNAME_KEY,
   WEBDAV_ALLOW_INSECURE_HTTP_KEY,
 } from './sync-constants';
 import { getSecureConfigValue } from './secure-config';
+import { readActiveSyncLocationScope } from './sync-location-scope';
 import { logInfo, logWarn, sanitizeLogMessage } from './app-log';
 import { isLikelyFilePath } from './sync-service-utils';
 
@@ -793,25 +791,12 @@ type AttachmentPresenceStamp = { scope: string; at: number };
  * two gates that consult it (that predicate, and each backend's own presence pass) can
  * never disagree about what "the same backend configuration" means.
  *
- * Deliberately excludes the WebDAV password and the cloud token: this string is written to
- * plain AsyncStorage, and neither secret changes which remote a cloudKey addresses.
- * Null means the config could not be read at all, which every caller treats as doubt.
+ * Shared with sync-encryption discovery scoping (#1138) via `readActiveSyncLocationScope`
+ * so the two features can never disagree about what "the same sync location" means. That
+ * helper normalizes URLs where this one used raw values, so the first run after upgrading
+ * sees a changed scope and reconciles once — exactly the "don't know" path below.
  */
-const readAttachmentPresenceScope = async (): Promise<string | null> => {
-  try {
-    const values = await Promise.all([
-      AsyncStorage.getItem(SYNC_BACKEND_KEY),
-      AsyncStorage.getItem(WEBDAV_URL_KEY),
-      AsyncStorage.getItem(WEBDAV_USERNAME_KEY),
-      AsyncStorage.getItem(CLOUD_PROVIDER_KEY),
-      AsyncStorage.getItem(CLOUD_URL_KEY),
-      AsyncStorage.getItem(SYNC_PATH_KEY),
-    ]);
-    return JSON.stringify(values);
-  } catch {
-    return null;
-  }
-};
+const readAttachmentPresenceScope = readActiveSyncLocationScope;
 
 const readAttachmentPresenceStamp = async (): Promise<AttachmentPresenceStamp | null> => {
   try {

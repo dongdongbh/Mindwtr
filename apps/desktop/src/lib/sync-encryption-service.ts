@@ -213,13 +213,16 @@ export async function getSyncEncryptionStatus(): Promise<SyncEncryptionStatus> {
 export async function markRemoteSyncEncryptionDiscovered(discovered: {
     salt: Uint8Array;
     params: SyncCryptoKdfParams;
-}): Promise<void> {
+}, locationScope?: string | null): Promise<void> {
     // `Or`, not the throwing form: in the web build there is no keyring and no sidecar to
     // persist into, and a discovery must not turn into a second, confusing failure on top of
     // the terminal one the caller is already raising.
     await invokeNativeOr(null, 'mark_sync_encryption_remote_discovered', {
         salt: bytesToHex(discovered.salt),
         kdfParams: discovered.params,
+        // #1138: binds the discovery to the location it was made on. Optional on the Rust
+        // side, and an absent scope re-checks rather than blocking.
+        locationScope: locationScope ?? null,
     });
     clearSyncEncryptionMaterialCache();
 }
@@ -227,8 +230,10 @@ export async function markRemoteSyncEncryptionDiscovered(discovered: {
 /** Persists `remote-plaintext` when a TS seam holds a key and finds the sync location back in
  *  plaintext (a peer disabled encryption there). Mirrors core's `markRemotePlaintextDiscovered`;
  *  Rust refuses to move any state but `enabled`, so this is safe to call from a read path. */
-export async function markRemoteSyncEncryptionPlaintext(): Promise<void> {
-    await invokeNativeOr(null, 'mark_sync_encryption_remote_plaintext');
+export async function markRemoteSyncEncryptionPlaintext(locationScope?: string | null): Promise<void> {
+    await invokeNativeOr(null, 'mark_sync_encryption_remote_plaintext', {
+        locationScope: locationScope ?? null,
+    });
     clearSyncEncryptionMaterialCache();
 }
 
@@ -893,10 +898,13 @@ export async function runChangePassphraseOverRemote(
         ));
 }
 
+/** `'no-encrypted-remote'` (#1138): nothing encrypted is at this location, so the no-key state
+ *  described somewhere this device has left behind. Core clears it back to off (which this
+ *  adapter's `localState.write(null)` turns into `clear_sync_encryption_key_material`). */
 export async function runProvidePassphraseOverRemote(
     passphrase: string,
     remote: SyncEncryptionRemotePort,
-): Promise<'ok' | 'wrong-passphrase'> {
+): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> {
     const ports = await openTransitionPorts();
     return runWithRemoteMutationFence(remote, ports, (guardedRemote, keyCache, localState) =>
         runProvideSyncEncryptionPassphraseOverRemote(

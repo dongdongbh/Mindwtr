@@ -25,6 +25,7 @@ import {
     type SyncCryptoPrimitives,
     type SyncKeyMaterial,
 } from './sync-crypto';
+import { normalizeCloudUrl, normalizeWebdavUrl } from './sync-helpers';
 
 /** `remote-plaintext` is the inverse of `remote-encrypted-no-key`: this device holds a key
  *  and the sync location has gone back to plaintext (a peer disabled encryption there). It
@@ -52,7 +53,91 @@ export type SyncEncryptionLocalState = {
     state: SyncEncryptionState;
     discoveredSalt?: string; // hex
     discoveredParams?: SyncCryptoKdfParams;
+    /** Which sync location the discovery states (`remote-encrypted-no-key`, `remote-plaintext`)
+     * were discovered on (#1138). A lock must not outlive the location it was set for: the
+     * flag is device-global and checked before any remote read, so without this a user who
+     * empties the encrypted folder — or points the device at a different backend entirely —
+     * can never clear it (Unlock, the only exit, needs an encrypted document at the CURRENT
+     * location). Absent on states written by 1.2.6 and earlier; see
+     * `isSyncEncryptionStateBlocked` for why absent means "re-check", not "blocked". */
+    discoveredScope?: string;
     incompleteTransition?: SyncEncryptionTransitionKind;
+};
+
+/** Identity of the sync location a cycle runs against (#1138): the backend plus whatever
+ * addresses the folder/account within it. Deliberately excludes every secret (WebDAV
+ * password, cloud token, Dropbox credentials) — it is persisted in the clear in the
+ * device-local encryption sidecar, and no secret changes WHICH remote a location names.
+ *
+ * Only the dimensions the ACTIVE backend addresses are included: a stale WebDAV URL left
+ * behind by a user who moved to File Sync must not change the identity of the folder they
+ * sync now, and an activation probe carrying no `cloudProvider` for a WebDAV candidate must
+ * produce the same string the committed configuration produces afterwards.
+ *
+ * Rust mirrors the `file` branch for the desktop file backend
+ * (`file_sync_location_scope` in sync.rs); keep the two shapes identical. */
+export type SyncLocationScopeInput = {
+    backend?: string | null;
+    webdavUrl?: string | null;
+    webdavUsername?: string | null;
+    cloudProvider?: string | null;
+    cloudUrl?: string | null;
+    syncPath?: string | null;
+};
+
+const scopeValue = (value: string | null | undefined): string | null => {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
+};
+
+export const buildSyncLocationScope = (input: SyncLocationScopeInput): string => {
+    const backend = scopeValue(input.backend) ?? 'off';
+    if (backend === 'file') return JSON.stringify(['file', scopeValue(input.syncPath)]);
+    if (backend === 'webdav') {
+        const url = scopeValue(input.webdavUrl);
+        return JSON.stringify([
+            'webdav',
+            url ? normalizeWebdavUrl(url) : null,
+            scopeValue(input.webdavUsername),
+        ]);
+    }
+    if (backend === 'cloud') {
+        const provider = scopeValue(input.cloudProvider) ?? 'selfhosted';
+        // Dropbox is one app folder per linked account per device, so the provider alone
+        // names the location; a self-hosted server is named by its URL.
+        if (provider === 'dropbox') return JSON.stringify(['cloud', 'dropbox']);
+        const url = scopeValue(input.cloudUrl);
+        return JSON.stringify(['cloud', provider, url ? normalizeCloudUrl(url) : null]);
+    }
+    return JSON.stringify([backend]);
+};
+
+/**
+ * The one home for "must this device refuse to sync before touching the remote?" (#1138).
+ * Mirrored by Rust's `sync_encryption_state_blocked` for the desktop file backend.
+ *
+ * `activeScope` identifies the backend + location this cycle is about to run against, in the
+ * same derivation the discovery seams stamp with. Three cases, in order:
+ *
+ *  - No persisted scope: state written before scopes existed. NOT blocked — the cycle
+ *    proceeds exactly like a fresh device's first sync against this location, the read seams
+ *    re-discover and re-mark WITH a scope, and either throw again (still encrypted) or sync
+ *    normally (emptied / plaintext). This is what unwedges existing victims via one manual
+ *    "Sync now" instead of clearing app data.
+ *  - Scope persisted but the active one is unknown (`null`, e.g. the config could not be
+ *    read): blocked. "Don't know" must not license a plaintext write beside ciphertext.
+ *  - Otherwise: blocked only when the location matches the one the discovery was made on.
+ */
+export const isSyncEncryptionStateBlocked = (
+    state: SyncEncryptionLocalState | null | undefined,
+    activeScope: string | null,
+): boolean => {
+    if (!state) return false;
+    if (state.incompleteTransition) return true;
+    if (state.state !== 'remote-encrypted-no-key' && state.state !== 'remote-plaintext') return false;
+    if (!state.discoveredScope) return false;
+    if (activeScope === null) return true;
+    return state.discoveredScope === activeScope;
 };
 
 export type SyncEncryptionLocalStatePort = {
@@ -489,6 +574,9 @@ export function getSyncEncryptionStatusFromLocalState(localState: SyncEncryption
 export function markRemoteEncryptionDiscovered(
     localState: SyncEncryptionLocalStatePort,
     discovered: { salt: Uint8Array; params: SyncCryptoKdfParams },
+    // Optional so a seam that cannot name its location still persists the discovery; the
+    // resulting scope-less state re-checks on the next cycle rather than blocking forever.
+    scope?: string | null,
 ): void {
     const current = localState.read();
     if (current && SYNC_ENCRYPTION_KEYED_STATES.includes(current.state)
@@ -497,6 +585,7 @@ export function markRemoteEncryptionDiscovered(
         state: 'remote-encrypted-no-key',
         discoveredSalt: bytesToHex(discovered.salt),
         discoveredParams: discovered.params,
+        ...(scope ? { discoveredScope: scope } : {}),
     });
 }
 
@@ -506,10 +595,17 @@ export function markRemoteEncryptionDiscovered(
  * carried over deliberately: the key must stay resolvable so the user can run the disable
  * transition, which is the only sanctioned way out. Mirrored by Rust's
  * `mark_remote_plaintext` for the file backend. */
-export function markRemotePlaintextDiscovered(localState: SyncEncryptionLocalStatePort): void {
+export function markRemotePlaintextDiscovered(
+    localState: SyncEncryptionLocalStatePort,
+    scope?: string | null,
+): void {
     const current = localState.read();
     if (!current || current.state !== 'enabled') return;
-    localState.write({ ...current, state: 'remote-plaintext' });
+    localState.write({
+        ...current,
+        state: 'remote-plaintext',
+        ...(scope ? { discoveredScope: scope } : {}),
+    });
 }
 
 /** declineSyncEncryptionPassphrase(): re-affirms (never clears) the persisted no-key
@@ -1097,7 +1193,14 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
 /** Validates a passphrase against the remote's current `.enc` base document (never
  * mutates the remote either way) and, on success, caches the key and clears the no-key
  * state. `baseDocumentPlainName` is the un-suffixed document name (e.g. `data.json`) —
- * the caller doesn't need to know the `.enc` name itself. */
+ * the caller doesn't need to know the `.enc` name itself.
+ *
+ * `'no-encrypted-remote'` (#1138): there is nothing encrypted here to unlock. From
+ * `remote-encrypted-no-key` that is the stale-lock exit — the discovery describes a location
+ * this device is no longer pointed at (or one that has since been emptied), this device holds
+ * no key, so nothing is lost by clearing back to off and saying so. Never taken from a keyed
+ * state: there the missing `.enc` means a peer disabled encryption, which is
+ * `remote-plaintext`'s business and must not silently drop a key the user still needs. */
 export async function runProvideSyncEncryptionPassphraseOverRemote(
     passphrase: string,
     baseDocumentPlainName: string,
@@ -1105,13 +1208,17 @@ export async function runProvideSyncEncryptionPassphraseOverRemote(
     keyCache: SyncEncryptionKeyCachePort,
     localState: SyncEncryptionLocalStatePort,
     prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
-): Promise<'ok' | 'wrong-passphrase'> {
+): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> {
     assertNoIncompleteSyncEncryptionTransition(localState);
     const encName = syncEncryptedArtifactName(baseDocumentPlainName);
     for (let attempt = 0; attempt < 2; attempt += 1) {
         const captured = await remote.read(encName);
         const bytes = captured.bytes;
         if (!bytes) {
+            if (localState.read()?.state === 'remote-encrypted-no-key') {
+                await runDisableSyncEncryptionLocalOnly(keyCache, localState);
+                return 'no-encrypted-remote';
+            }
             throw new Error(`sync encryption: no encrypted remote artifact found at ${encName}`);
         }
         requireExistingRemoteVersion(encName, captured);

@@ -3,9 +3,11 @@ import {
     SyncEncryptionTerminalError,
     SyncEncryptionRemoteConflictError,
     SyncEncryptionRemoteVersionUnavailableError,
+    buildSyncLocationScope,
     decryptRemoteArtifactOrThrow,
     detectForeignSaltArtifact,
     getSyncEncryptionStatusFromLocalState,
+    isSyncEncryptionStateBlocked,
     markRemoteEncryptionDiscovered,
     markRemotePlaintextDiscovered,
     reaffirmRemoteEncryptionNoKey,
@@ -1218,6 +1220,121 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
         expect(result).toBe('ok');
         expect(await keyCache.getKey()).not.toBeNull();
         expect(localState.value?.state).toBe('enabled');
+    });
+
+    // #1138 (5): the stale-lock exit. Without the branch this test hits the
+    // `no encrypted remote artifact found at data.json.enc` throw and the state stays
+    // remote-encrypted-no-key forever.
+    it('clears a stale no-key state when the location holds no encrypted document', async () => {
+        const remote = createFakeRemote({});
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        markRemoteEncryptionDiscovered(
+            localState,
+            { salt: new Uint8Array(16).fill(5), params: FAST_KDF },
+            '["cloud","dropbox"]',
+        );
+
+        const result = await runProvideSyncEncryptionPassphraseOverRemote(
+            'anything', 'data.json', remote, keyCache, localState,
+        );
+
+        expect(result).toBe('no-encrypted-remote');
+        expect(localState.value).toBeNull();
+        expect(await keyCache.getKey()).toBeNull();
+        expect(remote.store.size).toBe(0);
+    });
+
+    // #1138 (5, negative half): a KEYED device finding no `.enc` is remote-plaintext's
+    // business. Dropping its key here would be the silent downgrade decision #5 forbids.
+    it('still throws for a missing encrypted document while this device holds a key', async () => {
+        const remote = createFakeRemote({ 'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' } });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('right-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const keyBefore = await keyCache.getKey();
+        const stateBefore = localState.value;
+        remote.store.delete('data.json.enc');
+
+        await expect(runProvideSyncEncryptionPassphraseOverRemote(
+            'right-pw', 'data.json', remote, keyCache, localState,
+        )).rejects.toThrow(/no encrypted remote artifact/);
+        expect(await keyCache.getKey()).toEqual(keyBefore);
+        expect(localState.value).toEqual(stateBefore);
+    });
+});
+
+describe('discovery scope (#1138)', () => {
+    const noKey = (scope?: string): SyncEncryptionLocalState => ({
+        state: 'remote-encrypted-no-key',
+        discoveredSalt: '01'.repeat(16),
+        discoveredParams: FAST_KDF,
+        ...(scope ? { discoveredScope: scope } : {}),
+    });
+
+    it('stamps the active scope on both discovery directions', () => {
+        const localState = createFakeLocalState();
+        markRemoteEncryptionDiscovered(
+            localState,
+            { salt: new Uint8Array(16).fill(1), params: FAST_KDF },
+            '["webdav","https://dav.example.com/mindwtr/data.json","u"]',
+        );
+        expect(localState.value?.discoveredScope).toBe('["webdav","https://dav.example.com/mindwtr/data.json","u"]');
+
+        localState.write({ state: 'enabled', discoveredSalt: 'aabb', discoveredParams: FAST_KDF });
+        markRemotePlaintextDiscovered(localState, '["file","/sync"]');
+        expect(localState.value).toMatchObject({
+            state: 'remote-plaintext',
+            discoveredScope: '["file","/sync"]',
+        });
+    });
+
+    // (3) same location: blocked exactly as before this change.
+    it('blocks a discovery made on the location being synced', () => {
+        expect(isSyncEncryptionStateBlocked(noKey('["file","/sync"]'), '["file","/sync"]')).toBe(true);
+    });
+
+    // (4) a different backend or folder is a different lock.
+    it('does not block a discovery made on a different location', () => {
+        expect(isSyncEncryptionStateBlocked(noKey('["cloud","dropbox"]'), '["file","/sync"]')).toBe(false);
+    });
+
+    // (1)/(2) the 1.2.6 upgrade path: re-check instead of refusing forever.
+    it('does not block a discovery written before scopes existed', () => {
+        expect(isSyncEncryptionStateBlocked(noKey(), '["file","/sync"]')).toBe(false);
+        expect(isSyncEncryptionStateBlocked(noKey(), null)).toBe(false);
+    });
+
+    it('blocks a scoped discovery when the active location cannot be determined', () => {
+        expect(isSyncEncryptionStateBlocked(noKey('["file","/sync"]'), null)).toBe(true);
+    });
+
+    it('blocks an incomplete transition regardless of location', () => {
+        expect(isSyncEncryptionStateBlocked(
+            { state: 'off', incompleteTransition: 'enable' },
+            '["file","/elsewhere"]',
+        )).toBe(true);
+    });
+
+    it('never blocks off or enabled', () => {
+        expect(isSyncEncryptionStateBlocked({ state: 'enabled', discoveredScope: 'x' }, 'x')).toBe(false);
+        expect(isSyncEncryptionStateBlocked(null, 'x')).toBe(false);
+    });
+
+    it('names only the dimensions the active backend addresses', () => {
+        // A stale WebDAV URL left behind by a move to File Sync must not change the folder's identity.
+        expect(buildSyncLocationScope({ backend: 'file', syncPath: '/sync', webdavUrl: 'https://old.example' }))
+            .toBe(buildSyncLocationScope({ backend: 'file', syncPath: '/sync' }));
+        // An activation probe's typed URL and the normalized committed value agree.
+        expect(buildSyncLocationScope({ backend: 'webdav', webdavUrl: 'https://dav.example.com/mindwtr ', webdavUsername: 'u' }))
+            .toBe(buildSyncLocationScope({ backend: 'webdav', webdavUrl: 'https://dav.example.com/mindwtr', webdavUsername: 'u' }));
+        expect(buildSyncLocationScope({ backend: 'file', syncPath: '/a' }))
+            .not.toBe(buildSyncLocationScope({ backend: 'file', syncPath: '/b' }));
+        expect(buildSyncLocationScope({ backend: 'cloud', cloudProvider: 'dropbox' }))
+            .not.toBe(buildSyncLocationScope({ backend: 'file', syncPath: '/a' }));
+        // Rust mirrors this exact shape (`sync_location_scope` in sync.rs).
+        expect(buildSyncLocationScope({ backend: 'file', syncPath: '/sync' })).toBe('["file","/sync"]');
+        expect(buildSyncLocationScope({ backend: 'cloud', cloudProvider: 'dropbox' })).toBe('["cloud","dropbox"]');
     });
 });
 

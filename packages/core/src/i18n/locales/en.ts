@@ -1125,6 +1125,8 @@ export const en: Record<string, string> = {
         'settings.syncEncryptionUnlock': 'Enter passphrase',
         'settings.syncEncryptionDecline': 'Not now',
         'settings.syncEncryptionPausedDesc': 'Automatic sync stays paused on this device until you enter the passphrase.',
+        'settings.syncEncryptionLockedRecheckHint': 'If this sync location no longer holds encrypted files, tap Sync now. This device re-checks the location and carries on.',
+        'settings.syncEncryptionNoEncryptedRemote': 'There are no encrypted files at this sync location any more, so encryption is now off on this device. Turn it on again to encrypt this location.',
         'settings.syncEncryptionRemoteEncrypted': 'This sync location is encrypted. Enter its sync passphrase to continue syncing.',
         'settings.syncEncryptionRemotePlaintext': 'Sync stopped: this sync location is no longer encrypted. Turn sync encryption off on this device, or turn it back on at the sync location.',
         'settings.syncEncryptionRemotePlaintextDesc': 'Another device turned encryption off at this sync location. Nothing here has been changed or downgraded. Turn sync encryption off on this device to keep syncing in plain form, or turn encryption back on at the sync location.',

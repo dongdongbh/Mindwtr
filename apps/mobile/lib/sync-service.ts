@@ -45,11 +45,13 @@ import {
   DROPBOX_LAST_REV_KEY,
 } from './sync-constants';
 import { getSecureConfigValue, isSecretConfigKey } from './secure-config';
+import { buildSyncLocationScope } from './sync-location-scope';
 import { mobileSyncCryptoPrimitives } from './sync-crypto-native';
 import {
   flushSyncEncryptionLocalState,
   getMobileSyncEncryptionStatus,
   getSyncEncryptionMaterial,
+  hasUnscopedSyncEncryptionDiscovery,
   isSyncEncryptionBlocked,
   SyncEncryptionNoKeyError,
   SyncEncryptionStateUnavailableError,
@@ -573,6 +575,34 @@ class MobileSyncRun {
   /** #1056: resolved once per cycle in setupCycle. `null` is the encryption-off path and
    *  every seam below then behaves byte-for-byte as it did before the feature. */
   private encryptionMaterial: SyncKeyMaterial | null = null;
+  /** #1138: which sync location this cycle runs against. Every encryption discovery this
+   *  cycle persists is stamped with it, and the pre-read block compares against it, so a
+   *  lock set for one backend/folder cannot refuse a sync against another. `null` means the
+   *  configuration could not be read, which the block rule treats as doubt. */
+  private locationScope: string | null = null;
+  /** #1138: this cycle carries a discovery state from before scopes existed, so it is
+   *  running blind like a fresh join. Nothing may be uploaded until the document read has
+   *  re-established what is actually at this location. */
+  private deferUploadsUntilDiscovery = false;
+
+  /** #1138: the location identity this cycle syncs against. Built from the cycle's OWN
+   *  resolved configuration rather than from AsyncStorage, for two reasons: an activation
+   *  probe runs on a candidate config that AsyncStorage does not hold yet (57f8e2420 depends
+   *  on the discovery a failing probe stamps surviving the commit), and the file backend's
+   *  configured path is rewritten by bookmark/URI resolution — stamping the pre-resolution
+   *  value would make the same folder look like a different location next cycle. Every
+   *  `resolve*BackendConfig` above already honours `configOverride`, so this reads whatever
+   *  the cycle is actually about to touch. */
+  private buildLocationScope(): string {
+    return buildSyncLocationScope({
+      backend: this.backend,
+      syncPath: this.fileSyncPath,
+      webdavUrl: this.webdavConfig?.url,
+      webdavUsername: this.webdavConfig?.username,
+      cloudProvider: this.cloudProvider,
+      cloudUrl: this.cloudConfig?.url,
+    });
+  }
 
   private async assertFileSyncLeaseHeld(): Promise<void> {
     if (this.backend !== 'file') return;
@@ -1095,6 +1125,7 @@ class MobileSyncRun {
         let legacyWebdavPostureAllowed = false;
         if (this.supportsSyncEncryption()) {
           const probingCandidate = this.activationProbe && Boolean(this.configOverride);
+          this.locationScope = this.buildLocationScope();
           const encryptionStatus = await getMobileSyncEncryptionStatus();
           const incompleteTransition = encryptionStatus.incompleteTransition;
           legacyWebdavPostureAllowed = backend === 'webdav'
@@ -1105,10 +1136,14 @@ class MobileSyncRun {
             if (!this.manual && !probingCandidate) return { kind: 'disabled' };
             throw new SyncEncryptionTransitionIncompleteError(incompleteTransition);
           }
-          if (!probingCandidate && await isSyncEncryptionBlocked()) {
+          // #1138: the block is bound to the location the discovery was made on. A state
+          // written before scopes existed does not block at all — this cycle re-checks the
+          // location like a fresh join, and the read seams re-mark it WITH a scope.
+          if (!probingCandidate && await isSyncEncryptionBlocked(this.locationScope)) {
             if (!this.manual) return { kind: 'disabled' };
             throw new SyncEncryptionNoKeyError();
           }
+          this.deferUploadsUntilDiscovery = await hasUnscopedSyncEncryptionDiscovery();
           this.encryptionMaterial = await getSyncEncryptionMaterial();
         }
         this.syncEncryptionOff = legacyWebdavPostureAllowed;
@@ -1175,6 +1210,16 @@ class MobileSyncRun {
       },
       shouldRunAttachmentPhase: async (data, phase) => {
         const backend = this.backend;
+        // #1138: this cycle is re-checking a location it holds an unscoped discovery for, and
+        // the pre-sync attachment phase runs BEFORE the document read
+        // (`preSyncAttachmentsBeforeFastCheck`). With no key resolved it would upload
+        // PLAINTEXT attachment bytes beside ciphertext — exactly what decision #5 forbids —
+        // before the read got a chance to discover the folder is still encrypted. Skip the
+        // pre-phase; the post-merge phase runs normally once the read has settled the posture.
+        if (phase === 'prepare' && this.deferUploadsUntilDiscovery) {
+          logSyncInfo('Attachment pre-sync skipped', { backend, reason: 'encryption-recheck' });
+          return false;
+        }
         // #1057 (review B3): every attachment backend now wires check-on-touch
         // content detection, including the bespoke Dropbox/self-hosted Cloud loops.
         // Without this, the steady state — cloudKey + managed local file +
@@ -1430,7 +1475,7 @@ class MobileSyncRun {
             // A peer disabled encryption at the sync location. Persist first (the state must
             // survive a restart), then fail the cycle. Nothing on the remote is touched, and
             // this device never follows the remote down to plaintext on its own.
-            markRemotePlaintextDiscovered(syncEncryptionLocalState);
+            markRemotePlaintextDiscovered(syncEncryptionLocalState, this.locationScope);
             await flushSyncEncryptionLocalState();
             throw new SyncEncryptionRemotePlaintextError();
           }
@@ -1440,7 +1485,7 @@ class MobileSyncRun {
             }
             // Persist first (decision #5: the state must survive a restart), then fail
             // the cycle. Nothing on the remote is touched on this path.
-            markRemoteEncryptionDiscovered(syncEncryptionLocalState, result);
+            markRemoteEncryptionDiscovered(syncEncryptionLocalState, result, this.locationScope);
             await flushSyncEncryptionLocalState();
             this.markCandidateEncryptedRemoteProven();
             throw new SyncEncryptionNoKeyError();
@@ -1602,6 +1647,7 @@ class MobileSyncRun {
         try {
           const result = await readSyncFileVersioned(fileSyncPath, {
             bookmark: this.fileSyncBookmark,
+            locationScope: this.locationScope,
             ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
           });
           await this.assertFileSyncLeaseHeld();
@@ -1650,13 +1696,13 @@ class MobileSyncRun {
           )
         );
         if (result.encryptedNoKey) {
-          markRemoteEncryptionDiscovered(syncEncryptionLocalState, result.encryptedNoKey);
+          markRemoteEncryptionDiscovered(syncEncryptionLocalState, result.encryptedNoKey, this.locationScope);
           await flushSyncEncryptionLocalState();
           this.markCandidateEncryptedRemoteProven();
           throw new SyncEncryptionNoKeyError();
         }
         if (result.remotePlaintext) {
-          markRemotePlaintextDiscovered(syncEncryptionLocalState);
+          markRemotePlaintextDiscovered(syncEncryptionLocalState, this.locationScope);
           await flushSyncEncryptionLocalState();
           throw new SyncEncryptionRemotePlaintextError();
         }

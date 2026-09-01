@@ -942,7 +942,7 @@ const runProvidePassphraseOverRemote = async (
   port: SyncEncryptionRemotePort,
   assertLocalFileFenceHeld?: () => Promise<void>,
   releaseLocalFileFence?: () => Promise<void>,
-): Promise<'ok' | 'wrong-passphrase'> => {
+): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> => {
   return runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
     runProvideSyncEncryptionPassphraseOverRemote(
         passphrase,
@@ -954,9 +954,12 @@ const runProvidePassphraseOverRemote = async (
     ), assertLocalFileFenceHeld, releaseLocalFileFence);
 };
 
+/** `'no-encrypted-remote'` (#1138): this location holds nothing encrypted, so the no-key state
+ *  it was carrying described somewhere else (or a folder since emptied). Core clears the state
+ *  back to off; the card tells the user encryption is now off here. */
 export const provideSyncEncryptionPassphrase = async (
     passphrase: string,
-): Promise<'ok' | 'wrong-passphrase'> => runSerializedSyncDocumentOperation(async () => {
+): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
     const target = await requireTransitionTarget(null);
     return runWithFileTransitionLease(target, (port, releaseFence) => runProvidePassphraseOverRemote(
