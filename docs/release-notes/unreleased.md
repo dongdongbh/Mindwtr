@@ -4,8 +4,23 @@ Changes collected after `v1.2.5` and before the next version tag.
 
 ## Highlights
 
+- Sync and backup recovery now keep the last trusted attachment copy when a remote file cannot be proven gone, and default-on GTD settings stay enabled when syncing with older 1.2.5-rc.2 clients.
+- Archived project views are consistently read-only on desktop and mobile, including checklist, status, completion and Focus controls.
+- Self-hosted Cloud deployments can load token lists from a protected file, and the new readiness check fails closed when mounted storage disappears or is replaced.
+- The Arch beta package is now `mindwtr-beta-bin`. The legacy `mindwtr-bin-beta` identity will keep receiving updates during a documented manual migration period.
+
 ## Full Change List
 
+- Sync activation and backup restore no longer discard a verified local attachment when a missing remote response could be temporary. Cleanup waits until absence is proven, so the last recoverable copy remains available.
+- GTD feature defaults now survive two-way sync with 1.2.5-rc.2 devices. An older client cannot silently switch a current default-on setting off, while an explicit opt-out remains off.
+- Archived project task lists are read-only across desktop and mobile. Completion, status, checklist, Focus and nested row actions are disabled instead of allowing changes from an archive view.
+- Self-hosted Docker deployments can provide `MINDWTR_CLOUD_AUTH_TOKENS` through a root-owned secret file. `/ready` now checks the original writable data mount without recreating a missing directory, while `/health` remains a simple liveness check.
+- Arch beta releases update both `mindwtr-beta-bin` and the transitional `mindwtr-bin-beta` package. Existing users keep receiving releases, but should move manually because AUR helpers do not consistently rename installed package identities.
+- Mobile Daily Review now includes every eligible task in large libraries and moves to the new day at local midnight without requiring an app restart.
+- Recurrence editing preserves the series anchor, time zone and supported rule metadata. Task forms submit only fields that actually changed, reducing the chance that an older draft overwrites a newer edit.
+- Desktop Timeline refreshes at local midnight, uses the selected calendar system, and offers Earlier or Later navigation when a very long schedule falls outside the bounded window. Its task action is also exposed clearly to assistive technology.
+- Quick capture ignores late completion from a previous submission after the window or sheet has been reopened, preventing stale success or failure state from affecting a new task.
+- Release automation now treats an unreadable successful Google Play commit response as outcome unknown, pins Docker build inputs, and isolates Flathub package generation dependencies.
 - Desktop: selecting several tasks inside a project and choosing **Bulk organize** now offers **Project section**, so a batch of tasks can be filed into one section in a single step. The field appears only in a project's own task list, where every selected task already belongs to that project, and it steps aside when the same dialog is also moving the tasks to a different project. (#1122)
 - The web app (PWA and the self-hosted Docker build) can now show and open file attachments again: images, audio, text and everything else are fetched from your self-hosted Mindwtr Cloud server on demand instead of leaving an empty viewer and a dead Open button. Other sync backends, and libraries with sync encryption on, still show the not-supported notice, since the browser has no local files and no key.
 - Desktop has a new read-only **Timeline** view, off by default and switched on in Settings → GTD → Features: every task with a start or due date is drawn as a bar from start to due, grouped by project and colored the way its project dot is, with day/week/month zoom, a today line and a Today button. Dragging bars to reschedule comes later. (#1111)
