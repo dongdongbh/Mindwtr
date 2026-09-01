@@ -805,7 +805,7 @@ export function ProjectWorkspace({
 
     useEffect(() => {
         exitSelectionMode();
-    }, [exitSelectionMode, selectedProjectId]);
+    }, [exitSelectionMode, isArchivedProject, selectedProjectId]);
 
     const handleBatchMove = moveSelectedTasks;
 
@@ -938,10 +938,10 @@ export function ProjectWorkspace({
         return { taskIdsByContainer: idsByContainer, taskIdToContainer: idToContainer };
     }, [sectionTaskGroups]);
 
-    const canReorderProjectTasks = projectTaskSortBy === 'default';
+    const canReorderProjectTasks = !isArchivedProject && projectTaskSortBy === 'default';
 
     const handleTaskDragEnd = useCallback((event: DragEndEvent) => {
-        if (!selectedProject) return;
+        if (!selectedProject || isArchivedProject) return;
         // In non-default sort modes the list is not a drop target; tasks can only
         // be dragged out to the sidebar (handled by the Projects view).
         if (!canReorderProjectTasks) return;
@@ -1004,7 +1004,7 @@ export function ProjectWorkspace({
                 reorderProjectTasks(selectedProject.id, nextDestinationItems, getSectionIdFromContainer(destinationContainer)),
             );
         })().catch(failTaskMove);
-    }, [canReorderProjectTasks, reorderProjectTasks, selectedProject, showToast, taskIdToContainer, taskIdsByContainer, updateTask]);
+    }, [canReorderProjectTasks, isArchivedProject, reorderProjectTasks, selectedProject, showToast, taskIdToContainer, taskIdsByContainer, updateTask]);
 
     useEffect(() => {
         taskDragEndRef.current = handleTaskDragEnd;
@@ -1024,6 +1024,7 @@ export function ProjectWorkspace({
                         key={task.id}
                         task={task}
                         project={selectedProject!}
+                        interactionDisabled={isArchivedProject}
                         narrow={columnsLayout}
                         sequenceCue={projectTaskSequenceCues.get(task.id)}
                         availableSequenceLabel={availableSequenceLabel}
@@ -1044,6 +1045,7 @@ export function ProjectWorkspace({
                     key={task.id}
                     task={task}
                     project={selectedProject!}
+                    interactionDisabled={isArchivedProject}
                     narrow={columnsLayout}
                     sequenceCue={projectTaskSequenceCues.get(task.id)}
                     availableSequenceLabel={availableSequenceLabel}
@@ -1066,6 +1068,7 @@ export function ProjectWorkspace({
                     enableDoubleClickEdit
                     showProjectBadgeInActions={false}
                     showProjectBadgeInMetadata={false}
+                    interactionDisabled={isArchivedProject}
                     selectionMode={selectionMode}
                     isMultiSelected={multiSelectedIds.has(task.id)}
                     onToggleSelect={(options) => toggleMultiSelect(task.id, options)}
@@ -1087,6 +1090,7 @@ export function ProjectWorkspace({
                     enableDoubleClickEdit
                     showProjectBadgeInActions={false}
                     showProjectBadgeInMetadata={false}
+                    interactionDisabled={isArchivedProject}
                 />
             )}
         />
@@ -1213,15 +1217,17 @@ export function ProjectWorkspace({
                             </button>
                         </>
                     )}
-                    <button
-                        type="button"
-                        data-add-task-trigger
-                        onClick={() => openProjectQuickAdd(group.section.id)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                        aria-label={t('projects.addTask')}
-                    >
-                        <Plus className="h-3.5 w-3.5" />
-                    </button>
+                    {!isArchivedProject && (
+                        <button
+                            type="button"
+                            data-add-task-trigger
+                            onClick={() => openProjectQuickAdd(group.section.id)}
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                            aria-label={t('projects.addTask')}
+                        >
+                            <Plus className="h-3.5 w-3.5" />
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => handleToggleSectionNotes(group.section.id)}
@@ -1418,7 +1424,9 @@ export function ProjectWorkspace({
 
     const renderSectionLayout = columnsLayout ? renderProjectSectionColumns : renderProjectSections;
     const tasksContent = renderSectionLayout(
-        selectionMode
+        isArchivedProject
+            ? renderStaticTasks
+            : selectionMode
             ? renderSelectableTasks
             : !canReorderProjectTasks
                 ? renderDraggableTasks
@@ -1589,7 +1597,7 @@ export function ProjectWorkspace({
             {t('projects.addTask')}
         </button>
     ) : null;
-    const selectProjectTasksButton = selectedProject ? (
+    const selectProjectTasksButton = selectedProject && !isArchivedProject ? (
         <button
             type="button"
             data-task-selection-toggle

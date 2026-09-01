@@ -168,6 +168,7 @@ export function SortableProjectTaskRow({
     availableSequenceLabel,
     laterSequenceLabel,
     narrow,
+    interactionDisabled = false,
 }: {
     task: Task;
     project: Project;
@@ -175,10 +176,12 @@ export function SortableProjectTaskRow({
     availableSequenceLabel: string;
     laterSequenceLabel: string;
     narrow?: boolean;
+    interactionDisabled?: boolean;
 }) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
         id: task.id,
         data: { type: 'task', sortable: true },
+        disabled: interactionDisabled,
     });
     const style = {
         transform: CSS.Transform.toString(transform),
@@ -204,8 +207,9 @@ export function SortableProjectTaskRow({
                     enableDoubleClickEdit
                     showProjectBadgeInActions={false}
                     showProjectBadgeInMetadata={false}
+                    interactionDisabled={interactionDisabled}
                     {...(narrow ? NARROW_TASK_ITEM_PROPS : {})}
-                    dragHandle={(
+                    dragHandle={interactionDisabled ? undefined : (
                         <button
                             type="button"
                             {...attributes}
@@ -232,6 +236,7 @@ export function DraggableProjectTaskRow({
     availableSequenceLabel,
     laterSequenceLabel,
     narrow,
+    interactionDisabled = false,
 }: {
     task: Task;
     project: Project;
@@ -239,10 +244,12 @@ export function DraggableProjectTaskRow({
     availableSequenceLabel: string;
     laterSequenceLabel: string;
     narrow?: boolean;
+    interactionDisabled?: boolean;
 }) {
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
         id: task.id,
         data: { type: 'task', sortable: false },
+        disabled: interactionDisabled,
     });
     const { taskContainerClassName, title } = getSequenceCuePresentation(
         sequenceCue,
@@ -262,8 +269,9 @@ export function DraggableProjectTaskRow({
                     enableDoubleClickEdit
                     showProjectBadgeInActions={false}
                     showProjectBadgeInMetadata={false}
+                    interactionDisabled={interactionDisabled}
                     {...(narrow ? NARROW_TASK_ITEM_PROPS : {})}
-                    dragHandle={(
+                    dragHandle={interactionDisabled ? undefined : (
                         <button
                             type="button"
                             {...attributes}

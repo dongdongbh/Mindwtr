@@ -68,6 +68,8 @@ interface TaskItemDisplayProps {
     showProjectBadgeInActions?: boolean;
     showProjectBadgeInMetadata?: boolean;
     readOnly: boolean;
+    /** Stronger than completed-row read-only: viewing historical project data must expose no mutations. */
+    interactionDisabled?: boolean;
     compactMetaEnabled?: boolean;
     dense?: boolean;
     actionsOverlay?: boolean;
@@ -120,6 +122,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     showProjectBadgeInActions = true,
     showProjectBadgeInMetadata = true,
     readOnly,
+    interactionDisabled = false,
     compactMetaEnabled = true,
     dense = false,
     actionsOverlay = false,
@@ -397,7 +400,9 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
         && !selectionMode
         && !readOnly
         && isTaskActionable(task);
-    const canEditCompletedAt = Boolean(completionLabel && onEditCompletedAt) && !selectionMode;
+    const canEditCompletedAt = Boolean(completionLabel && onEditCompletedAt)
+        && !selectionMode
+        && !interactionDisabled;
     // A read-only row restores to where the task belongs: an archived task goes
     // back to the Inbox to be re-clarified, which is what Archive's bulk action
     // and mobile already do; anything else picks up as the next action.
@@ -709,7 +714,12 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     <button
                         type="button"
                         data-task-edit-trigger
-                        onClick={readOnly && canEditCompletedAt ? onEditCompletedAt : onEdit}
+                        onClick={interactionDisabled
+                            ? undefined
+                            : readOnly && canEditCompletedAt
+                                ? onEditCompletedAt
+                                : onEdit}
+                        disabled={interactionDisabled}
                         className="sr-only"
                         aria-label={t('common.edit')}
                         tabIndex={-1}
@@ -1060,7 +1070,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             <MoreHorizontal className="w-4 h-4" />
                         </button>
                     )}
-                    {readOnly ? (
+                    {readOnly ? (interactionDisabled ? null : (
                         <>
                             <button
                                 type="button"
@@ -1089,7 +1099,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                                 <Trash2 className="w-4 h-4" />
                             </button>
                         </>
-                    ) : (
+                    )) : (
                         <>
                             {showStatusSelect && (
                                 <select

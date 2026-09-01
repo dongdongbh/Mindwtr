@@ -36,7 +36,11 @@ const task: Task = {
     updatedAt: '2026-05-12T00:00:00.000Z',
 };
 
-const renderRow = (narrow: boolean, Row: typeof SortableProjectTaskRow | typeof DraggableProjectTaskRow) => {
+const renderRow = (
+    narrow: boolean,
+    Row: typeof SortableProjectTaskRow | typeof DraggableProjectTaskRow,
+    interactionDisabled = false,
+) => {
     taskItemProps.calls = [];
     render(
         <DndContext>
@@ -45,6 +49,7 @@ const renderRow = (narrow: boolean, Row: typeof SortableProjectTaskRow | typeof 
                     task={task}
                     project={project}
                     narrow={narrow}
+                    interactionDisabled={interactionDisabled}
                     availableSequenceLabel="Available"
                     laterSequenceLabel="Later"
                 />
@@ -86,5 +91,12 @@ describe.each([
 
         expect(props.actionsOverlay).toBeUndefined();
         expect(props.showStatusSelect).toBeUndefined();
+    });
+
+    it('removes drag and mutation capabilities for a read-only project row', () => {
+        const props = renderRow(false, Row, true);
+
+        expect(props.interactionDisabled).toBe(true);
+        expect(props.dragHandle).toBeUndefined();
     });
 });

@@ -2007,6 +2007,130 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     vi.useRealTimers();
   });
 
+  it('disables nested mutation controls when the task row is read-only', () => {
+    const task = {
+      id: 'task-1',
+      title: 'Archived release notes',
+      status: 'done',
+      isFocusedToday: true,
+      completedAt: '2026-05-12T08:30:00.000Z',
+      checklist: [{ id: 'item-1', title: 'Confirm archive', isCompleted: false }],
+      createdAt: '2026-05-01T08:30:00.000Z',
+      updatedAt: '2026-05-12T08:30:00.000Z',
+    } as any;
+    storeState._allTasks = [task];
+    getChecklistProgress.mockReturnValue({ completed: 0, total: 1, percent: 0 });
+
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(
+        <SwipeableTaskItem
+          task={task}
+          isDark={false}
+          tc={{
+            taskItemBg: '#111111',
+            border: '#222222',
+            text: '#ffffff',
+            secondaryText: '#999999',
+            tint: '#3b82f6',
+            warning: '#f59e0b',
+          } as any}
+          onPress={vi.fn()}
+          onStatusChange={vi.fn()}
+          onDelete={vi.fn()}
+          interactionDisabled
+          showFocusToggle
+        />
+      );
+    });
+
+    const checklistProgressButton = tree.root.find(
+      (node) => node.props.accessibilityLabel === 'checklist.progress'
+    );
+    renderer.act(() => {
+      checklistProgressButton.props.onPress();
+    });
+
+    const checklistItemButton = tree.root.find(
+      (node) => node.props.accessibilityLabel === 'Confirm archive'
+    );
+    const statusButton = tree.root.find(
+      (node) => node.props.accessibilityLabel === 'Change status. Current status: Done'
+    );
+
+    expect(checklistItemButton.props.disabled).toBe(true);
+    expect(checklistItemButton.props.onPress).toBeUndefined();
+    expect(checklistItemButton.props.accessibilityState).toEqual({ checked: false, disabled: true });
+    expect(statusButton.props.disabled).toBe(true);
+    expect(statusButton.props.onPress).toBeUndefined();
+    expect(statusButton.props.accessibilityState).toEqual({ disabled: true });
+    expect(() => tree.root.find((node) => node.props.accessibilityLabel === 'Edit completion time')).toThrow();
+    expect(() => tree.root.find((node) => node.props.accessibilityLabel === 'Remove from focus')).toThrow();
+    expect(() => tree.root.findByType('CompletedAtPicker' as any)).toThrow();
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending checklist write when a task row becomes read-only', () => {
+    vi.useFakeTimers();
+    const task = {
+      id: 'task-1',
+      title: 'Archive in progress',
+      status: 'next',
+      checklist: [{ id: 'item-1', title: 'Stop pending write', isCompleted: false }],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    } as any;
+    storeState._allTasks = [task];
+    getChecklistProgress.mockReturnValue({ completed: 0, total: 1, percent: 0 });
+    const onPress = vi.fn();
+    const onStatusChange = vi.fn();
+    const onDelete = vi.fn();
+    const renderRow = (interactionDisabled: boolean) => (
+      <SwipeableTaskItem
+        task={task}
+        isDark={false}
+        tc={{
+          taskItemBg: '#111111',
+          border: '#222222',
+          text: '#ffffff',
+          secondaryText: '#999999',
+          tint: '#3b82f6',
+          warning: '#f59e0b',
+        } as any}
+        onPress={onPress}
+        onStatusChange={onStatusChange}
+        onDelete={onDelete}
+        interactionDisabled={interactionDisabled}
+      />
+    );
+
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(renderRow(false));
+    });
+    renderer.act(() => {
+      tree.root.find((node) => node.props.accessibilityLabel === 'checklist.progress').props.onPress();
+    });
+    renderer.act(() => {
+      tree.root.find((node) => (
+        node.props.accessibilityLabel === 'Stop pending write'
+        && typeof node.props.onPress === 'function'
+      )).props.onPress();
+    });
+
+    expect(updateTask).not.toHaveBeenCalled();
+    renderer.act(() => {
+      tree.update(renderRow(true));
+    });
+    renderer.act(() => {
+      vi.runAllTimers();
+      tree.unmount();
+    });
+
+    expect(updateTask).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it('hides checklist progress when requested by the list view', () => {
     const task = {
       id: 'task-1',

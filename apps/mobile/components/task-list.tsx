@@ -131,6 +131,8 @@ export interface TaskListProjectOptions {
   sequenceCueLabels?: Record<ProjectSequenceTaskCue, string>;
   enableBulkOrganize?: boolean;
   enableReorder?: boolean;
+  /** Historical project workspace: rows remain viewable but expose no mutations. */
+  readOnly?: boolean;
   reorderMode?: boolean;
   onReorderModeChange?: (active: boolean) => void;
 }
@@ -239,6 +241,7 @@ function TaskListComponent({
     sequenceCueLabels,
     enableBulkOrganize: enableProjectBulkOrganize = false,
     enableReorder: enableProjectReorder = false,
+    readOnly: projectReadOnly = false,
     reorderMode: projectReorderModeProp,
     onReorderModeChange: onProjectReorderModeChange,
   } = project ?? NO_PROJECT_OPTIONS;
@@ -373,7 +376,8 @@ function TaskListComponent({
   const { collapsedGroupIds, toggleGroup } = useCollapsedTaskGroups(statusFilter, activeGroupBy);
   const localDayKey = useLocalDayKey(activeGroupBy === 'completedDate');
   const handleChangeGroupBy = onChangeGroupBy;
-  const canUseProjectReorder = Boolean(enableProjectReorder && projectId && sortBy === 'default');
+  const effectiveBulkActions = enableBulkActions && !projectReadOnly;
+  const canUseProjectReorder = Boolean(!projectReadOnly && enableProjectReorder && projectId && sortBy === 'default');
   const shouldGroupCompletedTasks = Boolean(groupCompletedTasksLast && projectId && statusFilter === 'all');
   const projectReorderMode = projectReorderModeProp ?? internalProjectReorderMode;
   const focusTaskLimit = normalizeFocusTaskLimit(settings?.gtd?.focusTaskLimit);
@@ -458,6 +462,14 @@ function TaskListComponent({
       exitSelectionMode();
     }
   }, [exitSelectionMode, projectReorderMode, selectionMode]);
+
+  useEffect(() => {
+    if (!projectReadOnly) return;
+    if (selectionMode) exitSelectionMode();
+    if (projectReorderMode) setProjectReorderMode(false);
+    setIsModalVisible(false);
+    setEditingTask(null);
+  }, [exitSelectionMode, projectReadOnly, projectReorderMode, selectionMode, setProjectReorderMode]);
 
   const taskListDeriveStartedAt = Date.now();
   const filterableTasks = useMemo(() => {
@@ -1049,7 +1061,7 @@ function TaskListComponent({
   );
 
   const bulkBarProps = useMemo<TaskListBulkBarProps | null>(() => {
-    if (!enableBulkActions || !selectionMode || projectReorderMode) return null;
+    if (!effectiveBulkActions || !selectionMode || projectReorderMode) return null;
     return {
       bulkActionLabel,
       bulkActionLoading,
@@ -1073,7 +1085,7 @@ function TaskListComponent({
     bulkActionLoading,
     bulkMoveStatusOptions,
     canBulkOrganizeSelection,
-    enableBulkActions,
+    effectiveBulkActions,
     exitSelectionMode,
     handleBatchDelete,
     handleBatchMove,
@@ -1183,16 +1195,18 @@ function TaskListComponent({
     toggleMultiSelect,
   };
   const rowActions = useMemo<TaskRowActions>(() => ({
-    edit: (task) => rowActionSourcesRef.current.handleEditTask(task),
-    changeStatus: (task, status) => rowActionSourcesRef.current.handleTaskStatusChange(task.id, status),
-    remove: (task) => rowActionSourcesRef.current.deleteTask(task.id),
-    toggleSelect: enableBulkActions
+    edit: projectReadOnly ? () => undefined : (task) => rowActionSourcesRef.current.handleEditTask(task),
+    changeStatus: projectReadOnly
+      ? () => undefined
+      : (task, status) => rowActionSourcesRef.current.handleTaskStatusChange(task.id, status),
+    remove: projectReadOnly ? () => undefined : (task) => rowActionSourcesRef.current.deleteTask(task.id),
+    toggleSelect: effectiveBulkActions
       ? (task) => {
         const sources = rowActionSourcesRef.current;
         sources.toggleMultiSelect(task.id, { visibleTaskIds: sources.orderedTaskIds });
       }
       : undefined,
-  }), [enableBulkActions]);
+  }), [effectiveBulkActions, projectReadOnly]);
 
   const renderTask = useCallback(({ item }: { item: Task }) => {
     const sequenceCue = getTaskSequenceCue?.(item);
@@ -1205,12 +1219,13 @@ function TaskListComponent({
           hideProjectMeta={Boolean(projectId)}
           isDark={isDark}
           isHighlighted={item.id === highlightTaskId}
-          isMultiSelected={enableBulkActions && multiSelectedIds.has(item.id)}
+          interactionDisabled={projectReadOnly}
+          isMultiSelected={effectiveBulkActions && multiSelectedIds.has(item.id)}
           onProjectPress={projectId ? undefined : openProjectScreen}
           onContextPress={openContextsScreen}
           onTagPress={openContextsScreen}
           rowContext={rowContext}
-          selectionMode={enableBulkActions ? selectionMode : false}
+          selectionMode={effectiveBulkActions ? selectionMode : false}
           sequenceCue={sequenceCue}
           sequenceLabel={sequenceCue ? sequenceCueLabels?.[sequenceCue] : undefined}
           statusBadgeAsIcon={statusBadgeAsIconForList}
@@ -1220,7 +1235,7 @@ function TaskListComponent({
       </ErrorBoundary>
     );
   }, [
-    enableBulkActions,
+    effectiveBulkActions,
     getTaskSequenceCue,
     highlightTaskId,
     isDark,
@@ -1233,6 +1248,7 @@ function TaskListComponent({
     projectId,
     sequenceCueLabels,
     rowContext,
+    projectReadOnly,
   ]);
 
   const getProjectReorderItemLayout = useCallback((_: ArrayLike<ProjectReorderFlatItem<Task>> | null | undefined, index: number) => ({
@@ -1671,7 +1687,7 @@ function TaskListComponent({
 
       <ErrorBoundary>
         <TaskEditModal
-          visible={isModalVisible}
+          visible={isModalVisible && !projectReadOnly}
           task={editingTask}
           onClose={() => setIsModalVisible(false)}
           onSave={onSaveTask}

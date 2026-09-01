@@ -1403,6 +1403,50 @@ describe('TaskItemDisplay', () => {
         expect(onEditCompletedAt).toHaveBeenCalled();
     });
 
+    it('offers no mutating actions when the surrounding project is strictly read-only', () => {
+        const archivedTask: Task = {
+            ...baseTask,
+            title: 'Archived project task',
+            status: 'archived',
+            completedAt: '2026-01-02T10:00:00.000Z',
+        };
+
+        const { queryByLabelText } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={archivedTask}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView: vi.fn(),
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                        onEditCompletedAt: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    readOnly
+                    interactionDisabled
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        expect(queryByLabelText('Edit completion time')).not.toBeInTheDocument();
+        expect(queryByLabelText('Restore to Inbox')).not.toBeInTheDocument();
+        expect(queryByLabelText('taskEdit.duplicateTask')).not.toBeInTheDocument();
+        expect(queryByLabelText('task.aria.delete')).not.toBeInTheDocument();
+    });
+
     it('paints a due date red only once it has passed (#640)', () => {
         const dueColorFor = (dueDate: string) => {
             const { getByText, unmount } = render(

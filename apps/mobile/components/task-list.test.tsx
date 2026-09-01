@@ -569,6 +569,57 @@ describe('TaskList', () => {
     }));
   });
 
+  it('removes row, swipe, editor, bulk, and reorder mutations for a read-only project', async () => {
+    const archivedTask = makeTask('archived-task', 'Historical task', { status: 'archived' });
+    taskListSelectionState.current = {
+      ...taskListSelectionState.current,
+      hasSelection: true,
+      selectedIdsArray: [archivedTask.id],
+      selectionMode: true,
+    };
+    const onBulkBarPropsChange = vi.fn();
+    let tree!: ReturnType<typeof create>;
+
+    await act(async () => {
+      tree = create(
+        <TaskList
+          enableBulkActions
+          bulkBarPlacement="external"
+          onBulkBarPropsChange={onBulkBarPropsChange}
+          project={{
+            id: project.id,
+            enableReorder: true,
+            includeArchived: true,
+            readOnly: true,
+            reorderMode: true,
+          }}
+          showHeader={false}
+          statusFilter="all"
+          taskSource={[archivedTask]}
+          title={project.title}
+        />,
+      );
+    });
+
+    const row = tree.root.findByType('SwipeableTaskItem' as unknown as React.ElementType);
+    expect(row.props.interactionDisabled).toBe(true);
+    expect(row.props.selectionMode).toBe(false);
+    expect(row.props.actions.toggleSelect).toBeUndefined();
+    expect(tree.root.findAll((node) => String(node.type) === 'DraggableFlatList')).toHaveLength(0);
+    expect(onBulkBarPropsChange.mock.calls.at(-1)?.[0]).toBeNull();
+
+    act(() => {
+      row.props.actions.edit(archivedTask);
+      row.props.actions.changeStatus(archivedTask, 'done');
+      row.props.actions.remove(archivedTask);
+    });
+    expect(updateTaskMock).not.toHaveBeenCalled();
+    expect(storeState.deleteTask).not.toHaveBeenCalled();
+    expect(taskEditModalPropsSpy.mock.calls.at(-1)?.[0].visible).toBe(false);
+
+    act(() => tree.unmount());
+  });
+
 
 
   it('omits the current page status from bulk move options and orders Done before Reference', async () => {

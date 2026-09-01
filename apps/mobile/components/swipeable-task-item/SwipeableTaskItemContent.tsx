@@ -578,11 +578,15 @@ export function SwipeableTaskItemContent({
                         {(localChecklist || []).map((item, index) => (
                             <Pressable
                                 key={item.id || index}
-                                onPress={() => onToggleChecklistItem(index)}
+                                disabled={interactionDisabled}
+                                onPress={interactionDisabled ? undefined : () => onToggleChecklistItem(index)}
                                 style={styles.checklistItem}
                                 accessibilityRole="button"
                                 accessibilityLabel={item.title}
-                                accessibilityState={{ checked: item.isCompleted }}
+                                accessibilityState={{
+                                    checked: item.isCompleted,
+                                    ...(interactionDisabled ? { disabled: true } : {}),
+                                }}
                             >
                                 <MarkdownInlineText
                                     markdown={`${item.isCompleted ? '✓' : '○'} ${item.title}`}
@@ -628,7 +632,8 @@ export function SwipeableTaskItemContent({
             </View>
             {!hideStatusBadge && (
                 <Pressable
-                    onPress={(event) => {
+                    disabled={interactionDisabled}
+                    onPress={interactionDisabled ? undefined : (event) => {
                         event.stopPropagation();
                         onOpenStatusMenu();
                     }}
@@ -651,6 +656,7 @@ export function SwipeableTaskItemContent({
                         'Double-tap to open status menu',
                     )}
                     accessibilityRole="button"
+                    accessibilityState={interactionDisabled ? { disabled: true } : undefined}
                 >
                     {statusBadgeAsIcon ? (
                         <CircleDot size={20} color={statusColors.text} strokeWidth={2} />

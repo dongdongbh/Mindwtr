@@ -20,7 +20,7 @@ import {
 } from '@mindwtr/core';
 import type { Area, Project, ProjectSequenceTaskCue, Section, Task, TaskStatus } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, Check, RotateCcw, Trash2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { ThemeColors } from '../hooks/use-theme-colors';
@@ -273,7 +273,8 @@ function SwipeableTaskItemInner({
         timeSpentEnabled,
         showTaskAge,
     } = rowContext;
-    const canShowFocusToggle = showFocusToggle
+    const canShowFocusToggle = !interactionDisabled
+        && showFocusToggle
         && isTaskActionable(task);
     const isReference = task.status === 'reference';
     const {
@@ -284,7 +285,7 @@ function SwipeableTaskItemInner({
         showChecklist,
         toggleChecklist,
         toggleChecklistItem,
-    } = useSwipeableChecklist(task, updateTask);
+    } = useSwipeableChecklist(task, updateTask, interactionDisabled);
     const [showStatusMenu, setShowStatusMenu] = useState(false);
     const [projectNextActionPrompt, setProjectNextActionPrompt] = useState<ProjectNextActionPromptState | null>(null);
     const [projectNextActionTitle, setProjectNextActionTitle] = useState('');
@@ -336,6 +337,7 @@ function SwipeableTaskItemInner({
     }, [showToast, t]);
 
     const handleStatusChange = useCallback((status: TaskStatus) => {
+        if (interactionDisabled) return;
         const previousStatus = task.status;
         const wasFocusedToday = task.isFocusedToday === true;
         void settleStoreAction(() => onStatusChange(status))
@@ -365,13 +367,20 @@ function SwipeableTaskItemInner({
                     openProjectNextActionPromptIfNeeded(task.id);
                 }
             });
-    }, [onStatusChange, openProjectNextActionPromptIfNeeded, showActionFailure, showToast, t, task.id, task.isFocusedToday, task.status, task.title]);
+    }, [interactionDisabled, onStatusChange, openProjectNextActionPromptIfNeeded, showActionFailure, showToast, t, task.id, task.isFocusedToday, task.status, task.title]);
 
     const [completedAtPicker, setCompletedAtPicker] = useState<null | 'complete' | 'edit'>(null);
+    useEffect(() => {
+        if (!interactionDisabled) return;
+        setShowStatusMenu(false);
+        setCompletedAtPicker(null);
+        closeProjectNextActionPrompt();
+    }, [closeProjectNextActionPrompt, interactionDisabled]);
+
     const applyCompletedAt = useCallback((iso: string, timeSpentMinutes?: number) => {
         const mode = completedAtPicker;
         setCompletedAtPicker(null);
-        if (!mode) return;
+        if (!mode || interactionDisabled) return;
         const updates: Partial<Task> = mode === 'complete'
             ? { status: 'done', completedAt: iso }
             : { completedAt: iso };
@@ -388,10 +397,10 @@ function SwipeableTaskItemInner({
                     openProjectNextActionPromptIfNeeded(task.id);
                 }
             });
-    }, [completedAtPicker, openProjectNextActionPromptIfNeeded, showActionFailure, task.id, task.status, timeSpentEnabled, updateTask]);
+    }, [completedAtPicker, interactionDisabled, openProjectNextActionPromptIfNeeded, showActionFailure, task.id, task.status, timeSpentEnabled, updateTask]);
 
     const handlePromoteProjectNextAction = useCallback((nextTaskId: string) => {
-        if (isProjectNextActionSubmitting) return;
+        if (interactionDisabled || isProjectNextActionSubmitting) return;
         setIsProjectNextActionSubmitting(true);
         void settleStoreAction(() => updateTask(nextTaskId, { status: 'next' }))
             .then((outcome) => {
@@ -402,10 +411,10 @@ function SwipeableTaskItemInner({
                 closeProjectNextActionPrompt();
             })
             .finally(() => setIsProjectNextActionSubmitting(false));
-    }, [closeProjectNextActionPrompt, isProjectNextActionSubmitting, showActionFailure, updateTask]);
+    }, [closeProjectNextActionPrompt, interactionDisabled, isProjectNextActionSubmitting, showActionFailure, updateTask]);
 
     const handleCompleteProjectNextAction = useCallback(() => {
-        if (!projectNextActionPrompt || isProjectNextActionSubmitting) return;
+        if (interactionDisabled || !projectNextActionPrompt || isProjectNextActionSubmitting) return;
         const { projectId } = projectNextActionPrompt;
         setIsProjectNextActionSubmitting(true);
         // Archiving completes the project's remaining tasks in core and is
@@ -419,10 +428,10 @@ function SwipeableTaskItemInner({
                 closeProjectNextActionPrompt();
             })
             .finally(() => setIsProjectNextActionSubmitting(false));
-    }, [closeProjectNextActionPrompt, isProjectNextActionSubmitting, projectNextActionPrompt, showActionFailure]);
+    }, [closeProjectNextActionPrompt, interactionDisabled, isProjectNextActionSubmitting, projectNextActionPrompt, showActionFailure]);
 
     const handleAddProjectNextAction = useCallback(() => {
-        if (!projectNextActionPrompt || isProjectNextActionSubmitting) return;
+        if (interactionDisabled || !projectNextActionPrompt || isProjectNextActionSubmitting) return;
         const title = projectNextActionTitle.trim();
         if (!title) return;
         setIsProjectNextActionSubmitting(true);
@@ -442,6 +451,7 @@ function SwipeableTaskItemInner({
     }, [
         addTask,
         closeProjectNextActionPrompt,
+        interactionDisabled,
         isProjectNextActionSubmitting,
         projectNextActionPrompt,
         projectNextActionTitle,
@@ -449,7 +459,7 @@ function SwipeableTaskItemInner({
     ]);
 
     const toggleFocus = () => {
-        if (selectionMode) return;
+        if (interactionDisabled || selectionMode) return;
         // Core focus-star module decides eligibility, cap, and the patch;
         // status promotion happens in the store's star↔status rules.
         const action = useTaskStore.getState().getFocusStarAction(task);
@@ -589,6 +599,7 @@ function SwipeableTaskItemInner({
     // an undo toast instead of a confirmation alert. Permanent purge (in Trash)
     // keeps its confirmation.
     const handleDelete = () => {
+        if (interactionDisabled) return;
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
         cancelPendingChecklist();
         void settleStoreAction(() => onDelete())
@@ -646,6 +657,7 @@ function SwipeableTaskItemInner({
     ];
 
     const handleAccessibilityAction = (event: { nativeEvent: { actionName: string } }) => {
+        if (interactionDisabled) return;
         const { actionName } = event.nativeEvent;
         if (actionName === 'activate') {
             handlePress();
@@ -689,11 +701,13 @@ function SwipeableTaskItemInner({
             onAccessibilityAction={handleAccessibilityAction}
             onAddChecklistItem={addChecklistItem}
             onContextPress={onContextPress}
-            onEditCompletedAt={isTaskFinished(task) && !selectionMode
+            onEditCompletedAt={!interactionDisabled && isTaskFinished(task) && !selectionMode
                 ? () => setCompletedAtPicker('edit')
                 : undefined}
             onLongPress={handleLongPress}
-            onOpenStatusMenu={() => setShowStatusMenu(true)}
+            onOpenStatusMenu={() => {
+                if (!interactionDisabled) setShowStatusMenu(true);
+            }}
             onPress={handlePress}
             onProjectPress={onProjectPress}
             onTagPress={onTagPress}
@@ -744,15 +758,17 @@ function SwipeableTaskItemInner({
             )}
 
             <SwipeableTaskItemStatusMenu
-                visible={showStatusMenu}
+                visible={!interactionDisabled && showStatusMenu}
                 onClose={() => setShowStatusMenu(false)}
                 onStatusChange={handleStatusChange}
-                onBackdatedComplete={task.status === 'done' ? undefined : () => setCompletedAtPicker('complete')}
+                onBackdatedComplete={interactionDisabled || task.status === 'done'
+                    ? undefined
+                    : () => setCompletedAtPicker('complete')}
                 taskStatus={task.status}
                 tc={tc}
                 t={t}
             />
-            {completedAtPicker ? (
+            {!interactionDisabled && completedAtPicker ? (
                 <CompletedAtPicker
                     initialValue={completedAtPicker === 'edit' ? (task.completedAt || task.updatedAt) : undefined}
                     initialTimeSpentMinutes={task.timeSpentMinutes}
@@ -763,7 +779,7 @@ function SwipeableTaskItemInner({
                     tc={tc}
                 />
             ) : null}
-            {projectNextActionPrompt ? (
+            {!interactionDisabled && projectNextActionPrompt ? (
                 <ProjectNextActionPromptModal
                     visible={Boolean(projectNextActionPrompt)}
                     candidates={projectNextActionPrompt.candidates}

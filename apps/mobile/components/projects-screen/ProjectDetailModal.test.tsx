@@ -731,6 +731,8 @@ describe('ProjectDetailModal task sorting', () => {
 
         expect(taskListPropsSpy.mock.calls.at(-1)?.[0].taskSource).toEqual([archivedTask]);
         expect(taskListPropsSpy.mock.calls.at(-1)?.[0].project.includeArchived).toBe(true);
+        expect(taskListPropsSpy.mock.calls.at(-1)?.[0].project.readOnly).toBe(true);
+        expect(taskListPropsSpy.mock.calls.at(-1)?.[0].enableBulkActions).toBe(false);
     });
 
     it('keeps project task controls outside the scrolling task list', () => {
@@ -1166,6 +1168,7 @@ describe('ProjectDetailModal archived projects', () => {
             groupCompletedTasksLast: false,
             includeArchived: true,
             includeDone: true,
+            readOnly: true,
         });
     });
 
@@ -1176,6 +1179,7 @@ describe('ProjectDetailModal archived projects', () => {
             groupCompletedTasksLast: false,
             includeArchived: false,
             includeDone: false,
+            readOnly: false,
         });
     });
 
@@ -1186,6 +1190,7 @@ describe('ProjectDetailModal archived projects', () => {
             groupCompletedTasksLast: true,
             includeArchived: true,
             includeDone: true,
+            readOnly: false,
         });
     });
 
@@ -1196,6 +1201,7 @@ describe('ProjectDetailModal archived projects', () => {
             groupCompletedTasksLast: false,
             includeArchived: true,
             includeDone: true,
+            readOnly: false,
         });
     });
 });

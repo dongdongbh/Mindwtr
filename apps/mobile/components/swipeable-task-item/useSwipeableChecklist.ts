@@ -5,12 +5,18 @@ import { settleStoreAction } from '../store-action-result';
 
 type UpdateTask = ReturnType<typeof useTaskStore.getState>['updateTask'];
 
-export function useSwipeableChecklist(task: Task, updateTask: UpdateTask) {
+export function useSwipeableChecklist(
+    task: Task,
+    updateTask: UpdateTask,
+    interactionDisabled = false,
+) {
     const [showChecklist, setShowChecklist] = useState(false);
     const [localChecklist, setLocalChecklist] = useState(task.checklist || []);
     const checklistUpdateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingChecklist = useRef<{ taskId: string; checklist: Task['checklist'] } | null>(null);
     const checklistTaskIdRef = useRef(task.id);
+    const interactionDisabledRef = useRef(interactionDisabled);
+    interactionDisabledRef.current = interactionDisabled;
 
     const clearChecklistTimer = useCallback(() => {
         if (checklistUpdateTimer.current) {
@@ -25,6 +31,10 @@ export function useSwipeableChecklist(task: Task, updateTask: UpdateTask) {
     }, [clearChecklistTimer]);
 
     const flushPendingChecklist = useCallback(() => {
+        if (interactionDisabledRef.current) {
+            pendingChecklist.current = null;
+            return;
+        }
         const pending = pendingChecklist.current;
         if (!pending) return;
         const { taskId } = pending;
@@ -76,6 +86,12 @@ export function useSwipeableChecklist(task: Task, updateTask: UpdateTask) {
         }
     }, [task.deletedAt, cancelPendingChecklist]);
 
+    useEffect(() => {
+        if (!interactionDisabled) return;
+        cancelPendingChecklist();
+        setLocalChecklist(task.checklist || []);
+    }, [cancelPendingChecklist, interactionDisabled, task.checklist]);
+
     useEffect(() => () => {
         clearChecklistTimer();
         flushPendingChecklist();
@@ -97,6 +113,7 @@ export function useSwipeableChecklist(task: Task, updateTask: UpdateTask) {
     }, [clearChecklistTimer, flushPendingChecklist]);
 
     const toggleChecklistItem = useCallback((index: number) => {
+        if (interactionDisabled) return;
         const taskId = task.id;
         setLocalChecklist((currentChecklist) => {
             const nextChecklist = (currentChecklist || []).map((item, itemIndex) =>
@@ -105,9 +122,10 @@ export function useSwipeableChecklist(task: Task, updateTask: UpdateTask) {
             scheduleChecklistUpdate(taskId, nextChecklist);
             return nextChecklist;
         });
-    }, [scheduleChecklistUpdate, task.id]);
+    }, [interactionDisabled, scheduleChecklistUpdate, task.id]);
 
     const addChecklistItem = useCallback((title: string) => {
+        if (interactionDisabled) return;
         const trimmed = title.trim();
         if (!trimmed) return;
         const taskId = task.id;
@@ -119,7 +137,7 @@ export function useSwipeableChecklist(task: Task, updateTask: UpdateTask) {
             scheduleChecklistUpdate(taskId, nextChecklist);
             return nextChecklist;
         });
-    }, [scheduleChecklistUpdate, task.id]);
+    }, [interactionDisabled, scheduleChecklistUpdate, task.id]);
 
     const checklistProgress = useMemo(
         () => getChecklistProgress({ ...task, checklist: localChecklist }),

@@ -18,6 +18,7 @@ export function getProjectDetailTaskListOptions(selectedProject: Project | null,
         includeArchived: isArchived || showCompletedTasks,
         includeDone: isArchived || showCompletedTasks,
         groupCompletedTasksLast: !isArchived && showCompletedTasks && !selectedProject?.isSequential,
+        readOnly: isArchived,
     };
 }
 
@@ -79,6 +80,7 @@ export function ProjectTaskList({
             sequenceCueLabels,
             enableBulkOrganize: options.allowAdd,
             enableReorder: options.enableProjectReorder,
+            readOnly: options.readOnly,
             reorderMode,
             onReorderModeChange,
         };
@@ -104,7 +106,7 @@ export function ProjectTaskList({
             title={project.title}
             taskSource={projectTaskSource}
             project={projectOptions}
-            enableBulkActions
+            enableBulkActions={!projectOptions.readOnly}
             bulkBarPlacement="external"
             onBulkBarPropsChange={onBulkBarPropsChange}
             contentPaddingBottom={contentPaddingBottom}

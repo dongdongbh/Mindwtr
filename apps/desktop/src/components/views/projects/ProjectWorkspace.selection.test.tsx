@@ -17,13 +17,15 @@ vi.mock('../../TaskItem', () => ({
         selectionMode,
         isMultiSelected,
         onToggleSelect,
+        interactionDisabled,
     }: {
         task: Task;
         selectionMode?: boolean;
         isMultiSelected?: boolean;
         onToggleSelect?: (options?: { range?: boolean }) => void;
+        interactionDisabled?: boolean;
     }) => (
-        <div data-task-id={task.id}>
+        <div data-task-id={task.id} data-interaction-disabled={interactionDisabled ? 'true' : 'false'}>
             {selectionMode && (
                 <input
                     type="checkbox"
@@ -275,6 +277,40 @@ describe('ProjectWorkspace Select mode', () => {
     it('ends the project scroller with the shared end gap, not with viewport padding (#977)', () => {
         const { container } = renderWorkspace();
         expectScrolledEndGap(container);
+    });
+
+    it('keeps archived-project task rows out of edit, selection, and drag paths', () => {
+        const archivedProject = { ...project, status: 'archived' as const };
+        const archivedTask = task('archived-task', 'Historical task', { status: 'archived' });
+        const taskDragEndRef = { current: null as ProjectWorkspaceProps['taskDragEndRef']['current'] };
+        const updateTask = vi.fn();
+        const reorderProjectTasks = vi.fn();
+
+        const { container, queryByRole } = renderWorkspace({
+            selectedProject: archivedProject,
+            allTasks: [archivedTask],
+            selectedProjectTasks: [archivedTask],
+            sections: [projectSection],
+            taskDragEndRef,
+            updateTask,
+            reorderProjectTasks,
+        });
+
+        expect(queryByRole('button', { name: 'Select' })).not.toBeInTheDocument();
+        expect(queryByRole('button', { name: 'Add task' })).not.toBeInTheDocument();
+        expect(container.querySelector('[data-task-id="archived-task"]'))
+            .toHaveAttribute('data-interaction-disabled', 'true');
+        expect(container.querySelector('[data-sortable-task-id]')).not.toBeInTheDocument();
+        expect(container.querySelector('[data-draggable-task-id]')).not.toBeInTheDocument();
+
+        act(() => {
+            taskDragEndRef.current?.({
+                active: { id: archivedTask.id },
+                over: { id: archivedTask.id },
+            } as never);
+        });
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(reorderProjectTasks).not.toHaveBeenCalled();
     });
 
     it('opens global quick add with the selected project defaults', () => {

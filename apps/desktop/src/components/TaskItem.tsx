@@ -92,6 +92,7 @@ interface TaskItemProps {
         alwaysVisible?: boolean;
     };
     readOnly?: boolean;
+    interactionDisabled?: boolean;
     compactMetaEnabled?: boolean;
     enableDoubleClickEdit?: boolean;
     showHoverHint?: boolean;
@@ -125,6 +126,7 @@ export const TaskItem = memo(function TaskItem({
     dragHandle,
     focusToggle,
     readOnly = false,
+    interactionDisabled = false,
     compactMetaEnabled = true,
     enableDoubleClickEdit = false,
     showHoverHint = true,
@@ -261,7 +263,7 @@ export const TaskItem = memo(function TaskItem({
     const recurrenceRule = getRecurrenceRuleValue(task.recurrence);
     const recurrenceStrategy = getRecurrenceStrategyValue(task.recurrence);
     const isStagnant = (task.pushCount ?? 0) > 3;
-    const effectiveReadOnly = readOnly || task.status === 'done';
+    const effectiveReadOnly = interactionDisabled || readOnly || task.status === 'done';
     const effectiveFocusToggle = effectiveReadOnly ? undefined : focusToggle;
     // Time tracking is opt-in: every time-spent surface (editor field, badge,
     // quick-start) stays hidden unless the Pomodoro timer and its task linking
@@ -1354,7 +1356,7 @@ export const TaskItem = memo(function TaskItem({
                     event.stopPropagation();
                     startEditing();
                 }}
-                onContextMenu={handleOpenQuickActionMenu}
+                onContextMenu={interactionDisabled ? undefined : handleOpenQuickActionMenu}
                 className={cn(
                     "group rounded-lg hover:bg-muted/50 dark:hover:bg-muted/20 transition-colors animate-in fade-in slide-in-from-bottom-2",
                     isCondensed ? "px-2.5 py-1.5" : isCompact ? "p-2.5" : "px-3 py-3",
@@ -1413,6 +1415,7 @@ export const TaskItem = memo(function TaskItem({
                                 showProjectBadgeInActions={showProjectBadgeInActions}
                                 showProjectBadgeInMetadata={showProjectBadgeInMetadata}
                                 readOnly={effectiveReadOnly}
+                                interactionDisabled={interactionDisabled}
                                 compactMetaEnabled={compactMetaEnabled}
                                 dense={isDense}
                                 actionsOverlay={actionsOverlay}
