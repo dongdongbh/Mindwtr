@@ -642,7 +642,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
             <Text style={[styles.stepQuestion, { color: tc.text }]}>
               {tFallback(t, 'inbox.deferWhen', 'When should it come back?')}
             </Text>
-            <Text style={[styles.stepHint, { color: tc.secondaryText }]}> 
+            <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
               {tFallback(t, 'process.incubateHint', 'Park this without deciding. It comes back to clarify on the date you choose.')}
             </Text>
             <InboxDateSelectorRow
