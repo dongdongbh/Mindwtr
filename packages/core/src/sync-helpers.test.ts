@@ -316,8 +316,14 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
 
         const sanitized = sanitizeAppDataForRemote(data);
 
-        expect(sanitized.settings.syncPreferences).toEqual(data.settings.syncPreferences);
-        expect(sanitized.settings.syncPreferencesUpdatedAt).toEqual(data.settings.syncPreferencesUpdatedAt);
+        expect(sanitized.settings.syncPreferences).toEqual({
+            ...data.settings.syncPreferences,
+            gtd: true,
+        });
+        expect(sanitized.settings.syncPreferencesUpdatedAt).toEqual({
+            ...data.settings.syncPreferencesUpdatedAt,
+            preferences: '2026-02-19T00:00:00.001Z',
+        });
         expect(sanitized.settings.theme).toBe('dark');
         expect(sanitized.settings.appearance).toEqual({ density: 'compact', textSize: 'small', mobileQuickAccessView: 'contexts' });
         expect(sanitized.settings.keybindingStyle).toBe('emacs');
@@ -421,6 +427,11 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
 
         const sanitized = sanitizeAppDataForRemote(data);
 
+        expect(sanitized.settings.syncPreferences?.gtd).toBe(true);
+        expect(sanitized.settings.syncPreferencesUpdatedAt?.preferences).toBe(
+            '1970-01-01T00:00:00.001Z',
+        );
+        expect(data.settings.syncPreferencesUpdatedAt).toBeUndefined();
         expect(sanitized.settings.gtd).toEqual({
             timeEstimatePresets: ['15min', '1hr'],
             autoArchiveDays: 14,
@@ -453,10 +464,74 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
         });
     });
 
+    it('materializes default-on GTD in remote snapshots so an RC.2 peer preserves custom values', () => {
+        const source = createData([]);
+        source.settings = {
+            gtd: { defaultScheduleTime: '09:30' },
+            syncPreferencesUpdatedAt: {
+                preferences: '2026-08-01T12:00:00.000Z',
+                gtd: '2026-08-29T12:00:00.000Z',
+            },
+        };
+        const sourceBefore = structuredClone(source);
+        const firstPayload = sanitizeAppDataForRemote(source);
+
+        // v1.2.5-rc.2 first merged the entire preference map by its
+        // `preferences` timestamp, then uploaded GTD fields only when gtd was
+        // explicitly true. Its newer unrelated preference-map edit must not
+        // discard the current client's wire-only default.
+        const rc2Settings: AppData['settings'] = {
+            syncPreferences: { language: true },
+            syncPreferencesUpdatedAt: {
+                preferences: '2026-08-30T12:00:00.000Z',
+                gtd: '2026-08-10T12:00:00.000Z',
+            },
+            gtd: { defaultScheduleTime: '08:00' },
+        };
+        const mergedOnRc2 = mergeSettingsForSync(rc2Settings, firstPayload.settings);
+        const sanitizeSettingsLikeRc2 = (settings: AppData['settings']): AppData['settings'] => ({
+            syncPreferences: { ...(settings.syncPreferences ?? {}) },
+            syncPreferencesUpdatedAt: settings.syncPreferencesUpdatedAt
+                ? { ...settings.syncPreferencesUpdatedAt }
+                : undefined,
+            ...(settings.syncPreferences?.gtd === true
+                ? { gtd: settings.gtd ? { ...settings.gtd } : settings.gtd }
+                : {}),
+        });
+        const firstRc2Payload = sanitizeSettingsLikeRc2(mergedOnRc2);
+        const learnedCurrent = createData([]);
+        learnedCurrent.settings = mergeSettingsForSync(source.settings, firstRc2Payload);
+        const retryPayload = sanitizeAppDataForRemote(learnedCurrent);
+        const convergedRc2 = mergeSettingsForSync(mergedOnRc2, retryPayload.settings);
+        const convergedRc2Payload = sanitizeSettingsLikeRc2(convergedRc2);
+        const convergedCurrent = createData([]);
+        convergedCurrent.settings = mergeSettingsForSync(learnedCurrent.settings, convergedRc2Payload);
+        const convergedCurrentPayload = sanitizeAppDataForRemote(convergedCurrent);
+
+        expect(firstPayload.settings.syncPreferences?.gtd).toBe(true);
+        expect(firstPayload.settings.syncPreferencesUpdatedAt?.preferences).toBe(
+            '2026-08-29T12:00:00.001Z',
+        );
+        expect(mergedOnRc2.syncPreferences?.gtd).toBeUndefined();
+        expect(firstRc2Payload.gtd).toBeUndefined();
+        expect(learnedCurrent.settings.gtd?.defaultScheduleTime).toBe('09:30');
+        expect(retryPayload.settings.syncPreferencesUpdatedAt?.preferences).toBe(
+            '2026-08-30T12:00:00.001Z',
+        );
+        expect(convergedRc2.syncPreferences?.gtd).toBe(true);
+        expect(convergedRc2Payload.gtd?.defaultScheduleTime).toBe('09:30');
+        expect(convergedCurrentPayload.settings).toEqual(convergedRc2Payload);
+        expect(source).toEqual(sourceBefore);
+    });
+
     it('keeps the expanded GTD group local after an explicit opt-out', () => {
         const data = createData([]);
         data.settings = {
             syncPreferences: { gtd: false },
+            syncPreferencesUpdatedAt: {
+                preferences: '2026-08-01T12:00:00.000Z',
+                gtd: '2026-08-29T12:00:00.000Z',
+            },
             gtd: {
                 defaultCaptureMethod: 'audio',
                 weeklyReview: { includeContextStep: false },
@@ -465,13 +540,28 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
             markdownEditorAssist: false,
             features: { pomodoro: true },
         };
+        const before = structuredClone(data);
 
         const sanitized = sanitizeAppDataForRemote(data);
 
+        expect(sanitized.settings.syncPreferences?.gtd).toBe(false);
+        expect(sanitized.settings.syncPreferencesUpdatedAt?.preferences).toBe(
+            '2026-08-01T12:00:00.000Z',
+        );
         expect(sanitized.settings.gtd).toBeUndefined();
         expect(sanitized.settings.quickAddAutoClean).toBeUndefined();
         expect(sanitized.settings.markdownEditorAssist).toBeUndefined();
         expect(sanitized.settings.features).toBeUndefined();
+        expect(data).toEqual(before);
+
+        const noTimestampOptOut = createData([]);
+        noTimestampOptOut.settings = {
+            syncPreferences: { gtd: false },
+            gtd: { defaultScheduleTime: '09:30' },
+        };
+        const noTimestampSanitized = sanitizeAppDataForRemote(noTimestampOptOut);
+        expect(noTimestampSanitized.settings.syncPreferences?.gtd).toBe(false);
+        expect(noTimestampSanitized.settings.syncPreferencesUpdatedAt).toBeUndefined();
     });
 
     it('converges the expanded GTD payload across peers without dropping explicit values', () => {

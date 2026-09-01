@@ -10,6 +10,18 @@ import {
 } from './tombstone-compaction';
 
 const MISSING_ATTACHMENT_TIMESTAMP_SENTINEL = '1970-01-01T00:00:00.000Z';
+const MISSING_SETTINGS_SYNC_TIMESTAMP_SENTINEL = '1970-01-01T00:00:00.000Z';
+
+const advanceLatestSyncTimestamp = (...values: Array<string | undefined>): string | undefined => {
+    let latestTime = Date.parse(MISSING_SETTINGS_SYNC_TIMESTAMP_SENTINEL);
+    for (const value of values) {
+        const parsed = Date.parse(value ?? '');
+        if (Number.isFinite(parsed) && parsed > latestTime) latestTime = parsed;
+    }
+    if (!Number.isFinite(latestTime)) return undefined;
+    const advanced = new Date(latestTime + 1);
+    return Number.isFinite(advanced.getTime()) ? advanced.toISOString() : undefined;
+};
 
 export type SoftDeletable = {
     deletedAt?: string | null;
@@ -162,11 +174,32 @@ export const hasPendingSyncSideEffects = (data: AppData): boolean => (
 
 const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['settings'] => {
     const prefs = settings.syncPreferences ?? {};
+    const remotePrefs = { ...prefs };
+    let remotePrefsUpdatedAt = settings.syncPreferencesUpdatedAt
+        ? { ...settings.syncPreferencesUpdatedAt }
+        : undefined;
+    if (isSettingsSyncGroupEnabled(prefs, 'gtd')) {
+        // Current clients treat a missing GTD preference as enabled. Materialize
+        // that effective value only in the wire snapshot so RC.2 peers, which
+        // require explicit true, do not strip the synced GTD fields on upload.
+        remotePrefs.gtd = true;
+        if (prefs.gtd === undefined) {
+            // RC.2 merges the whole preference map before deciding whether GTD
+            // fields may upload. Advance the wire-only true one deterministic
+            // tick past both relevant generations so an equal copied timestamp
+            // cannot deadlock, without advancing the persisted setting.
+            const materializedAt = advanceLatestSyncTimestamp(
+                remotePrefsUpdatedAt?.preferences,
+                remotePrefsUpdatedAt?.gtd,
+            );
+            if (materializedAt) {
+                remotePrefsUpdatedAt = { ...remotePrefsUpdatedAt, preferences: materializedAt };
+            }
+        }
+    }
     const next: AppData['settings'] = {
-        syncPreferences: { ...prefs },
-        syncPreferencesUpdatedAt: settings.syncPreferencesUpdatedAt
-            ? { ...settings.syncPreferencesUpdatedAt }
-            : undefined,
+        syncPreferences: remotePrefs,
+        syncPreferencesUpdatedAt: remotePrefsUpdatedAt,
     };
 
     if (prefs.appearance === true) {
