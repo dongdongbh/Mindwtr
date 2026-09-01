@@ -83,6 +83,16 @@ class GooglePlayTransport:
             raise ValueError("Google Play request paths must be origin-relative")
         if json_body is not None and data_path is not None:
             raise ValueError("A request cannot contain both JSON and binary data")
+        commit_path_match = re.fullmatch(
+            r"/androidpublisher/v3/applications/[^/]+/edits/([^/:]+):commit",
+            path,
+        )
+        is_commit_request = method == "POST" and commit_path_match is not None
+        expected_commit_edit_id = (
+            urllib.parse.unquote(commit_path_match.group(1))
+            if is_commit_request and commit_path_match is not None
+            else None
+        )
 
         body: object | None = None
         opened_file = None
@@ -118,6 +128,10 @@ class GooglePlayTransport:
                 response.close()
 
             if len(response_body) > MAX_RESPONSE_BYTES:
+                if is_commit_request and 200 <= status < 300:
+                    raise CommitOutcomeUnknown(
+                        "Google Play edit commit outcome is unknown; do not retry automatically"
+                    )
                 raise GooglePlayApiError(
                     f"Google Play API {method} {path} response exceeded "
                     f"{MAX_RESPONSE_BYTES} bytes"
@@ -139,14 +153,33 @@ class GooglePlayTransport:
             if connection is not None:
                 connection.close()
 
+        if not response_body and is_commit_request:
+            raise CommitOutcomeUnknown(
+                "Google Play edit commit outcome is unknown; do not retry automatically"
+            )
         if not response_body:
             return {}
         try:
-            return json.loads(response_body)
+            parsed_response = json.loads(response_body)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            if is_commit_request:
+                raise CommitOutcomeUnknown(
+                    "Google Play edit commit outcome is unknown; do not retry automatically"
+                ) from error
             raise GooglePlayApiError(
                 f"Google Play API {method} {path} returned invalid JSON"
             ) from error
+        if (
+            is_commit_request
+            and (
+                not isinstance(parsed_response, Mapping)
+                or parsed_response.get("id") != expected_commit_edit_id
+            )
+        ):
+            raise CommitOutcomeUnknown(
+                "Google Play edit commit outcome is unknown; do not retry automatically"
+            )
+        return parsed_response
 
 
 def _mapping(value: object, label: str) -> Mapping[str, Any]:

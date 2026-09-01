@@ -261,6 +261,76 @@ class GooglePlayEditTest(unittest.TestCase):
         self.assertNotIn("top-secret", message)
         self.assertIn("[REDACTED]", message)
 
+    def test_transport_treats_invalid_successful_commit_responses_as_unknown(self) -> None:
+        cases = (
+            ("empty", b""),
+            ("truncated", b'{"id":'),
+            ("wrong shape", b"[]"),
+            ("empty object", b"{}"),
+            ("missing identity", b'{"expiryTimeSeconds":"1"}'),
+            ("wrong identity", b'{"id":"edit-2","expiryTimeSeconds":"1"}'),
+            ("non-string identity", b'{"id":1,"expiryTimeSeconds":"1"}'),
+            ("oversized", b"x" * (MODULE.MAX_RESPONSE_BYTES + 2)),
+        )
+        for label, body in cases:
+            with self.subTest(label=label):
+                response = FakeHttpResponse(body=body)
+                connection = FakeHttpsConnection(response)
+                with patch.dict(os.environ, {"GOOGLE_PLAY_ACCESS_TOKEN": "top-secret"}):
+                    with patch.object(
+                        MODULE.http.client,
+                        "HTTPSConnection",
+                        return_value=connection,
+                    ):
+                        with self.assertRaisesRegex(
+                            MODULE.CommitOutcomeUnknown,
+                            "unknown; do not retry automatically",
+                        ):
+                            MODULE.GooglePlayTransport().request(
+                                "POST",
+                                "/androidpublisher/v3/applications/tech.dongdongbh.mindwtr/edits/edit-1:commit",
+                            )
+
+                self.assertTrue(connection.closed)
+                self.assertTrue(response.closed)
+
+    def test_transport_accepts_commit_response_for_the_requested_edit(self) -> None:
+        response = FakeHttpResponse(
+            body=b'{"id":"edit-1","expiryTimeSeconds":"1"}',
+        )
+        connection = FakeHttpsConnection(response)
+        with patch.dict(os.environ, {"GOOGLE_PLAY_ACCESS_TOKEN": "top-secret"}):
+            with patch.object(
+                MODULE.http.client,
+                "HTTPSConnection",
+                return_value=connection,
+            ):
+                result = MODULE.GooglePlayTransport().request(
+                    "POST",
+                    "/androidpublisher/v3/applications/tech.dongdongbh.mindwtr/edits/edit-1:commit",
+                )
+
+        self.assertEqual(result["id"], "edit-1")
+
+    def test_transport_keeps_verified_commit_rejections_definite(self) -> None:
+        response = FakeHttpResponse(
+            status=400,
+            body=b'{"error":"commit rejected"}',
+            reason="Bad Request",
+        )
+        connection = FakeHttpsConnection(response)
+        with patch.dict(os.environ, {"GOOGLE_PLAY_ACCESS_TOKEN": "top-secret"}):
+            with patch.object(
+                MODULE.http.client,
+                "HTTPSConnection",
+                return_value=connection,
+            ):
+                with self.assertRaisesRegex(MODULE.GooglePlayApiError, "HTTP 400"):
+                    MODULE.GooglePlayTransport().request(
+                        "POST",
+                        "/androidpublisher/v3/applications/tech.dongdongbh.mindwtr/edits/edit-1:commit",
+                    )
+
     def test_validates_every_local_input_before_creating_edit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             plan = make_plan(Path(temp_dir))
