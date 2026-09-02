@@ -90,6 +90,10 @@ type SyncActionOptions = {
     backend?: 'file' | 'webdav' | 'cloud' | 'cloudkit';
     cloud?: SelfHostedSyncSettings;
     cloudProvider?: CloudProvider;
+    // The folder picker activates the folder it just picked, before the state
+    // set in the same tick is visible to this hook's closures.
+    syncPath?: string | null;
+    syncPathBookmark?: string | null;
     webdav?: WebDavSyncSettings;
 };
 
@@ -193,6 +197,9 @@ export function useSyncSettingsTransportActions({
     const provenCloudProviderRef = useRef<CloudProvider>('selfhosted');
     const hasPendingSyncConfiguration = useRef(false);
     const stagedDropboxCredentialsRef = useRef<MobileDropboxSyncCredentials | null>(null);
+    // The select/save handlers are declared before `handleSync`; this ref lets
+    // them run the activation-aware sync without reordering the hook.
+    const handleSyncRef = useRef<(options?: SyncActionOptions) => Promise<void>>(async () => undefined);
     const [dropboxConnected, setDropboxConnected] = useState(false);
     const [dropboxBusy, setDropboxBusy] = useState(false);
     const [cloudKitAccountStatus, setCloudKitAccountStatus] = useState<CloudKitAccountStatus>('unknown');
@@ -413,6 +420,37 @@ export function useSyncSettingsTransportActions({
             .catch(logSettingsError);
     }, []);
 
+    // Choosing a backend or provider whose target is already complete (a saved
+    // WebDAV/self-hosted server, a connected Dropbox, a picked folder) activates
+    // it through the verification sync. An incomplete target stays staged so the
+    // user can finish the form and Save.
+    const isSyncTargetComplete = useCallback((backend: SyncBackend, provider: CloudProvider): boolean => {
+        if (backend === 'off') return false;
+        if (backend === 'cloudkit') return true;
+        if (backend === 'webdav') return webdavUrl.trim().length > 0;
+        if (backend === 'file') return Boolean(syncPath);
+        if (provider === 'dropbox') return dropboxConnected || stagedDropboxCredentialsRef.current !== null;
+        return cloudUrl.trim().length > 0 && cloudToken.trim().length > 0;
+    }, [cloudToken, cloudUrl, dropboxConnected, syncPath, webdavUrl]);
+
+    const currentSyncTargetOptions = useCallback((): Omit<SyncActionOptions, 'backend'> => ({
+        cloud: { allowInsecureHttp: cloudAllowInsecureHttp, token: cloudToken, url: cloudUrl },
+        webdav: {
+            allowInsecureHttp: webdavAllowInsecureHttp,
+            password: webdavPassword,
+            url: webdavUrl,
+            username: webdavUsername,
+        },
+    }), [
+        cloudAllowInsecureHttp,
+        cloudToken,
+        cloudUrl,
+        webdavAllowInsecureHttp,
+        webdavPassword,
+        webdavUrl,
+        webdavUsername,
+    ]);
+
     const handleSelectSyncBackend = useCallback((backend: 'off' | 'file' | 'webdav' | 'cloud') => {
         const nextBackend = backend === 'cloud'
             ? (cloudProvider === 'cloudkit' ? 'cloudkit' : 'cloud')
@@ -426,20 +464,48 @@ export function useSyncSettingsTransportActions({
             persistSyncConfigItem(SYNC_BACKEND_KEY, nextBackend, reconcileBackgroundSyncRegistration);
         } else if (nextBackend !== provenSyncBackendRef.current) {
             hasPendingSyncConfiguration.current = true;
+            if (isSyncTargetComplete(nextBackend, cloudProvider)) {
+                void handleSyncRef.current({
+                    ...currentSyncTargetOptions(),
+                    backend: nextBackend,
+                    cloudProvider,
+                });
+            }
         }
-    }, [cloudProvider, resetSyncStatusForBackendSwitch]);
+    }, [
+        cloudProvider,
+        currentSyncTargetOptions,
+        isSyncTargetComplete,
+        resetSyncStatusForBackendSwitch,
+    ]);
 
     const handleSelectCloudProvider = useCallback((provider: CloudProvider) => {
         if (provider === 'cloudkit' && !supportsNativeICloudSync) return;
         if (provider === 'dropbox' && !dropboxConfigured) return;
 
         const nextBackend: SyncBackend = provider === 'cloudkit' ? 'cloudkit' : 'cloud';
-        if (provider !== provenCloudProviderRef.current || nextBackend !== provenSyncBackendRef.current) {
+        const isNewSelection = (
+            provider !== provenCloudProviderRef.current
+            || nextBackend !== provenSyncBackendRef.current
+        );
+        if (isNewSelection) {
             hasPendingSyncConfiguration.current = true;
         }
         setCloudProvider(provider);
         setSyncBackend(nextBackend);
-    }, [dropboxConfigured, supportsNativeICloudSync]);
+        if (isNewSelection && isSyncTargetComplete(nextBackend, provider)) {
+            void handleSyncRef.current({
+                ...currentSyncTargetOptions(),
+                backend: nextBackend,
+                cloudProvider: provider,
+            });
+        }
+    }, [
+        currentSyncTargetOptions,
+        dropboxConfigured,
+        isSyncTargetComplete,
+        supportsNativeICloudSync,
+    ]);
 
     const handleSetSyncPath = useCallback(async () => {
         try {
@@ -469,6 +535,13 @@ export function useSyncSettingsTransportActions({
             hasPendingSyncConfiguration.current = true;
             addBreadcrumb('settings:syncBackend:file');
             setSyncBackend('file');
+            // A picked folder is a complete target: activate the folder just
+            // picked, not the stale one still in state this tick.
+            await handleSyncRef.current({
+                backend: 'file',
+                syncPath: fileUri,
+                syncPathBookmark: fileBookmark,
+            });
         } catch (error) {
             const message = String(error);
             if (/Selected JSON file is not a Mindwtr backup/i.test(message)) {
@@ -623,6 +696,15 @@ export function useSyncSettingsTransportActions({
         setWebdavAllowInsecureHttp(nextSettings.allowInsecureHttp);
         setSyncBackend('webdav');
         hasPendingSyncConfiguration.current = true;
+        await handleSyncRef.current({
+            backend: 'webdav',
+            webdav: {
+                allowInsecureHttp: nextSettings.allowInsecureHttp,
+                password: nextSettings.password,
+                url: trimmedUrl,
+                username: trimmedUsername,
+            },
+        });
     }, [validateSyncHttpUrl]);
 
     const handleSaveSelfHostedSettings = useCallback(async (nextSettings: SelfHostedSyncSettings) => {
@@ -639,6 +721,17 @@ export function useSyncSettingsTransportActions({
         setCloudProvider('selfhosted');
         setSyncBackend('cloud');
         hasPendingSyncConfiguration.current = true;
+        // An empty token passes validation but cannot activate; leave it staged.
+        if (!nextSettings.token.trim()) return;
+        await handleSyncRef.current({
+            backend: 'cloud',
+            cloudProvider: 'selfhosted',
+            cloud: {
+                allowInsecureHttp: nextSettings.allowInsecureHttp,
+                token: nextSettings.token,
+                url: trimmedUrl,
+            },
+        });
     }, [
         validateCloudToken,
         validateSyncHttpUrl,
@@ -727,6 +820,8 @@ export function useSyncSettingsTransportActions({
                 url: cloudUrl,
             };
             const effectiveCloudProvider = options?.cloudProvider ?? cloudProvider;
+            const effectiveSyncPath = options?.syncPath ?? syncPath;
+            const effectiveSyncPathBookmark = options?.syncPathBookmark ?? syncPathBookmark;
             const effectiveWebdav = options?.webdav ?? {
                 allowInsecureHttp: webdavAllowInsecureHttp,
                 password: webdavPassword,
@@ -813,12 +908,14 @@ export function useSyncSettingsTransportActions({
                     setSyncBackend('cloud');
                 }
             } else {
-                if (!syncPath) {
+                if (!effectiveSyncPath) {
                     showSettingsWarning(tr('common.notice'), tr('settings.syncMobile.pleaseSetASyncFolderFirst'));
                     return;
                 }
-                configOverride.syncPath = syncPath;
-                configOverride.syncPathBookmark = syncPathBookmark;
+                configOverride.syncPath = effectiveSyncPath;
+                configOverride.syncPathBookmark = effectiveSyncPathBookmark;
+                setSyncPath(effectiveSyncPath);
+                setSyncPathBookmark(effectiveSyncPathBookmark);
                 setSyncBackend('file');
             }
 
@@ -849,7 +946,7 @@ export function useSyncSettingsTransportActions({
                     }
                 }
                 const probeResult = await performMobileSync(
-                    effectiveBackend === 'file' ? syncPath || undefined : undefined,
+                    effectiveBackend === 'file' ? effectiveSyncPath || undefined : undefined,
                     { activationProbe: true, manual: true, configOverride }
                 );
                 if (probeResult.skipped === 'offline' || isLikelyOfflineSyncError(probeResult.error)) {
@@ -1104,6 +1201,8 @@ export function useSyncSettingsTransportActions({
         webdavUrl,
         webdavUsername,
     ]);
+
+    handleSyncRef.current = handleSync;
 
     const handleConnectDropbox = useCallback(async () => {
         if (isFossBuild) {
