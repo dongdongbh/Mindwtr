@@ -67,6 +67,11 @@ export function SyncLoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                 });
             }
 
+            if (probeResult.skipped === 'requeued') {
+                fail(probeResult.error);
+                return;
+            }
+
             const provenEnough = probeResult.success
                 || classifySyncEncryptionFailure(probeResult.error) === 'remote-encrypted-no-key';
 

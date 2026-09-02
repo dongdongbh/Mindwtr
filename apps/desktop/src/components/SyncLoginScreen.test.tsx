@@ -86,7 +86,7 @@ describe('SyncLoginScreen', () => {
     it('retries a requeued probe up to 3 attempts, then shows an error without committing', async () => {
         const onLoggedIn = vi.fn();
         const performSync = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
-            success: false,
+            success: true,
             skipped: 'requeued',
         });
         const commit = vi.spyOn(SyncService, 'commitProvenSyncConfiguration');
