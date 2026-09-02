@@ -373,7 +373,7 @@ export const syncWebdavAttachments = async (
             if (readResult.readFailed) throw new LocalReadFailure(readResult.error);
             uploadData = readResult.data;
           }
-          const buffer = toArrayBuffer(await sealAttachmentBytesForUpload(uploadData, material));
+          const buffer = toArrayBuffer(await sealAttachmentBytesForUpload(uploadData, material, cloudKey));
           await withRetry(
             async () => {
               await waitForSlot();
@@ -480,6 +480,7 @@ export const syncWebdavAttachments = async (
       const bytes = await openAttachmentBytesFromDownload(
         fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : new Uint8Array(fileData as ArrayBuffer),
         material,
+        cloudKey,
       );
       await validateAttachmentHash(attachment, bytes);
       const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;

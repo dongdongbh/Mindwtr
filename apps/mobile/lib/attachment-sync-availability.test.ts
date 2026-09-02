@@ -74,8 +74,23 @@ vi.mock('./secure-config', () => ({
 }));
 
 // Encryption off: the plaintext path is what every branch below exercises.
-vi.mock('./sync-encryption-state', () => ({
+//
+// Review finding S2: this used to be a two-key object literal that replaced the WHOLE
+// module. `./attachment-sync-backends/common` (imported transitively via
+// `ensureAttachmentAvailable`) grew a `logSyncEncryptionEvent` import for its `remote-read`
+// diagnostic line (fresh-join-attachment-posture packet -10, correction pass) and that import
+// resolved to `undefined` under the old mock, throwing a `TypeError` deep inside the seam that
+// surfaced here as `null`/`undefined` results with no stack trace pointing at the real cause.
+// The `importOriginal` spread (same pattern this file already uses for `@mindwtr/core` below)
+// keeps every export of the real module — so a future import add can never repeat this — and
+// overrides only the two functions this suite actually needs stubbed.
+vi.mock('./sync-encryption-state', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./sync-encryption-state')>()),
   getSyncEncryptionMaterial: vi.fn().mockResolvedValue(null),
+  // The attachment byte seams' `remote-read` diagnostic line rides this emitter on every
+  // call. A no-op stub is enough here — this file exercises transport/hash behavior, not the
+  // diagnostics trail.
+  logSyncEncryptionEvent: vi.fn(),
 }));
 
 vi.mock('expo-constants', () => ({

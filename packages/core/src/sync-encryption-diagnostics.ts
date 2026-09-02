@@ -201,7 +201,11 @@ export type SyncEncryptionRemoteReadKind =
     | 'invalid';
 
 /** `absent` and `plaintext` are the ordinary outcomes; the rest are the ones that precede a
- *  refusal. Every seam that can throw a SyncEncryption*Error emits one of these first. */
+ *  refusal. Every seam that can throw a SyncEncryption*Error emits one of these first.
+ *  `seal` (fresh-join-attachment-posture packet -10) is the one write-direction value: the
+ *  outgoing-attachment-byte seams (`sealAttachmentBytes`) reuse this same event/builder rather
+ *  than inventing a parallel one, since it is still "does this artifact leave the device as
+ *  ciphertext or plaintext, and why" — `kind` on that line then says which. */
 export type SyncEncryptionRemoteReadDecision =
     | 'decrypt'
     | 'no-key'
@@ -209,7 +213,8 @@ export type SyncEncryptionRemoteReadDecision =
     | 'legacy-plaintext'
     | 'version-unavailable'
     | 'plaintext'
-    | 'absent';
+    | 'absent'
+    | 'seal';
 
 /** How safe the backend generation is for a compare-and-swap. */
 export type SyncEncryptionRemoteVersionKind = 'strong' | 'weak' | 'none' | 'n/a';

@@ -15,8 +15,10 @@
 import {
     SYNC_ENCRYPTION_LOG_EVENTS,
     SyncEncryptionRemoteConflictError,
+    buildSyncEncryptionRemoteReadExtra,
     buildSyncEncryptionTransitionExtra,
     syncEncryptionLogMessage,
+    type SyncEncryptionRemoteReadLogInput,
     type SyncEncryptionTransitionLogKind,
     type SyncEncryptionTransitionOutcome,
     acquireSyncRemoteMutationFence,
@@ -98,6 +100,18 @@ const logSyncEncryptionTransition = (
         return;
     }
     void logInfo(message, context);
+};
+
+/** fresh-join-attachment-posture packet -10: the attachment byte seams (`sealAttachmentBytes`,
+ *  `openAttachmentBytes`) get their own `remote-read` line, same builder and event as the
+ *  document-read seams in sync-service.ts — this module cannot import that one (see the file
+ *  banner), so this is a second, deliberately identical emitter. Rides the Debug logging
+ *  switch like `state`/`remote-read` everywhere else — not forced, unlike `transition`/`error`. */
+const logSyncEncryptionRemoteRead = (input: SyncEncryptionRemoteReadLogInput): void => {
+    void logInfo(
+        syncEncryptionLogMessage(SYNC_ENCRYPTION_LOG_EVENTS.remoteRead),
+        { scope: 'sync', extra: buildSyncEncryptionRemoteReadExtra(input) },
+    );
 };
 
 const transitionOutcomeForError = (error: unknown): SyncEncryptionTransitionOutcome => {
@@ -1042,15 +1056,20 @@ export async function runProvidePassphraseOverRemote(
  *  and immutable once uploaded, so renaming would churn every record (pinned decision #1). */
 export async function sealAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array> {
     const material = await getSyncEncryptionMaterial();
-    if (material) return encryptSyncArtifact(bytes, material);
+    if (material) {
+        logSyncEncryptionRemoteRead({ artifact: '', exists: null, kind: 'encrypted', decision: 'seal' });
+        return encryptSyncArtifact(bytes, material);
+    }
     if (await isSyncEncryptionEnabledButLocked()) {
         // S3: `enabled` but no key resolved must fail closed — the old `return bytes`
         // fallback here would silently upload a PLAINTEXT attachment into a folder every
         // other device believes is encrypted.
+        logSyncEncryptionRemoteRead({ artifact: '', exists: null, kind: 'encrypted', decision: 'no-key' });
         throw new SyncEncryptionTerminalError(
             new SyncCryptoUnsupportedError('sync encryption is enabled but no key is available on this device'),
         );
     }
+    logSyncEncryptionRemoteRead({ artifact: '', exists: null, kind: 'plaintext', decision: 'seal' });
     return bytes;
 }
 
@@ -1060,16 +1079,36 @@ export async function sealAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array
 export async function openAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array> {
     const inspected = inspectSyncArtifact(bytes);
     if (inspected.kind === 'unsupported') {
+        logSyncEncryptionRemoteRead({ artifact: '', exists: true, kind: 'unsupported', decision: 'decrypt' });
         throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(inspected.reason));
     }
-    if (inspected.kind === 'plaintext') return bytes;
+    if (inspected.kind === 'plaintext') {
+        logSyncEncryptionRemoteRead({ artifact: '', exists: true, kind: 'plaintext', decision: 'plaintext' });
+        return bytes;
+    }
     const material = await getSyncEncryptionMaterial();
     if (!material) {
+        logSyncEncryptionRemoteRead({
+            artifact: '',
+            exists: true,
+            kind: 'encrypted',
+            headerSalt: inspected.salt,
+            headerKdf: inspected.params,
+            decision: 'no-key',
+        });
         await markRemoteSyncEncryptionDiscovered({ salt: inspected.salt, params: inspected.params });
         throw new SyncEncryptionTerminalError(
             new SyncCryptoUnsupportedError('encrypted attachment: no key on this device'),
         );
     }
+    logSyncEncryptionRemoteRead({
+        artifact: '',
+        exists: true,
+        kind: 'encrypted',
+        headerSalt: inspected.salt,
+        headerKdf: inspected.params,
+        decision: 'decrypt',
+    });
     return decryptRemoteArtifactOrThrow(bytes, material.key, desktopSyncCryptoPrimitives);
 }
 

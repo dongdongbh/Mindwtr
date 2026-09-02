@@ -2,6 +2,7 @@ import {
   applyAttachmentContentStat,
   assertBufferedAttachmentUploadSize,
   AttachmentUploadSizeUnavailableError,
+  buildSyncEncryptionRemoteReadExtra,
   bumpAttachmentContentRevision,
   checkAttachmentContentChange,
   computeSha256Hex,
@@ -12,6 +13,7 @@ import {
   MAX_DOWNLOAD_BYTES,
   ResponseTooLargeError,
   runAttachmentTransferLifecycle,
+  SYNC_ENCRYPTION_LOG_EVENTS,
   SyncCryptoUnsupportedError,
   SyncEncryptionTerminalError,
   WebDavRemoteWriteConflictError,
@@ -19,6 +21,7 @@ import {
   type AttachmentDownloadExpectation,
   type AttachmentTransferLifecycleOptions,
   type AttachmentTransferResult,
+  type SyncEncryptionRemoteReadLogInput,
   type SyncKeyMaterial,
 } from '@mindwtr/core';
 import * as FileSystem from '../file-system';
@@ -41,8 +44,23 @@ import {
 } from '../attachment-sync-utils';
 import { installAttachmentFileGeneration, type AttachmentFileInstallResult } from '../attachment-file-installer';
 import { isExpoGo } from '../expo-go';
+import { logSyncEncryptionEvent } from '../sync-encryption-state';
 import { mobileSyncCryptoPrimitives } from '../sync-crypto-native';
 import { assertMobileWebdavConnection } from '../webdav-request-options';
+
+/**
+ * fresh-join-attachment-posture packet -10 (correction pass): the attachment byte seams
+ * (`sealAttachmentBytesForUpload`, `openAttachmentBytesFromDownload`) get their own
+ * `remote-read` line, same builder/event as the document-read seams in sync-service.ts
+ * (`this.logRemoteRead`) — that method is private to the sync-service class and this module
+ * cannot reach it, so this is a second, deliberately identical call through the same shared
+ * `logSyncEncryptionEvent` emitter (mirrors desktop's `logSyncEncryptionRemoteRead` in
+ * sync-encryption-service.ts, which has the identical constraint for the same reason). Not
+ * forced — rides the Debug logging switch like `state`/`remote-read` everywhere else.
+ */
+const logAttachmentByteRemoteRead = (input: SyncEncryptionRemoteReadLogInput): void => {
+  void logSyncEncryptionEvent(SYNC_ENCRYPTION_LOG_EVENTS.remoteRead, buildSyncEncryptionRemoteReadExtra(input));
+};
 
 /**
  * Attachment bytes at the storage seam (#1056). Local attachment files always stay
@@ -51,13 +69,25 @@ import { assertMobileWebdavConnection } from '../webdav-request-options';
  * change is the byte content.
  *
  * `null` material is the encryption-off path and returns the input untouched.
+ *
+ * `artifact` (review finding S1) is the caller's `cloudKey` — the four backends that call
+ * this hold it — passed straight through to `buildSyncEncryptionRemoteReadExtra`, which
+ * already reduces any string to its leaf name via `syncEncryptionArtifactLabel`. Optional:
+ * a caller with no identity yet (there is none today) still gets a valid line, just with
+ * the absent marker.
  */
 export const sealAttachmentBytesForUpload = async (
   bytes: Uint8Array,
   material: SyncKeyMaterial | null | undefined,
-): Promise<Uint8Array> => (
-  material ? encryptSyncArtifact(bytes, material, mobileSyncCryptoPrimitives) : bytes
-);
+  artifact?: string | null,
+): Promise<Uint8Array> => {
+  if (material) {
+    logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: null, kind: 'encrypted', decision: 'seal' });
+    return encryptSyncArtifact(bytes, material, mobileSyncCryptoPrimitives);
+  }
+  logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: null, kind: 'plaintext', decision: 'seal' });
+  return bytes;
+};
 
 /**
  * Inverse of the above. A remote attachment that is still plaintext is passed through:
@@ -65,17 +95,32 @@ export const sealAttachmentBytesForUpload = async (
  * `validateAttachmentHash` downstream is the backstop for content that is neither. Bytes
  * that DO carry the MWENC1 magic must decrypt or fail closed — a broken container is
  * never quietly treated as file content.
+ *
+ * `artifact`: see `sealAttachmentBytesForUpload` above.
  */
 export const openAttachmentBytesFromDownload = async (
   bytes: Uint8Array,
   material: SyncKeyMaterial | null | undefined,
+  artifact?: string | null,
 ): Promise<Uint8Array> => {
   if (!material) return bytes;
   const inspected = inspectSyncArtifact(bytes);
-  if (inspected.kind === 'plaintext') return bytes;
+  if (inspected.kind === 'plaintext') {
+    logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: true, kind: 'plaintext', decision: 'plaintext' });
+    return bytes;
+  }
   if (inspected.kind === 'unsupported') {
+    logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: true, kind: 'unsupported', decision: 'decrypt' });
     throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(inspected.reason));
   }
+  logAttachmentByteRemoteRead({
+    artifact: artifact ?? '',
+    exists: true,
+    kind: 'encrypted',
+    headerSalt: inspected.salt,
+    headerKdf: inspected.params,
+    decision: 'decrypt',
+  });
   return decryptRemoteArtifactOrThrow(bytes, material.key, mobileSyncCryptoPrimitives);
 };
 

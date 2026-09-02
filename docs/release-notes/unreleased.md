@@ -4,6 +4,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 ## Full Change List
 
+- Sync encryption: a device joining a sync location it had never synced before could upload its own attachment files before reading the location's document, so on a location that already held encrypted data the attachments arrived unencrypted beside it. On WebDAV, Dropbox and (on phones) File Sync, attachment uploads now wait until the device has read the location once and knows whether it is encrypted; from the second sync on, nothing changes. Attachment encryption and decryption also now appear in the encryption diagnostics trail, naming the attachment. (#1138)
+
 - macOS: the 1.2.6 downloads (DMG from GitHub or Homebrew) shipped without the native widget that 1.2.5 announced, so it never appeared in the Mac widget gallery; the release step that packages the DMG rebuilt the app after the widget had been added. The DMG is now built from the finished app, and the release checks that the DMG contains the widget before publishing. The Mac App Store build still has no widget; that is a separate follow-up. (#1054)
 
 - Diagnostics: sync encryption now leaves a structured trail in the debug log on desktop, Android and iOS (state and location at each sync, what each remote read found, the outcome of every enable, change, disable or unlock, and the exact error class behind a failure), with salts shortened, locations digested and no passphrase or key ever written. Settings → Diagnostics on both apps shows the same encryption status block, and a shared log carries it, so an encryption sync problem can be diagnosed from one shared log. (#1138, #1113)

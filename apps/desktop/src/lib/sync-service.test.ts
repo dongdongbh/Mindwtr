@@ -2833,6 +2833,83 @@ describe('SyncService testability hooks', () => {
         expect(__syncServiceTestUtils.isLegacyWebdavPlaintextPostureAllowed(status)).toBe(expected);
     });
 
+    // fresh-join-attachment-posture packet -10: closes #1138 result §8 risk 2. Desktop has no
+    // pre-read no-key gate, so this predicate is the ONLY thing standing between an unresolved
+    // encryption posture and sealAttachmentBytes' plaintext fallback.
+    describe('shouldDeferAttachmentPrepareUntilRead (fresh-join-attachment-posture packet -10)', () => {
+        const base = {
+            backend: 'webdav' as const,
+            cloudProvider: 'selfhosted' as const,
+            encryptionState: 'off' as const,
+            discoveredScopeLabel: undefined,
+            activeScopeLabel: 'webdav#aaaaaaaa',
+            hasCompletedCycleAgainstLocation: false,
+        };
+
+        it.each([
+            ['cloudkit', 'selfhosted'],
+            ['cloud', 'selfhosted'],
+        ] as const)('never defers for a backend encryption cannot apply to (%s/%s)', (backend, cloudProvider) => {
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                ...base,
+                backend,
+                cloudProvider,
+                hasCompletedCycleAgainstLocation: false,
+            })).toBe(false);
+        });
+
+        it.each([
+            ['file', 'selfhosted'],
+            ['webdav', 'selfhosted'],
+            ['cloud', 'dropbox'],
+        ] as const)('defers for a genuinely fresh %s/%s device (no fast-sync record yet)', (backend, cloudProvider) => {
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                ...base,
+                backend,
+                cloudProvider,
+                hasCompletedCycleAgainstLocation: false,
+            })).toBe(true);
+        });
+
+        it('does not defer once a fast-sync cycle has completed against this off-state location', () => {
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                ...base,
+                hasCompletedCycleAgainstLocation: true,
+            })).toBe(false);
+        });
+
+        it('treats an unreadable ("unknown") posture the same as off — fail closed, defer', () => {
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                ...base,
+                encryptionState: 'unknown',
+                hasCompletedCycleAgainstLocation: false,
+            })).toBe(true);
+        });
+
+        it.each([
+            // Keyed states (enabled/remote-plaintext) are ALWAYS established, with no scope
+            // comparison — material present means every write is encrypted from the first
+            // byte. Review packet -10 finding B1: `discoveredScopeLabel` is `undefined` for
+            // every production 'enabled' state (both writers clear it on purpose), so the row
+            // that matters most is the `undefined` one below — it must NOT defer.
+            ['enabled', 'webdav#aaaaaaaa', false],
+            ['enabled', 'webdav#bbbbbbbb', false],
+            ['enabled', undefined, false],
+            ['remote-plaintext', 'webdav#aaaaaaaa', false],
+            ['remote-plaintext', undefined, false],
+            ['remote-encrypted-no-key', 'webdav#aaaaaaaa', false],
+            ['remote-encrypted-no-key', 'webdav#bbbbbbbb', true],
+            ['remote-encrypted-no-key', undefined, true],
+        ] as const)('%s with discoveredScopeLabel %s -> defer=%s', (encryptionState, discoveredScopeLabel, expected) => {
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                ...base,
+                encryptionState,
+                discoveredScopeLabel,
+                hasCompletedCycleAgainstLocation: false,
+            })).toBe(expected);
+        });
+    });
+
     it('rejects an HTML/login response with 200 and a strong ETag during WebDAV setup', async () => {
         const fetchSpy = vi.fn(async () => new Response('<html>Sign in</html>', {
             status: 200,

@@ -851,6 +851,35 @@ export const markAttachmentPresenceReconciled = async (): Promise<void> => {
   }
 };
 
+/**
+ * fresh-join-attachment-posture packet -10 (correction pass, fixed in the final fix pass —
+ * review finding B2): the durable "this device has completed at least one full cycle against
+ * the active location" fact for backends with no `FastSyncState` record — the file backend
+ * above all, since `buildFastSyncScope` returns `null` for it and always will. A presence
+ * stamp is only ever written at the END of a completed attachment pass
+ * (`markAttachmentPresenceReconciled`, called by each backend's own presence loop), so its
+ * existence — for THIS exact scope — proves a full cycle already ran here, which is all the
+ * sync-encryption posture gate needs to stop treating a fresh join as "already known safe".
+ * Scope-exact on purpose: a stamp from a previous location must not vouch for a new one.
+ *
+ * Takes NO scope argument on purpose: it derives the comparison scope itself via
+ * `readAttachmentPresenceScope` (= `readActiveSyncLocationScope`), the exact same derivation
+ * `markAttachmentPresenceReconciled` uses to write the stamp. B2 caught a caller passing
+ * `sync-service.ts`'s `this.locationScope` (built from the RESOLVED file path, e.g. with
+ * `/data.json` appended in memory for an iOS folder bookmark) instead — the two derivations
+ * disagree for that exact configuration, so the stamp compared unequal forever and this gate
+ * never established. Deriving the scope in the one place that also writes it makes the two
+ * sides symmetric by construction; no caller can reintroduce the mismatch.
+ */
+export const hasCompletedAttachmentPresenceReconciliation = async (): Promise<boolean> => {
+  const [scope, stamp] = await Promise.all([
+    readAttachmentPresenceScope(),
+    readAttachmentPresenceStamp(),
+  ]);
+  if (scope === null) return false;
+  return stamp !== null && stamp.scope === scope;
+};
+
 export const hasPendingAttachmentSyncWork = async (
   appData: AppData,
   options: { contentCheckEnabled?: boolean } = {},

@@ -216,7 +216,7 @@ export const syncDropboxAttachments = async (
         const readResult = await readAttachmentBytesForUpload(snapshot.sourcePath);
         if (readResult.readFailed) throw readResult.error;
         const uploadBytes = readResult.data;
-        const wireBytes = await sealAttachmentBytesForUpload(uploadBytes, options.material);
+        const wireBytes = await sealAttachmentBytesForUpload(uploadBytes, options.material, cloudKey);
         const expectedRev = await runDropboxAuthorized(
           dropboxClientId,
           (accessToken) => getDropboxFileMetadata(
@@ -341,6 +341,7 @@ export const syncDropboxAttachments = async (
       const bytes = await openAttachmentBytesFromDownload(
         data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
         options.material,
+        cloudKey,
       );
       await validateAttachmentHash(attachment, bytes);
       const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;

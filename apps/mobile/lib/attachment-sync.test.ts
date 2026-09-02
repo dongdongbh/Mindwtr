@@ -1030,6 +1030,36 @@ describe('attachment sync', () => {
       expect(vi.mocked(core.webdavFileExists)).toHaveBeenCalledTimes(1);
     });
 
+    // fresh-join-attachment-posture packet -10 (correction pass, fixed in the final fix pass —
+    // review finding B2): the durable "seen this location" fact the sync-encryption posture
+    // gate uses for backends (the file backend above all) with no FastSyncState record.
+    // Scope-exact by design. Takes NO scope argument: it derives its own comparison scope via
+    // `readActiveSyncLocationScope`, the same derivation `markAttachmentPresenceReconciled`
+    // writes with — `stubDeviceConfig`'s `CONFIG` map IS that stored device config, so it
+    // always resolves to `scopeFor(WEBDAV_CONFIG.url)` here.
+    describe('hasCompletedAttachmentPresenceReconciliation', () => {
+      it('is false for a genuinely fresh device with no stamp at all', async () => {
+        await stubDeviceConfig(null);
+        await expect(attachmentSync.hasCompletedAttachmentPresenceReconciliation()).resolves.toBe(false);
+      });
+
+      it('is true once a presence pass has completed against this exact location', async () => {
+        await stubDeviceConfig({ scope: scopeFor(WEBDAV_CONFIG.url), at: Date.now() });
+        await expect(attachmentSync.hasCompletedAttachmentPresenceReconciliation()).resolves.toBe(true);
+      });
+
+      it('is false when the stamp belongs to a different location', async () => {
+        await stubDeviceConfig({ scope: scopeFor('https://old.example/data.json'), at: Date.now() });
+        await expect(attachmentSync.hasCompletedAttachmentPresenceReconciliation()).resolves.toBe(false);
+      });
+
+      it('is false when the device config cannot be resolved at all', async () => {
+        const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+        vi.mocked(AsyncStorage.getItem).mockRejectedValue(new Error('storage unavailable'));
+        await expect(attachmentSync.hasCompletedAttachmentPresenceReconciliation()).resolves.toBe(false);
+      });
+    });
+
     it('(e) does not MKCOL the attachments directory for a pass that uploads nothing', async () => {
       const core = await import('@mindwtr/core');
       const { syncWebdavAttachments } = attachmentSync;

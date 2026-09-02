@@ -242,7 +242,7 @@ export const syncFileAttachments = async (
           let downloadedSize: number | null = null;
           if (!expectedStagedHash) {
             const wireBytes = await readAttachmentDownloadStageBytes(stagedPath);
-            const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, options.material);
+            const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, options.material, attachment.cloudKey);
             const plaintextHash = await computeSha256Hex(plaintextBytes);
             if (!plaintextHash) throw new Error('Attachment download hash is unavailable');
             await validateAttachmentHash(attachment, plaintextBytes);
@@ -314,7 +314,7 @@ export const syncFileAttachments = async (
       const verifyPublishedGeneration = async (targetUri: string): Promise<void> => {
         const wireBytes = await readFileAsBytes(targetUri);
         try {
-          const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, material);
+          const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, material, cloudKey);
           const actualHash = await computeSha256Hex(plaintextBytes);
           if (actualHash?.toLowerCase() !== snapshot.fileHash.toLowerCase()) {
             throw new Error('plaintext digest mismatch');
@@ -326,7 +326,7 @@ export const syncFileAttachments = async (
           );
         }
       };
-      const wireBytes = await sealAttachmentBytesForUpload(await readFileAsBytes(localPath), material);
+      const wireBytes = await sealAttachmentBytesForUpload(await readFileAsBytes(localPath), material, cloudKey);
       const wireBase64 = bytesToBase64(wireBytes);
       if (syncDir.type === 'file') {
         const targetUri = `${syncDir.attachmentsDirUri}${filename}`;

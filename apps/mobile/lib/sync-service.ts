@@ -6,7 +6,7 @@ import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
 import { isSyncPathBookmarksAvailable, resolveSyncPathBookmark } from './sync-path-bookmarks';
-import { getBaseSyncUrl, getCloudBaseUrl, syncCloudAttachments, syncCloudKitAttachments, syncDropboxAttachments, syncFileAttachments, syncWebdavAttachments, cleanupAttachmentTempFiles, hasPendingAttachmentSyncWork } from './attachment-sync';
+import { getBaseSyncUrl, getCloudBaseUrl, syncCloudAttachments, syncCloudKitAttachments, syncDropboxAttachments, syncFileAttachments, syncWebdavAttachments, cleanupAttachmentTempFiles, hasCompletedAttachmentPresenceReconciliation, hasPendingAttachmentSyncWork } from './attachment-sync';
 import { runMobileAttachmentCleanup } from './sync-attachment-cleanup';
 import { getExternalCalendars, saveExternalCalendars } from './external-calendar';
 import {
@@ -51,8 +51,8 @@ import {
   flushSyncEncryptionLocalState,
   getMobileSyncEncryptionStatus,
   getSyncEncryptionMaterial,
-  hasUnscopedSyncEncryptionDiscovery,
   isSyncEncryptionBlocked,
+  isSyncEncryptionPostureUnestablished,
   loadSyncEncryptionLocalState,
   logSyncEncryptionEvent,
   SyncEncryptionNoKeyError,
@@ -582,9 +582,11 @@ class MobileSyncRun {
    *  lock set for one backend/folder cannot refuse a sync against another. `null` means the
    *  configuration could not be read, which the block rule treats as doubt. */
   private locationScope: string | null = null;
-  /** #1138: this cycle carries a discovery state from before scopes existed, so it is
-   *  running blind like a fresh join. Nothing may be uploaded until the document read has
-   *  re-established what is actually at this location. */
+  /** #1138 / fresh-join-attachment-posture packet -10: this cycle does not yet know the active
+   *  location's encryption posture — a stale/mismatched discovery, or no persisted encryption
+   *  state at all — so it is running blind like a fresh join. Nothing may be uploaded in the
+   *  attachment prepare phase until the document read has established what is actually at this
+   *  location. See `isSyncEncryptionPostureUnestablished`. */
   private deferUploadsUntilDiscovery = false;
   /** Encryption state as the gate saw it, kept for the `activation` diagnostic line so a
    *  probe reports what the cycle changed rather than only where it ended. */
@@ -1175,6 +1177,16 @@ class MobileSyncRun {
         if (backend === 'cloud') {
           await this.resolveCloudBackendConfig();
         }
+        // Computed once, ahead of the encryption block below (which needs it to answer "has
+        // this device already completed a cycle at this location") and reused for the cycle's
+        // `fastSyncScope` at the bottom of this hook — same config, same pure builder.
+        const fastSyncScope = buildFastSyncScope({
+          backend,
+          webdavConfig: this.webdavConfig,
+          cloudProvider: this.cloudProvider,
+          cloudConfig: this.cloudConfig,
+          dropboxClientId: this.dropboxClientId,
+        });
         // #1056: encryption applies to the three blob backends only. A device that knows
         // the remote is encrypted but holds no key must not sync at all — writing a fresh
         // plaintext document beside the ciphertext is exactly the outcome decision #5
@@ -1229,7 +1241,33 @@ class MobileSyncRun {
             if (!this.manual) return { kind: 'disabled' };
             throw new SyncEncryptionNoKeyError();
           }
-          this.deferUploadsUntilDiscovery = await hasUnscopedSyncEncryptionDiscovery();
+          // fresh-join-attachment-posture packet -10: closes #1138 result §8 risk 2. A fast-sync
+          // record for THIS location's fastSyncScope is the durable "already read this remote
+          // once and found it plaintext/absent" fact for the off-state case. The file backend
+          // has no fastSyncScope (buildFastSyncScope returns null there), so it falls back to
+          // the attachment presence-reconciliation stamp (#1119): that stamp is only ever
+          // written at the END of a completed attachment pass, scoped the same way, so its
+          // presence for THIS location proves a full cycle already ran here — the correction
+          // pass's durable "seen this location" fact for backends with no fast-sync record.
+          // Checked as an additional OR for webdav/dropbox too, so a device that completed a
+          // presence pass without yet writing a fast-sync record (or vice versa) is still
+          // recognized as established either way.
+          //
+          // No scope argument (review finding B2): `hasCompletedAttachmentPresenceReconciliation`
+          // derives its own comparison scope via `readActiveSyncLocationScope`, the SAME
+          // derivation `markAttachmentPresenceReconciled` writes with. `this.locationScope`
+          // below is built from the resolved file path (`buildLocationScope`), which can differ
+          // byte-for-byte from the stored path for an iOS folder bookmark — passing it here
+          // compared two different derivations and never matched.
+          const hasCompletedCycleAgainstLocation = (
+            await hasCompletedAttachmentPresenceReconciliation()
+          ) || (backend !== 'file' && fastSyncScope
+            ? (await readFastSyncState(fastSyncScope)) !== null
+            : false);
+          this.deferUploadsUntilDiscovery = await isSyncEncryptionPostureUnestablished(
+            this.locationScope,
+            hasCompletedCycleAgainstLocation,
+          );
           try {
             this.encryptionMaterial = await getSyncEncryptionMaterial();
           } catch (error) {
@@ -1282,13 +1320,7 @@ class MobileSyncRun {
           backend,
           cloudProvider: this.cloudProvider,
           io: this.createBackendIO(),
-          fastSyncScope: buildFastSyncScope({
-            backend,
-            webdavConfig: this.webdavConfig,
-            cloudProvider: this.cloudProvider,
-            cloudConfig: this.cloudConfig,
-            dropboxClientId: this.dropboxClientId,
-          }),
+          fastSyncScope,
         };
       },
       requestFollowUp: () => this.queueFollowUp(),
@@ -1307,12 +1339,14 @@ class MobileSyncRun {
       },
       shouldRunAttachmentPhase: async (data, phase) => {
         const backend = this.backend;
-        // #1138: this cycle is re-checking a location it holds an unscoped discovery for, and
-        // the pre-sync attachment phase runs BEFORE the document read
-        // (`preSyncAttachmentsBeforeFastCheck`). With no key resolved it would upload
-        // PLAINTEXT attachment bytes beside ciphertext — exactly what decision #5 forbids —
-        // before the read got a chance to discover the folder is still encrypted. Skip the
-        // pre-phase; the post-merge phase runs normally once the read has settled the posture.
+        // #1138 / fresh-join-attachment-posture packet -10: this cycle does not yet know the
+        // active location's encryption posture (a re-check for a stale/mismatched discovery,
+        // or a device with no persisted encryption state at all), and the pre-sync attachment
+        // phase runs BEFORE the document read (`preSyncAttachmentsBeforeFastCheck`). With no
+        // key resolved it would upload PLAINTEXT attachment bytes beside ciphertext — exactly
+        // what decision #5 forbids — before the read got a chance to discover the folder is
+        // still encrypted. Skip the pre-phase; the post-merge phase runs normally once the read
+        // has settled the posture.
         if (phase === 'prepare' && this.deferUploadsUntilDiscovery) {
           logSyncInfo('Attachment pre-sync skipped', { backend, reason: 'encryption-recheck' });
           return false;

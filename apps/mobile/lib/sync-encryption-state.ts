@@ -274,14 +274,36 @@ export const isSyncEncryptionBlocked = async (activeScope: string | null): Promi
     isSyncEncryptionStateBlocked(await loadSyncEncryptionLocalState(), activeScope)
 );
 
-/** True when the persisted state is a discovery this device has not yet bound to a location
- *  (written by 1.2.6 and earlier). Such a cycle runs like a fresh join: it must re-read the
- *  document BEFORE it is allowed to upload anything, or a no-key device would push plaintext
- *  attachments beside ciphertext. See the pre-sync attachment gate in sync-service.ts. */
-export const hasUnscopedSyncEncryptionDiscovery = async (): Promise<boolean> => {
+/** True when this cycle does not yet know whether `activeScope`'s encryption posture matches
+ *  what this device believes — the pre-sync attachment phase runs BEFORE the document read
+ *  (`preSyncAttachmentsBeforeFastCheck`), and with no key resolved it would upload PLAINTEXT
+ *  bytes beside ciphertext before the read gets a chance to find out. Generalizes #1138's
+ *  narrower "unscoped discovery" gate (fresh-join-attachment-posture packet -10, closing §8
+ *  risk 2 of the #1138 result): a genuinely fresh device (no persisted state at all) is exactly
+ *  as blind as an unscoped discovery, so it must defer too.
+ *
+ *  "Posture established" = one of: a keyed state (`enabled`/`remote-plaintext`) — material is
+ *  present, so anything this device writes is encrypted from the first byte, regardless of
+ *  `discoveredScope` (review packet -10 finding B1: `markSyncEncryptionEnabled` never stamps a
+ *  scope — Rust and core both clear it on purpose, "a key proves this device owns the
+ *  generation; the discovery scope described the lock it just left and must not linger" — so
+ *  comparing it against `activeScope` defers an enabled device forever, on every cycle, for the
+ *  life of the install); a `remote-encrypted-no-key` discovery whose scope matches `activeScope`
+ *  (same direction as `isSyncEncryptionBlocked`, widened from #1138's "no scope at all" to
+ *  "wrong scope" too); or no persisted state — the ONLY shape "off" ever takes, `parseLocalState`
+ *  rejects a bare `{state:'off'}` blob — and `hasCompletedCycleAgainstLocation` is true (the
+ *  caller's business: a per-location fast-sync fact this module does not have). Anything else
+ *  defers. */
+export const isSyncEncryptionPostureUnestablished = async (
+    activeScope: string | null,
+    hasCompletedCycleAgainstLocation: boolean,
+): Promise<boolean> => {
     const localState = await loadSyncEncryptionLocalState();
-    if (!localState || localState.discoveredScope) return false;
-    return localState.state === 'remote-encrypted-no-key' || localState.state === 'remote-plaintext';
+    if (!localState) return !hasCompletedCycleAgainstLocation;
+    if (SYNC_ENCRYPTION_KEYED_STATES.includes(localState.state)) return false;
+    // remote-encrypted-no-key (and any other non-keyed state): only established when this
+    // exact location's discovery is on record.
+    return localState.discoveredScope !== activeScope;
 };
 
 /**

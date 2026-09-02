@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Platform } from 'react-native';
 import {
+  buildSyncLocationScope,
   computeStableValueFingerprint,
   computeSyncPayloadFingerprint,
   runDataTransferTransaction,
@@ -12,6 +13,28 @@ import {
 import { __resetSyncEncryptionStateForTests, SyncEncryptionNoKeyError } from './sync-encryption-state';
 import { SYNC_ENCRYPTION_STATE_KEY } from './sync-constants';
 import { WEBDAV_CAPABILITY_PROOF_STORAGE_KEY } from './webdav-capability-proof';
+
+// #1119's stamp key — the same value `markAttachmentPresenceReconciled` writes to in
+// apps/mobile/lib/attachment-sync-utils.ts. Not exported (module-private there), so this is
+// the one place a test needs to know it verbatim.
+const ATTACHMENT_PRESENCE_KEY = '@mindwtr_attachment_presence_reconcile_v1';
+
+/** A `#1119` presence-reconciliation stamp whose scope is computed the SAME way
+ *  `readActiveSyncLocationScope` computes it — from stored config, not the cycle's resolved
+ *  config — so a test can drop it straight into `asyncStorageMocks.getItem`'s stored-values
+ *  map and get a stamp that `hasCompletedAttachmentPresenceReconciliation` (unmocked, see
+ *  `vi.mock('./attachment-sync', ...)`) will actually recognize as established. */
+const presenceStampFor = (values: Record<string, string | null>): string => JSON.stringify({
+  scope: buildSyncLocationScope({
+    backend: values['@mindwtr_sync_backend'] ?? null,
+    syncPath: values['@mindwtr_sync_path'] ?? null,
+    webdavUrl: values['@mindwtr_webdav_url'] ?? null,
+    webdavUsername: values['@mindwtr_webdav_username'] ?? null,
+    cloudProvider: values['@mindwtr_cloud_provider'] ?? null,
+    cloudUrl: values['@mindwtr_cloud_url'] ?? null,
+  }),
+  at: Date.now(),
+});
 
 const emptyData = {
   tasks: [],
@@ -62,6 +85,10 @@ const attachmentSyncMocks = vi.hoisted(() => ({
   syncWebdavAttachments: vi.fn(),
   cleanupAttachmentTempFiles: vi.fn(),
   hasPendingAttachmentSyncWork: vi.fn(),
+  // `hasCompletedAttachmentPresenceReconciliation` is deliberately NOT mocked here (review
+  // finding B2): it runs for real against the mocked AsyncStorage below, so the
+  // stored-config scope derivation it shares with `markAttachmentPresenceReconciled` is
+  // actually exercised instead of stubbed out. See `vi.mock('./attachment-sync', ...)`.
 }));
 
 const externalCalendarMocks = vi.hoisted(() => ({
@@ -182,7 +209,12 @@ vi.mock('./storage-adapter', () => ({
   },
 }));
 
-vi.mock('./attachment-sync', () => ({
+// `hasCompletedAttachmentPresenceReconciliation` is spread from the real module (review
+// finding B2) rather than stubbed: it reads AsyncStorage directly, and AsyncStorage itself
+// is already mocked below, so this exercises the real stored-config scope derivation instead
+// of hiding whether the caller and the writer agree on what "the same location" means.
+vi.mock('./attachment-sync', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./attachment-sync')>()),
   getBaseSyncUrl: attachmentSyncMocks.getBaseSyncUrl,
   getCloudBaseUrl: attachmentSyncMocks.getCloudBaseUrl,
   syncCloudAttachments: attachmentSyncMocks.syncCloudAttachments,
@@ -328,6 +360,14 @@ describe('mobile sync-service runtime', () => {
     attachmentSyncMocks.syncWebdavAttachments.mockResolvedValue(false);
     attachmentSyncMocks.cleanupAttachmentTempFiles.mockResolvedValue(undefined);
     attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(false);
+    // fresh-join-attachment-posture packet -10: `hasCompletedAttachmentPresenceReconciliation`
+    // is unmocked (see `vi.mock('./attachment-sync', ...)`) and reads AsyncStorage for real;
+    // the default `asyncStorageMocks.getItem` map above has no entry for
+    // `ATTACHMENT_PRESENCE_KEY`, so it naturally resolves `null` -> no stamp -> `false`, the
+    // same "unestablished" default the fast-sync mock already carries. Tests that need an
+    // established location write the stamp into the AsyncStorage mock explicitly (see
+    // `presenceStampFor` below), same as production, where the stamp is written only at the
+    // end of a completed attachment pass.
     fileSyncLockMocks.acquireMobileFileSyncLease.mockResolvedValue({ token: 'file-cycle-lease', native: true });
     fileSyncLockMocks.revalidateMobileFileSyncLease.mockResolvedValue(undefined);
     fileSyncLockMocks.releaseMobileFileSyncLease.mockResolvedValue(undefined);
@@ -559,6 +599,158 @@ describe('mobile sync-service runtime', () => {
       expect(extra.discoveredScope).toBe(extra.activeScope);
       expect(JSON.stringify(extra)).not.toContain('sync.example.com');
       expect(JSON.stringify(extra)).not.toContain('user');
+    });
+  });
+
+  // fresh-join-attachment-posture packet -10: closes #1138 result §8 risk 2. Unlike the block
+  // above, this device has NO persisted encryption state at all (fresh install, or `off` and
+  // never checked this exact location) — `hasUnscopedSyncEncryptionDiscovery` did not defer
+  // for it, so it ran the attachment pre-sync phase (BEFORE the document read) with
+  // `encryptionMaterial === null` and would have uploaded PLAINTEXT attachment bytes beside
+  // ciphertext this device cannot read.
+  describe('fresh device with no persisted encryption state (fresh-join-attachment-posture packet -10)', () => {
+    it('uploads no attachments before the read discovers the remote is still encrypted', async () => {
+      // The default beforeEach setup already omits SYNC_ENCRYPTION_STATE_KEY: a genuinely
+      // fresh device, never touched encryption, no fast-sync record for this location either.
+      attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
+      coreMocks.webdavGetJson.mockRejectedValue(
+        new Error('SYNC_ENCRYPTION_REMOTE_ENCRYPTED: the remote is encrypted and this device has no key'),
+      );
+
+      const result = await syncServiceModule.performMobileSync(undefined, { manual: true });
+
+      expect(result.success).toBe(false);
+      expect(coreMocks.webdavGetJson).toHaveBeenCalled();
+      expect(attachmentSyncMocks.syncWebdavAttachments).not.toHaveBeenCalled();
+      expect(coreMocks.webdavPutJson).not.toHaveBeenCalled();
+    });
+
+    it('defers the prepare phase on the first cycle against a plaintext location, then uploads after the read', async () => {
+      attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
+      attachmentSyncMocks.syncWebdavAttachments.mockResolvedValue(false);
+      coreMocks.webdavGetJson.mockResolvedValue(remoteChangedData);
+
+      const result = await syncServiceModule.performMobileSync(undefined, { manual: true });
+
+      expect(result.success).toBe(true);
+      expect(coreMocks.webdavGetJson).toHaveBeenCalled();
+      // Only the post-merge phase ran the attachment check — the prepare phase (before the
+      // read) was skipped outright, not merely "found nothing pending".
+      expect(attachmentSyncMocks.hasPendingAttachmentSyncWork).toHaveBeenCalledTimes(1);
+      expect(attachmentSyncMocks.syncWebdavAttachments).toHaveBeenCalledTimes(1);
+      const skipped = (logMocks.logInfo.mock.calls as unknown as [string, { extra?: Record<string, string> }][])
+        .filter((call) => call[0] === 'Attachment pre-sync skipped');
+      expect(skipped).toHaveLength(1);
+      expect(skipped[0]![1].extra).toMatchObject({ reason: 'encryption-recheck' });
+    });
+
+    // "Enabled device with matching scope -> prepare phase runs unchanged" is covered at the
+    // predicate level in lib/sync-encryption.test.ts ('is established for an enabled device
+    // whose discovery matches this location') — a full runtime cycle for the enabled state
+    // needs a keystore/secure-store mock this file does not otherwise set up, and the only
+    // thing a runtime test would add is proof that `getSyncEncryptionMaterial()` resolves,
+    // which is unrelated to the defer predicate this packet changes.
+
+    // Correction pass: the file backend has no FastSyncState (`buildFastSyncScope` returns
+    // `null` for it), so it is the one backend that fell back to "always established" before
+    // this fix — its fresh-join gap stayed open (see the original result.md §8/§9). The
+    // attachment presence-reconciliation stamp closes it the same way FastSyncState closes it
+    // for webdav/dropbox above.
+    describe('file backend', () => {
+      it('uploads no attachments before the read discovers the remote is still encrypted', async () => {
+        attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
+        storageFileMocks.readSyncFileVersioned.mockRejectedValue(new SyncEncryptionNoKeyError());
+
+        const result = await syncServiceModule.performMobileSync(undefined, {
+          manual: true,
+          configOverride: { backend: 'file', syncPath: 'file:///candidate/data.json' },
+        });
+
+        expect(result.success).toBe(false);
+        expect(storageFileMocks.readSyncFileVersioned).toHaveBeenCalled();
+        expect(attachmentSyncMocks.syncFileAttachments).not.toHaveBeenCalled();
+        expect(storageFileMocks.writeSyncFile).not.toHaveBeenCalled();
+      });
+
+      it('defers the prepare phase on the first cycle against a plaintext location, then uploads after the read', async () => {
+        attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
+        attachmentSyncMocks.syncFileAttachments.mockResolvedValue(false);
+
+        const result = await syncServiceModule.performMobileSync(undefined, {
+          manual: true,
+          configOverride: { backend: 'file', syncPath: 'file:///candidate/data.json' },
+        });
+
+        expect(result.success).toBe(true);
+        // Only the post-merge phase ran the attachment check — the prepare phase (before the
+        // read) was skipped outright, not merely "found nothing pending".
+        expect(attachmentSyncMocks.hasPendingAttachmentSyncWork).toHaveBeenCalledTimes(1);
+        expect(attachmentSyncMocks.syncFileAttachments).toHaveBeenCalledTimes(1);
+        const skipped = (logMocks.logInfo.mock.calls as unknown as [string, { extra?: Record<string, string> }][])
+          .filter((call) => call[0] === 'Attachment pre-sync skipped');
+        expect(skipped).toHaveLength(1);
+        expect(skipped[0]![1].extra).toMatchObject({ reason: 'encryption-recheck' });
+      });
+
+      it('runs the prepare phase as before once a presence-reconciliation pass has completed against this location', async () => {
+        // Review finding B2 fix: `hasCompletedAttachmentPresenceReconciliation` is unmocked
+        // and reads AsyncStorage for real, so the stamp has to actually be written there —
+        // with a scope computed the same way `readActiveSyncLocationScope` computes it —
+        // rather than stubbed to `true` regardless of what it was asked to compare.
+        const fileValues: Record<string, string | null> = {
+          '@mindwtr_sync_backend': 'file',
+          '@mindwtr_sync_path': 'file:///candidate/data.json',
+        };
+        asyncStorageMocks.getItem.mockImplementation(async (key: string) => (
+          key === ATTACHMENT_PRESENCE_KEY ? presenceStampFor(fileValues) : (fileValues[key] ?? null)
+        ));
+        attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
+        attachmentSyncMocks.syncFileAttachments.mockResolvedValue(false);
+
+        const result = await syncServiceModule.performMobileSync(undefined, {
+          manual: true,
+          configOverride: { backend: 'file', syncPath: 'file:///candidate/data.json' },
+        });
+
+        expect(result.success).toBe(true);
+        // Both phases ran the check: prepare (before the read) AND post-merge.
+        expect(attachmentSyncMocks.hasPendingAttachmentSyncWork).toHaveBeenCalledTimes(2);
+        const skipped = (logMocks.logInfo.mock.calls as unknown as [string, { extra?: Record<string, string> }][])
+          .filter((call) => call[0] === 'Attachment pre-sync skipped');
+        expect(skipped).toHaveLength(0);
+      });
+
+      // Review finding B2: the presence stamp is written from STORED config
+      // (`readActiveSyncLocationScope`, reading `@mindwtr_sync_path` as-is), but the cycle's
+      // own `this.locationScope` is built from the RESOLVED config — for an iOS folder
+      // bookmark, `resolveFileBackendConfig` appends `/data.json` in memory and never writes
+      // that back to storage. Before the fix, comparing the stamp against `this.locationScope`
+      // meant that configuration could never establish posture: the stamp held the bare
+      // folder scope forever, the cycle compared it against a scope with `/data.json`
+      // appended, and the two never matched. No configOverride here — this exercises the real
+      // `resolveFileBackendConfig` path (not the config-override shortcut the other tests in
+      // this block use) so the append actually happens.
+      it('establishes posture from the presence stamp even when the resolved cycle path has /data.json appended and storage does not', async () => {
+        const folderValues: Record<string, string | null> = {
+          '@mindwtr_sync_backend': 'file',
+          '@mindwtr_sync_path': 'file:///Documents/MindwtrFolder',
+        };
+        asyncStorageMocks.getItem.mockImplementation(async (key: string) => (
+          key === ATTACHMENT_PRESENCE_KEY ? presenceStampFor(folderValues) : (folderValues[key] ?? null)
+        ));
+        attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
+        attachmentSyncMocks.syncFileAttachments.mockResolvedValue(false);
+
+        const result = await syncServiceModule.performMobileSync(undefined, { manual: true });
+
+        expect(result.success).toBe(true);
+        // Both phases ran the check: prepare (before the read) AND post-merge — proving the
+        // stamp still establishes posture despite the resolved/stored path mismatch.
+        expect(attachmentSyncMocks.hasPendingAttachmentSyncWork).toHaveBeenCalledTimes(2);
+        const skipped = (logMocks.logInfo.mock.calls as unknown as [string, { extra?: Record<string, string> }][])
+          .filter((call) => call[0] === 'Attachment pre-sync skipped');
+        expect(skipped).toHaveLength(0);
+      });
     });
   });
 
@@ -858,7 +1050,14 @@ describe('mobile sync-service runtime', () => {
         password: 'pending-password',
       }),
     );
-    expect(asyncStorageMocks.getItem).not.toHaveBeenCalledWith('@mindwtr_webdav_url');
+    // Review finding B2 fix: `hasCompletedAttachmentPresenceReconciliation` now derives its
+    // own comparison scope via `readActiveSyncLocationScope`, which reads every
+    // location-identity key (including `@mindwtr_webdav_url`) unconditionally — it needs to
+    // know what location THIS device is stored as pointing at, independent of which backend
+    // the probe's session config happens to be. That read never feeds into the actual
+    // request, which the assertions above already prove uses only the session config
+    // (`pending-user`/`pending-password`/`pending.example.com`), so the "no persisted
+    // transport settings are used" contract this test guards still holds.
     expect(asyncStorageMocks.setItem).not.toHaveBeenCalledWith('@mindwtr_sync_backend', 'webdav');
     expect(storageMocks.saveData).not.toHaveBeenCalled();
     expect(externalCalendarMocks.getExternalCalendars).not.toHaveBeenCalled();
@@ -1211,6 +1410,30 @@ describe('mobile sync-service runtime', () => {
         },
       },
     };
+    // fresh-join-attachment-posture packet -10: this location's posture must be established
+    // (a completed fast-sync cycle here already, per an ordinary steady-state device) or the
+    // prepare phase this test exercises defers to after the read instead. Not what this test
+    // is about — that gap has its own coverage above.
+    const establishedScope = computeStableValueFingerprint({
+      backend: 'webdav',
+      url: 'https://sync.example.com/data.json',
+      username: 'user',
+    });
+    asyncStorageMocks.getItem.mockImplementation(async (key: string) => {
+      const values: Record<string, string | null> = {
+        '@mindwtr_sync_backend': 'webdav',
+        '@mindwtr_webdav_url': 'https://sync.example.com/data.json',
+        '@mindwtr_webdav_username': 'user',
+        '@mindwtr_webdav_password': 'pass',
+        '@mindwtr_fast_sync_state_v1': JSON.stringify({
+          scope: establishedScope,
+          localFingerprint: 'established',
+          remoteFingerprint: 'established',
+          checkedAt: '2026-05-07T00:00:00.000Z',
+        }),
+      };
+      return values[key] ?? null;
+    });
     attachmentSyncMocks.syncWebdavAttachments
       .mockResolvedValueOnce(preSyncedData)
       .mockResolvedValue(false);
@@ -1738,6 +1961,29 @@ describe('mobile sync-service runtime', () => {
     const events: string[] = [];
     let attachmentSyncCalls = 0;
 
+    // fresh-join-attachment-posture packet -10: this test is about the pending-upload retry
+    // ordering, not about a fresh device's posture gate — establish this location's fast-sync
+    // record so the prepare phase runs as it always has (see the packet's own coverage above).
+    const establishedScope = computeStableValueFingerprint({
+      backend: 'webdav',
+      url: 'https://sync.example.com/data.json',
+      username: 'user',
+    });
+    asyncStorageMocks.getItem.mockImplementation(async (key: string) => {
+      const values: Record<string, string | null> = {
+        '@mindwtr_sync_backend': 'webdav',
+        '@mindwtr_webdav_url': 'https://sync.example.com/data.json',
+        '@mindwtr_webdav_username': 'user',
+        '@mindwtr_webdav_password': 'pass',
+        '@mindwtr_fast_sync_state_v1': JSON.stringify({
+          scope: establishedScope,
+          localFingerprint: 'established',
+          remoteFingerprint: 'established',
+          checkedAt: '2026-05-07T00:00:00.000Z',
+        }),
+      };
+      return values[key] ?? null;
+    });
     storageMocks.getData.mockResolvedValue(localData);
     coreMocks.webdavGetJson.mockResolvedValue(null);
     coreMocks.webdavPutJson.mockImplementation(async () => {

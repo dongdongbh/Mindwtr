@@ -19,6 +19,7 @@ import {
     buildSyncEncryptionStateExtra,
     formatSyncEncryptionDiagnostics,
     syncEncryptionLogMessage,
+    syncEncryptionScopeLabel,
     type SyncEncryptionStateDecision,
     SyncCryptoUnsupportedError,
     SyncEncryptionRemotePlaintextError,
@@ -76,6 +77,7 @@ import {
     getTranslator,
     resolveI18nText,
     LEGACY_SYNC_FILE_NAME,
+    SYNC_ENCRYPTION_KEYED_STATES,
     SYNC_FILE_NAME,
     SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS,
     type CloudCalendarFeed,
@@ -437,6 +439,48 @@ const isLegacyWebdavPlaintextPostureAllowed = (
     status: Pick<SyncEncryptionStatus, 'state' | 'incompleteTransition'>,
 ): boolean => status.state === 'off' && !status.incompleteTransition;
 
+/** fresh-join-attachment-posture packet -10: closes #1138 result §8 risk 2. Desktop has no
+ *  pre-read no-key gate at all (unlike mobile — see `setupDesktopCycle`'s comment on
+ *  `logCycleState`), so this is the ONLY gate standing between an unresolved encryption
+ *  posture and the attachment prepare phase's `sealAttachmentBytes`, which falls back to
+ *  plaintext when `getSyncEncryptionMaterial()` resolves null
+ *  (apps/desktop/src/lib/sync-encryption-service.ts). Pure so it can be unit tested without a
+ *  full Tauri sync cycle — `setupDesktopCycle` supplies the already-resolved facts.
+ *
+ *  "Posture established" mirrors mobile's `isSyncEncryptionPostureUnestablished`: a keyed
+ *  state (enabled/remote-plaintext) is ALWAYS established, with no scope comparison — material
+ *  is present, so anything this device writes is encrypted from the first byte regardless of
+ *  `discoveredScopeLabel`. Review packet -10 finding B1: `discoveredScopeLabel` is `undefined`
+ *  for every production `enabled` state (the Rust and core writers both clear it on purpose —
+ *  a key proves this device owns the generation, the discovery scope described the lock it
+ *  just left) — comparing it against `activeScopeLabel` deferred an enabled device on every
+ *  cycle, forever. A `remote-encrypted-no-key` discovery is established only when
+ *  `discoveredScopeLabel` matches this location's reduced scope (a mismatched or missing scope
+ *  there is NOT established — that state is blocked from syncing anyway once the scope matches).
+ *  No persisted state at all (the only shape 'off' ever takes) is established only when
+ *  `hasCompletedCycleAgainstLocation` is true — a per-location fast-sync fact the file backend
+ *  has no way to record (`buildFastSyncScope` returns null there), so a plaintext file-backend
+ *  cycle always defers here; see the packet's blocked note. Never gates a backend encryption
+ *  cannot apply to. */
+const shouldDeferAttachmentPrepareUntilRead = (input: {
+    backend: SyncBackend;
+    cloudProvider: CloudProvider;
+    encryptionState: SyncEncryptionStatus['state'] | 'unknown';
+    discoveredScopeLabel: string | null | undefined;
+    activeScopeLabel: string;
+    hasCompletedCycleAgainstLocation: boolean;
+}): boolean => {
+    const encryptionCapableBackend = input.backend === 'file'
+        || input.backend === 'webdav'
+        || (input.backend === 'cloud' && input.cloudProvider === 'dropbox');
+    if (!encryptionCapableBackend) return false;
+    if (input.encryptionState === 'off' || input.encryptionState === 'unknown') {
+        return !input.hasCompletedCycleAgainstLocation;
+    }
+    if (SYNC_ENCRYPTION_KEYED_STATES.includes(input.encryptionState)) return false;
+    return input.discoveredScopeLabel !== input.activeScopeLabel;
+};
+
 const logSyncPayloadTrace = (
     message: string,
     data: AppData | null | undefined,
@@ -797,6 +841,15 @@ type DesktopSyncCycleContext = {
      *  transition). Gates every "no safe backend version" refusal — those protect
      *  encrypted CAS, and a plaintext cycle degrades instead of failing. */
     syncEncryptionOff: boolean;
+    /** fresh-join-attachment-posture packet -10: this cycle does not yet know the active
+     *  location's encryption posture (mismatched/no discovery, or no persisted state at all —
+     *  desktop has no pre-read no-key gate, so unlike mobile this also covers every ordinary
+     *  re-check). The attachment prepare phase runs BEFORE the document read
+     *  (`preSyncAttachmentsBeforeFastCheck`); `sealAttachmentBytes` falls back to plaintext when
+     *  `getSyncEncryptionMaterial()` resolves null, so uploading before the read settles the
+     *  posture is the plaintext-beside-ciphertext outcome decision #5 forbids. See
+     *  `shouldRunAttachmentPhase` below. */
+    deferAttachmentPrepareUntilRead: boolean;
 };
 
 /**
@@ -869,6 +922,7 @@ const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
     fileSyncLeaseToken: null,
     allowLegacyWebdavPlaintext: false,
     syncEncryptionOff: false,
+    deferAttachmentPrepareUntilRead: false,
 });
 
 const createFetchWithAbortForContext = async (context: DesktopSyncCycleContext): Promise<typeof fetch> => {
@@ -2345,12 +2399,32 @@ export class SyncService {
                     ? 'legacy-plaintext'
                     : 'proceed',
         );
+        // Computed once and reused for `fastSyncScope` below: same config, same pure builder.
+        const fastSyncScope = buildFastSyncScope(context);
+        context.deferAttachmentPrepareUntilRead = shouldDeferAttachmentPrepareUntilRead({
+            backend: context.backend,
+            cloudProvider: context.cloudProvider,
+            encryptionState: encryptionPosture?.state ?? 'off',
+            discoveredScopeLabel: encryptionPosture?.discoveredScopeLabel,
+            activeScopeLabel: syncEncryptionScopeLabel(desktopSyncLocationScope(context)),
+            // The file backend has no fastSyncScope (buildFastSyncScope returns null there), so
+            // there is no durable "seen this location" fact to ask for — see the packet's
+            // blocked note (§9). Treating that as "not established" would defer an ordinary
+            // plaintext file-backend cycle's prepare phase FOREVER, not just once; confirmed by
+            // two runtime tests. Until a per-location file-backend fact exists, `off` there
+            // keeps today's behaviour (prepare runs) rather than guessing.
+            hasCompletedCycleAgainstLocation: context.backend === 'file'
+                ? true
+                : fastSyncScope
+                    ? readFastSyncState(fastSyncScope) !== null
+                    : false,
+        });
         return {
             kind: 'ready',
             backend: context.backend,
             cloudProvider: context.cloudProvider,
             io: SyncService.createBackendIO(context),
-            fastSyncScope: buildFastSyncScope(context),
+            fastSyncScope,
         };
     }
 
@@ -3361,7 +3435,20 @@ export class SyncService {
                     },
                     acceptCoveredSnapshot: (expectedData) => SyncService.isCoveredLocalSnapshot(expectedData),
                     cleanupAttachmentTempFiles: () => cleanupAttachmentTempFiles(getAttachmentCleanupDeps()),
-                    shouldRunAttachmentPhase: async (data) => hasAttachmentSyncWork(data),
+                    shouldRunAttachmentPhase: async (data, phase) => {
+                        // fresh-join-attachment-posture packet -10: see the comment on
+                        // `deferAttachmentPrepareUntilRead` in setupDesktopCycle. The post-merge
+                        // phase (`phase !== 'prepare'`) is never gated — by then the document
+                        // read has settled the posture.
+                        if (phase === 'prepare' && context.deferAttachmentPrepareUntilRead) {
+                            logSyncInfo('Attachment pre-sync skipped', {
+                                backend: context.backend,
+                                reason: 'encryption-recheck',
+                            });
+                            return false;
+                        }
+                        return hasAttachmentSyncWork(data);
+                    },
                     runAttachmentCleanup: async (data, cleanupContext) => {
                         cleanupContext.setStep('attachments_cleanup');
                         await yieldToRenderer();
@@ -3493,6 +3580,7 @@ export class SyncService {
 
 export const __syncServiceTestUtils = {
     isLegacyWebdavPlaintextPostureAllowed,
+    shouldDeferAttachmentPrepareUntilRead,
     setDependenciesForTests(overrides: Partial<SyncServiceDependencies>) {
         syncServiceDependencies = {
             ...syncServiceDependencies,

@@ -1246,6 +1246,72 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
         appLog.logWarn.mockClear();
     });
 
+    // fresh-join-attachment-posture packet -10: the attachment byte seams (sealAttachmentBytes,
+    // openAttachmentBytes) now emit their own `remote-read` line, same shape as the document
+    // reads, immediately before anything that can throw SyncEncryptionTerminalError.
+    describe('attachment byte seams', () => {
+        it('precedes a failing attachment decrypt (no key) with a remote-read line', async () => {
+            native.state = {
+                state: 'enabled',
+                key: bytesToBase64(new Uint8Array(32).fill(7)),
+                salt: '00'.repeat(16),
+                kdfParams: { mKib: 19456, t: 2, p: 1 },
+            };
+            clearSyncEncryptionMaterialCache();
+            const sealed = await sealAttachmentBytes(new Uint8Array([1, 2, 3]));
+
+            native.state = { state: 'off' };
+            clearSyncEncryptionMaterialCache();
+            appLog.logInfo.mockClear();
+            appLog.logWarn.mockClear();
+
+            await expect(openAttachmentBytes(sealed)).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+            const trail = capturedTrail();
+            expect(trail).toContain('[sync-encryption] remote-read');
+            expect(trail).toContain('"decision":"no-key"');
+            expect(trail).toContain('"kind":"encrypted"');
+        });
+
+        it('precedes a failing attachment decrypt (unsupported container) with a remote-read line', async () => {
+            const truncated = new Uint8Array(20);
+            truncated.set(new TextEncoder().encode('MWENC1'));
+
+            await expect(openAttachmentBytes(truncated)).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+            const trail = capturedTrail();
+            expect(trail).toContain('[sync-encryption] remote-read');
+            expect(trail).toContain('"kind":"unsupported"');
+        });
+
+        it('logs a remote-read line for an ordinary successful seal and decrypt', async () => {
+            native.state = {
+                state: 'enabled',
+                key: bytesToBase64(new Uint8Array(32).fill(7)),
+                salt: '00'.repeat(16),
+                kdfParams: { mKib: 19456, t: 2, p: 1 },
+            };
+            clearSyncEncryptionMaterialCache();
+
+            const sealed = await sealAttachmentBytes(new Uint8Array([1, 2, 3]));
+            await openAttachmentBytes(sealed);
+
+            const trail = capturedTrail();
+            expect(trail).toContain('"decision":"seal"');
+            expect(trail).toContain('"decision":"decrypt"');
+        });
+
+        it('logs a plaintext seal (encryption off) without upgrading it to a failure line', async () => {
+            const bytes = new Uint8Array([9, 8, 7]);
+
+            expect(await sealAttachmentBytes(bytes)).toBe(bytes);
+
+            const trail = capturedTrail();
+            expect(trail).toContain('"decision":"seal"');
+            expect(trail).toContain('"kind":"plaintext"');
+        });
+    });
+
     it('never puts the passphrase or the derived key into an enable/unlock line', async () => {
         const passphrase = 'correct horse battery staple';
         const store = seedRemote();
