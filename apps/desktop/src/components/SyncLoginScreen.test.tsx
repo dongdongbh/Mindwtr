@@ -1,8 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import { SyncLoginScreen } from './SyncLoginScreen';
 import { LanguageProvider } from '../contexts/language-context';
 import { SyncService } from '../lib/sync-service';
+import { getWebDefaultCloudUrl } from '../lib/web-runtime-config';
+
+vi.mock('../lib/web-runtime-config', () => ({
+    getWebDefaultCloudUrl: vi.fn(),
+}));
 
 const renderScreen = (onLoggedIn: () => void) => render(
     <LanguageProvider><SyncLoginScreen onLoggedIn={onLoggedIn} /></LanguageProvider>,
@@ -15,6 +20,12 @@ const fillAndSubmit = (url: string, token: string) => {
     fireEvent.change(screen.getByLabelText('Access token'), { target: { value: token } });
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 };
+
+beforeEach(() => {
+    // Default: no default URL, so the prefill effect is a no-op unless a
+    // test overrides it.
+    vi.mocked(getWebDefaultCloudUrl).mockResolvedValue('');
+});
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -121,6 +132,31 @@ describe('SyncLoginScreen', () => {
         expect(onLoggedIn).not.toHaveBeenCalled();
     });
 
+    it('treats a pendingRemoteWriteBackoff skip carrying a stale encryption error as a failure', async () => {
+        const onLoggedIn = vi.fn();
+        // success:true and a `SYNC_ENCRYPTION_REMOTE_ENCRYPTED`-shaped `error`,
+        // but the error is `lastSyncError` carried over from persisted settings
+        // (a stale sentinel from an earlier, unrelated sync attempt on this
+        // device) and the backoff skip never talked to the server. Without the
+        // `!success` gate on the encrypted-remote branch, this would have been
+        // wrongly treated as proof and let the login through.
+        const performSync = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
+            success: true,
+            skipped: 'pendingRemoteWriteBackoff',
+            remoteWriteDeferred: true,
+            error: 'SYNC_ENCRYPTION_REMOTE_ENCRYPTED',
+        });
+        const commit = vi.spyOn(SyncService, 'commitProvenSyncConfiguration');
+        renderScreen(onLoggedIn);
+
+        fillAndSubmit('https://cloud.example.com', VALID_TOKEN);
+
+        await waitFor(() => expect(screen.getByText(/Couldn't connect/)).toBeInTheDocument());
+        expect(performSync).toHaveBeenCalledTimes(1);
+        expect(commit).not.toHaveBeenCalled();
+        expect(onLoggedIn).not.toHaveBeenCalled();
+    });
+
     it('treats a busy remote fence as a failure without retrying', async () => {
         const onLoggedIn = vi.fn();
         const performSync = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
@@ -154,5 +190,33 @@ describe('SyncLoginScreen', () => {
         expect(screen.getByText(/Cloud GET failed \(401\): Unauthorized/)).toBeInTheDocument();
         expect(commit).not.toHaveBeenCalled();
         expect(onLoggedIn).not.toHaveBeenCalled();
+    });
+
+    it('prefills the URL field from the runtime-config default and shows both hints', async () => {
+        vi.mocked(getWebDefaultCloudUrl).mockResolvedValue('https://runtime-default.example.com');
+        renderScreen(vi.fn());
+
+        await waitFor(() => expect(screen.getByLabelText('Self-hosted URL')).toHaveValue(
+            'https://runtime-default.example.com',
+        ));
+
+        expect(screen.getByText('Use your self-hosted endpoint URL.')).toBeInTheDocument();
+        expect(screen.getByText(
+            "Mindwtr doesn't use user accounts. Your devices connect to your server with this access token.",
+        )).toBeInTheDocument();
+    });
+
+    it('does not overwrite a URL the user already typed with the runtime-config default', async () => {
+        vi.mocked(getWebDefaultCloudUrl).mockResolvedValue('https://runtime-default.example.com');
+        renderScreen(vi.fn());
+
+        fireEvent.change(screen.getByLabelText('Self-hosted URL'), {
+            target: { value: 'https://user-typed.example.com' },
+        });
+
+        // Give the prefill promise a chance to resolve; the field must stay
+        // as the user typed it.
+        await waitFor(() => expect(getWebDefaultCloudUrl).toHaveBeenCalled());
+        expect(screen.getByLabelText('Self-hosted URL')).toHaveValue('https://user-typed.example.com');
     });
 });

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
     isConnectionAllowed,
     isValidCloudSyncToken,
@@ -7,6 +7,7 @@ import {
 import { useLanguage } from '../contexts/language-context';
 import { SyncService, type DesktopSyncConfigOverride } from '../lib/sync-service';
 import { classifySyncEncryptionFailure } from '../lib/sync-encryption-service';
+import { getWebDefaultCloudUrl } from '../lib/web-runtime-config';
 import { isValidHttpUrl } from './views/settings/sync/sync-page-utils';
 
 const ACTIVATION_PROBE_ATTEMPTS = 3;
@@ -17,6 +18,16 @@ export function SyncLoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     const [token, setToken] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState('');
+
+    useEffect(() => {
+        // Self-hosted web deployments preseed the Cloud URL (#1125): a
+        // prefill of the editor field only, and never over a user's
+        // in-flight edit.
+        void getWebDefaultCloudUrl().then((defaultUrl) => {
+            if (!defaultUrl) return;
+            setUrl((current) => (current ? current : defaultUrl));
+        });
+    }, []);
 
     const fail = (reason?: string) => {
         const trimmedReason = reason?.trim().slice(0, 200);
@@ -76,16 +87,23 @@ export function SyncLoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
             }
 
             // An encrypted remote is transport proof (the read reached a real
-            // Mindwtr document this device has no key for), so it is checked first
-            // and independently of `success`. Everything else must have actually
-            // talked to the server: a deferred remote write or a busy remote fence
-            // returns success:true from local state alone, which proves nothing
+            // Mindwtr document this device has no key for), so it is checked
+            // first, but gated on `!success` (matching Settings below): a
+            // deferred remote write or busy remote fence returns success:true
+            // with `error` carried over from persisted settings' lastSyncError,
+            // which can be a stale encryption-error string from an earlier,
+            // unrelated sync attempt on this device. Without the `!success`
+            // gate that stale string would satisfy this branch even though
+            // the current attempt never talked to the server.
+            // Everything else must have actually talked to the server: a
+            // deferred remote write or a busy remote fence returns
+            // success:true from local state alone, which proves nothing
             // about these credentials.
             // Unlike Settings (useSyncSettings.ts), this screen omits
             // `fileSyncLockDeferred` and the two 'cleanup' exceptions: it only ever
             // activates backend:'cloud' (never WebDAV/File Sync) on a first-time
             // login, so there is no pre-existing fence lease to clean up.
-            const provenEnough = classifySyncEncryptionFailure(probeResult.error) === 'remote-encrypted-no-key'
+            const provenEnough = (!probeResult.success && classifySyncEncryptionFailure(probeResult.error) === 'remote-encrypted-no-key')
                 || (
                     probeResult.success
                     && !probeResult.remoteWriteDeferred
@@ -130,6 +148,7 @@ export function SyncLoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                         autoComplete="username"
                         className="w-full bg-muted p-2 rounded text-sm font-mono border border-border focus:outline-none focus:ring-2 focus:ring-primary"
                     />
+                    <p className="text-xs text-muted-foreground">{t('settings.cloudHint')}</p>
                 </div>
 
                 <div className="space-y-1">
@@ -144,6 +163,7 @@ export function SyncLoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                         autoComplete="current-password"
                         className="w-full bg-muted p-2 rounded text-sm border border-border focus:outline-none focus:ring-2 focus:ring-primary"
                     />
+                    <p className="text-xs text-muted-foreground">{t('settings.cloudTokenHint')}</p>
                 </div>
 
                 {error && (
