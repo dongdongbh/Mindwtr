@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import { QuickAddWindowApp } from './QuickAddWindowApp.tsx';
+import { SyncLoginGate } from './components/SyncLoginGate';
 import './index.css';
 
 import { consoleLogger, setLogger, setStorageAdapter } from '@mindwtr/core';
@@ -221,11 +222,14 @@ async function bootstrap() {
     }
 
     const RootApp = isQuickAddWindow ? QuickAddWindowApp : App;
+    // MINDWTR_REQUIRE_SYNC only ever matters for the browser/PWA main window —
+    // the Tauri desktop app and the quick-add window always bypass the gate.
+    const skipSyncLoginGate = isQuickAddWindow || isTauriRuntime();
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
         <React.StrictMode>
             <LanguageProvider>
-                <RootApp />
+                {skipSyncLoginGate ? <RootApp /> : <SyncLoginGate RootApp={RootApp} />}
             </LanguageProvider>
         </React.StrictMode>,
     );
