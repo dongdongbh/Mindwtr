@@ -634,6 +634,34 @@ describe('useSyncSettings cloud token validation', () => {
         });
     });
 
+    it('activates Dropbox once the connection probe answers after the chip was chosen', async () => {
+        // Off -> Dropbox on a connected account: the probe only runs while
+        // Dropbox is selected, so at chip time dropboxConnected is still false.
+        // The choice must stay armed until the probe flips it (device test).
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockResolvedValue(dropboxConfigurationSnapshot('off'));
+        vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');
+        let resolveProbe: (value: boolean) => void = () => undefined;
+        vi.spyOn(SyncService, 'isDropboxConnected').mockReturnValue(new Promise((resolve) => { resolveProbe = resolve; }));
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('off'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('cloud');
+        });
+        expect(SyncService.performSync).not.toHaveBeenCalled();
+
+        await act(async () => {
+            resolveProbe(true);
+            await Promise.resolve();
+        });
+
+        await waitFor(() => expect(SyncService.performSync).toHaveBeenCalled());
+        expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({
+            activationProbe: true,
+            configOverride: { backend: 'cloud', cloudProvider: 'dropbox' },
+        });
+    });
+
     it('does not activate a backend whose target is still incomplete', async () => {
         const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());

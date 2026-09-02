@@ -2015,6 +2015,13 @@ export const useSyncSettings = ({
     // waits for the user to fill the form and Save.
     useEffect(() => {
         if (activateSelectedBackend.current !== syncBackend) return;
+        if (syncBackend === 'cloud' && cloudProvider === 'dropbox' && !dropboxConnected && !dropboxCredentialHandleRef.current) {
+            // The Dropbox connection probe only runs while Dropbox is selected,
+            // so right after the chip is chosen it has not answered yet. Stay
+            // armed; this effect re-runs when the probe flips dropboxConnected
+            // (device test: Off -> Dropbox never activated, config stayed off).
+            return;
+        }
         activateSelectedBackend.current = null;
         if (syncBackend === 'off' || !isSyncTargetValid) return;
         void logInfo('Sync backend selected; running the verification sync to activate it', {
@@ -2022,7 +2029,7 @@ export const useSyncSettings = ({
             extra: { backend: syncBackend, cloudProvider: syncBackend === 'cloud' ? cloudProvider : undefined },
         });
         void handleSync();
-    }, [cloudProvider, handleSync, isSyncTargetValid, syncBackend]);
+    }, [cloudProvider, dropboxConnected, handleSync, isSyncTargetValid, syncBackend]);
 
     return {
         syncPageProps: {
