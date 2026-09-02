@@ -28,10 +28,13 @@ function SyncEncryptionDiagnostics({ title }: { title: string }) {
 
     if (!lines) return null;
     return (
-        <div data-settings-key="syncEncryptionDiagnostics" className="text-xs text-muted-foreground">
-            <div className="font-medium mb-1">{title}</div>
+        // Folded by default: the block is reference data for a bug report, not
+        // something to read on every visit. The lines are still loaded on mount so
+        // the log stamp above happens whether or not the user unfolds it.
+        <details data-settings-key="syncEncryptionDiagnostics" className="text-xs text-muted-foreground">
+            <summary className="font-medium mb-1 cursor-pointer select-none">{title}</summary>
             <pre className="font-mono whitespace-pre-wrap break-all select-text m-0">{lines.join('\n')}</pre>
-        </div>
+        </details>
     );
 }
 

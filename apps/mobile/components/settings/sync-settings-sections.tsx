@@ -749,6 +749,7 @@ type SyncDiagnosticsCardProps = {
  */
 function SyncEncryptionDiagnosticsBlock({ t, tc }: { t: Translate; tc: ThemeColors }) {
   const [lines, setLines] = React.useState<string[] | null>(null);
+  const [open, setOpen] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -765,21 +766,47 @@ function SyncEncryptionDiagnosticsBlock({ t, tc }: { t: Translate; tc: ThemeColo
   }, []);
 
   if (!lines) return null;
+  // Folded by default (same disclosure shape as the Backup card): the block is
+  // reference data for a bug report, not something to read on every visit. The
+  // lines are still loaded, and the log stamped, on mount regardless.
   return (
-    <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-      <View style={styles.settingInfo}>
-        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncEncryption')}</Text>
-        {lines.map((line) => (
-          <Text
-            key={line}
-            selectable
-            style={[styles.settingDescription, { color: tc.secondaryText, fontFamily: 'monospace' }]}
-          >
-            {line}
-          </Text>
-        ))}
-      </View>
-    </View>
+    <>
+      <TouchableOpacity
+        style={[styles.gtdNavigationRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
+        onPress={() => setOpen((prev) => !prev)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        activeOpacity={0.75}
+        testID="sync-encryption-diagnostics-disclosure"
+      >
+        <View style={styles.settingInfo}>
+          <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncEncryption')}</Text>
+        </View>
+        <Ionicons
+          name={open ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={tc.secondaryText}
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        />
+      </TouchableOpacity>
+      {open && (
+        <View style={styles.settingRow}>
+          <View style={styles.settingInfo}>
+            {lines.map((line) => (
+              <Text
+                key={line}
+                selectable
+                style={[styles.settingDescription, { color: tc.secondaryText, fontFamily: 'monospace' }]}
+              >
+                {line}
+              </Text>
+            ))}
+          </View>
+        </View>
+      )}
+    </>
   );
 }
 
