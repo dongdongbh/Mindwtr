@@ -1222,10 +1222,10 @@ pub fn run() {
         })
         .on_menu_event(|_app, event| match event.id().as_ref() {
             MENU_HELP_DOCS_ID => {
-                let _ = open::that("https://github.com/dongdongbh/Mindwtr#readme");
+                let _ = open::that_detached("https://github.com/dongdongbh/Mindwtr#readme");
             }
             MENU_HELP_ISSUES_ID => {
-                let _ = open::that("https://github.com/dongdongbh/Mindwtr/issues");
+                let _ = open::that_detached("https://github.com/dongdongbh/Mindwtr/issues");
             }
             _ => {}
         });

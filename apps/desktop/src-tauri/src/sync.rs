@@ -2752,7 +2752,11 @@ fn run_dropbox_oauth(
         query.append_pair("state", &state);
     }
 
-    open::that(authorize_url.as_str())
+    // Detached: `open::that` waits for the launched program to exit. With a
+    // handler that stays alive (a browser started for this URL, or a misregistered
+    // default such as a chat app) the callback listener below never ran, the
+    // sign-in page spun on the redirect, and the Connect button stayed dead.
+    open::that_detached(authorize_url.as_str())
         .map_err(|error| format!("Failed to open Dropbox authorization URL: {error}"))?;
 
     let code = wait_for_dropbox_auth_code(&listener, &state)?;

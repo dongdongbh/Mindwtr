@@ -64,6 +64,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 - Android and iOS: opening an attachment that was added on the desktop with "Link to file…" now explains that the link points to a file on another device and names the path, instead of doing nothing; a link the phone cannot open now says so too. Such links keep pointing at the desktop's file and are not uploaded; attach the file instead of linking it to have it synced. (#1001)
 
+- Desktop Dropbox sign-in and external links: the app waited for the program that opened the sign-in page (or a file or link) to exit before it started listening for the sign-in result. When that program stayed open, which happens with a freshly started browser or when another app is registered as the URL handler, clicking Allow on the Dropbox page spun forever, the Connect button stayed greyed out, and only restarting Mindwtr recovered. The app now hands the URL off and returns at once. (device testing)
+
 - Desktop Dropbox sign-in: connecting could fail at once with "Dropbox state validation failed. Please retry from Mindwtr." when the browser replayed an earlier sign-in's callback (for example a reloaded tab from a previous connect) before the new one arrived; a second attempt then worked. Such a callback is now answered and ignored, and Mindwtr keeps waiting for the sign-in it started. (in-app report)
 
 - Settings: the Encryption section now links to the sync encryption guide on desktop and mobile, next to the existing sync setup guide link, so the WebDAV server requirements are one tap away when enabling fails. (#1113)
