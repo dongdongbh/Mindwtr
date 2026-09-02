@@ -3409,8 +3409,14 @@ export class SyncService {
                 resolve(idle);
             };
             const timer = setTimeout(() => finish(false), timeoutMs);
+            // The status listener fires from inside the cycle, before the
+            // orchestrator clears its own in-flight slot in a later microtask;
+            // re-check after yielding so the orchestrator's view is settled.
             const unsubscribe = SyncService.subscribeSyncStatus(() => {
-                if (isIdle()) finish(true);
+                if (settled) return;
+                setTimeout(() => {
+                    if (isIdle()) finish(true);
+                }, 0);
             });
         });
     }

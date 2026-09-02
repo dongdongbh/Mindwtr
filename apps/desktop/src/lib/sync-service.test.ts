@@ -3750,8 +3750,9 @@ describe('SyncService orchestration', () => {
                 queued: false,
             });
         });
-        // The active cycle read the backend once; the probe ran its own cycle after it.
-        expect(backendSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+        // The probe carried its own configOverride, so it never re-read the
+        // persisted backend; the active cycle's single read is all there is.
+        expect(backendSpy).toHaveBeenCalledTimes(1);
     });
 
     it('serializes re-entrant sync calls triggered by sync status listeners', async () => {
