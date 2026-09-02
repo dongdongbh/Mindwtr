@@ -30,6 +30,7 @@ const t = (key: string) => ({
     'common.save': 'Save',
     'nav.calendar': 'Calendar',
     'projects.duplicate': 'Duplicate',
+    'projects.search': 'Search projects',
     'review.markReviewed': 'Mark reviewed',
     'task.convertToReference': 'Convert to Reference',
     'task.convertToSection': 'Convert to Section',
@@ -42,6 +43,8 @@ const t = (key: string) => ({
     'taskEdit.dueDateLabel': 'Due Date',
     'taskEdit.moreOptions': 'More options',
     'taskEdit.noAreaOption': 'No Area',
+    'taskEdit.noProjectOption': 'No Project',
+    'taskEdit.projectLabel': 'Project',
     'taskEdit.reviewDateLabel': 'Review Date',
     'taskEdit.startDateLabel': 'Start Date',
 }[key] ?? key);
@@ -55,6 +58,7 @@ const createMenuProps = (overrides: Partial<ComponentProps<typeof TaskQuickActio
     nativeDateInputLocale: 'en-US',
     contextOptions: [],
     areas: [],
+    projects: [],
     readOnly: false,
     onClose: vi.fn(),
     onDuplicate: vi.fn(),
@@ -330,6 +334,34 @@ describe('TaskQuickActionMenu', () => {
 
         expect(onUpdateTask).not.toHaveBeenCalled();
         expect(props.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('moves the task into a project from the Project panel and drops its section', async () => {
+        const onUpdateTask = vi.fn(async () => ({ success: true as const }));
+        const props = renderMenu({
+            task: { ...task, sectionId: 'section-old' },
+            projects: [{
+                id: 'project-alpha',
+                title: 'Alpha',
+                status: 'active',
+                color: '#2563eb',
+                order: 0,
+                tagIds: [],
+                createdAt: now,
+                updatedAt: now,
+            }],
+            onUpdateTask,
+        });
+
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Project…' }));
+        const panel = screen.getByRole('dialog', { name: 'Project' });
+        expect(within(panel).getByRole('button', { name: 'Save' })).toBeDisabled();
+        fireEvent.click(within(panel).getByRole('button', { name: 'No Project' }));
+        fireEvent.click(screen.getByRole('option', { name: 'Alpha' }));
+        fireEvent.click(within(panel).getByRole('button', { name: 'Save' }));
+
+        await waitFor(() => expect(onUpdateTask).toHaveBeenCalledWith({ projectId: 'project-alpha', sectionId: undefined }));
+        await waitFor(() => expect(props.onClose).toHaveBeenCalled());
     });
 
     it('leaves Enter to the area selector dropdown instead of saving the panel', () => {

@@ -75,3 +75,5 @@ Changes collected after `v1.2.6` and before the next version tag.
 - Android and iOS: entering the wrong sync passphrase in Settings → Sync → "This sync location is encrypted" now shows the error where you are looking. The message was placed after the Unlock and "Not now" buttons, which put it below the bottom of a phone screen, so a wrong passphrase looked exactly like no answer at all. It now appears between the passphrase field and the buttons, in that card and in the enable, change and turn-off forms as well.
 
 - Android and iOS: Settings → Sync now updates "Last sync" after every sync. The timestamp, conflict count and sync history could sit unchanged for hours while syncs were plainly working and tasks were arriving, because a completed cycle's status was dropped on its way into the screen when nothing else in the settings had changed.
+
+- Desktop: the row menu (right-click a task, or the ⋯ button) now has "Project…" so you can move a task into a project, or take it out of one, without opening the editor. Moving a task out of its project also clears its section.
