@@ -46,6 +46,10 @@ afterEach(() => {
   }
 });
 
+// `docker compose config` cold-starts the docker CLI on a CI runner, which can
+// exceed bun's default 5 s per-test timeout (CI run 33590479279 flaked on it).
+const COMPOSE_RENDER_TIMEOUT_MS = 60_000;
+
 describe("Docker Compose cloud authentication", () => {
   it("keeps the mismatched-UID runtime regression in Cloud CI", () => {
     const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
@@ -76,7 +80,7 @@ describe("Docker Compose cloud authentication", () => {
       MINDWTR_CLOUD_CORS_ORIGIN: "http://localhost:5173",
     });
     expect(cloud.user).toBeUndefined();
-  });
+  }, COMPOSE_RENDER_TIMEOUT_MS);
 
   it("mounts file-backed tokens without copying token bytes into rendered config", () => {
     const directory = mkdtempSync(path.join(tmpdir(), "mindwtr-compose-secret-"));
@@ -107,7 +111,7 @@ describe("Docker Compose cloud authentication", () => {
       target: "mindwtr_cloud_tokens",
     });
     expect(config.secrets.mindwtr_cloud_tokens.file).toBe(tokenFile);
-  });
+  }, COMPOSE_RENDER_TIMEOUT_MS);
 
   it("mounts the same file-backed token handoff in the HTTPS stack", () => {
     const directory = mkdtempSync(path.join(tmpdir(), "mindwtr-compose-https-secret-"));
@@ -139,5 +143,5 @@ describe("Docker Compose cloud authentication", () => {
       target: "mindwtr_cloud_tokens",
     });
     expect(config.secrets.mindwtr_cloud_tokens.file).toBe(tokenFile);
-  });
+  }, COMPOSE_RENDER_TIMEOUT_MS);
 });
