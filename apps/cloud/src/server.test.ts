@@ -1588,7 +1588,9 @@ describe('cloud server namespace mode', () => {
             await Promise.all(workers.map((worker) => waitForChildExit(worker, 5_000)));
             rmSync(tempDataDir, { recursive: true, force: true });
         }
-    });
+    // Two spawned server processes on a loaded CI runner need more than bun's
+    // 5 s default (flaked 2026-08-31 and 2026-09-02).
+    }, 20_000);
 
     test('caps new namespace creation when any-token mode is enabled', async () => {
         const tempDataDir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-namespace-test-'));
