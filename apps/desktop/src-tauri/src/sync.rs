@@ -15,6 +15,8 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::TcpListener;
+#[cfg(test)]
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
@@ -1606,12 +1608,16 @@ fn wait_for_dropbox_auth_code(
 
                 let state = params.get("state").cloned().unwrap_or_default();
                 if state != expected_state {
+                    // A callback carrying another attempt's state (a reloaded
+                    // tab from an earlier connect, a stale prefetch) is not this
+                    // flow's answer; reject it and keep waiting for the real one.
+                    log::warn!("Ignoring Dropbox OAuth callback with a mismatched state");
                     let _ = write_oauth_http_response(
                         &mut stream,
                         "400 Bad Request",
                         "Dropbox state validation failed. Please retry from Mindwtr.",
                     );
-                    return Err("Dropbox authorization failed: state mismatch".to_string());
+                    continue;
                 }
 
                 let code = params.get("code").cloned().unwrap_or_default();
@@ -3805,6 +3811,39 @@ mod tests {
             error.contains("Invalid proxy URL"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn dropbox_oauth_callback_ignores_a_mismatched_state_and_keeps_waiting() {
+        use std::io::{Read, Write};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind callback listener");
+        listener.set_nonblocking(true).expect("nonblocking listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let client = std::thread::spawn(move || {
+            let mut answers = Vec::new();
+            for query in [
+                "code=stale-code&state=stale-state",
+                "code=fresh-code&state=fresh-state",
+            ] {
+                let mut stream = TcpStream::connect(addr).expect("connect callback");
+                let request = format!(
+                    "GET {DROPBOX_REDIRECT_PATH}?{query} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+                );
+                stream.write_all(request.as_bytes()).expect("send callback");
+                let mut buffer = [0u8; 1024];
+                let read = stream.read(&mut buffer).unwrap_or(0);
+                answers.push(String::from_utf8_lossy(&buffer[..read]).to_string());
+            }
+            answers
+        });
+
+        let code = wait_for_dropbox_auth_code(&listener, "fresh-state");
+        let answers = client.join().expect("client thread");
+
+        assert_eq!(code, Ok("fresh-code".to_string()));
+        assert!(answers[0].starts_with("HTTP/1.1 400"), "{}", answers[0]);
+        assert!(answers[1].starts_with("HTTP/1.1 200"), "{}", answers[1]);
     }
 
     #[test]
