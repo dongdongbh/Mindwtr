@@ -1528,6 +1528,12 @@ describe('runSharedSyncCycle', () => {
         expect(hooks.requestFollowUp).toHaveBeenCalled();
         expect(harness.persisted.settings.pendingRemoteWriteAt).toBeUndefined();
         expect(harness.diagnostics).toContain('requeued');
+        // Desktop has no diagnostics sink: the requeue must also reach the plain
+        // log with its reason, or a never-converging activation probe is invisible.
+        expect(harness.infos).toContainEqual(expect.objectContaining({
+            message: 'Sync cycle requeued',
+            extra: expect.objectContaining({ reason: 'remote-write-conflict' }),
+        }));
     });
 
     it('records a setup-phase failure against the backend the hook reported, not the pre-setup default', async () => {

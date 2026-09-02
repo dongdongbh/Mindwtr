@@ -953,7 +953,7 @@ class SharedSyncRunMachine {
             if (error instanceof SyncRemoteWriteConflict) {
                 // Another device wrote between readRemote and writeRemote; retry next cycle.
                 this.requestFollowUp();
-                throw new LocalSyncAbort();
+                throw new LocalSyncAbort('remote-write-conflict');
             }
             throw error;
         }
@@ -1700,6 +1700,16 @@ class SharedSyncRunMachine {
             if (!this.options.activationProbe) {
                 await this.persistPreSyncedDataAfterAbort();
             }
+            // Desktop has no onDiagnostic sink, so a requeued cycle used to leave
+            // no trace at all; an activation probe that keeps requeuing (a store
+            // write landing mid-probe on every attempt) then reads as "the switch
+            // never saves" with nothing in the log to say why.
+            this.notifier.logInfo('Sync cycle requeued', {
+                backend: this.backend,
+                step: this.state.step ?? '-',
+                reason: error.reason,
+                activationProbe: String(this.options.activationProbe === true),
+            });
             this.notifier.onDiagnostic?.({
                 event: 'requeued',
                 extra: {

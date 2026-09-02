@@ -4,6 +4,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 ## Full Change List
 
+- Desktop sync setup: verifying a new backend could silently fail to switch when local data changed while the verification ran (an automatic sync or an editor save landing mid-check); the page showed "Mindwtr found new changes while testing this sync setup. Run Sync Now again." and the previous backend stayed active, and if that raced on every attempt the switch never took. The verification now retries itself up to three times before giving up, and every interrupted sync cycle now records its reason in the debug log on desktop as well as on phones. (in-app report)
+
 - Android attachments: on some phones every attachment download failed with "Could not publish attachment generation", which also made a new sync location impossible to verify ("Candidate attachment proof failed for …"). The installer published a downloaded file with a hard link, which some Android storage layouts refuse. When the link is refused, the installer now falls back to an exclusive copy with the same safety guarantees, and the error names the operating-system reason so a report can be diagnosed from the log. (#1139)
 
 - Desktop Settings → Sync: saving a WebDAV or self-hosted cloud configuration now runs the verification sync immediately and activates the backend when it passes, instead of stopping at a "Sync now to verify" note; before, leaving the page after Save dropped the pending switch, so reopening Settings still showed the previous backend (for example Dropbox after switching to WebDAV). The backend control also no longer shows "Off" for a few seconds and then jumps to the real backend when the page opens. (in-app report)

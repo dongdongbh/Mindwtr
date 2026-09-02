@@ -7,6 +7,9 @@ import {
 import { classifySyncEncryptionFailure } from '../../../lib/sync-encryption-service';
 import { useUiStore } from '../../../store/ui-store';
 import { logError, logInfo } from '../../../lib/app-log';
+
+// Activation probes requeue when local data changes mid-probe; retry a few times before giving up.
+const ACTIVATION_PROBE_ATTEMPTS = 3;
 import { markSettingsOpenTrace, measureSettingsOpenStep } from '../../../lib/settings-open-diagnostics';
 import { useLanguage } from '../../../contexts/language-context';
 import { reportSettingsFailure, resolveSettingsFeedback } from './settings-feedback';
@@ -1143,11 +1146,26 @@ export const useSyncSettings = ({
                 if (configOverride.backend === 'webdav' && configOverride.webdav) {
                     await SyncService.testWebDavConnection(configOverride.webdav);
                 }
-                const probeResult = await SyncService.performSync({
+                // A store write landing mid-probe requeues the probe; retrying a
+                // couple of times absorbs the ordinary case (an auto sync or an
+                // editor save racing the verification) instead of dropping the
+                // switch behind an info toast the user reads as "saved".
+                let probeResult = await SyncService.performSync({
                     activationProbe: true,
                     configOverride,
                     manual: true,
                 });
+                for (let attempt = 1; probeResult.skipped === 'requeued' && attempt < ACTIVATION_PROBE_ATTEMPTS; attempt += 1) {
+                    void logInfo('Sync activation probe requeued; retrying', {
+                        scope: 'sync',
+                        extra: { attempt: String(attempt + 1), backend: configOverride.backend },
+                    });
+                    probeResult = await SyncService.performSync({
+                        activationProbe: true,
+                        configOverride,
+                        manual: true,
+                    });
+                }
                 if (probeResult.skipped === 'requeued') {
                     if (configOverride.dropboxCredentialHandle) {
                         await resolveCapturedCredential();

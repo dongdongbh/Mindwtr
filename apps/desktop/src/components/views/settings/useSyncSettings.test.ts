@@ -618,6 +618,12 @@ describe('useSyncSettings cloud token validation', () => {
         ['requeue', { success: true, skipped: 'requeued' as const }],
     ])('preserves the proven backend on %s', async (_label, syncResult) => {
         vi.mocked(SyncService.performSync).mockResolvedValueOnce(syncResult);
+        if (_label === 'requeue') {
+            // The probe retries a requeue twice before giving up; keep requeuing.
+            vi.mocked(SyncService.performSync)
+                .mockResolvedValueOnce(syncResult)
+                .mockResolvedValueOnce(syncResult);
+        }
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
         const showSaved = vi.fn();
@@ -658,6 +664,35 @@ describe('useSyncSettings cloud token validation', () => {
                 expect.anything(),
             );
         }
+    });
+
+    it('retries a requeued activation probe and commits when the retry passes', async () => {
+        // A store write landing mid-probe (an auto sync, an editor save) used to
+        // drop the switch behind a "Run Sync Now again" toast on the first try.
+        vi.mocked(SyncService.performSync)
+            .mockResolvedValueOnce({ success: true, skipped: 'requeued' })
+            .mockResolvedValueOnce({ success: true });
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('cloud');
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        const probeCalls = vi.mocked(SyncService.performSync).mock.calls.filter(([options]) => options?.activationProbe);
+        expect(probeCalls).toHaveLength(2);
+        expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledTimes(1);
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Mindwtr found new changes while testing this sync setup. Run Sync Now again.',
+            'info',
+        );
     });
 
     it('waits without activating when a compatible peer owns the candidate sync location', async () => {
