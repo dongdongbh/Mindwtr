@@ -520,7 +520,9 @@ describe('useSyncSettings cloud token validation', () => {
         // durable, left the page, and found the previous backend still selected.)
         expect(SyncService.setCloudConfig).not.toHaveBeenCalled();
         expect(SyncService.setSyncBackend).not.toHaveBeenCalled();
-        expect(SyncService.performSync).toHaveBeenCalledTimes(1);
+        // First call is the activation probe against the staged configuration;
+        // the regular sync that follows a successful probe is the second.
+        expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({ activationProbe: true });
         expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('Sync now'), 'info');
     });
 
@@ -536,7 +538,7 @@ describe('useSyncSettings cloud token validation', () => {
             await result.current.syncPageProps.onSaveWebDav();
         });
 
-        expect(SyncService.performSync).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({ activationProbe: true });
     });
 
     it('does not let a delayed persisted snapshot overwrite newer editor intent', async () => {
