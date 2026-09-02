@@ -15,6 +15,7 @@ import { clearIdleSyncCycleSnapshot, normalizeRemoteWriteResult, runSharedSyncCy
 import { normalizeAppData } from './sync-normalization';
 import { cloneAppData } from './sync-runtime-utils';
 import { toRemoteSyncDocument } from './sync-document';
+import { toStableSyncJson } from './sync-helpers';
 import type { FastSyncState } from './sync-fast-sync';
 import {
     SyncFileGenerationCorruptError,
@@ -2861,5 +2862,317 @@ describe('attachment pre-sync reconcile short-circuit', () => {
         await run();
 
         expect(capturedLocal!.tasks[0].attachments?.[0].cloudKey).toBe('attachments/a-1.txt');
+    });
+});
+
+describe('local-only upload fast path', () => {
+    /** Backends that can turn a fingerprint into a real conditional write
+     *  (WebDAV strong ETag, Dropbox rev) report it through this port. */
+    const conditionalIo = { adoptRemoteFingerprintForWrite: vi.fn(() => true) };
+
+    // A store write always moves the entity forward (`prepareStoreStateUpdate`
+    // bumps `rev` and stamps `updatedAt`), which is what makes the local
+    // document dominate the remote copy the fast path never reads.
+    const editedTask = (id: string, title: string, rev = 4, updatedAt = '2026-07-12T10:00:00.000Z'): Task => ({
+        ...createTask(id, title),
+        rev,
+        revBy: 'this-device',
+        updatedAt,
+    } as Task);
+
+    /** Local document a real store produces: an edit, an uncompacted purged
+     *  tombstone, and an entity stamped in the future by a skewed clock. */
+    const messyLocal = (title: string, rev?: number, updatedAt?: string): AppData => createData([
+        editedTask('t-local', title, rev, updatedAt),
+        {
+            ...createTask('t-purged', 'Deleted and purged'),
+            deletedAt: '2026-06-01T00:00:00.000Z',
+            purgedAt: '2026-06-02T00:00:00.000Z',
+            description: 'body that compaction has to strip',
+        } as Task,
+        { ...createTask('t-skewed', 'Stamped in the future'), updatedAt: '2099-01-01T00:00:00.000Z' } as Task,
+    ]);
+
+    /** One settled cycle, then a purely local edit. */
+    const settleThenEditLocally = async (bundle: ReturnType<typeof createHarness>, title: string) => {
+        await bundle.run();
+        bundle.harness.persisted = cloneAppData(messyLocal(title, 5, '2026-07-13T09:30:00.000Z'));
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        bundle.harness.lastDataChangeAt += 1;
+    };
+
+    beforeEach(() => {
+        conditionalIo.adoptRemoteFingerprintForWrite.mockClear();
+        conditionalIo.adoptRemoteFingerprintForWrite.mockReturnValue(true);
+    });
+
+    it('uploads without reading the remote document', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-upload',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+        vi.mocked(bundle.io.writeRemote).mockClear();
+
+        const result = await bundle.run();
+
+        expect(result.success).toBe(true);
+        expect(result.skipped).toBeUndefined();
+        expect(bundle.io.readRemote).not.toHaveBeenCalled();
+        expect(bundle.io.writeRemote).toHaveBeenCalledTimes(1);
+        expect(bundle.harness.remote?.tasks.find((task) => task.id === 't-local')?.title)
+            .toBe('Edited only here');
+        expect(bundle.harness.infos.some((info) => (
+            info.message === 'Sync uploading a local-only change without a remote read'
+        ))).toBe(true);
+    });
+
+    it('writes the same remote bytes a full cycle would have written', async () => {
+        const fast = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-bytes',
+            io: conditionalIo,
+        });
+        // Identical harness minus the conditional-write capability: it reads the
+        // remote and runs the two-sided merge.
+        const full = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-full-bytes',
+        });
+        await settleThenEditLocally(fast, 'Edited only here');
+        await settleThenEditLocally(full, 'Edited only here');
+        vi.mocked(fast.io.readRemote).mockClear();
+        vi.mocked(full.io.readRemote).mockClear();
+
+        await fast.run();
+        await full.run();
+
+        expect(fast.io.readRemote).not.toHaveBeenCalled();
+        expect(full.io.readRemote).toHaveBeenCalled();
+        expect(toStableSyncJson(toRemoteSyncDocument(fast.harness.remote!)))
+            .toBe(toStableSyncJson(toRemoteSyncDocument(full.harness.remote!)));
+        // Discriminating: the uploaded document really went through the merge
+        // normalizer (fields the fixture never sets are materialized, the
+        // purged tombstone lost its body), so this is not two unprocessed
+        // copies of the same input compared against each other.
+        const uploaded = fast.harness.remote!;
+        expect(uploaded.tasks.find((task) => task.id === 't-local')?.suppressMindwtrReminders).toBe(false);
+        const purged = uploaded.tasks.find((task) => task.id === 't-purged');
+        expect(purged?.description).toBeUndefined();
+        expect(purged?.title).toBeUndefined();
+    });
+
+    it('reads the remote when the backend cannot make the write conditional', async () => {
+        // Weak ETag, no ETag at all, legacy-plaintext WebDAV: the backend
+        // refuses to adopt the fingerprint and the cycle runs in full.
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-weak',
+            io: { adoptRemoteFingerprintForWrite: vi.fn(() => false) },
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when the backend exposes no fingerprint at all', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-nofp',
+            io: { ...conditionalIo, readRemoteFingerprint: undefined },
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when there is no recorded fast-sync state', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-norecord',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        bundle.harness.fastStates.clear();
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when the remote fingerprint moved', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-moved',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        // Another device wrote: the harness fingerprint is derived from the
+        // remote's task ids, so an added task moves it.
+        bundle.harness.remote = createData([
+            ...bundle.harness.remote!.tasks,
+            createTask('t-remote', 'Arrived from another device'),
+        ]);
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+        expect(bundle.harness.persisted.tasks.map((task) => task.id)).toContain('t-remote');
+    });
+
+    it('reads the remote while a pending remote-write marker is on disk', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-pending',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        const withMarker = (data: AppData): AppData => ({
+            ...data,
+            settings: { ...data.settings, pendingRemoteWriteAt: '2026-07-13T09:00:00.000Z' },
+        });
+        bundle.harness.persisted = withMarker(bundle.harness.persisted);
+        bundle.harness.inMemory = withMarker(bundle.harness.inMemory);
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when an attachment upload is still pending', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-attachment',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        const withPendingUpload = (data: AppData): AppData => ({
+            ...data,
+            tasks: data.tasks.map((task, index) => (index === 0
+                ? {
+                    ...task,
+                    attachments: [{
+                        id: 'a-1',
+                        kind: 'file' as const,
+                        title: 'file.txt',
+                        uri: 'file:///local/file.txt',
+                        localStatus: 'available' as const,
+                        pendingContentUpload: true,
+                        createdAt: STAMP,
+                        updatedAt: STAMP,
+                    }],
+                }
+                : task)),
+        });
+        bundle.harness.persisted = withPendingUpload(bundle.harness.persisted);
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when the attachment pre-sync patched the local document', async () => {
+        // The pre-sync phase runs before this check on both platforms. Its
+        // patches (cloudKey, localStatus) are not "a local-document-only
+        // change", so the cycle reads.
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-presync',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: {
+                ...conditionalIo,
+                // Prepare only: a post-merge mutation would mark the fast-sync
+                // state unsafe and this scenario would stop discriminating.
+                syncAttachments: vi.fn(async (data: AppData, attachmentHelpers) => (
+                    attachmentHelpers.phase === 'prepare'
+                        ? {
+                            ...data,
+                            tasks: data.tasks.map((task, index) => (
+                                index === 0 ? { ...task, title: 'Patched by the attachment pass' } : task
+                            )),
+                        }
+                        : null
+                )),
+            },
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when the transport says the remote needs repair', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-repair',
+            io: { ...conditionalIo, requiresRemoteRepair: () => true },
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote on a manual sync', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-manual',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run({ manual: true });
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('falls back to a full cycle when the conditional write loses the swap', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-precondition',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        // The peer that won the swap; the write rejects on the stale precondition.
+        const peerRemote = createData([
+            ...bundle.harness.remote!.tasks,
+            createTask('t-remote', 'Arrived from another device'),
+        ]);
+        vi.mocked(bundle.io.writeRemote).mockImplementationOnce(async () => {
+            bundle.harness.remote = cloneAppData(peerRemote);
+            throw new SyncRemoteWriteConflict();
+        });
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        const conflicted = await bundle.run();
+
+        expect(conflicted).toMatchObject({ success: true, skipped: 'requeued' });
+        expect(bundle.io.readRemote).not.toHaveBeenCalled();
+        expect(bundle.hooks.requestFollowUp).toHaveBeenCalled();
+
+        // The requeued cycle sees a moved fingerprint, reads, and merges.
+        const followUp = await bundle.run();
+
+        expect(followUp.success).toBe(true);
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+        expect(bundle.harness.persisted.tasks.map((task) => task.id)).toContain('t-remote');
     });
 });

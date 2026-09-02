@@ -113,6 +113,14 @@ export interface SyncBackendIO {
      *  write fingerprint and the `readRemoteFingerprint` fallback when the
      *  machine records fast-sync state. */
     getCachedRemoteFingerprint?(): string | null;
+    /** Adopt a fingerprint this cycle just read from the remote as the
+     *  compare-and-swap precondition for the cycle's write, so a cycle whose
+     *  only change is local can skip the document read entirely. Returns false
+     *  when the backend cannot turn that fingerprint into a real precondition
+     *  (weak validator, no conditional-write primitive, legacy plaintext
+     *  compatibility mode) — the machine then runs an ordinary full cycle.
+     *  Omit on backends that never support it; the fast path stays off. */
+    adoptRemoteFingerprintForWrite?(fingerprint: string): boolean;
     /** One mutating attachment pass against this backend (upload pending
      *  files, resolve missing downloads). The same operation serves the
      *  prepare, finalize, and post-merge phases. Return the mutated data,

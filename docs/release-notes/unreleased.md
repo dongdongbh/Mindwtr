@@ -4,6 +4,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 ## Full Change List
 
+- WebDAV and Dropbox sync: a sync whose only changes are local no longer downloads, decrypts and merges the remote document first. When the remote's version tag still matches the one recorded after the last sync, the device normalizes its own document and uploads it with a conditional write; if another device wrote in between, the write is refused and a full sync runs instead. On a 7,000-task library this removes about three quarters of the processing and the whole download from the most common kind of sync. Servers that do not enforce conditional writes, weak version tags, File Sync, iCloud and self-hosted Mindwtr Cloud keep the full cycle. (#1001)
+
 - Sync encryption: a device joining a sync location it had never synced before could upload its own attachment files before reading the location's document, so on a location that already held encrypted data the attachments arrived unencrypted beside it. On WebDAV, Dropbox and File Sync, attachment uploads now wait until the device has read the location once and knows whether it is encrypted; from the second sync on, nothing changes. Attachment encryption and decryption also now appear in the encryption diagnostics trail, naming the attachment. (#1138)
 
 - macOS: the 1.2.6 downloads (DMG from GitHub or Homebrew) shipped without the native widget that 1.2.5 announced, so it never appeared in the Mac widget gallery; the release step that packages the DMG rebuilt the app after the widget had been added. The DMG is now built from the finished app, and the release checks that the DMG contains the widget before publishing. The Mac App Store build still has no widget; that is a separate follow-up. (#1054)
