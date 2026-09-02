@@ -231,6 +231,21 @@ describe('useSyncSettings cloud token validation', () => {
         requestConfirmation,
     }));
 
+    /**
+     * Pick a backend while its target is still incomplete. The hook activates a
+     * chosen backend on its own as soon as the target is complete, so tests that
+     * exercise "staged configuration, then Sync now" select the backend first and
+     * fill the fields afterwards; field edits never auto-activate.
+     */
+    const stageBackend = async (
+        result: ReturnType<typeof setup>['result'],
+        backend: SyncBackend,
+    ) => {
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend(backend);
+        });
+    };
+
     it('uses localized copy for desktop backup completion', async () => {
         languageMocks.t.mockImplementation((key: string) => `localized:${key}`);
         const showToast = vi.fn();
@@ -352,12 +367,34 @@ describe('useSyncSettings cloud token validation', () => {
 
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        // An empty WebDAV URL has nothing to verify, so Save keeps the notice.
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('webdav');
+        });
+        await act(async () => {
+            await result.current.syncPageProps.onSaveWebDav();
+        });
+
+        expect(showToast).toHaveBeenCalledWith('Paramètres prêts à vérifier.', 'info');
+        expect(SyncService.performSync).not.toHaveBeenCalled();
+    });
+
+    it('runs the verification sync when a File Sync folder is saved', async () => {
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('file');
+        });
         act(() => result.current.syncPageProps.onSyncPathChange('/sync'));
+        expect(SyncService.performSync).not.toHaveBeenCalled();
         await act(async () => {
             await result.current.syncPageProps.onSaveSyncPath();
         });
 
-        expect(showToast).toHaveBeenCalledWith('Paramètres prêts à vérifier.', 'info');
+        expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({
+            activationProbe: true,
+            configOverride: { backend: 'file', syncPath: '/sync' },
+        });
     });
 
     it('tests the selected sync folder without saving it', async () => {
@@ -568,6 +605,46 @@ describe('useSyncSettings cloud token validation', () => {
         expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({ activationProbe: true });
     });
 
+    it('runs the verification sync when a connected Dropbox account is chosen from the backend control', async () => {
+        // dd's WebDAV -> Dropbox switch: the chip only staged the choice, and
+        // the footer's Sync ran on WebDAV; leaving the page lost the choice.
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockResolvedValue({
+            ...dropboxConfigurationSnapshot('off'),
+            backend: 'webdav',
+            webdav: { ...dropboxConfigurationSnapshot('off').webdav, url: 'https://dav.example.com/dav', username: 'dd', hasPassword: true },
+        });
+        vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');
+        vi.spyOn(SyncService, 'isDropboxConnected').mockResolvedValue(true);
+        // The account dd connected in this session. The durable-connection probe
+        // only runs while Dropbox is the selected transport, so on a WebDAV page
+        // this session handle is what makes the Dropbox target complete.
+        SyncService.rememberPendingDropboxCredentialHandleForSession('opaque-candidate-handle');
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('webdav'));
+        await waitFor(() => expect(result.current.syncPageProps.dropboxConnected).toBe(true));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('cloud');
+        });
+
+        await waitFor(() => expect(SyncService.performSync).toHaveBeenCalled());
+        expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({
+            activationProbe: true,
+            configOverride: { backend: 'cloud', cloudProvider: 'dropbox' },
+        });
+    });
+
+    it('does not activate a backend whose target is still incomplete', async () => {
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('webdav');
+        });
+
+        expect(SyncService.performSync).not.toHaveBeenCalled();
+    });
+
     it('does not let a delayed persisted snapshot overwrite newer editor intent', async () => {
         let resolveSnapshot!: (value: Awaited<ReturnType<
             typeof SyncService.getPersistedSyncConfigurationSnapshot
@@ -657,8 +734,8 @@ describe('useSyncSettings cloud token validation', () => {
         const { result } = setup(showSaved);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -704,8 +781,8 @@ describe('useSyncSettings cloud token validation', () => {
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -733,8 +810,8 @@ describe('useSyncSettings cloud token validation', () => {
         });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -762,8 +839,8 @@ describe('useSyncSettings cloud token validation', () => {
         });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'file');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('file');
             result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
         });
 
@@ -788,8 +865,8 @@ describe('useSyncSettings cloud token validation', () => {
         });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'file');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('file');
             result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
         });
 
@@ -812,8 +889,8 @@ describe('useSyncSettings cloud token validation', () => {
             .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'cleanup' });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'file');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('file');
             result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
         });
 
@@ -842,8 +919,8 @@ describe('useSyncSettings cloud token validation', () => {
         });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -873,8 +950,8 @@ describe('useSyncSettings cloud token validation', () => {
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
+        await stageBackend(result, 'webdav');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('webdav');
             result.current.syncPageProps.onWebdavUrlChange('https://dav.example.com/mindwtr/');
             result.current.syncPageProps.onWebdavUsernameChange('alice');
             result.current.syncPageProps.onWebdavPasswordChange('secret');
@@ -963,8 +1040,8 @@ describe('useSyncSettings cloud token validation', () => {
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -989,8 +1066,8 @@ describe('useSyncSettings cloud token validation', () => {
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -1032,8 +1109,8 @@ describe('useSyncSettings cloud token validation', () => {
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
         const validToken = 'a'.repeat(24);
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange(validToken);
         });
@@ -1087,22 +1164,21 @@ describe('useSyncSettings cloud token validation', () => {
             expect(result.current.syncPageProps.cloudProvider).toBe('dropbox');
             expect(result.current.syncPageProps.dropboxConnected).toBe(true);
         });
+        // Choosing the connected Dropbox account activates it, and that
+        // automatic verification sync is the probe this race gates.
         await act(async () => {
             await result.current.syncPageProps.onSetSyncBackend('cloud');
         });
-
-        let syncPromise!: Promise<void>;
-        act(() => {
-            syncPromise = result.current.syncPageProps.onSyncNow();
-        });
         await waitFor(() => expect(SyncService.performSync).toHaveBeenCalledTimes(1));
+
         await act(async () => {
             await result.current.syncPageProps.onSetSyncBackend('off');
         });
         await act(async () => {
             releaseProbe();
-            await syncPromise;
         });
+        await waitFor(() => expect(SyncService.discardDropboxCredentials)
+            .toHaveBeenCalledWith('opaque-candidate-handle'));
 
         expect(SyncService.setSyncBackend).toHaveBeenCalledWith('off');
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
@@ -1125,8 +1201,8 @@ describe('useSyncSettings cloud token validation', () => {
         const showSaved = vi.fn();
         const { result } = setup(showSaved);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -1162,8 +1238,8 @@ describe('useSyncSettings cloud token validation', () => {
         const showSaved = vi.fn();
         const { result } = setup(showSaved);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -1173,8 +1249,8 @@ describe('useSyncSettings cloud token validation', () => {
             firstSync = result.current.syncPageProps.onSyncNow();
         });
         await waitFor(() => expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledTimes(1));
-        await act(async () => {
-            await result.current.syncPageProps.onSetSyncBackend('webdav');
+        await stageBackend(result, 'webdav');
+        act(() => {
             result.current.syncPageProps.onWebdavUrlChange('https://dav.example.com');
         });
         await act(async () => {

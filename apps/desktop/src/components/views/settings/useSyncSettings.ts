@@ -172,6 +172,12 @@ export const useSyncSettings = ({
     const [cloudProvider, setCloudProvider] = useState<CloudProvider>(lastKnownSelection.cloudProvider ?? 'selfhosted');
     const [persistedCloudProvider, setPersistedCloudProvider] = useState<CloudProvider>(lastKnownSelection.cloudProvider ?? 'selfhosted');
     const hasPendingSyncConfiguration = useRef(false);
+    // Backend chosen from the control whose target may already be complete
+    // (connected Dropbox, saved WebDAV); activated after the page re-renders.
+    const activateSelectedBackend = useRef<SyncBackend | null>(null);
+    // Save handlers are declared before `handleSync`; this ref lets them run the
+    // activation-aware sync without reordering the hook.
+    const handleSyncRef = useRef<() => Promise<void>>(async () => undefined);
     const syncConfigurationGeneration = useRef(0);
     const dropboxOperationGeneration = useRef(0);
     const [calendarFeedUrl, setCalendarFeedUrl] = useState<string | null>(null);
@@ -543,8 +549,10 @@ export const useSyncSettings = ({
         hasPendingSyncConfiguration.current = true;
         setSyncPath(syncPath.trim());
         setSyncError(null);
-        showToast(resolveText('settings.sync.readyToVerify', 'Settings ready. Sync now to verify and save them.'), 'info');
-    }, [advanceSyncConfigurationGeneration, resolveText, showToast, syncPath]);
+        // Same as WebDAV: saving activates through the verification sync.
+        void logInfo('File Sync folder saved; running the verification sync to activate it', { scope: 'sync' });
+        await handleSyncRef.current();
+    }, [advanceSyncConfigurationGeneration, syncPath]);
 
     const handleTestSyncPath = useCallback(async () => {
         const path = syncPath.trim();
@@ -584,9 +592,11 @@ export const useSyncSettings = ({
             if (selected && typeof selected === 'string') {
                 advanceSyncConfigurationGeneration();
                 hasPendingSyncConfiguration.current = true;
+                // A chosen folder is a complete target; the activation effect
+                // runs the verification sync once the page holds the new path.
+                activateSelectedBackend.current = 'file';
                 setSyncPath(selected);
                 setSyncError(null);
-                showToast(resolveText('settings.sync.readyToVerify', 'Settings ready. Sync now to verify and save them.'), 'info');
             }
         } catch (error) {
             setSyncError(resolveText('settings.feedback.actionFailed', "Couldn't complete this action. Try again."));
@@ -660,6 +670,7 @@ export const useSyncSettings = ({
         if (backend !== 'off') {
             if (backend !== persistedSyncBackend) {
                 hasPendingSyncConfiguration.current = true;
+                activateSelectedBackend.current = backend;
             }
             setSyncBackend(backend);
             setSyncError(null);
@@ -687,10 +698,6 @@ export const useSyncSettings = ({
         resolveText,
         showSaved,
     ]);
-
-    // Save handlers are declared before `handleSync`; this ref lets them run the
-    // activation-aware sync without reordering the hook.
-    const handleSyncRef = useRef<() => Promise<void>>(async () => undefined);
 
     const handleSaveWebDav = useCallback(async () => {
         const trimmedUrl = webdavUrl.trim();
@@ -818,6 +825,7 @@ export const useSyncSettings = ({
         }
         if (provider !== persistedCloudProvider) {
             hasPendingSyncConfiguration.current = true;
+            activateSelectedBackend.current = 'cloud';
         }
         setCloudProvider(provider);
         if (provider !== 'dropbox') {
@@ -857,8 +865,11 @@ export const useSyncSettings = ({
             setDropboxConnected(true);
             setDropboxTestState('idle');
             hasPendingSyncConfiguration.current = true;
+            // The verification sync proves the new credential and commits the
+            // switch; before, it waited for a manual Sync now that users
+            // skipped, and leaving the page discarded the credential.
+            activateSelectedBackend.current = 'cloud';
             setSyncError(null);
-            showToast(resolveText('settings.sync.readyToVerify', 'Settings ready. Sync now to verify and save them.'), 'info');
         } catch (error) {
             if (syncConfigurationGeneration.current !== connectGeneration) return;
             const message = resolveText('settings.syncMobile.connectionFailed', 'Connection failed');
@@ -1996,6 +2007,22 @@ export const useSyncSettings = ({
                             ? !!cloudUrl.trim() && !cloudUrlError && cloudConnectionAllowed
                             : dropboxConfigured && !!dropboxAppKey.trim() && dropboxConnected)
                         : false;
+
+    // Choosing a backend whose target is already complete (a connected Dropbox
+    // account, a saved WebDAV or cloud server, a chosen folder) activates it
+    // through the verification sync, the same as Save. Before, the choice only
+    // stayed in the page and was lost on leaving it. An incomplete target
+    // waits for the user to fill the form and Save.
+    useEffect(() => {
+        if (activateSelectedBackend.current !== syncBackend) return;
+        activateSelectedBackend.current = null;
+        if (syncBackend === 'off' || !isSyncTargetValid) return;
+        void logInfo('Sync backend selected; running the verification sync to activate it', {
+            scope: 'sync',
+            extra: { backend: syncBackend, cloudProvider: syncBackend === 'cloud' ? cloudProvider : undefined },
+        });
+        void handleSync();
+    }, [cloudProvider, handleSync, isSyncTargetValid, syncBackend]);
 
     return {
         syncPageProps: {
