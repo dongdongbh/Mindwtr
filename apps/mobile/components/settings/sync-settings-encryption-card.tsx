@@ -398,6 +398,23 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
         </TouchableOpacity>
     );
 
+    // Rendered next to the fields it is about, not at the end of the card. Appended after
+    // the action rows it landed below the fold on a phone — a wrong passphrase then looked
+    // exactly like no answer at all, which is what the Dropbox device test saw.
+    const errorBlock = errorMessage
+        ? (
+            <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                <Text
+                    accessibilityLiveRegion="assertive"
+                    accessibilityRole="alert"
+                    style={[styles.settingDescription, { color: tc.danger }]}
+                >
+                    {errorMessage}
+                </Text>
+            </View>
+        )
+        : null;
+
     const renderRevealToggle = () => (
         <TouchableOpacity
             accessibilityRole="switch"
@@ -451,6 +468,7 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                                     </View>
                                     {renderPassphraseInput(t('settings.syncEncryptionPassphrase'), nextPassphrase, setNextPassphrase)}
                                     {renderPassphraseInput(t('settings.syncEncryptionPassphraseConfirm'), confirmPassphrase, setConfirmPassphrase)}
+                                    {errorBlock}
                                     {renderRevealToggle()}
                                     {renderAction(t('settings.syncEncryptionGenerate'), generate)}
                                     {generated && (
@@ -496,6 +514,7 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                                 {renderPassphraseInput(t('settings.syncEncryptionCurrentPassphrase'), currentPassphrase, setCurrentPassphrase)}
                                 {renderPassphraseInput(t('settings.syncEncryptionNewPassphrase'), nextPassphrase, setNextPassphrase)}
                                 {renderPassphraseInput(t('settings.syncEncryptionPassphraseConfirm'), confirmPassphrase, setConfirmPassphrase)}
+                                {errorBlock}
                                 {renderRevealToggle()}
                                 {renderAction(t('settings.syncEncryptionGenerate'), generate)}
                                 {generated && (
@@ -522,6 +541,7 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                                             : 'settings.syncEncryptionDisableWarning')}
                                     </Text>
                                 </View>
+                                {errorBlock}
                                 {renderAction(t('settings.syncEncryptionDisable'), submitDisable)}
                                 {renderAction(t('common.cancel'), closeFlow)}
                             </>
@@ -550,6 +570,7 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                             : (
                                 <>
                                     {renderPassphraseInput(t('settings.syncEncryptionPassphrase'), currentPassphrase, setCurrentPassphrase)}
+                                    {errorBlock}
                                     {renderRevealToggle()}
                                     {renderAction(t('settings.syncEncryptionUnlock'), submitUnlock, !currentPassphrase)}
                                     {renderAction(t('settings.syncEncryptionDecline'), decline)}
@@ -572,17 +593,9 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                         </Text>
                     </View>
                 )}
-                {errorMessage && (
-                    <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                        <Text
-                            accessibilityLiveRegion="assertive"
-                            accessibilityRole="alert"
-                            style={[styles.settingDescription, { color: tc.danger }]}
-                        >
-                            {errorMessage}
-                        </Text>
-                    </View>
-                )}
+                {/* Errors raised outside a flow (an incomplete transition found by the
+                    status read) have no field to sit next to. */}
+                {flow === 'none' && errorBlock}
             </View>
         </>
     );
