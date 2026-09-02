@@ -34,6 +34,7 @@ const coreMock = vi.hoisted(() => ({
 }));
 
 const syncServiceMock = vi.hoisted(() => ({
+  abortMobileSync: vi.fn(),
   getMobileSyncConfigurationStatus: vi.fn(),
   performMobileSync: vi.fn(),
 }));
@@ -203,6 +204,50 @@ describe('mobile background sync task', () => {
 
     expect(result).toBe(backgroundTaskMock.BackgroundTaskResult.Failed);
     expect(storageAdapterMock.quiesceMobileStorage).toHaveBeenCalledTimes(2);
+  });
+
+  it('abandons a sync that outlives the job deadline so the job returns before JobScheduler kills it', async () => {
+    vi.useFakeTimers();
+    try {
+      syncServiceMock.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'webdav', configured: true });
+      syncServiceMock.performMobileSync.mockImplementation(() => new Promise(() => undefined));
+
+      const module = await loadModule();
+      const executor = taskManagerMock.state.executor;
+      if (!executor) throw new Error('Expected the background sync task to be defined');
+
+      const run = executor();
+      await vi.advanceTimersByTimeAsync(module.MOBILE_BACKGROUND_SYNC_DEADLINE_MS - 1);
+      expect(syncServiceMock.abortMobileSync).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(await run).toBe(backgroundTaskMock.BackgroundTaskResult.Failed);
+      expect(syncServiceMock.abortMobileSync).toHaveBeenCalledTimes(1);
+      expect(storageAdapterMock.quiesceMobileStorage).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let a hung storage quiesce hold the job open either', async () => {
+    vi.useFakeTimers();
+    try {
+      syncServiceMock.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'webdav', configured: true });
+      syncServiceMock.performMobileSync.mockResolvedValue({ success: true });
+      storageAdapterMock.quiesceMobileStorage.mockImplementation(() => new Promise(() => undefined));
+
+      const module = await loadModule();
+      const executor = taskManagerMock.state.executor;
+      if (!executor) throw new Error('Expected the background sync task to be defined');
+
+      const run = executor();
+      await vi.advanceTimersByTimeAsync(module.MOBILE_BACKGROUND_SYNC_QUIESCE_DEADLINE_MS);
+
+      expect(await run).toBe(backgroundTaskMock.BackgroundTaskResult.Success);
+      expect(syncServiceMock.abortMobileSync).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('coalesces overlapping invocations into one run without latching', async () => {

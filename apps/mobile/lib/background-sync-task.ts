@@ -6,7 +6,7 @@ import { flushPendingSave } from '@mindwtr/core';
 import type { SyncBackend } from './sync-service-utils';
 import { logInfo, logWarn } from './app-log';
 import { quiesceMobileStorage } from './storage-adapter';
-import { getMobileSyncConfigurationStatus, performMobileSync } from './sync-service';
+import { abortMobileSync, getMobileSyncConfigurationStatus, performMobileSync } from './sync-service';
 import {
   BACKGROUND_SYNC_INTERVAL_KEY,
   BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY,
@@ -17,6 +17,14 @@ export type { BackgroundSyncInterval };
 
 export const MOBILE_BACKGROUND_SYNC_TASK_NAME = 'mindwtr-background-sync';
 export const MOBILE_BACKGROUND_SYNC_MINIMUM_INTERVAL_MINUTES = 15;
+// JobScheduler stops a WorkManager job that is still running after its
+// allowance (10 minutes normally, 20 in the ACTIVE standby bucket), counts a
+// "timeout" against the app, and defers the next run by about 40 minutes. On
+// device the job held a wakelock for the whole allowance whenever the sync did
+// not settle (#1001). The run is abandoned well inside that allowance instead,
+// so the job always returns and the wakelock is released.
+export const MOBILE_BACKGROUND_SYNC_DEADLINE_MS = 4 * 60 * 1000;
+export const MOBILE_BACKGROUND_SYNC_QUIESCE_DEADLINE_MS = 20 * 1000;
 
 type MobileBackgroundSyncRegistrationAction = 'registered' | 'unregistered' | 'unchanged';
 
@@ -119,30 +127,60 @@ const clearLastRegisteredBackgroundSyncInterval = async (): Promise<void> => {
   }
 };
 
+const withDeadline = <T>(work: Promise<T>, deadlineMs: number, onDeadline: () => T): Promise<T> => (
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(onDeadline()), deadlineMs);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  })
+);
+
+const performBackgroundSyncWork = async (): Promise<BackgroundTask.BackgroundTaskResult> => {
+  const { backend, configured } = await getMobileSyncConfigurationStatus();
+  if (!configured || !supportsMobileScheduledBackgroundSync(backend)) {
+    return BackgroundTask.BackgroundTaskResult.Success;
+  }
+
+  await flushPendingSave().catch((error) => {
+    logBackgroundSyncWarning('Mobile background sync save flush failed', error);
+  });
+  const result = await performMobileSync();
+  if (result.success) {
+    return BackgroundTask.BackgroundTaskResult.Success;
+  }
+
+  logBackgroundSyncWarning('Mobile background sync failed', result.error);
+  return BackgroundTask.BackgroundTaskResult.Failed;
+};
+
 const runMobileBackgroundSync = async (): Promise<BackgroundTask.BackgroundTaskResult> => {
   try {
-    const { backend, configured } = await getMobileSyncConfigurationStatus();
-    if (!configured || !supportsMobileScheduledBackgroundSync(backend)) {
-      return BackgroundTask.BackgroundTaskResult.Success;
-    }
-
-    await flushPendingSave().catch((error) => {
-      logBackgroundSyncWarning('Mobile background sync save flush failed', error);
+    return await withDeadline(performBackgroundSyncWork(), MOBILE_BACKGROUND_SYNC_DEADLINE_MS, () => {
+      abortMobileSync();
+      void logWarn('Mobile background sync did not finish before its deadline and was abandoned', {
+        scope: 'sync',
+        extra: { deadlineMs: String(MOBILE_BACKGROUND_SYNC_DEADLINE_MS) },
+      });
+      return BackgroundTask.BackgroundTaskResult.Failed;
     });
-    const result = await performMobileSync();
-    if (result.success) {
-      return BackgroundTask.BackgroundTaskResult.Success;
-    }
-
-    logBackgroundSyncWarning('Mobile background sync failed', result.error);
-    return BackgroundTask.BackgroundTaskResult.Failed;
   } catch (error) {
     logBackgroundSyncWarning('Mobile background sync crashed', error);
     return BackgroundTask.BackgroundTaskResult.Failed;
   } finally {
     // This runs in a headless RN instance that is destroyed the moment the task
     // promise settles; deferred storage work must land before that, not after.
-    await quiesceMobileStorage();
+    // It gets its own short deadline for the same reason as the sync above.
+    await withDeadline(quiesceMobileStorage(), MOBILE_BACKGROUND_SYNC_QUIESCE_DEADLINE_MS, () => {
+      logBackgroundSyncWarning('Mobile background sync storage quiesce did not finish before its deadline');
+    });
   }
 };
 
