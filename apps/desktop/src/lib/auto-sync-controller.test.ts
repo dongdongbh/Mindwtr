@@ -516,6 +516,44 @@ describe('createDesktopAutoSyncController', () => {
         controller.dispose();
     });
 
+    it('names the encryption state that suppressed an automatic run', async () => {
+        // The Dropbox device test logged "the remote is encrypted and unreadable" for a
+        // device that was itself the encrypted side of a remote that had gone plaintext.
+        const cases = [
+            ['remote-plaintext', 'Auto sync suppressed while this device is encrypted and the remote is not'],
+            ['remote-encrypted-no-key', 'Auto sync suppressed while the remote is encrypted and unreadable'],
+        ] as const;
+
+        for (const [state, message] of cases) {
+            const logInfo = vi.fn();
+            const performSync = vi.fn(async () => ({ success: true }));
+            const controller = createDesktopAutoSyncController({
+                canSync: async () => true,
+                syncEncryptionSuspension: async () => state,
+                performSync,
+                flushPendingSave: async () => undefined,
+                reportError: vi.fn(),
+                isRuntimeActive: () => true,
+                minIntervalMs: 0,
+                periodicSyncIntervalMs: null,
+                logInfo,
+            });
+
+            controller.handleBlur();
+            await waitForAssertion(() => {
+                expect(logInfo).toHaveBeenCalledWith(message, { source: 'blur', state });
+            });
+            expect(performSync).not.toHaveBeenCalled();
+
+            // A manual run still goes through: it is how the user finds out.
+            await controller.requestSync();
+            await waitForAssertion(() => {
+                expect(performSync).toHaveBeenCalledTimes(1);
+            });
+            controller.dispose();
+        }
+    });
+
     it('cleans up the periodic heartbeat timer on dispose', async () => {
         const scheduler = createManualScheduler();
 
