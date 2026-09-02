@@ -1053,43 +1053,54 @@ export async function runProvidePassphraseOverRemote(
 // ---------------------------------------------------------------------------
 
 /** Attachments keep their exact remote name with encrypted bytes: `cloudKey` is identity-keyed
- *  and immutable once uploaded, so renaming would churn every record (pinned decision #1). */
-export async function sealAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array> {
+ *  and immutable once uploaded, so renaming would churn every record (pinned decision #1).
+ *
+ *  `artifact` is the caller's `cloudKey` (or, for the file backend's generation verification,
+ *  the target path) — the byte-seam `remote-read` line used to say `absent` for every
+ *  attachment in the trail, so a log full of seals named nothing. Passed straight to
+ *  `buildSyncEncryptionRemoteReadExtra`, which reduces any string to its leaf name via
+ *  `syncEncryptionArtifactLabel`. Optional: a caller with no identity yet still gets a valid
+ *  line, just with the absent marker. Mirrors mobile's `sealAttachmentBytesForUpload`. */
+export async function sealAttachmentBytes(bytes: Uint8Array, artifact?: string | null): Promise<Uint8Array> {
+    const label = artifact ?? '';
     const material = await getSyncEncryptionMaterial();
     if (material) {
-        logSyncEncryptionRemoteRead({ artifact: '', exists: null, kind: 'encrypted', decision: 'seal' });
+        logSyncEncryptionRemoteRead({ artifact: label, exists: null, kind: 'encrypted', decision: 'seal' });
         return encryptSyncArtifact(bytes, material);
     }
     if (await isSyncEncryptionEnabledButLocked()) {
         // S3: `enabled` but no key resolved must fail closed — the old `return bytes`
         // fallback here would silently upload a PLAINTEXT attachment into a folder every
         // other device believes is encrypted.
-        logSyncEncryptionRemoteRead({ artifact: '', exists: null, kind: 'encrypted', decision: 'no-key' });
+        logSyncEncryptionRemoteRead({ artifact: label, exists: null, kind: 'encrypted', decision: 'no-key' });
         throw new SyncEncryptionTerminalError(
             new SyncCryptoUnsupportedError('sync encryption is enabled but no key is available on this device'),
         );
     }
-    logSyncEncryptionRemoteRead({ artifact: '', exists: null, kind: 'plaintext', decision: 'seal' });
+    logSyncEncryptionRemoteRead({ artifact: label, exists: null, kind: 'plaintext', decision: 'seal' });
     return bytes;
 }
 
 /** Plaintext bytes pass straight through: during (and after an interrupted) transition a
  *  remote legitimately holds both generations, and a peer on an older app version can still
- *  upload plaintext. Ciphertext with no key is terminal — never "corrupt, re-upload". */
-export async function openAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array> {
+ *  upload plaintext. Ciphertext with no key is terminal — never "corrupt, re-upload".
+ *
+ *  `artifact`: see `sealAttachmentBytes` above. */
+export async function openAttachmentBytes(bytes: Uint8Array, artifact?: string | null): Promise<Uint8Array> {
+    const label = artifact ?? '';
     const inspected = inspectSyncArtifact(bytes);
     if (inspected.kind === 'unsupported') {
-        logSyncEncryptionRemoteRead({ artifact: '', exists: true, kind: 'unsupported', decision: 'decrypt' });
+        logSyncEncryptionRemoteRead({ artifact: label, exists: true, kind: 'unsupported', decision: 'decrypt' });
         throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(inspected.reason));
     }
     if (inspected.kind === 'plaintext') {
-        logSyncEncryptionRemoteRead({ artifact: '', exists: true, kind: 'plaintext', decision: 'plaintext' });
+        logSyncEncryptionRemoteRead({ artifact: label, exists: true, kind: 'plaintext', decision: 'plaintext' });
         return bytes;
     }
     const material = await getSyncEncryptionMaterial();
     if (!material) {
         logSyncEncryptionRemoteRead({
-            artifact: '',
+            artifact: label,
             exists: true,
             kind: 'encrypted',
             headerSalt: inspected.salt,
@@ -1102,7 +1113,7 @@ export async function openAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array
         );
     }
     logSyncEncryptionRemoteRead({
-        artifact: '',
+        artifact: label,
         exists: true,
         kind: 'encrypted',
         headerSalt: inspected.salt,

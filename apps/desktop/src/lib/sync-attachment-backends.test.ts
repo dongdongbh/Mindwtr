@@ -7,6 +7,12 @@ import {
 } from '@mindwtr/core';
 
 import {
+    clearAttachmentPresenceStamp,
+    hasCompletedAttachmentPresenceReconciliation,
+    isAttachmentPresenceReconciliationDue,
+    markAttachmentPresenceReconciled,
+} from './attachment-presence-scope';
+import {
     clearAttachmentSyncState,
     syncCloudAttachments,
     syncCloudKitAttachments,
@@ -843,33 +849,62 @@ describe('desktop sync attachment backends', () => {
         const rateLimitError = Object.assign(new Error('WebDAV MKCOL failed (503)'), { status: 503 });
         const logSyncInfo = vi.fn();
         const logSyncWarning = vi.fn();
+        const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => new Response(null, { status: 200 }));
         const deps: AttachmentBackendDeps = {
-            getTauriFetch: vi.fn(async () => undefined),
+            getTauriFetch: async () => fetcher as unknown as typeof fetch,
             isTauriRuntimeEnv: () => true,
             logSyncInfo,
             logSyncWarning,
             resolveWebdavPassword: vi.fn(async () => 'secret'),
         };
-        const appData: AppData = {
-            tasks: [],
+        // #1119 follow-up: the MKCOL now runs lazily from `onUpload`, so reaching it needs an
+        // attachment that actually wants uploading. An empty document issues no request at all.
+        const uploadableData = (): AppData => ({
+            tasks: [
+                {
+                    id: 'task-1',
+                    title: 'Task',
+                    status: 'next',
+                    tags: [],
+                    contexts: [],
+                    attachments: [
+                        {
+                            id: 'attachment-1',
+                            kind: 'file',
+                            title: 'file.txt',
+                            uri: '/app-data/mindwtr/attachments/file.txt',
+                            createdAt: '2026-06-12T00:00:00.000Z',
+                            updatedAt: '2026-06-12T00:00:00.000Z',
+                        },
+                    ],
+                    createdAt: '2026-06-12T00:00:00.000Z',
+                    updatedAt: '2026-06-12T00:00:00.000Z',
+                },
+            ],
             projects: [],
             sections: [],
             areas: [],
             settings: {},
-        };
+        });
+        fsMocks.exists.mockResolvedValue(true);
+        fsMocks.readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
         coreMocks.webdavMakeDirectory.mockRejectedValueOnce(rateLimitError);
 
+        const cloudKeyAfter = (result: AppData | null): string | undefined => (
+            result === null ? undefined : result.tasks[0].attachments?.[0]?.cloudKey
+        );
+        const rateLimitedRun = await syncWebdavAttachments(
+            uploadableData(),
+            { url: 'https://dav.example/mindwtr', username: 'alice' },
+            'https://dav.example/mindwtr',
+            deps,
+        );
+        // The MKCOL 503 aborts the upload, so no cloud key is recorded (the pass may still
+        // return a document for unrelated local bookkeeping).
+        expect(cloudKeyAfter(rateLimitedRun)).toBeUndefined();
         await expect(
             syncWebdavAttachments(
-                appData,
-                { url: 'https://dav.example/mindwtr', username: 'alice' },
-                'https://dav.example/mindwtr',
-                deps,
-            ),
-        ).resolves.toBeNull();
-        await expect(
-            syncWebdavAttachments(
-                appData,
+                uploadableData(),
                 { url: 'https://dav.example/mindwtr', username: 'alice' },
                 'https://dav.example/mindwtr',
                 deps,
@@ -886,19 +921,23 @@ describe('desktop sync attachment backends', () => {
             { remainingMs: '60000' },
         );
 
+        // Real timers for the recovery run: it reaches a genuine upload, whose per-request
+        // throttle sleeps, and the fake clock (June) is already behind the real one, so the
+        // cooldown deadline is long past either way.
         vi.advanceTimersByTime(60_000);
+        vi.useRealTimers();
         coreMocks.webdavMakeDirectory.mockResolvedValueOnce(undefined);
 
-        await expect(
-            syncWebdavAttachments(
-                appData,
-                { url: 'https://dav.example/mindwtr', username: 'alice' },
-                'https://dav.example/mindwtr',
-                deps,
-            ),
-        ).resolves.toBeNull();
+        const recovered = await syncWebdavAttachments(
+            uploadableData(),
+            { url: 'https://dav.example/mindwtr', username: 'alice' },
+            'https://dav.example/mindwtr',
+            deps,
+        );
 
         expect(coreMocks.webdavMakeDirectory).toHaveBeenCalledTimes(2);
+        expect(recovered).not.toBeNull();
+        expect((recovered as AppData).tasks[0].attachments?.[0]?.cloudKey).toBeTruthy();
     });
 
     it('caps WebDAV uploads per sync run and logs once when the limit is reached', async () => {
@@ -2011,6 +2050,142 @@ describe('desktop sync attachment backends', () => {
             expect(result.settings.attachments?.pendingRemoteDeletes).toEqual([]);
             expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
             expect(appData.settings.attachments?.pendingRemoteDeletes).toHaveLength(1);
+        });
+    });
+
+    // #1119 follow-up (audit F3), desktop port of mobile commit 06ebf5b41: an idle cycle for
+    // an attachment owner used to cost one MKCOL plus one HEAD per attachment, every cycle,
+    // forever. The presence proof is now periodic and the MKCOL lazy.
+    describe('idle-cycle attachment traffic (#1119 follow-up)', () => {
+        const SCOPE = JSON.stringify(['webdav', 'https://dav.example/mindwtr', 'alice']);
+        const OTHER_SCOPE = JSON.stringify(['webdav', 'https://other.example/mindwtr', 'alice']);
+
+        const settledData = (): AppData => {
+            const appData = createCandidateAttachmentData();
+            Object.assign(appData.tasks[0].attachments![0], {
+                contentMtimeMs: 1000,
+                contentSize: 3,
+            });
+            return appData;
+        };
+
+        const webdavDeps = (presenceScope: string | null): AttachmentBackendDeps => ({
+            getTauriFetch: async () => (vi.fn(async () => new Response(null, { status: 200 }))) as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(async () => 'secret'),
+            presenceScope,
+        });
+
+        const runWebdav = (appData: AppData, deps: AttachmentBackendDeps, helpers?: Parameters<typeof syncWebdavAttachments>[4]) =>
+            syncWebdavAttachments(
+                appData,
+                { url: 'https://dav.example/mindwtr', username: 'alice' },
+                'https://dav.example/mindwtr',
+                deps,
+                helpers,
+            );
+
+        beforeEach(() => {
+            clearAttachmentPresenceStamp();
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
+            coreMocks.webdavFileExists.mockResolvedValue(true);
+        });
+
+        afterEach(() => {
+            clearAttachmentPresenceStamp();
+        });
+
+        it('(a) issues no MKCOL and no HEAD for settled attachments inside the interval', async () => {
+            markAttachmentPresenceReconciled(SCOPE);
+
+            await runWebdav(settledData(), webdavDeps(SCOPE));
+
+            expect(coreMocks.webdavMakeDirectory).not.toHaveBeenCalled();
+            expect(coreMocks.webdavFileExists).not.toHaveBeenCalled();
+        });
+
+        it('(b) runs the HEAD pass once and re-stamps when the stamp is older than a day', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(new Date('2026-06-12T00:00:00.000Z'));
+            markAttachmentPresenceReconciled(SCOPE);
+            expect(isAttachmentPresenceReconciliationDue(SCOPE)).toBe(false);
+
+            vi.setSystemTime(new Date('2026-06-13T01:00:00.000Z'));
+            expect(isAttachmentPresenceReconciliationDue(SCOPE)).toBe(true);
+
+            await runWebdav(settledData(), webdavDeps(SCOPE));
+
+            expect(coreMocks.webdavFileExists).toHaveBeenCalledTimes(1);
+            // A completed pass advances the stamp, so the very next cycle is free again.
+            expect(isAttachmentPresenceReconciliationDue(SCOPE)).toBe(false);
+        });
+
+        it('(d) forces the HEAD pass when the stamp belongs to a different sync location', async () => {
+            markAttachmentPresenceReconciled(OTHER_SCOPE);
+
+            await runWebdav(settledData(), webdavDeps(SCOPE));
+
+            expect(coreMocks.webdavFileExists).toHaveBeenCalledTimes(1);
+        });
+
+        it('(e) MKCOLs only when something is actually uploaded', async () => {
+            markAttachmentPresenceReconciled(SCOPE);
+
+            await runWebdav(settledData(), webdavDeps(SCOPE));
+            expect(coreMocks.webdavMakeDirectory).not.toHaveBeenCalled();
+
+            const uploadable = settledData();
+            uploadable.tasks[0].attachments![0].cloudKey = undefined;
+            await runWebdav(uploadable, webdavDeps(SCOPE));
+            expect(coreMocks.webdavMakeDirectory).toHaveBeenCalledTimes(1);
+        });
+
+        it('(f) an activation probe reconciles even when a fresh stamp says it is not due', async () => {
+            markAttachmentPresenceReconciled(SCOPE);
+            expect(isAttachmentPresenceReconciliationDue(SCOPE)).toBe(false);
+
+            await runWebdav(settledData(), webdavDeps(SCOPE), activationHelpers());
+
+            // A probe must prove every candidate object holds right now (#1119), stamp or no
+            // stamp — the same pass without the probe issues nothing (test (a)).
+            expect(coreMocks.webdavFileExists).toHaveBeenCalledTimes(1);
+        });
+
+        it('(f2) an activation probe never writes the stamp', async () => {
+            await runWebdav(settledData(), webdavDeps(SCOPE), activationHelpers());
+
+            expect(coreMocks.webdavFileExists).toHaveBeenCalledTimes(1);
+            // The scope names the COMMITTED location, which the probe did not run against.
+            expect(hasCompletedAttachmentPresenceReconciliation(SCOPE)).toBe(false);
+        });
+
+        it('(g) skips the file backend sync-folder presence probe inside the interval', async () => {
+            const fileScope = JSON.stringify(['file', '/candidate-sync']);
+            markAttachmentPresenceReconciled(fileScope);
+            syncFsMocks.exists.mockResolvedValue(true);
+            const deps = { ...webdavDeps(fileScope) };
+
+            await syncFileAttachments(settledData(), '/candidate-sync', deps);
+
+            expect(syncFsMocks.exists).not.toHaveBeenCalledWith(
+                expect.stringContaining('/candidate-sync/attachments/attachment-1'),
+            );
+            expect(hasCompletedAttachmentPresenceReconciliation(fileScope)).toBe(true);
+        });
+
+        it('(h) stamps for cloud, dropbox and cloudkit, which have no presence pass to gate', async () => {
+            const scope = JSON.stringify(['cloud', 'selfhosted', 'https://cloud.example']);
+            await syncCloudAttachments(
+                settledData(),
+                { url: 'https://cloud.example', token: 't' },
+                'https://cloud.example',
+                webdavDeps(scope),
+            );
+
+            expect(hasCompletedAttachmentPresenceReconciliation(scope)).toBe(true);
         });
     });
 });

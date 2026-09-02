@@ -35,6 +35,20 @@ import { WEBDAV_CAPABILITY_PROOF_STORAGE_KEY } from './webdav-capability-proof';
 const markLocalWriteMock = vi.hoisted(() => vi.fn());
 const markLocalSqliteWriteMock = vi.hoisted(() => vi.fn());
 
+// #1119 follow-up: `hasAttachmentSyncWork` asks `attachment-reference` where the managed
+// attachments dir is, which is one Tauri IPC and resolves to null outside the desktop shell.
+// Only that lookup is stubbed — `isExternalFileReference`, the rule being tested, is the real
+// one.
+const MANAGED_ATTACHMENTS_DIR = '/app-data/mindwtr/attachments/';
+vi.mock('./attachment-reference', async (importOriginal) => ({
+    ...await importOriginal<typeof import('./attachment-reference')>(),
+    loadManagedAttachmentsDirPrefix: vi.fn(async () => '/app-data/mindwtr/attachments/'),
+}));
+
+import {
+    clearAttachmentPresenceStamp,
+    markAttachmentPresenceReconciled,
+} from './attachment-presence-scope';
 import { SyncService, __syncServiceTestUtils } from './sync-service';
 
 const waitForAssertion = async (assertion: () => void, maxAttempts = 200): Promise<void> => {
@@ -2907,6 +2921,145 @@ describe('SyncService testability hooks', () => {
                 discoveredScopeLabel,
                 hasCompletedCycleAgainstLocation: false,
             })).toBe(expected);
+        });
+    });
+
+
+    // #1119 follow-up (audit F3), desktop port of mobile commit 06ebf5b41. The gate used to
+    // return true for ANY live file attachment, so a user with one synced attachment paid the
+    // whole phase — MKCOL plus one HEAD per attachment — on every cycle including idle ones.
+    describe('hasAttachmentSyncWork (#1119 follow-up)', () => {
+        const SCOPE = JSON.stringify(['webdav', 'https://dav.example/mindwtr', 'alice']);
+
+        const dataWith = (attachment: Partial<Attachment>): AppData => ({
+            ...emptyAppData(),
+            tasks: [{
+                id: 'task-1',
+                title: 'Task',
+                status: 'next',
+                tags: [],
+                contexts: [],
+                createdAt: '2026-09-01T00:00:00.000Z',
+                updatedAt: '2026-09-01T00:00:00.000Z',
+                attachments: [{
+                    id: 'attachment-1',
+                    kind: 'file',
+                    title: 'doc.txt',
+                    uri: `${MANAGED_ATTACHMENTS_DIR}doc.txt`,
+                    cloudKey: 'attachments/attachment-1.txt',
+                    localStatus: 'available',
+                    contentMtimeMs: 1000,
+                    contentSize: 3,
+                    createdAt: '2026-09-01T00:00:00.000Z',
+                    updatedAt: '2026-09-01T00:00:00.000Z',
+                    ...attachment,
+                }],
+            }],
+        });
+
+        afterEach(() => {
+            clearAttachmentPresenceStamp();
+        });
+
+        it('reports no work for a settled managed attachment inside the reconciliation interval', async () => {
+            markAttachmentPresenceReconciled(SCOPE);
+            await expect(__syncServiceTestUtils.hasAttachmentSyncWork(dataWith({}), SCOPE)).resolves.toBe(false);
+        });
+
+        it('reports work when the daily presence proof is due', async () => {
+            await expect(__syncServiceTestUtils.hasAttachmentSyncWork(dataWith({}), SCOPE)).resolves.toBe(true);
+        });
+
+        it.each([
+            ['no cloudKey yet', { cloudKey: undefined }],
+            ['no local copy', { uri: '' }],
+            ['localStatus missing', { localStatus: 'missing' as const }],
+            ['localStatus downloading', { localStatus: 'downloading' as const }],
+            ['localStatus not yet known', { localStatus: undefined }],
+            ['a pending content upload', { pendingContentUpload: true }],
+            // An incoming content winner is merged in with NO recorded stat, on purpose, so the
+            // receiving device re-checks and re-downloads (resolveContentIdentity in core).
+            ['no recorded content mtime', { contentMtimeMs: undefined }],
+            ['no recorded content size', { contentSize: undefined }],
+            // Desktop-only: a linked file outside the managed dir can be edited in an external
+            // editor, which is exactly what #1057 check-on-touch exists to catch.
+            ['an external file reference', { uri: '/home/user/Documents/spec.pdf' }],
+        ])('still reports work with %s, even with a fresh stamp', async (_label, overrides) => {
+            markAttachmentPresenceReconciled(SCOPE);
+            await expect(
+                __syncServiceTestUtils.hasAttachmentSyncWork(dataWith(overrides), SCOPE),
+            ).resolves.toBe(true);
+        });
+
+        it('reports work for a pending remote delete regardless of the stamp', async () => {
+            markAttachmentPresenceReconciled(SCOPE);
+            const data = dataWith({});
+            data.settings.attachments = {
+                pendingRemoteDeletes: [{ cloudKey: 'attachments/attachment-9.txt' }],
+            };
+            await expect(__syncServiceTestUtils.hasAttachmentSyncWork(data, SCOPE)).resolves.toBe(true);
+        });
+
+        it('reports no work at all for a library with no file attachments', async () => {
+            markAttachmentPresenceReconciled(SCOPE);
+            await expect(__syncServiceTestUtils.hasAttachmentSyncWork(emptyAppData(), SCOPE)).resolves.toBe(false);
+        });
+    });
+
+    // fresh-join-attachment-posture packet -10, added item A: the presence stamp is the file
+    // backend's only durable "seen this location" fact, since buildFastSyncScope returns null
+    // there. Before this, `file` was hard-coded established, so a genuinely fresh file-backend
+    // device ran its attachment prepare phase — and `sealAttachmentBytes`' plaintext fallback —
+    // before the document read could discover the folder is encrypted.
+    describe('hasCompletedCycleAgainstLocation (#1119 stamp feeding the #1138 posture gate)', () => {
+        const FILE_SCOPE = JSON.stringify(['file', '/sync']);
+
+        afterEach(() => {
+            clearAttachmentPresenceStamp();
+        });
+
+        it('is not established on a fresh file-backend device, so the prepare phase defers', () => {
+            const established = __syncServiceTestUtils.hasCompletedCycleAgainstLocation({
+                backend: 'file',
+                locationScope: FILE_SCOPE,
+                fastSyncScope: null,
+            });
+            expect(established).toBe(false);
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                backend: 'file',
+                cloudProvider: 'selfhosted',
+                encryptionState: 'off',
+                discoveredScopeLabel: undefined,
+                activeScopeLabel: 'file#aaaaaaaa',
+                hasCompletedCycleAgainstLocation: established,
+            })).toBe(true);
+        });
+
+        it('is established once a presence pass completed against this location', () => {
+            markAttachmentPresenceReconciled(FILE_SCOPE);
+            const established = __syncServiceTestUtils.hasCompletedCycleAgainstLocation({
+                backend: 'file',
+                locationScope: FILE_SCOPE,
+                fastSyncScope: null,
+            });
+            expect(established).toBe(true);
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                backend: 'file',
+                cloudProvider: 'selfhosted',
+                encryptionState: 'off',
+                discoveredScopeLabel: undefined,
+                activeScopeLabel: 'file#aaaaaaaa',
+                hasCompletedCycleAgainstLocation: established,
+            })).toBe(false);
+        });
+
+        it('never lets a stamp from another location vouch for this one', () => {
+            markAttachmentPresenceReconciled(JSON.stringify(['file', '/other-sync']));
+            expect(__syncServiceTestUtils.hasCompletedCycleAgainstLocation({
+                backend: 'file',
+                locationScope: FILE_SCOPE,
+                fastSyncScope: null,
+            })).toBe(false);
         });
     });
 

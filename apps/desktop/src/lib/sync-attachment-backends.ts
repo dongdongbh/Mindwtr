@@ -64,6 +64,10 @@ import {
 } from './sync-attachment-validation';
 import { openAttachmentBytes, sealAttachmentBytes } from './sync-encryption-service';
 import {
+    isAttachmentPresenceReconciliationDue,
+    markAttachmentPresenceReconciled,
+} from './attachment-presence-scope';
+import {
     downloadDropboxFile,
     DropboxConflictError,
     DropboxFileNotFoundError,
@@ -104,6 +108,13 @@ export type AttachmentBackendDeps = {
     logSyncInfo: (message: string, extra?: Record<string, string>) => void;
     logSyncWarning: (message: string, error?: unknown) => void;
     resolveWebdavPassword: (config: WebDavConfig) => Promise<string>;
+    /** Identity of the sync location this pass runs against, for the once-a-day presence
+     *  reconciliation stamp (#1119 follow-up; see `attachment-presence-scope.ts`). Produced
+     *  once per cycle by `desktopSyncLocationScope` in sync-service.ts and shared with the
+     *  gate that reads the stamp, so reader and writer cannot derive it differently.
+     *  Absent — the shape every hand-built test deps object has — means "no scope", which
+     *  reconciles on every pass and never stamps: the pre-#1119-follow-up behaviour. */
+    presenceScope?: string | null;
 };
 
 const FILE_BACKEND_VALIDATION_CONFIG = {
@@ -453,21 +464,32 @@ export async function syncWebdavAttachments(
     const password = await deps.resolveWebdavPassword(webDavConfig);
 
     const attachmentsDirUrl = `${baseSyncUrl}/${ATTACHMENTS_DIR_NAME}`;
-    try {
-        await helpers?.assertRemoteMutationFenceHeld?.(UPLOAD_TIMEOUT_MS + 5_000);
-        await webdavMakeDirectory(attachmentsDirUrl, {
-            allowInsecureHttp: webDavConfig.allowInsecureHttp,
-            username: webDavConfig.username,
-            password,
-            fetcher,
-        });
-    } catch (error) {
-        if (isSyncRemoteMutationFenceError(error)) throw error;
-        if (markWebdavAttachmentRateLimited(error, deps)) {
-            return null;
+    // Only a PUT needs the collection to exist; HEAD and GET do not. This used to run on
+    // every pass, which cost one MKCOL per idle cycle for anyone owning a synced attachment
+    // (audit F3), so it is deferred to just before the first upload of a pass.
+    let attachmentsDirEnsured = false;
+    const ensureRemoteAttachmentsDir = async (): Promise<void> => {
+        if (attachmentsDirEnsured) return;
+        try {
+            await helpers?.assertRemoteMutationFenceHeld?.(UPLOAD_TIMEOUT_MS + 5_000);
+            await webdavMakeDirectory(attachmentsDirUrl, {
+                allowInsecureHttp: webDavConfig.allowInsecureHttp,
+                username: webDavConfig.username,
+                password,
+                fetcher,
+            });
+        } catch (error) {
+            if (isSyncRemoteMutationFenceError(error)) throw error;
+            // The old prologue returned null for the whole pass on a rate limit. Inside an
+            // upload the equivalent is to rethrow: `onUploadError` runs `handleRateLimit`,
+            // which sets `abortedByRateLimit` and stops the rest of the pass.
+            if (markWebdavAttachmentRateLimited(error, deps)) throw error;
+            logAttachmentWarning(deps, 'Failed to ensure WebDAV attachments directory', error);
         }
-        logAttachmentWarning(deps, 'Failed to ensure WebDAV attachments directory', error);
-    }
+        // Set only once the call did not throw a fatal error, so a fence loss or a rate limit
+        // that aborts this upload does not silently skip the MKCOL for a later retry.
+        attachmentsDirEnsured = true;
+    };
 
     try {
         await mkdir(await getManagedPath(ATTACHMENTS_DIR_NAME), { recursive: true });
@@ -489,8 +511,17 @@ export async function syncWebdavAttachments(
     };
 
     pruneWebdavDownloadBackoff();
+    // See `isAttachmentPresenceReconciliationDue`: an uploaded attachment's key is derived
+    // from its id and its bytes never change, so the presence pass below can only ever
+    // discover a server-side deletion — worth proving daily, not hourly (audit F3). An
+    // activation probe is different: it has to prove the candidate backend holds every object
+    // right now (#1119), so it always reconciles and never writes the stamp (the stamp names
+    // the committed configuration, not the candidate one).
+    const reconcilePresence = helpers?.activationProbe === true
+        || isAttachmentPresenceReconciliationDue(deps.presenceScope);
     deps.logSyncInfo('WebDAV attachment sync start', {
         count: String(attachmentsById.size),
+        presence: reconcilePresence ? 'reconcile' : 'skipped',
     });
 
     let lastRequestAt = 0;
@@ -531,6 +562,10 @@ export async function syncWebdavAttachments(
     // if it was deleted directly on the server, clear cloudKey so the lifecycle below re-uploads
     // it. This has to run as its own pass before the lifecycle: it's an async, network-calling,
     // state-mutating check, which doesn't fit the lifecycle's synchronous `hasCloudCopy` predicate.
+    // ...and its REMOTE half only when `reconcilePresence` above says the proof is due. The
+    // local half below (presence, pruning an unreadable attachment out of the lifecycle,
+    // clearing a download backoff) makes no request and is not gated: skipping it would
+    // change which attachments the lifecycle sees, which is not what this change is about.
     const maybeYieldPrePass = createCooperativeYield(4);
     for (const attachment of attachmentsById.values()) {
         await maybeYieldPrePass();
@@ -560,7 +595,7 @@ export async function syncWebdavAttachments(
             webdavDownloadBackoff.deleteEntry(attachment.id);
         }
 
-        if (attachment.cloudKey && existsLocally && attachment.pendingContentUpload !== true) {
+        if (reconcilePresence && attachment.cloudKey && existsLocally && attachment.pendingContentUpload !== true) {
             try {
                 const remoteExists = await withRetry(async () => {
                     await waitForSlot();
@@ -586,6 +621,12 @@ export async function syncWebdavAttachments(
             logAttachmentWarning(deps, 'Failed to check WebDAV attachment remote status', error);
             }
         }
+    }
+
+    // Only a pass that ran the proof to completion may advance the stamp: a rate-limit break
+    // leaves it alone so the next cycle retries, and an activation probe never stamps at all.
+    if (reconcilePresence && !abortedByRateLimit && helpers?.activationProbe !== true) {
+        markAttachmentPresenceReconciled(deps.presenceScope, deps.logSyncWarning);
     }
 
     // Throttle policy: per-run upload/download caps, plus the same rate-limit abort the pre-pass
@@ -670,10 +711,11 @@ export async function syncWebdavAttachments(
                 bytes: String(fileData.length),
                 cloudKey,
             });
+            await ensureRemoteAttachmentsDir();
             // Encrypted bytes keep the attachment's exact remote name (cloudKey is identity-
             // keyed and immutable once uploaded), but they are longer than the plaintext — the
             // Content-Length header has to describe what actually goes on the wire.
-            const wireData = await sealAttachmentBytes(fileData);
+            const wireData = await sealAttachmentBytes(fileData, cloudKey);
             const uploadUrl = `${baseSyncUrl}/${cloudKey}`;
             const remoteVersion = await withRetry(async () => {
                 await waitForSlot();
@@ -779,6 +821,7 @@ export async function syncWebdavAttachments(
             // synced document, and it must stay stable across re-encryptions.
             const bytes = await openAttachmentBytes(
                 fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : new Uint8Array(fileData as ArrayBuffer),
+                cloudKey,
             );
             const expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, bytes);
             const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;
@@ -1020,6 +1063,14 @@ export async function syncCloudAttachments(
         },
     });
 
+    // Cloud, Dropbox and CloudKit have no remote presence pre-pass to gate — their
+    // per-attachment loops are local presence and content checks — but a completed pass IS
+    // their whole reconciliation. Without this the steady-state gate in sync-service.ts would
+    // read "reconciliation due" on every cycle for them and nothing would improve.
+    if (helpers?.activationProbe !== true) {
+        markAttachmentPresenceReconciled(deps.presenceScope, deps.logSyncWarning);
+    }
+
     const nextData = applyAttachmentPatches(appData, patches);
     return nextData !== appData ? nextData : false;
 }
@@ -1108,7 +1159,7 @@ export async function syncDropboxAttachments(
             }
             clearAttachmentValidationFailure(attachment.id);
             reportProgress(attachment.id, 'upload', 0, fileData.length, 'active');
-            const wireData = await sealAttachmentBytes(fileData);
+            const wireData = await sealAttachmentBytes(fileData, cloudKey);
             const expectedRev = await withRetry(
                 () => withDropboxAccess((token) => getDropboxFileMetadata(
                     token,
@@ -1175,6 +1226,7 @@ export async function syncDropboxAttachments(
             }
             const bytes = await openAttachmentBytes(
                 fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : new Uint8Array(fileData as ArrayBuffer),
+                attachment.cloudKey,
             );
             const expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, bytes);
             const filename =
@@ -1216,6 +1268,14 @@ export async function syncDropboxAttachments(
             logAttachmentWarning(deps, `Failed to download attachment ${attachment.id}`, error);
         },
     });
+
+    // Cloud, Dropbox and CloudKit have no remote presence pre-pass to gate — their
+    // per-attachment loops are local presence and content checks — but a completed pass IS
+    // their whole reconciliation. Without this the steady-state gate in sync-service.ts would
+    // read "reconciliation due" on every cycle for them and nothing would improve.
+    if (helpers?.activationProbe !== true) {
+        markAttachmentPresenceReconciled(deps.presenceScope, deps.logSyncWarning);
+    }
 
     const nextData = applyAttachmentPatches(appData, patches);
     return nextData !== appData ? nextData : false;
@@ -1403,6 +1463,14 @@ export async function syncCloudKitAttachments(
         },
     });
 
+    // Cloud, Dropbox and CloudKit have no remote presence pre-pass to gate — their
+    // per-attachment loops are local presence and content checks — but a completed pass IS
+    // their whole reconciliation. Without this the steady-state gate in sync-service.ts would
+    // read "reconciliation due" on every cycle for them and nothing would improve.
+    if (helpers?.activationProbe !== true) {
+        markAttachmentPresenceReconciled(deps.presenceScope, deps.logSyncWarning);
+    }
+
     const nextData = withAttachmentSettingsPatch(applyAttachmentPatches(appData, patches), settingsPatch);
     const didMutate = nextData !== appData;
     deps.logSyncInfo('CloudKit attachment sync done', {
@@ -1536,10 +1604,10 @@ export async function syncFileAttachments(
         const publicationLeaseToken = fileSyncLeaseToken ?? '';
         const verifyExistingGeneration = async (): Promise<void> => {
             try {
-                const plaintext = await openAttachmentBytes(await readFileSyncWireData(
+                const plaintext = await openAttachmentBytes(
+                    await readFileSyncWireData(targetPath, { expectedSize: wireData.byteLength }),
                     targetPath,
-                    { expectedSize: wireData.byteLength },
-                ));
+                );
                 const actualSha256 = await computeSha256Hex(plaintext);
                 if (actualSha256?.toLowerCase() !== expectedPlaintextSha256.toLowerCase()) {
                     throw new Error('plaintext digest mismatch');
@@ -1611,6 +1679,16 @@ export async function syncFileAttachments(
     // previous sync folder (or a file deleted from this one) must not stop
     // the copy into the current folder. Clearing it lets the lifecycle below
     // re-upload; only cleared when a local copy exists to upload from (#1001).
+    // Periodic for the same reason WebDAV's is (audit F3): it can only discover a file
+    // removed from the sync folder behind the app's back, and the folder may be a slow
+    // network mount, so re-learning every idle cycle that nothing moved is pure cost. An
+    // activation probe must prove the candidate folder holds every object right now (#1119),
+    // so it always reconciles and never stamps.
+    const reconcilePresence = helpers?.activationProbe === true
+        || isAttachmentPresenceReconciliationDue(deps.presenceScope);
+    // Only the REMOTE half below is gated. The local half (presence, and pruning an
+    // unreadable attachment out of the lifecycle) makes no sync-folder request and is what
+    // decides which attachments the lifecycle sees, so it runs every pass as before.
     const allPatches = new Map<string, Attachment>();
     for (const attachment of attachmentsById.values()) {
         if (
@@ -1626,7 +1704,7 @@ export async function syncFileAttachments(
             attachmentsById.delete(attachment.id);
             continue;
         }
-        if (localPresence !== 'present') continue;
+        if (localPresence !== 'present' || !reconcilePresence) continue;
         try {
             const remotePath = await resolveFileBackendPath(join, baseSyncDir, attachment.cloudKey);
             if (!(await syncFsExists(remotePath))) {
@@ -1637,6 +1715,12 @@ export async function syncFileAttachments(
         } catch (error) {
             logAttachmentWarning(deps, 'Failed to check sync-folder attachment presence', error);
         }
+    }
+
+    // Only a completed proof advances the stamp; an activation probe never stamps, since the
+    // scope names the committed folder rather than the candidate one.
+    if (reconcilePresence && helpers?.activationProbe !== true) {
+        markAttachmentPresenceReconciled(deps.presenceScope, deps.logSyncWarning);
     }
 
     const { patches } = await syncBasicRemoteAttachments({
@@ -1670,7 +1754,7 @@ export async function syncFileAttachments(
             // The sync folder is the remote for this backend, so its attachment bytes are
             // encrypted here for the same reason WebDAV's and Dropbox's are. The LOCAL managed
             // copy (below, in onDownload) stays plaintext — encryption never touches local data.
-            const wireData = await sealAttachmentBytes(fileData);
+            const wireData = await sealAttachmentBytes(fileData, cloudKey);
             await publishFileSyncGeneration(
                 await resolveFileBackendPath(join, baseSyncDir, cloudKey),
                 wireData,
@@ -1687,7 +1771,10 @@ export async function syncFileAttachments(
             if (!attachment.cloudKey) return false;
             const sourcePath = await resolveFileBackendPath(join, baseSyncDir, attachment.cloudKey);
             if (!(await syncFsExists(sourcePath))) return false;
-            const fileData = await openAttachmentBytes(await readFileSyncWireData(sourcePath));
+            const fileData = await openAttachmentBytes(
+                await readFileSyncWireData(sourcePath),
+                attachment.cloudKey,
+            );
             const expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, fileData);
             const filename =
                 attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;

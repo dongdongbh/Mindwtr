@@ -1310,6 +1310,26 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
             expect(trail).toContain('"decision":"seal"');
             expect(trail).toContain('"kind":"plaintext"');
         });
+
+        // Added item B: the byte-seam lines used to say `artifact: absent` for every
+        // attachment, so a trail full of seals named nothing. The backends now pass the
+        // cloudKey, which `syncEncryptionArtifactLabel` reduces to its leaf.
+        it('names the attachment on both the seal and the open line', async () => {
+            native.state = {
+                state: 'enabled',
+                key: bytesToBase64(new Uint8Array(32).fill(7)),
+                salt: '00'.repeat(16),
+                kdfParams: { mKib: 19456, t: 2, p: 1 },
+            };
+            clearSyncEncryptionMaterialCache();
+
+            const sealed = await sealAttachmentBytes(new Uint8Array([1, 2, 3]), 'attachments/att-1.txt');
+            await openAttachmentBytes(sealed, 'attachments/att-1.txt');
+
+            const trail = capturedTrail();
+            expect(trail).toContain('"artifact":"att-1.txt"');
+            expect(trail).not.toContain('"artifact":"absent"');
+        });
     });
 
     it('never puts the passphrase or the derived key into an enable/unlock line', async () => {

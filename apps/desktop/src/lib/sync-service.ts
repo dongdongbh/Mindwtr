@@ -218,6 +218,11 @@ import {
     writeLocalSyncStatus,
     writeFastSyncState,
 } from './sync-service-fast-sync';
+import {
+    hasCompletedAttachmentPresenceReconciliation,
+    isAttachmentPresenceReconciliationDue,
+} from './attachment-presence-scope';
+import { isExternalFileReference, loadManagedAttachmentsDirPrefix } from './attachment-reference';
 
 export type ExternalSyncChangeResolution = 'keep-local' | 'use-external' | 'merge';
 export type { CloudProvider };
@@ -480,6 +485,31 @@ const shouldDeferAttachmentPrepareUntilRead = (input: {
     if (SYNC_ENCRYPTION_KEYED_STATES.includes(input.encryptionState)) return false;
     return input.discoveredScopeLabel !== input.activeScopeLabel;
 };
+
+/** The durable "this device has already completed a cycle against THIS location" fact that
+ *  `shouldDeferAttachmentPrepareUntilRead` needs for the `off`/`unknown` posture.
+ *
+ *  Two sources, ORed. The fast-sync record is the original one, but `buildFastSyncScope`
+ *  returns `null` for the file backend and always will, which is why the packet had to ship
+ *  an unconditional `file -> established` and establish a genuinely fresh file-backend device
+ *  on its very first cycle. The attachment presence stamp (#1119 follow-up) closes that: it is
+ *  only ever written at the END of a completed attachment pass, keyed by
+ *  `desktopSyncLocationScope` — the same derivation this function is handed — so its presence
+ *  for this location proves a full cycle already ran here. Checked for webdav/dropbox too, so
+ *  a device that completed a presence pass without yet writing a fast-sync record (or the
+ *  reverse) is recognized either way. */
+const hasCompletedCycleAgainstLocation = (input: {
+    backend: SyncBackend;
+    locationScope: string;
+    fastSyncScope: string | null;
+}): boolean => (
+    hasCompletedAttachmentPresenceReconciliation(input.locationScope)
+    || (
+        input.backend !== 'file' && input.fastSyncScope
+            ? readFastSyncState(input.fastSyncScope) !== null
+            : false
+    )
+);
 
 const logSyncPayloadTrace = (
     message: string,
@@ -751,22 +781,71 @@ const getAttachmentCleanupDeps = (
 });
 
 /**
- * Pure in-memory gate for the attachment phases, mirroring mobile's
- * `hasPendingAttachmentSyncWork`. `preSyncAttachmentsBeforeFastCheck` makes the
- * prepare phase run on every tick (#1057), and every desktop backend opens with
- * directory-ensure / rate-limit-probe IO before it looks at a single attachment —
- * so a store with no file attachments paid a network round trip per cycle for
- * loops it was always going to run zero times. Same shape as the
- * `runAttachmentCleanup` short-circuit below: no IO, only what is already loaded.
+ * Gate for the attachment phases, mirroring mobile's `hasPendingAttachmentSyncWork`.
+ * `preSyncAttachmentsBeforeFastCheck` makes the prepare phase run on every tick (#1057), and
+ * every desktop backend opens with directory-ensure / rate-limit-probe IO before it looks at
+ * a single attachment — so a store with no file attachments paid a network round trip per
+ * cycle for loops it was always going to run zero times.
+ *
+ * #1119 follow-up (audit F3): returning `true` for ANY live file attachment made every cycle
+ * run the whole phase for anyone owning one synced attachment — a MKCOL plus one HEAD per
+ * attachment against the server, forever. Three things genuinely need the phase, and each now
+ * has its own signal rather than "always":
+ *
+ *  - an attachment that still has to move: no `cloudKey` (never uploaded, or the presence
+ *    self-heal cleared it), no local copy, `missing`/`downloading`/unknown `localStatus`, or
+ *    `pendingContentUpload`.
+ *  - another device's newer content. `resolveContentIdentity` in core's merge
+ *    (packages/core/src/sync.ts) lands an incoming content winner with NO recorded
+ *    `contentMtimeMs`/`contentSize`, precisely so the receiving device re-checks and
+ *    re-downloads. An absent recorded stat is therefore the download signal, and it is
+ *    already in the document — no stat, no request.
+ *  - the remote copy deleted on the server behind the app's back. Nothing local can show
+ *    that, so it stays a real pass — just a periodic one, see `attachment-presence-scope.ts`.
+ *
+ * Desktop diverges from mobile in ONE place, deliberately: an EXTERNAL file reference (a
+ * `uri` outside the managed attachments dir, the shape "Add link" produces) never enters the
+ * steady state. Mobile's managed files live in app-private storage and are only ever created
+ * by capture or replaced by a download that re-records the stat in the same breath, so mobile
+ * can defer check-on-touch to the daily pass. A desktop user can and does edit a linked file
+ * in an external editor, which is the exact case #1057's check-on-touch exists for. Keeping
+ * those eager costs a local stat per cycle and no requests at all — the MKCOL is now lazy and
+ * the HEAD pass is gated inside the backends independently of this predicate.
  */
-const hasAttachmentSyncWork = (data: AppData): boolean => {
+const hasAttachmentSyncWork = async (data: AppData, presenceScope: string | null): Promise<boolean> => {
     if ((data.settings.attachments?.pendingRemoteDeletes?.length ?? 0) > 0) return true;
+
+    const settled: Attachment[] = [];
     for (const attachment of collectAttachmentsById(data).values()) {
         if (attachment.kind !== 'file') continue;
         if (attachment.deletedAt) continue;
-        return true;
+        const uri = attachment.uri || '';
+        const hasLocalUri = Boolean(uri) && !/^https?:\/\//i.test(uri);
+        if (!attachment.cloudKey) {
+            // Nothing uploaded yet. A local copy the app can still read is an upload waiting
+            // to happen; anything else (a bare http link, a file already known missing) is not.
+            if (hasLocalUri && attachment.localStatus !== 'missing') return true;
+            continue;
+        }
+        if (!hasLocalUri || attachment.localStatus !== 'available') return true;
+        if (attachment.pendingContentUpload === true) return true;
+        if (
+            !Number.isFinite(attachment.contentMtimeMs ?? NaN)
+            || !Number.isFinite(attachment.contentSize ?? NaN)
+        ) return true;
+        settled.push(attachment);
     }
-    return false;
+
+    if (settled.length === 0) return false;
+    const managedDirPrefix = await loadManagedAttachmentsDirPrefix();
+    // Unresolved prefix (not desktop, or the managed dir could not be resolved) is doubt, and
+    // doubt runs the phase.
+    if (!managedDirPrefix) return true;
+    if (settled.some((attachment) => isExternalFileReference(attachment, managedDirPrefix))) return true;
+
+    // Nothing in the document says there is work to do. The one remaining reason to run the
+    // phase is the periodic presence proof.
+    return isAttachmentPresenceReconciliationDue(presenceScope);
 };
 
 const getSyncConfigDeps = () => ({
@@ -2407,17 +2486,11 @@ export class SyncService {
             encryptionState: encryptionPosture?.state ?? 'off',
             discoveredScopeLabel: encryptionPosture?.discoveredScopeLabel,
             activeScopeLabel: syncEncryptionScopeLabel(desktopSyncLocationScope(context)),
-            // The file backend has no fastSyncScope (buildFastSyncScope returns null there), so
-            // there is no durable "seen this location" fact to ask for — see the packet's
-            // blocked note (§9). Treating that as "not established" would defer an ordinary
-            // plaintext file-backend cycle's prepare phase FOREVER, not just once; confirmed by
-            // two runtime tests. Until a per-location file-backend fact exists, `off` there
-            // keeps today's behaviour (prepare runs) rather than guessing.
-            hasCompletedCycleAgainstLocation: context.backend === 'file'
-                ? true
-                : fastSyncScope
-                    ? readFastSyncState(fastSyncScope) !== null
-                    : false,
+            hasCompletedCycleAgainstLocation: hasCompletedCycleAgainstLocation({
+                backend: context.backend,
+                locationScope: desktopSyncLocationScope(context),
+                fastSyncScope,
+            }),
         });
         return {
             kind: 'ready',
@@ -2453,6 +2526,15 @@ export class SyncService {
      *  `createSyncBackendIO`; this only supplies desktop's transport truths. */
     private static createBackendIO(context: DesktopSyncCycleContext): SyncBackendIO {
         const ctx = SyncService.createBackendContext(context);
+        // #1119 follow-up: the presence-reconciliation stamp's scope, computed ONCE per cycle
+        // from the fully-resolved context (every field it reads is assigned in
+        // setupDesktopCycle, before this runs) and shared with the gate that reads the stamp
+        // in `shouldRunAttachmentPhase`. One derivation, one value — mobile had to derive it
+        // twice and a reader/writer mismatch was a blocking review finding there.
+        const cycleAttachmentDeps: AttachmentBackendDeps = {
+            ...attachmentBackendDeps,
+            presenceScope: desktopSyncLocationScope(context),
+        };
 
         const transport: SyncTransport = {
             acquireWebdavRemoteMutationFence: async () => {
@@ -2801,28 +2883,28 @@ export class SyncService {
             },
             syncWebdavAttachments: async (data, helpers) => {
                 const baseUrl = getBaseSyncUrl(context.webdavConfig!.url);
-                return syncAttachments(data, context.webdavConfig!, baseUrl, attachmentBackendDeps, helpers);
+                return syncAttachments(data, context.webdavConfig!, baseUrl, cycleAttachmentDeps, helpers);
             },
             syncCloudKitAttachments: async (data, helpers) => syncCloudKitAttachments(
                 data,
-                attachmentBackendDeps,
+                cycleAttachmentDeps,
                 helpers,
             ),
             syncFileAttachments: async (data, helpers) => syncFileAttachments(
                 data,
                 context.fileBaseDir,
-                attachmentBackendDeps,
+                cycleAttachmentDeps,
                 helpers,
                 context.fileSyncLeaseToken ?? undefined,
             ),
             syncCloudAttachments: async (data, helpers) => {
                 const baseUrl = getCloudBaseUrl(context.cloudConfig!.url);
-                return syncCloudAttachments(data, context.cloudConfig!, baseUrl, attachmentBackendDeps, helpers);
+                return syncCloudAttachments(data, context.cloudConfig!, baseUrl, cycleAttachmentDeps, helpers);
             },
             syncDropboxAttachments: async (data, helpers) => syncDropboxAttachments(
                 data,
                 (forceRefresh) => resolveDropboxAccessTokenForContext(context, forceRefresh),
-                attachmentBackendDeps,
+                cycleAttachmentDeps,
                 helpers,
             ),
         };
@@ -3447,7 +3529,7 @@ export class SyncService {
                             });
                             return false;
                         }
-                        return hasAttachmentSyncWork(data);
+                        return await hasAttachmentSyncWork(data, desktopSyncLocationScope(context));
                     },
                     runAttachmentCleanup: async (data, cleanupContext) => {
                         cleanupContext.setStep('attachments_cleanup');
@@ -3581,6 +3663,8 @@ export class SyncService {
 export const __syncServiceTestUtils = {
     isLegacyWebdavPlaintextPostureAllowed,
     shouldDeferAttachmentPrepareUntilRead,
+    hasAttachmentSyncWork,
+    hasCompletedCycleAgainstLocation,
     setDependenciesForTests(overrides: Partial<SyncServiceDependencies>) {
         syncServiceDependencies = {
             ...syncServiceDependencies,
