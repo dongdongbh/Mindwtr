@@ -6,7 +6,7 @@ import {
 } from '../../../lib/sync-service';
 import { classifySyncEncryptionFailure } from '../../../lib/sync-encryption-service';
 import { useUiStore } from '../../../store/ui-store';
-import { logError } from '../../../lib/app-log';
+import { logError, logInfo } from '../../../lib/app-log';
 import { markSettingsOpenTrace, measureSettingsOpenStep } from '../../../lib/settings-open-diagnostics';
 import { useLanguage } from '../../../contexts/language-context';
 import { reportSettingsFailure, resolveSettingsFeedback } from './settings-feedback';
@@ -146,8 +146,12 @@ export const useSyncSettings = ({
     const [syncPath, setSyncPath] = useState('');
     const [syncStatus, setSyncStatus] = useState(() => SyncService.getSyncStatus());
     const [syncError, setSyncError] = useState<string | null>(null);
-    const [syncBackend, setSyncBackend] = useState<SyncBackend>('off');
-    const [persistedSyncBackend, setPersistedSyncBackend] = useState<SyncBackend>('off');
+    // Seed from the last durable read so the backend control does not show
+    // "Off" for the seconds the serialized configuration read takes and then
+    // jump to the real backend; the snapshot below still corrects it.
+    const [lastKnownSelection] = useState(() => SyncService.getLastKnownSyncSelection());
+    const [syncBackend, setSyncBackend] = useState<SyncBackend>(lastKnownSelection.backend ?? 'off');
+    const [persistedSyncBackend, setPersistedSyncBackend] = useState<SyncBackend>(lastKnownSelection.backend ?? 'off');
     const [webdavUrl, setWebdavUrl] = useState('');
     const [webdavUsername, setWebdavUsername] = useState('');
     const [webdavPassword, setWebdavPassword] = useState('');
@@ -161,8 +165,8 @@ export const useSyncSettings = ({
     const [cloudToken, setCloudToken] = useState('');
     const [cloudRememberToken, setCloudRememberToken] = useState(false);
     const [cloudAllowInsecureHttp, setCloudAllowInsecureHttp] = useState(false);
-    const [cloudProvider, setCloudProvider] = useState<CloudProvider>('selfhosted');
-    const [persistedCloudProvider, setPersistedCloudProvider] = useState<CloudProvider>('selfhosted');
+    const [cloudProvider, setCloudProvider] = useState<CloudProvider>(lastKnownSelection.cloudProvider ?? 'selfhosted');
+    const [persistedCloudProvider, setPersistedCloudProvider] = useState<CloudProvider>(lastKnownSelection.cloudProvider ?? 'selfhosted');
     const hasPendingSyncConfiguration = useRef(false);
     const syncConfigurationGeneration = useRef(0);
     const dropboxOperationGeneration = useRef(0);
@@ -680,6 +684,10 @@ export const useSyncSettings = ({
         showSaved,
     ]);
 
+    // Save handlers are declared before `handleSync`; this ref lets them run the
+    // activation-aware sync without reordering the hook.
+    const handleSyncRef = useRef<() => Promise<void>>(async () => undefined);
+
     const handleSaveWebDav = useCallback(async () => {
         const trimmedUrl = webdavUrl.trim();
         const trimmedPassword = webdavPassword.trim();
@@ -697,10 +705,19 @@ export const useSyncSettings = ({
                 setWebdavHasPassword(true);
             }
             setSyncError(null);
-            showToast(resolveText('settings.sync.readyToVerify', 'Settings ready. Sync now to verify and save them.'), 'info');
         } finally {
             setIsSavingWebDav(false);
         }
+        if (!trimmedUrl) {
+            showToast(resolveText('settings.sync.readyToVerify', 'Settings ready. Sync now to verify and save them.'), 'info');
+            return;
+        }
+        // "Save" used to stop here with a toast asking for Sync now; users read
+        // "saved" as durable, left the page, and found the previous backend
+        // still selected because only the verification sync commits a switch.
+        // Run that verification right away, so saved means saved (or says why not).
+        void logInfo('WebDAV settings saved; running the verification sync to activate them', { scope: 'sync' });
+        await handleSyncRef.current();
     }, [
         advanceSyncConfigurationGeneration,
         resolveText,
@@ -764,7 +781,13 @@ export const useSyncSettings = ({
         setCloudUrl(trimmedUrl);
         setCloudToken(trimmedToken);
         setSyncError(null);
-        showToast(resolveText('settings.sync.readyToVerify', 'Settings ready. Sync now to verify and save them.'), 'info');
+        if (!trimmedUrl) {
+            showToast(resolveText('settings.sync.readyToVerify', 'Settings ready. Sync now to verify and save them.'), 'info');
+            return;
+        }
+        // Same as WebDAV: saving activates through the verification sync.
+        void logInfo('Self-hosted cloud settings saved; running the verification sync to activate them', { scope: 'sync' });
+        await handleSyncRef.current();
     }, [
         advanceSyncConfigurationGeneration,
         cloudAllowInsecureHttp,
@@ -1383,6 +1406,7 @@ export const useSyncSettings = ({
         webdavUrl,
         webdavUsername,
     ]);
+    handleSyncRef.current = handleSync;
 
     const handleSyncPathChange = useCallback((value: string) => {
         advanceSyncConfigurationGeneration();

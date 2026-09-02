@@ -126,6 +126,25 @@ const NO_TARGET: TargetInputs = {
 };
 
 describe('useSyncSettings cloud token validation', () => {
+
+    it('seeds the backend control from the last-known selection before the persisted snapshot resolves', async () => {
+        // The persisted snapshot is read through the serialized restore queue and
+        // can take seconds after launch; without a synchronous seed the control
+        // showed "Off" and then jumped to the real backend on every open.
+        vi.spyOn(SyncService, 'getLastKnownSyncSelection').mockReturnValue({ backend: 'cloud', cloudProvider: 'dropbox' });
+        let resolveSnapshot: (value: ReturnType<typeof dropboxConfigurationSnapshot>) => void = () => undefined;
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockReturnValueOnce(new Promise((resolve) => {
+            resolveSnapshot = resolve;
+        }));
+
+        const { result } = setup();
+
+        expect(result.current.syncPageProps.syncBackend).toBe('cloud');
+        expect(result.current.syncPageProps.cloudProvider).toBe('dropbox');
+
+        resolveSnapshot({ ...dropboxConfigurationSnapshot('off'), backend: 'webdav', cloudProvider: 'selfhosted' });
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('webdav'));
+    });
     beforeEach(() => {
         languageMocks.t.mockImplementation((key: string) => key);
         SyncService.forgetPendingDropboxCredentialHandleForSession();
@@ -481,10 +500,12 @@ describe('useSyncSettings cloud token validation', () => {
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
 
-        const { result } = setup();
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
         act(() => {
+            // The self-hosted form is only reachable once its chip is selected.
+            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -493,10 +514,29 @@ describe('useSyncSettings cloud token validation', () => {
             await result.current.syncPageProps.onSaveCloud();
         });
 
+        // Nothing is written directly: Save hands the staged configuration to the
+        // verification sync, which is the only path that commits a backend switch.
+        // (It used to stop at a "Sync now to verify" toast; users read "saved" as
+        // durable, left the page, and found the previous backend still selected.)
         expect(SyncService.setCloudConfig).not.toHaveBeenCalled();
         expect(SyncService.setSyncBackend).not.toHaveBeenCalled();
-        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
-        expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Sync now'), 'info');
+        expect(SyncService.performSync).toHaveBeenCalledTimes(1);
+        expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('Sync now'), 'info');
+    });
+
+    it('runs the verification sync when a WebDAV configuration is saved', async () => {
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('webdav');
+            result.current.syncPageProps.onWebdavUrlChange('https://dav.example.com/remote.php/dav/');
+        });
+        await act(async () => {
+            await result.current.syncPageProps.onSaveWebDav();
+        });
+
+        expect(SyncService.performSync).toHaveBeenCalledTimes(1);
     });
 
     it('does not let a delayed persisted snapshot overwrite newer editor intent', async () => {

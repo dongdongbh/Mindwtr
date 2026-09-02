@@ -1046,6 +1046,28 @@ const writeSyncBackendHint = (backend: SyncBackend): void => {
         // Display seed only; losing it costs one blink, nothing else.
     }
 };
+// The Sync settings page reads its configuration through the serialized
+// restore queue, which can take seconds after launch; without a synchronous
+// seed the backend control showed "Off" and then jumped to the real backend.
+// The backend hint above covers the backend; Dropbox is backend 'cloud' plus
+// this provider, so it needs a seed of its own.
+const CLOUD_PROVIDER_HINT_KEY = 'mindwtr-last-known-cloud-provider';
+const CLOUD_PROVIDER_VALUES: readonly CloudProvider[] = ['selfhosted', 'dropbox'];
+const readCloudProviderHint = (): CloudProvider | null => {
+    try {
+        const value = window.localStorage.getItem(CLOUD_PROVIDER_HINT_KEY);
+        return (CLOUD_PROVIDER_VALUES as readonly string[]).includes(value ?? '') ? value as CloudProvider : null;
+    } catch {
+        return null;
+    }
+};
+const writeCloudProviderHint = (provider: CloudProvider): void => {
+    try {
+        window.localStorage.setItem(CLOUD_PROVIDER_HINT_KEY, provider);
+    } catch {
+        // Display seed only.
+    }
+};
 
 export class SyncService {
     private static didMigrate = false;
@@ -1678,7 +1700,16 @@ export class SyncService {
     }
 
     static async getPersistedSyncConfigurationSnapshot(): Promise<PersistedDesktopSyncConfiguration> {
-        return runSyncRestoreExclusive(() => SyncService.readPersistedSyncConfiguration());
+        const configuration = await runSyncRestoreExclusive(() => SyncService.readPersistedSyncConfiguration());
+        writeCloudProviderHint(configuration.cloudProvider);
+        return configuration;
+    }
+
+    /** Synchronous first-frame seed for the Sync settings page: the last
+     *  backend and cloud provider this device durably read. `null` until the
+     *  first configuration read on this install. */
+    static getLastKnownSyncSelection(): { backend: SyncBackend | null; cloudProvider: CloudProvider | null } {
+        return { backend: SyncService.syncStatus.backend, cloudProvider: readCloudProviderHint() };
     }
 
     static async setSyncBackend(backend: SyncBackend): Promise<void> {
