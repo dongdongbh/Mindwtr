@@ -53,6 +53,7 @@ services:
     # the app detects the cloud on its own origin without this.
     # environment:
     #   MINDWTR_DEFAULT_CLOUD_URL: "https://mindwtr.example.com"
+    #   MINDWTR_REQUIRE_SYNC: "1"  # forces a login screen (Self-Hosted URL + Access Token) before the app loads
     depends_on:
       mindwtr-cloud:
         condition: service_healthy
