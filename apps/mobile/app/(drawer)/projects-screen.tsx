@@ -970,6 +970,7 @@ export default function ProjectsScreen() {
         attachments={attachments}
         notes={notesEditor}
         onClose={closeProjectDetail}
+        onDeleteProject={handleDeleteProject}
         onDuplicateProject={handleDuplicateProject}
         onOpenAreaPicker={openAreaPicker}
         onOpenQuickAdd={openProjectQuickAdd}

@@ -298,6 +298,7 @@ const createProjectDetailModalProps = (
     attachments: createAttachments(),
     notes: createNotesEditor(),
     onClose: vi.fn(),
+    onDeleteProject: vi.fn(),
     onDuplicateProject: vi.fn(),
     onOpenAreaPicker: vi.fn(),
     onOpenQuickAdd: vi.fn(),
@@ -1078,6 +1079,33 @@ describe('ProjectDetailModal lifecycle actions', () => {
         expect(duplicate).toBeTruthy();
         expect(tree.root.findByProps({ testID: 'project-archive-button' })).toBeTruthy();
         expect(duplicate.findAllByProps({ testID: 'project-type-toggle' })).toHaveLength(0);
+    });
+
+    it('deletes the project from the actions menu after a confirm', () => {
+        // The swipe action on the project list was the only way to delete a
+        // project on mobile; a reporter looking next to Archive found nothing (#1142).
+        vi.spyOn(Alert, 'alert').mockImplementation(((_title, _message, buttons) => {
+            buttons?.[1]?.onPress?.();
+        }) as typeof Alert.alert);
+        const props = createProjectDetailModalProps();
+        let tree!: ReturnType<typeof create>;
+
+        act(() => {
+            tree = create(<ProjectDetailModal {...props} />);
+        });
+        act(() => {
+            tree.root.findByProps({ testID: 'project-actions-menu-button' }).props.onPress();
+        });
+        act(() => {
+            tree.root.findByProps({ testID: 'project-delete-button' }).props.onPress();
+        });
+
+        expect(Alert.alert).toHaveBeenCalledWith(
+            'projects.title',
+            'projects.deleteConfirm',
+            expect.any(Array),
+        );
+        expect(props.onDeleteProject).toHaveBeenCalledWith(props.project?.id);
     });
 
     it('archives from the Archive action with a single tap and no native confirm', () => {

@@ -54,6 +54,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 - German translation: dozens of typos and wording fixes across the app (thanks tweltner), plus three follow-ups: the Focus limit hint now shows the configured number instead of a fixed "drei", the project review date field reads "Revisionsdatum" like the sort option, and the daily review Focus step matches the English wording. (#1140)
 
+- Android and iOS: the project actions menu (the ⋯ button in a project) gains Delete next to Duplicate and Archive, with the same confirm as the swipe action on the project list; the project goes to Trash and its tasks stay, unassigned. (#1142)
+
 - Desktop Dropbox sign-in: connecting could fail at once with "Dropbox state validation failed. Please retry from Mindwtr." when the browser replayed an earlier sign-in's callback (for example a reloaded tab from a previous connect) before the new one arrived; a second attempt then worked. Such a callback is now answered and ignored, and Mindwtr keeps waiting for the sign-in it started. (in-app report)
 
 - Settings: the Encryption section now links to the sync encryption guide on desktop and mobile, next to the existing sync setup guide link, so the WebDAV server requirements are one tap away when enabling fails. (#1113)
