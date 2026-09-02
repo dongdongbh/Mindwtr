@@ -39,6 +39,7 @@ type UseRootLayoutExternalCaptureParams = {
     dataReady: boolean;
     hasShareIntent: boolean;
     incomingUrl: string | null;
+    incomingUrlKey: number;
     resolveText: ResolveText;
     resetShareIntent: () => void;
     router: RouterLike;
@@ -234,6 +235,7 @@ export function useRootLayoutExternalCapture({
     dataReady,
     hasShareIntent,
     incomingUrl,
+    incomingUrlKey,
     resolveText,
     resetShareIntent,
     router,
@@ -244,7 +246,9 @@ export function useRootLayoutExternalCapture({
     shareWebUrl,
     showToast,
 }: UseRootLayoutExternalCaptureParams) {
-    const lastHandledUrl = useRef<string | null>(null);
+    // Keyed per delivery, not per URL string: an Action Button shortcut sends
+    // the same capture link every time, and each press must open the sheet.
+    const lastHandledKey = useRef<number>(0);
     // The async file-copy branch outlives a render; a dep-identity change
     // mid-copy (language load swaps resolveText, for instance) must not start
     // a second copy of the same share.
@@ -372,29 +376,29 @@ export function useRootLayoutExternalCapture({
     useEffect(() => {
         if (!dataReady) return;
         if (!incomingUrl) return;
-        if (lastHandledUrl.current === incomingUrl) return;
+        if (lastHandledKey.current === incomingUrlKey) return;
 
         const featurePayload = parseOpenFeatureUrl(incomingUrl);
         if (featurePayload) {
-            lastHandledUrl.current = incomingUrl;
+            lastHandledKey.current = incomingUrlKey;
             router.replace(resolveOpenFeaturePath(featurePayload.feature));
             return;
         }
         if (isOpenFeatureUrl(incomingUrl)) {
-            lastHandledUrl.current = incomingUrl;
+            lastHandledKey.current = incomingUrlKey;
             router.replace('/inbox');
             return;
         }
 
         const entityPayload = parseEntityOpenUrl(incomingUrl);
         if (entityPayload) {
-            lastHandledUrl.current = incomingUrl;
+            lastHandledKey.current = incomingUrlKey;
             const target = resolveEntityOpenPath(entityPayload.kind, entityPayload.id);
             router.replace(target ?? '/inbox');
             return;
         }
         if (isEntityOpenUrl(incomingUrl)) {
-            lastHandledUrl.current = incomingUrl;
+            lastHandledKey.current = incomingUrlKey;
             router.replace('/inbox');
             return;
         }
@@ -402,7 +406,7 @@ export function useRootLayoutExternalCapture({
         const payload = parseShortcutCaptureUrl(incomingUrl);
         if (!payload) {
             if (!isShortcutCaptureUrl(incomingUrl)) return;
-            lastHandledUrl.current = incomingUrl;
+            lastHandledKey.current = incomingUrlKey;
             void logWarn('Invalid shortcut capture URL', {
                 scope: 'shortcuts',
                 extra: { url: incomingUrl },
@@ -415,12 +419,12 @@ export function useRootLayoutExternalCapture({
             return;
         }
 
-        lastHandledUrl.current = incomingUrl;
+        lastHandledKey.current = incomingUrlKey;
         try {
             openCaptureConfirmation(payload);
         } catch (error) {
-            lastHandledUrl.current = null;
+            lastHandledKey.current = 0;
             void logError(error, { scope: 'shortcuts', extra: { url: incomingUrl } });
         }
-    }, [dataReady, incomingUrl, resolveText, openCaptureConfirmation, router, showToast]);
+    }, [dataReady, incomingUrl, incomingUrlKey, resolveText, openCaptureConfirmation, router, showToast]);
 }

@@ -50,6 +50,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 - Android and iOS Settings → Sync: choosing a backend or cloud provider whose setup is already complete, saving WebDAV or self-hosted settings, or picking a File Sync folder now activates it at once through the verification sync. Before, these choices only stayed on the page until you pressed Sync, and leaving the screen dropped them, so the previous backend kept syncing. A form that is still empty waits for Save as before. (in-app report)
 
+- iOS and Android: a Shortcut or Action Button that opens Mindwtr through a fixed capture link (for example `mindwtr://capture`) opened the capture sheet only the first time per app session; every later press did nothing until the app was force-closed. Each press now opens the sheet. Shortcuts built with the "Capture to Mindwtr" action were not affected. (in-app report)
+
 - Desktop Dropbox sign-in: connecting could fail at once with "Dropbox state validation failed. Please retry from Mindwtr." when the browser replayed an earlier sign-in's callback (for example a reloaded tab from a previous connect) before the new one arrived; a second attempt then worked. Such a callback is now answered and ignored, and Mindwtr keeps waiting for the sign-in it started. (in-app report)
 
 - Settings: the Encryption section now links to the sync encryption guide on desktop and mobile, next to the existing sync setup guide link, so the WebDAV server requirements are one tap away when enabling fails. (#1113)

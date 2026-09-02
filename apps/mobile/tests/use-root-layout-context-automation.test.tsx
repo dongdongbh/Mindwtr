@@ -36,16 +36,19 @@ const defaultResolveText = (_key: string, fallback: string) => fallback;
 
 function TestHarness({
   incomingUrl,
+  incomingUrlKey = incomingUrl ? 1 : 0,
   returnToBackground,
   resolveText = defaultResolveText,
 }: {
   incomingUrl: string | null;
+  incomingUrlKey?: number;
   returnToBackground?: ReturnType<typeof vi.fn>;
   resolveText?: (key: string, fallback: string) => string;
 }) {
   useRootLayoutContextAutomation({
     dataReady: true,
     incomingUrl,
+    incomingUrlKey,
     returnToBackground,
     resolveText,
   });
