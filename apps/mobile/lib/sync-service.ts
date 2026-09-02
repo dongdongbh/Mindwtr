@@ -1512,6 +1512,19 @@ class MobileSyncRun {
         const refreshStartedAt = Date.now();
         if (!info.localWriteSkipped) {
           await useTaskStore.getState().fetchData({ silent: true, preloadedData: mergedData });
+          // The refresh alone never publishes this cycle's status: the store keeps its
+          // previous settings object whenever the incoming one differs only in the
+          // volatile lastSync* keys (reuseSettingsIfEquivalent, #766), so the Sync
+          // screen kept showing an hours-old "Last sync" while cycles kept succeeding.
+          // The local-write-skipped path already gets this patch from core's
+          // persistSyncStatusOnly; issue it here for every cycle that wrote locally.
+          await applyLocalSyncStatus({
+            lastSyncAt: mergedData.settings.lastSyncAt,
+            lastSyncStatus: mergedData.settings.lastSyncStatus,
+            lastSyncError: mergedData.settings.lastSyncError,
+            lastSyncStats: mergedData.settings.lastSyncStats,
+            lastSyncHistory: mergedData.settings.lastSyncHistory,
+          });
         }
         logSyncDiagnostic('Sync diagnostic complete', this.syncDiagnosticStartedAt, {
           backend: this.backend,

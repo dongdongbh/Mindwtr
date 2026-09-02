@@ -2286,6 +2286,44 @@ describe('mobile sync-service runtime', () => {
     expect(storeStateRef.current.fetchData).not.toHaveBeenCalled();
   });
 
+  it('publishes the cycle status to the store after a merge that wrote locally', async () => {
+    // The store keeps its previous settings object whenever the incoming one differs only
+    // in the volatile lastSync* keys (reuseSettingsIfEquivalent, #766), so the preloaded
+    // refresh alone never moves "Last sync" on the Sync screen. The 2026-09-02 Dropbox
+    // device test watched that timestamp sit still through several successful cycles.
+    const syncedAt = '2026-09-02T21:40:45.000Z';
+    coreMocks.webdavGetJson.mockResolvedValue(remoteChangedData);
+    coreMocks.performSyncCycle.mockImplementation(async (io: any) => {
+      const local = await io.readLocal();
+      const remote = await io.readRemote();
+      const base = remote ?? local;
+      const data = {
+        ...base,
+        settings: { ...base.settings, lastSyncAt: syncedAt, lastSyncStatus: 'success' },
+      };
+      await io.writeLocal(data);
+      await io.writeRemote(data);
+      return { status: 'success', stats: emptyStats, data };
+    });
+
+    await syncServiceModule.performMobileSync();
+
+    const patched = coreMocks.useTaskStoreSetState.mock.calls
+      .map((call: any[]) => (call[0] as (state: any) => any)({ settings: { theme: 'dark' } }))
+      .find((next: any) => next?.settings?.lastSyncAt === syncedAt);
+    expect(patched?.settings).toMatchObject({
+      lastSyncAt: syncedAt,
+      lastSyncStatus: 'success',
+      // Untouched keys survive the patch.
+      theme: 'dark',
+    });
+    // And it survives a restart of the screen through the device-local status cache.
+    const cached = asyncStorageMocks.setItem.mock.calls
+      .filter((call: any[]) => call[0] === '@mindwtr_local_sync_status_v1')
+      .map((call: any[]) => JSON.parse(call[1] as string));
+    expect(cached.at(-1)).toMatchObject({ lastSyncAt: syncedAt, lastSyncStatus: 'success' });
+  });
+
   it('stops cloud attachment pre-sync when the app lifecycle aborts the sync', async () => {
     const dataWithAttachment: AppData = {
       tasks: [
