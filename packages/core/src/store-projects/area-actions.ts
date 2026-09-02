@@ -178,18 +178,25 @@ export const createAreaActions = ({
             const nextName = updates.name !== undefined ? updates.name.trim() : area.name;
             let projectsChanged = false;
             let newAllProjects = state._allProjects;
-            if ('color' in updates) {
-                // Project.color is required, so clearing the area color
-                // repaints its projects back to the neutral default rather
-                // than leaving them stuck on the color the area just lost.
-                const nextAreaColor = updates.color ?? DEFAULT_PROJECT_COLOR;
+            // Project.color is required, so clearing the area color repaints its
+            // projects back to the neutral default rather than leaving them stuck
+            // on the color the area just lost. `areaTitle` is the denormalized
+            // copy of the area name: leaving it stale would make the next sync
+            // merge repair every child project (sync-normalization.ts).
+            const repaintColor = 'color' in updates;
+            const nextAreaColor = updates.color ?? DEFAULT_PROJECT_COLOR;
+            const nextAreaTitle = nextName.trim() || undefined;
+            if (repaintColor || nextAreaTitle !== area.name?.trim()) {
                 newAllProjects = state._allProjects.map((project) => {
                     if (project.areaId !== id) return project;
-                    if (project.color === nextAreaColor) return project;
+                    const wantsColor = repaintColor && project.color !== nextAreaColor;
+                    const wantsTitle = project.areaTitle !== nextAreaTitle;
+                    if (!wantsColor && !wantsTitle) return project;
                     projectsChanged = true;
                     return {
                         ...project,
-                        color: nextAreaColor,
+                        ...(wantsColor ? { color: nextAreaColor } : {}),
+                        ...(wantsTitle ? { areaTitle: nextAreaTitle } : {}),
                         updatedAt: now,
                         rev: nextRevision(project.rev),
                         revBy: deviceState.deviceId,
@@ -276,7 +283,10 @@ export const createAreaActions = ({
                 };
             });
             const newAllTasks = state._allTasks.map((task) => {
-                if (task.areaId !== id || task.deletedAt) return task;
+                // Trashed tasks are detached too: the sync merge clears a link to a
+                // non-live area on every device, and restoreArea never re-links
+                // children, so keeping it here only made the next sync repair it.
+                if (task.areaId !== id) return task;
                 return {
                     ...task,
                     areaId: undefined,

@@ -115,6 +115,20 @@ export type SyncCycleIO = {
      *  is authoritative during this one merge; local URI/status still win as
      *  usual so downloaded bytes are not discarded. */
     preferIncomingAttachmentCloudKeys?: boolean;
+    /**
+     * True only for the local-only upload fast path, where `readRemote` answers
+     * "absent" by construction. Merging a document against an absent remote is
+     * `normalize(local)`, and every local read is canonical — each storage codec
+     * reads a field back in exactly the shape the merge would emit — so that
+     * normalize is the identity and the cycle can hand the document straight to
+     * the tombstone purge and the validate step.
+     *
+     * The invariant behind the skip (`pass(readLocal(x)) === readLocal(x)`) is
+     * held by the codecs, guarded by `sync-canonical-reads.contract.test.ts` and
+     * re-checked at the wire exit in development builds. Never set it for a
+     * cycle that actually read a remote document.
+     */
+    skipEmptyRemoteMerge?: () => boolean;
     historyContext?: {
         backend?: SyncHistoryEntry['backend'];
         type?: SyncHistoryEntry['type'];

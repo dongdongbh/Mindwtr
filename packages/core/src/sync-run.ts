@@ -903,7 +903,39 @@ class SharedSyncRunMachine {
         return io.readRemoteFingerprint();
     }
 
+    /**
+     * Development-only backstop for the local-only upload fast path, at the one
+     * place the document leaves for the wire. The fast path skips the
+     * empty-remote merge on the strength of one invariant — every local read is
+     * canonical, so `mergeAppData(local, {})` is the identity — and this is
+     * where a write path that broke it gets caught, before the non-canonical
+     * bytes reach a remote. Production pays nothing: the check costs two full
+     * serializations of the document.
+     */
+    private assertLocalOnlyUploadIsCanonical(data: AppData): void {
+        if (!this.state.localOnlyUploadFingerprint) return;
+        // Same predicate the store's write contract uses (store.ts).
+        if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'development') return;
+        // The same empty document the real cycle merges against (sync.ts parses
+        // an absent remote through parseSyncDocument), so the comparison is
+        // byte-exact against what production does.
+        const parsedEmpty = parseSyncDocument({}, 'remote');
+        const emptyRemote: AppData = parsedEmpty.ok
+            ? parsedEmpty.data
+            : { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
+        const asWritten = toStableSyncJson(toRemoteSyncDocument(data));
+        const asMerged = toStableSyncJson(toRemoteSyncDocument(mergeAppData(data, emptyRemote)));
+        if (asWritten === asMerged) return;
+        const message = 'Sync canonical-read invariant broken: the local-only upload fast path '
+            + 'is about to publish a document the normalize pass would still change. A local '
+            + 'write path is producing a non-canonical entity; see '
+            + 'sync-canonical-reads.contract.test.ts.';
+        this.notifier.logWarning(message);
+        throw new Error(message);
+    }
+
     private async writeRemoteForCycle(data: AppData): Promise<void> {
+        this.assertLocalOnlyUploadIsCanonical(data);
         await this.ensureRemoteMutationFence();
         await this.assertRemoteMutationFenceHeld();
         await this.ensureNetwork();
@@ -1067,6 +1099,16 @@ class SharedSyncRunMachine {
      * fallback: a write path that changed an entity without bumping its
      * revision would be published here where a full cycle would have let the
      * recorded remote win. Any new write producer must keep that convention.
+     *
+     * SECOND HARD DEPENDENCY: arming this also skips `mergeAppData(local, {})`
+     * itself (`io.skipEmptyRemoteMerge`; the tombstone purge and the validate
+     * step still run). That is sound only because readLocal output is canonical:
+     * `pass(readLocal(x)) === readLocal(x)`. Every storage codec must read a
+     * field back in exactly the shape the merge would emit — `showFutureRecurrence`
+     * is `true` or absent, never `false`; every other synced boolean is explicit
+     * — and every creation path must write that same shape. The invariant is
+     * guarded by `sync-canonical-reads.contract.test.ts` and re-checked at the
+     * wire exit by `assertLocalOnlyUploadIsCanonical` in development builds.
      */
     private async tryArmLocalOnlyUploadFastPath(): Promise<boolean> {
         // Same rule as the fast check: a user-initiated sync always reads, so a
@@ -1510,6 +1552,9 @@ class SharedSyncRunMachine {
             },
             preferIncomingAttachmentCloudKeys:
                 this.options.ignorePendingRemoteWriteBackoff === true,
+            // Read lazily: the fast path arms before the merge phase builds this
+            // object, but nothing here should depend on that ordering.
+            skipEmptyRemoteMerge: () => this.state.localOnlyUploadFingerprint !== null,
             onStep: (next) => this.setStep(next),
             yieldToUi: this.notifier.yieldToUi ? () => this.notifier.yieldToUi!() : undefined,
             historyContext: {

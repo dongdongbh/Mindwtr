@@ -44,6 +44,15 @@ export const fromJson = <T,>(value: unknown, fallback: T): T => {
 
 export const toBool = (value?: boolean) => (value ? 1 : 0);
 export const fromBool = (value: unknown) => Boolean(value);
+/**
+ * Read rule for a boolean column whose canonical wire form is `true` or ABSENT,
+ * never `false` (`showFutureRecurrence`; see sync-normalization.ts). The column
+ * stays a plain INTEGER: a stored 0 (and every legacy row already on disk)
+ * reads back as absent, so local reads match what the merge would emit and no
+ * migration is needed. `1` is tolerated as a number because the macOS CloudKit
+ * bridge boxes booleans that way (#902).
+ */
+export const fromPresentBool = (value: unknown): true | undefined => (value ? true : undefined);
 export const toNullableBool = (value?: boolean | null) => (value === null || value === undefined ? null : toBool(value));
 export const fromNullableBool = (value: unknown): boolean | null | undefined => {
     if (value === null) return null;

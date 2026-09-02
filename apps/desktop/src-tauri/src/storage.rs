@@ -1836,8 +1836,14 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
     if !recurrence_val.is_null() {
         map.insert("recurrence".to_string(), recurrence_val);
     }
+    // Canonical wire form is `true` or ABSENT, never `false` (the merge rule in
+    // packages/core/src/sync-normalization.ts). Reading a stored 0 (or NULL) back
+    // as absent keeps this reader in step with the JS codec's fromPresentBool and
+    // absorbs every legacy row without a migration.
     if let Ok(val) = row.get::<_, i64>("showFutureRecurrence") {
-        map.insert("showFutureRecurrence".to_string(), Value::Bool(val != 0));
+        if val != 0 {
+            map.insert("showFutureRecurrence".to_string(), Value::Bool(true));
+        }
     }
     if let Ok(val) = row.get::<_, Option<i64>>("pushCount") {
         if let Some(v) = val {
@@ -5049,6 +5055,61 @@ mod tests {
         );
     }
 
+    /// The canonical wire form of `showFutureRecurrence` is `true` or ABSENT,
+    /// never `false` (the merge rule in packages/core/src/sync-normalization.ts).
+    /// This reader and the JS codec's `fromPresentBool` must agree, or a desktop
+    /// build's two local readers disagree about the same row and the sync cycle
+    /// re-normalizes the whole library on every upload. The JS side of the same
+    /// rule is pinned by packages/core/src/sync-schema-row-codec.test.ts (sparse
+    /// task fixture) and packages/core/src/sync-canonical-reads.contract.test.ts.
+    #[test]
+    fn show_future_recurrence_round_trips_as_true_or_absent() {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../../../packages/core/src/task-sync-schema.fixture.json"
+        ))
+        .expect("valid Task schema fixture");
+        let fixture = schema
+            .get("fixture")
+            .and_then(Value::as_object)
+            .expect("Task schema payload")
+            .clone();
+
+        let conn = Connection::open_in_memory().expect("should open in-memory db");
+        conn.execute_batch(SQLITE_SCHEMA)
+            .expect("should create schema");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("should disable fixture foreign keys");
+
+        let write = |id: &str, value: Option<bool>| {
+            let mut task = fixture.clone();
+            task.insert("id".to_string(), Value::String(id.to_string()));
+            match value {
+                Some(flag) => {
+                    task.insert("showFutureRecurrence".to_string(), Value::Bool(flag));
+                }
+                None => {
+                    task.remove("showFutureRecurrence");
+                }
+            }
+            upsert_task_row(&conn, &Value::Object(task)).expect("should write task row");
+        };
+        let read = |id: &str| -> Option<Value> {
+            conn.query_row("SELECT * FROM tasks WHERE id = ?1", [id], row_to_task_value)
+                .expect("should map task row")
+                .get("showFutureRecurrence")
+                .cloned()
+        };
+
+        write("sfr-true", Some(true));
+        write("sfr-false", Some(false));
+        write("sfr-absent", None);
+
+        assert_eq!(read("sfr-true"), Some(Value::Bool(true)));
+        // Stored 0, and every legacy row already on disk, read back ABSENT.
+        assert_eq!(read("sfr-false"), None);
+        assert_eq!(read("sfr-absent"), None);
+    }
+
     /// Mirrors `packages/core/src/task-query.test.ts` and `local_api.rs`'s
     /// fixture test against the SAME (tasks, query) -> expected ids table.
     /// Unlike local_api's HTTP-query-param filter, this Tauri command takes a
@@ -5584,7 +5645,8 @@ mod tests {
         );
         assert_eq!(task.get("order"), Some(&Value::Number(11.into())));
         assert_eq!(task.get("orderNum"), Some(&Value::Number(11.into())));
-        assert_eq!(task.get("showFutureRecurrence"), Some(&Value::Bool(false)));
+        // Stored 0 reads back ABSENT: canonical is `true` or nothing.
+        assert_eq!(task.get("showFutureRecurrence"), None);
         assert_eq!(task.get("isFocusedToday"), Some(&Value::Bool(false)));
         assert_eq!(
             task.get("suppressMindwtrReminders"),

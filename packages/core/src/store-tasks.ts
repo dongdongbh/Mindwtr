@@ -434,6 +434,13 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
                 updatedAt: now,
                 deletedAt: undefined,
                 purgedAt: undefined,
+                // Synced booleans whose canonical form is an explicit `false`
+                // (sync-normalization.ts materializes both). SQLite hides the
+                // gap by re-materializing every boolean column on read, so an
+                // omission here only shows up on a path that uploads the
+                // in-memory snapshot. Keep the creation literal canonical.
+                isFocusedToday: initialTaskProps.isFocusedToday ?? false,
+                suppressMindwtrReminders: initialTaskProps.suppressMindwtrReminders ?? false,
                 ...referenceClears,
                 areaId: resolvedAreaId,
                 projectId: resolvedProjectId,
@@ -1056,6 +1063,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
                         tagIds: projectTagIds,
                     },
                     existingProjects: state._allProjects,
+                    existingAreas: state._allAreas,
                     settings: state.settings,
                     deviceId: deviceState.deviceId,
                     now,

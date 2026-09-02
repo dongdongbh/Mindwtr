@@ -24,7 +24,7 @@ import {
     type SyncBackend,
 } from './sync-service-utils';
 import type { SyncCycleIO, SyncCycleResult } from './sync-types';
-import { performSyncCycle } from './sync';
+import { mergeAppData, performSyncCycle } from './sync';
 import {
     SyncRemoteMutationFenceBusyError,
     SyncRemoteMutationFenceLostError,
@@ -2886,9 +2886,10 @@ describe('local-only upload fast path', () => {
         updatedAt,
     } as Task);
 
-    /** Local document a real store produces: an edit, an uncompacted purged
-     *  tombstone, and an entity stamped in the future by a skewed clock. */
-    const messyLocal = (title: string, rev?: number, updatedAt?: string): AppData => createData([
+    /** Raw store output: an edit, an uncompacted purged tombstone, and an
+     *  entity stamped in the future by a skewed clock. Deliberately NOT
+     *  canonical — the storage codecs materialize the fields it omits. */
+    const rawLocal = (title: string, rev?: number, updatedAt?: string): AppData => createData([
         editedTask('t-local', title, rev, updatedAt),
         {
             ...createTask('t-purged', 'Deleted and purged'),
@@ -2898,6 +2899,18 @@ describe('local-only upload fast path', () => {
         } as Task,
         { ...createTask('t-skewed', 'Stamped in the future'), updatedAt: '2099-01-01T00:00:00.000Z' } as Task,
     ]);
+
+    const EMPTY_REMOTE: AppData = {
+        tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
+    };
+
+    /** The document a device actually holds: written by a previous cycle's
+     *  merge and read back through codecs that reproduce it field for field.
+     *  The fast path skips the empty-remote merge on exactly that guarantee
+     *  (`pass(readLocal(x)) === readLocal(x)`), so a fixture standing in for a
+     *  local read has to be a fixed point of the pass too. */
+    const messyLocal = (title: string, rev?: number, updatedAt?: string): AppData =>
+        mergeAppData(rawLocal(title, rev, updatedAt), EMPTY_REMOTE);
 
     /** One settled cycle, then a purely local edit. */
     const settleThenEditLocally = async (bundle: ReturnType<typeof createHarness>, title: string) => {
@@ -2974,6 +2987,36 @@ describe('local-only upload fast path', () => {
         const purged = uploaded.tasks.find((task) => task.id === 't-purged');
         expect(purged?.description).toBeUndefined();
         expect(purged?.title).toBeUndefined();
+    });
+
+    it('skips the empty-remote merge entirely', async () => {
+        // Observable only with a deliberately non-canonical local document: a
+        // real one is a fixed point of the pass, which is the whole reason the
+        // skip is safe. The raw fixture omits fields the merge materializes, so
+        // the fast path publishes them missing where a full cycle fills them in.
+        const nonCanonical = rawLocal('Edited only here', 5, '2026-07-13T09:30:00.000Z');
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-skips-merge',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: conditionalIo,
+        });
+        await bundle.run();
+        bundle.harness.persisted = cloneAppData(nonCanonical);
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        bundle.harness.lastDataChangeAt += 1;
+
+        await bundle.run();
+
+        const uploaded = bundle.harness.remote!.tasks.find((task) => task.id === 't-local');
+        expect(uploaded?.title).toBe('Edited only here');
+        // The merge would have materialized these; nothing else in the cycle does.
+        expect(uploaded?.suppressMindwtrReminders).toBeUndefined();
+        expect(uploaded?.isFocusedToday).toBeUndefined();
+        // The tombstone purge and the validate step still run: the purged
+        // tombstone is gone from the wire document, not merely uncompacted.
+        expect(bundle.harness.remote!.tasks.find((task) => task.id === 't-purged')?.description)
+            .toBeUndefined();
     });
 
     it('reads the remote when the backend cannot make the write conditional', async () => {

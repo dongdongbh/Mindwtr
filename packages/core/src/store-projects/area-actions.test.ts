@@ -116,6 +116,31 @@ describe('area actions', () => {
         expect(state.projects.find((item) => item.id === project.id)?.color).toBe('#94a3b8');
     });
 
+    it('detaches already-trashed tasks from a deleted area, the same as the sync merge would', async () => {
+        // The merge clears a link to a non-live area on every device and restoreArea
+        // never re-links children, so keeping the link here only produced a
+        // non-canonical document that the next sync had to repair (#1001).
+        const { addArea, addTask, deleteTask, deleteArea } = useTaskStore.getState();
+        const area = await addArea('Work');
+        expect(area).not.toBeNull();
+        if (!area) return;
+        const trashed = await addTask('Trashed area task', { areaId: area.id, status: 'next' });
+        expect(trashed.success).toBe(true);
+        if (!trashed.success) return;
+        await deleteTask(trashed.id);
+        const before = useTaskStore.getState()._allTasks.find((task) => task.id === trashed.id);
+        expect(before?.deletedAt).toBeTruthy();
+        expect(before?.areaId).toBe(area.id);
+
+        await deleteArea(area.id);
+        await flushPendingSave();
+
+        const after = useTaskStore.getState()._allTasks.find((task) => task.id === trashed.id);
+        expect(after?.deletedAt).toBe(before?.deletedAt);
+        expect(after?.areaId).toBeUndefined();
+        expect(after?.rev).toBe((before?.rev ?? 0) + 1);
+    });
+
     it('restores the area without resurrecting independently deleted children', async () => {
         const { addArea, addProject, addSection, addTask, deleteArea, deleteProject, deleteTask, restoreArea } = useTaskStore.getState();
         const area = await addArea('Work');

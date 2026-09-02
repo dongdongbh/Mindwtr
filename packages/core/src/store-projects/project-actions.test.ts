@@ -64,11 +64,20 @@ describe('project actions', () => {
             updatedAt: BASE_NOW,
         };
 
+        const existingArea = {
+            id: 'area-1',
+            name: 'Home',
+            order: 0,
+            createdAt: BASE_NOW,
+            updatedAt: BASE_NOW,
+        };
+
         const project = buildNewProject({
             title: '  Launch  ',
             color: '#3b82f6',
             initialProps: { areaId: 'area-1', tagIds: ['#launch'] },
             existingProjects: [existingProject],
+            existingAreas: [existingArea],
             settings: { gtd: { defaultProjectFlowMode: 'sequential' } },
             deviceId: 'device-1',
             now: BASE_NOW,
@@ -87,7 +96,11 @@ describe('project actions', () => {
             createdAt: BASE_NOW,
             updatedAt: BASE_NOW,
             isSequential: true,
+            isFocused: false,
             tagIds: ['#launch'],
+            // Denormalized copy of the area name; omitting it leaves a project
+            // the sync merge has to repair on the next cycle.
+            areaTitle: 'Home',
         });
 
         const explicitParallelProject = buildNewProject({
@@ -95,6 +108,7 @@ describe('project actions', () => {
             color: '#22c55e',
             initialProps: { isSequential: false },
             existingProjects: [],
+            existingAreas: [],
             settings: { gtd: { defaultProjectFlowMode: 'sequential' } },
             deviceId: 'device-1',
             now: BASE_NOW,

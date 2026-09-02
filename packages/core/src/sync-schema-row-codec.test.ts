@@ -58,7 +58,8 @@ type RowCodecCase<T> = {
     // are booleans coerce a missing value to `false` by established, pre-existing design
     // (fromBool/toBool never preserved undefined, on any entity, before or after this task) —
     // sparse fixtures set those explicitly to keep the round-trip meaningful rather than
-    // asserting a behaviour this task didn't change.
+    // asserting a behaviour this task didn't change. The one exception is
+    // `showFutureRecurrence`, whose canonical form is `true` or absent, never `false`.
     sparseFixture: T;
 };
 
@@ -67,7 +68,9 @@ const ISO = '2026-01-01T00:00:00.000Z';
 const sparseTask: Task = {
     id: 'task-sparse', title: 'Sparse task', status: 'inbox', tags: [], contexts: [],
     createdAt: ISO, updatedAt: ISO,
-    showFutureRecurrence: false, isFocusedToday: false, suppressMindwtrReminders: false,
+    // showFutureRecurrence is deliberately absent: its canonical form is `true` or
+    // nothing, so a stored 0/NULL reads back absent (fromPresentBool).
+    isFocusedToday: false, suppressMindwtrReminders: false,
     // Nullable BY DESIGN (`T | null`, not just `T | undefined`): the write side collapses an
     // absent value to SQLite NULL (`?? null`), so "omitted" can never round-trip back to
     // `undefined` — only ever `null`. Set explicitly rather than asserting an impossible round

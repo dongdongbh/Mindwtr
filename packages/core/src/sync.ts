@@ -123,6 +123,32 @@ function createEmptyEntityStats(localTotal: number, incomingTotal: number): Enti
     };
 }
 
+/**
+ * Stats for a cycle that skipped the empty-remote merge (`io.skipEmptyRemoteMerge`):
+ * with no incoming document every entity is local-only, nothing conflicts and
+ * nothing is clamped. Kept in step with what the real merge reports for an empty
+ * remote by `sync-canonical-reads.contract.test.ts`.
+ */
+function createLocalOnlyMergeStats(data: AppData): MergeStats {
+    const forCollection = (items?: readonly unknown[]): EntityMergeStats => {
+        const stats = createEmptyEntityStats(items?.length ?? 0, 0);
+        stats.mergedTotal = stats.localTotal;
+        stats.localOnly = stats.localTotal;
+        // The reconcile counts an entity with no counterpart as resolved using
+        // the local side, so a skipped merge has to report it the same way.
+        stats.resolvedUsingLocal = stats.localTotal;
+        return stats;
+    };
+    return {
+        tasks: forCollection(data.tasks),
+        projects: forCollection(data.projects),
+        sections: forCollection(data.sections),
+        areas: forCollection(data.areas),
+        people: forCollection(data.people),
+        tombstoneRepairs: 0,
+    };
+}
+
 const CONFLICT_SAMPLE_LIMIT = 5;
 const CONFLICT_DIFF_KEY_LIMIT = 8;
 const PENDING_REMOTE_WRITE_RETRY_BASE_MS = 5 * 1000;
@@ -1261,10 +1287,19 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
 
     io.onStep?.('merge');
     await yieldToUi();
-    const mergeResult = mergeAppDataWithStats(localData, remoteData, {
-        nowIso,
-        preferIncomingAttachmentCloudKeys: io.preferIncomingAttachmentCloudKeys,
-    });
+    // The skip is refused unless the remote really is empty, so a caller that
+    // sets the flag on a cycle that read a document cannot discard it.
+    const remoteIsEmpty = remoteData.tasks.length === 0
+        && remoteData.projects.length === 0
+        && remoteData.sections.length === 0
+        && remoteData.areas.length === 0
+        && (remoteData.people?.length ?? 0) === 0;
+    const mergeResult: MergeResult = io.skipEmptyRemoteMerge?.() === true && remoteIsEmpty
+        ? { data: localData, stats: createLocalOnlyMergeStats(localData) }
+        : mergeAppDataWithStats(localData, remoteData, {
+            nowIso,
+            preferIncomingAttachmentCloudKeys: io.preferIncomingAttachmentCloudKeys,
+        });
     const mergeSummary = summarizeMergeStats(mergeResult.stats);
     const conflictCount = mergeSummary.conflicts;
     const nextSyncStatus: SyncCycleResult['status'] = conflictCount > 0 ? 'conflict' : 'success';
