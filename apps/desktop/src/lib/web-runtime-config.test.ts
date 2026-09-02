@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getWebDefaultCloudUrl, resetWebDefaultCloudUrlForTests } from './web-runtime-config';
+import { getRequireSyncFlag, getWebDefaultCloudUrl, resetWebDefaultCloudUrlForTests } from './web-runtime-config';
 
 type FetchResponses = Record<string, () => Promise<Partial<Response>> | Partial<Response>>;
 
@@ -78,6 +78,55 @@ describe('getWebDefaultCloudUrl', () => {
         });
         await getWebDefaultCloudUrl();
         await getWebDefaultCloudUrl();
+        expect(calls).toEqual(['/runtime-config.json']);
+    });
+});
+
+describe('getRequireSyncFlag', () => {
+    beforeEach(() => {
+        resetWebDefaultCloudUrlForTests();
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('reports true when runtime config sets requireSync', async () => {
+        installFetch({
+            '/runtime-config.json': () => jsonResponse({ requireSync: true }),
+        });
+        await expect(getRequireSyncFlag()).resolves.toBe(true);
+    });
+
+    it('reports false when requireSync is absent', async () => {
+        installFetch({
+            '/runtime-config.json': () => jsonResponse({ defaultCloudUrl: 'https://cloud.example' }),
+        });
+        await expect(getRequireSyncFlag()).resolves.toBe(false);
+    });
+
+    it('reports false when the runtime config file is missing', async () => {
+        installFetch({
+            '/runtime-config.json': () => jsonResponse(null, false),
+        });
+        await expect(getRequireSyncFlag()).resolves.toBe(false);
+    });
+
+    it('reports false when the fetch throws', async () => {
+        installFetch({
+            '/runtime-config.json': () => {
+                throw new Error('offline');
+            },
+        });
+        await expect(getRequireSyncFlag()).resolves.toBe(false);
+    });
+
+    it('shares one fetch of runtime-config.json with getWebDefaultCloudUrl', async () => {
+        const calls = installFetch({
+            '/runtime-config.json': () => jsonResponse({ defaultCloudUrl: 'https://cloud.example', requireSync: true }),
+        });
+        await getWebDefaultCloudUrl();
+        await getRequireSyncFlag();
         expect(calls).toEqual(['/runtime-config.json']);
     });
 });
