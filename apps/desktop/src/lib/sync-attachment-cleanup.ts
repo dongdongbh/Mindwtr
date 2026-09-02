@@ -10,6 +10,7 @@ import {
     type CloudProvider,
     runAttachmentCleanupLifecycle,
     normalizeStrongWebdavEtag,
+    webdavDeleteFile,
     webdavDeleteFileVersioned,
     webdavHeadFile,
 } from '@mindwtr/core';
@@ -202,15 +203,24 @@ export const cleanupOrphanedAttachments = async (
                     throw missing;
                 }
                 const etag = normalizeStrongWebdavEtag(metadata.etag);
-                if (!etag) throw new Error('WebDAV attachment version is unavailable; refusing an unconditional delete');
                 guards.ensureLocalSnapshotFresh();
                 await guards.assertRemoteMutationFenceHeld?.(35_000);
-                await webdavDeleteFileVersioned(targetUrl, etag, {
+                const requestOptions = {
                     allowInsecureHttp: webdavConfig.allowInsecureHttp,
                     username: webdavConfig.username,
                     password: webdavPassword,
                     fetcher,
-                });
+                };
+                if (etag) {
+                    await webdavDeleteFileVersioned(targetUrl, etag, requestOptions);
+                } else {
+                    // A server without strong ETags (Jianguoyun, some proxies) gets
+                    // the document written unconditionally already; refusing the
+                    // delete here only left the orphan on the server and a warning
+                    // in the log on every cycle, forever.
+                    deps.logSyncInfo('WebDAV attachment removed without a version check; the server provides no strong ETag');
+                    await webdavDeleteFile(targetUrl, requestOptions);
+                }
             } else if (backend === 'cloud' && cloudProvider === 'selfhosted' && cloudConfig?.url) {
                 const baseUrl = getCloudBaseUrl(cloudConfig.url);
                 guards.ensureLocalSnapshotFresh();

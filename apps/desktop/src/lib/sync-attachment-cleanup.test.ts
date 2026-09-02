@@ -15,12 +15,14 @@ const fsMocks = vi.hoisted(() => ({
 }));
 
 const coreMocks = vi.hoisted(() => ({
+    webdavDeleteFile: vi.fn(),
     webdavDeleteFileVersioned: vi.fn(),
     webdavHeadFile: vi.fn(),
 }));
 
 vi.mock('@mindwtr/core', async (importOriginal) => ({
     ...(await importOriginal<typeof import('@mindwtr/core')>()),
+    webdavDeleteFile: coreMocks.webdavDeleteFile,
     webdavDeleteFileVersioned: coreMocks.webdavDeleteFileVersioned,
     webdavHeadFile: coreMocks.webdavHeadFile,
 }));
@@ -93,6 +95,41 @@ describe('desktop attachment cleanup freshness', () => {
 
         expect(fsMocks.remove).not.toHaveBeenCalled();
         expect(cleaned.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+    });
+
+    it('deletes a remote orphan without a version on a server that provides no strong ETag', async () => {
+        // Jianguoyun answers HEAD without an ETag; the cleanup used to refuse the
+        // delete and warn on every cycle forever (device test, 2026-09-02).
+        const appData: AppData = {
+            ...buildData(),
+            settings: { attachments: { pendingRemoteDeletes: [{
+                cloudKey: 'attachments/orphan-1.png',
+                title: 'orphan-1.png',
+                attempts: 3,
+                lastErrorAt: '2026-09-02T00:00:00.000Z',
+            }] } },
+        };
+        const deps = buildDeps();
+        vi.mocked(deps.getWebDavConfig).mockResolvedValue({
+            url: 'https://dav.example.com/mindwtr/',
+            username: 'alice',
+        });
+        fsMocks.readDir.mockResolvedValue([]);
+        coreMocks.webdavHeadFile.mockResolvedValue({ exists: true, etag: undefined });
+        coreMocks.webdavDeleteFile.mockResolvedValue(undefined);
+
+        const result = await cleanupOrphanedAttachments(
+            appData,
+            'webdav',
+            deps,
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
+
+        expect(coreMocks.webdavDeleteFileVersioned).not.toHaveBeenCalled();
+        expect(coreMocks.webdavDeleteFile).toHaveBeenCalledTimes(1);
+        expect(coreMocks.webdavDeleteFile.mock.calls[0]?.[0]).toBe('https://dav.example.com/mindwtr/attachments/orphan-1.png');
+        expect(result.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+        expect(deps.logSyncWarning).not.toHaveBeenCalled();
     });
 
     it('bounds remote cleanup and resumes the retained queue on the next pass', async () => {
