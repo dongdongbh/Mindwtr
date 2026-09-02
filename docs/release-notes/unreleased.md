@@ -52,6 +52,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 - iOS and Android: a Shortcut or Action Button that opens Mindwtr through a fixed capture link (for example `mindwtr://capture`) opened the capture sheet only the first time per app session; every later press did nothing until the app was force-closed. Each press now opens the sheet. Shortcuts built with the "Capture to Mindwtr" action were not affected. (in-app report)
 
+- German translation: dozens of typos and wording fixes across the app (thanks tweltner), plus three follow-ups: the Focus limit hint now shows the configured number instead of a fixed "drei", the project review date field reads "Revisionsdatum" like the sort option, and the daily review Focus step matches the English wording. (#1140)
+
 - Desktop Dropbox sign-in: connecting could fail at once with "Dropbox state validation failed. Please retry from Mindwtr." when the browser replayed an earlier sign-in's callback (for example a reloaded tab from a previous connect) before the new one arrived; a second attempt then worked. Such a callback is now answered and ignored, and Mindwtr keeps waiting for the sign-in it started. (in-app report)
 
 - Settings: the Encryption section now links to the sync encryption guide on desktop and mobile, next to the existing sync setup guide link, so the WebDAV server requirements are one tap away when enabling fails. (#1113)
