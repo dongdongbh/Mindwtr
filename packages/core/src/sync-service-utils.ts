@@ -87,6 +87,7 @@ const AI_KEY_PATTERNS = [
 const READONLY_ERROR_PATTERN = /isn't writable|not writable|read-only|read only|permission denied|EACCES/i;
 const OFFLINE_ERROR_PATTERNS = [
     /offline state detected/i,
+    /interrupted while the app was suspended/i,
     /network request failed/i,
     /internet connection appears to be offline/i,
     /airplane mode/i,
