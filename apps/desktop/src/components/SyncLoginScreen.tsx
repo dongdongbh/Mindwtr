@@ -23,10 +23,17 @@ export function SyncLoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         // Self-hosted web deployments preseed the Cloud URL (#1125): a
         // prefill of the editor field only, and never over a user's
         // in-flight edit.
+        // `active` guards against setUrl firing after this screen is
+        // unmounted (SyncLoginGate swaps it out for RootApp the instant
+        // onLoggedIn() fires) — mirrors the same guard in SyncLoginGate.tsx.
+        let active = true;
         void getWebDefaultCloudUrl().then((defaultUrl) => {
-            if (!defaultUrl) return;
+            if (!active || !defaultUrl) return;
             setUrl((current) => (current ? current : defaultUrl));
         });
+        return () => {
+            active = false;
+        };
     }, []);
 
     const fail = (reason?: string) => {

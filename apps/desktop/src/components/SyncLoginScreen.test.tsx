@@ -219,4 +219,37 @@ describe('SyncLoginScreen', () => {
         await waitFor(() => expect(getWebDefaultCloudUrl).toHaveBeenCalled());
         expect(screen.getByLabelText('Self-hosted URL')).toHaveValue('https://user-typed.example.com');
     });
+
+    it('does not update state after unmount when the prefill resolves late', async () => {
+        // Reproduces the race the `active` guard closes: SyncLoginGate
+        // unmounts this screen the instant onLoggedIn() fires, but
+        // getWebDefaultCloudUrl()'s underlying fetch can take up to 3s
+        // (PROBE_TIMEOUT_MS in web-runtime-config.ts) to resolve. Without the
+        // guard, the prefill's `.then` would call setUrl on an unmounted
+        // component.
+        let resolvePrefill: (url: string) => void = () => {};
+        vi.mocked(getWebDefaultCloudUrl).mockReturnValue(
+            new Promise<string>((resolve) => {
+                resolvePrefill = resolve;
+            }),
+        );
+        // On React 18+, a state update on an already-unmounted component is
+        // a silent no-op (the "Cannot update an unmounted component" warning
+        // was removed), so this can't be observed via a React dev warning.
+        // console.error is still asserted as a general regression guard: if
+        // this ever regresses to something that *does* throw or warn (e.g. a
+        // future change that logs on prefill), this test will catch it.
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const { unmount } = renderScreen(vi.fn());
+        unmount();
+
+        resolvePrefill('https://late.example.com');
+        // Let the effect's `.then` microtask (and any state update it would
+        // have triggered) run.
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(consoleError).not.toHaveBeenCalled();
+    });
 });
