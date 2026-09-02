@@ -146,28 +146,29 @@ export const useSyncSettings = ({
     lastSyncNeverLabel,
     requestConfirmation,
 }: UseSyncSettingsOptions) => {
-    const [syncPath, setSyncPath] = useState('');
-    const [syncStatus, setSyncStatus] = useState(() => SyncService.getSyncStatus());
-    const [syncError, setSyncError] = useState<string | null>(null);
     // Seed from the last durable read so the backend control does not show
     // "Off" for the seconds the serialized configuration read takes and then
     // jump to the real backend; the snapshot below still corrects it.
     const [lastKnownSelection] = useState(() => SyncService.getLastKnownSyncSelection());
+    const seed = lastKnownSelection.configuration;
+    const [syncPath, setSyncPath] = useState(seed?.syncPath ?? '');
+    const [syncStatus, setSyncStatus] = useState(() => SyncService.getSyncStatus());
+    const [syncError, setSyncError] = useState<string | null>(null);
     const [syncBackend, setSyncBackend] = useState<SyncBackend>(lastKnownSelection.backend ?? 'off');
     const [persistedSyncBackend, setPersistedSyncBackend] = useState<SyncBackend>(lastKnownSelection.backend ?? 'off');
-    const [webdavUrl, setWebdavUrl] = useState('');
-    const [webdavUsername, setWebdavUsername] = useState('');
-    const [webdavPassword, setWebdavPassword] = useState('');
-    const [webdavHasPassword, setWebdavHasPassword] = useState(false);
-    const [webdavAllowInsecureHttp, setWebdavAllowInsecureHttp] = useState(false);
+    const [webdavUrl, setWebdavUrl] = useState(seed?.webdav.url ?? '');
+    const [webdavUsername, setWebdavUsername] = useState(seed?.webdav.username ?? '');
+    const [webdavPassword, setWebdavPassword] = useState(seed?.webdav.password ?? '');
+    const [webdavHasPassword, setWebdavHasPassword] = useState(seed?.webdav.hasPassword === true);
+    const [webdavAllowInsecureHttp, setWebdavAllowInsecureHttp] = useState(seed?.webdav.allowInsecureHttp === true);
     const [isTestingSyncPath, setIsTestingSyncPath] = useState(false);
     const [isSavingWebDav, setIsSavingWebDav] = useState(false);
     const [isTestingWebDav, setIsTestingWebDav] = useState(false);
     const [webdavTestState, setWebdavTestState] = useState<WebDavTestState>('idle');
-    const [cloudUrl, setCloudUrl] = useState('');
-    const [cloudToken, setCloudToken] = useState('');
-    const [cloudRememberToken, setCloudRememberToken] = useState(false);
-    const [cloudAllowInsecureHttp, setCloudAllowInsecureHttp] = useState(false);
+    const [cloudUrl, setCloudUrl] = useState(seed?.cloud.url ?? '');
+    const [cloudToken, setCloudToken] = useState(seed?.cloud.token ?? '');
+    const [cloudRememberToken, setCloudRememberToken] = useState(seed?.cloud.rememberToken === true);
+    const [cloudAllowInsecureHttp, setCloudAllowInsecureHttp] = useState(seed?.cloud.allowInsecureHttp === true);
     const [cloudProvider, setCloudProvider] = useState<CloudProvider>(lastKnownSelection.cloudProvider ?? 'selfhosted');
     const [persistedCloudProvider, setPersistedCloudProvider] = useState<CloudProvider>(lastKnownSelection.cloudProvider ?? 'selfhosted');
     const hasPendingSyncConfiguration = useRef(false);

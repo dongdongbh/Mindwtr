@@ -1255,6 +1255,9 @@ export class SyncService {
      *  error text a failed save just produced. */
     static async noteSyncBackendPersisted(backend: SyncBackend): Promise<void> {
         SyncService.updateSyncStatus({ backend });
+        if (SyncService.lastConfigurationSnapshot) {
+            SyncService.lastConfigurationSnapshot = { ...SyncService.lastConfigurationSnapshot, backend };
+        }
         if (backend !== 'off') return;
         // Sync reporting ends with sync: once no future sync can clear it, a
         // stale conflict/error status would re-toast at every launch (#1001).
@@ -1701,17 +1704,36 @@ export class SyncService {
         };
     }
 
+    /** Last durable configuration this session read or committed. The Sync
+     *  settings page seeds every field from it on open, because the serialized
+     *  read below waits behind whole sync cycles (tens of seconds on WebDAV). */
+    private static lastConfigurationSnapshot: PersistedDesktopSyncConfiguration | null = null;
+
+    private static rememberConfigurationSnapshot(configuration: PersistedDesktopSyncConfiguration): void {
+        SyncService.lastConfigurationSnapshot = configuration;
+        writeCloudProviderHint(configuration.cloudProvider);
+    }
+
     static async getPersistedSyncConfigurationSnapshot(): Promise<PersistedDesktopSyncConfiguration> {
         const configuration = await runSyncRestoreExclusive(() => SyncService.readPersistedSyncConfiguration());
-        writeCloudProviderHint(configuration.cloudProvider);
+        SyncService.rememberConfigurationSnapshot(configuration);
         return configuration;
     }
 
     /** Synchronous first-frame seed for the Sync settings page: the last
-     *  backend and cloud provider this device durably read. `null` until the
-     *  first configuration read on this install. */
-    static getLastKnownSyncSelection(): { backend: SyncBackend | null; cloudProvider: CloudProvider | null } {
-        return { backend: SyncService.syncStatus.backend, cloudProvider: readCloudProviderHint() };
+     *  backend and cloud provider this device durably read, plus the full
+     *  configuration when this session has read or committed one. */
+    static getLastKnownSyncSelection(): {
+        backend: SyncBackend | null;
+        cloudProvider: CloudProvider | null;
+        configuration: PersistedDesktopSyncConfiguration | null;
+    } {
+        const configuration = SyncService.lastConfigurationSnapshot;
+        return {
+            backend: configuration?.backend ?? SyncService.syncStatus.backend ?? null,
+            cloudProvider: configuration?.cloudProvider ?? readCloudProviderHint(),
+            configuration,
+        };
     }
 
     static async setSyncBackend(backend: SyncBackend): Promise<void> {
@@ -2058,6 +2080,14 @@ export class SyncService {
                     // Phase ownership changes before releasing the lifecycle queue;
                     // a queued Off/disconnect barrier must see and settle this slot.
                     SyncService.moveDropboxCredentialToFinalizeRetry(credentialHandle);
+                }
+                // Refresh the page seed inside the queue slot, ahead of any sync
+                // cycle already waiting; a reopened Sync page otherwise shows the
+                // previous backend until that cycle finishes.
+                try {
+                    SyncService.rememberConfigurationSnapshot(await SyncService.readPersistedSyncConfiguration());
+                } catch (error) {
+                    logSyncWarning('Failed to refresh the sync configuration seed after commit', error);
                 }
                 return committed;
             });

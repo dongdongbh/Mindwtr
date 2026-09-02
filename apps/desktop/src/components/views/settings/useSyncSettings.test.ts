@@ -131,7 +131,7 @@ describe('useSyncSettings cloud token validation', () => {
         // The persisted snapshot is read through the serialized restore queue and
         // can take seconds after launch; without a synchronous seed the control
         // showed "Off" and then jumped to the real backend on every open.
-        vi.spyOn(SyncService, 'getLastKnownSyncSelection').mockReturnValue({ backend: 'cloud', cloudProvider: 'dropbox' });
+        vi.spyOn(SyncService, 'getLastKnownSyncSelection').mockReturnValue({ backend: 'cloud', cloudProvider: 'dropbox', configuration: null });
         let resolveSnapshot: (value: ReturnType<typeof dropboxConfigurationSnapshot>) => void = () => undefined;
         vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockReturnValueOnce(new Promise((resolve) => {
             resolveSnapshot = resolve;
@@ -144,6 +144,33 @@ describe('useSyncSettings cloud token validation', () => {
 
         resolveSnapshot({ ...dropboxConfigurationSnapshot('off'), backend: 'webdav', cloudProvider: 'selfhosted' });
         await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('webdav'));
+    });
+
+    it('seeds every editor field from the last durable configuration on the first frame', () => {
+        // After a Dropbox -> WebDAV switch the reopened page showed the WebDAV
+        // control with empty URL/username fields until the queued read returned.
+        const configuration = {
+            ...dropboxConfigurationSnapshot('off'),
+            backend: 'webdav' as const,
+            cloudProvider: 'selfhosted' as const,
+            webdav: {
+                ...dropboxConfigurationSnapshot('off').webdav,
+                url: 'https://dav.example.com/mindwtr',
+                username: 'dd',
+                hasPassword: true,
+                allowInsecureHttp: true,
+            },
+        };
+        vi.spyOn(SyncService, 'getLastKnownSyncSelection').mockReturnValue({ backend: 'webdav', cloudProvider: 'selfhosted', configuration });
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockReturnValueOnce(new Promise(() => undefined));
+
+        const { result } = setup();
+
+        expect(result.current.syncPageProps.syncBackend).toBe('webdav');
+        expect(result.current.syncPageProps.webdavUrl).toBe('https://dav.example.com/mindwtr');
+        expect(result.current.syncPageProps.webdavUsername).toBe('dd');
+        expect(result.current.syncPageProps.webdavHasPassword).toBe(true);
+        expect(result.current.syncPageProps.webdavAllowInsecureHttp).toBe(true);
     });
     beforeEach(() => {
         languageMocks.t.mockImplementation((key: string) => key);
@@ -1857,6 +1884,9 @@ describe('useSyncSettings sync target validity', () => {
         vi.spyOn(SyncService, 'isDropboxConnected').mockResolvedValue(input.dropboxConnected);
         vi.spyOn(SyncService, 'listDataSnapshots').mockResolvedValue([]);
         vi.spyOn(SyncService, 'subscribeSyncStatus').mockImplementation(() => () => {});
+        // The first-frame seed is a session-static cache; a previous case's
+        // configuration must not satisfy this case's waitFor early.
+        vi.spyOn(SyncService, 'getLastKnownSyncSelection').mockReturnValue({ backend: null, cloudProvider: null, configuration: null });
 
         return renderHook(() => useSyncSettings({
             appVersion: '1.0.0',

@@ -1413,6 +1413,15 @@ describe('SyncService testability hooks', () => {
         expect(events[0]).toBe('dropbox:recover-before-configuration');
         expect(events).toContain('snapshot:strict-cloud');
         expect(events.indexOf('provider:selfhosted')).toBeLessThan(events.lastIndexOf('backend:cloud'));
+        // The Sync page seed is refreshed from the committed configuration in
+        // the same queue slot, so a reopened page does not show the old backend
+        // until a queued sync cycle finishes.
+        expect(events.lastIndexOf('snapshot:tolerant')).toBeGreaterThan(events.lastIndexOf('backend:cloud'));
+        expect(SyncService.getLastKnownSyncSelection()).toMatchObject({
+            backend: 'cloud',
+            cloudProvider: 'selfhosted',
+            configuration: { backend: 'cloud', cloud: { url: 'https://new-cloud.example.com' } },
+        });
     });
 
     it('prevents every configuration read and write when native Dropbox recovery fails', async () => {
