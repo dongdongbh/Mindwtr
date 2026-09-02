@@ -47,6 +47,9 @@ export function SyncLoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
             const configOverride: DesktopSyncConfigOverride = {
                 backend: 'cloud',
                 cloudProvider: 'selfhosted',
+                // rememberToken is deliberately on (Settings defaults it off on web):
+                // a login must survive a reload or a new tab, and sessionStorage
+                // would force re-entering the token every time.
                 cloud: { url: trimmedUrl, token: trimmedToken, allowInsecureHttp: false, rememberToken: true },
             };
 
@@ -72,8 +75,24 @@ export function SyncLoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                 return;
             }
 
-            const provenEnough = probeResult.success
-                || classifySyncEncryptionFailure(probeResult.error) === 'remote-encrypted-no-key';
+            // An encrypted remote is transport proof (the read reached a real
+            // Mindwtr document this device has no key for), so it is checked first
+            // and independently of `success`. Everything else must have actually
+            // talked to the server: a deferred remote write or a busy remote fence
+            // returns success:true from local state alone, which proves nothing
+            // about these credentials.
+            // Unlike Settings (useSyncSettings.ts), this screen omits
+            // `fileSyncLockDeferred` and the two 'cleanup' exceptions: it only ever
+            // activates backend:'cloud' (never WebDAV/File Sync) on a first-time
+            // login, so there is no pre-existing fence lease to clean up.
+            const provenEnough = classifySyncEncryptionFailure(probeResult.error) === 'remote-encrypted-no-key'
+                || (
+                    probeResult.success
+                    && !probeResult.remoteWriteDeferred
+                    && !probeResult.remoteFenceDeferred
+                    && probeResult.skipped !== 'offline'
+                    && probeResult.skipped !== 'pendingRemoteWriteBackoff'
+                );
 
             if (!provenEnough) {
                 fail(probeResult.error);

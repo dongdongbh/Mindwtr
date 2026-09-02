@@ -100,6 +100,45 @@ describe('SyncLoginScreen', () => {
         expect(screen.getByText(/Couldn't connect/)).toBeInTheDocument();
     });
 
+    it('treats a pendingRemoteWriteBackoff skip as a failure without retrying', async () => {
+        const onLoggedIn = vi.fn();
+        // success:true, but decided from local backoff state without any network
+        // call, so it proves nothing about these credentials.
+        const performSync = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
+            success: true,
+            skipped: 'pendingRemoteWriteBackoff',
+            remoteWriteDeferred: true,
+        });
+        const commit = vi.spyOn(SyncService, 'commitProvenSyncConfiguration');
+        renderScreen(onLoggedIn);
+
+        fillAndSubmit('https://cloud.example.com', VALID_TOKEN);
+
+        await waitFor(() => expect(screen.getByText(/Couldn't connect/)).toBeInTheDocument());
+        // Not 'requeued', so the retry loop must not run it again.
+        expect(performSync).toHaveBeenCalledTimes(1);
+        expect(commit).not.toHaveBeenCalled();
+        expect(onLoggedIn).not.toHaveBeenCalled();
+    });
+
+    it('treats a busy remote fence as a failure without retrying', async () => {
+        const onLoggedIn = vi.fn();
+        const performSync = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
+            success: true,
+            skipped: 'remoteFenceBusy',
+            remoteFenceDeferred: 'busy',
+        });
+        const commit = vi.spyOn(SyncService, 'commitProvenSyncConfiguration');
+        renderScreen(onLoggedIn);
+
+        fillAndSubmit('https://cloud.example.com', VALID_TOKEN);
+
+        await waitFor(() => expect(screen.getByText(/Couldn't connect/)).toBeInTheDocument());
+        expect(performSync).toHaveBeenCalledTimes(1);
+        expect(commit).not.toHaveBeenCalled();
+        expect(onLoggedIn).not.toHaveBeenCalled();
+    });
+
     it('shows a generic error with the trimmed reason on a plain probe failure', async () => {
         const onLoggedIn = vi.fn();
         vi.spyOn(SyncService, 'performSync').mockResolvedValue({

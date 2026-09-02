@@ -135,8 +135,9 @@ A fresh browser opening the PWA can have the Cloud URL filled in already, so peo
 
 - **Same domain (recommended):** when the app and the cloud API are served from one domain (the HTTPS compose does this), the app detects the cloud on its own origin automatically. Nothing to configure.
 - **Split domains:** set `MINDWTR_DEFAULT_CLOUD_URL` on the `mindwtr-app` container (see the commented block in `docker/compose.yaml`) to the public cloud URL. Useful for Kubernetes or any deployment where the app and API live on different hosts.
+- **Require sync before the app loads:** set `MINDWTR_REQUIRE_SYNC: "1"` on the `mindwtr-app` container to show a login screen (Self-hosted URL + Access token) instead of the app until sync is configured. The URL and token are verified against the cloud server before they are saved, and logging in stores the access token in that browser's `localStorage` so the session survives a reload or a new tab. This is **not authentication**: the check runs entirely client-side and deliberately fails open (any failure to read the flag or the stored config renders the app normally), and anyone with browser devtools can set the keys it looks for. Use it to stop people from accidentally using the app without sync — put a reverse proxy with real auth in front of `mindwtr-app` if you need actual access control.
 
-The value only prefills the setup form. It never overwrites a URL a browser has already configured, and sync stays off until the person saves with their token.
+The `MINDWTR_DEFAULT_CLOUD_URL` value only prefills the setup form. It never overwrites a URL a browser has already configured, and sync stays off until the person saves with their token.
 
 For a file-backed Docker secret, remove `MINDWTR_CLOUD_AUTH_TOKENS` from the
 Compose environment file, put the token in a host file readable only by its

@@ -54,6 +54,9 @@ services:
     # environment:
     #   MINDWTR_DEFAULT_CLOUD_URL: "https://mindwtr.example.com"
     #   MINDWTR_REQUIRE_SYNC: "1"  # forces a login screen (Self-Hosted URL + Access Token) before the app loads
+    # NOTE: MINDWTR_REQUIRE_SYNC is a convenience gate to make sure sync is
+    # configured, not real authentication: it runs client-side and fails open.
+    # Put a reverse proxy in front if you need actual access control.
     depends_on:
       mindwtr-cloud:
         condition: service_healthy
