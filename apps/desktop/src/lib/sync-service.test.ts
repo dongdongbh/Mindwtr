@@ -3709,7 +3709,12 @@ describe('SyncService orchestration', () => {
         expect(snapshots.some((status) => status.queued === true)).toBe(true);
     });
 
-    it('does not return an active cycle as proof for a queued transient configuration', async () => {
+    it('waits for the active cycle and then proves a transient configuration on its own run', async () => {
+        // An activation probe must be proven by the call that will commit it, so
+        // it can neither ride the active cycle nor be queued behind it as a
+        // follow-up. It used to bounce with `requeued` at once, which dropped the
+        // backend switch every time an auto sync happened to be running when the
+        // user pressed Save (dd's own desktop, 2026-09-02). It now waits.
         const firstRun = createDeferred();
         const backendSpy = vi.spyOn(SyncService as any, 'getSyncBackend');
         backendSpy.mockImplementation(async () => {
@@ -3721,23 +3726,32 @@ describe('SyncService orchestration', () => {
         await waitForAssertion(() => {
             expect(SyncService.getSyncStatus().inFlight).toBe(true);
         });
-        const proofResult = await SyncService.performSync({
+        let proofSettled = false;
+        const proof = SyncService.performSync({
             activationProbe: true,
             configOverride: { backend: 'off' },
             manual: true,
+        }).then((result) => {
+            proofSettled = true;
+            return result;
         });
-
-        expect(proofResult).toEqual({ success: true, skipped: 'requeued' });
+        // Still waiting: nothing queued behind the active cycle, nothing answered.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(proofSettled).toBe(false);
         expect(SyncService.getSyncStatus().queued).toBe(false);
+
         firstRun.resolve();
         await first;
+        const proofResult = await proof;
+        expect(proofResult).not.toMatchObject({ skipped: 'requeued' });
         await waitForAssertion(() => {
             expect(SyncService.getSyncStatus()).toMatchObject({
                 inFlight: false,
                 queued: false,
             });
         });
-        expect(backendSpy).toHaveBeenCalledTimes(1);
+        // The active cycle read the backend once; the probe ran its own cycle after it.
+        expect(backendSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
 
     it('serializes re-entrant sync calls triggered by sync status listeners', async () => {

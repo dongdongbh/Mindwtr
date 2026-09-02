@@ -1029,6 +1029,8 @@ const resolveDropboxAccessTokenForContext = async (
 // affordances render correctly on the first frame instead of blinking while the
 // async config read resolves (#1001). The persisted config stays the authority;
 // this is display seed data only.
+// How long an activation probe waits for a running cycle before reporting a requeue.
+const ACTIVATION_PROBE_IDLE_WAIT_MS = 90_000;
 const SYNC_BACKEND_HINT_KEY = 'mindwtr-last-known-sync-backend';
 const SYNC_BACKEND_VALUES: readonly SyncBackend[] = ['off', 'file', 'webdav', 'cloud', 'cloudkit'];
 const readSyncBackendHint = (): SyncBackend | null => {
@@ -3386,12 +3388,44 @@ export class SyncService {
      * 3. Write merged data back to both Local & Remote
      * 4. Refresh Core Store
      */
+    /** Resolve once no sync cycle is in flight or queued, or after `timeoutMs`
+     *  (false). Activation probes wait on this instead of bouncing: a focus- or
+     *  data-change-triggered auto sync is usually running when the user presses
+     *  Save, and an immediate "requeued" answer dropped the backend switch behind
+     *  an info toast every single time. */
+    private static waitForSyncIdle(timeoutMs: number): Promise<boolean> {
+        const isIdle = () => {
+            const state = SyncService.syncOrchestrator.getState();
+            return !state.inFlight && !state.queued;
+        };
+        if (isIdle()) return Promise.resolve(true);
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (idle: boolean) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                unsubscribe();
+                resolve(idle);
+            };
+            const timer = setTimeout(() => finish(false), timeoutMs);
+            const unsubscribe = SyncService.subscribeSyncStatus(() => {
+                if (isIdle()) finish(true);
+            });
+        });
+    }
+
     static async performSync(options: SyncRunOptions = {}): Promise<SyncRunResult> {
-        const wasInFlight = SyncService.syncOrchestrator.getState().inFlight;
+        let wasInFlight = SyncService.syncOrchestrator.getState().inFlight;
         if (wasInFlight && options.activationProbe) {
-            // A candidate must be proven by the call that will commit it. Do not
-            // queue transient credentials after returning a requeue result.
-            return { success: true, skipped: 'requeued' };
+            // A candidate must be proven by the call that will commit it, so it
+            // cannot ride the active cycle. Wait for that cycle (and any queued
+            // follow-up) to finish, then prove the candidate on a clean run.
+            const idle = await SyncService.waitForSyncIdle(ACTIVATION_PROBE_IDLE_WAIT_MS);
+            wasInFlight = SyncService.syncOrchestrator.getState().inFlight;
+            if (!idle || wasInFlight) {
+                return { success: true, skipped: 'requeued' };
+            }
         }
         if (wasInFlight) {
             SyncService.queuedSyncOptions = options;
