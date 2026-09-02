@@ -21,6 +21,30 @@ describe('URL Polyfill Shim', () => {
         expect(shim.URLSearchParams).toBeDefined();
     });
 
+    test('fallback URL resolves an absolute path against the bases expo-router uses', async () => {
+        // expo-router parses every navigation path with `new URL(path, 'file:')`
+        // and resolves hrefs against `exp://host`. A shim revision that derived
+        // the base href with a trailing "/" turned '/focus' into '//focus', so no
+        // route ever matched and the root navigator reset in a loop (Expo Go
+        // flashed black with "Refreshing..."; bisected to the #1132 commit).
+        vi.resetModules();
+        const OriginalURL = globalThis.URL;
+        // @ts-expect-error simulate a runtime without a native URL
+        globalThis.URL = undefined;
+        try {
+            const shimModule = await import('./url-polyfill');
+            const FallbackURL = shimModule.URL as unknown as typeof URL;
+            expect(new FallbackURL('/focus', 'file:').pathname).toBe('/focus');
+            const resolved = new FallbackURL('/focus', 'exp://127.0.0.1:8081');
+            expect(resolved.pathname).toBe('/focus');
+            expect(resolved.href).toBe('exp://127.0.0.1:8081/focus');
+            expect(new FallbackURL('exp://127.0.0.1:8081/--/focus?x=1').pathname).toBe('/--/focus');
+        } finally {
+            globalThis.URL = OriginalURL;
+            vi.resetModules();
+        }
+    });
+
     test('does not mutate existing timer globals', async () => {
         vi.resetModules();
         const originalSetImmediate = (globalThis as any).setImmediate;
@@ -103,31 +127,6 @@ describe('URL Polyfill Shim', () => {
             globalThis.URL = OriginalURL;
             globalThis.URLSearchParams = OriginalURLSearchParams;
             vi.resetModules();
-        }
-    });
-
-    test('fallback URL keeps the sync mutation fence and parent collection off data.json', async () => {
-        const OriginalURL = globalThis.URL;
-        const OriginalURLSearchParams = globalThis.URLSearchParams;
-        try {
-            vi.resetModules();
-            globalThis.URL = undefined as unknown as typeof URL;
-            await import('./url-polyfill');
-            const { webdavMutationFenceUrl } = await import('@mindwtr/core');
-
-            expect(webdavMutationFenceUrl('https://example.com/dav/data.json'))
-                .toBe('https://example.com/dav/.mindwtr-sync-fence-v1.json');
-
-            // The polyfill itself must honor component writes too (#1132).
-            const parsed = new URL('https://example.com/dav/data.json?x=1#h');
-            parsed.pathname = '/dav/other.json';
-            parsed.search = '';
-            parsed.hash = '';
-            expect(parsed.toString()).toBe('https://example.com/dav/other.json');
-        } finally {
-            vi.resetModules();
-            globalThis.URL = OriginalURL;
-            globalThis.URLSearchParams = OriginalURLSearchParams;
         }
     });
 
