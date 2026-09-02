@@ -62,6 +62,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 - Android: when the system froze Mindwtr in the background while a sync request was in flight (common on Samsung One UI and under battery optimization), the app reported "Cloud request timed out" or the WebDAV equivalent when it woke up, sometimes an hour later, and showed the sync as failed. Such an interruption is now treated like a dropped connection: the sync retries later on its own and no failure is shown. (#1139)
 
+- Android and iOS: opening an attachment that was added on the desktop with "Link to file…" now explains that the link points to a file on another device and names the path, instead of doing nothing; a link the phone cannot open now says so too. Such links keep pointing at the desktop's file and are not uploaded; attach the file instead of linking it to have it synced. (#1001)
+
 - Desktop Dropbox sign-in: connecting could fail at once with "Dropbox state validation failed. Please retry from Mindwtr." when the browser replayed an earlier sign-in's callback (for example a reloaded tab from a previous connect) before the new one arrived; a second attempt then worked. Such a callback is now answered and ignored, and Mindwtr keeps waiting for the sign-in it started. (in-app report)
 
 - Settings: the Encryption section now links to the sync encryption guide on desktop and mobile, next to the existing sync setup guide link, so the WebDAV server requirements are one tap away when enabling fails. (#1113)

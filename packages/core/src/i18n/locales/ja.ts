@@ -315,6 +315,8 @@ export const jaOverrides: Record<string, string> = {
         'attachments.fileTooLarge': 'ファイルが大きすぎてアップロードできません。',
         'attachments.fileNotReadable': 'このファイルを読み取れなかったため添付できませんでした。別のフォルダに移してからもう一度お試しください。',
         'attachments.linkToFile': 'ファイルへのリンク…',
+        'attachments.linkedFileElsewhere': 'このリンクは別のデバイス上のファイルを指しています: {{path}}。そのデバイスで開くか、リンクではなくファイルを添付してください。',
+        'attachments.openLinkFailed': 'このリンクを開けませんでした。',
         'attachments.invalidFileType': '対応していないファイル形式です。',
         'attachments.invalidLink': '有効な URL を入力してください。',
         'attachments.photoUnavailableTitle': '写真の選択が利用できません',

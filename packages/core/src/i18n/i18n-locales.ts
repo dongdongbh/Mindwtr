@@ -218,7 +218,7 @@ export const LOCALES = {
         nonLatin: true,
         // Rewritten end to end by a native speaker in #934 (64 -> ~100%), replacing a machine
         // translation that rendered brand names as common nouns ('Gemini' as the constellation).
-        translatedKeyFloor: 2235,
+        translatedKeyFloor: 2237,
     },
     it: {
         loadSync: () => require('./locales/it') as typeof import('./locales/it'),

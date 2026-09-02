@@ -352,6 +352,8 @@ export const koOverrides: Record<string, string> = {
         'attachments.fileTooLarge': '파일이 너무 커서 업로드할 수 없습니다.',
         'attachments.fileNotReadable': '이 파일을 읽을 수 없어 첨부되지 않았습니다. 파일을 다른 폴더로 옮긴 뒤 다시 시도하세요.',
         'attachments.linkToFile': '파일에 연결…',
+        'attachments.linkedFileElsewhere': '이 링크는 다른 기기에 있는 파일을 가리킵니다: {{path}}. 해당 기기에서 열거나, 링크 대신 파일 자체를 첨부하세요.',
+        'attachments.openLinkFailed': '이 링크를 열 수 없습니다.',
         'attachments.invalidFileType': '지원되지 않는 파일 형식입니다.',
         'attachments.invalidLink': '유효한 URL을 입력하세요.',
         'attachments.photoUnavailableTitle': '사진 선택 도구를 사용할 수 없습니다.',
