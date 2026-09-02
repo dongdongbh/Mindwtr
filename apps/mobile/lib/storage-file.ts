@@ -4,6 +4,8 @@ import * as FileSystem from './file-system';
 import { Directory as ExpoDirectory, File as ExpoFile } from 'expo-file-system';
 import {
     AppData,
+    SYNC_ENCRYPTION_LOG_EVENTS,
+    buildSyncEncryptionRemoteReadExtra,
     decodeUriSafe,
     decryptRemoteArtifactOrThrow,
     detectForeignSaltArtifact,
@@ -27,6 +29,7 @@ import { logError, logInfo, logWarn } from './app-log';
 import { mobileSyncCryptoPrimitives } from './sync-crypto-native';
 import {
     flushSyncEncryptionLocalState,
+    logSyncEncryptionEvent,
     SyncEncryptionNoKeyError,
     syncEncryptionLocalState,
 } from './sync-encryption-state';
@@ -594,6 +597,16 @@ export interface SyncFileAccessOptions {
     locationScope?: string | null;
 }
 
+/** One `remote-read` line per File Sync document seam (#1056 diagnostics). Every path below
+ *  that can throw a SyncEncryption* error emits one first, so a shared log says what the
+ *  folder actually held. */
+const logSyncFileRead = (input: Parameters<typeof buildSyncEncryptionRemoteReadExtra>[0]): void => {
+    logSyncEncryptionEvent(
+        SYNC_ENCRYPTION_LOG_EVENTS.remoteRead,
+        buildSyncEncryptionRemoteReadExtra(input),
+    );
+};
+
 const getUriLeafName = (uri: string): string => {
     const stripped = decodeUriSafe(uri).replace(/[?#].*$/, '').replace(/\/+$/, '');
     const lastSeparator = Math.max(stripped.lastIndexOf('/'), stripped.lastIndexOf(':'));
@@ -630,6 +643,17 @@ const discoverEncryptedSyncFolder = async (
         if (!bytes || bytes.length === 0) continue;
         const inspected = inspectSyncArtifact(bytes);
         if (inspected.kind !== 'encrypted') continue;
+        logSyncFileRead({
+            artifact: encryptedLeafNameFor(resolvedUri),
+            exists: true,
+            kind: 'encrypted',
+            headerSalt: inspected.salt,
+            headerKdf: inspected.params,
+            bytes: bytes.length,
+            version: 'n/a',
+            foreignSalt: false,
+            decision: 'no-key',
+        });
         markRemoteEncryptionDiscovered(syncEncryptionLocalState, {
             salt: inspected.salt,
             params: inspected.params,
@@ -658,10 +682,25 @@ const readEncryptedSyncFile = async (
         // peer-restored plaintext document is merely unreadable.
         const plain = await readSyncArtifactBytes(resolvedUri);
         if (isPlaintextSyncArtifact(plain)) {
+            logSyncFileRead({
+                artifact: getUriLeafName(resolvedUri),
+                exists: true,
+                kind: 'plaintext',
+                bytes: plain?.length ?? null,
+                version: 'n/a',
+                decision: 'plaintext-discovered',
+            });
             markRemotePlaintextDiscovered(syncEncryptionLocalState, locationScope);
             await flushSyncEncryptionLocalState();
             throw new SyncEncryptionRemotePlaintextError();
         }
+        logSyncFileRead({
+            artifact: encryptedLeafNameFor(resolvedUri),
+            exists: false,
+            kind: 'absent',
+            version: 'n/a',
+            decision: 'absent',
+        });
         return null;
     }
     // Sealed under another salt = this device's key is for a different encryption
@@ -670,10 +709,32 @@ const readEncryptedSyncFile = async (
     // remote's own salt) surfaces, instead of decrypting into a dead-end Auth failure.
     const foreign = detectForeignSaltArtifact(bytes, material);
     if (foreign) {
+        logSyncFileRead({
+            artifact: encryptedLeafNameFor(resolvedUri),
+            exists: true,
+            kind: 'encrypted',
+            headerSalt: foreign.salt,
+            headerKdf: foreign.params,
+            bytes: bytes.length,
+            version: 'n/a',
+            foreignSalt: true,
+            decision: 'no-key',
+        });
         markRemoteEncryptionDiscovered(syncEncryptionLocalState, foreign, locationScope);
         await flushSyncEncryptionLocalState();
         throw new SyncEncryptionNoKeyError();
     }
+    logSyncFileRead({
+        artifact: encryptedLeafNameFor(resolvedUri),
+        exists: true,
+        kind: 'encrypted',
+        headerSalt: material.salt,
+        headerKdf: material.params,
+        bytes: bytes.length,
+        version: 'n/a',
+        foreignSalt: false,
+        decision: 'decrypt',
+    });
     const plaintext = await decryptRemoteArtifactOrThrow(bytes, material.key, mobileSyncCryptoPrimitives);
     return parseAppData(new TextDecoder().decode(plaintext));
 };
@@ -822,10 +883,32 @@ export const readSyncFileVersioned = async (
         if (material) {
             const foreign = detectForeignSaltArtifact(snapshot.bytes, material);
             if (foreign) {
+                logSyncFileRead({
+                    artifact: name,
+                    exists: true,
+                    kind: 'encrypted',
+                    headerSalt: foreign.salt,
+                    headerKdf: foreign.params,
+                    bytes: snapshot.bytes.length,
+                    version: 'strong',
+                    foreignSalt: true,
+                    decision: 'no-key',
+                });
                 markRemoteEncryptionDiscovered(syncEncryptionLocalState, foreign, options?.locationScope);
                 await flushSyncEncryptionLocalState();
                 throw new SyncEncryptionNoKeyError();
             }
+            logSyncFileRead({
+                artifact: name,
+                exists: true,
+                kind: 'encrypted',
+                headerSalt: material.salt,
+                headerKdf: material.params,
+                bytes: snapshot.bytes.length,
+                version: 'strong',
+                foreignSalt: false,
+                decision: 'decrypt',
+            });
             const plaintext = await decryptRemoteArtifactOrThrow(
                 snapshot.bytes,
                 material.key,
@@ -839,8 +922,17 @@ export const readSyncFileVersioned = async (
         }
         if (inspectSyncArtifact(snapshot.bytes).kind === 'plaintext') {
             try {
+                const parsed = parseAppData(new TextDecoder().decode(snapshot.bytes));
+                logSyncFileRead({
+                    artifact: name,
+                    exists: true,
+                    kind: 'plaintext',
+                    bytes: snapshot.bytes.length,
+                    version: 'strong',
+                    decision: 'plaintext',
+                });
                 return {
-                    data: parseAppData(new TextDecoder().decode(snapshot.bytes)),
+                    data: parsed,
                     fingerprint: snapshot.version,
                     source: 'primary',
                 };

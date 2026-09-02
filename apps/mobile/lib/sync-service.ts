@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, acquireSyncRemoteMutationFence, clearIdleSyncCycleSnapshot, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, probeWebdavSyncCompatibility, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncFileLockUnavailableError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunResult, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
+import { AppData, SYNC_ENCRYPTION_LOG_EVENTS, buildSyncEncryptionActivationExtra, buildSyncEncryptionErrorExtra, buildSyncEncryptionRemoteReadExtra, buildSyncEncryptionStateExtra, type SyncEncryptionState, type SyncEncryptionStateDecision, acquireSyncRemoteMutationFence, clearIdleSyncCycleSnapshot, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, probeWebdavSyncCompatibility, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncFileLockUnavailableError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunResult, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -26,7 +26,7 @@ import {
   uploadDropboxAppData,
 } from './dropbox-sync';
 import * as Network from 'expo-network';
-import { coerceSupportedBackend, formatSyncErrorMessage, isLikelyFilePath, isLikelyOfflineSyncError, isRemoteSyncBackend, normalizeFileSyncPath, resolveBackend, type SyncBackend } from './sync-service-utils';
+import { classifySyncFailure, coerceSupportedBackend, formatSyncErrorMessage, isLikelyFilePath, isLikelyOfflineSyncError, isRemoteSyncBackend, normalizeFileSyncPath, resolveBackend, type SyncBackend } from './sync-service-utils';
 import { ensureCloudKitReady, readRemoteCloudKit, writeRemoteCloudKit, isCloudKitAvailable } from './cloudkit-sync';
 import { createWebdavSyncRateLimitController } from './sync-rate-limit';
 import {
@@ -53,6 +53,8 @@ import {
   getSyncEncryptionMaterial,
   hasUnscopedSyncEncryptionDiscovery,
   isSyncEncryptionBlocked,
+  loadSyncEncryptionLocalState,
+  logSyncEncryptionEvent,
   SyncEncryptionNoKeyError,
   SyncEncryptionStateUnavailableError,
   syncEncryptionLocalState,
@@ -584,6 +586,9 @@ class MobileSyncRun {
    *  running blind like a fresh join. Nothing may be uploaded until the document read has
    *  re-established what is actually at this location. */
   private deferUploadsUntilDiscovery = false;
+  /** Encryption state as the gate saw it, kept for the `activation` diagnostic line so a
+   *  probe reports what the cycle changed rather than only where it ended. */
+  private encryptionStateAtSetup: SyncEncryptionState | 'unknown' = 'unknown';
 
   /** #1138: the location identity this cycle syncs against. Built from the cycle's OWN
    *  resolved configuration rather than from AsyncStorage, for two reasons: an activation
@@ -671,12 +676,31 @@ class MobileSyncRun {
         performSyncCycle: (io) => performSyncCycle(io),
       });
       result = this.activationProof ? { ...cycleResult, activationProof: this.activationProof } : cycleResult;
+      await this.logActivationOutcome();
     } finally {
       fileSyncLockCleanupDeferred = await this.releaseResources();
     }
     return result.success && fileSyncLockCleanupDeferred
       ? { ...result, fileSyncLockDeferred: 'cleanup' }
       : result;
+  }
+
+  /** Activation probes are the one place a cycle exists to answer a question about the
+   *  remote's encryption posture rather than to sync (57f8e2420). One line per probe, forced,
+   *  because the settings UI acts on this result and support has to see what it acted on. */
+  private async logActivationOutcome(): Promise<void> {
+    if (!this.activationProbe) return;
+    const after = await loadSyncEncryptionLocalState().catch(() => null);
+    logSyncEncryptionEvent(
+      SYNC_ENCRYPTION_LOG_EVENTS.activation,
+      buildSyncEncryptionActivationExtra({
+        activationProof: this.activationProof ?? null,
+        stateBefore: this.encryptionStateAtSetup,
+        stateAfter: after?.state ?? 'off',
+        backend: this.backend,
+      }),
+      { force: true },
+    );
   }
 
   private queueFollowUp(): void {
@@ -1005,11 +1029,14 @@ class MobileSyncRun {
         void logWarn(message, { scope: 'sync', extra });
       },
       sanitizeLogMessage: (message) => sanitizeLogMessage(message),
-      logSyncError: (error, context) => logSyncError(error, {
-        backend: context.backend,
-        step: context.step,
-        url: context.url,
-      }),
+      logSyncError: (error, context) => {
+        this.logEncryptionFailure(error, context.step);
+        return logSyncError(error, {
+          backend: context.backend,
+          step: context.step,
+          url: context.url,
+        });
+      },
       logMergeSummary: (mergeLog) => {
         void logInfo(
           mergeLog.message,
@@ -1098,6 +1125,36 @@ class MobileSyncRun {
     return this.backend === 'cloud' && this.cloudProvider === CLOUD_PROVIDER_DROPBOX;
   }
 
+  /** One `remote-read` line per document read seam. Every path that can throw a
+   *  SyncEncryption* error emits one first, so a shared log explains the refusal without a
+   *  second round-trip to the user. Rides the Debug logging switch like the rest of the
+   *  per-cycle detail. */
+  private logRemoteRead(input: Parameters<typeof buildSyncEncryptionRemoteReadExtra>[0]): void {
+    logSyncEncryptionEvent(
+      SYNC_ENCRYPTION_LOG_EVENTS.remoteRead,
+      buildSyncEncryptionRemoteReadExtra(input),
+    );
+  }
+
+  /** The line that ties a user's toast to the trail: emitted where the cycle's failure is
+   *  logged, with the classification the settings/toast layer will render. Forced, so it is
+   *  present even when the user only turned Debug logging on after the failure. */
+  private logEncryptionFailure(error: unknown, step: string): void {
+    if (!isSyncEncryptionError(error)) return;
+    const message = error instanceof Error ? error.message : String(error);
+    logSyncEncryptionEvent(
+      SYNC_ENCRYPTION_LOG_EVENTS.error,
+      buildSyncEncryptionErrorExtra({
+        errorName: error instanceof Error ? error.name : 'unknown',
+        errorMessage: message,
+        backend: this.backend,
+        step,
+        classification: classifySyncFailure(error),
+      }),
+      { level: 'warn', force: true },
+    );
+  }
+
   private markCandidateEncryptedRemoteProven(): void {
     if (this.activationProbe && this.configOverride) {
       this.activationProof = 'remote-encrypted-no-key';
@@ -1128,11 +1185,36 @@ class MobileSyncRun {
           this.locationScope = this.buildLocationScope();
           const encryptionStatus = await getMobileSyncEncryptionStatus();
           const incompleteTransition = encryptionStatus.incompleteTransition;
+          // The raw sidecar carries the salt and the discovery scope the status shape drops;
+          // the trail needs both to explain a refusal (#1056 diagnostics). Reads the same
+          // hydrated cache the gate below does, so this costs nothing extra.
+          const localState = await loadSyncEncryptionLocalState().catch(() => null);
+          this.encryptionStateAtSetup = localState?.state ?? 'off';
+          // One `state` line per cycle, whatever the gate decides. Emitted immediately before
+          // the return/throw it explains so a shared log never shows a refusal with no reason.
+          const logState = (decision: SyncEncryptionStateDecision, hasMaterial: boolean | null) => {
+            logSyncEncryptionEvent(
+              SYNC_ENCRYPTION_LOG_EVENTS.state,
+              buildSyncEncryptionStateExtra({
+                backend,
+                trigger: this.activationProbe ? 'probe' : this.manual ? 'manual' : 'auto',
+                state: localState?.state ?? 'off',
+                hasMaterial,
+                salt: localState?.discoveredSalt,
+                kdf: localState?.discoveredParams,
+                incompleteTransition,
+                discoveredScope: localState?.discoveredScope,
+                activeScope: this.locationScope,
+                decision,
+              }),
+            );
+          };
           legacyWebdavPostureAllowed = backend === 'webdav'
             && encryptionStatus.state === 'off'
             && !incompleteTransition;
           this.allowLegacyWebdavPlaintext = false;
           if (incompleteTransition) {
+            logState('blocked-transition', null);
             if (!this.manual && !probingCandidate) return { kind: 'disabled' };
             throw new SyncEncryptionTransitionIncompleteError(incompleteTransition);
           }
@@ -1140,11 +1222,26 @@ class MobileSyncRun {
           // written before scopes existed does not block at all — this cycle re-checks the
           // location like a fresh join, and the read seams re-mark it WITH a scope.
           if (!probingCandidate && await isSyncEncryptionBlocked(this.locationScope)) {
+            logState(
+              localState?.state === 'remote-plaintext' ? 'blocked-plaintext' : 'blocked-no-key',
+              null,
+            );
             if (!this.manual) return { kind: 'disabled' };
             throw new SyncEncryptionNoKeyError();
           }
           this.deferUploadsUntilDiscovery = await hasUnscopedSyncEncryptionDiscovery();
-          this.encryptionMaterial = await getSyncEncryptionMaterial();
+          try {
+            this.encryptionMaterial = await getSyncEncryptionMaterial();
+          } catch (error) {
+            // `enabled` with no resolvable key (keystore invalidation). The line has to
+            // precede the throw, or the failure reaches the log with no posture behind it.
+            logState('blocked-no-key', false);
+            throw error;
+          }
+          logState(
+            probingCandidate ? 'probe' : legacyWebdavPostureAllowed ? 'legacy-plaintext' : 'proceed',
+            this.encryptionMaterial !== null,
+          );
         }
         this.syncEncryptionOff = legacyWebdavPostureAllowed;
         if (backend === 'webdav') {
@@ -1471,15 +1568,38 @@ class MobileSyncRun {
             }),
             WEBDAV_READ_RETRY_OPTIONS
           );
+          const webdavArtifact = this.encryptionMaterial
+            ? syncEncryptedArtifactName(SYNC_FILE_NAME)
+            : SYNC_FILE_NAME;
+          const webdavVersion = normalizeStrongWebdavEtag(result.strongEtag)
+            ? 'strong'
+            : result.strongEtag ? 'weak' : 'none';
           if (result.state === 'remote-plaintext') {
             // A peer disabled encryption at the sync location. Persist first (the state must
             // survive a restart), then fail the cycle. Nothing on the remote is touched, and
             // this device never follows the remote down to plaintext on its own.
+            this.logRemoteRead({
+              artifact: SYNC_FILE_NAME,
+              exists: true,
+              kind: 'plaintext',
+              version: webdavVersion,
+              decision: 'plaintext-discovered',
+            });
             markRemotePlaintextDiscovered(syncEncryptionLocalState, this.locationScope);
             await flushSyncEncryptionLocalState();
             throw new SyncEncryptionRemotePlaintextError();
           }
           if (result.state === 'encrypted-no-key') {
+            this.logRemoteRead({
+              artifact: webdavArtifact,
+              exists: true,
+              kind: 'encrypted',
+              headerSalt: result.salt,
+              headerKdf: result.params,
+              version: webdavVersion,
+              foreignSalt: this.encryptionMaterial !== null,
+              decision: webdavVersion === 'strong' ? 'no-key' : 'version-unavailable',
+            });
             if (!normalizeStrongWebdavEtag(result.strongEtag)) {
               throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV encrypted sync document');
             }
@@ -1490,6 +1610,20 @@ class MobileSyncRun {
             this.markCandidateEncryptedRemoteProven();
             throw new SyncEncryptionNoKeyError();
           }
+          this.logRemoteRead({
+            artifact: webdavArtifact,
+            exists: result.exists,
+            kind: result.exists ? (this.encryptionMaterial ? 'encrypted' : 'plaintext') : 'absent',
+            headerSalt: this.encryptionMaterial?.salt,
+            headerKdf: this.encryptionMaterial?.params,
+            version: webdavVersion,
+            foreignSalt: false,
+            decision: !result.exists
+              ? 'absent'
+              : this.encryptionMaterial
+                ? 'decrypt'
+                : webdavVersion === 'strong' ? 'plaintext' : 'legacy-plaintext',
+          });
           if (result.exists && !normalizeStrongWebdavEtag(result.strongEtag)) {
             if (!this.syncEncryptionOff) {
               // Encrypted CAS depends on the strong ETag; refuse the cycle.
@@ -1696,16 +1830,43 @@ class MobileSyncRun {
           )
         );
         if (result.encryptedNoKey) {
+          this.logRemoteRead({
+            artifact: syncEncryptedArtifactName(SYNC_FILE_NAME),
+            exists: true,
+            kind: 'encrypted',
+            headerSalt: result.encryptedNoKey.salt,
+            headerKdf: result.encryptedNoKey.params,
+            version: 'n/a',
+            foreignSalt: material !== null,
+            decision: 'no-key',
+          });
           markRemoteEncryptionDiscovered(syncEncryptionLocalState, result.encryptedNoKey, this.locationScope);
           await flushSyncEncryptionLocalState();
           this.markCandidateEncryptedRemoteProven();
           throw new SyncEncryptionNoKeyError();
         }
         if (result.remotePlaintext) {
+          this.logRemoteRead({
+            artifact: SYNC_FILE_NAME,
+            exists: true,
+            kind: 'plaintext',
+            version: 'n/a',
+            decision: 'plaintext-discovered',
+          });
           markRemotePlaintextDiscovered(syncEncryptionLocalState, this.locationScope);
           await flushSyncEncryptionLocalState();
           throw new SyncEncryptionRemotePlaintextError();
         }
+        this.logRemoteRead({
+          artifact: material ? syncEncryptedArtifactName(SYNC_FILE_NAME) : SYNC_FILE_NAME,
+          exists: result.data != null,
+          kind: result.data == null ? 'absent' : material ? 'encrypted' : 'plaintext',
+          headerSalt: material?.salt,
+          headerKdf: material?.params,
+          version: result.rev ? 'strong' : 'none',
+          foreignSalt: false,
+          decision: result.data == null ? 'absent' : material ? 'decrypt' : 'plaintext',
+        });
         await this.persistDropboxRev(result.rev);
         return result;
       },

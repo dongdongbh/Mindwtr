@@ -122,6 +122,12 @@ vi.mock('./tauri-invoke', () => {
     };
 });
 
+const appLog = vi.hoisted(() => ({
+    logInfo: vi.fn(async () => null),
+    logWarn: vi.fn(async () => null),
+}));
+vi.mock('./app-log', () => appLog);
+
 const {
     classifySyncEncryptionFailure,
     clearSyncEncryptionMaterialCache,
@@ -139,6 +145,7 @@ const {
     runProvidePassphraseOverRemote,
     sealAttachmentBytes,
     SyncEncryptionCleanupDeferredError,
+    withTransitionDiagnostics,
 } = await import('./sync-encryption-service');
 
 /** A blob store both fakes serve from, keyed exactly the way the remote names it. */
@@ -1219,5 +1226,127 @@ describe('failure classification', () => {
         // The two failure classes it must never be confused with.
         expect(classifySyncEncryptionFailure('WebDAV GET failed (403): forbidden')).toBeNull();
         expect(classifySyncEncryptionFailure('Invalid sync payload shape: expected an object')).toBeNull();
+    });
+});
+
+
+describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
+    /** Only the `[sync-encryption]` lines, message + extras, as one string to search. */
+    type LoggedCall = [string, { extra: Record<string, string> }];
+    const capturedTrail = (): string => JSON.stringify(
+        ([...appLog.logInfo.mock.calls, ...appLog.logWarn.mock.calls] as unknown as LoggedCall[])
+            .filter((call) => typeof call[0] === 'string' && call[0].startsWith('[sync-encryption]')),
+    );
+
+    const hex = (bytes: Uint8Array) =>
+        Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+    beforeEach(() => {
+        appLog.logInfo.mockClear();
+        appLog.logWarn.mockClear();
+    });
+
+    it('never puts the passphrase or the derived key into an enable/unlock line', async () => {
+        const passphrase = 'correct horse battery staple';
+        const store = seedRemote();
+        const fetcher = createDropboxFetch(store);
+        const remote = createDropboxRemotePort((operation) => operation('token'), fetcher);
+
+        await withTransitionDiagnostics('enable', 'cloud', undefined, (progress) =>
+            runEnableOverRemote(passphrase, remote, progress));
+        clearSyncEncryptionMaterialCache();
+        await withTransitionDiagnostics(
+            'unlock',
+            'cloud',
+            undefined,
+            () => runProvidePassphraseOverRemote(
+                passphrase,
+                createDropboxRemotePort((operation) => operation('token'), createDropboxFetch(store)),
+            ),
+            (result) => (result === 'ok' ? 'ok' : result),
+        );
+
+        const material = await getSyncEncryptionMaterial();
+        expect(material).not.toBeNull();
+
+        const trail = capturedTrail();
+        // The trail exists at all — otherwise "no secret found" is vacuously true.
+        expect(trail).toContain('[sync-encryption] transition');
+        expect(trail).toContain('"kind":"enable"');
+        expect(trail).toContain('"kind":"unlock"');
+        expect(trail).toContain('"outcome":"ok"');
+
+        expect(trail).not.toContain(passphrase);
+        expect(trail).not.toContain(hex(material!.key));
+        expect(trail).not.toContain(bytesToBase64(material!.key));
+        // The salt is public but is never logged in full by any transition line.
+        expect(trail).not.toContain(hex(material!.salt));
+    });
+
+    it('clamps a transition failure message instead of logging it whole', async () => {
+        const longMessage = `/home/someone/very/long/sync/folder/path/${'x'.repeat(400)}`;
+
+        await expect(withTransitionDiagnostics('disable', 'file', undefined, async () => {
+            throw new Error(longMessage);
+        })).rejects.toThrow();
+
+        const trail = capturedTrail();
+        expect(trail).toContain('"outcome":"error"');
+        expect(trail).not.toContain(longMessage);
+        const logged = JSON.parse(trail) as LoggedCall[];
+        const errorMessages = logged
+            .map(([, context]) => context.extra.errorMessage)
+            .filter((value): value is string => typeof value === 'string' && value !== '-');
+        expect(errorMessages).toHaveLength(1);
+        expect(errorMessages[0]!.length).toBeLessThanOrEqual(201);
+    });
+
+    it('logs one progress line per completed transition phase, with planned and done filled', async () => {
+        // Core reports progress BEFORE it increments its counter, so a `completed >= total`
+        // guard never fires. Driven through the real transition, not a synthetic progress
+        // sequence: the bug this covers was a wrong belief about core's callback order.
+        const store = seedRemote();
+        await withTransitionDiagnostics('enable', 'cloud', undefined, (progress) =>
+            runEnableOverRemote(
+                'correct horse battery staple',
+                createDropboxRemotePort((o) => o('token'), createDropboxFetch(store)),
+                progress,
+            ));
+
+        const logged = JSON.parse(capturedTrail()) as LoggedCall[];
+        const phases = logged.map(([, context]) => context.extra).filter((extra) => extra.phase === 'artifact');
+        expect(phases.map((extra) => extra.artifact)).toEqual(['attachments', 'documents']);
+        for (const extra of phases) {
+            expect(Number(extra.planned)).toBeGreaterThan(0);
+            expect(Number(extra.done)).toBeGreaterThan(0);
+            expect(Number(extra.done)).toBeLessThanOrEqual(Number(extra.planned));
+        }
+        // The last phase's line is emitted after the run returned, so everything planned is done.
+        const finalPhase = phases[phases.length - 1]!;
+        expect(finalPhase.done).toBe(finalPhase.planned);
+    });
+
+    it('reports a wrong passphrase as an outcome, not as the passphrase', async () => {
+        const store = seedRemote();
+        await withTransitionDiagnostics('enable', 'cloud', undefined, (progress) =>
+            runEnableOverRemote('correct horse battery', createDropboxRemotePort((o) => o('token'), createDropboxFetch(store)), progress));
+        clearSyncEncryptionMaterialCache();
+        appLog.logInfo.mockClear();
+        appLog.logWarn.mockClear();
+
+        await withTransitionDiagnostics(
+            'unlock',
+            'cloud',
+            undefined,
+            () => runProvidePassphraseOverRemote(
+                'not the passphrase at all',
+                createDropboxRemotePort((o) => o('token'), createDropboxFetch(store)),
+            ),
+            (result) => (result === 'ok' ? 'ok' : result),
+        );
+
+        const trail = capturedTrail();
+        expect(trail).toContain('"outcome":"wrong-passphrase"');
+        expect(trail).not.toContain('not the passphrase at all');
     });
 });

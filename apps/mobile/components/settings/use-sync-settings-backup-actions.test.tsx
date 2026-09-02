@@ -194,6 +194,33 @@ describe('useSyncSettingsBackupActions', () => {
         expect(showToast).not.toHaveBeenCalled();
     });
 
+    it('waits for the encryption posture line to reach the log file before sharing it', async () => {
+        // `Share log` shares the log FILE. A fire-and-forget stamp races the share sheet and
+        // the posture can miss the copy the user hands over (#1056 diagnostics review).
+        let releaseWrite: (() => void) | undefined;
+        appLogMocks.logInfo.mockImplementation(() => new Promise<null>((resolve) => {
+            releaseWrite = () => resolve(null);
+        }));
+
+        await act(async () => {
+            create(<Harness />);
+        });
+
+        const shared = latest!.handleShareLog();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(appLogMocks.logInfo).toHaveBeenCalledWith(
+            expect.stringContaining('[sync-encryption]'),
+            expect.anything(),
+        );
+        expect(sharingMocks.shareAsync).not.toHaveBeenCalled();
+
+        releaseWrite?.();
+        await shared;
+
+        expect(sharingMocks.shareAsync).toHaveBeenCalledWith('file://logs/mindwtr.log', { mimeType: 'text/plain' });
+    });
+
     it('merges a backup only after the confirmation is accepted, and reports what changed', async () => {
         const backupData = { tasks: [], projects: [], sections: [], areas: [], settings: {} };
         vi.mocked(dataTransfer.pickBackupDocument).mockResolvedValue({ uri: 'file://backup.json', fileName: 'backup.json' });

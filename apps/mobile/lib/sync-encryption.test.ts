@@ -210,6 +210,7 @@ import {
 import {
   __resetSyncEncryptionStateForTests,
   flushSyncEncryptionLocalState,
+  logSyncEncryptionDiagnosticsBlock,
   getMobileSyncEncryptionStatus,
   getSyncEncryptionMaterial,
   isSyncEncryptionBlocked,
@@ -1997,4 +1998,121 @@ describe('stale sync-encryption discovery scope (#1138)', () => {
       incompleteTransition: undefined,
     });
   });
+});
+
+describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
+  const FOLDER_SCOPE = `["file","${SYNC_URI}"]`;
+
+  /** Only the `[sync-encryption]` lines, message + extras, as one string to search. */
+  const capturedTrail = async (): Promise<string> => {
+    const { logInfo, logWarn } = await import('./app-log');
+    const calls = [
+      ...vi.mocked(logInfo).mock.calls,
+      ...vi.mocked(logWarn).mock.calls,
+    ].filter(([message]) => typeof message === 'string' && message.startsWith('[sync-encryption]'));
+    return JSON.stringify(calls);
+  };
+
+  const hex = (bytes: Uint8Array) =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+  it('never puts the passphrase or the derived key into a transition line', async () => {
+    await enableSyncEncryption(PASSPHRASE);
+    const resolved = await getSyncEncryptionMaterial();
+    expect(resolved).not.toBeNull();
+
+    const trail = await capturedTrail();
+    // The trail exists at all — otherwise "no secret found" is vacuously true.
+    expect(trail).toContain('[sync-encryption] transition');
+    expect(trail).toContain('"kind":"enable-local-only"');
+    expect(trail).toContain('"outcome":"ok"');
+
+    expect(trail).not.toContain(PASSPHRASE);
+    expect(trail).not.toContain(hex(resolved!.key));
+    expect(trail).not.toContain(Buffer.from(resolved!.key).toString('base64'));
+  }, 30_000);
+
+  it('logs the persisted salt as an 8-hex prefix and the location as a digest', async () => {
+    asyncStorage.set(SYNC_BACKEND_KEY, 'file');
+    asyncStorage.set(SYNC_PATH_KEY, SYNC_URI);
+    syncEncryptionLocalState.write({
+      state: 'remote-encrypted-no-key',
+      discoveredSalt: '07'.repeat(16),
+      discoveredParams: FAST_PARAMS,
+      discoveredScope: FOLDER_SCOPE,
+    });
+    await flushSyncEncryptionLocalState();
+
+    await logSyncEncryptionDiagnosticsBlock();
+
+    const trail = await capturedTrail();
+    expect(trail).toContain('[sync-encryption] state');
+    expect(trail).toContain('"state":"remote-encrypted-no-key"');
+    expect(trail).toContain('"decision":"blocked-no-key"');
+    // 8 hex characters of the persisted salt, and no more.
+    expect(trail).toContain('"saltPrefix":"07070707"');
+    expect(trail).not.toContain('07'.repeat(16));
+    // The scope string names the sync folder; only `file#<digest>` may be logged.
+    expect(trail).toContain('"activeScope":"file#');
+    expect(trail).not.toContain(SYNC_URI);
+  }, 30_000);
+
+  it('logs an artifact header salt as an 8-hex prefix, never in full', async () => {
+    const foreign = await deriveSyncKeyMaterial(
+      'a different passphrase', new Uint8Array(16).fill(0xab), FAST_PARAMS, mobileSyncCryptoPrimitives,
+    );
+    await seedEncrypted(appData('sealed'), foreign);
+
+    await expect(readSyncFile(SYNC_URI, { locationScope: FOLDER_SCOPE }))
+      .rejects.toBeInstanceOf(SyncEncryptionNoKeyError);
+
+    const trail = await capturedTrail();
+    expect(trail).toContain('[sync-encryption] remote-read');
+    expect(trail).toContain('"decision":"no-key"');
+    expect(trail).toContain('"headerSaltPrefix":"abababab"');
+    expect(trail).not.toContain('ab'.repeat(16));
+  }, 30_000);
+
+  it('logs one progress line per completed transition phase, with planned and done filled', async () => {
+    // Core reports progress BEFORE it increments its counter, so a `completed >= total` guard
+    // never fires. Driven through the real transition, not a synthetic progress sequence:
+    // the bug this covers was a wrong belief about core's callback order.
+    asyncStorage.set(SYNC_BACKEND_KEY, 'file');
+    asyncStorage.set(SYNC_PATH_KEY, SYNC_URI);
+    fs.files.set(SYNC_URI, new TextEncoder().encode(JSON.stringify(appData('before'), null, 2)));
+    fs.files.set(`${SYNC_DIR}/data.json.bak`, new TextEncoder().encode(JSON.stringify(appData('backup'), null, 2)));
+    fs.files.set(`${SYNC_DIR}/attachments/a1.png`, new Uint8Array([9, 8, 7, 6]));
+
+    await enableSyncEncryption(PASSPHRASE);
+
+    const logged = JSON.parse(await capturedTrail()) as [string, { extra: Record<string, string> }][];
+    const phases = logged.map(([, context]) => context.extra).filter((extra) => extra.phase === 'artifact');
+    expect(phases.map((extra) => extra.artifact)).toEqual(['attachments', 'documents']);
+    for (const extra of phases) {
+      expect(Number(extra.planned)).toBeGreaterThan(0);
+      expect(Number(extra.done)).toBeGreaterThan(0);
+      expect(Number(extra.done)).toBeLessThanOrEqual(Number(extra.planned));
+    }
+    // The last phase's line is emitted after the run returned, so everything planned is done.
+    expect(phases.at(-1)!.done).toBe(phases.at(-1)!.planned);
+  }, 30_000);
+
+  it('reports the unlock outcome without the passphrase that produced it', async () => {
+    asyncStorage.set(SYNC_BACKEND_KEY, 'file');
+    asyncStorage.set(SYNC_PATH_KEY, SYNC_URI);
+    setSyncFileLockNativeModuleForTests({
+      acquireAsync: vi.fn(async () => 'lease-token'),
+      revalidateAsync: vi.fn(async () => undefined),
+      releaseAsync: vi.fn(async () => undefined),
+    }, 'android');
+    await seedEncrypted(appData('sealed'));
+
+    await expect(provideSyncEncryptionPassphrase('not the passphrase at all'))
+      .resolves.toBe('wrong-passphrase');
+
+    const trail = await capturedTrail();
+    expect(trail).toContain('"kind":"unlock"');
+    expect(trail).toContain('"outcome":"wrong-passphrase"');
+    expect(trail).not.toContain('not the passphrase at all');
+  }, 30_000);
 });

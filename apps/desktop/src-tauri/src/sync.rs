@@ -56,6 +56,13 @@ use crate::sync_encryption::{
     plaintext_artifact_name, read_local_state, resolve_key_material, terminal_error,
     TRANSITION_CHANGE_PASSPHRASE, TRANSITION_DISABLE, TRANSITION_ENABLE,
     STATE_OFF, SYNC_ENCRYPTION_REMOTE_ENCRYPTED, SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
+    SYNC_ENCRYPTION_STATE_UNAVAILABLE, SYNC_ENCRYPTION_TERMINAL,
+    sync_encryption_artifact_label, sync_encryption_backend_label, sync_encryption_diagnostic,
+    sync_encryption_kdf_label, sync_encryption_salt_prefix, sync_encryption_salt_prefix_bytes,
+    sync_encryption_scope_label, SyncEncryptionLocalState,
+    SYNC_ENCRYPTION_LOG_ABSENT, SYNC_ENCRYPTION_LOG_EVENT_ERROR,
+    SYNC_ENCRYPTION_LOG_EVENT_REMOTE_READ, SYNC_ENCRYPTION_LOG_EVENT_STATE,
+    SYNC_ENCRYPTION_LOG_EVENT_TRANSITION,
 };
 #[cfg(target_os = "macos")]
 use crate::{
@@ -3718,6 +3725,71 @@ pub(crate) async fn cloud_put_json(
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    const WEBDAV_TEST_SCOPE: &str =
+        r#"["webdav","https://dav.example.com/remote.php/dav/","alice"]"#;
+
+    /// The file-backend gate is also the native WebDAV commands' gate, so its lines must name
+    /// the backend the cycle actually ran against. A line reading `backend=file` beside
+    /// `activeScope=webdav#…` contradicts itself and misleads whoever reads the shared log.
+    #[test]
+    fn a_sync_encryption_state_line_names_the_webdav_backend_on_a_webdav_cycle() {
+        let line = sync_encryption_state_line(None, Some(WEBDAV_TEST_SCOPE), false, "proceed");
+        assert!(line.contains("backend=webdav"), "{line}");
+        assert!(line.contains("activeScope=webdav#"), "{line}");
+        assert!(!line.contains("backend=file"), "{line}");
+        assert!(!line.contains("dav.example.com"), "{line}");
+        assert!(!line.contains("alice"), "{line}");
+
+        let file_line = sync_encryption_state_line(
+            None,
+            Some(r#"["file","/home/u/Sync"]"#),
+            true,
+            "proceed",
+        );
+        assert!(file_line.contains("backend=file"), "{file_line}");
+        assert!(!file_line.contains("/home/u/Sync"), "{file_line}");
+    }
+
+    #[test]
+    fn a_sync_encryption_remote_read_line_names_the_webdav_backend_on_a_webdav_cycle() {
+        let (read_line, error_line) = sync_encryption_remote_read_lines(
+            Some(WEBDAV_TEST_SCOPE),
+            Some(SYNC_ENCRYPTION_REMOTE_PLAINTEXT),
+        )
+        .expect("a discovery failure emits the pair");
+        assert!(read_line.contains("decision=plaintext-discovered"), "{read_line}");
+        let error_line = error_line.expect("a discovery failure emits the error line");
+        assert!(error_line.contains("backend=webdav"), "{error_line}");
+        assert!(!error_line.contains("backend=file"), "{error_line}");
+        assert!(!error_line.contains("dav.example.com"), "{error_line}");
+
+        // An ordinary IO failure stays out of this trail entirely.
+        assert!(
+            sync_encryption_remote_read_lines(Some(WEBDAV_TEST_SCOPE), Some("connection reset"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_sync_encryption_transition_sentinel_names_every_core_sentinel() {
+        for sentinel in [
+            "SYNC_ENCRYPTION_REMOTE_ENCRYPTED",
+            "SYNC_ENCRYPTION_REMOTE_PLAINTEXT",
+            "SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE",
+            "SYNC_ENCRYPTION_TRANSITION_INCOMPLETE",
+            "SYNC_ENCRYPTION_STATE_UNAVAILABLE",
+            "SYNC_ENCRYPTION_TERMINAL",
+            "SYNC_ENCRYPTION_WRONG_PASSPHRASE",
+            "SYNC_ENCRYPTION_BACKEND_REQUIRED",
+        ] {
+            assert_eq!(
+                sync_encryption_transition_sentinel(&format!("{sentinel}: something failed")),
+                sentinel
+            );
+        }
+        assert_eq!(sync_encryption_transition_sentinel("disk full"), "-");
+    }
 
     #[test]
     fn blocking_http_client_accepts_missing_or_blank_proxy() {
@@ -17013,12 +17085,86 @@ fn read_sync_file_versioned_from_retained_root_with(
 /// fails closed rather than silently reading/writing the plaintext names, which would fork the
 /// folder into two generations.
 fn resolve_sync_encryption_material(app: &tauri::AppHandle) -> Result<Option<SyncKeyMaterial>, String> {
-    if !is_encryption_enabled(app)? {
-        return Ok(None);
-    }
-    resolve_key_material(app)?
-        .map(Some)
-        .ok_or_else(|| terminal_error("sync encryption is enabled but no key is available on this device"))
+    let enabled = is_encryption_enabled(app)?;
+    let resolved = if enabled {
+        let material = resolve_key_material(app)?;
+        if material.is_none() {
+            log_sync_encryption_state(app, false, "blocked-no-key");
+            return Err(terminal_error(
+                "sync encryption is enabled but no key is available on this device",
+            ));
+        }
+        material
+    } else {
+        None
+    };
+    // One `state` line per file-backend operation, at the same seam that decides whether this
+    // device encrypts. The mobile and desktop-TS gates emit the identical line per cycle.
+    log_sync_encryption_state(app, resolved.is_some(), "proceed");
+    Ok(resolved)
+}
+
+/// The `[sync-encryption] state` line for the file backend. Reads only what the sidecar
+/// already holds -- never the key, never the passphrase.
+fn log_sync_encryption_state(app: &tauri::AppHandle, has_material: bool, decision: &str) {
+    let state = read_local_state(app).ok().flatten();
+    let active_scope = sync_location_scope(app, None);
+    log::info!(
+        "{}",
+        sync_encryption_state_line(state.as_ref(), active_scope.as_deref(), has_material, decision)
+    );
+}
+
+/// Pure builder for that line, so the field wiring is testable without an `AppHandle`.
+/// `backend` comes from the active scope, never a literal: `resolve_sync_encryption_material`
+/// is also the native WebDAV commands' gate, and a line reading `backend=file` next to
+/// `activeScope=webdav#…` would contradict itself.
+fn sync_encryption_state_line(
+    state: Option<&SyncEncryptionLocalState>,
+    active_scope: Option<&str>,
+    has_material: bool,
+    decision: &str,
+) -> String {
+    sync_encryption_diagnostic(
+            SYNC_ENCRYPTION_LOG_EVENT_STATE,
+            &[
+                ("backend", sync_encryption_backend_label(active_scope)),
+                ("trigger", "auto".to_string()),
+                (
+                    "state",
+                    state
+                        .as_ref()
+                        .map(|value| value.state.clone())
+                        .unwrap_or_else(|| STATE_OFF.to_string()),
+                ),
+                ("hasMaterial", has_material.to_string()),
+                (
+                    "saltPrefix",
+                    sync_encryption_salt_prefix(state.as_ref().and_then(|value| value.salt.as_deref())),
+                ),
+                (
+                    "kdf",
+                    sync_encryption_kdf_label(
+                        state.as_ref().and_then(|value| value.kdf_params).map(Into::into),
+                    ),
+                ),
+                (
+                    "incompleteTransition",
+                    state
+                        .as_ref()
+                        .and_then(|value| value.incomplete_transition.clone())
+                        .unwrap_or_else(|| SYNC_ENCRYPTION_LOG_ABSENT.to_string()),
+                ),
+                (
+                    "discoveredScope",
+                    sync_encryption_scope_label(
+                        state.as_ref().and_then(|value| value.discovered_scope.as_deref()),
+                    ),
+                ),
+                ("activeScope", sync_encryption_scope_label(active_scope)),
+                ("decision", decision.to_string()),
+            ],
+    )
 }
 
 fn crypto_for<'a>(material: &'a Option<SyncKeyMaterial>) -> SyncFileCrypto<'a> {
@@ -17108,11 +17254,112 @@ fn persist_discovery_and_reduce<T>(
     result: Result<T, String>,
 ) -> Result<T, String> {
     let scope = sync_location_scope(app, path_override);
+    log_file_remote_read(scope.as_deref(), &result);
     persist_discovery_and_reduce_with(
         result,
         |salt, params| mark_remote_encrypted_no_key(app, salt, params, scope.as_deref()),
         || mark_remote_plaintext(app, scope.as_deref()),
     )
+}
+
+/// The `[sync-encryption] remote-read` line for the file/WebDAV read seams, plus the
+/// `[sync-encryption] error` line that ties the sentinel TS classifies on back to the read
+/// that produced it. Emitted before the discovery is persisted, so a shared log always shows
+/// what the folder held before it shows the refusal.
+fn log_file_remote_read<T>(scope: Option<&str>, result: &Result<T, String>) {
+    let Some((read_line, error_line)) =
+        sync_encryption_remote_read_lines(scope, result.as_ref().err().map(String::as_str))
+    else {
+        return;
+    };
+    log::info!("{read_line}");
+    if let Some(error_line) = error_line {
+        log::warn!("{error_line}");
+    }
+}
+
+/// Pure builder for that pair -- `None` when the failure is an ordinary IO/parse error, which
+/// is not this trail's business. `backend` is derived from the scope this read was bound to,
+/// never a literal: the same seam serves the file backend and the native WebDAV commands.
+fn sync_encryption_remote_read_lines(
+    scope: Option<&str>,
+    error: Option<&str>,
+) -> Option<(String, Option<String>)> {
+    let artifact = sync_encryption_artifact_label(&encrypted_artifact_name(DATA_FILE_NAME));
+    let (kind, decision, salt_prefix, kdf, sentinel, error_text) = match error {
+        None => (
+            "plaintext",
+            "decrypt",
+            SYNC_ENCRYPTION_LOG_ABSENT.to_string(),
+            SYNC_ENCRYPTION_LOG_ABSENT.to_string(),
+            SYNC_ENCRYPTION_LOG_ABSENT.to_string(),
+            None,
+        ),
+        Some(error) => {
+            if let Some((salt, params)) = parse_encrypted_discovery(error) {
+                (
+                    "encrypted",
+                    "no-key",
+                    sync_encryption_salt_prefix_bytes(&salt),
+                    sync_encryption_kdf_label(Some(params)),
+                    SYNC_ENCRYPTION_REMOTE_ENCRYPTED.to_string(),
+                    Some(error),
+                )
+            } else if error == SYNC_ENCRYPTION_REMOTE_PLAINTEXT {
+                (
+                    "plaintext",
+                    "plaintext-discovered",
+                    SYNC_ENCRYPTION_LOG_ABSENT.to_string(),
+                    SYNC_ENCRYPTION_LOG_ABSENT.to_string(),
+                    SYNC_ENCRYPTION_REMOTE_PLAINTEXT.to_string(),
+                    Some(error),
+                )
+            } else if is_terminal_error(error) {
+                (
+                    "unsupported",
+                    "no-key",
+                    SYNC_ENCRYPTION_LOG_ABSENT.to_string(),
+                    SYNC_ENCRYPTION_LOG_ABSENT.to_string(),
+                    SYNC_ENCRYPTION_TERMINAL.to_string(),
+                    Some(error),
+                )
+            } else {
+                // An ordinary IO/parse failure: not this trail's business.
+                return None;
+            }
+        }
+    };
+    let read_line = sync_encryption_diagnostic(
+        SYNC_ENCRYPTION_LOG_EVENT_REMOTE_READ,
+        &[
+            ("artifact", artifact),
+            ("exists", "true".to_string()),
+            ("kind", kind.to_string()),
+            ("headerSaltPrefix", salt_prefix),
+            ("headerKdf", kdf),
+            ("bytes", SYNC_ENCRYPTION_LOG_ABSENT.to_string()),
+            ("version", "n/a".to_string()),
+            ("foreignSalt", SYNC_ENCRYPTION_LOG_ABSENT.to_string()),
+            ("decision", decision.to_string()),
+        ],
+    );
+    let error_line = error_text.map(|_| {
+        sync_encryption_diagnostic(
+            SYNC_ENCRYPTION_LOG_EVENT_ERROR,
+            &[
+                // The error text itself is a fixed sentinel plus a salt/params tuple, so
+                // the sentinel field carries everything a reader needs. Deliberately not
+                // logging the raw string: it is the only place a future change could add
+                // a path or a URL to this line.
+                ("errorName", "SyncEncryptionRemoteError".to_string()),
+                ("sentinel", sentinel),
+                ("backend", sync_encryption_backend_label(scope)),
+                ("step", "read".to_string()),
+                ("classification", decision.to_string()),
+            ],
+        )
+    });
+    Some((read_line, error_line))
 }
 
 #[tauri::command(async)]
@@ -19408,6 +19655,87 @@ where
     result.map(|()| next)
 }
 
+/// Start/end lines around one file-backend encryption transition. Same event, same fields as
+/// the TS transitions emit; the file backend is the one whose transition logic lives in Rust.
+fn log_sync_encryption_transition(
+    kind: &str,
+    phase: &str,
+    outcome: &str,
+    error: Option<&str>,
+) {
+    let line = sync_encryption_diagnostic(
+        SYNC_ENCRYPTION_LOG_EVENT_TRANSITION,
+        &[
+            ("kind", kind.to_string()),
+            ("backend", "file".to_string()),
+            ("phase", phase.to_string()),
+            ("artifact", SYNC_ENCRYPTION_LOG_ABSENT.to_string()),
+            ("outcome", outcome.to_string()),
+            (
+                "errorName",
+                error
+                    .map(|_| "SyncEncryptionTransitionError".to_string())
+                    .unwrap_or_else(|| SYNC_ENCRYPTION_LOG_ABSENT.to_string()),
+            ),
+            // Rust transition failures are already sentinel-prefixed strings built in this
+            // crate; none of them can contain a passphrase or key bytes, and the sentinel is
+            // the part a reader matches on.
+            (
+                "sentinel",
+                error
+                    .map(sync_encryption_transition_sentinel)
+                    .unwrap_or_else(|| SYNC_ENCRYPTION_LOG_ABSENT.to_string()),
+            ),
+        ],
+    );
+    if outcome == "ok" {
+        log::info!("{line}");
+    } else {
+        log::warn!("{line}");
+    }
+}
+
+/// The sentinel prefix inside a transition failure, or `-`. Never the raw message: a file
+/// backend error can carry the sync folder path.
+fn sync_encryption_transition_sentinel(error: &str) -> String {
+    // The same list core's `findSyncEncryptionSentinel` carries, longest first so a sentinel
+    // that is a prefix of another can never shadow it. Missing an entry here costs a reader
+    // the one word that names the failure.
+    for sentinel in [
+        "SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE",
+        "SYNC_ENCRYPTION_TRANSITION_INCOMPLETE",
+        SYNC_ENCRYPTION_STATE_UNAVAILABLE,
+        SYNC_ENCRYPTION_REMOTE_ENCRYPTED,
+        SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
+        "SYNC_ENCRYPTION_WRONG_PASSPHRASE",
+        "SYNC_ENCRYPTION_BACKEND_REQUIRED",
+        SYNC_ENCRYPTION_TERMINAL,
+    ] {
+        if error.contains(sentinel) {
+            return sentinel.to_string();
+        }
+    }
+    SYNC_ENCRYPTION_LOG_ABSENT.to_string()
+}
+
+/// Wraps one transition body in its start/end diagnostics.
+fn with_sync_encryption_transition_log<T>(
+    kind: &str,
+    run: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    log_sync_encryption_transition(kind, "start", SYNC_ENCRYPTION_LOG_ABSENT, None);
+    match run() {
+        Ok(value) => {
+            log_sync_encryption_transition(kind, "end", "ok", None);
+            Ok(value)
+        }
+        Err(error) => {
+            log_sync_encryption_transition(kind, "end", "error", Some(&error));
+            Err(error)
+        }
+    }
+}
+
 fn require_file_backend_dir(
     app: &tauri::AppHandle,
     path: Option<String>,
@@ -19435,7 +19763,7 @@ pub(crate) fn enable_sync_encryption(
     path: Option<String>,
 ) -> Result<(), String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
-    enable_sync_encryption_in_dir_with(
+    with_sync_encryption_transition_log(TRANSITION_ENABLE, || enable_sync_encryption_in_dir_with(
         &sync_dir,
         &passphrase,
         || begin_sync_encryption_transition(&app, TRANSITION_ENABLE),
@@ -19451,7 +19779,7 @@ pub(crate) fn enable_sync_encryption(
                 },
             )
         },
-    )?;
+    ))?;
     Ok(())
 }
 
@@ -19462,7 +19790,7 @@ pub(crate) fn disable_sync_encryption(
 ) -> Result<(), String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
     let key = cached_key_or_err(&app)?;
-    disable_sync_encryption_in_dir_with(
+    with_sync_encryption_transition_log(TRANSITION_DISABLE, || disable_sync_encryption_in_dir_with(
         &sync_dir,
         &key,
         || begin_sync_encryption_transition(&app, TRANSITION_DISABLE),
@@ -19473,7 +19801,7 @@ pub(crate) fn disable_sync_encryption(
                 revalidate_sync_lock(lock, &sync_dir)
             })
         },
-    )
+    ))
 }
 
 #[tauri::command(async)]
@@ -19484,7 +19812,7 @@ pub(crate) fn change_sync_encryption_passphrase(
 ) -> Result<(), String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
     let old_key = cached_key_or_err(&app)?;
-    change_sync_encryption_passphrase_in_dir_with(
+    with_sync_encryption_transition_log(TRANSITION_CHANGE_PASSPHRASE, || change_sync_encryption_passphrase_in_dir_with(
         &sync_dir,
         &old_key,
         &next_passphrase,
@@ -19501,7 +19829,7 @@ pub(crate) fn change_sync_encryption_passphrase(
                 },
             )
         },
-    )?;
+    ))?;
     Ok(())
 }
 
@@ -19615,7 +19943,11 @@ pub(crate) fn provide_sync_encryption_passphrase(
     path: Option<String>,
 ) -> Result<String, String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
-    provide_sync_encryption_passphrase_in_dir_with(
+    // `unlock` reports its answer rather than throwing it: a wrong passphrase is an Ok value,
+    // so the end line takes the returned outcome verbatim ("ok" | "wrong-passphrase" |
+    // "no-encrypted-remote"), which is exactly the fixed outcome vocabulary.
+    log_sync_encryption_transition("unlock", "start", SYNC_ENCRYPTION_LOG_ABSENT, None);
+    let result = provide_sync_encryption_passphrase_in_dir_with(
         &sync_dir,
         &passphrase,
         || Ok(()),
@@ -19625,7 +19957,12 @@ pub(crate) fn provide_sync_encryption_passphrase(
             })
         },
         || clear_stale_remote_encrypted_no_key(&app),
-    )
+    );
+    match &result {
+        Ok(outcome) => log_sync_encryption_transition("unlock", "end", outcome, None),
+        Err(error) => log_sync_encryption_transition("unlock", "end", "error", Some(error)),
+    }
+    result
 }
 
 // tauri-plugin-fs declares `exists`, `mkdir`, `remove` and `rename` as plain

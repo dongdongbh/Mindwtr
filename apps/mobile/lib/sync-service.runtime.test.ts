@@ -535,6 +535,31 @@ describe('mobile sync-service runtime', () => {
       expect(attachmentSyncMocks.syncWebdavAttachments).not.toHaveBeenCalled();
       expect(coreMocks.webdavPutJson).not.toHaveBeenCalled();
     });
+
+    // #1056 diagnostics: the refusal above is useless in a support log without the line that
+    // says WHY. One `state` line per cycle, carrying the two scopes that decided it — as
+    // digests, never as the WebDAV URL or username the scope string is built from.
+    it('logs why the gate refused, with the location as a digest', async () => {
+      const scope = '["webdav","https://sync.example.com/data.json","user"]';
+      persistedNoKey(scope);
+
+      await syncServiceModule.performMobileSync(undefined, { manual: true });
+
+      const calls = logMocks.logInfo.mock.calls as unknown as [string, { extra: Record<string, string> }][];
+      const trail = calls.filter((call) => call[0] === '[sync-encryption] state');
+      expect(trail).toHaveLength(1);
+      const extra = trail[0]![1].extra;
+      expect(extra).toMatchObject({
+        backend: 'webdav',
+        trigger: 'manual',
+        state: 'remote-encrypted-no-key',
+        decision: 'blocked-no-key',
+      });
+      expect(extra.discoveredScope).toMatch(/^webdav#[0-9a-f]{8}$/);
+      expect(extra.discoveredScope).toBe(extra.activeScope);
+      expect(JSON.stringify(extra)).not.toContain('sync.example.com');
+      expect(JSON.stringify(extra)).not.toContain('user');
+    });
   });
 
   it('probes a candidate transport despite stale global no-key state', async () => {

@@ -22,18 +22,26 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
     SYNC_ENCRYPTION_KEYED_STATES,
+    SYNC_ENCRYPTION_LOG_EVENTS,
+    buildSyncEncryptionStateExtra,
+    formatSyncEncryptionDiagnostics,
     isSyncEncryptionStateBlocked,
+    syncEncryptionLogMessage,
     type SyncCryptoKdfParams,
     type SyncEncryptionKeyCachePort,
     type SyncEncryptionLocalState,
     type SyncEncryptionLocalStatePort,
+    type SyncEncryptionLogEvent,
+    type SyncEncryptionState,
+    type SyncEncryptionStateDecision,
     type SyncEncryptionStatus,
     type SyncEncryptionTransitionKind,
     type SyncKeyMaterial,
 } from '@mindwtr/core';
 
 import { base64ToBytes, bytesToBase64 } from './attachment-sync-utils';
-import { logWarn } from './app-log';
+import { logInfo, logWarn } from './app-log';
+import { readActiveSyncLocationScope } from './sync-location-scope';
 import { deleteSecureConfigValue, getSecureConfigValue, setSecureConfigValue } from './secure-config';
 import { SYNC_ENCRYPTION_KEY_KEY, SYNC_ENCRYPTION_STATE_KEY } from './sync-constants';
 
@@ -274,6 +282,132 @@ export const hasUnscopedSyncEncryptionDiscovery = async (): Promise<boolean> => 
     const localState = await loadSyncEncryptionLocalState();
     if (!localState || localState.discoveredScope) return false;
     return localState.state === 'remote-encrypted-no-key' || localState.state === 'remote-plaintext';
+};
+
+/**
+ * The one emitter for the `[sync-encryption]` trail on mobile (#1056 diagnostics).
+ *
+ * `state` and `remote-read` are per-cycle detail and ride the existing Debug logging switch
+ * (Settings → Diagnostics), which is what `logInfo`/`logWarn` already gate on. `transition`,
+ * `error` and `activation` pass `force` so they land in the shareable log whether or not the
+ * user had detailed logging on when the failure happened — those are the lines a support
+ * report is useless without.
+ *
+ * Extras must come from core's builders: they are the only place the field names and the
+ * salt/scope redaction are defined, and `logInfo` sanitizes them a second time on the way out.
+ *
+ * Returns the queued file write so a caller that must not race it (Share log) can await it.
+ * The promise never rejects; every other caller ignores it deliberately.
+ */
+export const logSyncEncryptionEvent = (
+    event: SyncEncryptionLogEvent,
+    extra: Record<string, string>,
+    options?: { level?: 'info' | 'warn'; force?: boolean },
+): Promise<void> => {
+    const message = syncEncryptionLogMessage(event);
+    const context = { scope: 'sync', extra, force: options?.force };
+    const written = options?.level === 'warn' ? logWarn(message, context) : logInfo(message, context);
+    // `Promise.resolve` rather than `.then` directly: a log sink that returns nothing is still
+    // a valid sink, and a diagnostics line must never be the thing that throws.
+    return Promise.resolve(written).then(() => undefined, () => undefined);
+};
+
+/** Backend name out of a location scope (`["webdav", …]`). The scope is the only place the
+ *  screen and the share header can read it from without a second AsyncStorage round-trip. */
+const backendFromScope = (scope: string | null): string => {
+    if (!scope) return '-';
+    try {
+        const parsed: unknown = JSON.parse(scope);
+        if (Array.isArray(parsed) && typeof parsed[0] === 'string' && parsed[0]) return parsed[0];
+    } catch {
+        // Unparseable scope: the block still reports state, material and salt.
+    }
+    return '-';
+};
+
+type SyncEncryptionPosture = {
+    backend: string;
+    activeScope: string | null;
+    state: SyncEncryptionState | 'unknown';
+    hasMaterial: boolean | null;
+    localState: SyncEncryptionLocalState | null;
+    decision: SyncEncryptionStateDecision;
+};
+
+/** What the encryption gate would decide if a manual sync started right now. Reads only —
+ *  it resolves the same local state and the same block rule `setupCycle` uses. */
+const readSyncEncryptionPosture = async (): Promise<SyncEncryptionPosture> => {
+    const activeScope = await readActiveSyncLocationScope();
+    const backend = backendFromScope(activeScope);
+    let localState: SyncEncryptionLocalState | null = null;
+    try {
+        localState = await loadSyncEncryptionLocalState();
+    } catch {
+        // A sidecar that cannot be read is exactly what the block has to report.
+        return {
+            backend,
+            activeScope,
+            state: 'unknown',
+            hasMaterial: null,
+            localState: null,
+            decision: 'blocked-transition',
+        };
+    }
+    let hasMaterial: boolean | null = null;
+    try {
+        hasMaterial = (await getSyncEncryptionMaterial()) !== null;
+    } catch {
+        // `enabled` with no resolvable key: the honest answer is "no material".
+        hasMaterial = false;
+    }
+    const state = localState?.state ?? 'off';
+    let decision: SyncEncryptionStateDecision = 'proceed';
+    if (localState?.incompleteTransition) {
+        decision = 'blocked-transition';
+    } else if (isSyncEncryptionStateBlocked(localState, activeScope)) {
+        decision = state === 'remote-plaintext' ? 'blocked-plaintext' : 'blocked-no-key';
+    }
+    return { backend, activeScope, state, hasMaterial, localState, decision };
+};
+
+/** The `Encryption` block the Diagnostics screen renders, as `label: value` lines. Reads the
+ *  same local state the gate does, so what the screen shows is what the next cycle will use. */
+export const getSyncEncryptionDiagnosticsLines = async (): Promise<string[]> => {
+    const posture = await readSyncEncryptionPosture();
+    return formatSyncEncryptionDiagnostics({
+        state: posture.state,
+        hasMaterial: posture.hasMaterial,
+        salt: posture.localState?.discoveredSalt,
+        kdf: posture.localState?.discoveredParams,
+        incompleteTransition: posture.localState?.incompleteTransition,
+        activeScope: posture.activeScope,
+    });
+};
+
+/** Writes the same posture into the log file unconditionally, so a shared log carries it even
+ *  when the user never opened Diagnostics and had detailed logging off until the moment they
+ *  hit Share. Emitted as the ordinary `state` event: it answers the same question the
+ *  cycle-start line does ("what would this device do now"), so it greps the same way. */
+export const logSyncEncryptionDiagnosticsBlock = async (): Promise<void> => {
+    const posture = await readSyncEncryptionPosture();
+    // Awaited, not fired-and-forgotten: `Share log` shares the log FILE, so the line has to be
+    // on disk before the share sheet opens.
+    await logSyncEncryptionEvent(
+        SYNC_ENCRYPTION_LOG_EVENTS.state,
+        buildSyncEncryptionStateExtra({
+            backend: posture.backend,
+            trigger: 'manual',
+            state: posture.state,
+            hasMaterial: posture.hasMaterial,
+            salt: posture.localState?.discoveredSalt,
+            kdf: posture.localState?.discoveredParams,
+            incompleteTransition: posture.localState?.incompleteTransition,
+            discoveredScope: posture.localState?.discoveredScope,
+            activeScope: posture.activeScope,
+            decision: posture.decision,
+        }),
+        { force: true },
+    );
 };
 
 export const __resetSyncEncryptionStateForTests = (): void => {

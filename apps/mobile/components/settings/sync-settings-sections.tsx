@@ -7,6 +7,10 @@ import { translateWithFallback } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CompactText } from '@/components/compact-text';
 import { MOBILE_BACKGROUND_SYNC_INTERVAL_OPTIONS, type BackgroundSyncInterval } from '@/lib/sync-constants';
+import {
+  getSyncEncryptionDiagnosticsLines,
+  logSyncEncryptionDiagnosticsBlock,
+} from '@/lib/sync-encryption-state';
 import type { BackupAction } from './use-sync-settings-backup-actions';
 
 import { styles } from './settings.styles';
@@ -737,6 +741,48 @@ type SyncDiagnosticsCardProps = {
   toggleDebugLogging: (value: boolean) => void;
 };
 
+/**
+ * The `Encryption` block (#1056 diagnostics). Read-only, and deliberately rendered as the same
+ * `label: value` tokens the `[sync-encryption]` log lines use, so a user can copy either one
+ * into a report and both match. Loads its own data rather than threading props through the
+ * whole settings screen: nothing else on this screen needs the encryption posture.
+ */
+function SyncEncryptionDiagnosticsBlock({ t, tc }: { t: Translate; tc: ThemeColors }) {
+  const [lines, setLines] = React.useState<string[] | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const next = await getSyncEncryptionDiagnosticsLines().catch(() => null);
+      if (!cancelled) setLines(next);
+      // Also stamp the posture into the log file itself, forced, so a shared log carries it
+      // even if the user shares without scrolling here or had Debug logging off until now.
+      await logSyncEncryptionDiagnosticsBlock().catch(() => undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!lines) return null;
+  return (
+    <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+      <View style={styles.settingInfo}>
+        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncEncryption')}</Text>
+        {lines.map((line) => (
+          <Text
+            key={line}
+            selectable
+            style={[styles.settingDescription, { color: tc.secondaryText, fontFamily: 'monospace' }]}
+          >
+            {line}
+          </Text>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 export function SyncDiagnosticsCard({
   analyticsHeartbeatAvailable,
   analyticsHeartbeatOptedOut,
@@ -766,9 +812,10 @@ export function SyncDiagnosticsCard({
             />
           </View>
         )}
+        <SyncEncryptionDiagnosticsBlock t={t} tc={tc} />
         <View style={[
           styles.settingRow,
-          analyticsHeartbeatAvailable && { borderTopWidth: 1, borderTopColor: tc.border },
+          { borderTopWidth: 1, borderTopColor: tc.border },
         ]}>
           <View style={styles.settingInfo}>
             <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.debugLogging')}</Text>

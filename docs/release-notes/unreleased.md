@@ -4,6 +4,8 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 ## Full Change List
 
+- Diagnostics: sync encryption now leaves a structured trail in the debug log on desktop, Android and iOS (state and location at each sync, what each remote read found, the outcome of every enable, change, disable or unlock, and the exact error class behind a failure), with salts shortened, locations digested and no passphrase or key ever written. Settings → Diagnostics on both apps shows the same encryption status block, and a shared log carries it, so an encryption sync problem can be diagnosed from one shared log. (#1138, #1113)
+
 - Android and iOS: Settings → Sync gains a Background sync option for WebDAV, self-hosted cloud, Dropbox and iCloud: Off, every 15 minutes (the default and the platform minimum), every hour, or every 6 hours. It controls only the scheduled job that runs while the app is closed; syncing while the app is open, when you leave it, and shortly after edits is unchanged. The choice is per device and is not synced. (#1001)
 
 - Sync encryption: a phone or desktop that had once found an encrypted sync location it had no passphrase for kept refusing every sync afterwards, on every backend, with "This sync folder is encrypted. Enter the sync passphrase to continue", even after the location was emptied or the backend switched to a plain folder; Unlock could not help because it needs the encrypted document to still exist at the current location. The lock is now tied to the location it was found on: a different or emptied location is checked instead of refused, a device already stuck on 1.2.6 recovers with one manual Sync, and Unlock at a location that no longer holds encrypted data clears the stale lock and says so. (#1138)
