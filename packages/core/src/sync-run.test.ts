@@ -2910,6 +2910,9 @@ describe('local-only upload fast path', () => {
         const bundle = createHarness({
             local: messyLocal('Local task'),
             fastSyncScope: 'scope-fast-upload',
+            // Both platforms run the attachment pre-sync BEFORE this step; the
+            // fast path refuses when a platform does not (see the gate test).
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
             io: conditionalIo,
         });
         await settleThenEditLocally(bundle, 'Edited only here');
@@ -2933,6 +2936,9 @@ describe('local-only upload fast path', () => {
         const fast = createHarness({
             local: messyLocal('Local task'),
             fastSyncScope: 'scope-fast-bytes',
+            // Both platforms run the attachment pre-sync BEFORE this step; the
+            // fast path refuses when a platform does not (see the gate test).
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
             io: conditionalIo,
         });
         // Identical harness minus the conditional-write capability: it reads the
@@ -3144,10 +3150,32 @@ describe('local-only upload fast path', () => {
         expect(bundle.io.readRemote).toHaveBeenCalled();
     });
 
+    it('reads the remote when the platform runs the attachment pre-sync after the fast check', async () => {
+        // `preSyncedLocalData` can only witness attachment patches that landed
+        // BEFORE this step; a platform that orders the pre-sync afterwards must
+        // take the full cycle or a later patch would ride a write that never read.
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-late-presync',
+            policy: { preSyncAttachmentsBeforeFastCheck: false },
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        const result = await bundle.run();
+
+        expect(result.success).toBe(true);
+        expect(bundle.io.readRemote).toHaveBeenCalledTimes(1);
+    });
+
     it('falls back to a full cycle when the conditional write loses the swap', async () => {
         const bundle = createHarness({
             local: messyLocal('Local task'),
             fastSyncScope: 'scope-fast-precondition',
+            // Both platforms run the attachment pre-sync BEFORE this step; the
+            // fast path refuses when a platform does not (see the gate test).
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
             io: conditionalIo,
         });
         await settleThenEditLocally(bundle, 'Edited only here');
