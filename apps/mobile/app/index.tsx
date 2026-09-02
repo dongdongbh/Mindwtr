@@ -6,10 +6,8 @@ import { readRestorableRoute } from '@/lib/session-restore';
 
 export default function Index() {
     // Reopening shortly after the app closed resumes the interrupted session on
-    // the same screen; a fresh session starts on Focus (#842). Deep links into
-    // a root-level route (e.g. the capture modal, #1066) no longer mount this
-    // route at all: the root stack is anchored on the drawer group, so index
-    // is skipped. Drawer/tab deep links still bypass this route as before.
+    // the same screen; a fresh session starts on Focus (#842). Deep links,
+    // notifications, and share intents bypass this route entirely.
     const [target, setTarget] = useState<Href | null>(null);
 
     useEffect(() => {

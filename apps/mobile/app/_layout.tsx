@@ -1197,17 +1197,6 @@ function RootLayoutContentInner() {
   );
 }
 
-// Deep links into a root-level screen (the Lock Screen/Control Center "Add
-// Task" capture modal, #1066) must not mount `index` beneath them: on a cold
-// launch the default initial route is `index`, whose session-restore
-// Redirect uses router.replace and would replace the deep-linked modal with
-// Focus. Anchoring the root stack on the drawer group, the same mechanism
-// `app/(drawer)/_layout.tsx` uses for `(tabs)`, keeps `index` out of the
-// stack for root deep links while leaving drawer/tab deep links unaffected.
-export const unstable_settings = {
-  anchor: '(drawer)',
-};
-
 export default function RootLayout() {
   return (
     <ShareIntentProvider>

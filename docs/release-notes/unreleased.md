@@ -4,8 +4,6 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 ## Full Change List
 
-- iOS: tapping the Lock Screen "Add Task" widget (or the iOS 18 control) while Mindwtr was not running opened the app on Focus instead of the capture sheet; the start screen's session-restore redirect replaced the sheet that had opened above it. Deep links into the capture sheet are now anchored on the main screens, so the sheet opens and Focus is what remains when it is dismissed. (#1066)
-
 - macOS: the 1.2.6 downloads (DMG from GitHub or Homebrew) shipped without the native widget that 1.2.5 announced, so it never appeared in the Mac widget gallery; the release step that packages the DMG rebuilt the app after the widget had been added. The DMG is now built from the finished app, and the release checks that the DMG contains the widget before publishing. The Mac App Store build still has no widget; that is a separate follow-up. (#1054)
 
 - Diagnostics: sync encryption now leaves a structured trail in the debug log on desktop, Android and iOS (state and location at each sync, what each remote read found, the outcome of every enable, change, disable or unlock, and the exact error class behind a failure), with salts shortened, locations digested and no passphrase or key ever written. Settings → Diagnostics on both apps shows the same encryption status block, and a shared log carries it, so an encryption sync problem can be diagnosed from one shared log. (#1138, #1113)
