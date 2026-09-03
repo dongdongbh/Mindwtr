@@ -1,125 +1,124 @@
 {
-    "comment": "CloudKit Production container schema state by record type. 'deployed' is the repository assertion for keys already exercised by stable releases or explicitly confirmed in the Production dashboard. New keys stay in 'pendingProduction' until that dashboard check is complete; stable releases fail while any pending key remains.",
-    "records": {
-        "MindwtrTask": {
-            "deployed": [
-                "title",
-                "status",
-                "priority",
-                "energyLevel",
-                "assignedTo",
-                "taskMode",
-                "startTime",
-                "relativeStartOffset",
-                "dueDate",
-                "recurrence",
-                "showFutureRecurrence",
-                "pushCount",
-                "tags",
-                "contexts",
-                "checklist",
-                "taskDescription",
-                "textDirection",
-                "attachments",
-                "location",
-                "projectId",
-                "sectionId",
-                "viewSectionIds",
-                "areaId",
-                "isFocusedToday",
-                "timeEstimate",
-                "timeSpentMinutes",
-                "suppressMindwtrReminders",
-                "repeatReminderMinutes",
-                "reviewAt",
-                "completedAt",
-                "statusBeforeProjectArchive",
-                "completedAtBeforeProjectArchive",
-                "isFocusedTodayBeforeProjectArchive",
-                "projectArchivedAt",
-                "rev",
-                "revBy",
-                "createdAt",
-                "updatedAt",
-                "deletedAt",
-                "purgedAt",
-                "sortOrder",
-                "orderNum",
-                "focusOrder"
-            ],
-            "pendingProduction": []
-        },
-        "MindwtrProject": {
-            "deployed": [
-                "title",
-                "status",
-                "color",
-                "sortOrder",
-                "tagIds",
-                "isSequential",
-                "sequentialScope",
-                "taskSortBy",
-                "isFocused",
-                "supportNotes",
-                "attachments",
-                "dueDate",
-                "reviewAt",
-                "areaId",
-                "areaTitle",
-                "rev",
-                "revBy",
-                "createdAt",
-                "updatedAt",
-                "deletedAt",
-                "purgedAt"
-            ],
-            "pendingProduction": [
-                "startDate"
-            ]
-        },
-        "MindwtrSection": {
-            "deployed": [
-                "projectId",
-                "title",
-                "sectionDescription",
-                "sortOrder",
-                "isCollapsed",
-                "rev",
-                "revBy",
-                "createdAt",
-                "updatedAt",
-                "deletedAt",
-                "deletedAtBeforeProjectArchive",
-                "projectArchivedAt"
-            ],
-            "pendingProduction": []
-        },
-        "MindwtrArea": {
-            "deployed": [
-                "name",
-                "color",
-                "icon",
-                "sortOrder",
-                "rev",
-                "revBy",
-                "createdAt",
-                "updatedAt",
-                "deletedAt"
-            ],
-            "pendingProduction": []
-        },
-        "MindwtrPerson": {
-            "deployed": [
-                "name",
-                "note",
-                "referenceLink",
-                "rev",
-                "revBy",
-                "createdAt",
-                "updatedAt",
-                "deletedAt"
-            ],
-            "pendingProduction": []
-        }
-    }
+ "comment": "CloudKit Production container schema state by record type. 'deployed' is the repository assertion for keys already exercised by stable releases or explicitly confirmed in the Production dashboard. New keys stay in 'pendingProduction' until that dashboard check is complete; stable releases fail while any pending key remains.",
+ "records": {
+  "MindwtrTask": {
+   "deployed": [
+    "title",
+    "status",
+    "priority",
+    "energyLevel",
+    "assignedTo",
+    "taskMode",
+    "startTime",
+    "relativeStartOffset",
+    "dueDate",
+    "recurrence",
+    "showFutureRecurrence",
+    "pushCount",
+    "tags",
+    "contexts",
+    "checklist",
+    "taskDescription",
+    "textDirection",
+    "attachments",
+    "location",
+    "projectId",
+    "sectionId",
+    "viewSectionIds",
+    "areaId",
+    "isFocusedToday",
+    "timeEstimate",
+    "timeSpentMinutes",
+    "suppressMindwtrReminders",
+    "repeatReminderMinutes",
+    "reviewAt",
+    "completedAt",
+    "statusBeforeProjectArchive",
+    "completedAtBeforeProjectArchive",
+    "isFocusedTodayBeforeProjectArchive",
+    "projectArchivedAt",
+    "rev",
+    "revBy",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "purgedAt",
+    "sortOrder",
+    "orderNum",
+    "focusOrder"
+   ],
+   "pendingProduction": []
+  },
+  "MindwtrProject": {
+   "deployed": [
+    "title",
+    "status",
+    "color",
+    "sortOrder",
+    "tagIds",
+    "isSequential",
+    "sequentialScope",
+    "taskSortBy",
+    "isFocused",
+    "supportNotes",
+    "attachments",
+    "dueDate",
+    "reviewAt",
+    "areaId",
+    "areaTitle",
+    "rev",
+    "revBy",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "purgedAt",
+    "startDate"
+   ],
+   "pendingProduction": []
+  },
+  "MindwtrSection": {
+   "deployed": [
+    "projectId",
+    "title",
+    "sectionDescription",
+    "sortOrder",
+    "isCollapsed",
+    "rev",
+    "revBy",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "deletedAtBeforeProjectArchive",
+    "projectArchivedAt"
+   ],
+   "pendingProduction": []
+  },
+  "MindwtrArea": {
+   "deployed": [
+    "name",
+    "color",
+    "icon",
+    "sortOrder",
+    "rev",
+    "revBy",
+    "createdAt",
+    "updatedAt",
+    "deletedAt"
+   ],
+   "pendingProduction": []
+  },
+  "MindwtrPerson": {
+   "deployed": [
+    "name",
+    "note",
+    "referenceLink",
+    "rev",
+    "revBy",
+    "createdAt",
+    "updatedAt",
+    "deletedAt"
+   ],
+   "pendingProduction": []
+  }
+ }
 }
