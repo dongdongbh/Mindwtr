@@ -11,3 +11,5 @@ Changes collected after `v1.2.7` and before the next version tag.
 - Arch Linux: the source-built AUR package `mindwtr` is now community maintained and is no longer published by the Mindwtr release pipeline. The packages Mindwtr publishes are `mindwtr-bin` (stable) and `mindwtr-beta-bin` (release candidates). The docs and the AUR package policy now say so.
 
 - Web app: choosing a self-hosted server that already holds attachments failed with "Candidate attachment proof failed for …" on every attempt, because the browser build was asked to prove attachments it has no storage for. The web app now skips that proof; attachments stay available on your native apps and unavailable in the browser, as before. (#1119)
+
+- Desktop Timeline: the view is easier to read. A line now separates one project from the next, task bars are drawn in a lighter tint of the project color so the project bar stands out as their parent, and a task title is shown once in the name column on the left instead of also on the bar. (#1111)

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { TimelineView, resolveTimelineTrack } from './TimelineView';
+import { TimelineView, resolveTimelineTrack, taskBarTint } from './TimelineView';
 import { LanguageProvider } from '../../contexts/language-context';
 import { configureDateFormatting, useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
 
@@ -124,7 +124,7 @@ describe('TimelineView (#1111)', () => {
         expect(bars().map((bar) => bar.dataset.taskId)).toEqual(['dated']);
     });
 
-    it('colors a bar with the same accent the calendar gives that task', () => {
+    it('tints a bar with the same accent the calendar gives that task', () => {
         setStore({
             tasks: [
                 makeTask({ id: 'in-area', title: 'In area', projectId: 'p1', startTime: iso(0), dueDate: iso(1) }),
@@ -140,9 +140,11 @@ describe('TimelineView (#1111)', () => {
             areas: [{ id: 'a1', name: 'Work', color: '#ff0000', createdAt: iso(-60), updatedAt: iso(-60) } as unknown as Area],
         });
         renderTimeline();
-        expect(barFor('in-area')?.style.backgroundColor).toBe('rgb(255, 0, 0)');
-        expect(barFor('plain')?.style.backgroundColor).toBe('rgb(0, 255, 0)');
-        expect(barFor('loose')?.style.backgroundColor).toBe('rgb(255, 0, 0)');
+        // Same hue as the calendar, drawn at the calm strength a task bar uses.
+        expect(barFor('in-area')?.style.backgroundColor).toBe('rgba(255, 0, 0, 0.25)');
+        expect(barFor('plain')?.style.backgroundColor).toBe('rgba(0, 255, 0, 0.25)');
+        expect(barFor('loose')?.style.backgroundColor).toBe('rgba(255, 0, 0, 0.25)');
+        expect(barFor('plain')?.style.border).toBe('1px solid rgba(0, 255, 0, 0.7)');
     });
 
     it('groups rows by project with unassigned tasks last', () => {
@@ -268,6 +270,70 @@ describe('TimelineView (#1111)', () => {
             fireEvent.click(groupButton);
             window.removeEventListener('mindwtr:navigate', listener as EventListener);
             expect(navigations).toEqual(['projects']);
+        });
+    });
+
+    describe('project group and task bar hierarchy', () => {
+        const twoProjectStore = () => setStore({
+            tasks: [
+                makeTask({ id: 'owned', title: 'Owned task', projectId: 'p1', startTime: iso(0), dueDate: iso(3) }),
+                makeTask({ id: 'other', title: 'Other task', projectId: 'p2', startTime: iso(0), dueDate: iso(3) }),
+                makeTask({ id: 'loose', title: 'Loose task', startTime: iso(0), dueDate: iso(3) }),
+            ],
+            projects: [
+                { id: 'p1', title: 'First', status: 'active', color: '#00ff00', startDate: iso(0).slice(0, 10), dueDate: iso(3).slice(0, 10), createdAt: iso(-60), updatedAt: iso(-60) } as Project,
+                { id: 'p2', title: 'Second', status: 'active', color: '#0000ff', createdAt: iso(-59), updatedAt: iso(-59) } as Project,
+            ],
+        });
+
+        it('rules off every project group but the first', () => {
+            twoProjectStore();
+            renderTimeline();
+
+            // Three groups: First, Second and No project. The first opens the
+            // list, so only the two that start a new block carry a rule.
+            expect(rowLabels()).toEqual(['First', 'Owned task', 'Second', 'Other task', 'No project', 'Loose task']);
+            expect(screen.getAllByTestId('timeline-group-separator')).toHaveLength(2);
+        });
+
+        it('draws a task bar as a tint of the project bar, with no title on it', () => {
+            twoProjectStore();
+            renderTimeline();
+
+            const projectBar = projectBarFor('p1');
+            const taskBar = barFor('owned');
+            expect(projectBar?.style.backgroundColor).toBe('rgb(0, 255, 0)');
+            expect(taskBar?.style.backgroundColor).not.toBe(projectBar?.style.backgroundColor);
+            expect(taskBar?.style.backgroundColor).toBe('rgba(0, 255, 0, 0.25)');
+            // The sticky name column is the only place the title is written.
+            expect(taskBar?.textContent).toBe('');
+            expect(screen.getAllByText('Owned task')).toHaveLength(1);
+        });
+
+        it('tints a mini marker and an accent-colored bar the same way', () => {
+            setStore({
+                tasks: [
+                    makeTask({ id: 'mini', title: 'One sided', projectId: 'p1', dueDate: iso(1) }),
+                    makeTask({ id: 'accent', title: 'No color', startTime: iso(0), dueDate: iso(2) }),
+                ],
+                projects: [{ id: 'p1', title: 'First', status: 'active', color: '#00ff00', createdAt: iso(-60), updatedAt: iso(-60) } as Project],
+            });
+            renderTimeline();
+
+            expect(barFor('mini')?.dataset.variant).toBe('mini');
+            expect(barFor('mini')?.style.backgroundColor).toBe('rgba(0, 255, 0, 0.25)');
+            // A task with no area or project keeps the accent, tinted with the token.
+            expect(barFor('accent')?.style.backgroundColor).toBe('hsl(var(--primary) / 0.25)');
+            expect(bars().every((bar) => bar.textContent === '')).toBe(true);
+        });
+
+        it('falls back to the accent token for a color it cannot read', () => {
+            expect(taskBarTint('#00ff00')).toEqual({ fill: 'rgba(0, 255, 0, 0.25)', border: 'rgba(0, 255, 0, 0.7)' });
+            // Shorthand hex and an 8-digit widget color both resolve.
+            expect(taskBarTint('#0f0').fill).toBe('rgba(0, 255, 0, 0.25)');
+            expect(taskBarTint('#00ff00ff').fill).toBe('rgba(0, 255, 0, 0.25)');
+            expect(taskBarTint(undefined).fill).toBe('hsl(var(--primary) / 0.25)');
+            expect(taskBarTint('not a color').border).toBe('hsl(var(--primary) / 0.7)');
         });
     });
 

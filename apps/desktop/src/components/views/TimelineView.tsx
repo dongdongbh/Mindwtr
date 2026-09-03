@@ -53,8 +53,6 @@ const AXIS_HEIGHT = 44;
 const GUTTER_WIDTH = 224;
 /** Breathing room right of the last column when the track scrolls. */
 const TRACK_TAIL = 24;
-/** Narrower than this and a title on the bar is all ellipsis. */
-const ON_BAR_LABEL_MIN_WIDTH = 64;
 const MIN_MAJOR_LABEL_GAP = 68;
 const MIN_MINOR_LABEL_GAP = 26;
 // ponytail: a fixed 400-day window instead of paging. Tasks dated entirely
@@ -83,19 +81,31 @@ function sanitizeTimelineViewState(
 }
 
 /**
- * Rec. 709 luma, enough to pick black or white for a title sitting on a bar.
- * Area and project colors are hex from the tailwind-500 family (#1085 allows a
- * custom one); an 8-digit #RRGGBBAA is read as its opaque prefix.
+ * "255, 0, 0" from a row color. Area and project colors are hex from the
+ * tailwind-500 family (#1085 allows a custom one); an 8-digit #RRGGBBAA is
+ * read as its opaque prefix.
  */
-function isLightColor(hex: string): boolean {
+function hexChannels(hex: string): string | null {
     const value = hex.trim().replace('#', '');
     const full = value.length === 3
         ? value.split('').map((channel) => channel + channel).join('')
         : value.slice(0, 6);
-    if (!/^[0-9a-fA-F]{6}$/.test(full)) return false;
+    if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
     const int = Number.parseInt(full, 16);
-    const luma = 0.2126 * ((int >> 16) & 255) + 0.7152 * ((int >> 8) & 255) + 0.0722 * (int & 255);
-    return luma / 255 > 0.62;
+    return `${(int >> 16) & 255}, ${(int >> 8) & 255}, ${int & 255}`;
+}
+
+/**
+ * A task bar is a child of the project bar above it, so it wears the same color
+ * at a calmer strength: a translucent fill inside a thin border of that color.
+ * Both stay visible on the light card and on the dark one, and every project
+ * keeps its own hue. The accent falls back to the primary token.
+ */
+export function taskBarTint(color: string | undefined): { fill: string; border: string } {
+    const channels = color ? hexChannels(color) : null;
+    return channels
+        ? { fill: `rgba(${channels}, 0.25)`, border: `rgba(${channels}, 0.7)` }
+        : { fill: 'hsl(var(--primary) / 0.25)', border: 'hsl(var(--primary) / 0.7)' };
 }
 
 /** "Start date: 3 May. Due date: 9 May" — the spoken half of a bar's label. */
@@ -549,7 +559,7 @@ export function TimelineView() {
         dispatchNavigateEvent('projects');
     }, [setProjectView]);
 
-    const renderRow = (row: TimelineRow) => {
+    const renderRow = (row: TimelineRow, index: number) => {
         if (row.kind === 'group') {
             const project = row.project;
             const groupDates = project ? describeDates(t, project.startDate, project.dueDate) : '';
@@ -561,8 +571,18 @@ export function TimelineView() {
                     style={{ backgroundColor: row.color || 'hsl(var(--primary))' }}
                 />
             );
+            // The first row is always a group, so any later group opens a new
+            // block: it gets a full-strength rule across gutter and track.
+            const showSeparator = index > 0;
             return (
-                <div className="flex border-y border-border/60" style={{ height: ROW_HEIGHT }}>
+                <div
+                    data-testid={showSeparator ? 'timeline-group-separator' : undefined}
+                    className={cn(
+                        'flex border-b border-t border-b-border/60',
+                        showSeparator ? 'border-t-border' : 'border-t-border/60',
+                    )}
+                    style={{ height: ROW_HEIGHT }}
+                >
                     {project ? (
                         // The project name is the row's click target, the way a task
                         // row's name is: the rail below is a 10px secondary one.
@@ -622,13 +642,9 @@ export function TimelineView() {
         const left = row.single
             ? Math.max(0, row.lo * dayWidth + (dayWidth - MARKER_WIDTH) / 2)
             : row.lo * dayWidth;
-        const onBar = !row.single && width >= ON_BAR_LABEL_MIN_WIDTH;
-        // Full-strength area→project color; the app's accent when a task has
-        // neither, never muted-foreground.
-        const background = row.color || 'hsl(var(--primary))';
-        const onBarColor = row.color
-            ? (isLightColor(row.color) ? 'rgba(0, 0, 0, 0.84)' : 'rgba(255, 255, 255, 0.96)')
-            : 'hsl(var(--primary-foreground))';
+        // The project bar keeps the full-strength area→project color; the work
+        // under it is drawn as a tint of the same one. Mini markers included.
+        const tint = taskBarTint(row.color);
         const dateDescription = describeDates(t, row.task.startTime, row.task.dueDate);
         const taskActionLabel = dateDescription
             ? `${row.task.title}. ${dateDescription}`
@@ -661,27 +677,18 @@ export function TimelineView() {
                         title={row.task.title}
                         aria-hidden="true"
                         onClick={() => setOpenTaskId(row.task.id)}
-                        className={cn(
-                            'absolute z-10 flex cursor-pointer items-center rounded-full shadow-sm transition-[filter] hover:brightness-110',
-                            onBar && 'overflow-hidden px-2.5',
-                        )}
+                        // No title on the bar: the sticky name column already
+                        // carries it, and the tooltip repeats it on hover.
+                        className="absolute z-10 cursor-pointer rounded-full transition-[filter] hover:brightness-110"
                         style={{
                             left,
                             width,
                             height: barHeight,
                             top: (ROW_HEIGHT - barHeight) / 2,
-                            backgroundColor: background,
+                            backgroundColor: tint.fill,
+                            border: `1px solid ${tint.border}`,
                         }}
-                    >
-                        {onBar && (
-                            <span
-                                className="truncate text-[11px] font-medium leading-none"
-                                style={{ color: onBarColor }}
-                            >
-                                {row.task.title}
-                            </span>
-                        )}
-                    </div>
+                    />
                 </div>
             </div>
         );
@@ -865,11 +872,11 @@ export function TimelineView() {
                                                     className="absolute left-0 right-0"
                                                     style={{ top: virtualRow.start, height: virtualRow.size }}
                                                 >
-                                                    {renderRow(rows[virtualRow.index])}
+                                                    {renderRow(rows[virtualRow.index], virtualRow.index)}
                                                 </div>
                                             ))
-                                            : rows.map((row) => (
-                                                <React.Fragment key={row.key}>{renderRow(row)}</React.Fragment>
+                                            : rows.map((row, index) => (
+                                                <React.Fragment key={row.key}>{renderRow(row, index)}</React.Fragment>
                                             ))}
                                     </div>
                                 </div>
