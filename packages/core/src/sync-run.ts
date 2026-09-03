@@ -1063,6 +1063,7 @@ class SharedSyncRunMachine {
         await this.persistUnchangedSyncStatus();
         this.publishIdleCycleSnapshot(localData, localFingerprint);
         this.notifier.logInfo('Sync fast check found no changes', { backend: this.backend });
+        this.logUnchangedCycleSkips('fast');
         return { success: true, skipped: 'unchanged' };
     }
 
@@ -1195,6 +1196,7 @@ class SharedSyncRunMachine {
         this.publishIdleCycleSnapshot(localData, localFingerprint);
         this.state.readCheckRemoteData = undefined;
         this.notifier.logInfo('Sync read check found no changes', { backend: this.backend });
+        this.logUnchangedCycleSkips('read');
         return { success: true, skipped: 'unchanged' };
     }
 
@@ -1266,6 +1268,23 @@ class SharedSyncRunMachine {
         const stored = this.state.localDataCache?.data;
         if (!stored) return false;
         return isLocalPersistEquivalent(data, stored);
+    }
+
+    /** #1001 proof line: both unchanged returns leave the cycle before the merge
+     *  phase, so the local document write, the post-sync store refresh and the
+     *  attachment passes never run. The remote mutation fence is reported from
+     *  state rather than assumed: an attachment pass earlier in the cycle can
+     *  already have taken one. The skipped full local read has its own line
+     *  (`Sync local reconcile` with `reconcile: 'idle-cache'`). */
+    private logUnchangedCycleSkips(check: 'fast' | 'read'): void {
+        const skippedPasses = ['local-persist', 'store-refresh', 'attachments'];
+        if (!this.remoteMutationFence) skippedPasses.push('remote-fence');
+        this.notifier.logInfo('Sync cycle changed nothing; passes skipped', {
+            releaseCheck: 'v1.2.7/cycle-unchanged-skip',
+            backend: this.backend,
+            check,
+            skipped: skippedPasses.join(','),
+        });
     }
 
     /** Carry an unchanged local snapshot to the next cycle. Only reached from

@@ -129,6 +129,12 @@ vi.mock('@mindwtr/core', async () => ({
     SYNC_LOCAL_INSECURE_URL_OPTIONS: { allowLocalHostnames: true, allowPrivateIpRanges: true },
 }));
 
+vi.mock('@/lib/app-log', () => ({
+    logInfo: vi.fn(),
+    logWarn: vi.fn(),
+    logError: vi.fn(),
+}));
+
 vi.mock('@/lib/storage-file', () => ({
     pickAndParseSyncFolder: vi.fn(),
 }));

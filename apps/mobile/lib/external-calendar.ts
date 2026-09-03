@@ -13,6 +13,7 @@ import {
     type ExternalCalendarSubscription,
 } from '@mindwtr/core';
 import * as FileSystem from './file-system';
+import { logInfo } from './app-log';
 
 export const EXTERNAL_CALENDARS_KEY = 'mindwtr-external-calendars';
 export const SYSTEM_CALENDAR_SETTINGS_KEY = 'mindwtr-system-calendar-settings';
@@ -497,6 +498,31 @@ async function fetchSystemCalendarEvents(rangeStart: Date, rangeEnd: Date, signa
             location: typeof event.location === 'string' && event.location.trim().length > 0 ? event.location : undefined,
         });
     }
+
+    // #1133/#1134 proof: `spanning` counts the events that cross a window edge — the ones
+    // Android's containment query used to drop before the app ever saw them.
+    const dayMs = 24 * 60 * 60 * 1000;
+    let multiDay = 0;
+    let allDay = 0;
+    let spanning = 0;
+    for (const event of events) {
+        const start = new Date(event.start).getTime();
+        const end = new Date(event.end).getTime();
+        if (end - start > dayMs) multiDay += 1;
+        if (event.allDay) allDay += 1;
+        if (start < rangeStart.getTime() || end > rangeEnd.getTime()) spanning += 1;
+    }
+    void logInfo('Device calendar events loaded for the window', {
+        scope: 'calendar',
+        extra: {
+            releaseCheck: 'v1.2.7/calendar-spanning-events',
+            platform: Platform.OS,
+            total: String(events.length),
+            multiDay: String(multiDay),
+            allDay: String(allDay),
+            spanning: String(spanning),
+        },
+    });
 
     return { calendars, events };
 }

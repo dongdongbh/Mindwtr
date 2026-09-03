@@ -1611,7 +1611,10 @@ fn wait_for_dropbox_auth_code(
                     // A callback carrying another attempt's state (a reloaded
                     // tab from an earlier connect, a stale prefetch) is not this
                     // flow's answer; reject it and keep waiting for the real one.
-                    log::warn!("Ignoring Dropbox OAuth callback with a mismatched state");
+                    log::warn!(
+                        target: "sync",
+                        "Ignoring Dropbox OAuth callback with a mismatched state releaseCheck=v1.2.7/dropbox-signin-detached phase=callback-state-mismatch"
+                    );
                     let _ = write_oauth_http_response(
                         &mut stream,
                         "400 Bad Request",
@@ -1630,6 +1633,10 @@ fn wait_for_dropbox_auth_code(
                     return Err("Dropbox authorization failed: missing code".to_string());
                 }
 
+                log::info!(
+                    target: "sync",
+                    "Dropbox sign-in callback accepted with a matching state releaseCheck=v1.2.7/dropbox-signin-detached phase=callback-state-matched"
+                );
                 let _ = write_oauth_http_response(
                     &mut stream,
                     "200 OK",
@@ -2758,6 +2765,10 @@ fn run_dropbox_oauth(
     // sign-in page spun on the redirect, and the Connect button stayed dead.
     open::that_detached(authorize_url.as_str())
         .map_err(|error| format!("Failed to open Dropbox authorization URL: {error}"))?;
+    log::info!(
+        target: "sync",
+        "Dropbox sign-in page opened detached; waiting for the callback releaseCheck=v1.2.7/dropbox-signin-detached phase=opened"
+    );
 
     let code = wait_for_dropbox_auth_code(&listener, &state)?;
     exchange_dropbox_auth_code(

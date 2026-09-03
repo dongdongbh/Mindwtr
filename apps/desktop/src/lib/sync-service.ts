@@ -845,7 +845,16 @@ const hasAttachmentSyncWork = async (data: AppData, presenceScope: string | null
 
     // Nothing in the document says there is work to do. The one remaining reason to run the
     // phase is the periodic presence proof.
-    return isAttachmentPresenceReconciliationDue(presenceScope);
+    const presenceDue = isAttachmentPresenceReconciliationDue(presenceScope);
+    void logInfo('Attachment presence re-verification checked', {
+        scope: 'sync',
+        extra: {
+            releaseCheck: 'v1.2.7/daily-attachment-presence',
+            presenceDue: String(presenceDue),
+            hasScope: String(Boolean(presenceScope)),
+        },
+    });
+    return presenceDue;
 };
 
 const getSyncConfigDeps = () => ({

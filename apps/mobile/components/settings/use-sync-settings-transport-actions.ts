@@ -17,6 +17,7 @@ import {
     type AppSettings,
 } from '@mindwtr/core';
 
+import { logInfo } from '@/lib/app-log';
 import { pickAndParseSyncFolder } from '@/lib/storage-file';
 import { getCloudKitAccountStatus } from '@/lib/cloudkit-sync';
 import { authorizeDropbox, getDropboxRedirectUri } from '@/lib/dropbox-oauth';
@@ -830,6 +831,18 @@ export function useSyncSettingsTransportActions({
             };
 
             if (effectiveBackend === 'off') return;
+            // Only an activation passes an explicit backend; a manual "Sync now" tap
+            // calls handleSync() with no options and never reaches this line.
+            if (options?.backend) {
+                void logInfo('Sync backend selected; running the verification sync to activate it', {
+                    scope: 'sync',
+                    extra: {
+                        releaseCheck: 'v1.2.7/sync-settings-activation-mobile',
+                        backend: effectiveBackend,
+                        cloudProvider: effectiveCloudProvider,
+                    },
+                });
+            }
             if (effectiveBackend === 'webdav') {
                 const trimmedWebDavUrl = effectiveWebdav.url.trim();
                 if (!trimmedWebDavUrl) {
