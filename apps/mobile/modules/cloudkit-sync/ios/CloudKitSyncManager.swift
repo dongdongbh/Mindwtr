@@ -369,13 +369,26 @@ final class CloudKitSyncManager {
         if !nonConflictErrors.isEmpty {
             let descriptions = nonConflictErrors.prefix(5).map { $0.localizedDescription }.joined(separator: "; ")
             NSLog("[CloudKitSyncManager] saveRecords had \(nonConflictErrors.count) non-conflict error(s): \(descriptions)")
+            // An atomic zone save reports the one record that failed with its real
+            // error and every other record with `batchRequestFailed` ("Atomic
+            // failure"). The victims come first in callback order, so showing
+            // errors[0] hid the cause from the Sync screen and the shared log
+            // (App Store 1.2.7 report). Prefer the culprit.
+            let isBatchVictim: (Error) -> Bool = { error in
+                (error as? CKError)?.code == .batchRequestFailed
+            }
+            let primary = nonConflictErrors.first { !isBatchVictim($0) } ?? nonConflictErrors[0]
+            var message = primary.localizedDescription
+            if isBatchVictim(primary) {
+                message = "CloudKit rejected the whole batch because one record in it failed, and reported no record-level cause (\(nonConflictErrors.count) records): \(message)"
+            }
             var userInfo: [String: Any] = [
-                NSLocalizedDescriptionKey: nonConflictErrors[0].localizedDescription,
-                NSUnderlyingErrorKey: nonConflictErrors[0],
+                NSLocalizedDescriptionKey: message,
+                NSUnderlyingErrorKey: primary,
             ]
             if !conflictIDs.isEmpty {
                 userInfo["conflictIDs"] = conflictIDs.joined(separator: ",")
-                userInfo[NSLocalizedDescriptionKey] = "CloudKit save failed with both conflicts and non-conflict errors: \(nonConflictErrors[0].localizedDescription)"
+                userInfo[NSLocalizedDescriptionKey] = "CloudKit save failed with both conflicts and non-conflict errors: \(message)"
             }
             throw NSError(domain: "CloudKitSync", code: 2, userInfo: userInfo)
         }
