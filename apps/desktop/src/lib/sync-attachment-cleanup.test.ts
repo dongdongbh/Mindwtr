@@ -132,6 +132,48 @@ describe('desktop attachment cleanup freshness', () => {
         expect(deps.logSyncWarning).not.toHaveBeenCalled();
     });
 
+    it('names the error class and sanitized message when a remote delete fails', async () => {
+        // The generic "(status)" message had no cause to diagnose a real
+        // server failure by (device test, 2026-09-02).
+        const appData: AppData = {
+            ...buildData(),
+            settings: { attachments: { pendingRemoteDeletes: [{
+                cloudKey: 'attachments/orphan-2.png',
+                title: 'orphan-2.png',
+            }] } },
+        };
+        const deps = buildDeps();
+        vi.mocked(deps.getWebDavConfig).mockResolvedValue({
+            url: 'https://dav.example.com/mindwtr/',
+            username: 'alice',
+        });
+        fsMocks.readDir.mockResolvedValue([]);
+        coreMocks.webdavHeadFile.mockResolvedValue({ exists: true, etag: '"v1"' });
+        const remoteError = new Error(
+            'https://dav.example.com/mindwtr/attachments/orphan-2.png PRECONDITION FAILED',
+        );
+        remoteError.name = 'WebDavError';
+        (remoteError as Error & { status?: number }).status = 409;
+        coreMocks.webdavDeleteFileVersioned.mockRejectedValue(remoteError);
+
+        await cleanupOrphanedAttachments(
+            appData,
+            'webdav',
+            deps,
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
+
+        expect(deps.logSyncWarning).toHaveBeenCalledTimes(1);
+        const [message, loggedError] = vi.mocked(deps.logSyncWarning).mock.calls[0]!;
+        expect(message).toBe('Failed to delete remote attachment');
+        expect(loggedError).toBeInstanceOf(Error);
+        const loggedMessage = (loggedError as Error).message;
+        expect(loggedMessage).toContain('(409)');
+        expect(loggedMessage).toContain('WebDavError');
+        expect(loggedMessage).toContain('PRECONDITION FAILED');
+        expect(loggedMessage).not.toContain('https://');
+    });
+
     it('bounds remote cleanup and resumes the retained queue on the next pass', async () => {
         const pendingRemoteDeletes = Array.from({ length: 26 }, (_, index) => ({
             cloudKey: `attachments/orphan-${index + 1}.pdf`,
@@ -239,5 +281,23 @@ describe('deleteAttachmentFile', () => {
             'Failed to delete attachment file a1',
             expect.any(Error),
         );
+    });
+
+    it('treats an orphan file that is already gone as cleaned, not a failure', async () => {
+        // The file is already gone, so this is the cleanup succeeding, not
+        // failing; it used to log a warning every cycle regardless (device
+        // test, 2026-09-02).
+        fsMocks.remove.mockReset();
+        fsMocks.exists.mockResolvedValue(true);
+        const logSyncWarning = vi.fn();
+        fsMocks.remove.mockRejectedValueOnce(new Error('No such file or directory (os error 2)'));
+
+        await expect(deleteAttachmentFile(
+            attachment('/new-profile/attachments/a1.pdf'),
+            { logSyncWarning },
+            { ensureLocalSnapshotFresh: vi.fn() },
+        )).resolves.toBeUndefined();
+
+        expect(logSyncWarning).not.toHaveBeenCalled();
     });
 });
