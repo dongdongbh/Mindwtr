@@ -71,11 +71,10 @@
     "createdAt",
     "updatedAt",
     "deletedAt",
-    "purgedAt"
-   ],
-   "pendingProduction": [
+    "purgedAt",
     "startDateText"
-   ]
+   ],
+   "pendingProduction": []
   },
   "MindwtrSection": {
    "deployed": [
