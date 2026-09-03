@@ -67,10 +67,12 @@ vi.mock('@react-native-async-storage/async-storage', () => ({ default: asyncStor
 vi.mock('./sync-service-utils', () => ({
   isRemoteSyncBackend: (backend: string) => backend === 'webdav' || backend === 'cloud',
 }));
-vi.mock('./app-log', () => ({
+const appLogMock = vi.hoisted(() => ({
   logInfo: vi.fn(),
   logWarn: vi.fn(),
 }));
+vi.mock('./app-log', () => appLogMock);
+vi.mock('./js-timers', () => ({ areJsTimersPaused: vi.fn(() => true) }));
 
 const loadModule = async () => import('./background-sync-task');
 
@@ -181,6 +183,13 @@ describe('mobile background sync task', () => {
     expect(coreMock.flushPendingSave).toHaveBeenCalledTimes(1);
     expect(syncServiceMock.performMobileSync).toHaveBeenCalledTimes(1);
     expect(result).toBe(backgroundTaskMock.BackgroundTaskResult.Success);
+    // The start/finish pair is the field diagnostic for a run that never settles.
+    expect(appLogMock.logInfo).toHaveBeenCalledWith('Mobile background sync started', expect.objectContaining({
+      extra: { timersPaused: 'true' },
+    }));
+    expect(appLogMock.logInfo).toHaveBeenCalledWith('Mobile background sync finished', expect.objectContaining({
+      extra: expect.objectContaining({ outcome: 'success' }),
+    }));
   });
 
   it('treats unsupported or unconfigured task runs as a successful no-op', async () => {
@@ -239,6 +248,11 @@ describe('mobile background sync task', () => {
       expect(await run).toBe(backgroundTaskMock.BackgroundTaskResult.Failed);
       expect(syncServiceMock.abortMobileSync).toHaveBeenCalledTimes(1);
       expect(storageAdapterMock.quiesceMobileStorage).toHaveBeenCalledTimes(1);
+      // A run this long is written even with debug logging off.
+      expect(appLogMock.logWarn).toHaveBeenCalledWith('Mobile background sync run took longer than a minute', expect.objectContaining({
+        force: true,
+        extra: expect.objectContaining({ outcome: 'abandoned' }),
+      }));
       // The request deadline is what holds while timers are paused; it must be
       // armed for the run and cleared afterwards.
       const deadlineCalls = syncServiceMock.setMobileSyncRequestDeadline.mock.calls;

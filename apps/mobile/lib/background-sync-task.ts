@@ -5,6 +5,7 @@ import { flushPendingSave } from '@mindwtr/core';
 
 import type { SyncBackend } from './sync-service-utils';
 import { logInfo, logWarn } from './app-log';
+import { areJsTimersPaused } from './js-timers';
 import { quiesceMobileStorage } from './storage-adapter';
 import { abortMobileSync, getMobileSyncConfigurationStatus, performMobileSync, setMobileSyncRequestDeadline } from './sync-service';
 import {
@@ -30,6 +31,10 @@ export const MOBILE_BACKGROUND_SYNC_MINIMUM_INTERVAL_MINUTES = 15;
 // fetch, which refuses to start a request past it and caps each request at it.
 export const MOBILE_BACKGROUND_SYNC_DEADLINE_MS = 4 * 60 * 1000;
 export const MOBILE_BACKGROUND_SYNC_QUIESCE_DEADLINE_MS = 20 * 1000;
+/** A run past this is written to the log even with debug logging off: a job
+ *  that lives this long is what drained batteries in #1001, and the log a
+ *  user shares is the only view into a background run. */
+export const MOBILE_BACKGROUND_SYNC_SLOW_RUN_MS = 60 * 1000;
 
 type MobileBackgroundSyncRegistrationAction = 'registered' | 'unregistered' | 'unchanged';
 
@@ -167,16 +172,31 @@ const performBackgroundSyncWork = async (): Promise<BackgroundTask.BackgroundTas
 };
 
 const runMobileBackgroundSync = async (): Promise<BackgroundTask.BackgroundTaskResult> => {
-  setMobileSyncRequestDeadline(Date.now() + MOBILE_BACKGROUND_SYNC_DEADLINE_MS);
+  const startedAt = Date.now();
+  // Kept on an object: the deadline callback below assigns it from a closure,
+  // which control-flow narrowing on a plain `let` cannot see.
+  const run: { outcome: 'success' | 'failed' | 'abandoned' | 'crashed' } = { outcome: 'crashed' };
+  setMobileSyncRequestDeadline(startedAt + MOBILE_BACKGROUND_SYNC_DEADLINE_MS);
+  // A "started" line without its "finished" line in a shared log is the
+  // signature of a run that never settled (#1001).
+  void logInfo('Mobile background sync started', {
+    scope: 'sync',
+    extra: { timersPaused: String(areJsTimersPaused()) },
+  });
   try {
-    return await withDeadline(performBackgroundSyncWork(), MOBILE_BACKGROUND_SYNC_DEADLINE_MS, () => {
+    const result = await withDeadline(performBackgroundSyncWork(), MOBILE_BACKGROUND_SYNC_DEADLINE_MS, () => {
       abortMobileSync();
+      run.outcome = 'abandoned';
       void logWarn('Mobile background sync did not finish before its deadline and was abandoned', {
         scope: 'sync',
         extra: { deadlineMs: String(MOBILE_BACKGROUND_SYNC_DEADLINE_MS) },
       });
       return BackgroundTask.BackgroundTaskResult.Failed;
     });
+    if (run.outcome !== 'abandoned') {
+      run.outcome = result === BackgroundTask.BackgroundTaskResult.Success ? 'success' : 'failed';
+    }
+    return result;
   } catch (error) {
     logBackgroundSyncWarning('Mobile background sync crashed', error);
     return BackgroundTask.BackgroundTaskResult.Failed;
@@ -188,6 +208,13 @@ const runMobileBackgroundSync = async (): Promise<BackgroundTask.BackgroundTaskR
     await withDeadline(quiesceMobileStorage(), MOBILE_BACKGROUND_SYNC_QUIESCE_DEADLINE_MS, () => {
       logBackgroundSyncWarning('Mobile background sync storage quiesce did not finish before its deadline');
     });
+    const elapsedMs = Date.now() - startedAt;
+    const extra = { outcome: run.outcome, elapsedMs: String(elapsedMs) };
+    if (elapsedMs >= MOBILE_BACKGROUND_SYNC_SLOW_RUN_MS) {
+      void logWarn('Mobile background sync run took longer than a minute', { scope: 'sync', force: true, extra });
+    } else {
+      void logInfo('Mobile background sync finished', { scope: 'sync', extra });
+    }
   }
 };
 
