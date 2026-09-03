@@ -108,6 +108,12 @@
 
 熟悉 GTD 的话：这就是完整的收集、澄清、组织、执行、回顾。不熟悉也没关系：Mindwtr 每一步都有引导，想深入了解可以读读 [15 分钟入门 GTD](https://hamberg.no/gtd)。
 
+<p align="center">
+  <a href="https://docs.mindwtr.app/assets/diagrams/gtd-workflow"><img src="https://docs.mindwtr.app/assets/diagrams/gtd-workflow.svg" alt="Mindwtr 的 GTD 循环：收集到收件箱、澄清、整理进项目和清单、每周回顾、在专注视图中执行" width="900"></a>
+  <br>
+  <sub>整个循环，一页看完。<a href="https://docs.mindwtr.app/assets/diagrams/gtd-workflow">打开交互式图表</a></sub>
+</p>
+
 ## 理念
 
 **我只是想骑车，不要给我驾驶舱。**
