@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+    clearAttachmentPresenceStamp,
+    markAttachmentPresenceReconciled,
+} from './attachment-presence-scope';
 import { computeStableValueFingerprint, computeSyncPayloadFingerprint, type AppData } from '@mindwtr/core';
 import { rememberWebdavCapabilityProof } from './webdav-capability-proof';
 
@@ -293,6 +297,14 @@ vi.mock('@tauri-apps/api/path', () => pathMocks);
 
 const syncServiceModulePromise = import('./sync-service');
 
+/** #1119 follow-up / #1138 added item A: the attachment presence stamp is the file backend's
+ *  only durable "this device has completed a cycle against this location" fact, and without
+ *  one the encryption posture gate treats a cycle as a fresh join and skips the attachment
+ *  PREPARE phase. Every cycle test below models an established device, so the stamp is seeded
+ *  in beforeEach; the fresh-join case has its own test at the end of this file. The scope is
+ *  `desktopSyncLocationScope` for the file backend, i.e. the configured sync path verbatim. */
+const ESTABLISHED_FILE_LOCATION_SCOPE = JSON.stringify(['file', '/sync/data.json']);
+
 describe('desktop sync-service runtime', () => {
     beforeEach(async () => {
         const syncServiceModule = await syncServiceModulePromise;
@@ -301,6 +313,8 @@ describe('desktop sync-service runtime', () => {
         // renderer migration has dedicated coverage in sync-service.test.ts.
         (syncServiceModule.SyncService as any).didMigrate = true;
         vi.clearAllMocks();
+        clearAttachmentPresenceStamp();
+        markAttachmentPresenceReconciled(ESTABLISHED_FILE_LOCATION_SCOPE);
 
         storeStateRef.current = {
             _allTasks: structuredClone(localData.tasks),
@@ -498,6 +512,51 @@ describe('desktop sync-service runtime', () => {
         });
         expect(fsMocks.writeFile).not.toHaveBeenCalled();
         expect(syncFsMocks.rename).not.toHaveBeenCalled();
+    });
+
+    // #1138 added item A: desktop has NO pre-read no-key gate, so the attachment prepare
+    // phase (which runs BEFORE the document read) was the one path that could put plaintext
+    // attachment bytes into a folder this device has never read. The packet had to ship
+    // `file -> always established` because the file backend has no fast-sync record; the
+    // #1119 presence stamp is that missing per-location fact.
+    describe('fresh join on the file backend (#1138 / #1119 stamp)', () => {
+        it('skips the attachment prepare phase until a cycle has completed against this location', async () => {
+            const syncServiceModule = await syncServiceModulePromise;
+            clearAttachmentPresenceStamp();
+
+            await syncServiceModule.SyncService.performSync();
+
+            expect(logInfoMock).toHaveBeenCalledWith(
+                'Attachment pre-sync skipped',
+                { scope: 'sync', extra: { backend: 'file', reason: 'encryption-recheck' } },
+            );
+        });
+
+        it('runs the attachment prepare phase once the presence stamp names this location', async () => {
+            const syncServiceModule = await syncServiceModulePromise;
+            // Seeded by beforeEach; restated here so the contrast with the test above is local.
+            markAttachmentPresenceReconciled(ESTABLISHED_FILE_LOCATION_SCOPE);
+
+            await syncServiceModule.SyncService.performSync();
+
+            expect(logInfoMock).not.toHaveBeenCalledWith(
+                'Attachment pre-sync skipped',
+                expect.anything(),
+            );
+        });
+
+        it('never lets a stamp from another sync folder establish this one', async () => {
+            const syncServiceModule = await syncServiceModulePromise;
+            clearAttachmentPresenceStamp();
+            markAttachmentPresenceReconciled(JSON.stringify(['file', '/some/other/folder/data.json']));
+
+            await syncServiceModule.SyncService.performSync();
+
+            expect(logInfoMock).toHaveBeenCalledWith(
+                'Attachment pre-sync skipped',
+                { scope: 'sync', extra: { backend: 'file', reason: 'encryption-recheck' } },
+            );
+        });
     });
 
     it('treats pending remote write backoff as a skipped sync', async () => {

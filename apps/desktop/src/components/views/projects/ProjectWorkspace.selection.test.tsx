@@ -96,15 +96,37 @@ vi.mock('./ProjectDetailsHeader', () => ({
 }));
 
 vi.mock('./ProjectDetailsFields', () => ({
-    ProjectDetailsFields: ({ onToggleSequential, readOnly }: { onToggleSequential: () => void; readOnly?: boolean }) => (
-        <button
-            type="button"
-            data-testid="project-type-toggle"
-            disabled={readOnly}
-            onClick={onToggleSequential}
-        >
-            Project type
-        </button>
+    ProjectDetailsFields: ({ onToggleSequential, onStartDateChange, readOnly }: {
+        onToggleSequential: () => void;
+        onStartDateChange: (value: string) => void;
+        readOnly?: boolean;
+    }) => (
+        <>
+            <button
+                type="button"
+                data-testid="project-type-toggle"
+                disabled={readOnly}
+                onClick={onToggleSequential}
+            >
+                Project type
+            </button>
+            <button
+                type="button"
+                data-testid="project-start-date-set"
+                disabled={readOnly}
+                onClick={() => onStartDateChange('2026-10-05')}
+            >
+                Set start date
+            </button>
+            <button
+                type="button"
+                data-testid="project-start-date-clear"
+                disabled={readOnly}
+                onClick={() => onStartDateChange('')}
+            >
+                Clear start date
+            </button>
+        </>
     ),
 }));
 
@@ -360,6 +382,19 @@ describe('ProjectWorkspace Select mode', () => {
         });
         expect(updateTask).not.toHaveBeenCalled();
         expect(reorderProjectTasks).not.toHaveBeenCalled();
+    });
+
+    it('saves and clears the project start date through updateProject', () => {
+        const updateProject = vi.fn();
+        const { getByRole, getByTestId } = renderWorkspace({ updateProject });
+
+        fireEvent.click(getByRole('button', { name: 'Details' }));
+        fireEvent.click(getByTestId('project-start-date-set'));
+        expect(updateProject).toHaveBeenCalledWith('project-1', { startDate: '2026-10-05' });
+
+        // Clearing the field has to erase the stored date, not write an empty string.
+        fireEvent.click(getByTestId('project-start-date-clear'));
+        expect(updateProject).toHaveBeenLastCalledWith('project-1', { startDate: undefined });
     });
 
     it('keeps archived project details and delayed section notes read-only until Reactivate', () => {

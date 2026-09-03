@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Platform } from 'react-native';
-import { SyncRemoteMutationFenceLostError } from '@mindwtr/core';
+import { computeStableValueFingerprint, SyncRemoteMutationFenceLostError } from '@mindwtr/core';
 
 import * as syncServiceModule from './sync-service';
+import { backgroundSafeFetch } from './background-safe-fetch';
 
 const emptyData = {
   tasks: [],
@@ -45,6 +46,8 @@ const attachmentSyncMocks = vi.hoisted(() => ({
   syncWebdavAttachments: vi.fn(),
   cleanupAttachmentTempFiles: vi.fn(),
   hasPendingAttachmentSyncWork: vi.fn(),
+  // `hasCompletedAttachmentPresenceReconciliation` is deliberately NOT mocked (review finding
+  // B2) — see `vi.mock('./attachment-sync', ...)` below.
 }));
 
 const externalCalendarMocks = vi.hoisted(() => ({
@@ -155,7 +158,10 @@ vi.mock('./storage-adapter', () => ({
   },
 }));
 
-vi.mock('./attachment-sync', () => ({
+// `hasCompletedAttachmentPresenceReconciliation` is spread from the real module (review
+// finding B2): it reads the mocked AsyncStorage directly rather than being stubbed out.
+vi.mock('./attachment-sync', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./attachment-sync')>()),
   getBaseSyncUrl: attachmentSyncMocks.getBaseSyncUrl,
   getCloudBaseUrl: attachmentSyncMocks.getCloudBaseUrl,
   syncCloudAttachments: attachmentSyncMocks.syncCloudAttachments,
@@ -283,6 +289,10 @@ describe('mobile Dropbox sync transient retry', () => {
     attachmentSyncMocks.syncWebdavAttachments.mockResolvedValue(false);
     attachmentSyncMocks.cleanupAttachmentTempFiles.mockResolvedValue(undefined);
     attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(false);
+    // fresh-join-attachment-posture packet -10: `hasCompletedAttachmentPresenceReconciliation`
+    // is unmocked and reads AsyncStorage for real; the default `getItem` map above has no
+    // entry for the presence-reconciliation key, so it naturally resolves to "no stamp",
+    // matching a real device's AsyncStorage before any full attachment pass has completed.
 
     externalCalendarMocks.getExternalCalendars.mockResolvedValue([]);
     externalCalendarMocks.saveExternalCalendars.mockResolvedValue(undefined);
@@ -375,6 +385,28 @@ describe('mobile Dropbox sync transient retry', () => {
   });
 
   it('enables steady-state attachment content checks for Dropbox', async () => {
+    // fresh-join-attachment-posture packet -10: this test is about steady-state content
+    // checks, not about a fresh device's posture gate — establish this location's fast-sync
+    // record so the prepare phase runs as it always has.
+    const establishedScope = computeStableValueFingerprint({
+      backend: 'cloud',
+      provider: 'dropbox',
+      appKey: 'test-app-key',
+      path: '/data.json',
+    });
+    asyncStorageMocks.getItem.mockImplementation(async (key: string) => {
+      const values: Record<string, string | null> = {
+        '@mindwtr_sync_backend': 'cloud',
+        '@mindwtr_cloud_provider': 'dropbox',
+        '@mindwtr_fast_sync_state_v1': JSON.stringify({
+          scope: establishedScope,
+          localFingerprint: 'established',
+          remoteFingerprint: 'established',
+          checkedAt: '2026-05-07T00:00:00.000Z',
+        }),
+      };
+      return values[key] ?? null;
+    });
     dropboxSyncMocks.downloadDropboxAppData.mockResolvedValue({ data: emptyData, rev: 'rev-1' });
 
     const result = await syncServiceModule.performMobileSync();
@@ -471,10 +503,12 @@ describe('mobile Dropbox sync transient retry', () => {
     });
 
     expect(result.success).toBe(true);
+    // The fence port must not ride the cycle's abort signal: a lifecycle abort
+    // would cancel the release in `run()`'s finally and leave a stale lease.
     expect(coreMocks.createDropboxSyncRemoteMutationFencePort).toHaveBeenCalledWith(
       'candidate-access-token',
-      expect.any(Function),
-      expect.objectContaining({ timeoutMs: 30_000 }),
+      backgroundSafeFetch,
+      { timeoutMs: 30_000 },
     );
     expect(coreMocks.acquireSyncRemoteMutationFence).toHaveBeenCalledWith(
       { provider: 'dropbox-fence-port' },

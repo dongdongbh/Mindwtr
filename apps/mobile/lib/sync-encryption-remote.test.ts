@@ -55,6 +55,7 @@ import { __resetSecureSecretStoreForTests } from './secure-secret-store';
 import { classifySyncFailure } from './sync-service-utils';
 import { SyncEncryptionNoKeyError, SyncEncryptionStateUnavailableError } from './sync-encryption-state';
 import { forceRefreshDropboxAccessToken, getValidDropboxAccessToken } from './dropbox-auth';
+import { logInfo } from './app-log';
 
 const nodeQuickCrypto: SyncCryptoNativeModule = {
   argon2: (_algorithm, params, callback) => {
@@ -145,6 +146,60 @@ describe('attachment byte seam', () => {
     sealed[6] = 0x09; // unknown format_version -> 'unsupported'
     await expect(openAttachmentBytesFromDownload(sealed, material))
       .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+  });
+
+  // fresh-join-attachment-posture packet -10 (correction pass, item 2): the attachment-byte
+  // decrypt/encrypt seams get their own `remote-read` line — same event/builder as the
+  // document-read seams — so a support log can explain an attachment refusal without a
+  // second round-trip. Shown here to precede BOTH ways this seam can throw.
+  describe('remote-read diagnostics', () => {
+    it('logs a remote-read line before a decrypt failure on a corrupt container', async () => {
+      const material = await deriveSyncKeyMaterial(
+        PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
+      );
+      const sealed = await sealAttachmentBytesForUpload(new Uint8Array([1, 2, 3]), material, 'attachments/corrupt.bin');
+      sealed[6] = 0x09; // unknown format_version -> 'unsupported'
+      vi.mocked(logInfo).mockClear();
+
+      await expect(openAttachmentBytesFromDownload(sealed, material, 'attachments/corrupt.bin'))
+        .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+      const remoteReadCalls = vi.mocked(logInfo).mock.calls
+        .filter(([message]) => message === '[sync-encryption] remote-read');
+      expect(remoteReadCalls).toHaveLength(1);
+      const [, context] = remoteReadCalls[0]!;
+      expect((context as { extra?: Record<string, string> }).extra).toMatchObject({
+        artifact: 'corrupt.bin',
+        kind: 'unsupported',
+        decision: 'decrypt',
+      });
+    });
+
+    it('logs a remote-read line on every seal/open outcome, including the plaintext no-op path', async () => {
+      vi.mocked(logInfo).mockClear();
+
+      const sealedPlaintext = await sealAttachmentBytesForUpload(new Uint8Array([9, 9]), null, 'attachments/plain.bin');
+      expect(sealedPlaintext).toEqual(new Uint8Array([9, 9]));
+
+      const material = await deriveSyncKeyMaterial(
+        PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
+      );
+      const sealedEncrypted = await sealAttachmentBytesForUpload(new Uint8Array([9, 9]), material, 'attachments/secret.bin');
+      await openAttachmentBytesFromDownload(sealedEncrypted, material, 'attachments/secret.bin');
+
+      const remoteReadCalls = vi.mocked(logInfo).mock.calls
+        .filter(([message]) => message === '[sync-encryption] remote-read')
+        .map(([, context]) => (context as { extra?: Record<string, string> }).extra);
+      // seal(off) -> plaintext/seal, seal(material) -> encrypted/seal, open(material,
+      // decrypts) -> encrypted/decrypt. `artifact` (review finding S1) carries the cloudKey's
+      // leaf name through `syncEncryptionArtifactLabel`, never the absent marker when a name
+      // is available.
+      expect(remoteReadCalls).toEqual([
+        expect.objectContaining({ artifact: 'plain.bin', kind: 'plaintext', decision: 'seal' }),
+        expect.objectContaining({ artifact: 'secret.bin', kind: 'encrypted', decision: 'seal' }),
+        expect.objectContaining({ artifact: 'secret.bin', kind: 'encrypted', decision: 'decrypt' }),
+      ]);
+    });
   });
 
   it('fails closed on a wrong key', async () => {

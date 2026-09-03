@@ -37,7 +37,10 @@ const SNAPSHOT_RETENTION_RECENT_COUNT: usize = 2;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const STORAGE_RETRY_ATTEMPTS: usize = 4;
 const STORAGE_RETRY_BASE_DELAY_MS: u64 = 120;
-const STORAGE_SCHEMA_VERSION: i64 = 6;
+// Version 7 adds projects.startDate. Increment this whenever SQLITE_SCHEMA or
+// an ensure_* migration changes; otherwise the warm schema-state fast path can
+// incorrectly skip the migration on an existing database.
+const STORAGE_SCHEMA_VERSION: i64 = 7;
 const STORAGE_SCHEMA_STATE_TABLE: &str = "storage_schema_state";
 // Version 4 adds assignedTo to the desktop-native FTS schema and forces one
 // content rebuild after the corrected triggers are installed.
@@ -142,7 +145,8 @@ CREATE TABLE IF NOT EXISTS projects (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   deletedAt TEXT,
-  purgedAt TEXT
+  purgedAt TEXT,
+  startDate TEXT
 );
 
 CREATE TABLE IF NOT EXISTS areas (
@@ -525,6 +529,7 @@ fn initialize_sqlite_schema(conn: &mut Connection) -> Result<i64, String> {
         ensure_column(&transaction, "projects", "sequentialScope", "TEXT")?;
         ensure_column(&transaction, "projects", "taskSortBy", "TEXT")?;
         ensure_projects_due_date_column(&transaction)?;
+        ensure_column(&transaction, "projects", "startDate", "TEXT")?;
         ensure_projects_purged_at_column(&transaction)?;
         ensure_projects_area_order_index(&transaction)?;
         ensure_sync_revision_columns(&transaction)?;
@@ -1836,8 +1841,14 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
     if !recurrence_val.is_null() {
         map.insert("recurrence".to_string(), recurrence_val);
     }
+    // Canonical wire form is `true` or ABSENT, never `false` (the merge rule in
+    // packages/core/src/sync-normalization.ts). Reading a stored 0 (or NULL) back
+    // as absent keeps this reader in step with the JS codec's fromPresentBool and
+    // absorbs every legacy row without a migration.
     if let Ok(val) = row.get::<_, i64>("showFutureRecurrence") {
-        map.insert("showFutureRecurrence".to_string(), Value::Bool(val != 0));
+        if val != 0 {
+            map.insert("showFutureRecurrence".to_string(), Value::Bool(true));
+        }
     }
     if let Ok(val) = row.get::<_, Option<i64>>("pushCount") {
         if let Some(v) = val {
@@ -2051,6 +2062,11 @@ fn row_to_project_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Erro
     if let Ok(val) = row.get::<_, Option<String>>("dueDate") {
         if let Some(v) = val {
             map.insert("dueDate".to_string(), Value::String(v));
+        }
+    }
+    if let Ok(val) = row.get::<_, Option<String>>("startDate") {
+        if let Some(v) = val {
+            map.insert("startDate".to_string(), Value::String(v));
         }
     }
     if let Ok(val) = row.get::<_, Option<String>>("reviewAt") {
@@ -3096,7 +3112,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
         let tag_ids_json = json_str_or_default(project.get("tagIds"), "[]");
         let attachments_json = json_str(project.get("attachments"));
         conn.execute(
-            "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+            "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
             params![
                 project.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
                 project.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3120,6 +3136,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
                 project.get("updatedAt").and_then(|v| v.as_str()).unwrap_or_default(),
                 project.get("deletedAt").and_then(|v| v.as_str()),
                 project.get("purgedAt").and_then(|v| v.as_str()),
+                project.get("startDate").and_then(|v| v.as_str()),
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -5049,6 +5066,61 @@ mod tests {
         );
     }
 
+    /// The canonical wire form of `showFutureRecurrence` is `true` or ABSENT,
+    /// never `false` (the merge rule in packages/core/src/sync-normalization.ts).
+    /// This reader and the JS codec's `fromPresentBool` must agree, or a desktop
+    /// build's two local readers disagree about the same row and the sync cycle
+    /// re-normalizes the whole library on every upload. The JS side of the same
+    /// rule is pinned by packages/core/src/sync-schema-row-codec.test.ts (sparse
+    /// task fixture) and packages/core/src/sync-canonical-reads.contract.test.ts.
+    #[test]
+    fn show_future_recurrence_round_trips_as_true_or_absent() {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../../../packages/core/src/task-sync-schema.fixture.json"
+        ))
+        .expect("valid Task schema fixture");
+        let fixture = schema
+            .get("fixture")
+            .and_then(Value::as_object)
+            .expect("Task schema payload")
+            .clone();
+
+        let conn = Connection::open_in_memory().expect("should open in-memory db");
+        conn.execute_batch(SQLITE_SCHEMA)
+            .expect("should create schema");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("should disable fixture foreign keys");
+
+        let write = |id: &str, value: Option<bool>| {
+            let mut task = fixture.clone();
+            task.insert("id".to_string(), Value::String(id.to_string()));
+            match value {
+                Some(flag) => {
+                    task.insert("showFutureRecurrence".to_string(), Value::Bool(flag));
+                }
+                None => {
+                    task.remove("showFutureRecurrence");
+                }
+            }
+            upsert_task_row(&conn, &Value::Object(task)).expect("should write task row");
+        };
+        let read = |id: &str| -> Option<Value> {
+            conn.query_row("SELECT * FROM tasks WHERE id = ?1", [id], row_to_task_value)
+                .expect("should map task row")
+                .get("showFutureRecurrence")
+                .cloned()
+        };
+
+        write("sfr-true", Some(true));
+        write("sfr-false", Some(false));
+        write("sfr-absent", None);
+
+        assert_eq!(read("sfr-true"), Some(Value::Bool(true)));
+        // Stored 0, and every legacy row already on disk, read back ABSENT.
+        assert_eq!(read("sfr-false"), None);
+        assert_eq!(read("sfr-absent"), None);
+    }
+
     /// Mirrors `packages/core/src/task-query.test.ts` and `local_api.rs`'s
     /// fixture test against the SAME (tasks, query) -> expected ids table.
     /// Unlike local_api's HTTP-query-param filter, this Tauri command takes a
@@ -5252,6 +5324,70 @@ mod tests {
         assert!(index_names
             .iter()
             .any(|name| name == "idx_projects_dueDate"));
+    }
+
+    #[test]
+    fn ensure_column_migrates_legacy_projects_table_missing_start_date() {
+        let conn = Connection::open_in_memory().expect("should open in-memory db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE projects (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL,
+              color TEXT NOT NULL,
+              dueDate TEXT
+            );
+            "#,
+        )
+        .expect("should create legacy projects table");
+
+        ensure_column(&conn, "projects", "startDate", "TEXT").expect("should add startDate column");
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(projects)")
+            .expect("should inspect project columns");
+        let column_names: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("should read project columns")
+            .map(|row| row.expect("column row"))
+            .collect();
+        assert!(column_names.iter().any(|name| name == "startDate"));
+
+        // Idempotent: running it again against a table that already has the column is a no-op,
+        // not an error (matches how ensureProjectColumns/ensure_column are called on every
+        // startup, not just once).
+        ensure_column(&conn, "projects", "startDate", "TEXT")
+            .expect("should be a no-op when startDate already exists");
+    }
+
+    #[test]
+    fn sqlite_open_migrates_version_six_projects_table_missing_start_date() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp.path().join("version-six-projects.sqlite");
+        let conn = Connection::open(&db_path).expect("open legacy database");
+        let version_six_schema = SQLITE_SCHEMA.replace(
+            "  purgedAt TEXT,\n  startDate TEXT\n);",
+            "  purgedAt TEXT\n);",
+        );
+        assert_ne!(version_six_schema, SQLITE_SCHEMA, "fixture must omit projects.startDate");
+        conn.execute_batch(&version_six_schema)
+            .expect("create version six schema");
+        let schema_generation = sqlite_schema_generation(&conn).expect("read legacy generation");
+        conn.execute(
+            "INSERT INTO storage_schema_state (id, storage_version, schema_generation) VALUES (1, 6, ?1)",
+            params![schema_generation],
+        )
+        .expect("record version six schema state");
+        drop(conn);
+
+        let reopened = open_sqlite_path(&db_path).expect("migrate version six database");
+
+        assert!(has_column(&reopened, "projects", "startDate").expect("inspect project columns"));
+        let state = stored_sqlite_schema_state(&reopened)
+            .expect("read migrated state")
+            .expect("migrated state row");
+        assert_eq!(state.storage_version, STORAGE_SCHEMA_VERSION);
     }
 
     #[test]
@@ -5584,7 +5720,8 @@ mod tests {
         );
         assert_eq!(task.get("order"), Some(&Value::Number(11.into())));
         assert_eq!(task.get("orderNum"), Some(&Value::Number(11.into())));
-        assert_eq!(task.get("showFutureRecurrence"), Some(&Value::Bool(false)));
+        // Stored 0 reads back ABSENT: canonical is `true` or nothing.
+        assert_eq!(task.get("showFutureRecurrence"), None);
         assert_eq!(task.get("isFocusedToday"), Some(&Value::Bool(false)));
         assert_eq!(
             task.get("suppressMindwtrReminders"),
@@ -5753,6 +5890,7 @@ mod tests {
                 "updatedAt": "2026-06-01T08:00:00.000Z"
             }],
             "dueDate": "2026-06-10T12:00:00.000Z",
+            "startDate": "2026-06-01T09:00:00.000Z",
             "reviewAt": "2026-06-11T09:00:00.000Z",
             "areaId": "area-1",
             "areaTitle": "Work",
@@ -5869,6 +6007,7 @@ mod tests {
             "supportNotes",
             "attachments",
             "dueDate",
+            "startDate",
             "reviewAt",
             "areaId",
             "areaTitle",

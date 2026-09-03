@@ -5,6 +5,7 @@ export {
     ATTACHMENT_LOCAL_MIGRATION_MAX_PER_SYNC,
     getBaseSyncUrl,
     getCloudBaseUrl,
+    hasCompletedAttachmentPresenceReconciliation,
     hasPendingAttachmentSyncWork,
     persistAttachmentLocally,
     persistAttachmentLocallyDetailed,

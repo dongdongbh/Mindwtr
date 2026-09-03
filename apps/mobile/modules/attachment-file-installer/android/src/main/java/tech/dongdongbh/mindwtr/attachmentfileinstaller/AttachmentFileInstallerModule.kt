@@ -47,7 +47,32 @@ private object ExactAttachmentPublisherNative {
   ): Int
 }
 
-private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
+/**
+ * Outcome of attempting the primary hard-link publish. Kept as a typed
+ * result (rather than letting callers catch [ErrnoException] themselves) so
+ * [AndroidAttachmentInstallerFileOps.linkFile] can be swapped for a fake in
+ * JVM unit tests: android.system.Os is unusable on the host JVM (every call
+ * throws "not mocked" and every OsConstants errno collapses to 0), so tests
+ * inject an already-classified outcome instead of a real link failure.
+ */
+internal sealed class LinkAttemptOutcome {
+  data object Linked : LinkAttemptOutcome()
+  data object AlreadyExists : LinkAttemptOutcome()
+  data class Retry(val errno: Int, val cause: ErrnoException) : LinkAttemptOutcome()
+  data class Failed(val errno: Int, val cause: ErrnoException) : LinkAttemptOutcome()
+}
+
+/** Outcome of the exclusive-create copy fallback engaged when the hard link is refused. */
+internal sealed class CopyExclusiveOutcome {
+  data object Published : CopyExclusiveOutcome()
+  data object AlreadyExists : CopyExclusiveOutcome()
+  data class Failed(val errno: Int?, val cause: Throwable) : CopyExclusiveOutcome()
+}
+
+internal class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
+  internal var usedExclusiveCopyFallback = false
+    private set
+
   override fun canonical(file: File): File = file.canonicalFile
 
   override fun ensureDirectory(directory: File) {
@@ -181,21 +206,106 @@ private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
     return digest.digest().joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
   }
 
-  override fun moveExclusive(source: File, destination: File): Boolean {
-    try {
+  /** Seam: real hard-link attempt, classified. Tests replace this to inject
+   * an already-classified [LinkAttemptOutcome] instead of a real link failure
+   * (android.system.Os is unusable on the host JVM). */
+  internal var linkFile: (source: File, destination: File) -> LinkAttemptOutcome = ::realLinkFile
+
+  private fun realLinkFile(source: File, destination: File): LinkAttemptOutcome {
+    return try {
       Os.link(source.path, destination.path)
+      LinkAttemptOutcome.Linked
     } catch (error: ErrnoException) {
-      if (error.errno == OsConstants.EEXIST) return false
-      throw AttachmentInstallerFailure("Could not publish attachment generation", error)
+      when (error.errno) {
+        OsConstants.EEXIST -> LinkAttemptOutcome.AlreadyExists
+        OsConstants.EXDEV, OsConstants.EPERM, OsConstants.EOPNOTSUPP, OsConstants.ENOTSUP, OsConstants.EACCES ->
+          LinkAttemptOutcome.Retry(error.errno, error)
+        else -> LinkAttemptOutcome.Failed(error.errno, error)
+      }
+    }
+  }
+
+  /** Seam: the exclusive-create copy fallback engaged when the link is
+   * refused. Same rationale as [linkFile]: tests replace this rather than
+   * driving real cross-device/permission conditions. */
+  internal var copyExclusive: (source: File, destination: File) -> CopyExclusiveOutcome = ::realCopyExclusive
+
+  private fun realCopyExclusive(source: File, destination: File): CopyExclusiveOutcome {
+    val descriptor = try {
+      Os.open(
+        destination.path,
+        OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_WRONLY or OsConstants.O_NOFOLLOW,
+        0x180,
+      )
+    } catch (error: ErrnoException) {
+      return if (error.errno == OsConstants.EEXIST) {
+        CopyExclusiveOutcome.AlreadyExists
+      } else {
+        CopyExclusiveOutcome.Failed(error.errno, error)
+      }
+    }
+    try {
+      FileOutputStream(descriptor).use { output ->
+        openRegularInput(source).use { input ->
+          input.copyTo(output)
+          output.fd.sync()
+        }
+      }
+      destination.parentFile?.let(::syncDirectory)
+    } catch (error: Throwable) {
+      try {
+        destination.delete()
+      } catch (_: Throwable) {
+      }
+      return CopyExclusiveOutcome.Failed(null, error)
     }
     try {
       Os.remove(source.path)
-    } catch (error: Throwable) {
-      // Both hard links intentionally remain. The durable journal lets the
-      // next invocation prove which generation each path contains.
-      throw AttachmentInstallerFailure("Published attachment generation could not release its old path", error)
+    } catch (_: Throwable) {
+      // Tolerate a lingering source, same as the hard-link path: the durable
+      // journal lets the next invocation prove which generation each path
+      // holds.
     }
-    return true
+    return CopyExclusiveOutcome.Published
+  }
+
+  /** Seam: errno-to-name lookup. Tests replace this because
+   * [OsConstants.errnoName] throws "not mocked" on the host JVM. */
+  internal var errnoName: (Int) -> String? = OsConstants::errnoName
+
+  private fun describeErrno(errno: Int): String = errnoName(errno) ?: "errno $errno"
+
+  override fun moveExclusive(source: File, destination: File): Boolean {
+    return when (val attempt = linkFile(source, destination)) {
+      LinkAttemptOutcome.AlreadyExists -> false
+      LinkAttemptOutcome.Linked -> {
+        try {
+          Os.remove(source.path)
+        } catch (error: Throwable) {
+          // Both hard links intentionally remain. The durable journal lets
+          // the next invocation prove which generation each path contains.
+          throw AttachmentInstallerFailure("Published attachment generation could not release its old path", error)
+        }
+        true
+      }
+      is LinkAttemptOutcome.Retry -> {
+        when (val copied = copyExclusive(source, destination)) {
+          CopyExclusiveOutcome.AlreadyExists -> false
+          CopyExclusiveOutcome.Published -> {
+            usedExclusiveCopyFallback = true
+            true
+          }
+          is CopyExclusiveOutcome.Failed -> throw AttachmentInstallerFailure(
+            "Could not publish attachment generation (${copied.errno?.let(::describeErrno) ?: "copy failed"})",
+            copied.cause,
+          )
+        }
+      }
+      is LinkAttemptOutcome.Failed -> throw AttachmentInstallerFailure(
+        "Could not publish attachment generation (${describeErrno(attempt.errno)})",
+        attempt.cause,
+      )
+    }
   }
 
   override fun publishVerifiedImmutable(
@@ -423,10 +533,11 @@ class AttachmentFileInstallerModule : Module() {
       try {
         val filesRoot = context.filesDir.canonicalFile
         val cacheRoot = context.cacheDir.canonicalFile
+        val fileOps = AndroidAttachmentInstallerFileOps()
         val installer = AttachmentFileInstallerCore(
           targetRoot = File(filesRoot, "attachments"),
           sourceRoots = listOf(filesRoot, cacheRoot),
-          ops = AndroidAttachmentInstallerFileOps(),
+          ops = fileOps,
         )
         val outcome = installer.install(
           stagedInput = fileFromPath(stagedPath),
@@ -437,12 +548,13 @@ class AttachmentFileInstallerModule : Module() {
         when (outcome) {
           is AttachmentInstallOutcome.Installed -> buildMap {
             put("status", "installed")
+            if (fileOps.usedExclusiveCopyFallback) put("publication", "exclusive-copy")
             outcome.preservedFile?.let { put("preservedPath", Uri.fromFile(it).toString()) }
           }
-          is AttachmentInstallOutcome.Conflict -> mapOf(
-            "status" to "conflict",
-            "preservedPath" to Uri.fromFile(outcome.preservedFile).toString(),
-          )
+          is AttachmentInstallOutcome.Conflict -> buildMap {
+            put("status", "conflict")
+            put("preservedPath", Uri.fromFile(outcome.preservedFile).toString())
+          }
         }
       } catch (error: AttachmentFileInstallerException) {
         throw error

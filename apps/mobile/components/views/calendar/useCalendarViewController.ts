@@ -230,6 +230,7 @@ export function useCalendarViewController() {
   const [externalRefreshToken, setExternalRefreshToken] = useState(0);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const nowTickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hasHandledInitialFocusRef = useRef(false);
   const lastExternalRefreshRequestMsRef = useRef(0);
   const timelineScrollRef = useRef<any>(null);
@@ -305,11 +306,6 @@ export function useCalendarViewController() {
   useEffect(() => {
     ensureSelectedDateForViewMode(viewMode);
   }, [ensureSelectedDateForViewMode, viewMode]);
-
-  useEffect(() => {
-    const interval = setInterval(() => setNowTick(Date.now()), 60_000);
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     const storedViewMode = calendarSettings?.viewMode;
@@ -587,14 +583,41 @@ export function useCalendarViewController() {
   );
 
   useEffect(() => {
+    // The "now" tick only needs to run while the app is on screen: a
+    // backgrounded calendar view has nothing rendering its current-time line
+    // or day-keyed planning candidates, so ticking there just wakes the JS
+    // thread for no visible effect.
+    const startNowTick = () => {
+      if (nowTickIntervalRef.current) return;
+      setNowTick(Date.now());
+      nowTickIntervalRef.current = setInterval(() => setNowTick(Date.now()), 60_000);
+    };
+    const stopNowTick = () => {
+      if (!nowTickIntervalRef.current) return;
+      clearInterval(nowTickIntervalRef.current);
+      nowTickIntervalRef.current = null;
+    };
+
+    // iOS reports 'inactive' (not 'active') during a cold launch's initial
+    // AppState read, so only treat 'background' as not-yet-active (correction #6).
+    if (appStateRef.current !== 'background') startNowTick();
+
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (shouldRefreshExternalCalendarOnAppStateChange(appStateRef.current, nextAppState)) {
         requestExternalCalendarRefresh();
       }
+      if (nextAppState === 'active') {
+        startNowTick();
+      } else {
+        stopNowTick();
+      }
       appStateRef.current = nextAppState;
     });
 
-    return () => subscription.remove();
+    return () => {
+      subscription.remove();
+      stopNowTick();
+    };
   }, [requestExternalCalendarRefresh]);
 
   const calendarNameById = useMemo(
@@ -618,7 +641,11 @@ export function useCalendarViewController() {
       prioritizeByPriority: prioritiesEnabled,
       projects,
     });
-  }, [areaVisibleTasks, nowTick, prioritiesEnabled, projects, selectedDate]);
+    // Planning candidates recompute at most once per local day, not on every
+    // minute tick: nowTick only sets the "now" instant used for date/sort
+    // comparisons, mirrored from recurrenceProjectedAtIso above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areaVisibleTasks, recurrenceProjectionDayKey, prioritiesEnabled, projects, selectedDate]);
 
   const searchCandidates = useMemo(() => {
     if (!selectedDate) return [];

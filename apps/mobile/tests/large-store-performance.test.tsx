@@ -828,6 +828,7 @@ describe('large-store mobile interaction performance', () => {
       attachments: createProjectAttachments(),
       notes: createProjectNotes(),
       onClose: vi.fn(),
+      onDeleteProject: vi.fn(),
       onDuplicateProject: vi.fn(),
       onOpenAreaPicker: vi.fn(),
       onOpenQuickAdd: vi.fn(),

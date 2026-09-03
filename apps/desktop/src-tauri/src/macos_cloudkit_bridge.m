@@ -232,6 +232,7 @@ static const MWFieldSpec kProjectFields[] = {
     {"updatedAt",    "updatedAt",    MWFieldKindDate},
     {"deletedAt",    "deletedAt",    MWFieldKindDate},
     {"purgedAt",     "purgedAt",     MWFieldKindDate},
+    {"startDate",    "startDate",    MWFieldKindDate},
 };
 static const size_t kProjectFieldsCount = sizeof(kProjectFields) / sizeof(kProjectFields[0]);
 

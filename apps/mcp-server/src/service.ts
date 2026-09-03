@@ -287,6 +287,7 @@ export type AddProjectInput = {
   isSequential?: boolean;
   isFocused?: boolean;
   dueDate?: string | null;
+  startDate?: string | null;
   reviewAt?: string | null;
   supportNotes?: string | null;
 };
@@ -300,6 +301,7 @@ export type UpdateProjectInput = {
   isSequential?: boolean;
   isFocused?: boolean;
   dueDate?: string | null;
+  startDate?: string | null;
   reviewAt?: string | null;
   supportNotes?: string | null;
 };
@@ -556,6 +558,7 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
             isSequential: input.isSequential,
             isFocused: input.isFocused,
             dueDate: input.dueDate ?? undefined,
+            startDate: input.startDate ?? undefined,
             reviewAt: input.reviewAt ?? undefined,
             supportNotes: input.supportNotes ?? undefined,
           }) as Partial<CoreProject>,
@@ -571,6 +574,7 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
         if (input.isSequential !== undefined) updates.isSequential = input.isSequential;
         if (input.isFocused !== undefined) updates.isFocused = input.isFocused;
         if (input.dueDate !== undefined) updates.dueDate = input.dueDate ?? undefined;
+        if (input.startDate !== undefined) updates.startDate = input.startDate ?? undefined;
         if (input.reviewAt !== undefined) updates.reviewAt = input.reviewAt ?? undefined;
         if (input.supportNotes !== undefined) updates.supportNotes = input.supportNotes ?? undefined;
         return core.updateProject({ id: input.id, updates });

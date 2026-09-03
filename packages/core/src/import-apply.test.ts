@@ -131,6 +131,28 @@ describe('applyImport', () => {
         });
     });
 
+    it('carries a project startDate through the same as dueDate', () => {
+        const currentData = mockAppData([], [], []);
+        const parsed: ImportSource = {
+            areas: [],
+            projects: [{
+                name: 'Launch',
+                order: 0,
+                sourceKey: 'src-proj',
+                dueDate: '2026-07-01',
+                startDate: '2026-06-15',
+            }],
+            tasks: [],
+            warnings: [],
+        };
+
+        const result = applyImport(currentData, parsed, { ...OPTS, now: '2026-06-17T12:00:00.000Z' });
+
+        const importedProject = result.data.projects.find((project) => project.id === idFor('project', 'src-proj'));
+        expect(importedProject?.dueDate).toBe('2026-07-01');
+        expect(importedProject?.startDate).toBe('2026-06-15');
+    });
+
     it('does not duplicate entities when the same source is imported again', () => {
         const parsed: ImportSource = {
             areas: [{ name: 'Work', order: 0, sourceKey: 'src-area' }],

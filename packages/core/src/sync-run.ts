@@ -6,6 +6,7 @@ import {
     SyncFileLockBusyError,
     SyncFileLockUnavailableError,
 } from './sync-service-utils';
+import type { FastSyncState } from './sync-fast-sync';
 import type { SyncCycleIO, SyncCycleResult, SyncHistoryEntry } from './sync-types';
 import type {
     SyncBackendIO,
@@ -32,6 +33,8 @@ import {
     computeSyncChangeFingerprint,
     findPendingAttachmentUploads,
     hasPendingSyncSideEffects,
+    isLocalPersistEquivalent,
+    toStableSyncJson,
 } from './sync-helpers';
 import {
     areRemoteSyncDocumentsEqual,
@@ -102,10 +105,21 @@ type SharedSyncRunState = {
     fastSyncScope: string | null;
     localSnapshotChangeAt: number;
     localDataCache: { changeAt: number; data: AppData } | null;
+    /** `localDataCache.data` is byte-identical to the persisted document, so a
+     *  write of content-equal data can be skipped. False whenever the snapshot
+     *  was reconciled from the in-memory store, carries attachment pre-sync
+     *  patches, or the cycle has written since. */
+    localSnapshotMatchesDisk: boolean;
+    localDocumentFingerprint: { data: AppData; fingerprint: string } | null;
+    fastSyncStateCache: { scope: string; value: FastSyncState | null } | null;
     preSyncedLocalData: AppData | null;
     wroteLocal: boolean;
     remoteDataForCompare: AppData | null;
     readCheckRemoteData: AppData | undefined;
+    /** Set by `tryArmLocalOnlyUploadFastPath` once the remote is proven
+     *  unchanged since this device's last cycle: the document read is then
+     *  answered as "absent" so the merge normalizes local instead. */
+    localOnlyUploadFingerprint: string | null;
     lastRemoteWriteFingerprint: string | null;
     lastRemoteWriteMergedServerData: boolean;
     webdavRemoteCorrupted: boolean;
@@ -114,6 +128,63 @@ type SharedSyncRunState = {
 };
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/** Stable digest of every attachment a document carries, keyed by owner id.
+ *  The change fingerprint stops at the owner's revision tuple, so this is what
+ *  covers the fields attachment merging actually arbitrates — `cloudKey`,
+ *  `contentRev`, `fileHash`, `localStatus`, `pendingContentUpload`, the
+ *  recorded stats — without naming them one by one (a list that rots the
+ *  moment a new attachment field is added). Free for a document with no
+ *  attachments, which is most of them. */
+const computeAttachmentIdentityDigest = (data: AppData): string => {
+    const parts: string[] = [];
+    const append = (items: readonly { id: string; attachments?: Attachment[] }[] | undefined): void => {
+        for (const item of items ?? []) {
+            const attachments = item.attachments;
+            if (!attachments || attachments.length === 0) continue;
+            const ordered = [...attachments].sort((left, right) => (
+                left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+            ));
+            parts.push(`${item.id}:${toStableSyncJson(ordered)}`);
+        }
+    };
+    append(data.tasks);
+    append(data.projects);
+    return parts.join('\n');
+};
+
+/**
+ * The local document a previous cycle read and then concluded was unchanged,
+ * carried into the next cycle so a run of idle cycles reads SQLite, clones the
+ * store and stable-serializes the document once instead of every time (#766).
+ *
+ * The invariant it rests on: every write that changes the local document bumps
+ * the store's `lastDataChangeAt` first — the same stamp `readLocalDataForSyncCycle`
+ * and `ensureFreshLocalSyncSnapshot` already key on, and the one desktop's
+ * local-data-watcher bumps when another process writes the database. Sync
+ * status bookkeeping is deliberately exempt from that stamp and is exactly what
+ * this snapshot must not be trusted for, which is why only cycles that skipped
+ * (and therefore never wrote a document) publish one.
+ *
+ * ponytail: one retained AppData per process. Drop it to a fingerprint-only
+ * cache if the retained copy ever shows up in a memory profile.
+ */
+let idleCycleSnapshot: { scope: string; changeAt: number; data: AppData; fingerprint: string } | null = null;
+
+/** Hand the snapshot to the starting run and drop it: only a run that reaches
+ *  an unchanged-skip publishes a new one, so any run that writes, errors or
+ *  merges leaves the next cycle with nothing to reuse. */
+const takeIdleCycleSnapshot = (): typeof idleCycleSnapshot => {
+    const carried = idleCycleSnapshot;
+    idleCycleSnapshot = null;
+    return carried;
+};
+
+/** Test seam: a store replaced wholesale (import, restore, sign-out) must not
+ *  leave a stale document behind for the next cycle. */
+export const clearIdleSyncCycleSnapshot = (): void => {
+    idleCycleSnapshot = null;
+};
 
 const withoutInheritedPendingRemoteWrite = (data: AppData): AppData => {
     if (
@@ -376,6 +447,7 @@ class SharedSyncRunMachine {
     private readonly performSyncCycleImpl: (io: SyncCycleIO) => Promise<SyncCycleResult>;
     private io: SyncBackendIO | null = null;
     private remoteMutationFence: SyncRemoteMutationFenceLease | null = null;
+    private carriedIdleSnapshot = takeIdleCycleSnapshot();
     private readonly state: SharedSyncRunState = {
         backend: 'off',
         cloudProvider: 'selfhosted',
@@ -383,10 +455,14 @@ class SharedSyncRunMachine {
         fastSyncScope: null,
         localSnapshotChangeAt: 0,
         localDataCache: null,
+        localSnapshotMatchesDisk: false,
+        localDocumentFingerprint: null,
+        fastSyncStateCache: null,
         preSyncedLocalData: null,
         wroteLocal: false,
         remoteDataForCompare: null,
         readCheckRemoteData: undefined,
+        localOnlyUploadFingerprint: null,
         lastRemoteWriteFingerprint: null,
         lastRemoteWriteMergedServerData: false,
         webdavRemoteCorrupted: false,
@@ -458,10 +534,14 @@ class SharedSyncRunMachine {
             await this.runAttachmentPreSyncPhase();
         }
         let skipResult: SyncRunResult | null = null;
+        let localOnlyUpload = false;
         if (!this.options.activationProbe) {
             skipResult = await this.trySkipUnchangedFastSync();
+            if (!skipResult) {
+                localOnlyUpload = await this.tryArmLocalOnlyUploadFastPath();
+            }
         }
-        if (!this.options.activationProbe && !skipResult && this.policy.enableReadCheckSkip) {
+        if (!this.options.activationProbe && !skipResult && !localOnlyUpload && this.policy.enableReadCheckSkip) {
             skipResult = await this.trySkipUnchangedReadSync();
         }
         if (skipResult) {
@@ -531,6 +611,11 @@ class SharedSyncRunMachine {
         this.state.remoteDataForCompare = null;
     }
 
+    private async acquireAndAssertRemoteMutationFence(minRemainingMs?: number): Promise<void> {
+        await this.ensureRemoteMutationFence();
+        await this.assertRemoteMutationFenceHeld(minRemainingMs);
+    }
+
     private async assertRemoteMutationFenceHeld(
         minRemainingMs = SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS,
     ): Promise<void> {
@@ -587,8 +672,14 @@ class SharedSyncRunMachine {
     private attachmentHelpers(phase: SyncRunAttachmentPhase) {
         return {
             ensureLocalSnapshotFresh: () => this.ensureLocalSnapshotFresh(),
+            // Acquire-on-first-use, not acquire-on-entry. Every attachment
+            // backend calls this immediately before each remote mutation, so
+            // the fence is still held before anything is written; a pass that
+            // turns out to have nothing to upload or delete — the steady state
+            // for anyone who owns an attachment — now issues no fence PUT and
+            // no fence DELETE at all.
             assertRemoteMutationFenceHeld: (minRemainingMs?: number) => (
-                this.assertRemoteMutationFenceHeld(minRemainingMs)
+                this.acquireAndAssertRemoteMutationFence(minRemainingMs)
             ),
             activationProbe: this.options.activationProbe === true,
             phase,
@@ -640,6 +731,30 @@ class SharedSyncRunMachine {
             this.state.localSnapshotChangeAt = currentChangeAt;
             return this.state.localDataCache.data;
         }
+        const carried = this.policy.carryIdleCycleSnapshot ? this.carriedIdleSnapshot : null;
+        if (
+            carried
+            && carried.scope === this.state.fastSyncScope
+            && carried.changeAt === currentChangeAt
+            && !this.state.preSyncedLocalData
+            && !this.options.activationProbe
+            // Proof that the carried document describes THIS location's disk and
+            // not some other store that happened to share a scope and a change
+            // stamp: the cycle that published it wrote the same fingerprint into
+            // the durable fast-sync record that lives beside the data.
+            && (await this.readFastSyncState(carried.scope))?.localFingerprint === carried.fingerprint
+        ) {
+            this.state.localSnapshotChangeAt = currentChangeAt;
+            this.state.localDataCache = { changeAt: currentChangeAt, data: carried.data };
+            this.state.localSnapshotMatchesDisk = true;
+            this.state.localDocumentFingerprint = { data: carried.data, fingerprint: carried.fingerprint };
+            this.notifier.logInfo('Sync local reconcile', {
+                reconcile: 'idle-cache',
+                durationMs: '0',
+                tasks: String(carried.data.tasks.length),
+            });
+            return carried.data;
+        }
         const inMemorySnapshot = this.store.getInMemorySnapshot();
         // The persisted-vs-in-memory reconcile is a full-library merge — the
         // single most expensive step of an idle cycle at whale scale — and after
@@ -653,17 +768,32 @@ class SharedSyncRunMachine {
         // would make the fast-check miss forever. Content diverging at
         // identical revision metadata is deferred to the next changed cycle,
         // the same trust reconcileEntityCollection already places in this
-        // tuple (#766). The attachment pre-sync branch must keep merging
-        // unconditionally: its patches can change fields the fingerprint does
-        // not cover (cloudKey, localStatus).
+        // tuple (#766). The attachment pre-sync branch cannot use the change
+        // fingerprint alone: its patches change fields that tuple does not
+        // cover (cloudKey, localStatus, contentRev), so it pairs the
+        // fingerprint with a digest of every attachment on both sides and
+        // merges whenever either differs.
         let baseData: AppData;
+        let matchesDisk = false;
         if (this.state.preSyncedLocalData) {
-            baseData = mergeAppData(this.state.preSyncedLocalData, inMemorySnapshot);
+            const preSynced = this.state.preSyncedLocalData;
+            const reconcileStart = Date.now();
+            const aligned = computeSyncChangeFingerprint(preSynced) === computeSyncChangeFingerprint(inMemorySnapshot)
+                && computeAttachmentIdentityDigest(preSynced) === computeAttachmentIdentityDigest(inMemorySnapshot);
+            // The pre-synced side carries this cycle's attachment patches, so it
+            // is the side that must survive — exactly as `persisted` is below.
+            baseData = aligned ? preSynced : mergeAppData(preSynced, inMemorySnapshot);
+            this.notifier.logInfo('Sync local reconcile', {
+                reconcile: aligned ? 'aligned-skip-presynced' : 'merged-presynced',
+                durationMs: String(Date.now() - reconcileStart),
+                tasks: String(baseData.tasks.length),
+            });
         } else {
             const persisted = await this.storage.readPersistedLocal();
             const reconcileStart = Date.now();
             const aligned = computeSyncChangeFingerprint(persisted) === computeSyncChangeFingerprint(inMemorySnapshot);
             baseData = aligned ? persisted : mergeAppData(persisted, inMemorySnapshot);
+            matchesDisk = aligned;
             // One line per cycle so a diagnostics log shows whether whale-scale
             // cycles take the cheap aligned path and what a miss costs (#766).
             this.notifier.logInfo('Sync local reconcile', {
@@ -685,6 +815,10 @@ class SharedSyncRunMachine {
             changeAt: currentChangeAt,
             data,
         };
+        // Only the untouched persisted document is a valid baseline for the
+        // unchanged-local-write guard: a reconciled or calendar-injected
+        // snapshot holds content the disk does not.
+        this.state.localSnapshotMatchesDisk = matchesDisk && data === baseData;
         return data;
     }
 
@@ -692,6 +826,9 @@ class SharedSyncRunMachine {
         await this.assertRemoteMutationFenceHeld();
         const persisted = await this.storage.persistLocal(data) ?? data;
         this.ensureLocalSnapshotFresh(persisted);
+        // Disk has moved past the snapshot this cycle read, so it is no longer
+        // a baseline for the unchanged-write guard.
+        this.state.localSnapshotMatchesDisk = false;
         if (this.storage.applyDataToStore) {
             this.storage.applyDataToStore(persisted);
             const currentChangeAt = this.store.getLastDataChangeAt();
@@ -722,6 +859,15 @@ class SharedSyncRunMachine {
             this.state.readCheckRemoteData = undefined;
             this.state.remoteDataForCompare = data;
             return data;
+        }
+        if (this.state.localOnlyUploadFingerprint) {
+            // The remote is proven identical to the document this device last
+            // synced, and local already holds it. Answering "absent" makes the
+            // merge phase a normalize-only pass over local; `remoteDataForCompare`
+            // stays null so the write's unchanged-guard cannot skip the upload
+            // this cycle exists for. See `tryArmLocalOnlyUploadFastPath`.
+            this.state.remoteDataForCompare = null;
+            return null;
         }
         await this.ensureNetwork();
         try {
@@ -757,7 +903,39 @@ class SharedSyncRunMachine {
         return io.readRemoteFingerprint();
     }
 
+    /**
+     * Development-only backstop for the local-only upload fast path, at the one
+     * place the document leaves for the wire. The fast path skips the
+     * empty-remote merge on the strength of one invariant — every local read is
+     * canonical, so `mergeAppData(local, {})` is the identity — and this is
+     * where a write path that broke it gets caught, before the non-canonical
+     * bytes reach a remote. Production pays nothing: the check costs two full
+     * serializations of the document.
+     */
+    private assertLocalOnlyUploadIsCanonical(data: AppData): void {
+        if (!this.state.localOnlyUploadFingerprint) return;
+        // Same predicate the store's write contract uses (store.ts).
+        if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'development') return;
+        // The same empty document the real cycle merges against (sync.ts parses
+        // an absent remote through parseSyncDocument), so the comparison is
+        // byte-exact against what production does.
+        const parsedEmpty = parseSyncDocument({}, 'remote');
+        const emptyRemote: AppData = parsedEmpty.ok
+            ? parsedEmpty.data
+            : { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
+        const asWritten = toStableSyncJson(toRemoteSyncDocument(data));
+        const asMerged = toStableSyncJson(toRemoteSyncDocument(mergeAppData(data, emptyRemote)));
+        if (asWritten === asMerged) return;
+        const message = 'Sync canonical-read invariant broken: the local-only upload fast path '
+            + 'is about to publish a document the normalize pass would still change. A local '
+            + 'write path is producing a non-canonical entity; see '
+            + 'sync-canonical-reads.contract.test.ts.';
+        this.notifier.logWarning(message);
+        throw new Error(message);
+    }
+
     private async writeRemoteForCycle(data: AppData): Promise<void> {
+        this.assertLocalOnlyUploadIsCanonical(data);
         await this.ensureRemoteMutationFence();
         await this.assertRemoteMutationFenceHeld();
         await this.ensureNetwork();
@@ -807,7 +985,7 @@ class SharedSyncRunMachine {
             if (error instanceof SyncRemoteWriteConflict) {
                 // Another device wrote between readRemote and writeRemote; retry next cycle.
                 this.requestFollowUp();
-                throw new LocalSyncAbort();
+                throw new LocalSyncAbort('remote-write-conflict');
             }
             throw error;
         }
@@ -860,8 +1038,8 @@ class SharedSyncRunMachine {
         this.ensureLocalSnapshotFresh();
         if (hasPendingSyncSideEffects(localData)) return null;
 
-        const localFingerprint = computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(localData));
-        const cached = await this.storage.readFastSyncState(scope);
+        const localFingerprint = this.localDocumentFingerprint(localData);
+        const cached = await this.readFastSyncState(scope);
         if (!cached || cached.localFingerprint !== localFingerprint) return null;
 
         let remoteFingerprint: string | null = null;
@@ -876,15 +1054,116 @@ class SharedSyncRunMachine {
         // A local edit landing during the fingerprint round trip must not be
         // recorded as "synced, nothing changed"; abort and requeue instead.
         this.ensureLocalSnapshotFresh();
-        await this.storage.writeFastSyncState({
+        await this.writeFastSyncState({
             scope,
             localFingerprint,
             remoteFingerprint,
             checkedAt: this.nowIso(),
         });
         await this.persistUnchangedSyncStatus();
+        this.publishIdleCycleSnapshot(localData, localFingerprint);
         this.notifier.logInfo('Sync fast check found no changes', { backend: this.backend });
+        this.logUnchangedCycleSkips('fast');
         return { success: true, skipped: 'unchanged' };
+    }
+
+    /**
+     * Local-only change: the document read, the decrypt and the two-sided merge
+     * are all skippable when the remote is still byte-for-byte the document
+     * this device last synced.
+     *
+     * The recorded remote fingerprint proves exactly that, and the local
+     * document already incorporates that remote, so `merge(local, remote)`
+     * degenerates to `normalize(local)` — which is what the merge phase runs
+     * anyway when the remote is absent. Arming this therefore changes one
+     * thing only: `readRemoteForCycle` answers "no remote document" without a
+     * network read. Every downstream guarantee (normalization, tombstone
+     * compaction, clock-skew clamping, validation, the pending-remote-write
+     * marker, the conditional write, the fast-sync bookkeeping) is the
+     * unmodified merge phase. Measured at 7000 tasks: the merge drops from
+     * 943 ms to 219 ms and a 3.9 MiB download plus its decrypt and parse go
+     * away, and the remote bytes are byte-identical to what a full cycle would
+     * have written (`sync-run.test.ts`, "local-only upload fast path").
+     *
+     * Refuses unless the swap is still a compare-and-swap: the write must go
+     * out under the very fingerprint this method just read
+     * (`adoptRemoteFingerprintForWrite`, false for weak/absent validators, for
+     * WebDAV's legacy-plaintext compatibility mode, and for every backend with
+     * no conditional-write primitive). A precondition failure at write time is
+     * the ordinary `SyncRemoteWriteConflict` → requeue, and the next cycle
+     * sees a moved fingerprint and runs in full.
+     *
+     * HARD DEPENDENCY: `mergeAppData(local, {})` equals `mergeAppData(local,
+     * remote-as-recorded)` only because every local write moves an entity
+     * forward (store writes bump `rev` and stamp `updatedAt`; a backup restore
+     * stamps forward too). Unlike a full merge, this path has no arbitration
+     * fallback: a write path that changed an entity without bumping its
+     * revision would be published here where a full cycle would have let the
+     * recorded remote win. Any new write producer must keep that convention.
+     *
+     * SECOND HARD DEPENDENCY: arming this also skips `mergeAppData(local, {})`
+     * itself (`io.skipEmptyRemoteMerge`; the tombstone purge and the validate
+     * step still run). That is sound only because readLocal output is canonical:
+     * `pass(readLocal(x)) === readLocal(x)`. Every storage codec must read a
+     * field back in exactly the shape the merge would emit — `showFutureRecurrence`
+     * is `true` or absent, never `false`; every other synced boolean is explicit
+     * — and every creation path must write that same shape. The invariant is
+     * guarded by `sync-canonical-reads.contract.test.ts` and re-checked at the
+     * wire exit by `assertLocalOnlyUploadIsCanonical` in development builds.
+     */
+    private async tryArmLocalOnlyUploadFastPath(): Promise<boolean> {
+        // Same rule as the fast check: a user-initiated sync always reads, so a
+        // stale local record can never hide remote data behind a "Sync now".
+        if (this.options.manual) return false;
+        // A candidate transport has to prove its own read before it may write.
+        if (this.options.ignorePendingRemoteWriteBackoff) return false;
+        const scope = this.state.fastSyncScope;
+        if (!scope) return false;
+        const io = this.requireIo();
+        if (!io.adoptRemoteFingerprintForWrite || !io.readRemoteFingerprint) return false;
+        if (io.requiresRemoteRepair?.() === true) return false;
+        // The `preSyncedLocalData` gate below only sees attachment pre-sync
+        // patches when that phase runs BEFORE this step. A platform that runs
+        // it afterwards must take the full cycle, or a later attachment patch
+        // would ride a write that skipped the read.
+        if (!this.policy.preSyncAttachmentsBeforeFastCheck) return false;
+        this.setStep('fast-check');
+        await this.yieldToUi();
+        // Attachment pre-sync patches (both platforms run it before this point)
+        // mean the cycle is not local-document-only; let it read.
+        if (this.state.preSyncedLocalData) return false;
+        const localData = await this.readLocalDataForSyncCycle();
+        this.ensureLocalSnapshotFresh();
+        // Pending remote write marker, pending attachment uploads, pending
+        // remote deletes: all need the full cycle's read.
+        if (hasPendingSyncSideEffects(localData)) return false;
+
+        const cached = await this.readFastSyncState(scope);
+        if (!cached) return false;
+        // Nothing changed locally either — that is the fast check's business,
+        // and it has already had its turn.
+        if (cached.localFingerprint === this.localDocumentFingerprint(localData)) return false;
+
+        let remoteFingerprint: string | null = null;
+        try {
+            remoteFingerprint = await this.readRemoteFingerprint();
+        } catch (error) {
+            this.notifier.logWarning('Sync fast check failed; falling back to full sync', error);
+            return false;
+        }
+        if (!remoteFingerprint || remoteFingerprint !== cached.remoteFingerprint) return false;
+        if (!io.adoptRemoteFingerprintForWrite(remoteFingerprint)) return false;
+
+        // Same abort-and-requeue as the fast check above: a local edit that
+        // landed during the fingerprint round trip leaves this cycle holding a
+        // stale snapshot, and the next cycle re-reads. (The merge phase would
+        // re-read too, but nothing here is worth racing over.)
+        this.ensureLocalSnapshotFresh();
+        this.state.localOnlyUploadFingerprint = remoteFingerprint;
+        this.notifier.logInfo('Sync uploading a local-only change without a remote read', {
+            backend: this.backend,
+        });
+        return true;
     }
 
     /** Mobile-only second skip: fetch the remote payload and compare directly.
@@ -904,14 +1183,20 @@ class SharedSyncRunMachine {
         this.state.readCheckRemoteData = remoteData;
         if (hasUncompactedPurgedTombstones(remoteData)) return null;
 
-        const localDocument = toRemoteSyncDocument(localData);
-        const remoteDocument = toRemoteSyncDocument(remoteData);
-        if (!areRemoteSyncDocumentsEqual(remoteDocument, localDocument)) return null;
+        // Fingerprints, not two stable-serialized documents: the same digest
+        // the fast check above already compares, and the same one the remote
+        // write records. Comparing documents here serialized both sides in
+        // full to reach the identical verdict.
+        const localFingerprint = this.localDocumentFingerprint(localData);
+        const remoteFingerprint = computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(remoteData));
+        if (localFingerprint !== remoteFingerprint) return null;
 
         await this.recordFastSyncState(localData, { allowRemoteFingerprintRead: false });
         await this.persistUnchangedSyncStatus();
+        this.publishIdleCycleSnapshot(localData, localFingerprint);
         this.state.readCheckRemoteData = undefined;
         this.notifier.logInfo('Sync read check found no changes', { backend: this.backend });
+        this.logUnchangedCycleSkips('read');
         return { success: true, skipped: 'unchanged' };
     }
 
@@ -938,12 +1223,84 @@ class SharedSyncRunMachine {
             }
         }
         if (!remoteFingerprint) return;
-        await this.storage.writeFastSyncState({
+        await this.writeFastSyncState({
             scope,
-            localFingerprint: computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(data)),
+            localFingerprint: this.localDocumentFingerprint(data),
             remoteFingerprint,
             checkedAt: this.nowIso(),
         });
+    }
+
+    /** Read once per cycle: the carried idle snapshot validates against it,
+     *  and the fast check then asks for the same record. */
+    private async readFastSyncState(scope: string): Promise<FastSyncState | null> {
+        const cached = this.state.fastSyncStateCache;
+        if (cached && cached.scope === scope) return cached.value;
+        const value = await this.storage.readFastSyncState(scope);
+        this.state.fastSyncStateCache = { scope, value };
+        return value;
+    }
+
+    private async writeFastSyncState(state: FastSyncState): Promise<void> {
+        this.state.fastSyncStateCache = { scope: state.scope, value: state };
+        await this.storage.writeFastSyncState(state);
+    }
+
+    /** Sanitized-document fingerprint of a local snapshot, memoized on the
+     *  snapshot's identity: the fast check, the read check and the fast-sync
+     *  bookkeeping all ask for the same one within a cycle. */
+    private localDocumentFingerprint(data: AppData): string {
+        const cached = this.state.localDocumentFingerprint;
+        if (cached && cached.data === data) return cached.fingerprint;
+        const fingerprint = computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(data));
+        this.state.localDocumentFingerprint = { data, fingerprint };
+        return fingerprint;
+    }
+
+    /** Mirror of the remote write's `remote-write-skipped-unchanged` guard:
+     *  the merged document carries nothing the persisted one does not, so both
+     *  document writes of the merge phase would rewrite the same bytes. Only
+     *  the untouched persisted snapshot is a valid baseline, and a candidate
+     *  probe never writes locally at all. */
+    private isLocalPersistUnchanged(data: AppData): boolean {
+        if (this.options.activationProbe) return false;
+        if (!this.state.localSnapshotMatchesDisk) return false;
+        const stored = this.state.localDataCache?.data;
+        if (!stored) return false;
+        return isLocalPersistEquivalent(data, stored);
+    }
+
+    /** #1001 proof line: both unchanged returns leave the cycle before the merge
+     *  phase, so the local document write, the post-sync store refresh and the
+     *  attachment passes never run. The remote mutation fence is reported from
+     *  state rather than assumed: an attachment pass earlier in the cycle can
+     *  already have taken one. The skipped full local read has its own line
+     *  (`Sync local reconcile` with `reconcile: 'idle-cache'`). */
+    private logUnchangedCycleSkips(check: 'fast' | 'read'): void {
+        const skippedPasses = ['local-persist', 'store-refresh', 'attachments'];
+        if (!this.remoteMutationFence) skippedPasses.push('remote-fence');
+        this.notifier.logInfo('Sync cycle changed nothing; passes skipped', {
+            releaseCheck: 'v1.2.7/cycle-unchanged-skip',
+            backend: this.backend,
+            check,
+            skipped: skippedPasses.join(','),
+        });
+    }
+
+    /** Carry an unchanged local snapshot to the next cycle. Only reached from
+     *  a skip: nothing was written, so the store stamp still describes it. */
+    private publishIdleCycleSnapshot(data: AppData, fingerprint: string): void {
+        const scope = this.state.fastSyncScope;
+        if (!this.policy.carryIdleCycleSnapshot) return;
+        if (!scope || this.options.activationProbe) return;
+        if (!this.state.localSnapshotMatchesDisk || this.state.wroteLocal) return;
+        if (this.store.getLastDataChangeAt() !== this.state.localSnapshotChangeAt) return;
+        idleCycleSnapshot = {
+            scope,
+            changeAt: this.state.localSnapshotChangeAt,
+            data,
+            fingerprint,
+        };
     }
 
     private async runAttachmentPreSyncPhase(): Promise<void> {
@@ -961,7 +1318,8 @@ class SharedSyncRunMachine {
             if (isRemoteSyncBackend(this.backend)) {
                 await this.ensureNetwork();
             }
-            await this.ensureRemoteMutationFence();
+            // No eager fence acquisition: the helpers passed below take it on
+            // the first mutation, so an idle pre-sync pass issues no PUT/DELETE.
             const result = await io.syncAttachments(localData, this.attachmentHelpers('prepare'));
             await this.assertRemoteMutationFenceHeld();
             const mutated = result === true || (Boolean(result) && typeof result === 'object');
@@ -1192,6 +1550,19 @@ class SharedSyncRunMachine {
             flushPendingLocalBeforeRetryRead: () => this.options.activationProbe
                 ? Promise.resolve()
                 : this.store.flushPendingSave(),
+            isLocalPersistUnchanged: (data) => this.isLocalPersistUnchanged(data),
+            persistSyncStatusOnly: async (data) => {
+                this.notifier.logInfo('Sync local write skipped; merged document matches stored', {
+                    backend: this.backend,
+                });
+                await this.storage.persistSyncStatus({
+                    lastSyncAt: data.settings.lastSyncAt,
+                    lastSyncStatus: data.settings.lastSyncStatus,
+                    lastSyncError: data.settings.lastSyncError,
+                    lastSyncStats: data.settings.lastSyncStats,
+                    lastSyncHistory: data.settings.lastSyncHistory,
+                });
+            },
             prepareRemoteWrite: (data) => this.prepareRemoteWriteData(data),
             writeRemote: async (data) => {
                 this.notifier.tracePayload?.('write-remote', data, { backend: this.backend });
@@ -1200,6 +1571,9 @@ class SharedSyncRunMachine {
             },
             preferIncomingAttachmentCloudKeys:
                 this.options.ignorePendingRemoteWriteBackoff === true,
+            // Read lazily: the fast path arms before the merge phase builds this
+            // object, but nothing here should depend on that ordering.
+            skipEmptyRemoteMerge: () => this.state.localOnlyUploadFingerprint !== null,
             onStep: (next) => this.setStep(next),
             yieldToUi: this.notifier.yieldToUi ? () => this.notifier.yieldToUi!() : undefined,
             historyContext: {
@@ -1309,9 +1683,11 @@ class SharedSyncRunMachine {
         await this.yieldToUi();
         this.ensureLocalSnapshotFresh(mergedData);
         await this.assertRemoteMutationFenceHeld();
+        const localWriteSkipped = syncResult.localWriteSkipped && !this.state.wroteLocal ? true : undefined;
         await this.hooks.finalizeSuccess(mergedData, {
             status: syncResult.status,
             wroteLocal: this.state.wroteLocal,
+            localWriteSkipped,
             getLocalSnapshotChangeAt: () => this.state.localSnapshotChangeAt,
             acceptCoveredSnapshot: (expectedData) => this.acceptCoveredLocalSnapshot(expectedData),
         });
@@ -1324,6 +1700,7 @@ class SharedSyncRunMachine {
                 attachmentWriteDeferred: attachmentWriteDeferred || undefined,
                 fileAttachmentUploadBlocked: this.state.fileAttachmentUploadBlocked ?? undefined,
                 error: mergedData.settings.lastSyncError,
+                localWriteSkipped,
                 stats,
             };
         }
@@ -1331,6 +1708,7 @@ class SharedSyncRunMachine {
             success: true,
             attachmentWriteDeferred: attachmentWriteDeferred || undefined,
             fileAttachmentUploadBlocked: this.state.fileAttachmentUploadBlocked ?? undefined,
+            localWriteSkipped,
             stats,
         };
     }
@@ -1386,6 +1764,16 @@ class SharedSyncRunMachine {
             if (!this.options.activationProbe) {
                 await this.persistPreSyncedDataAfterAbort();
             }
+            // Desktop has no onDiagnostic sink, so a requeued cycle used to leave
+            // no trace at all; an activation probe that keeps requeuing (a store
+            // write landing mid-probe on every attempt) then reads as "the switch
+            // never saves" with nothing in the log to say why.
+            this.notifier.logInfo('Sync cycle requeued', {
+                backend: this.backend,
+                step: this.state.step ?? '-',
+                reason: error.reason,
+                activationProbe: String(this.options.activationProbe === true),
+            });
             this.notifier.onDiagnostic?.({
                 event: 'requeued',
                 extra: {

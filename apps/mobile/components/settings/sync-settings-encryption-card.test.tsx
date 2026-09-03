@@ -344,6 +344,16 @@ describe('SyncEncryptionCard', () => {
     expect(error?.props.accessibilityLiveRegion).toBe('assertive');
     // Still open for another attempt, and nothing suggests the data is damaged.
     expect(inputLabels(tree)).toContain('settings.syncEncryptionPassphrase');
+    // The 2026-09-02 Dropbox device test saw no feedback at all, because the message
+    // used to be appended after the action rows and fell below the phone's viewport.
+    // It belongs between the field and the buttons the user just pressed.
+    const order = texts(tree);
+    expect(order.indexOf('settings.syncEncryptionErrorWrongPassphrase'))
+      .toBeGreaterThan(order.indexOf('settings.syncEncryptionPassphrase'));
+    expect(order.indexOf('settings.syncEncryptionErrorWrongPassphrase'))
+      .toBeLessThan(order.indexOf('settings.syncEncryptionUnlock'));
+    expect(order.indexOf('settings.syncEncryptionErrorWrongPassphrase'))
+      .toBeLessThan(order.indexOf('settings.syncEncryptionDecline'));
   });
 
   it('declines through the persisted API and says sync stays paused', async () => {

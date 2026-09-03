@@ -2,34 +2,68 @@ import type { ReactElement } from 'react';
 import type { AppData } from '@mindwtr/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resetMobileWidgetRenderCache, updateMobileWidgetFromData } from './widget-service';
+import { buildWidgetPayload } from './widget-data';
+import { resetMobileWidgetRenderCache, updateMobileWidgetFromData, updateMobileWidgetFromStore } from './widget-service';
 import { setExpoGoProbeForTests } from './expo-go';
 
 const {
     mockAsyncStorageGetItem,
+    mockAsyncStorageSetItem,
+    mockGetSystemColorSchemeForWidget,
     mockIosWidgetReloadTimelines,
     mockIosWidgetSetItem,
     mockPlatform,
     mockRequestWidgetUpdate,
+    mockUseTaskStoreGetState,
 } = vi.hoisted(() => ({
     mockAsyncStorageGetItem: vi.fn(),
+    mockAsyncStorageSetItem: vi.fn(),
+    mockGetSystemColorSchemeForWidget: vi.fn(() => 'light' as 'light' | 'dark' | undefined),
     mockIosWidgetReloadTimelines: vi.fn(),
     mockIosWidgetSetItem: vi.fn(),
     mockPlatform: {
         OS: 'android',
     },
     mockRequestWidgetUpdate: vi.fn(),
+    mockUseTaskStoreGetState: vi.fn(),
 }));
 
 vi.mock('react-native', () => ({
     Platform: mockPlatform,
 }));
 
+vi.mock('expo-constants', () => ({
+    __esModule: true,
+    default: { expoConfig: { version: '1.0.0' } },
+}));
+
 vi.mock('@react-native-async-storage/async-storage', () => ({
     default: {
         getItem: mockAsyncStorageGetItem,
+        setItem: mockAsyncStorageSetItem,
     },
 }));
+
+// Only useTaskStore.getState is replaced -- widget-data.ts pulls real logic
+// (sortTasksBy, isTaskActionable, translations, ...) from the rest of
+// '@mindwtr/core' and must keep using it.
+vi.mock('@mindwtr/core', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@mindwtr/core')>();
+    return {
+        ...actual,
+        useTaskStore: { getState: mockUseTaskStoreGetState },
+    };
+});
+
+// Real buildWidgetPayload, wrapped so gate 0 (the store-level pre-check) can
+// be asserted by call count instead of only by its native-render side effect.
+vi.mock('./widget-data', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('./widget-data')>();
+    return {
+        ...actual,
+        buildWidgetPayload: vi.fn(actual.buildWidgetPayload),
+    };
+});
 
 vi.mock('react-native-android-widget', () => ({
     FlexWidget: 'FlexWidget',
@@ -40,6 +74,12 @@ vi.mock('react-native-android-widget', () => ({
 vi.mock('react-native-widgetkit', () => ({
     reloadTimelines: mockIosWidgetReloadTimelines,
     setItem: mockIosWidgetSetItem,
+}));
+
+// Controllable per-test so gate 0's colour-scheme key (correction #2) can be
+// flipped without a real Appearance/NativeModules mock.
+vi.mock('./system-color-scheme', () => ({
+    getSystemColorSchemeForWidget: mockGetSystemColorSchemeForWidget,
 }));
 
 type WidgetElement = ReactElement<{
@@ -86,9 +126,19 @@ describe('widget-service', () => {
         mockPlatform.OS = 'android';
         mockAsyncStorageGetItem.mockReset();
         mockAsyncStorageGetItem.mockResolvedValue(null);
+        mockAsyncStorageSetItem.mockReset();
+        mockAsyncStorageSetItem.mockResolvedValue(undefined);
+        mockGetSystemColorSchemeForWidget.mockReset();
+        mockGetSystemColorSchemeForWidget.mockReturnValue('light');
         mockIosWidgetReloadTimelines.mockReset();
         mockIosWidgetSetItem.mockReset();
         mockRequestWidgetUpdate.mockReset();
+        mockUseTaskStoreGetState.mockReset();
+        // app-log's isLoggingEnabled reads useTaskStore.getState().settings on
+        // every log call; give it a safe default even in tests that never call
+        // updateMobileWidgetFromStore (which overrides this per-test).
+        mockUseTaskStoreGetState.mockReturnValue({ settings: {} });
+        vi.mocked(buildWidgetPayload).mockClear();
         resetMobileWidgetRenderCache();
     });
 
@@ -316,5 +366,154 @@ describe('widget-service', () => {
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrTasksWidget');
         const keys = mockIosWidgetSetItem.mock.calls.map(([key]) => key);
         expect(keys).not.toContain('mindwtr-ios-shortcuts-snapshot');
+    });
+
+    it('skips rebuilding the widget payload via updateMobileWidgetFromStore when lastDataChangeAt/language/day are unchanged', async () => {
+        const data = buildData(3);
+        const storeState = {
+            _allTasks: data.tasks,
+            _allProjects: [],
+            _allSections: [],
+            _allAreas: [],
+            tasks: data.tasks,
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+            lastDataChangeAt: 1,
+        };
+        mockUseTaskStoreGetState.mockReturnValue(storeState);
+
+        expect(await updateMobileWidgetFromStore()).toBe(true);
+        expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(1);
+        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+
+        // Repeated call, nothing changed: gate 0 must skip the payload build
+        // entirely, before the JSON fingerprint gate even runs.
+        expect(await updateMobileWidgetFromStore()).toBe(true);
+        expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(1);
+        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+
+        // lastDataChangeAt moves and the content actually differs: gate 0 lets
+        // the rebuild through, and gate 1 (the JSON fingerprint) sees new
+        // content and renders again.
+        const changedTasks = data.tasks.map((task, index) => (
+            index === 0 ? { ...task, title: 'Renamed' } : task
+        ));
+        mockUseTaskStoreGetState.mockReturnValue({
+            ...storeState,
+            _allTasks: changedTasks,
+            tasks: changedTasks,
+            lastDataChangeAt: 2,
+        });
+        expect(await updateMobileWidgetFromStore()).toBe(true);
+        expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(2);
+        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips the native render when a persisted fingerprint from a prior (cold) module instance matches (#766 follow-up)', async () => {
+        const data = buildData(3);
+
+        // First render, from a "cold" instance: persists its fingerprint to
+        // AsyncStorage as updateMobileWidgetFromData does after every render.
+        await updateMobileWidgetFromData(data);
+        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+        const [, persistedFingerprint] = mockAsyncStorageSetItem.mock.calls.find(
+            ([key]) => key === 'mindwtr-widget-render-fingerprint',
+        ) as [string, string];
+        expect(typeof persistedFingerprint).toBe('string');
+
+        // Simulate a fresh headless instance: module-scope render cache reset,
+        // and AsyncStorage now serving the fingerprint persisted above.
+        resetMobileWidgetRenderCache();
+        mockRequestWidgetUpdate.mockClear();
+        mockAsyncStorageGetItem.mockImplementation(async (key: string) => (
+            key === 'mindwtr-widget-render-fingerprint' ? persistedFingerprint : null
+        ));
+
+        expect(await updateMobileWidgetFromData(data)).toBe(true);
+        expect(mockRequestWidgetUpdate).not.toHaveBeenCalled();
+    });
+
+    it('retries the native render after a failed render, even with unchanged inputs (correction #1, blocking)', async () => {
+        const data = buildData(3);
+        const storeState = {
+            _allTasks: data.tasks,
+            _allProjects: [],
+            _allSections: [],
+            _allAreas: [],
+            tasks: data.tasks,
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+            lastDataChangeAt: 1,
+        };
+        mockUseTaskStoreGetState.mockReturnValue(storeState);
+        mockRequestWidgetUpdate.mockRejectedValue(new Error('widget host busy'));
+
+        expect(await updateMobileWidgetFromStore()).toBe(false);
+        expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(1);
+
+        // Retry with unchanged inputs (the immediate + 800ms pair callers
+        // use): gate 0 must not have cached the failed render, so the
+        // payload is built and the native call attempted again.
+        mockRequestWidgetUpdate.mockReset();
+        mockRequestWidgetUpdate.mockResolvedValue(undefined);
+        expect(await updateMobileWidgetFromStore()).toBe(true);
+        expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(2);
+    }, 10_000);
+
+    it('rebuilds the widget payload via updateMobileWidgetFromStore when only the system colour scheme changes (correction #2)', async () => {
+        const data = buildData(3);
+        const storeState = {
+            _allTasks: data.tasks,
+            _allProjects: [],
+            _allSections: [],
+            _allAreas: [],
+            tasks: data.tasks,
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+            lastDataChangeAt: 1,
+        };
+        mockUseTaskStoreGetState.mockReturnValue(storeState);
+
+        expect(await updateMobileWidgetFromStore()).toBe(true);
+        expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(1);
+
+        // Same store state, but the system flips to dark mode: gate 0's key
+        // must include the colour scheme so this is not treated as unchanged.
+        mockGetSystemColorSchemeForWidget.mockReturnValue('dark');
+        expect(await updateMobileWidgetFromStore()).toBe(true);
+        expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(2);
+    });
+
+    it('renders again when a persisted fingerprint carries a different app version (correction #4)', async () => {
+        const data = buildData(3);
+
+        await updateMobileWidgetFromData(data);
+        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+        const [, persistedFingerprint] = mockAsyncStorageSetItem.mock.calls.find(
+            ([key]) => key === 'mindwtr-widget-render-fingerprint',
+        ) as [string, string];
+        expect(typeof persistedFingerprint).toBe('string');
+
+        // The fingerprint's leading `<version>:` segment is the app version
+        // this module was built with (mocked to '1.0.0' above); replace it to
+        // simulate a value persisted by an older build, keeping the rest (an
+        // otherwise byte-identical payload) the same.
+        const staleVersionFingerprint = persistedFingerprint.replace('1.0.0:', 'stale-app-version:');
+        expect(staleVersionFingerprint).not.toBe(persistedFingerprint);
+
+        resetMobileWidgetRenderCache();
+        mockRequestWidgetUpdate.mockClear();
+        mockAsyncStorageGetItem.mockImplementation(async (key: string) => (
+            key === 'mindwtr-widget-render-fingerprint' ? staleVersionFingerprint : null
+        ));
+
+        expect(await updateMobileWidgetFromData(data)).toBe(true);
+        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
     });
 });

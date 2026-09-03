@@ -41,6 +41,18 @@ const renderTimeline = () => render(
 );
 
 const bars = () => Array.from(document.querySelectorAll('[data-testid="timeline-bar"]')) as HTMLElement[];
+const projectBarFor = (projectId: string) => document.querySelector(
+    `[data-testid="timeline-project-bar"][data-project-id="${projectId}"]`,
+) as HTMLElement | null;
+// Day zoom is 32px per day, so a bar's width and offset read back as day counts.
+const projectBarDays = (projectId: string) => {
+    const bar = projectBarFor(projectId);
+    if (!bar) return null;
+    return {
+        from: Number.parseFloat(bar.style.left) / 32,
+        days: Number.parseFloat(bar.style.width) / 32,
+    };
+};
 const barFor = (taskId: string) => document.querySelector(`[data-testid="timeline-bar"][data-task-id="${taskId}"]`) as HTMLElement | null;
 // Group headings and bar titles in one pass, in the order they are laid out.
 const rowLabels = () => Array.from(
@@ -143,6 +155,120 @@ describe('TimelineView (#1111)', () => {
         });
         renderTimeline();
         expect(rowLabels()).toEqual(['Area project', 'Owned task', 'No project', 'Loose task']);
+    });
+
+    describe('project bars', () => {
+        // Day zoom keeps one day at a fixed 32px, so extents are readable as numbers.
+        beforeEach(() => {
+            window.localStorage.setItem('mindwtr:view:timeline:v1', JSON.stringify({ zoom: 'day' }));
+        });
+
+        const projectWithDates = (dates: Partial<Project>): Project => ({
+            id: 'p1',
+            title: 'Rebuild the deck',
+            status: 'active',
+            color: '#00ff00',
+            createdAt: iso(-60),
+            updatedAt: iso(-60),
+            ...dates,
+        } as Project);
+
+        // The one task in the group runs day 0 to day 2 of its own span.
+        const groupTasks = () => [
+            makeTask({ id: 't1', title: 'Task', projectId: 'p1', startTime: iso(0), dueDate: iso(2) }),
+        ];
+
+        it('spans start to due when the project carries both dates', () => {
+            setStore({
+                tasks: groupTasks(),
+                projects: [projectWithDates({ startDate: iso(-3).slice(0, 10), dueDate: iso(6).slice(0, 10) })],
+            });
+            renderTimeline();
+            // The axis starts at the project start, three days before today.
+            expect(projectBarDays('p1')).toEqual({ from: 0, days: 10 });
+        });
+
+        it('borrows the missing end from the tasks under it', () => {
+            setStore({
+                tasks: groupTasks(),
+                projects: [projectWithDates({ startDate: iso(-3).slice(0, 10) })],
+            });
+            renderTimeline();
+            // Start date to the latest task end: -3 through +2 is six days.
+            expect(projectBarDays('p1')).toEqual({ from: 0, days: 6 });
+        });
+
+        it('borrows the missing start from the tasks under it', () => {
+            setStore({
+                tasks: groupTasks(),
+                projects: [projectWithDates({ dueDate: iso(6).slice(0, 10) })],
+            });
+            renderTimeline();
+            // Earliest task start (today) through the project due date.
+            expect(projectBarDays('p1')).toEqual({ from: 0, days: 7 });
+        });
+
+        it('draws no bar for a project with neither date', () => {
+            setStore({ tasks: groupTasks(), projects: [projectWithDates({})] });
+            renderTimeline();
+            expect(projectBarFor('p1')).toBeNull();
+            expect(barFor('t1')).not.toBeNull();
+        });
+
+        it('stretches the axis to a project deadline past every task', () => {
+            setStore({
+                tasks: groupTasks(),
+                projects: [projectWithDates({ dueDate: iso(40).slice(0, 10) })],
+            });
+            renderTimeline();
+            // Without the project date the axis would stop two days out; the bar
+            // must not be clipped to it.
+            expect(projectBarDays('p1')).toEqual({ from: 0, days: 41 });
+        });
+
+        it('draws a dated project with no dated tasks as a bare group row', () => {
+            setStore({
+                tasks: [makeTask({ id: 'undated', title: 'No dates yet', projectId: 'p1' })],
+                projects: [projectWithDates({ startDate: iso(0).slice(0, 10), dueDate: iso(4).slice(0, 10) })],
+            });
+            renderTimeline();
+
+            // A freshly planned project shows its span before its steps have dates.
+            expect(projectBarDays('p1')).toEqual({ from: 0, days: 5 });
+            expect(rowLabels()).toEqual(['Rebuild the deck']);
+            expect(bars()).toHaveLength(0);
+        });
+
+        it('shows nothing for an undated project whose tasks are undated too', () => {
+            setStore({
+                tasks: [makeTask({ id: 'undated', title: 'No dates yet', projectId: 'p1' })],
+                projects: [projectWithDates({})],
+            });
+            renderTimeline();
+
+            expect(projectBarFor('p1')).toBeNull();
+            expect(rowLabels()).toEqual([]);
+            expect(screen.getByText('Nothing scheduled yet')).toBeTruthy();
+        });
+
+        it('uses the project color and opens the project from its name', () => {
+            setStore({
+                tasks: groupTasks(),
+                projects: [projectWithDates({ startDate: iso(0).slice(0, 10), dueDate: iso(2).slice(0, 10) })],
+            });
+            renderTimeline();
+
+            expect(projectBarFor('p1')?.style.backgroundColor).toBe('rgb(0, 255, 0)');
+            const groupButton = screen.getByRole('button', { name: /Rebuild the deck.*Start date: .+Due date: .+/ });
+            expect(groupButton.dataset.projectId).toBe('p1');
+
+            const navigations: string[] = [];
+            const listener = (event: Event) => navigations.push((event as CustomEvent<{ view: string }>).detail.view);
+            window.addEventListener('mindwtr:navigate', listener as EventListener);
+            fireEvent.click(groupButton);
+            window.removeEventListener('mindwtr:navigate', listener as EventListener);
+            expect(navigations).toEqual(['projects']);
+        });
     });
 
     it('splits the month-zoom axis into a year tier and month ticks, and floors thin bars', () => {

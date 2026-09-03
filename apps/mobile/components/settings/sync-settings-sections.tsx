@@ -5,6 +5,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { translateWithFallback } from '@mindwtr/core';
 
 import type { ThemeColors } from '@/hooks/use-theme-colors';
+import { CompactText } from '@/components/compact-text';
+import { MOBILE_BACKGROUND_SYNC_INTERVAL_OPTIONS, type BackgroundSyncInterval } from '@/lib/sync-constants';
+import {
+  getSyncEncryptionDiagnosticsLines,
+  logSyncEncryptionDiagnosticsBlock,
+} from '@/lib/sync-encryption-state';
 import type { BackupAction } from './use-sync-settings-backup-actions';
 
 import { styles } from './settings.styles';
@@ -98,30 +104,73 @@ export function SyncLastStatusCard({
   );
 }
 
+const BACKGROUND_SYNC_INTERVAL_LABEL_KEYS: Record<BackgroundSyncInterval, string> = {
+  off: 'settings.syncMobile.backgroundSyncIntervalOff',
+  '15m': 'settings.syncMobile.backgroundSyncIntervalEvery15Minutes',
+  '1h': 'settings.syncMobile.backgroundSyncIntervalEveryHour',
+  '6h': 'settings.syncMobile.backgroundSyncIntervalEvery6Hours',
+};
+
 type BackgroundSyncInfoCardProps = {
+  interval: BackgroundSyncInterval;
   isRemoteBackend: boolean;
+  onSelectInterval: (interval: BackgroundSyncInterval) => void;
   tr: SettingsTranslator;
   tc: ThemeColors;
 };
 
 export function BackgroundSyncInfoCard({
+  interval,
   isRemoteBackend,
+  onSelectInterval,
   tr,
   tc,
 }: BackgroundSyncInfoCardProps) {
   return (
     <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 16 }]}>
-      <View style={styles.settingRow}>
-        <View style={styles.settingInfo}>
+      <View style={styles.settingRowColumn}>
+        <View>
           <Text style={[styles.settingLabel, { color: tc.text }]}>
             {tr('settings.syncMobile.backgroundSync')}
           </Text>
           <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
             {isRemoteBackend
-              ? tr('settings.syncMobile.mindwtrAsksTheSystemToSyncAboutEvery15Minutes')
+              ? tr('settings.syncMobile.backgroundSyncIntervalDescription')
               : tr('settings.syncMobile.scheduledBackgroundSyncIsAvailableForWebdavSelfHostedCloud')}
           </Text>
         </View>
+        {isRemoteBackend && (
+          <>
+            <Text style={[styles.settingLabel, { color: tc.text, marginTop: 12 }]}>
+              {tr('settings.syncMobile.backgroundSyncInterval')}
+            </Text>
+            <View style={[styles.gtdSegmentedControl, { backgroundColor: tc.bg, borderColor: tc.border, marginTop: 8 }]}>
+              {MOBILE_BACKGROUND_SYNC_INTERVAL_OPTIONS.map((option) => {
+                const selected = interval === option;
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    style={[
+                      styles.gtdSegmentedOption,
+                      { backgroundColor: selected ? tc.filterBg : 'transparent' },
+                    ]}
+                    onPress={() => onSelectInterval(option)}
+                    activeOpacity={0.8}
+                  >
+                    <CompactText
+                      style={[styles.gtdSegmentedOptionText, { color: selected ? tc.tint : tc.secondaryText }]}
+                      numberOfLines={2}
+                    >
+                      {tr(BACKGROUND_SYNC_INTERVAL_LABEL_KEYS[option])}
+                    </CompactText>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        )}
       </View>
     </View>
   );
@@ -692,6 +741,75 @@ type SyncDiagnosticsCardProps = {
   toggleDebugLogging: (value: boolean) => void;
 };
 
+/**
+ * The `Encryption` block (#1056 diagnostics). Read-only, and deliberately rendered as the same
+ * `label: value` tokens the `[sync-encryption]` log lines use, so a user can copy either one
+ * into a report and both match. Loads its own data rather than threading props through the
+ * whole settings screen: nothing else on this screen needs the encryption posture.
+ */
+function SyncEncryptionDiagnosticsBlock({ t, tc }: { t: Translate; tc: ThemeColors }) {
+  const [lines, setLines] = React.useState<string[] | null>(null);
+  const [open, setOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const next = await getSyncEncryptionDiagnosticsLines().catch(() => null);
+      if (!cancelled) setLines(next);
+      // Also stamp the posture into the log file itself, forced, so a shared log carries it
+      // even if the user shares without scrolling here or had Debug logging off until now.
+      await logSyncEncryptionDiagnosticsBlock().catch(() => undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!lines) return null;
+  // Folded by default (same disclosure shape as the Backup card): the block is
+  // reference data for a bug report, not something to read on every visit. The
+  // lines are still loaded, and the log stamped, on mount regardless.
+  return (
+    <>
+      <TouchableOpacity
+        style={[styles.gtdNavigationRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
+        onPress={() => setOpen((prev) => !prev)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        activeOpacity={0.75}
+        testID="sync-encryption-diagnostics-disclosure"
+      >
+        <View style={styles.settingInfo}>
+          <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncEncryption')}</Text>
+        </View>
+        <Ionicons
+          name={open ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={tc.secondaryText}
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        />
+      </TouchableOpacity>
+      {open && (
+        <View style={styles.settingRow}>
+          <View style={styles.settingInfo}>
+            {lines.map((line) => (
+              <Text
+                key={line}
+                selectable
+                style={[styles.settingDescription, { color: tc.secondaryText, fontFamily: 'monospace' }]}
+              >
+                {line}
+              </Text>
+            ))}
+          </View>
+        </View>
+      )}
+    </>
+  );
+}
+
 export function SyncDiagnosticsCard({
   analyticsHeartbeatAvailable,
   analyticsHeartbeatOptedOut,
@@ -721,9 +839,10 @@ export function SyncDiagnosticsCard({
             />
           </View>
         )}
+        <SyncEncryptionDiagnosticsBlock t={t} tc={tc} />
         <View style={[
           styles.settingRow,
-          analyticsHeartbeatAvailable && { borderTopWidth: 1, borderTopColor: tc.border },
+          { borderTopWidth: 1, borderTopColor: tc.border },
         ]}>
           <View style={styles.settingInfo}>
             <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.debugLogging')}</Text>

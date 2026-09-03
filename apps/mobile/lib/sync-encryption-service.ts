@@ -7,6 +7,11 @@
 // Out of scope by design: CloudKit and self-hosted mindwtr-cloud.
 
 import {
+    SYNC_ENCRYPTION_LOG_EVENTS,
+    SyncEncryptionRemoteConflictError,
+    buildSyncEncryptionTransitionExtra,
+    type SyncEncryptionTransitionLogKind,
+    type SyncEncryptionTransitionOutcome,
     acquireSyncRemoteMutationFence,
     createDropboxSyncRemoteMutationFencePort,
     createWebdavSyncRemoteMutationFencePort,
@@ -84,6 +89,7 @@ import {
     flushSyncEncryptionLocalState,
     getSyncEncryptionMaterial,
     getMobileSyncEncryptionStatus,
+    logSyncEncryptionEvent,
     syncEncryptionKeyCache,
     syncEncryptionLocalState,
     loadSyncEncryptionLocalState,
@@ -94,6 +100,7 @@ import {
     SYNC_BACKEND_KEY,
     SYNC_PATH_KEY,
 } from './sync-constants';
+import { backgroundSafeFetch } from './background-safe-fetch';
 
 const BACKUP_FILE_NAME = `${SYNC_FILE_NAME}.bak`;
 const DROPBOX_PROVIDER = 'dropbox';
@@ -149,6 +156,77 @@ const assertManagedRemoteArtifactName = (name: string): string => {
 };
 
 export type SyncEncryptionProgressCallback = (progress: SyncEncryptionTransitionProgress) => void;
+
+// ---------------------------------------------------------------------------
+// Transition diagnostics (#1056 diagnostics trail)
+// ---------------------------------------------------------------------------
+
+const logTransition = (input: Parameters<typeof buildSyncEncryptionTransitionExtra>[0]): void => {
+    logSyncEncryptionEvent(
+        SYNC_ENCRYPTION_LOG_EVENTS.transition,
+        buildSyncEncryptionTransitionExtra(input),
+        // Transitions rewrite every artifact at the sync location. Their outcome must be in
+        // the shareable log whether or not Debug logging happened to be on at the time.
+        { level: input.outcome && input.outcome !== 'ok' ? 'warn' : 'info', force: true },
+    );
+};
+
+/** Maps a thrown transition failure onto the fixed outcome vocabulary. Anything unrecognised
+ *  stays `error` and carries the error NAME plus a clamped, sanitized message — never a
+ *  passphrase, which no transition error message contains. */
+const transitionOutcomeForError = (error: unknown): SyncEncryptionTransitionOutcome => {
+    if (error instanceof SyncEncryptionRemoteConflictError) return 'conflict';
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    if (/only available for File Sync|no sync backend|not configured/i.test(message)) return 'backend-required';
+    if (/wrong passphrase/i.test(message)) return 'wrong-passphrase';
+    return 'error';
+};
+
+/**
+ * Start/end lines around one transition, plus a per-phase progress line when a phase
+ * completes. Deliberately NOT one line per artifact: a folder with hundreds of attachments
+ * would push the rest of the cycle out of the rotated log for no extra diagnosis.
+ */
+const withTransitionDiagnostics = async <T>(
+    kind: SyncEncryptionTransitionLogKind,
+    options: SyncEncryptionTransitionOptions | undefined,
+    run: (onProgress: SyncEncryptionProgressCallback | undefined) => Promise<T>,
+    outcomeOf: (value: T) => SyncEncryptionTransitionOutcome = () => 'ok',
+): Promise<T> => {
+    const backend = (await AsyncStorage.getItem(SYNC_BACKEND_KEY).catch(() => null))?.trim() || 'off';
+    logTransition({ kind, backend, phase: 'start' });
+    const callerProgress = options?.onProgress;
+    // Core reports BEFORE it increments its counter, so `completed` never reaches `total`
+    // inside the callback. A phase is finished when the NEXT phase reports (its `completed`
+    // is exactly what the finished phase got through) or when the run returns.
+    let last: SyncEncryptionTransitionProgress | undefined;
+    const logPhase = (phase: string, planned: number, done: number) => {
+        logTransition({ kind, backend, phase: 'artifact', artifact: phase, planned, done });
+    };
+    const onProgress: SyncEncryptionProgressCallback | undefined = (progress) => {
+        if (last && last.phase !== progress.phase) {
+            logPhase(last.phase, progress.total, progress.completed);
+        }
+        last = progress;
+        callerProgress?.(progress);
+    };
+    try {
+        const value = await run(onProgress);
+        if (last) logPhase(last.phase, last.total, last.total);
+        logTransition({ kind, backend, phase: 'end', outcome: outcomeOf(value) });
+        return value;
+    } catch (error) {
+        logTransition({
+            kind,
+            backend,
+            phase: 'end',
+            outcome: transitionOutcomeForError(error),
+            errorName: error instanceof Error ? error.name : 'unknown',
+            errorMessage: error instanceof Error ? error.message : String(error ?? ''),
+        });
+        throw error;
+    }
+};
 
 /**
  * The artifact set a transition covers, derived from authoritative provider enumeration
@@ -211,7 +289,7 @@ const listWebdavAttachmentKeys = async (
     collectionUrl,
     { method: 'PROPFIND', headers, body: DAV_PROPFIND_BODY, signal: options.signal },
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        options.fetcher ?? fetch,
+        options.fetcher ?? backgroundSafeFetch,
         'WebDAV attachment inventory timed out',
         async (response, signal) => {
           if (!response.ok) {
@@ -225,7 +303,7 @@ const listWebdavAttachmentKeys = async (
 
 const listDropboxAttachmentKeys = async (
     accessToken: string,
-    fetcher: typeof fetch = fetch,
+    fetcher: typeof fetch = backgroundSafeFetch,
 ): Promise<string[]> => {
     const keys = new Set<string>();
     for (const entry of await listDropboxFolderFiles(accessToken, '/attachments', fetcher)) {
@@ -863,30 +941,33 @@ export const enableSyncEncryption = async (
     await loadSyncEncryptionLocalState();
     const target = await resolveTransitionTarget(options.appData ?? null);
     if (target.kind === 'local-only') {
-        await runEnableSyncEncryptionLocalOnly(
-            passphrase,
-            syncEncryptionKeyCache,
-            syncEncryptionLocalState,
-            mobileSyncCryptoPrimitives,
-        );
-        await flushSyncEncryptionLocalState();
+        await withTransitionDiagnostics('enable-local-only', options, async () => {
+            await runEnableSyncEncryptionLocalOnly(
+                passphrase,
+                syncEncryptionKeyCache,
+                syncEncryptionLocalState,
+                mobileSyncCryptoPrimitives,
+            );
+            await flushSyncEncryptionLocalState();
+        });
         return;
     }
     if (target.kind !== 'remote') {
         throw new Error('Sync encryption is only available for File Sync, WebDAV and Dropbox.');
     }
-    await runWithFileTransitionLease(target, (port, releaseFence) =>
-      runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
-        runEnableSyncEncryptionOverRemote(
-          passphrase,
-          guardedRemote,
-          keyCache,
-          localState,
-          options.onProgress,
-          mobileSyncCryptoPrimitives,
-        ), target.fileSyncLease
-          ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
-          : undefined, releaseFence));
+    await withTransitionDiagnostics('enable', options, (onProgress) =>
+      runWithFileTransitionLease(target, (port, releaseFence) =>
+        runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
+          runEnableSyncEncryptionOverRemote(
+            passphrase,
+            guardedRemote,
+            keyCache,
+            localState,
+            onProgress,
+            mobileSyncCryptoPrimitives,
+          ), target.fileSyncLease
+            ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
+            : undefined, releaseFence)));
 });
 
 export const disableSyncEncryption = async (
@@ -895,24 +976,27 @@ export const disableSyncEncryption = async (
     await loadSyncEncryptionLocalState();
     const target = await resolveTransitionTarget(options.appData ?? null);
     if (target.kind === 'local-only') {
-        await runDisableSyncEncryptionLocalOnly(syncEncryptionKeyCache, syncEncryptionLocalState);
-        await flushSyncEncryptionLocalState();
+        await withTransitionDiagnostics('disable-local-only', options, async () => {
+            await runDisableSyncEncryptionLocalOnly(syncEncryptionKeyCache, syncEncryptionLocalState);
+            await flushSyncEncryptionLocalState();
+        });
         return;
     }
     if (target.kind !== 'remote') {
         throw new Error('Sync encryption is only available for File Sync, WebDAV and Dropbox.');
     }
-    await runWithFileTransitionLease(target, (port, releaseFence) =>
-      runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
-        runDisableSyncEncryptionOverRemote(
-          guardedRemote,
-          keyCache,
-          localState,
-          options.onProgress,
-          mobileSyncCryptoPrimitives,
-        ), target.fileSyncLease
-          ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
-          : undefined, releaseFence));
+    await withTransitionDiagnostics('disable', options, (onProgress) =>
+      runWithFileTransitionLease(target, (port, releaseFence) =>
+        runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
+          runDisableSyncEncryptionOverRemote(
+            guardedRemote,
+            keyCache,
+            localState,
+            onProgress,
+            mobileSyncCryptoPrimitives,
+          ), target.fileSyncLease
+            ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
+            : undefined, releaseFence)));
 });
 
 export const changeSyncEncryptionPassphrase = async (
@@ -922,19 +1006,20 @@ export const changeSyncEncryptionPassphrase = async (
 ): Promise<void> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
     const target = await requireTransitionTarget(options.appData ?? null);
-    await runWithFileTransitionLease(target, (port, releaseFence) =>
-      runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
-        runChangeSyncEncryptionPassphraseOverRemote(
-          current,
-          next,
-          guardedRemote,
-          keyCache,
-          localState,
-          options.onProgress,
-          mobileSyncCryptoPrimitives,
-        ), target.fileSyncLease
-          ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
-          : undefined, releaseFence));
+    await withTransitionDiagnostics('change-passphrase', options, (onProgress) =>
+      runWithFileTransitionLease(target, (port, releaseFence) =>
+        runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
+          runChangeSyncEncryptionPassphraseOverRemote(
+            current,
+            next,
+            guardedRemote,
+            keyCache,
+            localState,
+            onProgress,
+            mobileSyncCryptoPrimitives,
+          ), target.fileSyncLease
+            ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
+            : undefined, releaseFence)));
 });
 
 const runProvidePassphraseOverRemote = async (
@@ -942,7 +1027,7 @@ const runProvidePassphraseOverRemote = async (
   port: SyncEncryptionRemotePort,
   assertLocalFileFenceHeld?: () => Promise<void>,
   releaseLocalFileFence?: () => Promise<void>,
-): Promise<'ok' | 'wrong-passphrase'> => {
+): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> => {
   return runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
     runProvideSyncEncryptionPassphraseOverRemote(
         passphrase,
@@ -954,19 +1039,27 @@ const runProvidePassphraseOverRemote = async (
     ), assertLocalFileFenceHeld, releaseLocalFileFence);
 };
 
+/** `'no-encrypted-remote'` (#1138): this location holds nothing encrypted, so the no-key state
+ *  it was carrying described somewhere else (or a folder since emptied). Core clears the state
+ *  back to off; the card tells the user encryption is now off here. */
 export const provideSyncEncryptionPassphrase = async (
     passphrase: string,
-): Promise<'ok' | 'wrong-passphrase'> => runSerializedSyncDocumentOperation(async () => {
+): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
     const target = await requireTransitionTarget(null);
-    return runWithFileTransitionLease(target, (port, releaseFence) => runProvidePassphraseOverRemote(
-      passphrase,
-      port,
-      target.fileSyncLease
-        ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
-        : undefined,
-      releaseFence,
-    ));
+    return withTransitionDiagnostics(
+      'unlock',
+      undefined,
+      () => runWithFileTransitionLease(target, (port, releaseFence) => runProvidePassphraseOverRemote(
+        passphrase,
+        port,
+        target.fileSyncLease
+          ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
+          : undefined,
+        releaseFence,
+      )),
+      (result) => (result === 'ok' ? 'ok' : result),
+    );
 });
 
 /** "Not now". Re-affirms the persisted no-key state; automatic and background sync stay

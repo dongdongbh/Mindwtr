@@ -123,6 +123,32 @@ function createEmptyEntityStats(localTotal: number, incomingTotal: number): Enti
     };
 }
 
+/**
+ * Stats for a cycle that skipped the empty-remote merge (`io.skipEmptyRemoteMerge`):
+ * with no incoming document every entity is local-only, nothing conflicts and
+ * nothing is clamped. Kept in step with what the real merge reports for an empty
+ * remote by `sync-canonical-reads.contract.test.ts`.
+ */
+function createLocalOnlyMergeStats(data: AppData): MergeStats {
+    const forCollection = (items?: readonly unknown[]): EntityMergeStats => {
+        const stats = createEmptyEntityStats(items?.length ?? 0, 0);
+        stats.mergedTotal = stats.localTotal;
+        stats.localOnly = stats.localTotal;
+        // The reconcile counts an entity with no counterpart as resolved using
+        // the local side, so a skipped merge has to report it the same way.
+        stats.resolvedUsingLocal = stats.localTotal;
+        return stats;
+    };
+    return {
+        tasks: forCollection(data.tasks),
+        projects: forCollection(data.projects),
+        sections: forCollection(data.sections),
+        areas: forCollection(data.areas),
+        people: forCollection(data.people),
+        tombstoneRepairs: 0,
+    };
+}
+
 const CONFLICT_SAMPLE_LIMIT = 5;
 const CONFLICT_DIFF_KEY_LIMIT = 8;
 const PENDING_REMOTE_WRITE_RETRY_BASE_MS = 5 * 1000;
@@ -1261,10 +1287,19 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
 
     io.onStep?.('merge');
     await yieldToUi();
-    const mergeResult = mergeAppDataWithStats(localData, remoteData, {
-        nowIso,
-        preferIncomingAttachmentCloudKeys: io.preferIncomingAttachmentCloudKeys,
-    });
+    // The skip is refused unless the remote really is empty, so a caller that
+    // sets the flag on a cycle that read a document cannot discard it.
+    const remoteIsEmpty = remoteData.tasks.length === 0
+        && remoteData.projects.length === 0
+        && remoteData.sections.length === 0
+        && remoteData.areas.length === 0
+        && (remoteData.people?.length ?? 0) === 0;
+    const mergeResult: MergeResult = io.skipEmptyRemoteMerge?.() === true && remoteIsEmpty
+        ? { data: localData, stats: createLocalOnlyMergeStats(localData) }
+        : mergeAppDataWithStats(localData, remoteData, {
+            nowIso,
+            preferIncomingAttachmentCloudKeys: io.preferIncomingAttachmentCloudKeys,
+        });
     const mergeSummary = summarizeMergeStats(mergeResult.stats);
     const conflictCount = mergeSummary.conflicts;
     const nextSyncStatus: SyncCycleResult['status'] = conflictCount > 0 ? 'conflict' : 'success';
@@ -1358,6 +1393,52 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
             });
             throw new Error(`Sync validation failed: ${sample}`);
         }
+    }
+
+    // The merge produced nothing the local store does not already hold. Both
+    // document writes below would rewrite the same bytes, and the pending
+    // remote-write marker they carry has nothing to protect: it exists so a
+    // crash between the local write and the remote write cannot leave local
+    // holding merged-in remote changes that were never published, and here
+    // local absorbed nothing. Persist the cycle's own bookkeeping and go
+    // straight to the remote write, which keeps its own unchanged-guard.
+    if (
+        !pendingRemoteWriteMeta
+        && typeof io.isLocalPersistUnchanged === 'function'
+        && typeof io.persistSyncStatusOnly === 'function'
+        && io.isLocalPersistUnchanged(finalData)
+    ) {
+        io.onStep?.('write-remote');
+        await yieldToUi();
+        try {
+            await io.writeRemote(finalData);
+        } catch (error) {
+            if (!isLocalSyncAbortError(error)) {
+                // Nothing durable to roll back, but the retry schedule still
+                // has to land or the next cycle hammers a failing backend.
+                io.onStep?.('write-local');
+                await yieldToUi();
+                await io.writeLocal(withPendingRemoteWriteRetry(finalData, nowIso, error));
+            }
+            throw error;
+        }
+        try {
+            await io.persistSyncStatusOnly(finalData);
+        } catch (error) {
+            // The remote write already succeeded and no document changed locally;
+            // a failed status write must not report the whole cycle as an error
+            // (same swallow-and-warn as persistUnchangedSyncStatus).
+            logWarn('Failed to persist sync status after an unchanged local write', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+        return {
+            data: finalData,
+            stats: mergeResult.stats,
+            status: nextSyncStatus,
+            clockSkewWarning: mergeResult.clockSkewWarning,
+            localWriteSkipped: true,
+        };
     }
 
     const finalDataWithPendingRemoteWrite = withPendingRemoteWriteFlag(

@@ -14,6 +14,7 @@ import { generateUUID as uuidv4 } from '../uuid';
 import { DEFAULT_PROJECT_COLOR } from '../color-constants';
 import { findSelectableProjectByTitleAndArea } from '../project-utils';
 import { isTaskFinished } from '../task-status';
+import type { Area } from '../types';
 import type { Project, ProjectCoreActions, ProjectActionContext, Task, TaskStatus } from './shared';
 import type { TaskStore } from '../store-types';
 import type { PendingRemoteAttachmentDelete } from '../types';
@@ -108,6 +109,10 @@ type BuildNewProjectParams = {
     color?: string;
     initialProps?: Partial<Project>;
     existingProjects: readonly Project[];
+    /** Needed only to stamp `areaTitle`, the denormalized copy of the area name
+     *  that every other project writer keeps in step. Omitting it at creation
+     *  leaves a project the sync merge has to repair on the next cycle. */
+    existingAreas: readonly Area[];
     settings: TaskStore['settings'];
     deviceId: string;
     now: string;
@@ -119,6 +124,7 @@ export const buildNewProject = ({
     color,
     initialProps,
     existingProjects,
+    existingAreas,
     settings,
     deviceId,
     now,
@@ -136,7 +142,7 @@ export const buildNewProject = ({
     const useSequentialDefault = !hasExplicitFlowMode
         && settings.gtd?.defaultProjectFlowMode === 'sequential';
 
-    return {
+    const project: Project = {
         id: id ?? uuidv4(),
         title: trimmedTitle,
         color: color ?? DEFAULT_PROJECT_COLOR,
@@ -146,10 +152,19 @@ export const buildNewProject = ({
         revBy: deviceId,
         createdAt: now,
         updatedAt: now,
+        // Canonical form for both is an explicit `false` (sync-normalization.ts
+        // materializes them); see the same note in store-tasks.ts.
+        isSequential: false,
+        isFocused: false,
         ...(useSequentialDefault ? { isSequential: true } : {}),
         ...initialProps,
         tagIds: initialProps?.tagIds ?? [],
     };
+    // Resolved from the FINAL areaId, which initialProps may have supplied.
+    const areaTitle = project.areaId
+        ? existingAreas.find((area) => area.id === project.areaId && !area.deletedAt)?.name?.trim() || undefined
+        : undefined;
+    return areaTitle === project.areaTitle ? project : { ...project, areaTitle };
 };
 
 export const createProjectCoreActions = ({
@@ -180,6 +195,7 @@ export const createProjectCoreActions = ({
                 color,
                 initialProps,
                 existingProjects: state._allProjects,
+                existingAreas: state._allAreas,
                 settings: state.settings,
                 deviceId: deviceState.deviceId,
                 now,

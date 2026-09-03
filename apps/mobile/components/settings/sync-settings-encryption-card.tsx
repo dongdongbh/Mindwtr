@@ -42,7 +42,7 @@ type ErrorKind =
     | 'generic';
 
 type Flow = 'none' | 'enable' | 'change' | 'disable' | 'unlock';
-type WarningKind = 'cleanup-deferred' | 'file-cleanup-deferred';
+type WarningKind = 'cleanup-deferred' | 'file-cleanup-deferred' | 'no-encrypted-remote';
 
 export type SyncEncryptionCardProps = {
     /** Supplies the attachment worklist; phase 2 leaves attachments plaintext without it. */
@@ -244,8 +244,18 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
             let accepted = false;
             let cleanupDeferred: WarningKind | null = null;
             try {
-                accepted = (await provideSyncEncryptionPassphrase(currentPassphrase)) === 'ok';
-                if (!accepted) setError('wrong-passphrase');
+                const outcome = await provideSyncEncryptionPassphrase(currentPassphrase);
+                accepted = outcome === 'ok';
+                // #1138: nothing encrypted is here any more, so the lock described a location
+                // this device has left behind. Core already cleared it; close the flow and say
+                // what changed rather than reporting a wrong passphrase.
+                if (outcome === 'no-encrypted-remote') {
+                    accepted = true;
+                    cleanupDeferred = 'no-encrypted-remote';
+                    setWarning('no-encrypted-remote');
+                } else if (!accepted) {
+                    setError('wrong-passphrase');
+                }
             } catch (failure) {
                 logSettingsError(failure);
                 if (isSyncEncryptionCleanupDeferredError(failure)) {
@@ -349,7 +359,9 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
         ? t('settings.syncEncryptionCleanupDeferred')
         : warning === 'file-cleanup-deferred'
             ? t('settings.syncEncryptionFileCleanupDeferred')
-            : null;
+            : warning === 'no-encrypted-remote'
+                ? t('settings.syncEncryptionNoEncryptedRemote')
+                : null;
 
     const renderPassphraseInput = (label: string, value: string, onChange: (value: string) => void) => (
         <View style={[styles.inputGroup, { borderTopWidth: 1, borderTopColor: tc.border }]}>
@@ -385,6 +397,23 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
             {busy && <ActivityIndicator size="small" color={tc.tint} />}
         </TouchableOpacity>
     );
+
+    // Rendered next to the fields it is about, not at the end of the card. Appended after
+    // the action rows it landed below the fold on a phone — a wrong passphrase then looked
+    // exactly like no answer at all, which is what the Dropbox device test saw.
+    const errorBlock = errorMessage
+        ? (
+            <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                <Text
+                    accessibilityLiveRegion="assertive"
+                    accessibilityRole="alert"
+                    style={[styles.settingDescription, { color: tc.danger }]}
+                >
+                    {errorMessage}
+                </Text>
+            </View>
+        )
+        : null;
 
     const renderRevealToggle = () => (
         <TouchableOpacity
@@ -439,6 +468,7 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                                     </View>
                                     {renderPassphraseInput(t('settings.syncEncryptionPassphrase'), nextPassphrase, setNextPassphrase)}
                                     {renderPassphraseInput(t('settings.syncEncryptionPassphraseConfirm'), confirmPassphrase, setConfirmPassphrase)}
+                                    {errorBlock}
                                     {renderRevealToggle()}
                                     {renderAction(t('settings.syncEncryptionGenerate'), generate)}
                                     {generated && (
@@ -484,6 +514,7 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                                 {renderPassphraseInput(t('settings.syncEncryptionCurrentPassphrase'), currentPassphrase, setCurrentPassphrase)}
                                 {renderPassphraseInput(t('settings.syncEncryptionNewPassphrase'), nextPassphrase, setNextPassphrase)}
                                 {renderPassphraseInput(t('settings.syncEncryptionPassphraseConfirm'), confirmPassphrase, setConfirmPassphrase)}
+                                {errorBlock}
                                 {renderRevealToggle()}
                                 {renderAction(t('settings.syncEncryptionGenerate'), generate)}
                                 {generated && (
@@ -510,6 +541,7 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                                             : 'settings.syncEncryptionDisableWarning')}
                                     </Text>
                                 </View>
+                                {errorBlock}
                                 {renderAction(t('settings.syncEncryptionDisable'), submitDisable)}
                                 {renderAction(t('common.cancel'), closeFlow)}
                             </>
@@ -529,12 +561,16 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                             <Text style={[styles.settingDescription, { color: tc.secondaryText, marginTop: 8 }]}>
                                 {t('settings.syncEncryptionPausedDesc')}
                             </Text>
+                            <Text style={[styles.settingDescription, { color: tc.secondaryText, marginTop: 8 }]}>
+                                {t('settings.syncEncryptionLockedRecheckHint')}
+                            </Text>
                         </View>
                         {flow !== 'unlock'
                             ? renderAction(t('settings.syncEncryptionUnlock'), () => openFlow('unlock'))
                             : (
                                 <>
                                     {renderPassphraseInput(t('settings.syncEncryptionPassphrase'), currentPassphrase, setCurrentPassphrase)}
+                                    {errorBlock}
                                     {renderRevealToggle()}
                                     {renderAction(t('settings.syncEncryptionUnlock'), submitUnlock, !currentPassphrase)}
                                     {renderAction(t('settings.syncEncryptionDecline'), decline)}
@@ -557,17 +593,9 @@ export function SyncEncryptionCard({ appData, t, tc, transportBusy = false }: Sy
                         </Text>
                     </View>
                 )}
-                {errorMessage && (
-                    <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                        <Text
-                            accessibilityLiveRegion="assertive"
-                            accessibilityRole="alert"
-                            style={[styles.settingDescription, { color: tc.danger }]}
-                        >
-                            {errorMessage}
-                        </Text>
-                    </View>
-                )}
+                {/* Errors raised outside a flow (an incomplete transition found by the
+                    status read) have no field to sit next to. */}
+                {flow === 'none' && errorBlock}
             </View>
         </>
     );

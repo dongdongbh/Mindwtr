@@ -1,4 +1,4 @@
-- Las vistas de proyectos archivados impiden cambiar tareas, listas, estados, finalización y Enfoque.
-- La recuperación conserva la última copia fiable de los adjuntos y verifica mejor los archivos remotos ausentes.
-- Las repeticiones conservan ancla, zona horaria y reglas; las revisiones cambian de día a medianoche local.
-- Los interruptores de prioridad y tiempo controlan captura, ordenación, calendario y widgets.
+- Añade fechas de inicio a los proyectos y muestra su duración en la cronología.
+- Activa los ajustes de sincronización tras verificarlos y recupera adjuntos con más seguridad en WebDAV, Dropbox, carpetas, iCloud y servidores propios.
+- Reduce el trabajo de las sincronizaciones sin cambios y aclara el estado y los diagnósticos.
+- Mejora las fechas del calendario, el acceso a Dropbox, los proyectos archivados y las traducciones.

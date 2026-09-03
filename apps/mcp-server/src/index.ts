@@ -378,6 +378,7 @@ const addProjectSchema = z.object({
   isSequential: z.boolean().optional(),
   isFocused: z.boolean().optional(),
   dueDate: isoDateLikeSchema.nullable().optional(),
+  startDate: isoDateLikeSchema.nullable().optional(),
   reviewAt: isoDateLikeSchema.nullable().optional(),
   supportNotes: z.string().nullable().optional(),
 });
@@ -390,6 +391,7 @@ const updateProjectSchema = z.object({
   isSequential: z.boolean().optional(),
   isFocused: z.boolean().optional(),
   dueDate: isoDateLikeSchema.nullable().optional(),
+  startDate: isoDateLikeSchema.nullable().optional(),
   reviewAt: isoDateLikeSchema.nullable().optional(),
   supportNotes: z.string().nullable().optional(),
 });

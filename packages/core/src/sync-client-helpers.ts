@@ -8,10 +8,15 @@ export const CLOUD_PROVIDER_SELF_HOSTED = 'selfhosted' as const;
 export const CLOUD_PROVIDER_DROPBOX = 'dropbox' as const;
 export type CloudProvider = typeof CLOUD_PROVIDER_SELF_HOSTED | typeof CLOUD_PROVIDER_DROPBOX;
 
+export type LocalSyncAbortReason = 'local-data-changed' | 'remote-write-conflict';
+
 export class LocalSyncAbort extends Error {
-    constructor() {
+    readonly reason: LocalSyncAbortReason;
+
+    constructor(reason: LocalSyncAbortReason = 'local-data-changed') {
         super('Local changes detected during sync');
         this.name = 'LocalSyncAbort';
+        this.reason = reason;
     }
 }
 
@@ -37,7 +42,7 @@ export const ensureFreshLocalSyncSnapshot = ({
 
     onStale?.({ localSnapshotChangeAt, currentChangeAt });
     requestFollowUp();
-    throw new LocalSyncAbort();
+    throw new LocalSyncAbort('local-data-changed');
 };
 
 export const getInMemoryAppDataSnapshot = (): AppData => {

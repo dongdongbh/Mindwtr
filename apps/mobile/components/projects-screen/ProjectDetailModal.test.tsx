@@ -74,6 +74,7 @@ const translate = vi.hoisted(() => (key: string) => ({
     'status.waiting': 'Waiting',
     'taskEdit.details': 'Details',
     'taskEdit.dueDateLabel': 'Due Date',
+    'taskEdit.startDateLabel': 'Start Date',
     'taskEdit.tagsLabel': 'Tags',
 }[key] ?? key));
 
@@ -298,6 +299,7 @@ const createProjectDetailModalProps = (
     attachments: createAttachments(),
     notes: createNotesEditor(),
     onClose: vi.fn(),
+    onDeleteProject: vi.fn(),
     onDuplicateProject: vi.fn(),
     onOpenAreaPicker: vi.fn(),
     onOpenQuickAdd: vi.fn(),
@@ -618,6 +620,40 @@ describe('ProjectDetailModal metadata pickers', () => {
         });
 
         expect(tree.root.findAllByType(DateTimePicker)).toHaveLength(1);
+    });
+
+    it('saves a picked project start date and clears it again', () => {
+        let tree!: ReturnType<typeof create>;
+
+        act(() => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps()} />);
+        });
+
+        expandProjectDetails(tree);
+
+        act(() => {
+            tree.root.findByProps({ testID: 'project-start-date-picker' }).props.onPress();
+        });
+        act(() => {
+            tree.root.findByType(DateTimePicker).props.onChange({}, new Date('2026-10-05T00:00:00.000Z'));
+        });
+
+        expect(storeActions.updateProject).toHaveBeenCalledWith('project-1', { startDate: '2026-10-05' });
+        expect(tree.root.findAllByType(DateTimePicker)).toHaveLength(0);
+
+        // The clear button only exists once a date is stored, and the mocked
+        // store never writes back, so it needs a project that already has one.
+        let stored!: ReturnType<typeof create>;
+        act(() => {
+            stored = create(<ProjectDetailModal {...createProjectDetailModalProps({
+                project: { ...project('active'), startDate: '2026-10-05' },
+            })} />);
+        });
+        expandProjectDetails(stored);
+        act(() => {
+            stored.root.findByProps({ accessibilityLabel: 'Clear Start Date' }).props.onPress();
+        });
+        expect(storeActions.updateProject).toHaveBeenLastCalledWith('project-1', { startDate: undefined });
     });
 });
 
@@ -1078,6 +1114,33 @@ describe('ProjectDetailModal lifecycle actions', () => {
         expect(duplicate).toBeTruthy();
         expect(tree.root.findByProps({ testID: 'project-archive-button' })).toBeTruthy();
         expect(duplicate.findAllByProps({ testID: 'project-type-toggle' })).toHaveLength(0);
+    });
+
+    it('deletes the project from the actions menu after a confirm', () => {
+        // The swipe action on the project list was the only way to delete a
+        // project on mobile; a reporter looking next to Archive found nothing (#1142).
+        vi.spyOn(Alert, 'alert').mockImplementation(((_title, _message, buttons) => {
+            buttons?.[1]?.onPress?.();
+        }) as typeof Alert.alert);
+        const props = createProjectDetailModalProps();
+        let tree!: ReturnType<typeof create>;
+
+        act(() => {
+            tree = create(<ProjectDetailModal {...props} />);
+        });
+        act(() => {
+            tree.root.findByProps({ testID: 'project-actions-menu-button' }).props.onPress();
+        });
+        act(() => {
+            tree.root.findByProps({ testID: 'project-delete-button' }).props.onPress();
+        });
+
+        expect(Alert.alert).toHaveBeenCalledWith(
+            'projects.title',
+            'projects.deleteConfirm',
+            expect.any(Array),
+        );
+        expect(props.onDeleteProject).toHaveBeenCalledWith(props.project?.id);
     });
 
     it('archives from the Archive action with a single tap and no native confirm', () => {

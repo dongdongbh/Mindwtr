@@ -2,7 +2,7 @@
   "expo": {
     "name": "Mindwtr",
     "slug": "mindwtr",
-    "version": "1.2.6",
+    "version": "1.2.7",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "mindwtr",
@@ -53,7 +53,7 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "versionCode": 134,
+      "versionCode": 136,
       "package": "tech.dongdongbh.mindwtr",
       "permissions": [
         "RECORD_AUDIO",
@@ -155,7 +155,8 @@
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 24
+            "minSdkVersion": 24,
+            "extraProguardRules": "# expo-modules-core names the headless app loader only in an AndroidManifest meta-data value,\n# so R8 renames the class and the Class.forName in AppLoaderProvider throws\n# ClassNotFoundException. Without this rule expo-background-task tasks never run in a minified\n# release build: the background sync worker fails at startup and then hangs.\n-keep class expo.modules.adapters.react.apploader.RNHeadlessAppLoader { *; }\n"
           }
         }
       ],
@@ -182,7 +183,8 @@
       "./plugins/android-network-security-config",
       "./plugins/android-system-bars",
       "./plugins/android-startup-trace",
-      "./plugins/patch-alarm-notification-gradle"
+      "./plugins/patch-alarm-notification-gradle",
+      "./plugins/patch-expo-background-task"
     ],
     "experiments": {
       "typedRoutes": true

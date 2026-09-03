@@ -63,7 +63,7 @@ describe('cloud Task schema contract', () => {
 // schema and leave this alone; these snapshots cover the unchanged entity descriptors only.
 const PRE_REFACTOR_CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS = [
     'status', 'color', 'order', 'tagIds', 'isSequential', 'taskSortBy', 'isFocused',
-    'supportNotes', 'attachments', 'dueDate', 'reviewAt', 'areaId', 'areaTitle',
+    'supportNotes', 'attachments', 'startDate', 'dueDate', 'reviewAt', 'areaId', 'areaTitle',
 ];
 
 const PRE_REFACTOR_CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS = [

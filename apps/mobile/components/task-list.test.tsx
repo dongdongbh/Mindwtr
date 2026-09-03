@@ -94,6 +94,7 @@ const storeState = vi.hoisted(() => ({
   getDerivedState: vi.fn(() => ({
     focusedCount: storeState._allTasks.filter((task) => task.isFocusedToday).length,
   })),
+  getFocusedCount: vi.fn(() => storeState._allTasks.filter((task) => task.isFocusedToday).length),
   updateSettings: vi.fn(),
   highlightTaskId: null as string | null,
   setHighlightTask: setHighlightTaskMock,
@@ -800,11 +801,11 @@ describe('TaskList', () => {
     });
   });
 
-  it('reads focusedCount from the memoized derived state, not a fresh scan of the rendered task list (#766)', async () => {
+  it('reads focusedCount from the memoized store selector, not a fresh scan of the rendered task list (#766)', async () => {
     const visibleTask = makeTask('task-row-context-derived', 'Review launch notes');
     // state.tasks intentionally disagrees with _allTasks here: if focusedCount
     // were computed by scanning state.tasks (the pre-fix regression) it would
-    // report 5; the memoized getDerivedState() correctly counts _allTasks.
+    // report 5; the memoized getFocusedCount() correctly counts _allTasks.
     storeState.tasks = Array.from(
       { length: 5 },
       (_, index) => makeTask(`misleading-focused-${index}`, `Misleading ${index}`, { isFocusedToday: true }),
@@ -825,7 +826,7 @@ describe('TaskList', () => {
 
     const row = tree.root.findByType('SwipeableTaskItem' as unknown as React.ElementType);
     expect(row.props.rowContext.focusedCount).toBe(0);
-    expect(storeState.getDerivedState).toHaveBeenCalled();
+    expect(storeState.getFocusedCount).toHaveBeenCalled();
 
     act(() => {
       tree.unmount();

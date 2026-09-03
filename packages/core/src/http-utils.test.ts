@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     fetchWithTimeout,
     fetchWithTimeoutAndConsume,
@@ -7,6 +7,7 @@ import {
     MAX_DOWNLOAD_BYTES,
     readResponseBody,
     ResponseTooLargeError,
+    SUSPENDED_REQUEST_MESSAGE,
     SYNC_LOCAL_INSECURE_URL_OPTIONS,
 } from './http-utils';
 import { DEFAULT_MAX_FILE_SIZE_BYTES } from './attachment-validation';
@@ -492,5 +493,34 @@ describe('readResponseBody', () => {
             arrayBuffer: async () => new ArrayBuffer(512),
         } as unknown as Response;
         await expect(readResponseBody(res, undefined, 256)).rejects.toBeInstanceOf(ResponseTooLargeError);
+    });
+});
+
+
+describe('fetchWithTimeoutAndConsume suspension detection', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    const neverResolving: typeof fetch = () => new Promise(() => undefined);
+
+    it('reports a plain timeout when the timer fires on schedule', async () => {
+        vi.useFakeTimers();
+        const pending = fetchWithTimeoutAndConsume('https://example.com/x', {}, 1_000, neverResolving, 'Cloud request timed out', async () => 'ok');
+        const outcome = expect(pending).rejects.toThrow(/^Cloud request timed out$/);
+        await vi.advanceTimersByTimeAsync(1_000);
+        await outcome;
+    });
+
+    it('marks a timer that fired hours late as an interruption while the app was suspended', async () => {
+        // Android froze the process with the request in flight (#1139): the
+        // timer fired 62 minutes later, when the app was thawed.
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-09-02T07:00:15.000Z'));
+        const pending = fetchWithTimeoutAndConsume('https://example.com/x', {}, 1_000, neverResolving, 'Cloud request timed out', async () => 'ok');
+        const outcome = expect(pending).rejects.toThrow(new RegExp(`^Cloud request timed out; ${SUSPENDED_REQUEST_MESSAGE}$`));
+        vi.setSystemTime(new Date('2026-09-02T08:03:04.000Z'));
+        await vi.advanceTimersByTimeAsync(1_000);
+        await outcome;
     });
 });

@@ -90,7 +90,7 @@ use local_api::{
     get_local_api_server_status, set_local_api_server_config, start_configured_local_api_server,
     LocalApiServerState,
 };
-use logging::{append_log_line, append_native_log_line, clear_log_file};
+use logging::{append_log_line, append_native_log_line, clear_log_file, get_log_file_path};
 use macos_widget::write_macos_widget_payload;
 use obsidian_paths::default_obsidian_inbox_file;
 use obsidian_watcher::{start_obsidian_watcher, stop_obsidian_watcher, ObsidianWatcherState};
@@ -1222,10 +1222,10 @@ pub fn run() {
         })
         .on_menu_event(|_app, event| match event.id().as_ref() {
             MENU_HELP_DOCS_ID => {
-                let _ = open::that("https://github.com/dongdongbh/Mindwtr#readme");
+                let _ = open::that_detached("https://github.com/dongdongbh/Mindwtr#readme");
             }
             MENU_HELP_ISSUES_ID => {
-                let _ = open::that("https://github.com/dongdongbh/Mindwtr/issues");
+                let _ = open::that_detached("https://github.com/dongdongbh/Mindwtr/issues");
             }
             _ => {}
         });
@@ -1755,6 +1755,7 @@ pub fn run() {
             download_whisper_model,
             append_log_line,
             clear_log_file,
+            get_log_file_path,
             consume_quick_add_pending,
             get_system_theme_preference,
             set_global_quick_add_shortcut,

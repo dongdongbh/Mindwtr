@@ -1,0 +1,1 @@
+Prend en charge les pages mémoire de 16 Ko sur les appareils Android actuels. Ajoute les dates de début, plus d’actions de projet et une synchronisation en arrière-plan réglable. Améliore la récupération des pièces jointes pour chaque méthode de synchronisation, le calendrier, les alarmes, Dropbox, l’état, les diagnostics et les traductions.

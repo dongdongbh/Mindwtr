@@ -11,8 +11,10 @@ interface CreateSyncOrchestratorOptions<Arg, Result> {
     onQueuedRunError?: (error: unknown) => void;
     /** Delay before a queued follow-up cycle starts, derived from how long the
      *  finished cycle took. Slow cycles (large datasets, slow storage) otherwise
-     *  chain back-to-back and starve user interactions between them. */
-    getFollowUpDelayMs?: (lastCycleDurationMs: number) => number;
+     *  chain back-to-back and starve user interactions between them.
+     *  `minimumDelayMs` is the largest delay the cycle requested through
+     *  `requestFollowUpAfter`; the effective delay is never below it. */
+    getFollowUpDelayMs?: (lastCycleDurationMs: number, minimumDelayMs: number) => number;
 }
 
 export interface SyncOrchestrator<Arg, Result> {
@@ -132,7 +134,7 @@ export const createSyncOrchestrator = <Arg, Result>(
             };
 
             const delayMs = Math.max(
-                getFollowUpDelayMs?.(Date.now() - cycleStartedAt) ?? 0,
+                getFollowUpDelayMs?.(Date.now() - cycleStartedAt, minimumFollowUpDelayMs) ?? 0,
                 minimumFollowUpDelayMs,
             );
             minimumFollowUpDelayMs = 0;

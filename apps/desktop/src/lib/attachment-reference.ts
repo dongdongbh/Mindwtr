@@ -30,7 +30,12 @@ export function isBareFileReference(attachment: AttachmentRef, managedDirPrefix:
 let cachedManagedDirPrefix: string | null = null;
 let managedDirPrefixPromise: Promise<string | null> | null = null;
 
-async function loadManagedDirPrefix(): Promise<string | null> {
+/** The managed attachments dir, normalized and trailing-slashed, for `isExternalFileReference`.
+ *  Exported so the sync gate (`hasAttachmentSyncWork` in sync-service.ts) asks the same
+ *  question the UI's paperclip/link icons ask, rather than reimplementing the prefix rules.
+ *  Resolves at most one IPC per session; `null` means "not resolved / not desktop", which
+ *  every caller must treat as "assume external". */
+export async function loadManagedAttachmentsDirPrefix(): Promise<string | null> {
     if (!isTauriRuntime()) return null;
     if (cachedManagedDirPrefix) return cachedManagedDirPrefix;
     if (!managedDirPrefixPromise) {
@@ -56,7 +61,7 @@ function useManagedDirPrefix(): string | null {
     useEffect(() => {
         if (prefix) return;
         let cancelled = false;
-        void loadManagedDirPrefix().then((resolved) => {
+        void loadManagedAttachmentsDirPrefix().then((resolved) => {
             if (!cancelled && resolved) setPrefix(resolved);
         });
         return () => {

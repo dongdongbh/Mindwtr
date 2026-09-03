@@ -106,6 +106,7 @@ export type ParsedDgtProject = {
   name: string;
   order: number;
   sourceId: number;
+  startDate?: string;
   supportNotes?: string;
   updatedAt?: string;
 };

@@ -116,3 +116,11 @@ describe('sync-service-utils', () => {
         expect(isLikelyOfflineSyncError('WebDAV unauthorized (401)')).toBe(false);
     });
 });
+
+
+describe('isLikelyOfflineSyncError suspension', () => {
+    it('treats a request interrupted by app suspension as offline-class, a plain timeout not', () => {
+        expect(isLikelyOfflineSyncError('Cloud request timed out; the request was interrupted while the app was suspended')).toBe(true);
+        expect(isLikelyOfflineSyncError('Cloud request timed out')).toBe(false);
+    });
+});

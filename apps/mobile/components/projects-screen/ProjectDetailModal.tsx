@@ -64,6 +64,7 @@ type ProjectDetailModalProps = {
     attachments: ReturnType<typeof useProjectAttachments>;
     notes: ReturnType<typeof useProjectNotesEditor>;
     onClose: () => void;
+    onDeleteProject: (projectId: string) => void;
     onDuplicateProject: (projectId: string) => void;
     onOpenAreaPicker: () => void;
     onOpenQuickAdd: (project: Project) => void;
@@ -461,6 +462,7 @@ function ProjectOptionRow({
     onPress,
     selected = false,
     testID,
+    tone,
     value,
     tc,
 }: {
@@ -472,9 +474,12 @@ function ProjectOptionRow({
     onPress: () => void;
     selected?: boolean;
     testID: string;
+    tone?: 'danger';
     value?: string;
     tc: ThemeColors;
 }) {
+    const iconColor = tone === 'danger' ? tc.danger : selected ? tc.tint : tc.secondaryText;
+    const labelColor = tone === 'danger' ? tc.danger : tc.text;
     return (
         <TouchableOpacity
             accessibilityHint={accessibilityHint}
@@ -486,10 +491,10 @@ function ProjectOptionRow({
             testID={testID}
         >
             <View style={[styles.projectOptionsIcon, { backgroundColor: selected ? `${tc.tint}20` : tc.filterBg }]}>
-                <Ionicons name={icon} size={19} color={selected ? tc.tint : tc.secondaryText} />
+                <Ionicons name={icon} size={19} color={iconColor} />
             </View>
             <View style={styles.projectOptionsCopy}>
-                <Text style={[styles.projectOptionsRowLabel, { color: tc.text }]}>{label}</Text>
+                <Text style={[styles.projectOptionsRowLabel, { color: labelColor }]}>{label}</Text>
                 {description ? (
                     <Text style={[styles.projectOptionsDescription, { color: tc.secondaryText }]}>
                         {description}
@@ -511,6 +516,7 @@ export function ProjectDetailModal({
     attachments,
     notes,
     onClose,
+    onDeleteProject,
     onDuplicateProject,
     onOpenAreaPicker,
     onOpenQuickAdd,
@@ -608,6 +614,7 @@ export function ProjectDetailModal({
     }];
     const [showProjectMeta, setShowProjectMeta] = React.useState(false);
     const [showStatusMenu, setShowStatusMenu] = React.useState(false);
+    const [showStartDatePicker, setShowStartDatePicker] = React.useState(false);
     const [showDueDatePicker, setShowDueDatePicker] = React.useState(false);
     const [showReviewPicker, setShowReviewPicker] = React.useState(false);
     // Persisted device-locally so the choice survives app restarts, matching
@@ -1446,6 +1453,53 @@ export function ProjectDetailModal({
 
                                         <View style={[styles.reviewContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                                             <View style={styles.projectMetadataRow}>
+                                                <Text style={[styles.reviewLabel, { color: tc.text }]}>{tFallback(t, 'taskEdit.startDateLabel', 'Start Date')}</Text>
+                                                <View style={styles.projectMetadataControls}>
+                                                    <TouchableOpacity
+                                                        style={[styles.projectMetadataValueButton, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
+                                                        onPress={() => setShowStartDatePicker(true)}
+                                                        disabled={isArchivedProject}
+                                                        accessibilityRole="button"
+                                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                        accessibilityState={{ disabled: isArchivedProject }}
+                                                        testID="project-start-date-picker"
+                                                    >
+                                                        <Text style={[styles.projectMetadataValueText, { color: tc.text }]} numberOfLines={1}>
+                                                            {formatProjectDate(selectedProject.startDate, t('common.notSet'))}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                    {!!selectedProject.startDate ? (
+                                                        <TouchableOpacity
+                                                            accessibilityRole="button"
+                                                            accessibilityLabel={`${t('common.clear')} ${tFallback(t, 'taskEdit.startDateLabel', 'Start Date')}`}
+                                                            style={styles.projectMetadataClearButton}
+                                                            onPress={() => {
+                                                                updateMutableSelectedProject({ startDate: undefined });
+                                                            }}
+                                                            disabled={isArchivedProject}
+                                                            accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                            accessibilityState={{ disabled: isArchivedProject }}
+                                                        >
+                                                            <Ionicons name="close-circle-outline" size={19} color={tc.secondaryText} />
+                                                        </TouchableOpacity>
+                                                    ) : null}
+                                                </View>
+                                            </View>
+                                            {showStartDatePicker ? (
+                                                <DateTimePicker
+                                                    value={safeParseDate(selectedProject.startDate) ?? new Date()}
+                                                    mode="date"
+                                                    display="default"
+                                                    onChange={(_, date) => {
+                                                        setShowStartDatePicker(false);
+                                                        if (date) {
+                                                            const iso = date.toISOString().slice(0, 10);
+                                                            updateMutableSelectedProject({ startDate: iso });
+                                                        }
+                                                    }}
+                                                />
+                                            ) : null}
+                                            <View style={[styles.projectMetadataRow, styles.projectMetadataRowDivider, { borderTopColor: tc.border }]}>
                                                 <Text style={[styles.reviewLabel, { color: tc.text }]}>{tFallback(t, 'taskEdit.dueDateLabel', 'Due Date')}</Text>
                                                 <View style={styles.projectMetadataControls}>
                                                     <TouchableOpacity
@@ -1733,6 +1787,32 @@ export function ProjectDetailModal({
                                         testID={isArchivedProject
                                             ? 'project-reactivate-button'
                                             : 'project-archive-button'}
+                                        tc={tc}
+                                    />
+                                    <ProjectOptionRow
+                                        icon="trash-outline"
+                                        label={t('common.delete')}
+                                        onPress={() => {
+                                            // Same confirm and outcome as the swipe action on the
+                                            // project list; the project goes to Trash and its tasks
+                                            // stay, unassigned (#1142).
+                                            setProjectActionsVisible(false);
+                                            const projectId = selectedProject.id;
+                                            Alert.alert(
+                                                t('projects.title'),
+                                                t('projects.deleteConfirm'),
+                                                [
+                                                    { text: t('common.cancel'), style: 'cancel' },
+                                                    {
+                                                        text: t('common.delete'),
+                                                        style: 'destructive',
+                                                        onPress: () => onDeleteProject(projectId),
+                                                    },
+                                                ],
+                                            );
+                                        }}
+                                        testID="project-delete-button"
+                                        tone="danger"
                                         tc={tc}
                                     />
                                 </ProjectOptionsModal>

@@ -33,7 +33,7 @@ vi.mock('./managed-paths', async () => {
     };
 });
 
-import { logInfo } from './app-log';
+import { getLogPath, logInfo } from './app-log';
 
 const setTauriRuntime = (enabled: boolean) => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
@@ -49,6 +49,32 @@ afterEach(() => {
     mkdirMock.mockReset();
     writeTextFileMock.mockReset();
     getManagedPathMock.mockReset();
+});
+
+describe('getLogPath', () => {
+    it('prefers the path reported by the backend', async () => {
+        setTauriRuntime(true);
+        const redirected =
+            'C:\\Users\\a\\AppData\\Local\\Packages\\pfn\\LocalCache\\Roaming\\mindwtr\\logs\\mindwtr.log';
+        invokeMock.mockResolvedValue(redirected);
+
+        const path = await getLogPath();
+
+        expect(path).toBe(redirected);
+        expect(invokeMock).toHaveBeenCalledWith('get_log_file_path');
+        expect(getManagedPathMock).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the computed path when the command is unavailable', async () => {
+        setTauriRuntime(true);
+        invokeMock.mockRejectedValue(new Error('command unavailable'));
+        getManagedPathMock.mockResolvedValue('/data/logs/mindwtr.log');
+
+        const path = await getLogPath();
+
+        expect(path).toBe('/data/logs/mindwtr.log');
+        expect(getManagedPathMock).toHaveBeenCalledWith('logs', 'mindwtr.log');
+    });
 });
 
 describe('appendLogLine', () => {

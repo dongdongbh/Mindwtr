@@ -15,6 +15,7 @@ import {
     reconcileEntityCollection,
     reuseArrayIfShallowEqual,
     reuseSettingsIfEquivalent,
+    selectFocusedCount,
     selectVisibleAreas,
     selectVisiblePeople,
     selectVisibleProjects,
@@ -110,7 +111,7 @@ type SettingsActionContext = {
     getStorage: () => StorageAdapter;
 };
 
-type SettingsActions = Pick<TaskStore, 'fetchData' | 'seedGettingStarted' | 'updateSettings' | 'persistSnapshot' | 'getDerivedState' | 'setHighlightTask'>;
+type SettingsActions = Pick<TaskStore, 'fetchData' | 'seedGettingStarted' | 'updateSettings' | 'persistSnapshot' | 'getDerivedState' | 'getFocusedCount' | 'setHighlightTask'>;
 
 export const createSettingsActions = ({
     set,
@@ -636,4 +637,6 @@ export const createSettingsActions = ({
     setHighlightTask: (id: string | null) => {
         set({ highlightTaskId: id, highlightTaskAt: id ? Date.now() : null });
     },
+
+    getFocusedCount: () => selectFocusedCount(get().tasks),
 });

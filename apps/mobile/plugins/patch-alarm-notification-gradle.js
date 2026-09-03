@@ -1187,6 +1187,34 @@ const logPatchedCandidate = (label, candidate) => {
 // today's code is inconsistent about whether it stops at the first one that
 // applies or keeps going. This registry *declares* what was already
 // happening rather than changing it.
+// Android 12+ (API 31) lets the user revoke "Alarms & reminders". AlarmUtil's
+// setExactOrAllowWhileIdle then degrades to an inexact alarm, which lands
+// reminders and the pomodoro alert up to ~30 s late (#528). Nothing upstream
+// exposes that state to JS, so the settings screens cannot offer the system
+// permission screen. Fully qualified names keep the patch out of the import
+// block.
+const applyAlarmExactPermissionModulePatchToSource = (original) => {
+  if (original.includes('public void canScheduleExactAlarms(')) return original;
+  const marker = `    @ReactMethod
+    public void removeAllFiredNotifications() {`;
+  if (!original.includes(marker)) return original;
+  return original.replace(
+    marker,
+    `    @ReactMethod
+    public void canScheduleExactAlarms(Promise promise) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+            promise.resolve(true);
+            return;
+        }
+        android.app.AlarmManager alarmManager = (android.app.AlarmManager) mReactContext
+                .getSystemService(android.content.Context.ALARM_SERVICE);
+        promise.resolve(alarmManager != null && alarmManager.canScheduleExactAlarms());
+    }
+
+${marker}`
+  );
+};
+
 const androidJavaCandidates = (fileName) => (projectRoot) => getAndroidSourceCandidates(projectRoot, fileName);
 
 const androidGradleCandidates = (projectRoot) => [
@@ -1370,6 +1398,15 @@ const PATCHES = [
     // Original loop broke after the first successful write.
     firstMatchOnly: true,
     appliedMarker: 'NOTIFICATION_ACTION_COMPLETE',
+  },
+  {
+    id: 'alarm-exact-permission-module',
+    platform: 'android',
+    getCandidates: androidJavaCandidates('ANModule.java'),
+    transform: applyAlarmExactPermissionModulePatchToSource,
+    required: true,
+    firstMatchOnly: false,
+    appliedMarker: 'public void canScheduleExactAlarms(',
   },
   {
     id: 'alarm-ios-complete-action',

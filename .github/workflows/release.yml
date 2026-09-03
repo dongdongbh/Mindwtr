@@ -226,24 +226,24 @@ jobs:
           echo "Verified $TAG points at $HEAD_SHA."
 
   linux:
-    needs: validate
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_linux) && needs.validate.result == 'success' }}
+    needs: [validate, android-version-code]
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_linux) && needs.validate.result == 'success' && (needs['android-version-code'].result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.run_android && !inputs.run_android_foss)) }}
     uses: ./.github/workflows/release-linux.yml
     with:
       tag: ${{ needs.validate.outputs.tag }}
     secrets: inherit
 
   macos:
-    needs: validate
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_macos) && needs.validate.result == 'success' }}
+    needs: [validate, android-version-code]
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_macos) && needs.validate.result == 'success' && (needs['android-version-code'].result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.run_android && !inputs.run_android_foss)) }}
     uses: ./.github/workflows/release-macos.yml
     with:
       tag: ${{ needs.validate.outputs.tag }}
     secrets: inherit
 
   windows:
-    needs: validate
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_windows) && needs.validate.result == 'success' }}
+    needs: [validate, android-version-code]
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_windows) && needs.validate.result == 'success' && (needs['android-version-code'].result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.run_android && !inputs.run_android_foss)) }}
     uses: ./.github/workflows/release-windows.yml
     permissions:
       contents: read
@@ -356,8 +356,8 @@ jobs:
     secrets: inherit
 
   ios-appstore:
-    needs: validate
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_ios_appstore) && needs.validate.result == 'success' }}
+    needs: [validate, android-version-code]
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_ios_appstore) && needs.validate.result == 'success' && (needs['android-version-code'].result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.run_android && !inputs.run_android_foss)) }}
     uses: ./.github/workflows/release-ios-appstore.yml
     with:
       tag: ${{ needs.validate.outputs.tag }}
@@ -369,8 +369,8 @@ jobs:
     secrets: inherit
 
   macos-appstore:
-    needs: validate
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_macos_appstore) && needs.validate.result == 'success' }}
+    needs: [validate, android-version-code]
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_macos_appstore) && needs.validate.result == 'success' && (needs['android-version-code'].result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.run_android && !inputs.run_android_foss)) }}
     uses: ./.github/workflows/release-macos-appstore.yml
     with:
       tag: ${{ needs.validate.outputs.tag }}

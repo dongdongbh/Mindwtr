@@ -2,7 +2,7 @@
 
 [Mindwtr](https://mindwtr.app) is a free and open-source, cross-platform Getting Things Done (GTD) productivity app for desktop, mobile, and web.
 
-Mindwtr is actively used by **15,000+ users**, with **1,000+ daily active users**, and the community continues to grow rapidly.
+Mindwtr is actively used by **20,000+ users**, with **1,500+ daily active users**, and the community continues to grow rapidly.
 
 Sponsorship keeps Mindwtr free, independent, and actively maintained — funding development, cross-platform testing and release infrastructure, documentation, and community support.
 

@@ -6,10 +6,10 @@ import {
   normalizeLinkAttachmentInput,
   Project,
   useTaskStore,
-  validateAttachmentForUpload,
-} from '@mindwtr/core';
+  validateAttachmentForUpload, tFallback } from '@mindwtr/core';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
+import { isLikelyFilePath } from '@/lib/sync-service-utils';
 import * as Sharing from 'expo-sharing';
 
 import { resolveAttachmentValidationMessage } from './projects-screen.utils';
@@ -171,8 +171,18 @@ export function useProjectAttachments({
     const resolved = resolution.attachment;
 
     if (resolved.kind === 'link') {
-      Linking.openURL(resolved.uri).catch((error) => logProjectError('Failed to open attachment URL', error));
-      return;
+        // A "Link to file…" made on the desktop keeps that computer's path (for
+        // example D:\\Documents\\x.docx) and is never uploaded; handing it to the
+        // OS as a URL failed silently (#1001).
+        if (isLikelyFilePath(resolved.uri) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(resolved.uri)) {
+            Alert.alert(t('attachments.title'), tFallback(t, 'attachments.linkedFileElsewhere', 'This link points to a file on another device: {{path}}. Open it there, or attach the file instead of linking it.').replace('{{path}}', resolved.uri));
+            return;
+        }
+        Linking.openURL(resolved.uri).catch((error) => {
+            logProjectError('Failed to open attachment URL', error);
+            Alert.alert(t('attachments.title'), tFallback(t, 'attachments.openLinkFailed', 'Could not open this link.'));
+        });
+        return;
     }
     if (isImageAttachment(resolved)) {
       setImagePreviewAttachment(resolved);
@@ -194,7 +204,7 @@ export function useProjectAttachments({
     } else {
       Linking.openURL(resolved.uri).catch((error) => logProjectError('Failed to open attachment URL', error));
     }
-  }, [isImageAttachment, logProjectError, resolveProjectAttachment, selectedProject, showAttachmentResolutionError]);
+  }, [isImageAttachment, logProjectError, resolveProjectAttachment, selectedProject, showAttachmentResolutionError, t]);
 
   useEffect(() => {
     if (!selectedProject) {

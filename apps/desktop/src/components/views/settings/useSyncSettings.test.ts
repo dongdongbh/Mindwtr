@@ -126,6 +126,52 @@ const NO_TARGET: TargetInputs = {
 };
 
 describe('useSyncSettings cloud token validation', () => {
+
+    it('seeds the backend control from the last-known selection before the persisted snapshot resolves', async () => {
+        // The persisted snapshot is read through the serialized restore queue and
+        // can take seconds after launch; without a synchronous seed the control
+        // showed "Off" and then jumped to the real backend on every open.
+        vi.spyOn(SyncService, 'getLastKnownSyncSelection').mockReturnValue({ backend: 'cloud', cloudProvider: 'dropbox', configuration: null });
+        let resolveSnapshot: (value: ReturnType<typeof dropboxConfigurationSnapshot>) => void = () => undefined;
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockReturnValueOnce(new Promise((resolve) => {
+            resolveSnapshot = resolve;
+        }));
+
+        const { result } = setup();
+
+        expect(result.current.syncPageProps.syncBackend).toBe('cloud');
+        expect(result.current.syncPageProps.cloudProvider).toBe('dropbox');
+
+        resolveSnapshot({ ...dropboxConfigurationSnapshot('off'), backend: 'webdav', cloudProvider: 'selfhosted' });
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('webdav'));
+    });
+
+    it('seeds every editor field from the last durable configuration on the first frame', () => {
+        // After a Dropbox -> WebDAV switch the reopened page showed the WebDAV
+        // control with empty URL/username fields until the queued read returned.
+        const configuration = {
+            ...dropboxConfigurationSnapshot('off'),
+            backend: 'webdav' as const,
+            cloudProvider: 'selfhosted' as const,
+            webdav: {
+                ...dropboxConfigurationSnapshot('off').webdav,
+                url: 'https://dav.example.com/mindwtr',
+                username: 'dd',
+                hasPassword: true,
+                allowInsecureHttp: true,
+            },
+        };
+        vi.spyOn(SyncService, 'getLastKnownSyncSelection').mockReturnValue({ backend: 'webdav', cloudProvider: 'selfhosted', configuration });
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockReturnValueOnce(new Promise(() => undefined));
+
+        const { result } = setup();
+
+        expect(result.current.syncPageProps.syncBackend).toBe('webdav');
+        expect(result.current.syncPageProps.webdavUrl).toBe('https://dav.example.com/mindwtr');
+        expect(result.current.syncPageProps.webdavUsername).toBe('dd');
+        expect(result.current.syncPageProps.webdavHasPassword).toBe(true);
+        expect(result.current.syncPageProps.webdavAllowInsecureHttp).toBe(true);
+    });
     beforeEach(() => {
         languageMocks.t.mockImplementation((key: string) => key);
         SyncService.forgetPendingDropboxCredentialHandleForSession();
@@ -184,6 +230,21 @@ describe('useSyncSettings cloud token validation', () => {
         lastSyncNeverLabel: 'Never',
         requestConfirmation,
     }));
+
+    /**
+     * Pick a backend while its target is still incomplete. The hook activates a
+     * chosen backend on its own as soon as the target is complete, so tests that
+     * exercise "staged configuration, then Sync now" select the backend first and
+     * fill the fields afterwards; field edits never auto-activate.
+     */
+    const stageBackend = async (
+        result: ReturnType<typeof setup>['result'],
+        backend: SyncBackend,
+    ) => {
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend(backend);
+        });
+    };
 
     it('uses localized copy for desktop backup completion', async () => {
         languageMocks.t.mockImplementation((key: string) => `localized:${key}`);
@@ -306,12 +367,34 @@ describe('useSyncSettings cloud token validation', () => {
 
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        // An empty WebDAV URL has nothing to verify, so Save keeps the notice.
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('webdav');
+        });
+        await act(async () => {
+            await result.current.syncPageProps.onSaveWebDav();
+        });
+
+        expect(showToast).toHaveBeenCalledWith('Paramètres prêts à vérifier.', 'info');
+        expect(SyncService.performSync).not.toHaveBeenCalled();
+    });
+
+    it('runs the verification sync when a File Sync folder is saved', async () => {
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('file');
+        });
         act(() => result.current.syncPageProps.onSyncPathChange('/sync'));
+        expect(SyncService.performSync).not.toHaveBeenCalled();
         await act(async () => {
             await result.current.syncPageProps.onSaveSyncPath();
         });
 
-        expect(showToast).toHaveBeenCalledWith('Paramètres prêts à vérifier.', 'info');
+        expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({
+            activationProbe: true,
+            configOverride: { backend: 'file', syncPath: '/sync' },
+        });
     });
 
     it('tests the selected sync folder without saving it', async () => {
@@ -481,10 +564,12 @@ describe('useSyncSettings cloud token validation', () => {
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
 
-        const { result } = setup();
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
         act(() => {
+            // The self-hosted form is only reachable once its chip is selected.
+            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -493,10 +578,99 @@ describe('useSyncSettings cloud token validation', () => {
             await result.current.syncPageProps.onSaveCloud();
         });
 
+        // Nothing is written directly: Save hands the staged configuration to the
+        // verification sync, which is the only path that commits a backend switch.
+        // (It used to stop at a "Sync now to verify" toast; users read "saved" as
+        // durable, left the page, and found the previous backend still selected.)
         expect(SyncService.setCloudConfig).not.toHaveBeenCalled();
         expect(SyncService.setSyncBackend).not.toHaveBeenCalled();
-        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
-        expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Sync now'), 'info');
+        // First call is the activation probe against the staged configuration;
+        // the regular sync that follows a successful probe is the second.
+        expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({ activationProbe: true });
+        expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('Sync now'), 'info');
+    });
+
+    it('runs the verification sync when a WebDAV configuration is saved', async () => {
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('webdav');
+            result.current.syncPageProps.onWebdavUrlChange('https://dav.example.com/remote.php/dav/');
+        });
+        await act(async () => {
+            await result.current.syncPageProps.onSaveWebDav();
+        });
+
+        expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({ activationProbe: true });
+    });
+
+    it('runs the verification sync when a connected Dropbox account is chosen from the backend control', async () => {
+        // dd's WebDAV -> Dropbox switch: the chip only staged the choice, and
+        // the footer's Sync ran on WebDAV; leaving the page lost the choice.
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockResolvedValue({
+            ...dropboxConfigurationSnapshot('off'),
+            backend: 'webdav',
+            webdav: { ...dropboxConfigurationSnapshot('off').webdav, url: 'https://dav.example.com/dav', username: 'dd', hasPassword: true },
+        });
+        vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');
+        vi.spyOn(SyncService, 'isDropboxConnected').mockResolvedValue(true);
+        // The account dd connected in this session. The durable-connection probe
+        // only runs while Dropbox is the selected transport, so on a WebDAV page
+        // this session handle is what makes the Dropbox target complete.
+        SyncService.rememberPendingDropboxCredentialHandleForSession('opaque-candidate-handle');
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('webdav'));
+        await waitFor(() => expect(result.current.syncPageProps.dropboxConnected).toBe(true));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('cloud');
+        });
+
+        await waitFor(() => expect(SyncService.performSync).toHaveBeenCalled());
+        expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({
+            activationProbe: true,
+            configOverride: { backend: 'cloud', cloudProvider: 'dropbox' },
+        });
+    });
+
+    it('activates Dropbox once the connection probe answers after the chip was chosen', async () => {
+        // Off -> Dropbox on a connected account: the probe only runs while
+        // Dropbox is selected, so at chip time dropboxConnected is still false.
+        // The choice must stay armed until the probe flips it (device test).
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockResolvedValue(dropboxConfigurationSnapshot('off'));
+        vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');
+        let resolveProbe: (value: boolean) => void = () => undefined;
+        vi.spyOn(SyncService, 'isDropboxConnected').mockReturnValue(new Promise((resolve) => { resolveProbe = resolve; }));
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('off'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('cloud');
+        });
+        expect(SyncService.performSync).not.toHaveBeenCalled();
+
+        await act(async () => {
+            resolveProbe(true);
+            await Promise.resolve();
+        });
+
+        await waitFor(() => expect(SyncService.performSync).toHaveBeenCalled());
+        expect(vi.mocked(SyncService.performSync).mock.calls[0]?.[0]).toMatchObject({
+            activationProbe: true,
+            configOverride: { backend: 'cloud', cloudProvider: 'dropbox' },
+        });
+    });
+
+    it('does not activate a backend whose target is still incomplete', async () => {
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('webdav');
+        });
+
+        expect(SyncService.performSync).not.toHaveBeenCalled();
     });
 
     it('does not let a delayed persisted snapshot overwrite newer editor intent', async () => {
@@ -576,14 +750,20 @@ describe('useSyncSettings cloud token validation', () => {
         ['requeue', { success: true, skipped: 'requeued' as const }],
     ])('preserves the proven backend on %s', async (_label, syncResult) => {
         vi.mocked(SyncService.performSync).mockResolvedValueOnce(syncResult);
+        if (_label === 'requeue') {
+            // The probe retries a requeue twice before giving up; keep requeuing.
+            vi.mocked(SyncService.performSync)
+                .mockResolvedValueOnce(syncResult)
+                .mockResolvedValueOnce(syncResult);
+        }
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
         const showSaved = vi.fn();
         const { result } = setup(showSaved);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -618,6 +798,35 @@ describe('useSyncSettings cloud token validation', () => {
         }
     });
 
+    it('retries a requeued activation probe and commits when the retry passes', async () => {
+        // A store write landing mid-probe (an auto sync, an editor save) used to
+        // drop the switch behind a "Run Sync Now again" toast on the first try.
+        vi.mocked(SyncService.performSync)
+            .mockResolvedValueOnce({ success: true, skipped: 'requeued' })
+            .mockResolvedValueOnce({ success: true });
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        await stageBackend(result, 'cloud');
+        act(() => {
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        const probeCalls = vi.mocked(SyncService.performSync).mock.calls.filter(([options]) => options?.activationProbe);
+        expect(probeCalls).toHaveLength(2);
+        expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledTimes(1);
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Mindwtr found new changes while testing this sync setup. Run Sync Now again.',
+            'info',
+        );
+    });
+
     it('waits without activating when a compatible peer owns the candidate sync location', async () => {
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
@@ -629,8 +838,8 @@ describe('useSyncSettings cloud token validation', () => {
         });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -658,8 +867,8 @@ describe('useSyncSettings cloud token validation', () => {
         });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'file');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('file');
             result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
         });
 
@@ -684,8 +893,8 @@ describe('useSyncSettings cloud token validation', () => {
         });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'file');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('file');
             result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
         });
 
@@ -708,8 +917,8 @@ describe('useSyncSettings cloud token validation', () => {
             .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'cleanup' });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'file');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('file');
             result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
         });
 
@@ -738,8 +947,8 @@ describe('useSyncSettings cloud token validation', () => {
         });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -769,8 +978,8 @@ describe('useSyncSettings cloud token validation', () => {
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
+        await stageBackend(result, 'webdav');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('webdav');
             result.current.syncPageProps.onWebdavUrlChange('https://dav.example.com/mindwtr/');
             result.current.syncPageProps.onWebdavUsernameChange('alice');
             result.current.syncPageProps.onWebdavPasswordChange('secret');
@@ -859,8 +1068,8 @@ describe('useSyncSettings cloud token validation', () => {
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -885,8 +1094,8 @@ describe('useSyncSettings cloud token validation', () => {
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -928,8 +1137,8 @@ describe('useSyncSettings cloud token validation', () => {
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
 
         const validToken = 'a'.repeat(24);
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange(validToken);
         });
@@ -983,22 +1192,21 @@ describe('useSyncSettings cloud token validation', () => {
             expect(result.current.syncPageProps.cloudProvider).toBe('dropbox');
             expect(result.current.syncPageProps.dropboxConnected).toBe(true);
         });
+        // Choosing the connected Dropbox account activates it, and that
+        // automatic verification sync is the probe this race gates.
         await act(async () => {
             await result.current.syncPageProps.onSetSyncBackend('cloud');
         });
-
-        let syncPromise!: Promise<void>;
-        act(() => {
-            syncPromise = result.current.syncPageProps.onSyncNow();
-        });
         await waitFor(() => expect(SyncService.performSync).toHaveBeenCalledTimes(1));
+
         await act(async () => {
             await result.current.syncPageProps.onSetSyncBackend('off');
         });
         await act(async () => {
             releaseProbe();
-            await syncPromise;
         });
+        await waitFor(() => expect(SyncService.discardDropboxCredentials)
+            .toHaveBeenCalledWith('opaque-candidate-handle'));
 
         expect(SyncService.setSyncBackend).toHaveBeenCalledWith('off');
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
@@ -1021,8 +1229,8 @@ describe('useSyncSettings cloud token validation', () => {
         const showSaved = vi.fn();
         const { result } = setup(showSaved);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -1058,8 +1266,8 @@ describe('useSyncSettings cloud token validation', () => {
         const showSaved = vi.fn();
         const { result } = setup(showSaved);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
         act(() => {
-            void result.current.syncPageProps.onSetSyncBackend('cloud');
             result.current.syncPageProps.onCloudUrlChange('https://example.com');
             result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
         });
@@ -1069,8 +1277,8 @@ describe('useSyncSettings cloud token validation', () => {
             firstSync = result.current.syncPageProps.onSyncNow();
         });
         await waitFor(() => expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledTimes(1));
-        await act(async () => {
-            await result.current.syncPageProps.onSetSyncBackend('webdav');
+        await stageBackend(result, 'webdav');
+        act(() => {
             result.current.syncPageProps.onWebdavUrlChange('https://dav.example.com');
         });
         await act(async () => {
@@ -1780,6 +1988,9 @@ describe('useSyncSettings sync target validity', () => {
         vi.spyOn(SyncService, 'isDropboxConnected').mockResolvedValue(input.dropboxConnected);
         vi.spyOn(SyncService, 'listDataSnapshots').mockResolvedValue([]);
         vi.spyOn(SyncService, 'subscribeSyncStatus').mockImplementation(() => () => {});
+        // The first-frame seed is a session-static cache; a previous case's
+        // configuration must not satisfy this case's waitFor early.
+        vi.spyOn(SyncService, 'getLastKnownSyncSelection').mockReturnValue({ backend: null, cloudProvider: null, configuration: null });
 
         return renderHook(() => useSyncSettings({
             appVersion: '1.0.0',

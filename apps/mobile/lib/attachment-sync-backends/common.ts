@@ -2,16 +2,20 @@ import {
   applyAttachmentContentStat,
   assertBufferedAttachmentUploadSize,
   AttachmentUploadSizeUnavailableError,
+  buildSyncEncryptionRemoteReadExtra,
   bumpAttachmentContentRevision,
   checkAttachmentContentChange,
   computeSha256Hex,
   decryptRemoteArtifactOrThrow,
   encryptSyncArtifact,
   inspectSyncArtifact,
+  isAttachmentPresenceRepairCandidate,
   isSha256Hex,
   MAX_DOWNLOAD_BYTES,
+  repairMissingRemoteAttachments,
   ResponseTooLargeError,
   runAttachmentTransferLifecycle,
+  SYNC_ENCRYPTION_LOG_EVENTS,
   SyncCryptoUnsupportedError,
   SyncEncryptionTerminalError,
   WebDavRemoteWriteConflictError,
@@ -19,6 +23,7 @@ import {
   type AttachmentDownloadExpectation,
   type AttachmentTransferLifecycleOptions,
   type AttachmentTransferResult,
+  type SyncEncryptionRemoteReadLogInput,
   type SyncKeyMaterial,
 } from '@mindwtr/core';
 import * as FileSystem from '../file-system';
@@ -32,6 +37,8 @@ import {
   createAttachmentLocalMigrationLimiter,
   DEFAULT_CONTENT_TYPE,
   getLocalAttachmentPresence,
+  isHttpAttachmentUri,
+  logAttachmentInfo,
   logAttachmentWarn,
   readFileAsBytes,
   reportProgress,
@@ -41,8 +48,23 @@ import {
 } from '../attachment-sync-utils';
 import { installAttachmentFileGeneration, type AttachmentFileInstallResult } from '../attachment-file-installer';
 import { isExpoGo } from '../expo-go';
+import { logSyncEncryptionEvent } from '../sync-encryption-state';
 import { mobileSyncCryptoPrimitives } from '../sync-crypto-native';
 import { assertMobileWebdavConnection } from '../webdav-request-options';
+
+/**
+ * fresh-join-attachment-posture packet -10 (correction pass): the attachment byte seams
+ * (`sealAttachmentBytesForUpload`, `openAttachmentBytesFromDownload`) get their own
+ * `remote-read` line, same builder/event as the document-read seams in sync-service.ts
+ * (`this.logRemoteRead`) — that method is private to the sync-service class and this module
+ * cannot reach it, so this is a second, deliberately identical call through the same shared
+ * `logSyncEncryptionEvent` emitter (mirrors desktop's `logSyncEncryptionRemoteRead` in
+ * sync-encryption-service.ts, which has the identical constraint for the same reason). Not
+ * forced — rides the Debug logging switch like `state`/`remote-read` everywhere else.
+ */
+const logAttachmentByteRemoteRead = (input: SyncEncryptionRemoteReadLogInput): void => {
+  void logSyncEncryptionEvent(SYNC_ENCRYPTION_LOG_EVENTS.remoteRead, buildSyncEncryptionRemoteReadExtra(input));
+};
 
 /**
  * Attachment bytes at the storage seam (#1056). Local attachment files always stay
@@ -51,13 +73,25 @@ import { assertMobileWebdavConnection } from '../webdav-request-options';
  * change is the byte content.
  *
  * `null` material is the encryption-off path and returns the input untouched.
+ *
+ * `artifact` (review finding S1) is the caller's `cloudKey` — the four backends that call
+ * this hold it — passed straight through to `buildSyncEncryptionRemoteReadExtra`, which
+ * already reduces any string to its leaf name via `syncEncryptionArtifactLabel`. Optional:
+ * a caller with no identity yet (there is none today) still gets a valid line, just with
+ * the absent marker.
  */
 export const sealAttachmentBytesForUpload = async (
   bytes: Uint8Array,
   material: SyncKeyMaterial | null | undefined,
-): Promise<Uint8Array> => (
-  material ? encryptSyncArtifact(bytes, material, mobileSyncCryptoPrimitives) : bytes
-);
+  artifact?: string | null,
+): Promise<Uint8Array> => {
+  if (material) {
+    logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: null, kind: 'encrypted', decision: 'seal' });
+    return encryptSyncArtifact(bytes, material, mobileSyncCryptoPrimitives);
+  }
+  logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: null, kind: 'plaintext', decision: 'seal' });
+  return bytes;
+};
 
 /**
  * Inverse of the above. A remote attachment that is still plaintext is passed through:
@@ -65,17 +99,32 @@ export const sealAttachmentBytesForUpload = async (
  * `validateAttachmentHash` downstream is the backstop for content that is neither. Bytes
  * that DO carry the MWENC1 magic must decrypt or fail closed — a broken container is
  * never quietly treated as file content.
+ *
+ * `artifact`: see `sealAttachmentBytesForUpload` above.
  */
 export const openAttachmentBytesFromDownload = async (
   bytes: Uint8Array,
   material: SyncKeyMaterial | null | undefined,
+  artifact?: string | null,
 ): Promise<Uint8Array> => {
   if (!material) return bytes;
   const inspected = inspectSyncArtifact(bytes);
-  if (inspected.kind === 'plaintext') return bytes;
+  if (inspected.kind === 'plaintext') {
+    logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: true, kind: 'plaintext', decision: 'plaintext' });
+    return bytes;
+  }
   if (inspected.kind === 'unsupported') {
+    logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: true, kind: 'unsupported', decision: 'decrypt' });
     throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(inspected.reason));
   }
+  logAttachmentByteRemoteRead({
+    artifact: artifact ?? '',
+    exists: true,
+    kind: 'encrypted',
+    headerSalt: inspected.salt,
+    headerKdf: inspected.params,
+    decision: 'decrypt',
+  });
   return decryptRemoteArtifactOrThrow(bytes, material.key, mobileSyncCryptoPrimitives);
 };
 
@@ -114,9 +163,14 @@ const buildBearerAuthHeader = (token?: string): string | null => {
   return `Bearer ${token}`;
 };
 
-const resolveUploadType = (): any => {
-  const types = (FileSystem as any).FileSystemUploadType;
-  return types?.BINARY_CONTENT ?? types?.BINARY ?? undefined;
+/** #1136: the enum lives in `expo-file-system/legacy`, never in the local wrapper.
+ *  Android's native `FileSystemUploadOptions.uploadType` has no default and expo's
+ *  `UploadTask` spreads our options over its own default, so an undefined value
+ *  reaches Kotlin as null and `uploadTaskStartAsync` dies on `Enum.ordinal()`.
+ *  Never return undefined: 0 is BINARY_CONTENT on both sides. */
+const resolveUploadType = (): number => {
+  const types = (LegacyFileSystem as any).FileSystemUploadType;
+  return types?.BINARY_CONTENT ?? types?.BINARY ?? 0;
 };
 
 export const createAttachmentAbortError = (
@@ -726,6 +780,65 @@ export const migrateAttachmentsLocallyBeforeSync = async (
     if (result.skipped) attachmentsById.delete(attachment.id);
   }
   return patches;
+};
+
+/** One request per attachment is the fallback shape, so the pass is bounded. See the
+ *  ceiling note on `repairMissingRemoteAttachments`'s `maxChecks` in core. */
+export const CLOUD_ATTACHMENT_PRESENCE_MAX_CHECKS_PER_PASS = 200;
+
+/**
+ * #1119 follow-up: the "does the sync location still hold this blob?" pre-pass for Dropbox
+ * and the self-hosted cloud, mirroring desktop's `reconcileRemoteAttachmentPresence` in
+ * apps/desktop/src/lib/sync-attachment-backends.ts so the two apps repair the same way.
+ * WebDAV keeps its own inline loop on both platforms, because that walk also prunes
+ * unreadable attachments and clears download backoffs.
+ *
+ * Only an attachment this device can actually re-upload is eligible — `canUploadAttachmentFrom`
+ * plus readable local bytes — because clearing `cloudKey` is a request to upload again, and a
+ * device with no readable copy would just drop the pointer to the blob. The rest of the
+ * safety rule (a definitive not-found and nothing else may clear anything) lives in core.
+ *
+ * Returns whether the proof ran to the end: `false` means the caller must not advance the
+ * once-a-day stamp, so the next cycle retries.
+ */
+export const reconcileRemoteAttachmentPresence = async (options: {
+  label: string;
+  attachmentsById: Map<string, Attachment>;
+  /** Opens the pass. Called only once there is something to ask about, so a library with
+   *  nothing to prove costs no request at all; `null` means the remote could not be asked
+   *  (a listing that failed), which proves nothing and clears nothing. */
+  createProbe: () => Promise<((attachment: Attachment) => Promise<boolean | null>) | null>;
+  recordPatch: (attachment: Attachment) => void;
+  maxChecks?: number;
+  signal?: AbortSignal;
+}): Promise<boolean> => {
+  const candidates: Attachment[] = [];
+  for (const original of options.attachmentsById.values()) {
+    assertAttachmentSyncNotAborted(options.signal);
+    if (!isAttachmentPresenceRepairCandidate(original)) continue;
+    const uri = original.uri || '';
+    if (!uri || isHttpAttachmentUri(uri) || !canUploadAttachmentFrom(uri)) continue;
+    if (await getLocalAttachmentPresence(uri) !== 'present') continue;
+    candidates.push(original);
+  }
+  if (candidates.length === 0) return true;
+
+  const probe = await options.createProbe();
+  if (!probe) return false;
+
+  const result = await repairMissingRemoteAttachments({
+    candidates,
+    probe,
+    clear: (original) => options.recordPatch({ ...original, cloudKey: undefined }),
+    maxChecks: options.maxChecks,
+    log: logAttachmentInfo,
+  });
+  logAttachmentInfo(`${options.label} attachment presence pass`, {
+    checked: String(result.checked),
+    cleared: String(result.cleared),
+    complete: result.complete ? 'true' : 'false',
+  });
+  return result.complete;
 };
 
 export const waitForAttachmentSyncDelay = async (ms: number, signal?: AbortSignal): Promise<void> => {

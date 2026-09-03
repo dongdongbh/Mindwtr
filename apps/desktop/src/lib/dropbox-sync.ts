@@ -9,6 +9,7 @@ export {
     getDropboxAppDataMetadata,
     getDropboxFileMetadata,
     isDropboxUnauthorizedError,
+    listDropboxFolderFiles,
     testDropboxAccess,
     uploadDropboxAppData,
     uploadDropboxFile,

@@ -444,6 +444,12 @@ export const createProgressStream = (bytes: Uint8Array, onProgress: (loaded: num
  */
 const NO_REDIRECT_METHODS = new Set(['PUT', 'POST', 'PATCH', 'DELETE']);
 
+/** Appended to a timeout message when the timer fired far later than its delay:
+ *  the app was suspended by the OS with the request in flight. Sync treats it
+ *  like a dropped connection (retry later, no failure banner). */
+export const SUSPENDED_REQUEST_MESSAGE = 'the request was interrupted while the app was suspended';
+const SUSPENDED_REQUEST_FACTOR = 3;
+
 export const fetchWithTimeoutAndConsume = async <T>(
     url: string,
     init: RequestInit,
@@ -454,9 +460,15 @@ export const fetchWithTimeoutAndConsume = async <T>(
 ): Promise<T> => {
     const abortController = typeof AbortController === 'function' ? new AbortController() : null;
     let didTimeout = false;
+    let firedAfterSuspension = false;
+    const startedAt = Date.now();
     const timeoutId = abortController
         ? setTimeout(() => {
             didTimeout = true;
+            // A timer that fires hours late means the OS froze the process with
+            // the request in flight (Android cached-app freezer, doze); the
+            // socket is dead and the "timeout" is really an interruption.
+            firedAfterSuspension = Date.now() - startedAt > timeoutMs * SUSPENDED_REQUEST_FACTOR;
             abortController.abort(createAbortError(timeoutMessage));
         }, timeoutMs)
         : null;
@@ -503,7 +515,9 @@ export const fetchWithTimeoutAndConsume = async <T>(
     } catch (error) {
         if (isAbortError(error)) {
             if (didTimeout) {
-                throw new Error(timeoutMessage);
+                throw new Error(firedAfterSuspension
+                    ? `${timeoutMessage}; ${SUSPENDED_REQUEST_MESSAGE}`
+                    : timeoutMessage);
             }
             if (externalSignal?.aborted) {
                 throw getAbortSignalReason(externalSignal, 'Request cancelled');

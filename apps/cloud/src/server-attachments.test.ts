@@ -578,3 +578,76 @@ describe('handleAttachmentPathRequest DELETE', () => {
         }
     });
 });
+
+// #1119 attachment presence pass: a client that cannot stop a response body early must be
+// able to ask whether a blob is still there without downloading it.
+describe('handleAttachmentPathRequest HEAD', () => {
+    const withSandbox = async (
+        run: (paths: { rootRealPath: string; filePath: string }) => Promise<void>,
+    ): Promise<void> => {
+        const sandbox = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-attachment-head-'));
+        try {
+            const rootRealPath = join(sandbox, 'attachments');
+            mkdirSync(rootRealPath, { recursive: true });
+            await run({ rootRealPath, filePath: join(rootRealPath, 'file.bin') });
+        } finally {
+            rmSync(sandbox, { recursive: true, force: true });
+        }
+    };
+
+    const head = (paths: { rootRealPath: string; filePath: string }) => handleAttachmentPathRequest(
+        new Request('http://localhost/v1/attachments/file.bin', { method: 'HEAD' }),
+        '/v1/attachments/file.bin',
+        paths,
+        { maxAttachmentBytes: 1024, abortSignal: new AbortController().signal },
+    );
+
+    test('reports a stored attachment with its size and no body', async () => {
+        await withSandbox(async (paths) => {
+            writeFileSync(paths.filePath, 'attachment');
+
+            const response = await head(paths);
+
+            expect(response.status).toBe(200);
+            expect(response.headers.get('content-length')).toBe(String('attachment'.length));
+            expect(response.headers.get('content-type')).toBe('application/octet-stream');
+            expect(await response.arrayBuffer()).toHaveLength(0);
+        });
+    });
+
+    test('answers 404 for an attachment that is not there', async () => {
+        await withSandbox(async (paths) => {
+            const response = await head(paths);
+            expect(response.status).toBe(404);
+        });
+    });
+
+    test('agrees with GET about status and size', async () => {
+        await withSandbox(async (paths) => {
+            writeFileSync(paths.filePath, 'attachment');
+            const getResponse = await handleAttachmentPathRequest(
+                new Request('http://localhost/v1/attachments/file.bin'),
+                '/v1/attachments/file.bin',
+                paths,
+                { maxAttachmentBytes: 1024, abortSignal: new AbortController().signal },
+            );
+            const headResponse = await head(paths);
+
+            expect(headResponse.status).toBe(getResponse.status);
+            expect(headResponse.headers.get('content-length'))
+                .toBe(String((await getResponse.arrayBuffer()).byteLength));
+        });
+    });
+
+    test('never leaves the attachment root, even through a symlink', async () => {
+        await withSandbox(async (paths) => {
+            const outside = join(paths.rootRealPath, '..', 'outside.bin');
+            writeFileSync(outside, 'secret');
+            symlinkSync(outside, paths.filePath);
+
+            const response = await head(paths);
+
+            expect(response.status).toBe(400);
+        });
+    });
+});

@@ -893,7 +893,9 @@ pub(crate) fn open_path(
     if !path_is_openable(&normalized, &allowed_roots) {
         return Err("Path does not exist or cannot be opened.".to_string());
     }
-    open::that(normalized).map_err(|e| e.to_string())?;
+    // Detached: waiting on the handler would block this command for as long as
+    // the viewer or browser stays open.
+    open::that_detached(normalized).map_err(|e| e.to_string())?;
     Ok(true)
 }
 

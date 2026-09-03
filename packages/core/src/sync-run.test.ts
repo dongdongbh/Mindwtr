@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppData, Project, Task } from './types';
 import type {
@@ -11,10 +11,11 @@ import type {
     SyncStatusUpdates,
 } from './sync-run-ports';
 import { SyncRemoteWriteConflict } from './sync-run-ports';
-import { normalizeRemoteWriteResult, runSharedSyncCycle } from './sync-run';
+import { clearIdleSyncCycleSnapshot, normalizeRemoteWriteResult, runSharedSyncCycle } from './sync-run';
 import { normalizeAppData } from './sync-normalization';
 import { cloneAppData } from './sync-runtime-utils';
 import { toRemoteSyncDocument } from './sync-document';
+import { toStableSyncJson } from './sync-helpers';
 import type { FastSyncState } from './sync-fast-sync';
 import {
     SyncFileGenerationCorruptError,
@@ -23,13 +24,20 @@ import {
     type SyncBackend,
 } from './sync-service-utils';
 import type { SyncCycleIO, SyncCycleResult } from './sync-types';
-import { performSyncCycle } from './sync';
+import { mergeAppData, performSyncCycle } from './sync';
 import {
     SyncRemoteMutationFenceBusyError,
     SyncRemoteMutationFenceLostError,
     type SyncRemoteMutationFenceLease,
 } from './sync-remote-fence';
 import { AttachmentUploadTooLargeError } from './attachment-transfer';
+
+// Each harness stands up its own fake store, so the process-wide idle-cycle
+// snapshot (keyed on sync scope + the store's change stamp, unique inside a
+// real app) would otherwise leak one harness's document into the next.
+beforeEach(() => {
+    clearIdleSyncCycleSnapshot();
+});
 
 const NOW = new Date('2026-07-13T10:00:00.000Z');
 const STAMP = '2026-07-01T00:00:00.000Z';
@@ -1354,7 +1362,13 @@ describe('runSharedSyncCycle', () => {
         const { io, storage, run } = createHarness({
             io: {
                 acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease),
-                syncAttachments: vi.fn().mockResolvedValue(false),
+                // The fence is taken on the first mutation, so a pass that never
+                // reaches for it never meets the lost lease. Every real backend
+                // calls this immediately before it writes.
+                syncAttachments: vi.fn(async (_data, helpers) => {
+                    await helpers.assertRemoteMutationFenceHeld();
+                    return false;
+                }),
             },
         });
 
@@ -1514,6 +1528,12 @@ describe('runSharedSyncCycle', () => {
         expect(hooks.requestFollowUp).toHaveBeenCalled();
         expect(harness.persisted.settings.pendingRemoteWriteAt).toBeUndefined();
         expect(harness.diagnostics).toContain('requeued');
+        // Desktop has no diagnostics sink: the requeue must also reach the plain
+        // log with its reason, or a never-converging activation probe is invisible.
+        expect(harness.infos).toContainEqual(expect.objectContaining({
+            message: 'Sync cycle requeued',
+            extra: expect.objectContaining({ reason: 'remote-write-conflict' }),
+        }));
     });
 
     it('records a setup-phase failure against the backend the hook reported, not the pre-setup default', async () => {
@@ -2673,5 +2693,563 @@ describe('activation proof with metadata-only attachments (no blob anywhere)', (
             error: '[cloud] Candidate attachment proof failed for attachment-unreadable',
         });
         expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+});
+
+describe('sync cycle cost cuts', () => {
+    it('does not acquire the remote mutation fence for a pre-sync pass with nothing to mutate', async () => {
+        const acquireRemoteMutationFence = vi.fn(async () => createFenceLease());
+        const { run } = createHarness({
+            fastSyncScope: 'scope-idle-fence',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: {
+                acquireRemoteMutationFence,
+                syncAttachments: vi.fn(async () => false),
+            },
+        });
+
+        await run();
+        const afterFirstMerge = acquireRemoteMutationFence.mock.calls.length;
+        const second = await run();
+
+        expect(second.skipped).toBe('unchanged');
+        expect(acquireRemoteMutationFence.mock.calls.length).toBe(afterFirstMerge);
+    });
+
+    it('acquires the fence before an attachment pass that does mutate', async () => {
+        const acquireRemoteMutationFence = vi.fn(async () => createFenceLease());
+        const { run } = createHarness({
+            fastSyncScope: 'scope-mutating-fence',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: {
+                acquireRemoteMutationFence,
+                syncAttachments: vi.fn(async (_data, helpers) => {
+                    await helpers.assertRemoteMutationFenceHeld();
+                    return false;
+                }),
+            },
+        });
+
+        await run();
+
+        expect(acquireRemoteMutationFence).toHaveBeenCalled();
+    });
+
+    it('skips the local document write when the merge produced nothing new', async () => {
+        const bundle = createHarness({ fastSyncScope: 'scope-local-write' });
+        // Settle: the first cycles publish the normalized document and absorb
+        // the sanitized settings the remote copy materializes. Each one is
+        // followed by what mobile's post-sync refresh does, so the next cycle's
+        // reconcile takes the aligned path.
+        await bundle.run();
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        await bundle.run({ manual: true });
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        vi.mocked(bundle.storage.persistLocal).mockClear();
+        bundle.harness.statusUpdates.length = 0;
+        // Force the merge phase: a manual run never takes the fast-check skip.
+        const second = await bundle.run({ manual: true });
+
+        expect(second).toMatchObject({ success: true, localWriteSkipped: true });
+        expect(bundle.storage.persistLocal).not.toHaveBeenCalled();
+        expect(bundle.harness.statusUpdates.at(-1)).toMatchObject({ lastSyncStatus: 'success' });
+        const info = vi.mocked(bundle.hooks.finalizeSuccess).mock.calls.at(-1)?.[1];
+        expect(info?.wroteLocal).toBe(false);
+        // The signal mobile's post-sync refresh reads.
+        expect(info?.localWriteSkipped).toBe(true);
+    });
+
+    it('still writes locally when the merge brings in a remote change', async () => {
+        const bundle = createHarness({ fastSyncScope: 'scope-local-write-needed' });
+        await bundle.run();
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        await bundle.run({ manual: true });
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        vi.mocked(bundle.storage.persistLocal).mockClear();
+        bundle.harness.remote = createData([
+            createTask('t-local', 'Local task'),
+            createTask('t-remote', 'Arrived from another device'),
+        ]);
+
+        const second = await bundle.run({ manual: true });
+
+        expect(second.localWriteSkipped).toBeUndefined();
+        expect(bundle.storage.persistLocal).toHaveBeenCalled();
+        expect(bundle.harness.persisted.tasks.map((task) => task.id)).toContain('t-remote');
+    });
+
+    it('reuses the previous cycle\'s local snapshot for a back-to-back idle cycle', async () => {
+        const bundle = createHarness({ fastSyncScope: 'scope-idle-cache', policy: { carryIdleCycleSnapshot: true } });
+        await bundle.run();
+        await bundle.run();
+        vi.mocked(bundle.storage.readPersistedLocal).mockClear();
+        const third = await bundle.run();
+
+        expect(third.skipped).toBe('unchanged');
+        expect(bundle.storage.readPersistedLocal).not.toHaveBeenCalled();
+    });
+
+    it('re-reads the local snapshot when a write lands between idle cycles', async () => {
+        const bundle = createHarness({
+            fastSyncScope: 'scope-idle-cache-invalidated',
+            policy: { carryIdleCycleSnapshot: true },
+        });
+        await bundle.run();
+        await bundle.run();
+        vi.mocked(bundle.storage.readPersistedLocal).mockClear();
+        bundle.harness.lastDataChangeAt += 1;
+
+        await bundle.run();
+
+        expect(bundle.storage.readPersistedLocal).toHaveBeenCalled();
+    });
+});
+
+describe('attachment pre-sync reconcile short-circuit', () => {
+    const withAttachment = (data: AppData, cloudKey: string | undefined): AppData => ({
+        ...data,
+        tasks: data.tasks.map((task, index) => (index === 0
+            ? {
+                ...task,
+                attachments: [{
+                    id: 'a-1',
+                    kind: 'file' as const,
+                    title: 'file.txt',
+                    uri: 'file:///local/file.txt',
+                    localStatus: 'available' as const,
+                    cloudKey,
+                    createdAt: STAMP,
+                    updatedAt: STAMP,
+                }],
+            }
+            : task)),
+    });
+
+    it('hands back the pre-synced side without merging when both sides align', async () => {
+        // Diverged content at identical revision metadata: only the
+        // short-circuit yields the pre-synced title.
+        const inMemory = createData([createTask('t-1', 'Zebra title')]);
+        const preSynced = createData([createTask('t-1', 'Apple title')]);
+        let capturedLocal: AppData | null = null;
+        const { run } = createHarness({
+            local: inMemory,
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: { syncAttachments: vi.fn(async () => cloneAppData(preSynced)) },
+            performSyncCycle: async (io) => {
+                capturedLocal = await io.readLocal();
+                return performSyncCycle(io);
+            },
+        });
+
+        await run();
+
+        expect(capturedLocal!.tasks.map((task) => task.title)).toEqual(['Apple title']);
+    });
+
+    it('still merges when only the attachment fields differ', async () => {
+        // Identical revision tuples on both sides; the cloudKey lives only on
+        // the IN-MEMORY side, so the assertion discriminates — a short-circuit
+        // on the change fingerprint alone hands back the pre-synced side and
+        // drops it.
+        const base = createData([createTask('t-1', 'Shared task')]);
+        const inMemory = withAttachment(base, 'attachments/a-1.txt');
+        const preSynced = withAttachment(base, undefined);
+        let capturedLocal: AppData | null = null;
+        const { run } = createHarness({
+            local: inMemory,
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: { syncAttachments: vi.fn(async () => cloneAppData(preSynced)) },
+            performSyncCycle: async (io) => {
+                capturedLocal = await io.readLocal();
+                return performSyncCycle(io);
+            },
+        });
+
+        await run();
+
+        expect(capturedLocal!.tasks[0].attachments?.[0].cloudKey).toBe('attachments/a-1.txt');
+    });
+});
+
+describe('local-only upload fast path', () => {
+    /** Backends that can turn a fingerprint into a real conditional write
+     *  (WebDAV strong ETag, Dropbox rev) report it through this port. */
+    const conditionalIo = { adoptRemoteFingerprintForWrite: vi.fn(() => true) };
+
+    // A store write always moves the entity forward (`prepareStoreStateUpdate`
+    // bumps `rev` and stamps `updatedAt`), which is what makes the local
+    // document dominate the remote copy the fast path never reads.
+    const editedTask = (id: string, title: string, rev = 4, updatedAt = '2026-07-12T10:00:00.000Z'): Task => ({
+        ...createTask(id, title),
+        rev,
+        revBy: 'this-device',
+        updatedAt,
+    } as Task);
+
+    /** Raw store output: an edit, an uncompacted purged tombstone, and an
+     *  entity stamped in the future by a skewed clock. Deliberately NOT
+     *  canonical — the storage codecs materialize the fields it omits. */
+    const rawLocal = (title: string, rev?: number, updatedAt?: string): AppData => createData([
+        editedTask('t-local', title, rev, updatedAt),
+        {
+            ...createTask('t-purged', 'Deleted and purged'),
+            deletedAt: '2026-06-01T00:00:00.000Z',
+            purgedAt: '2026-06-02T00:00:00.000Z',
+            description: 'body that compaction has to strip',
+        } as Task,
+        { ...createTask('t-skewed', 'Stamped in the future'), updatedAt: '2099-01-01T00:00:00.000Z' } as Task,
+    ]);
+
+    const EMPTY_REMOTE: AppData = {
+        tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
+    };
+
+    /** The document a device actually holds: written by a previous cycle's
+     *  merge and read back through codecs that reproduce it field for field.
+     *  The fast path skips the empty-remote merge on exactly that guarantee
+     *  (`pass(readLocal(x)) === readLocal(x)`), so a fixture standing in for a
+     *  local read has to be a fixed point of the pass too. */
+    const messyLocal = (title: string, rev?: number, updatedAt?: string): AppData =>
+        mergeAppData(rawLocal(title, rev, updatedAt), EMPTY_REMOTE);
+
+    /** One settled cycle, then a purely local edit. */
+    const settleThenEditLocally = async (bundle: ReturnType<typeof createHarness>, title: string) => {
+        await bundle.run();
+        bundle.harness.persisted = cloneAppData(messyLocal(title, 5, '2026-07-13T09:30:00.000Z'));
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        bundle.harness.lastDataChangeAt += 1;
+    };
+
+    beforeEach(() => {
+        conditionalIo.adoptRemoteFingerprintForWrite.mockClear();
+        conditionalIo.adoptRemoteFingerprintForWrite.mockReturnValue(true);
+    });
+
+    it('uploads without reading the remote document', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-upload',
+            // Both platforms run the attachment pre-sync BEFORE this step; the
+            // fast path refuses when a platform does not (see the gate test).
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+        vi.mocked(bundle.io.writeRemote).mockClear();
+
+        const result = await bundle.run();
+
+        expect(result.success).toBe(true);
+        expect(result.skipped).toBeUndefined();
+        expect(bundle.io.readRemote).not.toHaveBeenCalled();
+        expect(bundle.io.writeRemote).toHaveBeenCalledTimes(1);
+        expect(bundle.harness.remote?.tasks.find((task) => task.id === 't-local')?.title)
+            .toBe('Edited only here');
+        expect(bundle.harness.infos.some((info) => (
+            info.message === 'Sync uploading a local-only change without a remote read'
+        ))).toBe(true);
+    });
+
+    it('writes the same remote bytes a full cycle would have written', async () => {
+        const fast = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-bytes',
+            // Both platforms run the attachment pre-sync BEFORE this step; the
+            // fast path refuses when a platform does not (see the gate test).
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: conditionalIo,
+        });
+        // Identical harness minus the conditional-write capability: it reads the
+        // remote and runs the two-sided merge.
+        const full = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-full-bytes',
+        });
+        await settleThenEditLocally(fast, 'Edited only here');
+        await settleThenEditLocally(full, 'Edited only here');
+        vi.mocked(fast.io.readRemote).mockClear();
+        vi.mocked(full.io.readRemote).mockClear();
+
+        await fast.run();
+        await full.run();
+
+        expect(fast.io.readRemote).not.toHaveBeenCalled();
+        expect(full.io.readRemote).toHaveBeenCalled();
+        expect(toStableSyncJson(toRemoteSyncDocument(fast.harness.remote!)))
+            .toBe(toStableSyncJson(toRemoteSyncDocument(full.harness.remote!)));
+        // Discriminating: the uploaded document really went through the merge
+        // normalizer (fields the fixture never sets are materialized, the
+        // purged tombstone lost its body), so this is not two unprocessed
+        // copies of the same input compared against each other.
+        const uploaded = fast.harness.remote!;
+        expect(uploaded.tasks.find((task) => task.id === 't-local')?.suppressMindwtrReminders).toBe(false);
+        const purged = uploaded.tasks.find((task) => task.id === 't-purged');
+        expect(purged?.description).toBeUndefined();
+        expect(purged?.title).toBeUndefined();
+    });
+
+    it('skips the empty-remote merge entirely', async () => {
+        // Observable only with a deliberately non-canonical local document: a
+        // real one is a fixed point of the pass, which is the whole reason the
+        // skip is safe. The raw fixture omits fields the merge materializes, so
+        // the fast path publishes them missing where a full cycle fills them in.
+        const nonCanonical = rawLocal('Edited only here', 5, '2026-07-13T09:30:00.000Z');
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-skips-merge',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: conditionalIo,
+        });
+        await bundle.run();
+        bundle.harness.persisted = cloneAppData(nonCanonical);
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        bundle.harness.lastDataChangeAt += 1;
+
+        await bundle.run();
+
+        const uploaded = bundle.harness.remote!.tasks.find((task) => task.id === 't-local');
+        expect(uploaded?.title).toBe('Edited only here');
+        // The merge would have materialized these; nothing else in the cycle does.
+        expect(uploaded?.suppressMindwtrReminders).toBeUndefined();
+        expect(uploaded?.isFocusedToday).toBeUndefined();
+        // The tombstone purge and the validate step still run: the purged
+        // tombstone is gone from the wire document, not merely uncompacted.
+        expect(bundle.harness.remote!.tasks.find((task) => task.id === 't-purged')?.description)
+            .toBeUndefined();
+    });
+
+    it('reads the remote when the backend cannot make the write conditional', async () => {
+        // Weak ETag, no ETag at all, legacy-plaintext WebDAV: the backend
+        // refuses to adopt the fingerprint and the cycle runs in full.
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-weak',
+            io: { adoptRemoteFingerprintForWrite: vi.fn(() => false) },
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when the backend exposes no fingerprint at all', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-nofp',
+            io: { ...conditionalIo, readRemoteFingerprint: undefined },
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when there is no recorded fast-sync state', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-norecord',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        bundle.harness.fastStates.clear();
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when the remote fingerprint moved', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-moved',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        // Another device wrote: the harness fingerprint is derived from the
+        // remote's task ids, so an added task moves it.
+        bundle.harness.remote = createData([
+            ...bundle.harness.remote!.tasks,
+            createTask('t-remote', 'Arrived from another device'),
+        ]);
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+        expect(bundle.harness.persisted.tasks.map((task) => task.id)).toContain('t-remote');
+    });
+
+    it('reads the remote while a pending remote-write marker is on disk', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-pending',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        const withMarker = (data: AppData): AppData => ({
+            ...data,
+            settings: { ...data.settings, pendingRemoteWriteAt: '2026-07-13T09:00:00.000Z' },
+        });
+        bundle.harness.persisted = withMarker(bundle.harness.persisted);
+        bundle.harness.inMemory = withMarker(bundle.harness.inMemory);
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when an attachment upload is still pending', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-attachment',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        const withPendingUpload = (data: AppData): AppData => ({
+            ...data,
+            tasks: data.tasks.map((task, index) => (index === 0
+                ? {
+                    ...task,
+                    attachments: [{
+                        id: 'a-1',
+                        kind: 'file' as const,
+                        title: 'file.txt',
+                        uri: 'file:///local/file.txt',
+                        localStatus: 'available' as const,
+                        pendingContentUpload: true,
+                        createdAt: STAMP,
+                        updatedAt: STAMP,
+                    }],
+                }
+                : task)),
+        });
+        bundle.harness.persisted = withPendingUpload(bundle.harness.persisted);
+        bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when the attachment pre-sync patched the local document', async () => {
+        // The pre-sync phase runs before this check on both platforms. Its
+        // patches (cloudKey, localStatus) are not "a local-document-only
+        // change", so the cycle reads.
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-presync',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: {
+                ...conditionalIo,
+                // Prepare only: a post-merge mutation would mark the fast-sync
+                // state unsafe and this scenario would stop discriminating.
+                syncAttachments: vi.fn(async (data: AppData, attachmentHelpers) => (
+                    attachmentHelpers.phase === 'prepare'
+                        ? {
+                            ...data,
+                            tasks: data.tasks.map((task, index) => (
+                                index === 0 ? { ...task, title: 'Patched by the attachment pass' } : task
+                            )),
+                        }
+                        : null
+                )),
+            },
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when the transport says the remote needs repair', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-repair',
+            io: { ...conditionalIo, requiresRemoteRepair: () => true },
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run();
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote on a manual sync', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-manual',
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        await bundle.run({ manual: true });
+
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+    });
+
+    it('reads the remote when the platform runs the attachment pre-sync after the fast check', async () => {
+        // `preSyncedLocalData` can only witness attachment patches that landed
+        // BEFORE this step; a platform that orders the pre-sync afterwards must
+        // take the full cycle or a later patch would ride a write that never read.
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-late-presync',
+            policy: { preSyncAttachmentsBeforeFastCheck: false },
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        const result = await bundle.run();
+
+        expect(result.success).toBe(true);
+        expect(bundle.io.readRemote).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to a full cycle when the conditional write loses the swap', async () => {
+        const bundle = createHarness({
+            local: messyLocal('Local task'),
+            fastSyncScope: 'scope-fast-precondition',
+            // Both platforms run the attachment pre-sync BEFORE this step; the
+            // fast path refuses when a platform does not (see the gate test).
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: conditionalIo,
+        });
+        await settleThenEditLocally(bundle, 'Edited only here');
+        // The peer that won the swap; the write rejects on the stale precondition.
+        const peerRemote = createData([
+            ...bundle.harness.remote!.tasks,
+            createTask('t-remote', 'Arrived from another device'),
+        ]);
+        vi.mocked(bundle.io.writeRemote).mockImplementationOnce(async () => {
+            bundle.harness.remote = cloneAppData(peerRemote);
+            throw new SyncRemoteWriteConflict();
+        });
+        vi.mocked(bundle.io.readRemote).mockClear();
+
+        const conflicted = await bundle.run();
+
+        expect(conflicted).toMatchObject({ success: true, skipped: 'requeued' });
+        expect(bundle.io.readRemote).not.toHaveBeenCalled();
+        expect(bundle.hooks.requestFollowUp).toHaveBeenCalled();
+
+        // The requeued cycle sees a moved fingerprint, reads, and merges.
+        const followUp = await bundle.run();
+
+        expect(followUp.success).toBe(true);
+        expect(bundle.io.readRemote).toHaveBeenCalled();
+        expect(bundle.harness.persisted.tasks.map((task) => task.id)).toContain('t-remote');
     });
 });

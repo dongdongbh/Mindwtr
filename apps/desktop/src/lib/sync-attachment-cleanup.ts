@@ -10,6 +10,7 @@ import {
     type CloudProvider,
     runAttachmentCleanupLifecycle,
     normalizeStrongWebdavEtag,
+    webdavDeleteFile,
     webdavDeleteFileVersioned,
     webdavHeadFile,
 } from '@mindwtr/core';
@@ -55,13 +56,49 @@ export type AttachmentCleanupGuards = {
     assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
 };
 
+const MAX_APPENDED_CLEANUP_ERROR_CHARS = 300;
+
+// Deliberately not core's sanitizeForLog: that sanitizer keeps a URL's host/path
+// (it only strips credentials and flagged query params), while a cleanup cause
+// should never carry a server URL at all. Strip URLs and Authorization/Basic
+// fragments outright, then cap the length (device test, 2026-09-02).
+const sanitizeAttachmentCleanupErrorDetail = (text: string): string => {
+    const stripped = text
+        .replace(/https?:\/\/\S+/gi, '[url]')
+        .replace(/(Authorization:\s*)?(Basic|Bearer)\s+[A-Za-z0-9+/=._-]+/gi, '[redacted]');
+    return stripped.length > MAX_APPENDED_CLEANUP_ERROR_CHARS
+        ? stripped.slice(0, MAX_APPENDED_CLEANUP_ERROR_CHARS)
+        : stripped;
+};
+
 const describeAttachmentCleanupErrorForLog = (error: unknown): Error => {
     const status = getErrorStatus(error);
-    return new Error(
-        status == null
-            ? 'Attachment cleanup operation failed'
-            : `Attachment cleanup operation failed (${status})`,
-    );
+    const prefix = status == null
+        ? 'Attachment cleanup operation failed'
+        : `Attachment cleanup operation failed (${status})`;
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    const sanitizedDetail = sanitizeAttachmentCleanupErrorDetail(detail);
+    return new Error(sanitizedDetail ? `${prefix}: ${sanitizedDetail}` : prefix);
+};
+
+// Tauri plugin-fs surfaces a missing file as an ENOENT-style io error. Deleting
+// an already-gone orphan is the cleanup succeeding, not failing (device test,
+// 2026-09-02 logged a warning every cycle for work that was already done).
+const isMissingLocalFileError = (error: unknown): boolean => {
+    if (!(error instanceof Error)) return false;
+    if ((error as Error & { code?: string }).code === 'ENOENT') return true;
+    return /no such file or directory|os error 2\b/i.test(error.message);
+};
+
+// The path we tried to operate on is the one piece of this error that can carry
+// a private attachment title (the on-disk name can equal the title, #1038-era
+// paths included) — redact exactly that known substring rather than guessing
+// at path shapes in general.
+const redactKnownPathFromError = (error: unknown, path: string | undefined): unknown => {
+    if (!path || !(error instanceof Error) || !error.message.includes(path)) return error;
+    const redacted = new Error(error.message.split(path).join('[attachment-path]'));
+    redacted.name = error.name;
+    return redacted;
 };
 
 const logAttachmentCleanupWarning = (
@@ -102,13 +139,14 @@ export const deleteAttachmentFile = async (
     if (!safeUri) return;
     const rawUri = stripFileScheme(safeUri);
     if (/^https?:\/\//i.test(rawUri) || rawUri.startsWith('content://')) return;
+    let normalizedRawUri: string | undefined;
     try {
         const { remove } = await import('@tauri-apps/plugin-fs');
         const normalizePath = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '');
         // Same fallback the read paths use: a relocated portable profile leaves
         // the recorded path stale, and the copy it names would otherwise stay in
         // the current managed dir forever (#1038).
-        const normalizedRawUri = normalizePath(
+        normalizedRawUri = normalizePath(
             await resolveAttachmentReadPath(rawUri, attachment.id),
         );
         const normalizedAttachmentsDir = normalizePath(await getManagedPath(ATTACHMENTS_DIR_NAME));
@@ -120,7 +158,12 @@ export const deleteAttachmentFile = async (
         await remove(normalizedRawUri);
     } catch (error) {
         if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
-        logAttachmentCleanupWarning(deps, `Failed to delete attachment file ${attachment.id}`, error);
+        if (isMissingLocalFileError(error)) return;
+        logAttachmentCleanupWarning(
+            deps,
+            `Failed to delete attachment file ${attachment.id}`,
+            redactKnownPathFromError(error, normalizedRawUri),
+        );
     }
 };
 
@@ -202,15 +245,24 @@ export const cleanupOrphanedAttachments = async (
                     throw missing;
                 }
                 const etag = normalizeStrongWebdavEtag(metadata.etag);
-                if (!etag) throw new Error('WebDAV attachment version is unavailable; refusing an unconditional delete');
                 guards.ensureLocalSnapshotFresh();
                 await guards.assertRemoteMutationFenceHeld?.(35_000);
-                await webdavDeleteFileVersioned(targetUrl, etag, {
+                const requestOptions = {
                     allowInsecureHttp: webdavConfig.allowInsecureHttp,
                     username: webdavConfig.username,
                     password: webdavPassword,
                     fetcher,
-                });
+                };
+                if (etag) {
+                    await webdavDeleteFileVersioned(targetUrl, etag, requestOptions);
+                } else {
+                    // A server without strong ETags (Jianguoyun, some proxies) gets
+                    // the document written unconditionally already; refusing the
+                    // delete here only left the orphan on the server and a warning
+                    // in the log on every cycle, forever.
+                    deps.logSyncInfo('WebDAV attachment removed without a version check; the server provides no strong ETag');
+                    await webdavDeleteFile(targetUrl, requestOptions);
+                }
             } else if (backend === 'cloud' && cloudProvider === 'selfhosted' && cloudConfig?.url) {
                 const baseUrl = getCloudBaseUrl(cloudConfig.url);
                 guards.ensureLocalSnapshotFresh();

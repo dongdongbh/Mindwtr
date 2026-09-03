@@ -65,6 +65,7 @@ import { ThemedAlertProvider } from '@/components/themed-alert';
 import { AppAnnouncementModal } from '@/components/app-announcement-modal';
 import { MobileOnboardingFlow } from '@/components/MobileOnboardingFlow';
 import { MobileAppLockGate } from '@/components/mobile-app-lock-gate';
+import { useIncomingUrl } from '@/hooks/use-incoming-url';
 import { PersistenceFailureBanner } from '@/components/persistence-failure-banner';
 import { applyAndroidSystemBars } from '@/lib/android-system-bars';
 import { isCloudKitAvailable } from '@/lib/cloudkit-sync';
@@ -356,7 +357,7 @@ function RootLayoutContent() {
 function RootLayoutContentInner() {
   const router = useRouter();
   const pathname = usePathname();
-  const incomingUrl = Linking.useURL();
+  const { url: incomingUrl, key: incomingUrlKey } = useIncomingUrl();
   const { isDark, isReady: themeReady } = useTheme();
   const tc = useThemeColors();
   const { language, setLanguage, isReady: languageReady, t } = useLanguage();
@@ -475,6 +476,7 @@ function RootLayoutContentInner() {
   useRootLayoutContextAutomation({
     dataReady,
     incomingUrl,
+    incomingUrlKey,
     returnToBackground: returnContextAutomationToBackground,
     resolveText,
   });
@@ -482,6 +484,7 @@ function RootLayoutContentInner() {
     dataReady,
     hasShareIntent,
     incomingUrl,
+    incomingUrlKey,
     resolveText,
     resetShareIntent,
     router,

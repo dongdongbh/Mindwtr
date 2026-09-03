@@ -1,4 +1,4 @@
-- Archived project views now prevent task, checklist, status, completion, and Focus changes.
-- Sync and backup recovery keep the last trusted attachment copy and handle missing remote files with stricter evidence.
-- Recurrence edits preserve anchors, time zones, and rule details; reviews move to the new day at local midnight.
-- Priority and time-estimate switches now control their matching capture, sort, calendar, and widget behavior.
+- Add start dates to projects and see project spans in Timeline.
+- Sync settings activate after a verification pass, with safer attachment recovery across WebDAV, Dropbox, File Sync, iCloud, and self-hosted servers.
+- Idle syncs do less work, while sync status and diagnostics give clearer results.
+- Calendar dates, Dropbox sign-in, archived project actions, and localization work more reliably.

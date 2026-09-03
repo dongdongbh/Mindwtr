@@ -23,6 +23,7 @@ import {
     getAttachmentsDir,
     isContentAttachmentUri,
     logAttachmentWarn,
+    markAttachmentPresenceReconciled,
     readAttachmentBytesForUpload,
     readFileAsBytes,
     reportProgress,
@@ -302,5 +303,11 @@ export const syncCloudKitAttachments = async (
     });
 
     for (const patch of patches.values()) allPatches.set(patch.id, patch);
+    // A completed pass is this backend's whole reconciliation: it refreshed every
+    // attachment's local presence and settled every transfer. Stamping it lets
+    // `hasPendingAttachmentSyncWork` keep the steady state quiet until the next one is due
+    // (audit F3). Never stamped for an activation probe, whose subject is the candidate
+    // configuration rather than the committed one the stamp names.
+    if (!options.activationProbe) await markAttachmentPresenceReconciled();
     return fold(allPatches);
 };

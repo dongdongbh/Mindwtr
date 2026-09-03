@@ -379,4 +379,85 @@ describe('MindwtrService conformance: local SQLite vs cloud REST', () => {
       expect(task.reviewAt).toBe('2026-04-01');
     });
   });
+
+  // Project.startDate (mirrors dueDate everywhere it's persisted/synced): pins that
+  // mindwtr_add_project/mindwtr_update_project carry it through both the local core-backed
+  // adapter and the cloud REST adapter's props bag, the same way dueDate already does. Own
+  // services (not the shared `local`/`cloud` above) so writing here can't leak state into the
+  // read-only listTasks fixtures elsewhere in this file.
+  describe('mindwtr_add_project / mindwtr_update_project write-surface: startDate reaches both adapters like dueDate', () => {
+    let writeTempDir = '';
+    let writeLocal: MindwtrService;
+
+    beforeAll(() => {
+      writeTempDir = mkdtempSync(join(tmpdir(), 'mindwtr-mcp-project-write-fixture-'));
+      const seedData: AppData = { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
+      writeFileSync(join(writeTempDir, 'data.json'), JSON.stringify(seedData));
+      writeLocal = createService({ dbPath: join(writeTempDir, 'mindwtr.db'), readonly: false });
+    });
+
+    afterAll(async () => {
+      await writeLocal.close();
+      rmSync(writeTempDir, { recursive: true, force: true });
+    });
+
+    test('local: round-trips startDate alongside dueDate through the real SQLite-backed core store', async () => {
+      const project = await writeLocal.addProject({
+        title: 'Kitchen remodel',
+        dueDate: '2026-05-10',
+        startDate: '2026-04-15',
+      });
+      expect(project.dueDate).toBe('2026-05-10');
+      expect(project.startDate).toBe('2026-04-15');
+
+      const updated = await writeLocal.updateProject({ id: project.id, startDate: '2026-04-20' });
+      expect(updated.startDate).toBe('2026-04-20');
+      expect(updated.dueDate).toBe('2026-05-10');
+    });
+
+    test('cloud: forwards startDate in the POST /projects and PATCH /projects/:id props bag', async () => {
+      let capturedCreateProps: Record<string, unknown> | undefined;
+      let capturedPatchBody: Record<string, unknown> | undefined;
+      const writeCloud = createCloudService({
+        url: 'https://mindwtr.example.com',
+        token: 'conformance-test-token',
+        fetcher: async (_input, init) => {
+          const method = init?.method ?? 'GET';
+          if (method === 'POST') {
+            const body = JSON.parse(String(init?.body)) as { title?: string; props?: Record<string, unknown> };
+            capturedCreateProps = body.props;
+            return new Response(JSON.stringify({
+              project: {
+                id: 'project-new', title: body.title, status: 'active', color: '#6B7280',
+                order: 0, tagIds: [], createdAt: iso('01'), updatedAt: iso('01'), ...body.props,
+              },
+            }), { status: 201 });
+          }
+          if (method === 'PATCH') {
+            capturedPatchBody = JSON.parse(String(init?.body));
+            return new Response(JSON.stringify({
+              project: {
+                id: 'project-new', title: 'Kitchen remodel', status: 'active', color: '#6B7280',
+                order: 0, tagIds: [], createdAt: iso('01'), updatedAt: iso('01'), ...capturedPatchBody,
+              },
+            }), { status: 200 });
+          }
+          return new Response(JSON.stringify(fixtureData), { status: 200 });
+        },
+      });
+
+      const project = await writeCloud.addProject({
+        title: 'Kitchen remodel',
+        dueDate: '2026-05-10',
+        startDate: '2026-04-15',
+      });
+      expect(capturedCreateProps).toMatchObject({ dueDate: '2026-05-10', startDate: '2026-04-15' });
+      expect(project.dueDate).toBe('2026-05-10');
+      expect(project.startDate).toBe('2026-04-15');
+
+      const updated = await writeCloud.updateProject({ id: project.id, startDate: '2026-04-20' });
+      expect(capturedPatchBody).toMatchObject({ startDate: '2026-04-20' });
+      expect(updated.startDate).toBe('2026-04-20');
+    });
+  });
 });

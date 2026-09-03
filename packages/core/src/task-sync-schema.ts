@@ -13,6 +13,7 @@ import {
     fromBool,
     fromJson,
     fromNullableBool,
+    fromPresentBool,
     fromOptional,
     isRecord,
     sqliteRowFromColumnValues,
@@ -232,7 +233,8 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
         relativeStartOffset: fromJson<unknown>(row.relativeStartOffset, undefined) as Task['relativeStartOffset'],
         dueDate: fromOptional(row.dueDate as string | null),
         recurrence: fromJson<unknown>(row.recurrence, null) as Task['recurrence'],
-        showFutureRecurrence: fromBool(row.showFutureRecurrence),
+        // `true | undefined`, never `false` — see fromPresentBool.
+        showFutureRecurrence: fromPresentBool(row.showFutureRecurrence),
         pushCount: row.pushCount === null || row.pushCount === undefined ? undefined : Number(row.pushCount),
         repeatReminderMinutes: row.repeatReminderMinutes === null || row.repeatReminderMinutes === undefined
             ? undefined

@@ -9,13 +9,14 @@ import {
     type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, Calendar, CalendarClock, ChevronRight, Copy, FolderPlus, MapPin, Pencil, Rows3, Tag, Trash2 } from 'lucide-react';
+import { BookOpen, Calendar, CalendarClock, ChevronRight, Copy, Folder, FolderPlus, MapPin, Pencil, Rows3, Tag, Trash2 } from 'lucide-react';
 import {
     getAdvancedReviewDate,
     isDueForReview,
     safeParseDate,
     tFallback,
     type Area,
+    type Project,
     type StoreActionResult,
     type Task,
     type TaskStatus,
@@ -27,6 +28,7 @@ import { cn } from '../../lib/utils';
 import { FocusStarIcon } from '../FocusStarIcon';
 import { Button } from '../ui/Button';
 import { AreaSelector } from '../ui/AreaSelector';
+import { ProjectSelector } from '../ui/ProjectSelector';
 import { normalizeDateInputValue } from './task-item-helpers';
 import { ContextsField } from './fields/TaskMetadataFields';
 import { DateField } from '../ui/DateField';
@@ -35,7 +37,7 @@ const VIEWPORT_MARGIN_PX = 8;
 const PANEL_GAP_PX = 8;
 const MENU_WIDTH_PX = 224;
 
-type QuickPanelId = 'startTime' | 'dueDate' | 'reviewAt' | 'area' | 'contexts' | null;
+type QuickPanelId = 'startTime' | 'dueDate' | 'reviewAt' | 'project' | 'area' | 'contexts' | null;
 
 export interface TaskQuickActionMenuProps {
     task: Task;
@@ -47,6 +49,7 @@ export interface TaskQuickActionMenuProps {
     contextOptions: string[];
     contextSuggestions?: string[];
     areas: Area[];
+    projects: Project[];
     readOnly: boolean;
     focusAction?: {
         isFocused: boolean;
@@ -141,6 +144,7 @@ export function TaskQuickActionMenu({
     contextOptions,
     contextSuggestions = contextOptions,
     areas,
+    projects,
     readOnly,
     focusAction,
     onClose,
@@ -161,6 +165,7 @@ export function TaskQuickActionMenu({
     const startButtonRef = useRef<HTMLButtonElement | null>(null);
     const dueButtonRef = useRef<HTMLButtonElement | null>(null);
     const reviewButtonRef = useRef<HTMLButtonElement | null>(null);
+    const projectButtonRef = useRef<HTMLButtonElement | null>(null);
     const areaButtonRef = useRef<HTMLButtonElement | null>(null);
     const contextsButtonRef = useRef<HTMLButtonElement | null>(null);
     const [activePanel, setActivePanel] = useState<QuickPanelId>(null);
@@ -169,6 +174,7 @@ export function TaskQuickActionMenu({
     const initialStartDraft = splitDateTime(task.startTime);
     const initialDueDraft = splitDateTime(task.dueDate);
     const initialReviewDraft = splitDateTime(task.reviewAt);
+    const initialProjectDraft = task.projectId || '';
     const initialAreaDraft = task.areaId || '';
     const initialContextsDraft = task.contexts?.join(', ') || '';
     const [startDateDraft, setStartDateDraft] = useState(initialStartDraft.date);
@@ -177,14 +183,18 @@ export function TaskQuickActionMenu({
     const [dueTimeDraft, setDueTimeDraft] = useState(initialDueDraft.time);
     const [reviewDateDraft, setReviewDateDraft] = useState(initialReviewDraft.date);
     const [reviewTimeDraft, setReviewTimeDraft] = useState(initialReviewDraft.time);
+    const [projectDraft, setProjectDraft] = useState(initialProjectDraft);
     const [areaDraft, setAreaDraft] = useState(initialAreaDraft);
     const [contextsDraft, setContextsDraft] = useState(initialContextsDraft);
     const [savingPanel, setSavingPanel] = useState<Exclude<QuickPanelId, null> | null>(null);
     const startLabel = tFallback(t, 'taskEdit.startDateLabel', 'Start Date');
     const dueLabel = tFallback(t, 'taskEdit.dueDateLabel', 'Due Date');
     const reviewLabel = tFallback(t, 'taskEdit.reviewDateLabel', 'Review Date');
+    const projectLabel = tFallback(t, 'taskEdit.projectLabel', 'Project');
     const areaLabel = tFallback(t, 'taskEdit.areaLabel', 'Area');
     const contextsLabel = tFallback(t, 'taskEdit.contextsLabel', 'Contexts');
+    const noProjectLabel = tFallback(t, 'taskEdit.noProjectOption', 'No Project');
+    const searchProjectsLabel = tFallback(t, 'projects.search', 'Search projects');
     const noAreaLabel = tFallback(t, 'taskEdit.noAreaOption', 'No Area');
     const renameLabel = tFallback(t, 'task.renameTitle', 'Rename task');
     const duplicateLabel = tFallback(t, 'projects.duplicate', 'Duplicate');
@@ -207,6 +217,7 @@ export function TaskQuickActionMenu({
     const startDraftChanged = startDateDraft !== initialStartDraft.date || startTimeDraft !== initialStartDraft.time;
     const dueDraftChanged = dueDateDraft !== initialDueDraft.date || dueTimeDraft !== initialDueDraft.time;
     const reviewDraftChanged = reviewDateDraft !== initialReviewDraft.date || reviewTimeDraft !== initialReviewDraft.time;
+    const projectDraftChanged = projectDraft !== initialProjectDraft;
     const areaDraftChanged = areaDraft !== initialAreaDraft;
     const contextsDraftChanged = normalizedDraftContexts.join('\u0000') !== normalizedInitialContexts.join('\u0000');
 
@@ -220,9 +231,10 @@ export function TaskQuickActionMenu({
         setDueTimeDraft(nextDueDraft.time);
         setReviewDateDraft(nextReviewDraft.date);
         setReviewTimeDraft(nextReviewDraft.time);
+        setProjectDraft(task.projectId || '');
         setAreaDraft(task.areaId || '');
         setContextsDraft(task.contexts?.join(', ') || '');
-    }, [task.areaId, task.contexts, task.dueDate, task.id, task.reviewAt, task.startTime]);
+    }, [task.areaId, task.contexts, task.dueDate, task.id, task.projectId, task.reviewAt, task.startTime]);
 
     // Focus the menu container, not the first item — like native context menus,
     // nothing is highlighted until the first arrow press, and key events still
@@ -285,9 +297,11 @@ export function TaskQuickActionMenu({
                     ? dueButtonRef.current
                     : panelId === 'reviewAt'
                         ? reviewButtonRef.current
-                        : panelId === 'area'
-                            ? areaButtonRef.current
-                            : contextsButtonRef.current
+                        : panelId === 'project'
+                            ? projectButtonRef.current
+                            : panelId === 'area'
+                                ? areaButtonRef.current
+                                : contextsButtonRef.current
         );
         const closeActivePanel = () => {
             if (!activePanel) return;
@@ -411,9 +425,11 @@ export function TaskQuickActionMenu({
                 ? dueButtonRef.current
                 : activePanel === 'reviewAt'
                     ? reviewButtonRef.current
-                    : activePanel === 'area'
-                        ? areaButtonRef.current
-                        : contextsButtonRef.current;
+                    : activePanel === 'project'
+                        ? projectButtonRef.current
+                        : activePanel === 'area'
+                            ? areaButtonRef.current
+                            : contextsButtonRef.current;
         const panel = panelRef.current;
         if (!anchor || !panel) return;
         const anchorRect = anchor.getBoundingClientRect();
@@ -471,6 +487,8 @@ export function TaskQuickActionMenu({
             const nextReviewDraft = splitDateTime(task.reviewAt);
             setReviewDateDraft(nextReviewDraft.date);
             setReviewTimeDraft(nextReviewDraft.time);
+        } else if (panelId === 'project') {
+            setProjectDraft(task.projectId || '');
         } else if (panelId === 'area') {
             setAreaDraft(task.areaId || '');
         } else {
@@ -569,6 +587,22 @@ export function TaskQuickActionMenu({
         }
     };
 
+    const handleProjectSave = async () => {
+        setSavingPanel('project');
+        try {
+            // A section belongs to one project, so leaving the project drops it.
+            const result = await onUpdateTask({ projectId: projectDraft || undefined, sectionId: undefined });
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to update task project');
+            }
+            onClose();
+        } catch (error) {
+            reportError('Failed to update task project from quick actions', error);
+        } finally {
+            setSavingPanel(null);
+        }
+    };
+
     const handleAreaSave = async () => {
         setSavingPanel('area');
         try {
@@ -618,6 +652,9 @@ export function TaskQuickActionMenu({
             else onClose();
         } else if (activePanel === 'reviewAt') {
             if (reviewDraftChanged) void handleReviewDateSave();
+            else onClose();
+        } else if (activePanel === 'project') {
+            if (projectDraftChanged) void handleProjectSave();
             else onClose();
         } else if (activePanel === 'area') {
             if (areaDraftChanged) void handleAreaSave();
@@ -754,6 +791,14 @@ export function TaskQuickActionMenu({
                     label: advanceReviewLabel,
                     onClick: () => { void handleAdvanceReview(); },
                 })}
+                {!readOnly && renderMenuAction({
+                    ref: projectButtonRef,
+                    icon: <Folder className="h-4 w-4" />,
+                    label: `${projectLabel}…`,
+                    active: activePanel === 'project',
+                    onClick: () => openPanel('project'),
+                    showChevron: true,
+                })}
                 {!readOnly && canEditArea && renderMenuAction({
                     ref: areaButtonRef,
                     icon: <MapPin className="h-4 w-4" />,
@@ -832,9 +877,11 @@ export function TaskQuickActionMenu({
                                 ? dueLabel
                                 : activePanel === 'reviewAt'
                                 ? reviewLabel
-                                : activePanel === 'area'
-                                    ? areaLabel
-                                    : contextsLabel
+                                : activePanel === 'project'
+                                    ? projectLabel
+                                    : activePanel === 'area'
+                                        ? areaLabel
+                                        : contextsLabel
                     }
                     className="fixed z-50 w-[min(30rem,calc(100vw-1rem))] rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"
                     style={{
@@ -1011,6 +1058,42 @@ export function TaskQuickActionMenu({
                                     onClick={() => void handleReviewDateSave()}
                                     loading={savingPanel === 'reviewAt'}
                                     disabled={!reviewDraftChanged}
+                                >
+                                    {saveLabel}
+                                </Button>
+                            </div>
+                        </div>
+                    ) : activePanel === 'project' ? (
+                        <div className="space-y-3">
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-muted-foreground">{projectLabel}</label>
+                                <ProjectSelector
+                                    projects={projects}
+                                    value={projectDraft}
+                                    onChange={setProjectDraft}
+                                    placeholder={noProjectLabel}
+                                    noProjectLabel={noProjectLabel}
+                                    searchPlaceholder={searchProjectsLabel}
+                                    noMatchesLabel={noMatchesLabel}
+                                    className="w-full"
+                                />
+                            </div>
+                            <div className="flex items-center justify-end gap-2">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => {
+                                        setProjectDraft(initialProjectDraft);
+                                        setActivePanel(null);
+                                    }}
+                                >
+                                    {cancelLabel}
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    onClick={handleProjectSave}
+                                    loading={savingPanel === 'project'}
+                                    disabled={!projectDraftChanged}
                                 >
                                     {saveLabel}
                                 </Button>

@@ -8,6 +8,7 @@ import {
     isSecureStoreAvailable,
     setSessionSecret,
 } from './secure-secret-store';
+import { backgroundSafeFetch } from './background-safe-fetch';
 
 const DROPBOX_SECURESTORE_TOKENS_KEY = 'mindwtr_dropbox_tokens';
 const DROPBOX_ASYNC_TOKENS_KEY = '@mindwtr_dropbox_tokens';
@@ -129,7 +130,7 @@ export async function isDropboxConnected(): Promise<boolean> {
 const requestDropboxAccessToken = async (
     clientId: string,
     refreshToken: string,
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = backgroundSafeFetch
 ): Promise<DropboxAuthTokens> => {
     const resolvedClientId = requireDropboxClientId(clientId);
     const resolvedRefreshToken = refreshToken.trim();
@@ -183,7 +184,7 @@ const requestDropboxAccessToken = async (
 export async function refreshDropboxAccessToken(
     clientId: string,
     refreshToken: string,
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = backgroundSafeFetch
 ): Promise<DropboxAuthTokens> {
     const tokens = await requestDropboxAccessToken(clientId, refreshToken, fetcher);
     await saveDropboxTokens(tokens);
@@ -202,7 +203,7 @@ const requireDropboxTokens = (tokens: DropboxAuthTokens): DropboxAuthTokens => {
 export async function getValidDropboxAccessTokenForTokens(
     clientId: string,
     tokens: DropboxAuthTokens,
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = backgroundSafeFetch
 ): Promise<DropboxAccessTokenResolution> {
     requireDropboxClientId(clientId);
     const resolvedTokens = requireDropboxTokens(tokens);
@@ -218,7 +219,7 @@ export async function getValidDropboxAccessTokenForTokens(
 export async function forceRefreshDropboxAccessTokenForTokens(
     clientId: string,
     tokens: DropboxAuthTokens,
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = backgroundSafeFetch
 ): Promise<DropboxAccessTokenResolution> {
     requireDropboxClientId(clientId);
     const resolvedTokens = requireDropboxTokens(tokens);
@@ -228,7 +229,7 @@ export async function forceRefreshDropboxAccessTokenForTokens(
 
 export async function getValidDropboxAccessToken(
     clientId: string,
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = backgroundSafeFetch
 ): Promise<string> {
     requireDropboxClientId(clientId);
     const stored = await getStoredDropboxTokens();
@@ -246,7 +247,7 @@ export async function getValidDropboxAccessToken(
 
 export async function forceRefreshDropboxAccessToken(
     clientId: string,
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = backgroundSafeFetch
 ): Promise<string> {
     requireDropboxClientId(clientId);
     const stored = await getStoredDropboxTokens();
@@ -261,7 +262,7 @@ export async function forceRefreshDropboxAccessToken(
 export async function revokeDropboxTokens(
     clientId: string,
     tokens: DropboxAuthTokens,
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = backgroundSafeFetch
 ): Promise<void> {
     requireDropboxClientId(clientId);
     const resolvedTokens = requireDropboxTokens(tokens);

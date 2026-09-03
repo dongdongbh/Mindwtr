@@ -196,6 +196,7 @@ describeSqlite('SqliteAdapter', () => {
                     sequentialScope: 'section',
                     isFocused: false,
                     dueDate: '2026-03-31',
+                    startDate: '2026-03-01',
                     rev: 7,
                     revBy: 'device-desktop',
                     createdAt: now,
@@ -340,6 +341,7 @@ describeSqlite('SqliteAdapter', () => {
         expect(project.sequentialScope).toBe('section');
         expect(project.isFocused).toBe(false);
         expect(project.dueDate).toBe('2026-03-31');
+        expect(project.startDate).toBe('2026-03-01');
         expect(project.deletedAt).toBe(archivedAt);
         expect(project.purgedAt).toBe(archivedAt);
         expect(project.rev).toBe(7);
@@ -1655,6 +1657,7 @@ describeSqlite('SqliteAdapter', () => {
         const projectColumns = allSql<{ name: string }>(db, 'PRAGMA table_info(projects)');
         const projectColumnNames = projectColumns.map((col) => col.name);
         expect(projectColumnNames).toContain('dueDate');
+        expect(projectColumnNames).toContain('startDate');
         expect(projectColumnNames).toContain('rev');
         expect(projectColumnNames).toContain('revBy');
         const projectIndexes = allSql<{ name: string }>(db, 'PRAGMA index_list(projects)');

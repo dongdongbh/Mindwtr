@@ -1,4 +1,5 @@
 import type { AppData } from './types';
+import { ATTACHMENTS_DIR_NAME } from './attachment-paths';
 import {
     isDropboxPathConflictTag,
     isDropboxPathNotFoundTag,
@@ -293,6 +294,40 @@ export async function listDropboxFolderFiles(
     }
     throw new Error('Dropbox folder inventory exceeded the pagination limit');
 }
+
+/**
+ * The attachments folder Dropbox stores blobs in, as `listDropboxFolderFiles` wants it.
+ * Derived from the same constant `buildCloudKey` writes into `cloudKey`, so the pass that
+ * lists the folder and the code that names the blobs can never drift apart.
+ */
+export const DROPBOX_ATTACHMENTS_PATH = `/${ATTACHMENTS_DIR_NAME}`;
+
+/**
+ * #1119 follow-up: turns one `list_folder` answer into a presence lookup for attachment
+ * cloud keys, so a whole pass costs one request instead of one per attachment.
+ *
+ * Returns `null` — never `false` — for a key that does not name a file directly inside the
+ * attachments folder. A cloud key left behind by another provider (a CloudKit record name,
+ * a File Sync generation path in a nested folder) says nothing about whether Dropbox holds
+ * anything, and a listing of a folder it was never in must not be read as proof of absence.
+ *
+ * Comparison is case-insensitive because Dropbox itself is: it preserves the display name
+ * but treats `A.TXT` and `a.txt` as one path, which is why the API reports `path_lower`.
+ * Encryption does not enter into it — sync encryption seals attachment BYTES and leaves
+ * their names alone (only the sync document gets an `.enc` name), so a name that is present
+ * on an encrypted remote is present on a plaintext one too.
+ */
+export const createDropboxAttachmentPresenceIndex = (
+    entries: DropboxFolderFileEntry[],
+): ((cloudKey: string) => boolean | null) => {
+    const names = new Set(entries.map((entry) => entry.name.toLowerCase()));
+    return (cloudKey: string): boolean | null => {
+        const segments = cloudKey.split('/');
+        if (segments.length !== 2) return null;
+        if (segments[0] !== ATTACHMENTS_DIR_NAME || !segments[1]) return null;
+        return names.has(segments[1].toLowerCase());
+    };
+};
 
 export async function downloadDropboxAppData(
     accessToken: string,

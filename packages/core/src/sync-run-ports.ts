@@ -27,6 +27,10 @@ export type SyncRunResult = {
     /** True when an attachment phase failed non-fatally during this run
      *  (feeds the desktop consecutive-warning toast policy). */
     hadAttachmentWarning?: boolean;
+    /** The merge phase ran but produced nothing new for local storage, so the
+     *  document write was skipped and only sync bookkeeping was persisted.
+     *  Absent on every other outcome, including runs that skipped entirely. */
+    localWriteSkipped?: boolean;
     /** True when the merge/read cycle succeeded locally but the remote write
      *  failed and was queued for background retry. `success` stays true (the
      *  run itself did not error and auto-retry behavior is unaffected) — this
@@ -109,6 +113,14 @@ export interface SyncBackendIO {
      *  write fingerprint and the `readRemoteFingerprint` fallback when the
      *  machine records fast-sync state. */
     getCachedRemoteFingerprint?(): string | null;
+    /** Adopt a fingerprint this cycle just read from the remote as the
+     *  compare-and-swap precondition for the cycle's write, so a cycle whose
+     *  only change is local can skip the document read entirely. Returns false
+     *  when the backend cannot turn that fingerprint into a real precondition
+     *  (weak validator, no conditional-write primitive, legacy plaintext
+     *  compatibility mode) — the machine then runs an ordinary full cycle.
+     *  Omit on backends that never support it; the fast path stays off. */
+    adoptRemoteFingerprintForWrite?(fingerprint: string): boolean;
     /** One mutating attachment pass against this backend (upload pending
      *  files, resolve missing downloads). The same operation serves the
      *  prepare, finalize, and post-merge phases. Return the mutated data,
@@ -270,6 +282,11 @@ export type SyncRunErrorStatusDetails = {
 export type SyncRunSuccessInfo = {
     status: 'success' | 'conflict';
     wroteLocal: boolean;
+    /** The merge produced nothing this cycle persisted locally, so the store
+     *  already holds the merged document. Platforms that refresh the store from
+     *  it at cycle end can skip that pass. Absent (false) means the document
+     *  was written as usual. */
+    localWriteSkipped?: boolean;
     /** The machine's snapshot stamp, for follow-up bookkeeping (desktop clears
      *  a queued run whose changes this cycle already covered). */
     getLocalSnapshotChangeAt(): number;
@@ -359,6 +376,15 @@ export type SyncRunPolicy = {
     /** Mobile runs the attachment pre-sync before the fast-check skip;
      *  desktop runs the fast-check first. */
     preSyncAttachmentsBeforeFastCheck: boolean;
+    /** Carry the local snapshot of a cycle that concluded "nothing changed"
+     *  into the next cycle, so a run of idle cycles clones the store, reads the
+     *  database and stable-serializes the document once instead of every time.
+     *  Opt-in because the snapshot is process-wide: it is keyed on the sync
+     *  scope, the store's change stamp and the durable fast-sync fingerprint,
+     *  all of which identify one document uniquely inside an app that has a
+     *  single store, but not inside a test process that stands up several.
+     *  Mobile opts in (battery); desktop has not. */
+    carryIdleCycleSnapshot?: boolean;
     /** Mobile-only second skip: fetch the remote payload and compare when the
      *  fingerprint fast-check cannot decide (also covers manual syncs and the
      *  file backend, which have no fingerprint). */

@@ -295,6 +295,7 @@ export const normalizeProjectForSyncMerge = (
         isFocused: normalizeSyncedBoolean(project.isFocused),
         attachments: normalizeAttachmentsForSyncMerge(project.attachments),
         dueDate: normalizeOptionalString(project.dueDate),
+        startDate: normalizeOptionalString(project.startDate),
         reviewAt: normalizeOptionalString(project.reviewAt),
         areaId: normalizeOptionalString(project.areaId),
         areaTitle: normalizeOptionalString(project.areaTitle),

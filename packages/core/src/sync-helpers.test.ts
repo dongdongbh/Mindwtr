@@ -4,6 +4,7 @@ import {
     assertNoPendingAttachmentUploads,
     computeCoveredSettingsFingerprint,
     computeSyncChangeFingerprint,
+    computeStableValueFingerprint,
     computeSyncPayloadFingerprint,
     findPendingAttachmentUploads,
     hasPendingSyncSideEffects,
@@ -1040,5 +1041,57 @@ describe('sync-helpers computeSyncPayloadFingerprint', () => {
         expect(attachment?.updatedAt).toBe('1970-01-01T00:00:00.000Z');
         expect(attachment?.deletedAt).toBe('1970-01-01T00:00:00.000Z');
         expect(computeSyncPayloadFingerprint(data)).toBe(computeSyncPayloadFingerprint(data));
+    });
+});
+
+describe('sync comparison ignores the order of id-keyed lists (#1136)', () => {
+    const attachment = (id: string): Attachment => ({
+        id,
+        kind: 'file',
+        title: `${id}.pdf`,
+        uri: '',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const task = (id: string, attachments: Attachment[]) => ({
+        id,
+        title: id,
+        status: 'inbox' as const,
+        tags: [],
+        contexts: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        attachments,
+    });
+    const doc = (tasks: ReturnType<typeof task>[]): AppData => ({
+        tasks: tasks as unknown as AppData['tasks'],
+        projects: [],
+        sections: [],
+        areas: [],
+        people: [],
+        settings: {},
+    });
+
+    it('treats a merge that listed the same records local-first on each device as equal', () => {
+        const phone = doc([task('t2', [attachment('a2'), attachment('a1')]), task('t1', [])]);
+        const server = doc([task('t1', []), task('t2', [attachment('a1'), attachment('a2')])]);
+
+        expect(areSyncPayloadsEqual(phone, server)).toBe(true);
+        expect(computeStableValueFingerprint(phone)).toBe(computeStableValueFingerprint(server));
+        expect(computeSyncPayloadFingerprint(phone)).toBe(computeSyncPayloadFingerprint(server));
+    });
+
+    it('still sees a content difference behind a reorder', () => {
+        const phone = doc([task('t2', [attachment('a2'), attachment('a1')])]);
+        const server = doc([task('t2', [attachment('a1'), { ...attachment('a2'), deletedAt: '2026-01-02T00:00:00.000Z' }])]);
+
+        expect(areSyncPayloadsEqual(phone, server)).toBe(false);
+    });
+
+    it('keeps primitive lists positional', () => {
+        expect(areSyncPayloadsEqual(
+            { ...doc([]), settings: { contexts: ['a', 'b'] } as AppData['settings'] },
+            { ...doc([]), settings: { contexts: ['b', 'a'] } as AppData['settings'] },
+        )).toBe(false);
     });
 });

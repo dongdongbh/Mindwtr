@@ -17,9 +17,9 @@ test("desktop declares XML parsing as an isolated-install dependency", () => {
     readFileSync("apps/desktop/package-lock.json", "utf8"),
   );
 
-  expect(packageJson.dependencies["@xmldom/xmldom"]).toBe("0.8.13");
+  expect(packageJson.dependencies["@xmldom/xmldom"]).toBe("0.8.15");
   expect(packageLock.packages["node_modules/@xmldom/xmldom"].version).toBe(
-    "0.8.13",
+    "0.8.15",
   );
 });
 

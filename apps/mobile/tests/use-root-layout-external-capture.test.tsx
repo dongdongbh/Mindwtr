@@ -54,6 +54,7 @@ type SharedFile = {
 function TestHarness({
   hasShareIntent = false,
   incomingUrl,
+  incomingUrlKey = incomingUrl ? 1 : 0,
   resetShareIntent = vi.fn(),
   router,
   shareFiles = null,
@@ -64,6 +65,7 @@ function TestHarness({
 }: {
   hasShareIntent?: boolean;
   incomingUrl: string | null;
+  incomingUrlKey?: number;
   resetShareIntent?: ReturnType<typeof vi.fn>;
   router: RouterMock;
   shareFiles?: SharedFile[] | null;
@@ -76,6 +78,7 @@ function TestHarness({
     dataReady: true,
     hasShareIntent,
     incomingUrl,
+    incomingUrlKey,
     resolveText: (_key: string, fallback: string) => fallback,
     resetShareIntent,
     router,
@@ -443,6 +446,37 @@ describe('useRootLayoutExternalCapture', () => {
     });
   });
 
+  it('opens the capture sheet again when the same shortcut link is delivered a second time', () => {
+    // An Action Button shortcut that opens a fixed mindwtr://capture link
+    // worked once per app session: the second delivery carried the same
+    // string and was treated as already handled (in-app report, iOS 26).
+    let tree!: ReturnType<typeof create>;
+    const url = 'mindwtr:///capture?title=Call%20dentist';
+
+    act(() => {
+      tree = create(<TestHarness incomingUrl={url} incomingUrlKey={1} router={router} showToast={showToast} />);
+    });
+    act(() => {
+      tree.update(<TestHarness incomingUrl={url} incomingUrlKey={2} router={router} showToast={showToast} />);
+    });
+
+    expect(router.replace).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reopen the capture sheet on a re-render that carries no new delivery', () => {
+    let tree!: ReturnType<typeof create>;
+    const url = 'mindwtr:///capture?title=Call%20dentist';
+
+    act(() => {
+      tree = create(<TestHarness incomingUrl={url} incomingUrlKey={1} router={router} showToast={showToast} />);
+    });
+    act(() => {
+      tree.update(<TestHarness incomingUrl={url} incomingUrlKey={1} router={router} showToast={vi.fn()} />);
+    });
+
+    expect(router.replace).toHaveBeenCalledTimes(1);
+  });
+
   it('handles repeated App Actions captures when the request id changes', () => {
     let tree!: ReturnType<typeof create>;
 
@@ -450,6 +484,7 @@ describe('useRootLayoutExternalCapture', () => {
       tree = create(
         <TestHarness
           incomingUrl="mindwtr:///capture?title=Call%20dentist&requestId=first"
+          incomingUrlKey={1}
           router={router}
           showToast={showToast}
         />
@@ -460,6 +495,7 @@ describe('useRootLayoutExternalCapture', () => {
       tree.update(
         <TestHarness
           incomingUrl="mindwtr:///capture?title=Call%20dentist&requestId=second"
+          incomingUrlKey={2}
           router={router}
           showToast={showToast}
         />

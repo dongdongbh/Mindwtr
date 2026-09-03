@@ -7,11 +7,14 @@ type SyncResult = {
 
 type DesktopAutoSyncControllerOptions = {
     canSync: () => Promise<boolean>;
-    /** #1056 decision #5: once this device has discovered ciphertext it has no key for,
-     *  automatic and background sync stay off for that backend until the user supplies the
-     *  passphrase. A MANUAL run is deliberately still allowed through — it is how the user
-     *  finds out, and it surfaces the typed failure instead of doing nothing at all. */
-    isSyncEncryptionLocked?: () => Promise<boolean>;
+    /** #1056 decision #5: the encryption states that hold automatic and background sync off
+     *  for a backend until the user acts, or `null` when nothing is holding it. Two states
+     *  qualify and they are opposites — `remote-encrypted-no-key` (the remote is encrypted
+     *  and this device has no key) and `remote-plaintext` (this device is encrypted and the
+     *  remote went back to plaintext) — so the suppression log names the one it got instead
+     *  of asserting the first. A MANUAL run is deliberately still allowed through: it is how
+     *  the user finds out, and it surfaces the typed failure instead of doing nothing. */
+    syncEncryptionSuspension?: () => Promise<'remote-encrypted-no-key' | 'remote-plaintext' | null>;
     performSync: () => Promise<SyncResult>;
     flushPendingSave: () => Promise<void>;
     reportError: (label: string, error: unknown) => void;
@@ -192,10 +195,16 @@ export const createDesktopAutoSyncController = (
                 return;
             }
 
-            if (request.source !== 'manual' && (await options.isSyncEncryptionLocked?.())) {
-                trace('Auto sync suppressed while the remote is encrypted and unreadable', {
-                    source: request.source,
-                });
+            const suspension = request.source === 'manual'
+                ? null
+                : await options.syncEncryptionSuspension?.() ?? null;
+            if (suspension) {
+                trace(
+                    suspension === 'remote-plaintext'
+                        ? 'Auto sync suppressed while this device is encrypted and the remote is not'
+                        : 'Auto sync suppressed while the remote is encrypted and unreadable',
+                    { source: request.source, state: suspension },
+                );
                 return;
             }
 

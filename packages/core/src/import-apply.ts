@@ -34,6 +34,7 @@ export type ImportProjectSource = {
     name: string;
     order: number;
     sourceKey: string;
+    startDate?: string;
     status?: Project['status'];
     supportNotes?: string;
     tagIds?: string[];
@@ -345,6 +346,7 @@ export function applyImport(
             tagIds: project.tagIds ?? [],
             supportNotes: project.supportNotes,
             dueDate: project.dueDate,
+            startDate: project.startDate,
             createdAt,
             updatedAt,
             rev: nextRevision(),

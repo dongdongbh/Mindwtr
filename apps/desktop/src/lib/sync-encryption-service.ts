@@ -13,6 +13,14 @@
 // Deliberately imports nothing from ./sync-service — that module imports this one.
 
 import {
+    SYNC_ENCRYPTION_LOG_EVENTS,
+    SyncEncryptionRemoteConflictError,
+    buildSyncEncryptionRemoteReadExtra,
+    buildSyncEncryptionTransitionExtra,
+    syncEncryptionLogMessage,
+    type SyncEncryptionRemoteReadLogInput,
+    type SyncEncryptionTransitionLogKind,
+    type SyncEncryptionTransitionOutcome,
     acquireSyncRemoteMutationFence,
     createDropboxSyncRemoteMutationFencePort,
     createWebdavSyncRemoteMutationFencePort,
@@ -66,7 +74,98 @@ import {
     type WebDavOptions,
 } from '@mindwtr/core';
 import { DOMParser } from '@xmldom/xmldom';
+import { logInfo, logWarn } from './app-log';
 import { invokeNative, invokeNativeOr } from './tauri-invoke';
+
+// ---------------------------------------------------------------------------
+// Diagnostics trail (#1056 follow-up)
+//
+// One emitter, core's builders for the field maps. `transition` always lands in the log file
+// (`force`) because a transition rewrites every artifact at the sync location and its outcome
+// is the single most useful line in an encryption report; `logInfo`/`logWarn` sanitize the
+// extras a second time on the way out.
+// ---------------------------------------------------------------------------
+
+const logSyncEncryptionTransition = (
+    input: Parameters<typeof buildSyncEncryptionTransitionExtra>[0],
+): void => {
+    const context = {
+        scope: 'sync',
+        extra: buildSyncEncryptionTransitionExtra(input),
+        force: true,
+    };
+    const message = syncEncryptionLogMessage(SYNC_ENCRYPTION_LOG_EVENTS.transition);
+    if (input.outcome && input.outcome !== 'ok') {
+        void logWarn(message, context);
+        return;
+    }
+    void logInfo(message, context);
+};
+
+/** fresh-join-attachment-posture packet -10: the attachment byte seams (`sealAttachmentBytes`,
+ *  `openAttachmentBytes`) get their own `remote-read` line, same builder and event as the
+ *  document-read seams in sync-service.ts — this module cannot import that one (see the file
+ *  banner), so this is a second, deliberately identical emitter. Rides the Debug logging
+ *  switch like `state`/`remote-read` everywhere else — not forced, unlike `transition`/`error`. */
+const logSyncEncryptionRemoteRead = (input: SyncEncryptionRemoteReadLogInput): void => {
+    void logInfo(
+        syncEncryptionLogMessage(SYNC_ENCRYPTION_LOG_EVENTS.remoteRead),
+        { scope: 'sync', extra: buildSyncEncryptionRemoteReadExtra(input) },
+    );
+};
+
+const transitionOutcomeForError = (error: unknown): SyncEncryptionTransitionOutcome => {
+    if (error instanceof SyncEncryptionRemoteConflictError) return 'conflict';
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
+    if (/wrong passphrase/i.test(message)) return 'wrong-passphrase';
+    return 'error';
+};
+
+/**
+ * Start/end lines around one transition, plus one line per completed progress phase.
+ * Deliberately NOT one line per artifact: a folder with hundreds of attachments would push the
+ * rest of the run out of the rotated log for no extra diagnosis.
+ */
+export const withTransitionDiagnostics = async <T>(
+    kind: SyncEncryptionTransitionLogKind,
+    backend: string,
+    onProgress: ((progress: SyncEncryptionTransitionProgress) => void) | undefined,
+    run: (onProgress: ((progress: SyncEncryptionTransitionProgress) => void) | undefined) => Promise<T>,
+    outcomeOf: (value: T) => SyncEncryptionTransitionOutcome = () => 'ok',
+): Promise<T> => {
+    logSyncEncryptionTransition({ kind, backend, phase: 'start' });
+    // Core reports BEFORE it increments its counter, so `completed` never reaches `total`
+    // inside the callback. A phase is finished when the NEXT phase reports (its `completed`
+    // is exactly what the finished phase got through) or when the run returns.
+    let last: SyncEncryptionTransitionProgress | undefined;
+    const logPhase = (phase: string, planned: number, done: number) => {
+        logSyncEncryptionTransition({ kind, backend, phase: 'artifact', artifact: phase, planned, done });
+    };
+    const wrappedProgress = (progress: SyncEncryptionTransitionProgress) => {
+        if (last && last.phase !== progress.phase) {
+            logPhase(last.phase, progress.total, progress.completed);
+        }
+        last = progress;
+        onProgress?.(progress);
+    };
+    try {
+        const value = await run(wrappedProgress);
+        if (last) logPhase(last.phase, last.total, last.total);
+        logSyncEncryptionTransition({ kind, backend, phase: 'end', outcome: outcomeOf(value) });
+        return value;
+    } catch (error) {
+        logSyncEncryptionTransition({
+            kind,
+            backend,
+            phase: 'end',
+            outcome: transitionOutcomeForError(error),
+            errorName: error instanceof Error ? error.name : 'unknown',
+            errorMessage: error instanceof Error ? error.message : String(error ?? ''),
+        });
+        throw error;
+    }
+};
 
 /** The document names a blob remote can hold. Reads of an absent name resolve to `null` and
  *  the core transition loops skip them, so probing existence up front buys nothing. */
@@ -125,7 +224,38 @@ type NativeStatus = {
     kdfParams?: NativeKdfParams;
     hasKey: boolean;
     incompleteTransition?: SyncEncryptionTransitionKind;
+    /** First 8 hex characters only — truncated in Rust so a diagnostics read never carries a
+     *  whole salt across the IPC boundary (#1056 diagnostics). */
+    saltPrefix?: string;
+    /** Location scope of a discovery state (#1138), ALREADY reduced to `<backend>#<digest>`
+     *  by Rust. No raw scope (WebDAV username, sync folder path) ever reaches the JS side. */
+    discoveredScopeLabel?: string;
 };
+
+/** The device's encryption posture as the Diagnostics "Encryption" block needs it: the core
+ *  status plus the two sidecar fields the core status shape does not carry. */
+export type DesktopSyncEncryptionPosture = {
+    state: SyncEncryptionStatus['state'];
+    kdfParams?: SyncCryptoKdfParams;
+    hasKey: boolean;
+    incompleteTransition?: SyncEncryptionTransitionKind;
+    saltPrefix?: string;
+    /** Already `<backend>#<digest>`; pass it as `discoveredScopeLabel` to core's builders. */
+    discoveredScopeLabel?: string;
+};
+
+export async function getSyncEncryptionPosture(): Promise<DesktopSyncEncryptionPosture> {
+    const status = await invokeNativeOr<NativeStatus | null>(null, 'get_sync_encryption_status');
+    if (!status) return { state: 'off', hasKey: false };
+    return {
+        state: status.state,
+        kdfParams: status.kdfParams,
+        hasKey: status.hasKey,
+        incompleteTransition: status.incompleteTransition,
+        saltPrefix: status.saltPrefix,
+        discoveredScopeLabel: status.discoveredScopeLabel,
+    };
+}
 
 const base64ToBytes = (value: string): Uint8Array => {
     const binary = atob(value);
@@ -213,13 +343,16 @@ export async function getSyncEncryptionStatus(): Promise<SyncEncryptionStatus> {
 export async function markRemoteSyncEncryptionDiscovered(discovered: {
     salt: Uint8Array;
     params: SyncCryptoKdfParams;
-}): Promise<void> {
+}, locationScope?: string | null): Promise<void> {
     // `Or`, not the throwing form: in the web build there is no keyring and no sidecar to
     // persist into, and a discovery must not turn into a second, confusing failure on top of
     // the terminal one the caller is already raising.
     await invokeNativeOr(null, 'mark_sync_encryption_remote_discovered', {
         salt: bytesToHex(discovered.salt),
         kdfParams: discovered.params,
+        // #1138: binds the discovery to the location it was made on. Optional on the Rust
+        // side, and an absent scope re-checks rather than blocking.
+        locationScope: locationScope ?? null,
     });
     clearSyncEncryptionMaterialCache();
 }
@@ -227,8 +360,10 @@ export async function markRemoteSyncEncryptionDiscovered(discovered: {
 /** Persists `remote-plaintext` when a TS seam holds a key and finds the sync location back in
  *  plaintext (a peer disabled encryption there). Mirrors core's `markRemotePlaintextDiscovered`;
  *  Rust refuses to move any state but `enabled`, so this is safe to call from a read path. */
-export async function markRemoteSyncEncryptionPlaintext(): Promise<void> {
-    await invokeNativeOr(null, 'mark_sync_encryption_remote_plaintext');
+export async function markRemoteSyncEncryptionPlaintext(locationScope?: string | null): Promise<void> {
+    await invokeNativeOr(null, 'mark_sync_encryption_remote_plaintext', {
+        locationScope: locationScope ?? null,
+    });
     clearSyncEncryptionMaterialCache();
 }
 
@@ -893,10 +1028,13 @@ export async function runChangePassphraseOverRemote(
         ));
 }
 
+/** `'no-encrypted-remote'` (#1138): nothing encrypted is at this location, so the no-key state
+ *  described somewhere this device has left behind. Core clears it back to off (which this
+ *  adapter's `localState.write(null)` turns into `clear_sync_encryption_key_material`). */
 export async function runProvidePassphraseOverRemote(
     passphrase: string,
     remote: SyncEncryptionRemotePort,
-): Promise<'ok' | 'wrong-passphrase'> {
+): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> {
     const ports = await openTransitionPorts();
     return runWithRemoteMutationFence(remote, ports, (guardedRemote, keyCache, localState) =>
         runProvideSyncEncryptionPassphraseOverRemote(
@@ -915,37 +1053,73 @@ export async function runProvidePassphraseOverRemote(
 // ---------------------------------------------------------------------------
 
 /** Attachments keep their exact remote name with encrypted bytes: `cloudKey` is identity-keyed
- *  and immutable once uploaded, so renaming would churn every record (pinned decision #1). */
-export async function sealAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array> {
+ *  and immutable once uploaded, so renaming would churn every record (pinned decision #1).
+ *
+ *  `artifact` is the caller's `cloudKey` (or, for the file backend's generation verification,
+ *  the target path) — the byte-seam `remote-read` line used to say `absent` for every
+ *  attachment in the trail, so a log full of seals named nothing. Passed straight to
+ *  `buildSyncEncryptionRemoteReadExtra`, which reduces any string to its leaf name via
+ *  `syncEncryptionArtifactLabel`. Optional: a caller with no identity yet still gets a valid
+ *  line, just with the absent marker. Mirrors mobile's `sealAttachmentBytesForUpload`. */
+export async function sealAttachmentBytes(bytes: Uint8Array, artifact?: string | null): Promise<Uint8Array> {
+    const label = artifact ?? '';
     const material = await getSyncEncryptionMaterial();
-    if (material) return encryptSyncArtifact(bytes, material);
+    if (material) {
+        logSyncEncryptionRemoteRead({ artifact: label, exists: null, kind: 'encrypted', decision: 'seal' });
+        return encryptSyncArtifact(bytes, material);
+    }
     if (await isSyncEncryptionEnabledButLocked()) {
         // S3: `enabled` but no key resolved must fail closed — the old `return bytes`
         // fallback here would silently upload a PLAINTEXT attachment into a folder every
         // other device believes is encrypted.
+        logSyncEncryptionRemoteRead({ artifact: label, exists: null, kind: 'encrypted', decision: 'no-key' });
         throw new SyncEncryptionTerminalError(
             new SyncCryptoUnsupportedError('sync encryption is enabled but no key is available on this device'),
         );
     }
+    logSyncEncryptionRemoteRead({ artifact: label, exists: null, kind: 'plaintext', decision: 'seal' });
     return bytes;
 }
 
 /** Plaintext bytes pass straight through: during (and after an interrupted) transition a
  *  remote legitimately holds both generations, and a peer on an older app version can still
- *  upload plaintext. Ciphertext with no key is terminal — never "corrupt, re-upload". */
-export async function openAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array> {
+ *  upload plaintext. Ciphertext with no key is terminal — never "corrupt, re-upload".
+ *
+ *  `artifact`: see `sealAttachmentBytes` above. */
+export async function openAttachmentBytes(bytes: Uint8Array, artifact?: string | null): Promise<Uint8Array> {
+    const label = artifact ?? '';
     const inspected = inspectSyncArtifact(bytes);
     if (inspected.kind === 'unsupported') {
+        logSyncEncryptionRemoteRead({ artifact: label, exists: true, kind: 'unsupported', decision: 'decrypt' });
         throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(inspected.reason));
     }
-    if (inspected.kind === 'plaintext') return bytes;
+    if (inspected.kind === 'plaintext') {
+        logSyncEncryptionRemoteRead({ artifact: label, exists: true, kind: 'plaintext', decision: 'plaintext' });
+        return bytes;
+    }
     const material = await getSyncEncryptionMaterial();
     if (!material) {
+        logSyncEncryptionRemoteRead({
+            artifact: label,
+            exists: true,
+            kind: 'encrypted',
+            headerSalt: inspected.salt,
+            headerKdf: inspected.params,
+            decision: 'no-key',
+        });
         await markRemoteSyncEncryptionDiscovered({ salt: inspected.salt, params: inspected.params });
         throw new SyncEncryptionTerminalError(
             new SyncCryptoUnsupportedError('encrypted attachment: no key on this device'),
         );
     }
+    logSyncEncryptionRemoteRead({
+        artifact: label,
+        exists: true,
+        kind: 'encrypted',
+        headerSalt: inspected.salt,
+        headerKdf: inspected.params,
+        decision: 'decrypt',
+    });
     return decryptRemoteArtifactOrThrow(bytes, material.key, desktopSyncCryptoPrimitives);
 }
 

@@ -33,6 +33,111 @@ use crate::sync_crypto::{
     SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 };
 
+// ---------------------------------------------------------------------------
+// Diagnostics trail (#1056 follow-up)
+//
+// Hand-mirrored from `packages/core/src/sync-encryption-diagnostics.ts` -- Rust cannot import
+// it, and the whole value of the trail is that a desktop log and a mobile log grep the same
+// way. Event names and field names are FIXED; if you add one here, add it there too.
+//
+// SECRETS: nothing in this section ever accepts a passphrase or key bytes. Salts are logged
+// as an 8-hex prefix (enough to tell two encryption generations apart), and a location scope
+// is logged as `<backend>#<digest>` because the scope string itself contains a WebDAV
+// username and a folder path.
+// ---------------------------------------------------------------------------
+
+pub(crate) const SYNC_ENCRYPTION_LOG_PREFIX: &str = "[sync-encryption]";
+pub(crate) const SYNC_ENCRYPTION_LOG_EVENT_STATE: &str = "state";
+pub(crate) const SYNC_ENCRYPTION_LOG_EVENT_REMOTE_READ: &str = "remote-read";
+pub(crate) const SYNC_ENCRYPTION_LOG_EVENT_TRANSITION: &str = "transition";
+pub(crate) const SYNC_ENCRYPTION_LOG_EVENT_ERROR: &str = "error";
+pub(crate) const SYNC_ENCRYPTION_LOG_ABSENT: &str = "-";
+
+/// `[sync-encryption] <event> a=b c=d` -- one line, key=value pairs, same field names the TS
+/// builders emit into their structured `extra` maps.
+pub(crate) fn sync_encryption_diagnostic(event: &str, fields: &[(&str, String)]) -> String {
+    let mut line = format!("{SYNC_ENCRYPTION_LOG_PREFIX} {event}");
+    for (key, value) in fields {
+        line.push(' ');
+        line.push_str(key);
+        line.push('=');
+        line.push_str(if value.is_empty() { SYNC_ENCRYPTION_LOG_ABSENT } else { value });
+    }
+    line
+}
+
+/// First 8 hex characters of a salt, or `-`. Non-hex input is rejected outright rather than
+/// truncated, matching core's `syncEncryptionSaltPrefix`: a hand-edited or migration-corrupted
+/// sidecar must not put arbitrary text where a reader expects a salt generation.
+pub(crate) fn sync_encryption_salt_prefix(salt: Option<&str>) -> String {
+    match salt {
+        Some(value)
+            if !value.trim().is_empty()
+                && value.trim().chars().all(|c| c.is_ascii_hexdigit()) =>
+        {
+            value.trim().chars().take(8).collect::<String>().to_lowercase()
+        }
+        _ => SYNC_ENCRYPTION_LOG_ABSENT.to_string(),
+    }
+}
+
+pub(crate) fn sync_encryption_salt_prefix_bytes(salt: &[u8]) -> String {
+    sync_encryption_salt_prefix(Some(bytes_to_hex(salt).as_str()))
+}
+
+/// `m=65536,t=3,p=1`, or `-`.
+pub(crate) fn sync_encryption_kdf_label(params: Option<SyncCryptoKdfParams>) -> String {
+    match params {
+        Some(params) => format!("m={},t={},p={}", params.m_kib, params.t, params.p),
+        None => SYNC_ENCRYPTION_LOG_ABSENT.to_string(),
+    }
+}
+
+/// FNV-1a/32 over UTF-16 code units -- byte-identical to core's `digest32`, which runs over
+/// `charCodeAt`. Not a security primitive: it exists only so two scope strings can be compared
+/// in a log that must not contain the folder path or the WebDAV username inside them.
+fn sync_encryption_digest32(value: &str) -> String {
+    let mut hash: u32 = 0x811c_9dc5;
+    for unit in value.encode_utf16() {
+        hash ^= u32::from(unit);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    format!("{hash:08x}")
+}
+
+/// The backend name a scope was built for (`file`, `webdav`, `cloud`, …), or `-`. Every
+/// `backend=` field is derived from the SAME scope the line's `activeScope=` digests, so a
+/// line can never say `backend=file` while reporting a WebDAV location: the file-backend
+/// seams in this crate are also reached by the native WebDAV commands.
+pub(crate) fn sync_encryption_backend_label(scope: Option<&str>) -> String {
+    let Some(scope) = scope.filter(|value| !value.trim().is_empty()) else {
+        return SYNC_ENCRYPTION_LOG_ABSENT.to_string();
+    };
+    serde_json::from_str::<Vec<Option<String>>>(scope)
+        .ok()
+        .and_then(|parts| parts.into_iter().next().flatten())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "scope".to_string())
+}
+
+/// `<backend>#<digest>` for a scope built by `sync_location_scope` / core's
+/// `buildSyncLocationScope`.
+pub(crate) fn sync_encryption_scope_label(scope: Option<&str>) -> String {
+    let Some(scope) = scope.filter(|value| !value.trim().is_empty()) else {
+        return SYNC_ENCRYPTION_LOG_ABSENT.to_string();
+    };
+    format!("{}#{}", sync_encryption_backend_label(Some(scope)), sync_encryption_digest32(scope))
+}
+
+/// Leaf name of a path -- `data.json.enc`, never the folder it sits in.
+pub(crate) fn sync_encryption_artifact_label(name: &str) -> String {
+    let trimmed = name.trim_end_matches(['/', '\\']);
+    match trimmed.rsplit(['/', '\\']).next() {
+        Some(leaf) if !leaf.is_empty() => leaf.to_string(),
+        _ => SYNC_ENCRYPTION_LOG_ABSENT.to_string(),
+    }
+}
+
 const SYNC_ENCRYPTION_STATE_FILE_NAME: &str = "sync-encryption-state.json";
 const KEYRING_SYNC_ENCRYPTION_KEY: &str = "sync_encryption_key_v1";
 
@@ -154,6 +259,14 @@ pub(crate) struct SyncEncryptionLocalState {
     pub salt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kdf_params: Option<KdfParamsPayload>,
+    /// Which sync location the discovery states were discovered on (#1138). Mirrors core's
+    /// `SyncEncryptionLocalState.discoveredScope` and is built by the same derivation
+    /// (`file_sync_location_scope` in sync.rs for the file backend, core's
+    /// `buildSyncLocationScope` for the TS seams). `#[serde(default)]` so a sidecar written
+    /// before this field existed still parses -- strict parsing rejects unknown STATES, never
+    /// a missing optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovered_scope: Option<String>,
     /// Only ever populated when the OS keyring is unavailable (portable mode, or a keyring
     /// backend that refuses to store). See `store_cached_key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -531,6 +644,9 @@ pub(crate) fn persist_enabled_material(
             state: STATE_ENABLED.to_string(),
             salt: Some(bytes_to_hex(&material.salt)),
             kdf_params: Some(material.params.into()),
+            // A key proves this device owns the generation; the discovery scope described the
+            // lock it just left and must not linger.
+            discovered_scope: None,
             fallback_key,
             incomplete_transition: None,
         }),
@@ -629,6 +745,7 @@ pub(crate) fn mark_remote_encrypted_no_key(
     app: &tauri::AppHandle,
     salt: &[u8],
     params: SyncCryptoKdfParams,
+    scope: Option<&str>,
 ) -> Result<(), String> {
     if let Some(current) = read_local_state(app)? {
         if state_holds_key(&current.state)
@@ -643,6 +760,7 @@ pub(crate) fn mark_remote_encrypted_no_key(
             state: STATE_REMOTE_ENCRYPTED_NO_KEY.to_string(),
             salt: Some(bytes_to_hex(salt)),
             kdf_params: Some(params.into()),
+            discovered_scope: scope.map(str::to_string),
             fallback_key: None,
             incomplete_transition: None,
         }),
@@ -653,7 +771,10 @@ pub(crate) fn mark_remote_encrypted_no_key(
 /// state, and its salt/params/fallback key are carried over unchanged so the key stays
 /// resolvable -- running the disable transition is the only sanctioned way out and it needs
 /// one.
-pub(crate) fn mark_remote_plaintext(app: &tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn mark_remote_plaintext(
+    app: &tauri::AppHandle,
+    scope: Option<&str>,
+) -> Result<(), String> {
     let Some(current) = read_local_state(app)? else {
         return Ok(());
     };
@@ -662,8 +783,57 @@ pub(crate) fn mark_remote_plaintext(app: &tauri::AppHandle) -> Result<(), String
     }
     write_local_state(
         app,
-        Some(&SyncEncryptionLocalState { state: STATE_REMOTE_PLAINTEXT.to_string(), ..current }),
+        Some(&SyncEncryptionLocalState {
+            state: STATE_REMOTE_PLAINTEXT.to_string(),
+            discovered_scope: scope.map(str::to_string).or(current.discovered_scope.clone()),
+            ..current
+        }),
     )
+}
+
+/// Mirrors core's `isSyncEncryptionStateBlocked`: must this device refuse to sync against
+/// `active_scope` before touching the remote? A discovery with NO scope was written before
+/// #1138 and does NOT block -- the cycle re-checks the location like a fresh join and the read
+/// seams re-mark it with a scope. An unknown active scope blocks, because "don't know" must
+/// never license a plaintext write beside ciphertext.
+///
+/// The desktop file backend has no pre-read gate of its own today (a no-key state simply
+/// resolves no material, and the read seam re-discovers), so nothing in this crate calls this
+/// yet. It exists so that the rule has ONE definition per platform and a future gate cannot be
+/// written against the unscoped predicate that #1138 was.
+#[allow(dead_code)]
+pub(crate) fn sync_encryption_state_blocked(
+    state: Option<&SyncEncryptionLocalState>,
+    active_scope: Option<&str>,
+) -> bool {
+    let Some(state) = state else { return false };
+    if state.incomplete_transition.is_some() {
+        return true;
+    }
+    if state.state != STATE_REMOTE_ENCRYPTED_NO_KEY && state.state != STATE_REMOTE_PLAINTEXT {
+        return false;
+    }
+    let Some(discovered) = state.discovered_scope.as_deref() else { return false };
+    match active_scope {
+        None => true,
+        Some(active) => discovered == active,
+    }
+}
+
+/// #1138: Unlock against a location that holds no encrypted document. From
+/// `remote-encrypted-no-key` that is the stale-lock exit -- the discovery described a location
+/// this device is no longer pointed at (or one since emptied), and this device holds no key,
+/// so clearing back to off loses nothing. Returns false (and changes nothing) from any other
+/// state: a keyed device finding no `.enc` is `remote-plaintext`'s business.
+pub(crate) fn clear_stale_remote_encrypted_no_key(app: &tauri::AppHandle) -> Result<bool, String> {
+    let Some(current) = read_local_state(app)? else {
+        return Ok(false);
+    };
+    if current.state != STATE_REMOTE_ENCRYPTED_NO_KEY || current.incomplete_transition.is_some() {
+        return Ok(false);
+    }
+    clear_encryption_state(app)?;
+    Ok(true)
 }
 
 fn clear_encryption_state_with<PersistDisabled, ClearKey>(
@@ -706,6 +876,17 @@ pub(crate) struct SyncEncryptionStatus {
     pub has_key: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub incomplete_transition: Option<String>,
+    /// First 8 hex characters of the persisted salt, for the Diagnostics "Encryption" block.
+    /// Truncated HERE so the full salt never crosses the IPC boundary for a diagnostics read;
+    /// the key-material command is the only place that hands TS a whole salt, and it needs it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub salt_prefix: Option<String>,
+    /// The location a discovery state was bound to (#1138), ALREADY reduced to
+    /// `<backend>#<digest>`. Reduced HERE, like `salt_prefix`, so no raw scope -- it carries
+    /// the WebDAV username and the sync folder path -- ever exists on the JS side where a
+    /// future log line or debug print could pick it up under a name that reads as safe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovered_scope_label: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -757,6 +938,8 @@ pub(crate) fn get_sync_encryption_status(
             kdf_params: None,
             has_key: false,
             incomplete_transition: None,
+            salt_prefix: None,
+            discovered_scope_label: None,
         });
     };
     let has_key = state_holds_key(&state.state)
@@ -764,12 +947,26 @@ pub(crate) fn get_sync_encryption_status(
             .or_else(|| state.fallback_key.clone())
             .and_then(|encoded| decode_key(&encoded))
             .is_some();
-    Ok(SyncEncryptionStatus {
+    Ok(sync_encryption_status_payload(state, has_key))
+}
+
+/// The status payload for one sidecar state. Pure so a test can assert what crosses IPC:
+/// the salt is truncated and the discovery scope is digested HERE, never on the JS side.
+fn sync_encryption_status_payload(
+    state: SyncEncryptionLocalState,
+    has_key: bool,
+) -> SyncEncryptionStatus {
+    SyncEncryptionStatus {
+        salt_prefix: state.salt.as_deref().map(|salt| sync_encryption_salt_prefix(Some(salt))),
+        discovered_scope_label: state
+            .discovered_scope
+            .as_deref()
+            .map(|scope| sync_encryption_scope_label(Some(scope))),
         state: state.state,
         kdf_params: state.kdf_params,
         has_key,
         incomplete_transition: state.incomplete_transition,
-    })
+    }
 }
 
 /// The key cache's `getKey`, and the material the TS-driven seams (Dropbox, and WebDAV under a
@@ -831,16 +1028,20 @@ pub(crate) fn mark_sync_encryption_remote_discovered(
     app: tauri::AppHandle,
     salt: String,
     kdf_params: KdfParamsPayload,
+    location_scope: Option<String>,
 ) -> Result<(), String> {
     let salt_bytes = hex_to_bytes(&salt).ok_or_else(|| "Sync encryption salt must be hex".to_string())?;
-    mark_remote_encrypted_no_key(&app, &salt_bytes, kdf_params.into())
+    mark_remote_encrypted_no_key(&app, &salt_bytes, kdf_params.into(), location_scope.as_deref())
 }
 
 /// Called by the TS seams (Dropbox / WebDAV-under-override) the moment they find the sync
 /// location back in plaintext while this device still holds a key.
 #[tauri::command(async)]
-pub(crate) fn mark_sync_encryption_remote_plaintext(app: tauri::AppHandle) -> Result<(), String> {
-    mark_remote_plaintext(&app)
+pub(crate) fn mark_sync_encryption_remote_plaintext(
+    app: tauri::AppHandle,
+    location_scope: Option<String>,
+) -> Result<(), String> {
+    mark_remote_plaintext(&app, location_scope.as_deref())
 }
 
 #[tauri::command(async)]
@@ -915,6 +1116,58 @@ mod tests {
             .is_none());
     }
 
+    // #1138 (7): a sidecar written by 1.2.6 and earlier carries no `discoveredScope`. Strict
+    // parsing rejects unknown STATES, never a missing optional -- if this regressed, every
+    // existing desktop install would fail closed with StateUnavailable on first launch.
+    #[test]
+    fn state_file_parses_without_the_discovered_scope_field() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME);
+        std::fs::write(
+            &path,
+            r#"{"state":"remote-encrypted-no-key","salt":"00112233445566778899aabbccddeeff"}"#,
+        )
+        .expect("seed legacy state");
+        let parsed = read_state_file(&path).expect("read state").expect("state present");
+        assert_eq!(parsed.state, STATE_REMOTE_ENCRYPTED_NO_KEY);
+        assert_eq!(parsed.discovered_scope, None);
+        // ...and an unscoped discovery does NOT block, so the next cycle re-checks the
+        // location like a fresh join instead of refusing forever.
+        assert!(!sync_encryption_state_blocked(Some(&parsed), Some(r#"["file","/sync"]"#)));
+    }
+
+    // #1138 (7): the scope compare, mirroring core's `isSyncEncryptionStateBlocked`.
+    #[test]
+    fn blocked_only_for_the_location_the_discovery_was_made_on() {
+        let scoped = |scope: Option<&str>, state: &str| SyncEncryptionLocalState {
+            state: state.to_string(),
+            salt: Some("00".repeat(16)),
+            kdf_params: Some(SYNC_CRYPTO_DEFAULT_KDF_PARAMS.into()),
+            discovered_scope: scope.map(str::to_string),
+            fallback_key: None,
+            incomplete_transition: None,
+        };
+        let here = r#"["file","/sync"]"#;
+        let elsewhere = r#"["cloud","dropbox"]"#;
+
+        let no_key_here = scoped(Some(here), STATE_REMOTE_ENCRYPTED_NO_KEY);
+        assert!(sync_encryption_state_blocked(Some(&no_key_here), Some(here)));
+        assert!(!sync_encryption_state_blocked(Some(&no_key_here), Some(elsewhere)));
+        // An unknown active location is doubt, and doubt must not license a plaintext write.
+        assert!(sync_encryption_state_blocked(Some(&no_key_here), None));
+
+        assert!(sync_encryption_state_blocked(
+            Some(&scoped(Some(here), STATE_REMOTE_PLAINTEXT)),
+            Some(here),
+        ));
+        assert!(!sync_encryption_state_blocked(Some(&scoped(Some(here), STATE_ENABLED)), Some(here)));
+        assert!(!sync_encryption_state_blocked(None, Some(here)));
+
+        let mut interrupted = scoped(None, STATE_OFF);
+        interrupted.incomplete_transition = Some(TRANSITION_ENABLE.to_string());
+        assert!(sync_encryption_state_blocked(Some(&interrupted), Some(elsewhere)));
+    }
+
     #[test]
     fn state_file_round_trips_and_clears() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -923,6 +1176,7 @@ mod tests {
             state: STATE_ENABLED.to_string(),
             salt: Some("00112233445566778899aabbccddeeff".to_string()),
             kdf_params: Some(SYNC_CRYPTO_DEFAULT_KDF_PARAMS.into()),
+            discovered_scope: None,
             fallback_key: None,
             incomplete_transition: None,
         };
@@ -1176,5 +1430,207 @@ mod tests {
         assert!(is_terminal_error(&terminal_error("wrong passphrase or corrupted data")));
         assert!(is_terminal_error(SYNC_ENCRYPTION_REMOTE_ENCRYPTED));
         assert!(!is_terminal_error("Invalid sync payload shape: expected an object"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Diagnostics trail (#1056 follow-up)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn diagnostic_lines_are_one_grep_able_key_value_line() {
+        let line = sync_encryption_diagnostic(
+            SYNC_ENCRYPTION_LOG_EVENT_STATE,
+            &[
+                ("backend", "file".to_string()),
+                ("state", STATE_ENABLED.to_string()),
+                ("hasMaterial", "true".to_string()),
+                // An empty value must still render as the absent token, never as nothing.
+                ("kdf", String::new()),
+            ],
+        );
+        assert_eq!(
+            line,
+            "[sync-encryption] state backend=file state=enabled hasMaterial=true kdf=-"
+        );
+    }
+
+    #[test]
+    fn a_salt_is_logged_as_eight_hex_characters_at_most() {
+        assert_eq!(sync_encryption_salt_prefix(Some(&"07".repeat(16))), "07070707");
+        assert_eq!(sync_encryption_salt_prefix_bytes(&[0xab; SALT_LEN]), "abababab");
+        assert_eq!(sync_encryption_salt_prefix(None), "-");
+        assert_eq!(sync_encryption_salt_prefix(Some("  ")), "-");
+        // The full salt must never appear.
+        assert!(!sync_encryption_salt_prefix_bytes(&[0xab; SALT_LEN]).contains(&"ab".repeat(16)));
+    }
+
+    #[test]
+    fn a_location_scope_is_logged_as_backend_plus_digest_never_the_path() {
+        // The two fixtures are pinned against core's `digest32`
+        // (packages/core/src/sync-encryption-diagnostics.test.ts). If either side's hash
+        // changes, both tests fail and the drift is caught here rather than in a support log.
+        assert_eq!(
+            sync_encryption_scope_label(Some(r#"["file","/home/u/Sync/data.json"]"#)),
+            "file#eb9492f4"
+        );
+        assert_eq!(
+            sync_encryption_scope_label(Some(r#"["cloud","dropbox"]"#)),
+            "cloud#0879d27a"
+        );
+
+        let webdav = r#"["webdav","https://dav.example.com/remote.php/dav/","alice"]"#;
+        let label = sync_encryption_scope_label(Some(webdav));
+        assert!(label.starts_with("webdav#"));
+        assert!(!label.contains("alice"));
+        assert!(!label.contains("dav.example.com"));
+        assert_eq!(sync_encryption_scope_label(None), "-");
+    }
+
+    #[test]
+    fn an_artifact_is_logged_by_its_leaf_name_only() {
+        assert_eq!(
+            sync_encryption_artifact_label("/home/u/Sync/data.json.enc"),
+            "data.json.enc"
+        );
+        assert_eq!(sync_encryption_artifact_label("data.json"), "data.json");
+        assert_eq!(sync_encryption_artifact_label(""), "-");
+    }
+
+    #[test]
+    fn no_diagnostic_line_can_carry_a_passphrase_or_a_key() {
+        // The seams below are the only inputs the Rust trail ever formats. None of them takes
+        // a passphrase or key bytes, and this asserts that by feeding the real values in
+        // beside them and checking the rendered lines.
+        let passphrase = "correct horse battery staple";
+        let key = [0x5a_u8; KEY_LEN];
+        let salt = [0xab_u8; SALT_LEN];
+        let scope = r#"["file","/home/u/Sync/data.json"]"#;
+
+        let lines = [
+            sync_encryption_diagnostic(
+                SYNC_ENCRYPTION_LOG_EVENT_STATE,
+                &[
+                    ("backend", "file".to_string()),
+                    ("state", STATE_REMOTE_ENCRYPTED_NO_KEY.to_string()),
+                    ("hasMaterial", "false".to_string()),
+                    ("saltPrefix", sync_encryption_salt_prefix_bytes(&salt)),
+                    (
+                        "kdf",
+                        sync_encryption_kdf_label(Some(SYNC_CRYPTO_DEFAULT_KDF_PARAMS)),
+                    ),
+                    ("activeScope", sync_encryption_scope_label(Some(scope))),
+                    ("decision", "blocked-no-key".to_string()),
+                ],
+            ),
+            sync_encryption_diagnostic(
+                SYNC_ENCRYPTION_LOG_EVENT_REMOTE_READ,
+                &[
+                    (
+                        "artifact",
+                        sync_encryption_artifact_label(&encrypted_artifact_name("data.json")),
+                    ),
+                    ("headerSaltPrefix", sync_encryption_salt_prefix_bytes(&salt)),
+                    ("decision", "no-key".to_string()),
+                ],
+            ),
+            sync_encryption_diagnostic(
+                SYNC_ENCRYPTION_LOG_EVENT_TRANSITION,
+                &[
+                    ("kind", TRANSITION_ENABLE.to_string()),
+                    ("backend", "file".to_string()),
+                    ("phase", "end".to_string()),
+                    ("outcome", "ok".to_string()),
+                ],
+            ),
+        ];
+
+        for line in &lines {
+            assert!(!line.contains(passphrase), "passphrase leaked into: {line}");
+            assert!(!line.contains(&bytes_to_hex(&key)), "key leaked into: {line}");
+            assert!(!line.contains(&BASE64_STANDARD.encode(key)), "key leaked into: {line}");
+            // The salt is public but never logged in full.
+            assert!(!line.contains(&bytes_to_hex(&salt)), "full salt leaked into: {line}");
+            // The scope names the sync folder; only its digest may appear.
+            assert!(!line.contains("/home/u/Sync"), "sync path leaked into: {line}");
+        }
+        assert!(lines[0].starts_with("[sync-encryption] state"));
+        assert!(lines[1].contains("artifact=data.json.enc"));
+        assert!(lines[2].contains("outcome=ok"));
+    }
+
+    #[test]
+    fn the_status_payload_carries_a_truncated_salt_and_the_discovery_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME);
+        write_state_file(
+            &path,
+            Some(&SyncEncryptionLocalState {
+                state: STATE_REMOTE_ENCRYPTED_NO_KEY.to_string(),
+                salt: Some("07".repeat(16)),
+                kdf_params: Some(SYNC_CRYPTO_DEFAULT_KDF_PARAMS.into()),
+                discovered_scope: Some(r#"["cloud","dropbox"]"#.to_string()),
+                fallback_key: None,
+                incomplete_transition: None,
+            }),
+        )
+        .unwrap();
+        let state = read_state_file(&path).unwrap().unwrap();
+        assert_eq!(
+            sync_encryption_salt_prefix(state.salt.as_deref()),
+            "07070707"
+        );
+        assert_eq!(
+            sync_encryption_scope_label(state.discovered_scope.as_deref()),
+            "cloud#0879d27a"
+        );
+    }
+
+    /// The scope carries a WebDAV URL and username. It must be digested before it crosses IPC,
+    /// exactly as the salt is truncated before it crosses -- a raw copy on the JS side under a
+    /// name that reads as already-safe is how a future log line leaks one.
+    #[test]
+    fn the_sync_encryption_status_payload_never_carries_a_raw_scope_or_a_whole_salt() {
+        let salt = "07".repeat(16);
+        let payload = sync_encryption_status_payload(
+            SyncEncryptionLocalState {
+                state: STATE_REMOTE_ENCRYPTED_NO_KEY.to_string(),
+                salt: Some(salt.clone()),
+                kdf_params: Some(SYNC_CRYPTO_DEFAULT_KDF_PARAMS.into()),
+                discovered_scope: Some(
+                    r#"["webdav","https://dav.example.com/remote.php/dav/","alice"]"#.to_string(),
+                ),
+                fallback_key: None,
+                incomplete_transition: None,
+            },
+            false,
+        );
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains(r#""discoveredScopeLabel":"webdav#"#), "{json}");
+        assert!(!json.contains("dav.example.com"), "{json}");
+        assert!(!json.contains("alice"), "{json}");
+        assert!(!json.contains(salt.as_str()), "{json}");
+        assert!(json.contains(r#""saltPrefix":"07070707""#), "{json}");
+    }
+
+    /// Rust only ever feeds this a value it hex-encoded itself, but a hand-edited or
+    /// migration-corrupted sidecar must not put arbitrary text in the salt column.
+    #[test]
+    fn a_sync_encryption_salt_prefix_rejects_non_hex_input() {
+        assert_eq!(sync_encryption_salt_prefix(Some("deadBEEF00")), "deadbeef");
+        assert_eq!(sync_encryption_salt_prefix(Some("/home/u/Sync")), "-");
+        assert_eq!(sync_encryption_salt_prefix(Some("  ")), "-");
+        assert_eq!(sync_encryption_salt_prefix(None), "-");
+    }
+
+    /// #1138 diagnostics: `backend=` is derived from the same scope `activeScope=` digests, so
+    /// a native WebDAV read can never log itself as the file backend.
+    #[test]
+    fn a_sync_encryption_backend_label_names_the_scope_backend() {
+        let webdav = r#"["webdav","https://dav.example.com/remote.php/dav/","alice"]"#;
+        assert_eq!(sync_encryption_backend_label(Some(webdav)), "webdav");
+        assert!(sync_encryption_scope_label(Some(webdav)).starts_with("webdav#"));
+        assert_eq!(sync_encryption_backend_label(Some(r#"["file","/home/u/Sync"]"#)), "file");
+        assert_eq!(sync_encryption_backend_label(Some("not json")), "scope");
+        assert_eq!(sync_encryption_backend_label(None), "-");
     }
 }

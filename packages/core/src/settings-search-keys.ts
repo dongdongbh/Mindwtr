@@ -273,6 +273,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchIndexEntry[] =
 // indexed on its own. Every key in SETTINGS_SEARCH_PAGE_KEYS must be either
 // resolvable on mobile or listed here — see settings-search-keys.test.ts.
 export const SETTINGS_SEARCH_MOBILE_EXCLUSIONS: Record<string, string> = {
+    featureTimeline: 'Timeline view exists on desktop only; the mobile GTD > Features screen has no row for it (#1145).',
     density: 'No adjustable list density setting on mobile.',
     textSize: 'Mobile follows the OS text-size setting automatically; no in-app override.',
     keybindings: 'No hardware-keyboard shortcuts configuration on mobile.',

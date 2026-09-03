@@ -77,6 +77,14 @@ async function appendLogLine(entry: LogEntry, options?: AppendLogOptions): Promi
 export async function getLogPath(): Promise<string | null> {
     if (!isTauriRuntime()) return null;
     try {
+        // The backend knows where the file really lands (MS Store installs get
+        // their AppData writes redirected into the package LocalCache, #1135).
+        const nativePath = (await invokeNative<string>('get_log_file_path')).trim();
+        if (nativePath) return nativePath;
+    } catch {
+        // Older backend without the command — fall back to the computed path.
+    }
+    try {
         return await getManagedPath(LOG_DIR_NAME, LOG_FILE_NAME);
     } catch (error) {
         return null;

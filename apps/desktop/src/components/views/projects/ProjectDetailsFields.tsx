@@ -1,5 +1,5 @@
 import { safeParseDate, type Project } from '@mindwtr/core';
-import { Calendar, CalendarClock, FolderOpenDot, ListOrdered, Plus, Settings2, Signal, Tags } from 'lucide-react';
+import { Calendar, CalendarClock, CalendarRange, FolderOpenDot, ListOrdered, Plus, Settings2, Signal, Tags } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { useNativeDateInputLocale } from '../../../hooks/use-native-date-input-locale';
 import { TokenAutocompleteInput } from '../../Task/TokenAutocompleteInput';
@@ -24,6 +24,8 @@ type ProjectDetailsFieldsProps = {
     onSequentialScopeChange: (value: Project['sequentialScope']) => void;
     status: Project['status'];
     onChangeStatus: (status: Project['status']) => void;
+    startDateValue: string;
+    onStartDateChange: (value: string) => void;
     dueDateValue: string;
     onDueDateChange: (value: string) => void;
     reviewAtValue: string;
@@ -51,6 +53,8 @@ export function ProjectDetailsFields({
     onSequentialScopeChange,
     status,
     onChangeStatus,
+    startDateValue,
+    onStartDateChange,
     dueDateValue,
     onDueDateChange,
     reviewAtValue,
@@ -202,6 +206,27 @@ export function ProjectDetailsFields({
                         }}
                         placeholder="#feature, #client"
                         className="h-9 w-full text-sm bg-background border border-border rounded-md px-2 text-foreground"
+                    />
+                </div>
+
+                <div className="space-y-2 min-w-0 2xl:col-span-2">
+                    <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5 truncate">
+                        <CalendarRange className="h-3.5 w-3.5" />
+                        {t('taskEdit.startDateLabel')}
+                    </label>
+                    <DateField
+                        key={`${project.id}-start`}
+                        t={t}
+                        dateAriaLabel={t('taskEdit.startDateLabel')}
+                        dateValue={startDateValue}
+                        selectedDate={safeParseDate(startDateValue)}
+                        dateFormatSetting={dateFormatSetting}
+                        nativeDateInputLocale={nativeDateInputLocale}
+                        dateInputClassName="h-9 text-sm bg-background border border-border rounded-md px-2 text-foreground"
+                        className="max-w-none"
+                        hasValue={Boolean(startDateValue)}
+                        onDateChange={onStartDateChange}
+                        onClear={() => onStartDateChange('')}
                     />
                 </div>
 

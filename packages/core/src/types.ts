@@ -93,6 +93,7 @@ export interface Project {
     isFocused?: boolean; // If true, this project is a priority focus (max 5 allowed)
     supportNotes?: string;
     attachments?: Attachment[];
+    startDate?: string; // Optional project start date (ISO date or datetime); with dueDate it spans a bar on the desktop Timeline.
     dueDate?: string; // Optional project deadline/target date (ISO date or datetime).
     reviewAt?: string; // Tickler/review date (ISO string). If set, project is due for review at/after this time.
     areaId?: string;

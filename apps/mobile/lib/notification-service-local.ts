@@ -9,7 +9,9 @@ import {
   isWeeklyReviewReminderEnabled,
   loadStoredLanguage,
   nameNotifyListener,
+  type AppLanguage,
   type Language,
+  type NotificationSettings,
   type ReminderScheduleRequest,
   useTaskStore,
 } from '@mindwtr/core';
@@ -644,6 +646,37 @@ function toLocalAlarmConfig(request: ReminderScheduleRequest): LocalAlarmConfig 
   };
 }
 
+// Every field a reschedule cycle actually reads (runRescheduleCycle's own
+// gates plus buildReminderSchedule's: areTaskRemindersEnabled,
+// areStartDateRemindersEnabled, areDueDateRemindersEnabled,
+// isWeeklyReviewReminderEnabled, hasActiveMobileNotificationFeature,
+// getDigestSchedule, and reviewAtNotificationsEnabled) plus `language`: the
+// cycle localizes every alarm title/body from it (see the language read near
+// the translations load below), so a language switch must re-arm too even
+// though buildReminderSchedule itself never reads it directly (correction
+// #3). A settings object can change identity every sync cycle
+// (lastSyncAt/lastSyncStatus/lastSyncStats bookkeeping) without moving any of
+// these, so the store-change guard below compares this signature instead of
+// settings identity (#766).
+function buildReminderRelevantSettingsSignature(
+  settings: NotificationSettings & { language?: AppLanguage },
+): string {
+  return JSON.stringify([
+    settings.notificationsEnabled,
+    settings.startDateNotificationsEnabled,
+    settings.dueDateNotificationsEnabled,
+    settings.weeklyReviewEnabled,
+    settings.reviewAtNotificationsEnabled,
+    settings.dailyDigestMorningEnabled,
+    settings.dailyDigestMorningTime,
+    settings.dailyDigestEveningEnabled,
+    settings.dailyDigestEveningTime,
+    settings.weeklyReviewDay,
+    settings.weeklyReviewTime,
+    settings.language,
+  ]);
+}
+
 async function runRescheduleCycle(api: AlarmNotificationsApi): Promise<void> {
   const cycleStartedAtMs = Date.now();
   await loadAlarmMapIfNeeded();
@@ -1030,13 +1063,15 @@ export async function startLocalMobileNotifications(): Promise<void> {
 
   storeSubscription?.();
   storeSubscription = useTaskStore.subscribe(nameNotifyListener('notification-reschedule', (state, prevState) => {
-    // Reschedule cycles only read tasks, projects, and settings; skip store
-    // updates (sync status, loading flags, editor state) that leave them untouched.
-    if (
-      state.tasks === prevState.tasks
-      && state.projects === prevState.projects
-      && state.settings === prevState.settings
-    ) {
+    // Reschedule cycles only read tasks, projects, and a handful of settings
+    // fields. tasks/projects re-arm on any identity change (cheap reference
+    // compare). settings re-arms only when a reminder-relevant field actually
+    // moved: an unchanged sync cycle still rewrites lastSyncAt/lastSyncStatus/
+    // lastSyncStats into a fresh settings object every time (#766).
+    const tasksOrProjectsChanged = state.tasks !== prevState.tasks || state.projects !== prevState.projects;
+    const settingsRelevantChanged = state.settings !== prevState.settings
+      && buildReminderRelevantSettingsSignature(state.settings) !== buildReminderRelevantSettingsSignature(prevState.settings);
+    if (!tasksOrProjectsChanged && !settingsRelevantChanged) {
       return;
     }
     clearRescheduleTimer();
@@ -1045,6 +1080,30 @@ export async function startLocalMobileNotifications(): Promise<void> {
       enqueueReschedule(api);
     }, STORE_RESCHEDULE_DEBOUNCE_MS);
   }));
+}
+
+// AlarmManager decides exact vs inexact when the alarm is *created*, so alarms
+// that were scheduled while "Alarms & reminders" was denied stay inexact after
+// the user allows it. `scheduleAlarmForKey` skips any key whose config
+// signature is unchanged, so a plain reschedule cycle would re-confirm every
+// stale alarm instead of re-creating it. Cancel first, then run the one
+// existing cycle so it rebuilds them all as exact.
+export async function rescheduleLocalAlarmsAsExact(): Promise<void> {
+  if (!started) return;
+  const api = await loadAlarmApi();
+  if (!api) return;
+  logNotificationInfo('Rebuilding alarms as exact after exact-alarm permission grant');
+  rescheduleQueue = rescheduleQueue
+    .catch(() => undefined)
+    .then(async () => {
+      await loadAlarmMapIfNeeded();
+      for (const key of Array.from(alarmMap.keys())) {
+        await cancelAlarmByKey(api, key);
+      }
+      await runRescheduleCycle(api);
+    })
+    .catch((error) => logNotificationError('Failed to rebuild alarms as exact', error));
+  await rescheduleQueue;
 }
 
 export async function stopLocalMobileNotifications(): Promise<void> {

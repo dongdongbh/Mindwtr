@@ -1588,7 +1588,9 @@ describe('cloud server namespace mode', () => {
             await Promise.all(workers.map((worker) => waitForChildExit(worker, 5_000)));
             rmSync(tempDataDir, { recursive: true, force: true });
         }
-    });
+    // Two spawned server processes on a loaded CI runner need more than bun's
+    // 5 s default (flaked 2026-08-31 and 2026-09-02).
+    }, 20_000);
 
     test('caps new namespace creation when any-token mode is enabled', async () => {
         const tempDataDir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-namespace-test-'));
@@ -3756,6 +3758,20 @@ describe('cloud server api', () => {
         const downloaded = new Uint8Array(await getResponse.arrayBuffer());
         expect(Array.from(downloaded)).toEqual(Array.from(payload));
 
+        // #1119 presence pass: HEAD answers the same question without the bytes.
+        const headResponse = await fetch(`${baseUrl}/v1/attachments/folder/file.bin`, {
+            method: 'HEAD',
+            headers: authHeaders,
+        });
+        expect(headResponse.status).toBe(200);
+        expect(headResponse.headers.get('content-length')).toBe(String(payload.byteLength));
+        expect(new Uint8Array(await headResponse.arrayBuffer())).toHaveLength(0);
+
+        const unauthorizedHead = await fetch(`${baseUrl}/v1/attachments/folder/file.bin`, {
+            method: 'HEAD',
+        });
+        expect(unauthorizedHead.status).toBe(401);
+
         const deleteResponse = await fetch(`${baseUrl}/v1/attachments/folder/file.bin`, {
             method: 'DELETE',
             headers: authHeaders,
@@ -3766,6 +3782,12 @@ describe('cloud server api', () => {
             headers: authHeaders,
         });
         expect(missingResponse.status).toBe(404);
+
+        const missingHead = await fetch(`${baseUrl}/v1/attachments/folder/file.bin`, {
+            method: 'HEAD',
+            headers: authHeaders,
+        });
+        expect(missingHead.status).toBe(404);
     });
 
     test('fails a partial attachment upload when the configured storage root is replaced', async () => {

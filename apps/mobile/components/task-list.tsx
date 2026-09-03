@@ -270,7 +270,7 @@ function TaskListComponent({
     updateSettings,
     highlightTaskId,
     setHighlightTask,
-    getDerivedState,
+    getFocusedCount,
   } = useTaskStore((state) => ({
     tasks: taskSource ?? (includeArchived ? state._allTasks : state.tasks),
     // References tag-matched to the project can live in other projects, so the
@@ -293,7 +293,7 @@ function TaskListComponent({
     updateSettings: state.updateSettings,
     highlightTaskId: state.highlightTaskId,
     setHighlightTask: state.setHighlightTask,
-    getDerivedState: state.getDerivedState,
+    getFocusedCount: state.getFocusedCount,
   }), shallow);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -381,7 +381,7 @@ function TaskListComponent({
   const shouldGroupCompletedTasks = Boolean(groupCompletedTasksLast && projectId && statusFilter === 'all');
   const projectReorderMode = projectReorderModeProp ?? internalProjectReorderMode;
   const focusTaskLimit = normalizeFocusTaskLimit(settings?.gtd?.focusTaskLimit);
-  const focusedCount = getDerivedState().focusedCount;
+  const focusedCount = getFocusedCount();
   const resolvedFeatureFlags = resolveFeatureFlags(settings);
   const prioritiesEnabled = resolvedFeatureFlags.priorities;
   const timeEstimatesEnabled = resolvedFeatureFlags.timeEstimates;

@@ -58,6 +58,27 @@ describe('createSyncCycleExecutor', () => {
 });
 
 describe('performSyncCycle', () => {
+    it('still merges a non-empty remote when the empty-remote skip flag is set', async () => {
+        // The local-only upload fast path sets skipEmptyRemoteMerge; the skip
+        // must never discard a real remote document if that flag is ever set on
+        // a cycle whose readRemote answered with data (review finding, #1001).
+        const local = mockAppData([createMockTask('local-1', '2023-01-02')]);
+        const incoming = mockAppData([createMockTask('remote-1', '2023-01-03')]);
+        let written: AppData | null = null;
+
+        const result = await performSyncCycle({
+            readLocal: async () => local,
+            readRemote: async () => incoming,
+            writeLocal: async (data) => { written = data; },
+            writeRemote: async () => {},
+            skipEmptyRemoteMerge: () => true,
+        });
+
+        const ids = (written as AppData | null)?.tasks.map((task) => task.id).sort();
+        expect(ids).toEqual(['local-1', 'remote-1']);
+        expect(result.data.tasks.map((task) => task.id).sort()).toEqual(['local-1', 'remote-1']);
+    });
+
     it('returns conflict status when merge finds conflicts', async () => {
         const local = mockAppData([{
             ...createMockTask('1', '2023-01-02'),

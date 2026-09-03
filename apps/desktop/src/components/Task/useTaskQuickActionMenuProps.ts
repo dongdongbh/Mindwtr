@@ -125,8 +125,8 @@ export function useTaskQuickActionMenuProps(
     overrides?: TaskQuickActionMenuOverrides,
 ): Omit<TaskQuickActionMenuProps, 'x' | 'y' | 'onClose'> {
     const { t, language } = useLanguage();
-    const { areas, settings } = useTaskStore(
-        (state) => ({ areas: state.areas, settings: state.settings }),
+    const { areas, projects, settings } = useTaskStore(
+        (state) => ({ areas: state.areas, projects: state.projects, settings: state.settings }),
         shallow,
     );
     const nativeDateInputLocale = useMemo(() => {
@@ -225,6 +225,7 @@ export function useTaskQuickActionMenuProps(
         contextOptions: popularContextOptions,
         contextSuggestions: allContexts,
         areas,
+        projects,
         readOnly,
         focusAction: overrides?.focusAction,
         onRename: overrides?.onRename,

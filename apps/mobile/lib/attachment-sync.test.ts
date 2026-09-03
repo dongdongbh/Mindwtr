@@ -1,5 +1,5 @@
 import * as nodeCrypto from 'node:crypto';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_DOWNLOAD_BYTES,
   SyncRemoteMutationFenceLostError,
@@ -48,6 +48,8 @@ const fileSystemMock = vi.hoisted(() => ({
   moveAsync: vi.fn().mockResolvedValue(undefined),
   uploadAsync: vi.fn(),
   createUploadTask: vi.fn(),
+  // Mirrors expo-file-system/legacy: the enum is exported here and nowhere else (#1136).
+  FileSystemUploadType: { BINARY_CONTENT: 0, MULTIPART: 1 },
 }));
 
 const modernFileSystemMock = vi.hoisted(() => {
@@ -115,6 +117,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   return {
     ...actual,
     MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES: 15,
+    cloudAttachmentExists: vi.fn(),
     cloudGetFile: vi.fn(),
     cloudDeleteFile: vi.fn(),
     cloudPutFile: vi.fn(),
@@ -137,6 +140,7 @@ vi.mock('./dropbox-sync', () => ({
   DropboxUnauthorizedError: class DropboxUnauthorizedError extends Error {},
   downloadDropboxFile: vi.fn(),
   getDropboxFileMetadata: vi.fn(),
+  listDropboxFolderFiles: vi.fn(),
   uploadDropboxFile: vi.fn(),
   uploadDropboxFileVersioned: vi.fn(),
 }));
@@ -245,8 +249,15 @@ describe('attachment sync', () => {
       lastModified: null,
       contentLength: null,
     });
+    // #1119 follow-up: the presence pre-pass may only ever clear on a DEFINITIVE not-found,
+    // so the unconfigured defaults are "the blob is there" and "no listing was obtained" —
+    // both of which change nothing. A test that wants a repair says so explicitly.
+    vi.mocked(core.cloudAttachmentExists).mockResolvedValue(true);
     const dropbox = await import('./dropbox-sync');
     vi.mocked(dropbox.getDropboxFileMetadata).mockResolvedValue({ rev: null });
+    vi.mocked(dropbox.listDropboxFolderFiles).mockRejectedValue(
+      new Error('Dropbox folder listing fixture not configured'),
+    );
     fileSystemMock.getInfoAsync.mockReset();
     fileSystemMock.makeDirectoryAsync.mockResolvedValue(undefined);
     fileSystemMock.copyAsync.mockResolvedValue(undefined);
@@ -889,6 +900,237 @@ describe('attachment sync', () => {
         ],
       },
     }))).resolves.toBe(true);
+  });
+
+  // Audit F3 / #1119 follow-up: a settled attachment used to make EVERY sync cycle run the
+  // whole attachment phase — a MKCOL, one HEAD per attachment, and (because the phase runs
+  // at all) a remote mutation fence PUT and DELETE. The presence proof is now periodic.
+  describe('idle-cycle attachment traffic', () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const WEBDAV_CONFIG = { url: 'https://example.com/data.json', username: 'u', password: 'p' };
+    const WEBDAV_BASE = 'https://example.com';
+    // Mirrors core's `buildSyncLocationScope` (shared with sync-encryption discovery scoping
+    // since #1138): only the dimensions the ACTIVE backend addresses, URLs normalized.
+    const scopeFor = (webdavUrl: string): string => JSON.stringify(['webdav', webdavUrl, 'u']);
+    const STEADY_BYTES = new Uint8Array([1, 2, 3]);
+
+    /** cloudKey set, a managed local file, `available`, and a recorded content stat that
+     *  matches what `getInfoAsync` reports below. Nothing here needs doing. */
+    const steadyAttachment = (): Attachment => ({
+      id: 'settled',
+      kind: 'file',
+      title: 'settled.txt',
+      uri: 'file://document/attachments/settled.txt',
+      cloudKey: 'attachments/settled.txt',
+      localStatus: 'available',
+      size: STEADY_BYTES.byteLength,
+      fileHash: sha256Hex(STEADY_BYTES),
+      contentMtimeMs: 1000,
+      contentSize: STEADY_BYTES.byteLength,
+      createdAt: '2026-04-18T10:00:00.000Z',
+      updatedAt: '2026-04-18T10:00:00.000Z',
+    });
+
+    const dataWith = (attachment: Attachment): AppData => ({
+      tasks: [{
+        id: 'task-1', title: 'Task', status: 'inbox', tags: [], contexts: [],
+        attachments: [attachment],
+        createdAt: '2026-04-18T10:00:00.000Z', updatedAt: '2026-04-18T10:00:00.000Z',
+      }],
+      projects: [], sections: [], areas: [], settings: {},
+    });
+
+    const RECONCILE_KEY = '@mindwtr_attachment_presence_reconcile_v1';
+    const CONFIG: Record<string, string | null> = {
+      '@mindwtr_sync_backend': 'webdav',
+      '@mindwtr_webdav_url': WEBDAV_CONFIG.url,
+      '@mindwtr_webdav_username': WEBDAV_CONFIG.username,
+    };
+
+    const stubDeviceConfig = async (stamp: { scope: string; at: number } | null): Promise<void> => {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      vi.mocked(AsyncStorage.getItem).mockImplementation(async (key: string) => {
+        if (key === RECONCILE_KEY) return stamp ? JSON.stringify(stamp) : null;
+        return CONFIG[key] ?? null;
+      });
+    };
+
+    const countWebdavRequests = async (): Promise<number> => {
+      const core = await import('@mindwtr/core');
+      return [
+        core.webdavMakeDirectory,
+        core.webdavFileExists,
+        core.webdavHeadFile,
+        core.webdavGetFile,
+        core.webdavPutFileVersioned,
+      ].reduce((total, fn) => total + vi.mocked(fn).mock.calls.length, 0)
+        + fileSystemMock.uploadAsync.mock.calls.length
+        + fileSystemMock.createUploadTask.mock.calls.length;
+    };
+
+    beforeEach(async () => {
+      fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3, modificationTime: 1 });
+      fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(STEADY_BYTES));
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.webdavFileExists).mockResolvedValue(true);
+      await stubDeviceConfig({ scope: scopeFor(WEBDAV_CONFIG.url), at: Date.now() });
+    });
+
+    afterEach(async () => {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      vi.mocked(AsyncStorage.getItem).mockReset();
+      vi.mocked(AsyncStorage.getItem).mockResolvedValue(null);
+    });
+
+    it('(a) reports no work and issues no request for a settled attachment inside the interval', async () => {
+      const { hasPendingAttachmentSyncWork, syncWebdavAttachments } = attachmentSync;
+      const appData = dataWith(steadyAttachment());
+
+      await expect(hasPendingAttachmentSyncWork(appData, { contentCheckEnabled: true }))
+        .resolves.toBe(false);
+
+      // Even if something else made the phase run, the settled attachment costs nothing.
+      await syncWebdavAttachments(appData, WEBDAV_CONFIG, WEBDAV_BASE);
+      await expect(countWebdavRequests()).resolves.toBe(0);
+    });
+
+    it('(b) reconciles once when the stamp is older than a day, and re-stamps', async () => {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      const core = await import('@mindwtr/core');
+      const { hasPendingAttachmentSyncWork, syncWebdavAttachments } = attachmentSync;
+      await stubDeviceConfig({ scope: scopeFor(WEBDAV_CONFIG.url), at: Date.now() - DAY_MS - 1 });
+      const appData = dataWith(steadyAttachment());
+
+      await expect(hasPendingAttachmentSyncWork(appData, { contentCheckEnabled: true }))
+        .resolves.toBe(true);
+
+      await syncWebdavAttachments(appData, WEBDAV_CONFIG, WEBDAV_BASE);
+
+      expect(vi.mocked(core.webdavFileExists)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.webdavFileExists)).toHaveBeenCalledWith(
+        'https://example.com/attachments/settled.txt',
+        expect.anything(),
+      );
+      const stamped = vi.mocked(AsyncStorage.setItem).mock.calls
+        .find(([key]) => key === RECONCILE_KEY);
+      expect(stamped).toBeDefined();
+      expect(JSON.parse(String(stamped?.[1])).scope).toBe(scopeFor(WEBDAV_CONFIG.url));
+    });
+
+    it('(c) reports work for an attachment that has never been uploaded, stamp or not', async () => {
+      const { hasPendingAttachmentSyncWork } = attachmentSync;
+      const attachment = { ...steadyAttachment(), cloudKey: undefined };
+
+      await expect(hasPendingAttachmentSyncWork(dataWith(attachment), { contentCheckEnabled: true }))
+        .resolves.toBe(true);
+    });
+
+    it('(d) forces reconciliation when the backend configuration changed under the stamp', async () => {
+      const core = await import('@mindwtr/core');
+      const { hasPendingAttachmentSyncWork, syncWebdavAttachments } = attachmentSync;
+      // Fresh in time, but written against a different server.
+      await stubDeviceConfig({ scope: scopeFor('https://old.example/data.json'), at: Date.now() });
+      const appData = dataWith(steadyAttachment());
+
+      await expect(hasPendingAttachmentSyncWork(appData, { contentCheckEnabled: true }))
+        .resolves.toBe(true);
+
+      await syncWebdavAttachments(appData, WEBDAV_CONFIG, WEBDAV_BASE);
+      expect(vi.mocked(core.webdavFileExists)).toHaveBeenCalledTimes(1);
+    });
+
+    // fresh-join-attachment-posture packet -10 (correction pass, fixed in the final fix pass —
+    // review finding B2): the durable "seen this location" fact the sync-encryption posture
+    // gate uses for backends (the file backend above all) with no FastSyncState record.
+    // Scope-exact by design. Takes NO scope argument: it derives its own comparison scope via
+    // `readActiveSyncLocationScope`, the same derivation `markAttachmentPresenceReconciled`
+    // writes with — `stubDeviceConfig`'s `CONFIG` map IS that stored device config, so it
+    // always resolves to `scopeFor(WEBDAV_CONFIG.url)` here.
+    describe('hasCompletedAttachmentPresenceReconciliation', () => {
+      it('is false for a genuinely fresh device with no stamp at all', async () => {
+        await stubDeviceConfig(null);
+        await expect(attachmentSync.hasCompletedAttachmentPresenceReconciliation()).resolves.toBe(false);
+      });
+
+      it('is true once a presence pass has completed against this exact location', async () => {
+        await stubDeviceConfig({ scope: scopeFor(WEBDAV_CONFIG.url), at: Date.now() });
+        await expect(attachmentSync.hasCompletedAttachmentPresenceReconciliation()).resolves.toBe(true);
+      });
+
+      it('is false when the stamp belongs to a different location', async () => {
+        await stubDeviceConfig({ scope: scopeFor('https://old.example/data.json'), at: Date.now() });
+        await expect(attachmentSync.hasCompletedAttachmentPresenceReconciliation()).resolves.toBe(false);
+      });
+
+      it('is false when the device config cannot be resolved at all', async () => {
+        const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+        vi.mocked(AsyncStorage.getItem).mockRejectedValue(new Error('storage unavailable'));
+        await expect(attachmentSync.hasCompletedAttachmentPresenceReconciliation()).resolves.toBe(false);
+      });
+    });
+
+    it('(e) does not MKCOL the attachments directory for a pass that uploads nothing', async () => {
+      const core = await import('@mindwtr/core');
+      const { syncWebdavAttachments } = attachmentSync;
+      // Reconciliation due, so the pass genuinely runs and still uploads nothing.
+      await stubDeviceConfig(null);
+
+      await syncWebdavAttachments(dataWith(steadyAttachment()), WEBDAV_CONFIG, WEBDAV_BASE);
+
+      expect(vi.mocked(core.webdavFileExists)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(core.webdavMakeDirectory)).not.toHaveBeenCalled();
+      expect(vi.mocked(core.webdavPutFileVersioned)).not.toHaveBeenCalled();
+    });
+
+    // The File Sync backend's pre-pass is local, so it costs no radio — but it is two
+    // native stats per attachment on every idle cycle, and it is what keeps
+    // `hasPendingAttachmentSyncWork` from ever going quiet for that backend.
+    it('(f) skips the File Sync remote-presence pre-pass inside the interval and runs it outside', async () => {
+      const { syncFileAttachments } = attachmentSync;
+      const syncFileUri = 'file://sync/data.json';
+      const remoteUri = 'file://sync/attachments/settled.txt';
+      const localUri = 'file://document/attachments/settled.txt';
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')
+          ? { exists: true, size: 3, modificationTime: 1 }
+          : { exists: false }
+      ));
+      const sawRemoteStat = (): boolean => fileSystemMock.getInfoAsync.mock.calls
+        .some(([uri]) => uri === remoteUri);
+
+      const quiet = dataWith(steadyAttachment());
+      const quietResult = syncResult(await syncFileAttachments(quiet, syncFileUri), quiet);
+      expect(sawRemoteStat()).toBe(false);
+      expect(quietResult.data.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/settled.txt');
+
+      fileSystemMock.getInfoAsync.mockClear();
+      await stubDeviceConfig({ scope: scopeFor(WEBDAV_CONFIG.url), at: Date.now() - DAY_MS - 1 });
+      const appData = dataWith(steadyAttachment());
+      const { data } = syncResult(await syncFileAttachments(appData, syncFileUri), appData);
+
+      expect(sawRemoteStat()).toBe(true);
+      // The remote copy is gone, so the pass clears cloudKey and the lifecycle republishes
+      // it under a fresh generation name.
+      expect(data.tasks[0].attachments?.[0]?.cloudKey).not.toBe('attachments/settled.txt');
+    });
+
+    it('(e2) still MKCOLs before the first upload of a pass', async () => {
+      const core = await import('@mindwtr/core');
+      const { syncWebdavAttachments } = attachmentSync;
+      const appData = dataWith({ ...steadyAttachment(), cloudKey: undefined });
+
+      await syncWebdavAttachments(appData, WEBDAV_CONFIG, WEBDAV_BASE);
+
+      expect(vi.mocked(core.webdavMakeDirectory)).toHaveBeenCalledTimes(1);
+      const mkcolOrder = vi.mocked(core.webdavMakeDirectory).mock.invocationCallOrder[0];
+      const putOrder = [
+        ...vi.mocked(core.webdavPutFileVersioned).mock.invocationCallOrder,
+        ...fileSystemMock.uploadAsync.mock.invocationCallOrder,
+        ...fileSystemMock.createUploadTask.mock.invocationCallOrder,
+      ];
+      expect(putOrder.length).toBeGreaterThan(0);
+      expect(mkcolOrder).toBeLessThan(Math.min(...putOrder));
+    });
   });
 
   it('uploads a pending SAF file attachment into the existing attachments directory', async () => {
@@ -4408,6 +4650,39 @@ describe('attachment sync', () => {
       expect(nextUploadAsync).toHaveBeenCalledOnce();
     });
 
+    it('sends a defined uploadType to the native uploader (#1136)', async () => {
+      // Android's FileSystemUploadOptions.uploadType has no native default and expo's
+      // UploadTask spreads our options over its own, so an undefined value here reached
+      // Kotlin as null and killed uploadTaskStartAsync with an Enum.ordinal() NPE.
+      fileSystemMock.createUploadTask.mockReturnValue({
+        uploadAsync: vi.fn().mockResolvedValue({ status: 200 }),
+        cancelAsync: vi.fn(),
+      });
+      const { uploadCloudFileWithFileSystem, uploadWebdavFileWithFileSystem } =
+        await import('./attachment-sync-backends/common');
+
+      await expect(uploadCloudFileWithFileSystem(
+        'https://sync.example/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'token',
+      )).resolves.toBe(true);
+      await expect(uploadWebdavFileWithFileSystem(
+        'https://example.com/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'u',
+        'p',
+        false,
+      )).resolves.toBe(true);
+
+      expect(fileSystemMock.createUploadTask).toHaveBeenCalledTimes(2);
+      for (const call of fileSystemMock.createUploadTask.mock.calls) {
+        expect(call[2]).toMatchObject({ uploadType: fileSystemMock.FileSystemUploadType.BINARY_CONTENT });
+        expect(call[2].uploadType).toBeDefined();
+      }
+    });
+
     it('does not finish after cancellation acknowledgement while the native upload is still live', async () => {
       const upload = deferred<{ status: number }>();
       const cancelAsync = vi.fn(async () => undefined);
@@ -4774,6 +5049,186 @@ describe('attachment sync', () => {
       expect(data.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
       expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
       expect(appData.settings.attachments?.pendingRemoteDeletes).toHaveLength(1);
+    });
+  });
+
+  // #1119 follow-up: a blob deleted on the server can only be restored by a device that
+  // still holds the bytes. WebDAV has repaired that since #1119; these are the same repair
+  // for Dropbox (one folder listing) and the self-hosted cloud (one probe per blob), mirroring
+  // apps/desktop/src/lib/sync-attachment-backends.test.ts.
+  describe('remote attachment presence repair (#1119 follow-up)', () => {
+    const BYTES = new Uint8Array([1, 2, 3]);
+    const localUri = 'file://document/attachments/settled.txt';
+
+    /** cloudKey set, readable managed bytes, nothing pending: the one shape the repair may act on. */
+    const uploadedData = (): AppData => singleAttachmentData({
+      id: 'settled',
+      title: 'settled.txt',
+      uri: localUri,
+      cloudKey: 'attachments/settled.txt',
+      localStatus: 'available',
+      size: BYTES.byteLength,
+      fileHash: sha256Hex(BYTES),
+      contentMtimeMs: 1000,
+      contentSize: BYTES.byteLength,
+    });
+
+    const cloudKeyOf = (appData: AppData): string | undefined => appData.tasks[0].attachments?.[0]?.cloudKey;
+
+    beforeEach(async () => {
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')
+          ? { exists: true, size: BYTES.byteLength, modificationTime: 1 }
+          : { exists: false }
+      ));
+      fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(BYTES));
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.cloudPutFile).mockResolvedValue(undefined);
+    });
+
+    const runCloud = (appData: AppData) => attachmentSync.syncCloudAttachments(
+      appData,
+      { url: 'https://cloud.example/v1/data', token: 'token' },
+      'https://cloud.example/v1',
+      { phase: 'post-merge' },
+    );
+
+    const runDropbox = (appData: AppData) => attachmentSync.syncDropboxAttachments(
+      appData,
+      'dropbox-client-id',
+      fetch,
+      { phase: 'post-merge' },
+    );
+
+    it('cloud: a definitive not-found clears the cloud reference and the same pass re-uploads', async () => {
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.cloudAttachmentExists).mockResolvedValue(false);
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runCloud(appData), appData);
+
+      expect(core.cloudAttachmentExists).toHaveBeenCalledWith(
+        'https://cloud.example/v1/attachments/settled.txt',
+        // React Native buffers whole response bodies, so the probe must never be allowed
+        // to fall back to a GET: that would download every attachment once a day.
+        expect.objectContaining({ partialBodyReads: false }),
+      );
+      expect(core.cloudPutFile).toHaveBeenCalledTimes(1);
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+    });
+
+    it('cloud: a probe that cannot tell changes nothing and uploads nothing', async () => {
+      const core = await import('@mindwtr/core');
+      // Stands in for a server with no HEAD route, which on this transport is unknowable.
+      vi.mocked(core.cloudAttachmentExists).mockImplementation(async (_url, options) => {
+        options?.onHeadUnsupported?.();
+        return null;
+      });
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runCloud(appData), appData);
+
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+    });
+
+    it('cloud: a present blob is left alone', async () => {
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.cloudAttachmentExists).mockResolvedValue(true);
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runCloud(appData), appData);
+
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+    });
+
+    it('dropbox: a blob missing from the folder listing is cleared and re-uploaded', async () => {
+      const dropbox = await import('./dropbox-sync');
+      vi.mocked(dropbox.listDropboxFolderFiles).mockResolvedValue([
+        { name: 'someone-elses.txt', pathLower: '/attachments/someone-elses.txt' },
+      ]);
+      vi.mocked(dropbox.uploadDropboxFileVersioned).mockResolvedValue(undefined as never);
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runDropbox(appData), appData);
+
+      expect(dropbox.listDropboxFolderFiles).toHaveBeenCalledTimes(1);
+      expect(dropbox.listDropboxFolderFiles).toHaveBeenCalledWith(
+        expect.any(String),
+        '/attachments',
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(dropbox.uploadDropboxFileVersioned).toHaveBeenCalledTimes(1);
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+    });
+
+    it('dropbox: a listing that fails changes nothing and uploads nothing', async () => {
+      const dropbox = await import('./dropbox-sync');
+      vi.mocked(dropbox.listDropboxFolderFiles).mockRejectedValue(new Error('network down'));
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runDropbox(appData), appData);
+
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+      expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+    });
+
+    it('dropbox: a listed blob is left alone', async () => {
+      const dropbox = await import('./dropbox-sync');
+      vi.mocked(dropbox.listDropboxFolderFiles).mockResolvedValue([
+        { name: 'settled.txt', pathLower: '/attachments/settled.txt' },
+      ]);
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runDropbox(appData), appData);
+
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+      expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+    });
+
+    it('asks nothing at all inside the daily interval', async () => {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      const core = await import('@mindwtr/core');
+      const dropbox = await import('./dropbox-sync');
+      const scope = JSON.stringify(['cloud', 'dropbox']);
+      vi.mocked(AsyncStorage.getItem).mockImplementation(async (key: string) => {
+        if (key === '@mindwtr_attachment_presence_reconcile_v1') {
+          return JSON.stringify({ scope, at: Date.now() });
+        }
+        if (key === '@mindwtr_sync_backend') return 'cloud';
+        if (key === '@mindwtr_cloud_provider') return 'dropbox';
+        return null;
+      });
+
+      await runDropbox(uploadedData());
+      await runCloud(uploadedData());
+
+      expect(dropbox.listDropboxFolderFiles).not.toHaveBeenCalled();
+      expect(core.cloudAttachmentExists).not.toHaveBeenCalled();
+      vi.mocked(AsyncStorage.getItem).mockReset();
+      vi.mocked(AsyncStorage.getItem).mockResolvedValue(null);
+    });
+
+    it('never clears a cloud reference for an attachment whose bytes are not readable here', async () => {
+      const core = await import('@mindwtr/core');
+      const dropbox = await import('./dropbox-sync');
+      vi.mocked(core.cloudAttachmentExists).mockResolvedValue(false);
+      vi.mocked(dropbox.listDropboxFolderFiles).mockResolvedValue([]);
+      fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+
+      const forCloud = uploadedData();
+      const forDropbox = uploadedData();
+      const cloudResult = syncResult(await runCloud(forCloud), forCloud);
+      const dropboxResult = syncResult(await runDropbox(forDropbox), forDropbox);
+
+      // Clearing here would drop the only pointer to bytes this device cannot re-upload.
+      expect(cloudKeyOf(cloudResult.data)).toBe('attachments/settled.txt');
+      expect(cloudKeyOf(dropboxResult.data)).toBe('attachments/settled.txt');
+      // Nothing was even asked: the candidate walk found no attachment it could repair.
+      expect(core.cloudAttachmentExists).not.toHaveBeenCalled();
+      expect(dropbox.listDropboxFolderFiles).not.toHaveBeenCalled();
     });
   });
 });

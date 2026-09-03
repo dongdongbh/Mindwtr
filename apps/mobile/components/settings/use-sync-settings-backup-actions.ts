@@ -49,6 +49,7 @@ import {
     restoreLocalDataSnapshot,
 } from '@/lib/data-transfer';
 import { clearLog, ensureLogFilePath, logInfo } from '@/lib/app-log';
+import { logSyncEncryptionDiagnosticsBlock } from '@/lib/sync-encryption-state';
 import { logSettingsError } from '@/lib/settings-utils';
 
 export type BackupAction =
@@ -824,6 +825,10 @@ export function useSyncSettingsBackupActions({
     }, [settings.diagnostics, updateSettings]);
 
     const handleShareLog = useCallback(async () => {
+        // Stamp the current encryption posture into the log before it leaves the device: a
+        // shared log has to answer "what state was this device in" even when the user never
+        // opened the Encryption block and only turned Debug logging on after the failure.
+        await logSyncEncryptionDiagnosticsBlock().catch(() => undefined);
         const path = await ensureLogFilePath();
         if (!path) {
             showToast({

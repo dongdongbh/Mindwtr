@@ -140,6 +140,7 @@ vi.mock('@/modules/notification-open-intents', () => ({
 import {
   __localNotificationTestUtils,
   cancelLocalPomodoroCompletionNotification,
+  rescheduleLocalAlarmsAsExact,
   scheduleLocalPomodoroCompletionNotification,
   sendLocalMobileNotification,
   setLocalNotificationOpenHandler,
@@ -372,6 +373,120 @@ describe('notification-service-local', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('does not reschedule when a settings update only touches sync bookkeeping fields', async () => {
+    await startLocalMobileNotifications();
+    const listener = (mockStoreSubscribe.mock.calls as unknown[][])[0]?.[0] as (state: unknown, prevState: unknown) => void;
+    expect(typeof listener).toBe('function');
+
+    vi.useFakeTimers();
+    try {
+      mockLogInfo.mockClear();
+      const shared = {
+        tasks: mockStoreState.tasks,
+        projects: mockStoreState.projects,
+      };
+      const prevSettings = { ...mockStoreState.settings, lastSyncAt: '2026-08-31T00:00:00.000Z', lastSyncStatus: 'success' };
+      const nextSettings = { ...prevSettings, lastSyncAt: '2026-09-01T00:00:00.000Z', lastSyncStats: { pushed: 3 } };
+      listener({ ...shared, settings: nextSettings }, { ...shared, settings: prevSettings });
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(mockLogInfo).not.toHaveBeenCalledWith(
+        '[Local Notifications] Reschedule cycle started',
+        expect.anything()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reschedules when a settings update changes a reminder-relevant field', async () => {
+    await startLocalMobileNotifications();
+    const listener = (mockStoreSubscribe.mock.calls as unknown[][])[0]?.[0] as (state: unknown, prevState: unknown) => void;
+    expect(typeof listener).toBe('function');
+
+    vi.useFakeTimers();
+    try {
+      mockLogInfo.mockClear();
+      const shared = {
+        tasks: mockStoreState.tasks,
+        projects: mockStoreState.projects,
+      };
+      const prevSettings = { ...mockStoreState.settings, notificationsEnabled: true };
+      const nextSettings = { ...prevSettings, notificationsEnabled: false };
+      listener({ ...shared, settings: nextSettings }, { ...shared, settings: prevSettings });
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(mockLogInfo).toHaveBeenCalledWith(
+        '[Local Notifications] Reschedule cycle started',
+        expect.anything()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reschedules when a settings update changes only the language (correction #3)', async () => {
+    await startLocalMobileNotifications();
+    const listener = (mockStoreSubscribe.mock.calls as unknown[][])[0]?.[0] as (state: unknown, prevState: unknown) => void;
+    expect(typeof listener).toBe('function');
+
+    vi.useFakeTimers();
+    try {
+      mockLogInfo.mockClear();
+      const shared = {
+        tasks: mockStoreState.tasks,
+        projects: mockStoreState.projects,
+      };
+      // buildReminderSchedule never reads `language` directly, but the
+      // reschedule cycle localizes every alarm title/body from it, so a
+      // language-only change must still re-arm.
+      const prevSettings = { ...mockStoreState.settings, language: 'en' };
+      const nextSettings = { ...prevSettings, language: 'de' };
+      listener({ ...shared, settings: nextSettings }, { ...shared, settings: prevSettings });
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(mockLogInfo).toHaveBeenCalledWith(
+        '[Local Notifications] Reschedule cycle started',
+        expect.anything()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe('rescheduleLocalAlarmsAsExact', () => {
+    // AlarmManager fixes exact-vs-inexact when the alarm is created, so an
+    // alarm scheduled while "Alarms & reminders" was denied stays inexact
+    // (#528). The rebuild has to cancel first: scheduleAlarmForKey skips any
+    // key whose config signature is unchanged, which every one of them is.
+    const scheduleOneReminder = async () => {
+      mockStoreState.tasks = [
+        { id: 'task-1', title: 'Task one', dueDate: new Date(Date.now() + 5 * 60 * 1000).toISOString() },
+      ];
+      await startLocalMobileNotifications();
+      expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
+    };
+
+    it('cancels and re-creates every scheduled alarm', async () => {
+      await scheduleOneReminder();
+      mockAlarmScheduleAlarm.mockClear();
+      mockAlarmDeleteAlarm.mockClear();
+
+      await rescheduleLocalAlarmsAsExact();
+
+      expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(99);
+      expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
+      expect(__localNotificationTestUtils.getAlarmMapSnapshot().size).toBe(1);
+      const cancelOrder = mockAlarmDeleteAlarm.mock.invocationCallOrder[0];
+      const scheduleOrder = mockAlarmScheduleAlarm.mock.invocationCallOrder[0];
+      expect(scheduleOrder).toBeGreaterThan(cancelOrder);
+    });
+
+    it('is a no-op while the notification service is not running', async () => {
+      await rescheduleLocalAlarmsAsExact();
+
+      expect(mockAlarmScheduleAlarm).not.toHaveBeenCalled();
+      expect(mockAlarmDeleteAlarm).not.toHaveBeenCalled();
+    });
   });
 
   it('logs reminder scheduling diagnostics without task title or description content', async () => {

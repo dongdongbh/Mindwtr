@@ -5,8 +5,13 @@
     "eas-cli": "21.5.0"
   },
   "overrides": {
+    "@xmldom/xmldom": "0.8.15",
+    "plist": {
+      "@xmldom/xmldom": "0.8.15"
+    },
     "ajv": "8.18.0",
     "diff": "8.0.3",
+    "fast-uri": "3.1.7",
     "joi": "17.13.4",
     "minimatch@5.1.2": "5.1.8",
     "nanoid": "3.3.18",

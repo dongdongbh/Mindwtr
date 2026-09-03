@@ -8,6 +8,7 @@ import {
     getWeekStartsOnIndex,
     hasTimeComponent,
     isTaskVisibleInArea,
+    projectMatchesAreaFilterSelection,
     safeFormatDate,
     safeParseDate,
     tFallback,
@@ -18,6 +19,8 @@ import {
 
 import { ErrorBoundary } from '../ErrorBoundary';
 import { cn } from '../../lib/utils';
+import { dispatchNavigateEvent } from '../../lib/navigation-events';
+import { useUiStore } from '../../store/ui-store';
 import { getTaskAccentColor } from '../../lib/task-accent-color';
 import { useLanguage } from '../../contexts/language-context';
 import { useAreaVisibility } from '../../hooks/useVisibleTaskContext';
@@ -43,6 +46,8 @@ const MARKER_WIDTH = 14;
 const MARKER_HEIGHT = 14;
 const ROW_HEIGHT = 30;
 const BAR_HEIGHT = 20;
+/** The project rail: half a task bar's height, so it reads as the container. */
+const PROJECT_BAR_HEIGHT = 10;
 const AXIS_HEIGHT = 44;
 /** The sticky name column: every row's title lives here, not floating on the canvas. */
 const GUTTER_WIDTH = 224;
@@ -91,6 +96,30 @@ function isLightColor(hex: string): boolean {
     const int = Number.parseInt(full, 16);
     const luma = 0.2126 * ((int >> 16) & 255) + 0.7152 * ((int >> 8) & 255) + 0.0722 * (int & 255);
     return luma / 255 > 0.62;
+}
+
+/** "Start date: 3 May. Due date: 9 May" — the spoken half of a bar's label. */
+function describeDates(
+    t: (key: string) => string,
+    start: string | undefined,
+    due: string | undefined,
+): string {
+    return [
+        start
+            ? `${tFallback(
+                t,
+                hasTimeComponent(start) ? 'task.aria.startTime' : 'task.aria.startDate',
+                hasTimeComponent(start) ? 'Start time' : 'Start date',
+            )}: ${safeFormatDate(start, hasTimeComponent(start) ? 'PPp' : 'PP', start)}`
+            : null,
+        due
+            ? `${tFallback(
+                t,
+                hasTimeComponent(due) ? 'task.aria.dueTime' : 'task.aria.dueDate',
+                hasTimeComponent(due) ? 'Due time' : 'Due date',
+            )}: ${safeFormatDate(due, hasTimeComponent(due) ? 'PPp' : 'PP', due)}`
+            : null,
+    ].filter((part): part is string => Boolean(part)).join('. ');
 }
 
 /** The task's dates reduced to local calendar days — the same day the calendar files it under. */
@@ -142,7 +171,15 @@ function thinTicks(ticks: AxisTick[], gap: number): AxisTick[] {
 }
 
 type TimelineRow =
-    | { kind: 'group'; key: string; label: string; color: string | undefined }
+    | {
+        kind: 'group';
+        key: string;
+        label: string;
+        color: string | undefined;
+        project: Project | undefined;
+        /** Day indexes of the project's own bar, absent when it has no dates. */
+        span: { lo: number; hi: number } | undefined;
+    }
     | { kind: 'task'; key: string; task: Task; color: string | undefined; lo: number; hi: number; single: boolean };
 
 export function TimelineView() {
@@ -154,7 +191,7 @@ export function TimelineView() {
     const language = useTaskStore((state) => state.settings?.language);
     const { t } = useLanguage();
     const visibility = useAreaVisibility();
-    const { areaById, projectById } = visibility;
+    const { areaById, projectById, resolvedAreaFilter } = visibility;
     const [persistedViewState, setPersistedViewState] = usePersistedViewState(
         TIMELINE_VIEW_STATE_STORAGE_KEY,
         DEFAULT_TIMELINE_VIEW_STATE,
@@ -212,6 +249,26 @@ export function TimelineView() {
         });
     }, [tasks, visibility]);
 
+    // A dated project is plan-worthy on its own: a project whose steps have no
+    // dates yet still gets its span drawn. Same scope as the task filter —
+    // nothing deleted, nothing archived, nothing outside the area filter.
+    const projectSpans = React.useMemo(() => {
+        perf.trackUseMemo();
+        const spans = new Map<string, { start: Date | null; due: Date | null }>();
+        for (const project of projectById.values()) {
+            if (project.deletedAt || project.status === 'archived') continue;
+            const start = safeParseDate(project.startDate);
+            const due = safeParseDate(project.dueDate);
+            if (!start && !due) continue;
+            if (!projectMatchesAreaFilterSelection(project, resolvedAreaFilter, areaById)) continue;
+            spans.set(project.id, {
+                start: start ? startOfDay(start) : null,
+                due: due ? startOfDay(due) : null,
+            });
+        }
+        return spans;
+    }, [areaById, projectById, resolvedAreaFilter]);
+
     const range = React.useMemo(() => {
         perf.trackUseMemo();
         let min: Date | null = null;
@@ -219,6 +276,14 @@ export function TimelineView() {
         for (const task of datedTasks) {
             const { start, due } = taskDays(task);
             for (const day of [start, due]) {
+                if (!day) continue;
+                if (!min || day < min) min = day;
+                if (!max || day > max) max = day;
+            }
+        }
+        // A project deadline past its last dated task still has to fit on the axis.
+        for (const span of projectSpans.values()) {
+            for (const day of [span.start, span.due]) {
                 if (!day) continue;
                 if (!min || day < min) min = day;
                 if (!max || day > max) max = day;
@@ -257,7 +322,7 @@ export function TimelineView() {
             }
         }
         return { from, to, days: differenceInCalendarDays(to, from) + 1 };
-    }, [datedTasks, today, windowStart]);
+    }, [datedTasks, projectSpans, today, windowStart]);
 
     const timelineRows = React.useMemo(() => {
         perf.trackUseMemo();
@@ -295,6 +360,13 @@ export function TimelineView() {
             if (!projectId) continue;
             projectGroups.push({ project: projectById.get(projectId), rows: groupRows });
         }
+        // A dated project with no dated task still earns its row: the group
+        // header and its bar, with nothing under it.
+        for (const projectId of projectSpans.keys()) {
+            if (byProject.has(projectId)) continue;
+            const project = projectById.get(projectId);
+            if (project) projectGroups.push({ project, rows: [] });
+        }
         projectGroups.sort((a, b) => {
             if (a.project && b.project) return compareProjectsByOrder(a.project, b.project);
             return a.project ? -1 : b.project ? 1 : 0;
@@ -314,21 +386,51 @@ export function TimelineView() {
             const groupColor = group.project
                 ? group.project.color || (group.project.areaId ? areaById.get(group.project.areaId)?.color : undefined) || undefined
                 : undefined;
+            // The group's extents, measured once here: the render loop never
+            // walks a group's rows again.
+            const projectSpan = group.project ? projectSpans.get(group.project.id) : undefined;
+            let span: { lo: number; hi: number } | undefined;
+            if (projectSpan) {
+                let taskLo = Number.POSITIVE_INFINITY;
+                let taskHi = Number.NEGATIVE_INFINITY;
+                for (const row of group.rows) {
+                    if (row.kind !== 'task') continue;
+                    if (row.lo < taskLo) taskLo = row.lo;
+                    if (row.hi > taskHi) taskHi = row.hi;
+                }
+                // One project date given, the other borrowed from the work under
+                // it — and from the given date itself when there is no work.
+                const from = projectSpan.start
+                    ? dayIndex(projectSpan.start)
+                    : Number.isFinite(taskLo) ? taskLo : dayIndex(projectSpan.due!);
+                const to = projectSpan.due
+                    ? dayIndex(projectSpan.due)
+                    : Number.isFinite(taskHi) ? taskHi : from;
+                const lo = Math.min(from, to);
+                const hi = Math.max(from, to);
+                // Clamped, not dropped: a bar reaching out of the window still
+                // shows the part of the project that falls inside it.
+                if (hi >= 0 && lo <= range.days - 1) {
+                    span = { lo: Math.max(0, lo), hi: Math.min(range.days - 1, hi) };
+                }
+            }
             flattened.push({
                 kind: 'group',
                 key: `group:${group.project?.id ?? 'none'}`,
                 label: group.project?.title ?? tFallback(t, 'inbox.noProject', 'No project'),
                 color: groupColor,
+                project: group.project,
+                span,
             });
             flattened.push(...group.rows);
         }
         return { rows: flattened, earlierOmitted, laterOmitted };
-    }, [areaById, datedTasks, projectById, range, t]);
+    }, [areaById, datedTasks, projectById, projectSpans, range, t]);
 
     const { rows, earlierOmitted, laterOmitted } = timelineRows;
     const omittedCount = earlierOmitted + laterOmitted;
     const taskRowCount = rows.reduce((count, row) => (row.kind === 'task' ? count + 1 : count), 0);
-    const hasDatedTasks = datedTasks.length > 0;
+    const hasDatedWork = datedTasks.length > 0 || projectSpans.size > 0;
     const hasRows = Boolean(range) && rows.length > 0;
     const { dayWidth, trackWidth, fitted } = resolveTimelineTrack(
         range?.days ?? 0,
@@ -441,22 +543,75 @@ export function TimelineView() {
     );
     const openProject = openTask?.projectId ? projectById.get(openTask.projectId) : undefined;
 
+    const setProjectView = useUiStore((state) => state.setProjectView);
+    const goToProject = React.useCallback((projectId: string) => {
+        setProjectView({ selectedProjectId: projectId });
+        dispatchNavigateEvent('projects');
+    }, [setProjectView]);
+
     const renderRow = (row: TimelineRow) => {
         if (row.kind === 'group') {
+            const project = row.project;
+            const groupDates = project ? describeDates(t, project.startDate, project.dueDate) : '';
+            const groupActionLabel = groupDates ? `${row.label}. ${groupDates}` : row.label;
+            const gutterClassName = 'sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-muted pl-3 pr-2 text-left text-xs font-semibold text-foreground';
+            const dot = (
+                <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: row.color || 'hsl(var(--primary))' }}
+                />
+            );
             return (
                 <div className="flex border-y border-border/60" style={{ height: ROW_HEIGHT }}>
-                    <div
-                        data-testid="timeline-group"
-                        className="sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-muted pl-3 pr-2 text-xs font-semibold text-foreground"
-                        style={{ width: GUTTER_WIDTH }}
-                    >
-                        <span
-                            className="h-2 w-2 shrink-0 rounded-full"
-                            style={{ backgroundColor: row.color || 'hsl(var(--primary))' }}
-                        />
-                        <span className="min-w-0 truncate">{row.label}</span>
+                    {project ? (
+                        // The project name is the row's click target, the way a task
+                        // row's name is: the rail below is a 10px secondary one.
+                        <button
+                            type="button"
+                            data-testid="timeline-group"
+                            data-project-id={project.id}
+                            title={row.label}
+                            aria-label={groupActionLabel}
+                            onClick={() => goToProject(project.id)}
+                            className={cn(
+                                gutterClassName,
+                                'transition-colors hover:bg-muted/70',
+                                'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+                            )}
+                            style={{ width: GUTTER_WIDTH }}
+                        >
+                            {dot}
+                            <span className="min-w-0 truncate">{row.label}</span>
+                        </button>
+                    ) : (
+                        <div
+                            data-testid="timeline-group"
+                            className={gutterClassName}
+                            style={{ width: GUTTER_WIDTH }}
+                        >
+                            {dot}
+                            <span className="min-w-0 truncate">{row.label}</span>
+                        </div>
+                    )}
+                    <div className="relative min-w-0 flex-1 bg-muted/60">
+                        {row.span && project && (
+                            <div
+                                data-testid="timeline-project-bar"
+                                data-project-id={project.id}
+                                title={row.label}
+                                aria-hidden="true"
+                                onClick={() => goToProject(project.id)}
+                                className="absolute z-10 cursor-pointer rounded-[3px] shadow-sm transition-[filter] hover:brightness-110"
+                                style={{
+                                    left: row.span.lo * dayWidth,
+                                    width: Math.max(MIN_BAR_WIDTH, (row.span.hi - row.span.lo + 1) * dayWidth),
+                                    height: PROJECT_BAR_HEIGHT,
+                                    top: (ROW_HEIGHT - PROJECT_BAR_HEIGHT) / 2,
+                                    backgroundColor: row.color || 'hsl(var(--primary))',
+                                }}
+                            />
+                        )}
                     </div>
-                    <div className="min-w-0 flex-1 bg-muted/60" />
                 </div>
             );
         }
@@ -474,22 +629,7 @@ export function TimelineView() {
         const onBarColor = row.color
             ? (isLightColor(row.color) ? 'rgba(0, 0, 0, 0.84)' : 'rgba(255, 255, 255, 0.96)')
             : 'hsl(var(--primary-foreground))';
-        const dateDescription = [
-            row.task.startTime
-                ? `${tFallback(
-                    t,
-                    hasTimeComponent(row.task.startTime) ? 'task.aria.startTime' : 'task.aria.startDate',
-                    hasTimeComponent(row.task.startTime) ? 'Start time' : 'Start date',
-                )}: ${safeFormatDate(row.task.startTime, hasTimeComponent(row.task.startTime) ? 'PPp' : 'PP', row.task.startTime)}`
-                : null,
-            row.task.dueDate
-                ? `${tFallback(
-                    t,
-                    hasTimeComponent(row.task.dueDate) ? 'task.aria.dueTime' : 'task.aria.dueDate',
-                    hasTimeComponent(row.task.dueDate) ? 'Due time' : 'Due date',
-                )}: ${safeFormatDate(row.task.dueDate, hasTimeComponent(row.task.dueDate) ? 'PPp' : 'PP', row.task.dueDate)}`
-                : null,
-        ].filter((part): part is string => Boolean(part)).join('. ');
+        const dateDescription = describeDates(t, row.task.startTime, row.task.dueDate);
         const taskActionLabel = dateDescription
             ? `${row.task.title}. ${dateDescription}`
             : row.task.title;
@@ -594,7 +734,7 @@ export function TimelineView() {
                     </div>
                 </div>
 
-                {!hasDatedTasks ? (
+                {!hasDatedWork ? (
                     <div>
                         <ListEmptyState
                             hasFilters={false}

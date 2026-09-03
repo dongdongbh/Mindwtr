@@ -38,6 +38,7 @@ const applyAlarmCompleteUtilPatchToSource = transformFor('alarm-complete-action-
 const applyAlarmCompleteReceiverPatchToSource = transformFor('alarm-complete-action-receiver');
 const applyAlarmDeadRowUtilPatchToSource = transformFor('alarm-dead-row-util');
 const applyAlarmActionDeadRowPatchToSource = transformFor('alarm-dead-row-actions');
+const applyAlarmExactPermissionModulePatchToSource = transformFor('alarm-exact-permission-module');
 const applyAlarmIosCompleteActionPatchToSource = transformFor('alarm-ios-complete-action');
 const applyAlarmIosUniqueIdentifierPatchToSource = transformFor('alarm-ios-unique-identifier');
 const applyAlarmIosDeletePendingPatchToSource = transformFor('alarm-ios-delete-pending-arg');
@@ -953,6 +954,10 @@ describe('PATCHES registry completeness', () => {
     // no-op on a notification action tap.
     ['AlarmUtil.java', 'applyAlarmDeadRowUtilPatchToSource'],
     ['AlarmReceiver.java', 'applyAlarmActionDeadRowPatchToSource'],
+    // Added for #528: dropping it leaves JS unable to see that "Alarms &
+    // reminders" is denied, so the settings screens silently stop offering the
+    // fix and every reminder stays inexact.
+    ['ANModule.java', 'applyAlarmExactPermissionModulePatchToSource'],
   ];
 
   it('has exactly one registry entry per original call site — none dropped in the collapse', () => {
@@ -966,7 +971,7 @@ describe('PATCHES registry completeness', () => {
   });
 
   it('every entry declares required/firstMatchOnly explicitly', () => {
-    expect(PATCHES).toHaveLength(20);
+    expect(PATCHES).toHaveLength(21);
     for (const patch of PATCHES) {
       expect(typeof patch.id).toBe('string');
       expect(typeof patch.required).toBe('boolean');
@@ -1222,5 +1227,44 @@ describe('pristine react-native-alarm-notification@1.8.0 fixture (#1028 correcti
     } finally {
       fs.rmSync(projectRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe('applyAlarmExactPermissionModulePatchToSource', () => {
+  const PRISTINE_AN_MODULE_JAVA = `package com.emekalites.react.alarm.notification;
+
+public class ANModule extends ReactContextBaseJavaModule {
+    @ReactMethod
+    public void removeFiredNotification(int id) {
+        alarmUtil.removeFiredNotification(id);
+    }
+
+    @ReactMethod
+    public void removeAllFiredNotifications() {
+        alarmUtil.removeAllFiredNotifications();
+    }
+}`;
+
+  it('exposes canScheduleExactAlarms to JS, guarded by the API level', () => {
+    const output = applyAlarmExactPermissionModulePatchToSource(PRISTINE_AN_MODULE_JAVA);
+
+    expect(output).toContain('public void canScheduleExactAlarms(Promise promise)');
+    expect(output).toContain('android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S');
+    expect(output).toContain('alarmManager != null && alarmManager.canScheduleExactAlarms()');
+    // Fully qualified so the patch never has to touch the import block.
+    expect(output).toContain('android.content.Context.ALARM_SERVICE');
+    expect(output).not.toContain('import android.app.AlarmManager;');
+    // The method it anchors on survives.
+    expect(output).toContain('public void removeAllFiredNotifications()');
+  });
+
+  it('is idempotent', () => {
+    const once = applyAlarmExactPermissionModulePatchToSource(PRISTINE_AN_MODULE_JAVA);
+    expect(applyAlarmExactPermissionModulePatchToSource(once)).toBe(once);
+  });
+
+  it('leaves an unrecognised source untouched so the registry marker check reports it', () => {
+    const unexpected = 'public class ANModule extends ReactContextBaseJavaModule {}';
+    expect(applyAlarmExactPermissionModulePatchToSource(unexpected)).toBe(unexpected);
   });
 });

@@ -17,6 +17,7 @@ const {
   openTaskScreen,
   getUsedTaskTokens,
   getDerivedState,
+  getFocusedCount,
   parseQuickAdd,
   splitQuickAddBulkLines,
   selectStore,
@@ -32,6 +33,7 @@ const {
   const openTaskScreen = vi.fn();
   const getUsedTaskTokens = vi.fn<() => string[]>(() => []);
   const getDerivedState = vi.fn(() => ({ focusedCount: 0 }));
+  const getFocusedCount = vi.fn(() => 0);
   const parseQuickAdd = vi.fn<(input: string) => any>((input: string) => ({
     title: input,
     props: {},
@@ -55,6 +57,7 @@ const {
     settings: {},
     tasks: [],
     getDerivedState,
+    getFocusedCount,
   };
   const selectStore = ((selector?: (state: typeof storeState) => unknown) => (
     selector ? selector(storeState) : storeState
@@ -69,6 +72,7 @@ const {
     openTaskScreen,
     getUsedTaskTokens,
     getDerivedState,
+    getFocusedCount,
     parseQuickAdd,
     splitQuickAddBulkLines,
     selectStore,
@@ -286,6 +290,8 @@ describe('QuickCaptureSheet save handling', () => {
     audioHookMock.params = null;
     getDerivedState.mockClear();
     getDerivedState.mockReturnValue({ focusedCount: 0 });
+    getFocusedCount.mockClear();
+    getFocusedCount.mockReturnValue(0);
     getUsedTaskTokens.mockClear();
     getUsedTaskTokens.mockReturnValue([]);
     documentPickerGetDocumentAsync.mockReset();

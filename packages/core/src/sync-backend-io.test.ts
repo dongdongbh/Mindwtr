@@ -174,6 +174,66 @@ describe('createSyncBackendIO', () => {
             expect(transport.webdavPut).not.toHaveBeenCalled();
         });
 
+        it('degrades an encryption-off cycle to the plaintext write when the read has no strong ETag', async () => {
+            // A Nextcloud-class server behind a proxy answered one GET without a usable
+            // validator while the capability probe had already classed it strong-ETag.
+            // Encryption is off, so the cycle degrades to the bounded plaintext write
+            // instead of failing with SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE.
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                syncEncryptionOff: true,
+            };
+            const webdavGet = vi.fn()
+                .mockResolvedValue({ data: APP_DATA, exists: true, strongEtag: null });
+            const transport = makeTransport({ webdavGet });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            expect(ctx.allowLegacyWebdavPlaintext).toBe(true);
+            await expect(io.writeRemote(APP_DATA)).resolves.toEqual({
+                fingerprint: 'webdav-legacy-fp',
+                serverMergedRemoteData: false,
+            });
+            expect(transport.webdavPut).not.toHaveBeenCalled();
+        });
+
+        it('prefers strong-ETag CAS when the degraded cycle rereads a validator back', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                syncEncryptionOff: true,
+            };
+            const webdavGet = vi.fn()
+                .mockResolvedValueOnce({ data: APP_DATA, exists: true, strongEtag: null })
+                .mockResolvedValueOnce({ data: APP_DATA, exists: true, strongEtag: '"back-v2"' });
+            const transport = makeTransport({ webdavGet });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            await io.writeRemote(APP_DATA);
+
+            expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA, '"back-v2"');
+            expect(transport.webdavPutLegacyPlaintext).not.toHaveBeenCalled();
+        });
+
+        it('leaves an encryption-off cycle on strong-ETag CAS while the read carries a validator', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                syncEncryptionOff: true,
+            };
+            const transport = makeTransport();
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            expect(ctx.allowLegacyWebdavPlaintext).toBeFalsy();
+            await io.writeRemote(APP_DATA);
+
+            expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA, '"webdav-read-v1"');
+            expect(transport.webdavPutLegacyPlaintext).not.toHaveBeenCalled();
+        });
+
         it('uses one explicit legacy plaintext write after a matching bounded reread', async () => {
             const ctx: SyncBackendContext = {
                 backend: 'webdav', cloudProvider: 'selfhosted',
@@ -518,5 +578,95 @@ describe('createSyncBackendIO', () => {
         expect(io.getSyncUrl!()).toBeUndefined();
         await io.readRemote();
         expect(io.getSyncUrl!()).toBe('https://dav.example.com/data.json');
+    });
+});
+
+describe('adoptRemoteFingerprintForWrite', () => {
+    const webdavCtx = (extra: Partial<SyncBackendContext> = {}): SyncBackendContext => ({
+        backend: 'webdav',
+        cloudProvider: 'selfhosted',
+        webdav: { url: 'https://dav.example.com/mindwtr/data.json' },
+        dropboxRev: null,
+        ...extra,
+    });
+
+    it('adopts a strong ETag fingerprint and writes conditionally on it', async () => {
+        const transport = makeTransport();
+        const io = createSyncBackendIO(webdavCtx(), transport);
+
+        expect(io.adoptRemoteFingerprintForWrite!('webdav:v1:etag="abc123"')).toBe(true);
+        await io.writeRemote(APP_DATA);
+
+        expect(transport.webdavGet).not.toHaveBeenCalled();
+        expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA, '"abc123"');
+    });
+
+    it('refuses a weak ETag, a mtime/length fingerprint, and an unrecognized one', () => {
+        const io = createSyncBackendIO(webdavCtx(), makeTransport());
+
+        expect(io.adoptRemoteFingerprintForWrite!('webdav:v1:etag=W/"abc123"')).toBe(false);
+        expect(io.adoptRemoteFingerprintForWrite!('webdav:v1:etag=abc123')).toBe(false);
+        expect(io.adoptRemoteFingerprintForWrite!('webdav:v1:mtime=Mon, 01 Jun 2026 00:00:00 GMT:len=42')).toBe(false);
+        expect(io.adoptRemoteFingerprintForWrite!('cloud:v1:etag="abc123"')).toBe(false);
+        expect(io.adoptRemoteFingerprintForWrite!('')).toBe(false);
+    });
+
+    it('refuses in the WebDAV legacy plaintext compatibility mode', () => {
+        const io = createSyncBackendIO(webdavCtx({ allowLegacyWebdavPlaintext: true }), makeTransport());
+
+        expect(io.adoptRemoteFingerprintForWrite!('webdav:v1:etag="abc123"')).toBe(false);
+    });
+
+    it('refuses after adopting nothing, leaving the unconditional-write refusal intact', async () => {
+        const io = createSyncBackendIO(webdavCtx(), makeTransport());
+
+        expect(io.adoptRemoteFingerprintForWrite!('webdav:v1:etag=W/"abc123"')).toBe(false);
+        await expect(io.writeRemote(APP_DATA)).rejects.toThrow(/document version is unavailable/);
+    });
+
+    it('adopts a Dropbox rev and uploads against it', async () => {
+        const transport = makeTransport();
+        const ctx: SyncBackendContext = {
+            backend: 'cloud',
+            cloudProvider: 'dropbox',
+            dropboxAppKey: 'app-key',
+            dropboxRev: null,
+        };
+        const io = createSyncBackendIO(ctx, transport);
+
+        expect(io.adoptRemoteFingerprintForWrite!('dropbox:v1:rev=rev-7')).toBe(true);
+        await io.writeRemote(APP_DATA);
+
+        expect(transport.dropboxDownload).not.toHaveBeenCalled();
+        expect(transport.dropboxUpload).toHaveBeenCalledWith('token', APP_DATA, 'rev-7');
+    });
+
+    it('refuses a malformed Dropbox fingerprint', () => {
+        const io = createSyncBackendIO(
+            { backend: 'cloud', cloudProvider: 'dropbox', dropboxAppKey: 'app-key', dropboxRev: null },
+            makeTransport(),
+        );
+
+        expect(io.adoptRemoteFingerprintForWrite!('dropbox:v1:rev=')).toBe(false);
+        expect(io.adoptRemoteFingerprintForWrite!('webdav:v1:etag="abc"')).toBe(false);
+    });
+
+    it('refuses on backends without a conditional-write primitive', () => {
+        const selfhosted = createSyncBackendIO(
+            { backend: 'cloud', cloudProvider: 'selfhosted', cloud: { url: 'https://cloud.example.com' }, dropboxRev: null },
+            makeTransport(),
+        );
+        const file = createSyncBackendIO(
+            { backend: 'file', cloudProvider: 'selfhosted', filePath: '/tmp/data.json', dropboxRev: null },
+            makeTransport(),
+        );
+        const cloudkit = createSyncBackendIO(
+            { backend: 'cloudkit', cloudProvider: 'selfhosted', dropboxRev: null },
+            makeTransport(),
+        );
+
+        expect(selfhosted.adoptRemoteFingerprintForWrite!('cloud:v1:etag="abc"')).toBe(false);
+        expect(file.adoptRemoteFingerprintForWrite!('file:v1:gen=7')).toBe(false);
+        expect(cloudkit.adoptRemoteFingerprintForWrite!('anything')).toBe(false);
     });
 });

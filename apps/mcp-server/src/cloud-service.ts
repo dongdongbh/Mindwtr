@@ -382,6 +382,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           isSequential: input.isSequential,
           isFocused: input.isFocused,
           dueDate: input.dueDate ?? undefined,
+          startDate: input.startDate ?? undefined,
           reviewAt: input.reviewAt ?? undefined,
           supportNotes: input.supportNotes ?? undefined,
         }),
@@ -397,6 +398,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       if (input.isSequential !== undefined) patch.isSequential = input.isSequential;
       if (input.isFocused !== undefined) patch.isFocused = input.isFocused;
       if (input.dueDate !== undefined) patch.dueDate = input.dueDate;
+      if (input.startDate !== undefined) patch.startDate = input.startDate;
       if (input.reviewAt !== undefined) patch.reviewAt = input.reviewAt;
       if (input.supportNotes !== undefined) patch.supportNotes = input.supportNotes;
       const result = await request<{ project: AppData['projects'][number] }>('PATCH', `/projects/${encodeURIComponent(input.id)}`, patch);

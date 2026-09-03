@@ -163,7 +163,7 @@ export function QuickCaptureSheet({
   initialValue?: string;
   autoRecord?: boolean;
 }) {
-  const { addTask, addTasks, addProject, addArea, updateSettings, projects, settings, areas, getDerivedState, setHighlightTask } = useTaskStore((state) => ({
+  const { addTask, addTasks, addProject, addArea, updateSettings, projects, settings, areas, getFocusedCount, setHighlightTask } = useTaskStore((state) => ({
     addTask: state.addTask,
     addTasks: state.addTasks,
     addProject: state.addProject,
@@ -172,7 +172,7 @@ export function QuickCaptureSheet({
     projects: state.projects,
     settings: state.settings,
     areas: state.areas,
-    getDerivedState: state.getDerivedState,
+    getFocusedCount: state.getFocusedCount,
     setHighlightTask: state.setHighlightTask,
   }), shallow);
   const { t } = useLanguage();
@@ -262,7 +262,7 @@ export function QuickCaptureSheet({
   const contextOptionsRequestRef = useRef(0);
   const initialFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusTaskLimit = normalizeFocusTaskLimit(settings?.gtd?.focusTaskLimit);
-  const canFocusNewTask = focusNewTask || canStarNewCapture({ focusedCount: getDerivedState().focusedCount, focusTaskLimit });
+  const canFocusNewTask = focusNewTask || canStarNewCapture({ focusedCount: getFocusedCount(), focusTaskLimit });
   const focusNewTaskDisabledReason = formatFocusTaskLimitText(
     tFallback(t, 'agenda.maxFocusItems', 'Max {{count}} focus item(s)'),
     focusTaskLimit,

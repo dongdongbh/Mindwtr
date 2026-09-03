@@ -18,8 +18,9 @@ import {
     restoreTaskFromProjectArchive,
     reuseArrayIfShallowEqual,
     reuseSettingsIfEquivalent,
+    selectFocusedCount,
 } from './store-helpers';
-import type { Project, Section, Task } from './types';
+import type { Attachment, Project, Section, Task } from './types';
 import type { SaveBaseState } from './store-types';
 
 const createTask = (
@@ -642,6 +643,30 @@ describe('derived store state helpers', () => {
         expect(derived.focusedCount).toBe(1);
     });
 
+    it('selectFocusedCount agrees with computeTaskDerivedState.focusedCount on a mixed fixture', () => {
+        const tasks = [
+            createTask('active-focused', 'project-1', 0, { status: 'next', isFocusedToday: true }),
+            createTask('active-unfocused', 'project-1', 1, { status: 'next', isFocusedToday: false }),
+            createTask('done-focused', 'project-1', 2, { status: 'done', isFocusedToday: true }),
+            createTask('reference-focused', 'project-1', 3, { status: 'reference', isFocusedToday: true }),
+            createTask('archived-focused', 'project-1', 4, { status: 'archived', isFocusedToday: true }),
+            createTask('waiting-focused', 'project-1', 5, { status: 'waiting', isFocusedToday: true }),
+            createTask('deleted-focused', 'project-1', 6, {
+                status: 'next',
+                isFocusedToday: true,
+                deletedAt: '2026-01-02T00:00:00.000Z',
+            }),
+        ];
+
+        expect(selectFocusedCount(tasks)).toBe(computeTaskDerivedState(tasks).focusedCount);
+        expect(selectFocusedCount(tasks)).toBe(2);
+        // Same array identity: cached hit still agrees.
+        expect(selectFocusedCount(tasks)).toBe(computeTaskDerivedState(tasks).focusedCount);
+        // A different array identity recomputes and still agrees.
+        const fewer = tasks.slice(0, 1);
+        expect(selectFocusedCount(fewer)).toBe(computeTaskDerivedState(fewer).focusedCount);
+    });
+
     // A-04 pin, written BEFORE folding token accumulation into the main loop:
     // collectTaskTokenUsage skips deletedAt and nothing else (archived/done still count), and
     // returns tokens in first-seen order with per-task dedupe. The fold must reproduce all
@@ -994,5 +1019,38 @@ describe('persist', () => {
         expect(() => persist(set, debouncedSave, baseState, { tasks: [createTask('t1'), createTask('t3')] }))
             .toThrow(/Refusing to save a partial task snapshot; missing existing ids: t2/);
         expect(debouncedSave).not.toHaveBeenCalled();
+    });
+});
+
+describe('reconcileEntityCollection attachments (#1136)', () => {
+    const attachment = (overrides: Partial<Attachment> = {}): Attachment => ({
+        id: 'att-1',
+        kind: 'file' as const,
+        title: 'scan.pdf',
+        uri: 'file:///attachments/att-1.pdf',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        ...overrides,
+    });
+
+    it('replaces an owner whose attachments changed under an unchanged revision tuple', () => {
+        const existing = createTask('t1', 'project-1', 0, { attachments: [attachment()] });
+        const incoming = createTask('t1', 'project-1', 0, {
+            attachments: [attachment({ deletedAt: '2026-01-01T00:00:00.000Z' })],
+        });
+
+        expect(hasSameEntityIdentity(existing, incoming)).toBe(false);
+        const result = reconcileEntityCollection([existing], buildEntityMap([existing]), [incoming]);
+        expect(result.items[0]).toBe(incoming);
+    });
+
+    it('still reuses an owner whose attachments are equal by content', () => {
+        const existing = createTask('t1', 'project-1', 0, { attachments: [attachment()] });
+        const incoming = createTask('t1', 'project-1', 0, { attachments: [attachment()] });
+
+        expect(hasSameEntityIdentity(existing, incoming)).toBe(true);
+        const result = reconcileEntityCollection([existing], buildEntityMap([existing]), [incoming]);
+        expect(result.items).toEqual([existing]);
+        expect(result.items[0]).toBe(existing);
     });
 });

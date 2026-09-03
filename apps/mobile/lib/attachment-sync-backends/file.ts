@@ -26,8 +26,10 @@ import {
   getAttachmentByteSize,
   getAttachmentsDir,
   getLocalAttachmentPresence,
+  isAttachmentPresenceReconciliationDue,
   isHttpAttachmentUri,
   logAttachmentWarn,
+  markAttachmentPresenceReconciled,
   getSafLeafName,
   inspectSafDirectoryEntriesByName,
   readFileAsBytes,
@@ -127,6 +129,14 @@ export const syncFileAttachments = async (
   // plain folder a user could have edited directly. So every local, existing attachment gets its
   // remote presence checked here regardless of cloudKey state; if missing, clearing cloudKey
   // lets the lifecycle below re-upload it through its normal hasCloudCopy-false path.
+  // The remote-presence half of the pre-pass below is periodic, not per-cycle: it can only
+  // discover a file removed from the sync folder behind the app's back, and paying two native
+  // stats per attachment on every idle cycle to re-learn that nothing moved is the local
+  // half of audit F3. The local-migration half is NOT gated — an unmigrated attachment is
+  // real pending work that `hasPendingAttachmentSyncWork` reports on every cycle.
+  // An activation probe must prove the candidate folder holds every object right now, so it
+  // always reconciles and never stamps (the stamp names the committed configuration).
+  const reconcilePresence = options.activationProbe || await isAttachmentPresenceReconciliationDue();
   const migrateAttachmentLocally = createAttachmentLocalMigrationLimiter();
   // Both steps write only to a per-attachment working copy, recorded here and put back into
   // `attachmentsById` so the lifecycle below reads the pre-pass's values.
@@ -162,7 +172,7 @@ export const syncFileAttachments = async (
       attachmentsById.delete(attachment.id);
       continue;
     }
-    if (localPresence === 'present' && attachment.pendingContentUpload !== true) {
+    if (reconcilePresence && localPresence === 'present' && attachment.pendingContentUpload !== true) {
       const cloudKey = attachment.cloudKey || buildCloudKey(attachment);
       const filename = remoteFilenameFor(cloudKey, attachment);
       const remotePresence = syncDir.type === 'file'
@@ -178,6 +188,10 @@ export const syncFileAttachments = async (
       allPatches.set(attachment.id, attachment);
       attachmentsById.set(attachment.id, attachment);
     }
+  }
+
+  if (reconcilePresence && !options.activationProbe) {
+    await markAttachmentPresenceReconciled();
   }
 
   const { patches } = await runMobileAttachmentLifecycle({
@@ -228,7 +242,7 @@ export const syncFileAttachments = async (
           let downloadedSize: number | null = null;
           if (!expectedStagedHash) {
             const wireBytes = await readAttachmentDownloadStageBytes(stagedPath);
-            const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, options.material);
+            const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, options.material, attachment.cloudKey);
             const plaintextHash = await computeSha256Hex(plaintextBytes);
             if (!plaintextHash) throw new Error('Attachment download hash is unavailable');
             await validateAttachmentHash(attachment, plaintextBytes);
@@ -300,7 +314,7 @@ export const syncFileAttachments = async (
       const verifyPublishedGeneration = async (targetUri: string): Promise<void> => {
         const wireBytes = await readFileAsBytes(targetUri);
         try {
-          const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, material);
+          const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, material, cloudKey);
           const actualHash = await computeSha256Hex(plaintextBytes);
           if (actualHash?.toLowerCase() !== snapshot.fileHash.toLowerCase()) {
             throw new Error('plaintext digest mismatch');
@@ -312,7 +326,7 @@ export const syncFileAttachments = async (
           );
         }
       };
-      const wireBytes = await sealAttachmentBytesForUpload(await readFileAsBytes(localPath), material);
+      const wireBytes = await sealAttachmentBytesForUpload(await readFileAsBytes(localPath), material, cloudKey);
       const wireBase64 = bytesToBase64(wireBytes);
       if (syncDir.type === 'file') {
         const targetUri = `${syncDir.attachmentsDirUri}${filename}`;

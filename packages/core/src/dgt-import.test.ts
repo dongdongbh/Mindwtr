@@ -38,6 +38,8 @@ const buildSampleExport = () => ({
             TYPE: 1,
             FOLDER: 1,
             NOTE: 'Project support note',
+            START_DATE: '2026-04-15',
+            START_TIME_SET: 0,
             DUE_DATE: '2026-04-20',
             DUE_TIME_SET: 0,
             STATUS: 0,
@@ -139,6 +141,7 @@ describe('dgt import', () => {
             name: 'House Renovation',
             areaSourceId: 1,
             dueDate: '2026-04-20',
+            startDate: '2026-04-15',
         });
         expect(parsed?.projects[0]?.supportNotes).toContain('Project support note');
 
@@ -265,6 +268,7 @@ describe('dgt import', () => {
             title: 'House Renovation',
             areaId: importedArea?.id,
             dueDate: '2026-04-20',
+            startDate: '2026-04-15',
         });
         expect(importedProject?.supportNotes).toContain('Project support note');
 

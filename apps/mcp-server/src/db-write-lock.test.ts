@@ -14,7 +14,9 @@ const CROSS_PROCESS_TEST_TIMEOUT_MS = 20_000;
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const waitForPath = async (path: string, timeoutMs = 5_000): Promise<void> => {
+// A second bun process on a loaded CI runner can take well over 5 s to reach
+// its ready marker (three flakes in a week); the whole test has 20 s.
+const waitForPath = async (path: string, timeoutMs = 15_000): Promise<void> => {
   const startedAt = Date.now();
   while (!existsSync(path)) {
     if (Date.now() - startedAt > timeoutMs) throw new Error(`Timed out waiting for ${path}`);

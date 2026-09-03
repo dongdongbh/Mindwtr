@@ -35,6 +35,20 @@ import { WEBDAV_CAPABILITY_PROOF_STORAGE_KEY } from './webdav-capability-proof';
 const markLocalWriteMock = vi.hoisted(() => vi.fn());
 const markLocalSqliteWriteMock = vi.hoisted(() => vi.fn());
 
+// #1119 follow-up: `hasAttachmentSyncWork` asks `attachment-reference` where the managed
+// attachments dir is, which is one Tauri IPC and resolves to null outside the desktop shell.
+// Only that lookup is stubbed — `isExternalFileReference`, the rule being tested, is the real
+// one.
+const MANAGED_ATTACHMENTS_DIR = '/app-data/mindwtr/attachments/';
+vi.mock('./attachment-reference', async (importOriginal) => ({
+    ...await importOriginal<typeof import('./attachment-reference')>(),
+    loadManagedAttachmentsDirPrefix: vi.fn(async () => '/app-data/mindwtr/attachments/'),
+}));
+
+import {
+    clearAttachmentPresenceStamp,
+    markAttachmentPresenceReconciled,
+} from './attachment-presence-scope';
 import { SyncService, __syncServiceTestUtils } from './sync-service';
 
 const waitForAssertion = async (assertion: () => void, maxAttempts = 200): Promise<void> => {
@@ -1399,6 +1413,15 @@ describe('SyncService testability hooks', () => {
         expect(events[0]).toBe('dropbox:recover-before-configuration');
         expect(events).toContain('snapshot:strict-cloud');
         expect(events.indexOf('provider:selfhosted')).toBeLessThan(events.lastIndexOf('backend:cloud'));
+        // The Sync page seed is refreshed from the committed configuration in
+        // the same queue slot, so a reopened page does not show the old backend
+        // until a queued sync cycle finishes.
+        expect(events.lastIndexOf('snapshot:tolerant')).toBeGreaterThan(events.lastIndexOf('backend:cloud'));
+        expect(SyncService.getLastKnownSyncSelection()).toMatchObject({
+            backend: 'cloud',
+            cloudProvider: 'selfhosted',
+            configuration: { backend: 'cloud', cloud: { url: 'https://new-cloud.example.com' } },
+        });
     });
 
     it('prevents every configuration read and write when native Dropbox recovery fails', async () => {
@@ -2833,6 +2856,222 @@ describe('SyncService testability hooks', () => {
         expect(__syncServiceTestUtils.isLegacyWebdavPlaintextPostureAllowed(status)).toBe(expected);
     });
 
+    // fresh-join-attachment-posture packet -10: closes #1138 result §8 risk 2. Desktop has no
+    // pre-read no-key gate, so this predicate is the ONLY thing standing between an unresolved
+    // encryption posture and sealAttachmentBytes' plaintext fallback.
+    describe('shouldDeferAttachmentPrepareUntilRead (fresh-join-attachment-posture packet -10)', () => {
+        const base = {
+            backend: 'webdav' as const,
+            cloudProvider: 'selfhosted' as const,
+            encryptionState: 'off' as const,
+            discoveredScopeLabel: undefined,
+            activeScopeLabel: 'webdav#aaaaaaaa',
+            hasCompletedCycleAgainstLocation: false,
+        };
+
+        it.each([
+            ['cloudkit', 'selfhosted'],
+            ['cloud', 'selfhosted'],
+        ] as const)('never defers for a backend encryption cannot apply to (%s/%s)', (backend, cloudProvider) => {
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                ...base,
+                backend,
+                cloudProvider,
+                hasCompletedCycleAgainstLocation: false,
+            })).toBe(false);
+        });
+
+        it.each([
+            ['file', 'selfhosted'],
+            ['webdav', 'selfhosted'],
+            ['cloud', 'dropbox'],
+        ] as const)('defers for a genuinely fresh %s/%s device (no fast-sync record yet)', (backend, cloudProvider) => {
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                ...base,
+                backend,
+                cloudProvider,
+                hasCompletedCycleAgainstLocation: false,
+            })).toBe(true);
+        });
+
+        it('does not defer once a fast-sync cycle has completed against this off-state location', () => {
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                ...base,
+                hasCompletedCycleAgainstLocation: true,
+            })).toBe(false);
+        });
+
+        it('treats an unreadable ("unknown") posture the same as off — fail closed, defer', () => {
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                ...base,
+                encryptionState: 'unknown',
+                hasCompletedCycleAgainstLocation: false,
+            })).toBe(true);
+        });
+
+        it.each([
+            // Keyed states (enabled/remote-plaintext) are ALWAYS established, with no scope
+            // comparison — material present means every write is encrypted from the first
+            // byte. Review packet -10 finding B1: `discoveredScopeLabel` is `undefined` for
+            // every production 'enabled' state (both writers clear it on purpose), so the row
+            // that matters most is the `undefined` one below — it must NOT defer.
+            ['enabled', 'webdav#aaaaaaaa', false],
+            ['enabled', 'webdav#bbbbbbbb', false],
+            ['enabled', undefined, false],
+            ['remote-plaintext', 'webdav#aaaaaaaa', false],
+            ['remote-plaintext', undefined, false],
+            ['remote-encrypted-no-key', 'webdav#aaaaaaaa', false],
+            ['remote-encrypted-no-key', 'webdav#bbbbbbbb', true],
+            ['remote-encrypted-no-key', undefined, true],
+        ] as const)('%s with discoveredScopeLabel %s -> defer=%s', (encryptionState, discoveredScopeLabel, expected) => {
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                ...base,
+                encryptionState,
+                discoveredScopeLabel,
+                hasCompletedCycleAgainstLocation: false,
+            })).toBe(expected);
+        });
+    });
+
+
+    // #1119 follow-up (audit F3), desktop port of mobile commit 06ebf5b41. The gate used to
+    // return true for ANY live file attachment, so a user with one synced attachment paid the
+    // whole phase — MKCOL plus one HEAD per attachment — on every cycle including idle ones.
+    describe('hasAttachmentSyncWork (#1119 follow-up)', () => {
+        const SCOPE = JSON.stringify(['webdav', 'https://dav.example/mindwtr', 'alice']);
+
+        const dataWith = (attachment: Partial<Attachment>): AppData => ({
+            ...emptyAppData(),
+            tasks: [{
+                id: 'task-1',
+                title: 'Task',
+                status: 'next',
+                tags: [],
+                contexts: [],
+                createdAt: '2026-09-01T00:00:00.000Z',
+                updatedAt: '2026-09-01T00:00:00.000Z',
+                attachments: [{
+                    id: 'attachment-1',
+                    kind: 'file',
+                    title: 'doc.txt',
+                    uri: `${MANAGED_ATTACHMENTS_DIR}doc.txt`,
+                    cloudKey: 'attachments/attachment-1.txt',
+                    localStatus: 'available',
+                    contentMtimeMs: 1000,
+                    contentSize: 3,
+                    createdAt: '2026-09-01T00:00:00.000Z',
+                    updatedAt: '2026-09-01T00:00:00.000Z',
+                    ...attachment,
+                }],
+            }],
+        });
+
+        afterEach(() => {
+            clearAttachmentPresenceStamp();
+        });
+
+        it('reports no work for a settled managed attachment inside the reconciliation interval', async () => {
+            markAttachmentPresenceReconciled(SCOPE);
+            await expect(__syncServiceTestUtils.hasAttachmentSyncWork(dataWith({}), SCOPE)).resolves.toBe(false);
+        });
+
+        it('reports work when the daily presence proof is due', async () => {
+            await expect(__syncServiceTestUtils.hasAttachmentSyncWork(dataWith({}), SCOPE)).resolves.toBe(true);
+        });
+
+        it.each([
+            ['no cloudKey yet', { cloudKey: undefined }],
+            ['no local copy', { uri: '' }],
+            ['localStatus missing', { localStatus: 'missing' as const }],
+            ['localStatus downloading', { localStatus: 'downloading' as const }],
+            ['localStatus not yet known', { localStatus: undefined }],
+            ['a pending content upload', { pendingContentUpload: true }],
+            // An incoming content winner is merged in with NO recorded stat, on purpose, so the
+            // receiving device re-checks and re-downloads (resolveContentIdentity in core).
+            ['no recorded content mtime', { contentMtimeMs: undefined }],
+            ['no recorded content size', { contentSize: undefined }],
+            // Desktop-only: a linked file outside the managed dir can be edited in an external
+            // editor, which is exactly what #1057 check-on-touch exists to catch.
+            ['an external file reference', { uri: '/home/user/Documents/spec.pdf' }],
+        ])('still reports work with %s, even with a fresh stamp', async (_label, overrides) => {
+            markAttachmentPresenceReconciled(SCOPE);
+            await expect(
+                __syncServiceTestUtils.hasAttachmentSyncWork(dataWith(overrides), SCOPE),
+            ).resolves.toBe(true);
+        });
+
+        it('reports work for a pending remote delete regardless of the stamp', async () => {
+            markAttachmentPresenceReconciled(SCOPE);
+            const data = dataWith({});
+            data.settings.attachments = {
+                pendingRemoteDeletes: [{ cloudKey: 'attachments/attachment-9.txt' }],
+            };
+            await expect(__syncServiceTestUtils.hasAttachmentSyncWork(data, SCOPE)).resolves.toBe(true);
+        });
+
+        it('reports no work at all for a library with no file attachments', async () => {
+            markAttachmentPresenceReconciled(SCOPE);
+            await expect(__syncServiceTestUtils.hasAttachmentSyncWork(emptyAppData(), SCOPE)).resolves.toBe(false);
+        });
+    });
+
+    // fresh-join-attachment-posture packet -10, added item A: the presence stamp is the file
+    // backend's only durable "seen this location" fact, since buildFastSyncScope returns null
+    // there. Before this, `file` was hard-coded established, so a genuinely fresh file-backend
+    // device ran its attachment prepare phase — and `sealAttachmentBytes`' plaintext fallback —
+    // before the document read could discover the folder is encrypted.
+    describe('hasCompletedCycleAgainstLocation (#1119 stamp feeding the #1138 posture gate)', () => {
+        const FILE_SCOPE = JSON.stringify(['file', '/sync']);
+
+        afterEach(() => {
+            clearAttachmentPresenceStamp();
+        });
+
+        it('is not established on a fresh file-backend device, so the prepare phase defers', () => {
+            const established = __syncServiceTestUtils.hasCompletedCycleAgainstLocation({
+                backend: 'file',
+                locationScope: FILE_SCOPE,
+                fastSyncScope: null,
+            });
+            expect(established).toBe(false);
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                backend: 'file',
+                cloudProvider: 'selfhosted',
+                encryptionState: 'off',
+                discoveredScopeLabel: undefined,
+                activeScopeLabel: 'file#aaaaaaaa',
+                hasCompletedCycleAgainstLocation: established,
+            })).toBe(true);
+        });
+
+        it('is established once a presence pass completed against this location', () => {
+            markAttachmentPresenceReconciled(FILE_SCOPE);
+            const established = __syncServiceTestUtils.hasCompletedCycleAgainstLocation({
+                backend: 'file',
+                locationScope: FILE_SCOPE,
+                fastSyncScope: null,
+            });
+            expect(established).toBe(true);
+            expect(__syncServiceTestUtils.shouldDeferAttachmentPrepareUntilRead({
+                backend: 'file',
+                cloudProvider: 'selfhosted',
+                encryptionState: 'off',
+                discoveredScopeLabel: undefined,
+                activeScopeLabel: 'file#aaaaaaaa',
+                hasCompletedCycleAgainstLocation: established,
+            })).toBe(false);
+        });
+
+        it('never lets a stamp from another location vouch for this one', () => {
+            markAttachmentPresenceReconciled(JSON.stringify(['file', '/other-sync']));
+            expect(__syncServiceTestUtils.hasCompletedCycleAgainstLocation({
+                backend: 'file',
+                locationScope: FILE_SCOPE,
+                fastSyncScope: null,
+            })).toBe(false);
+        });
+    });
+
     it('rejects an HTML/login response with 200 and a strong ETag during WebDAV setup', async () => {
         const fetchSpy = vi.fn(async () => new Response('<html>Sign in</html>', {
             status: 200,
@@ -3479,7 +3718,12 @@ describe('SyncService orchestration', () => {
         expect(snapshots.some((status) => status.queued === true)).toBe(true);
     });
 
-    it('does not return an active cycle as proof for a queued transient configuration', async () => {
+    it('waits for the active cycle and then proves a transient configuration on its own run', async () => {
+        // An activation probe must be proven by the call that will commit it, so
+        // it can neither ride the active cycle nor be queued behind it as a
+        // follow-up. It used to bounce with `requeued` at once, which dropped the
+        // backend switch every time an auto sync happened to be running when the
+        // user pressed Save (dd's own desktop, 2026-09-02). It now waits.
         const firstRun = createDeferred();
         const backendSpy = vi.spyOn(SyncService as any, 'getSyncBackend');
         backendSpy.mockImplementation(async () => {
@@ -3491,22 +3735,32 @@ describe('SyncService orchestration', () => {
         await waitForAssertion(() => {
             expect(SyncService.getSyncStatus().inFlight).toBe(true);
         });
-        const proofResult = await SyncService.performSync({
+        let proofSettled = false;
+        const proof = SyncService.performSync({
             activationProbe: true,
             configOverride: { backend: 'off' },
             manual: true,
+        }).then((result) => {
+            proofSettled = true;
+            return result;
         });
-
-        expect(proofResult).toEqual({ success: true, skipped: 'requeued' });
+        // Still waiting: nothing queued behind the active cycle, nothing answered.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(proofSettled).toBe(false);
         expect(SyncService.getSyncStatus().queued).toBe(false);
+
         firstRun.resolve();
         await first;
+        const proofResult = await proof;
+        expect(proofResult).not.toMatchObject({ skipped: 'requeued' });
         await waitForAssertion(() => {
             expect(SyncService.getSyncStatus()).toMatchObject({
                 inFlight: false,
                 queued: false,
             });
         });
+        // The probe carried its own configOverride, so it never re-read the
+        // persisted backend; the active cycle's single read is all there is.
         expect(backendSpy).toHaveBeenCalledTimes(1);
     });
 

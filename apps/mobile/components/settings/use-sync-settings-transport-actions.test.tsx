@@ -7,6 +7,7 @@ import {
     CLOUD_TOKEN_KEY,
     CLOUD_URL_KEY,
     SYNC_BACKEND_KEY,
+    SYNC_PATH_BOOKMARK_KEY,
     SYNC_PATH_KEY,
     WEBDAV_ALLOW_INSECURE_HTTP_KEY,
     WEBDAV_ALLOW_WEAK_FINGERPRINT_KEY,
@@ -14,6 +15,7 @@ import {
     WEBDAV_URL_KEY,
     WEBDAV_USERNAME_KEY,
 } from '@/lib/sync-constants';
+import { pickAndParseSyncFolder } from '@/lib/storage-file';
 import { useSyncSettingsTransportActions } from './use-sync-settings-transport-actions';
 
 const mocked = vi.hoisted(() => ({
@@ -66,6 +68,8 @@ const mocked = vi.hoisted(() => ({
     rememberWebdavCapabilityProof: vi.fn(),
     revokeDropboxTokens: vi.fn(),
     saveDropboxTokens: vi.fn(),
+    getMobileBackgroundSyncInterval: vi.fn(),
+    setMobileBackgroundSyncInterval: vi.fn(),
     syncMobileBackgroundSyncRegistration: vi.fn(),
     showSettingsErrorToast: vi.fn(),
     showSettingsWarning: vi.fn(),
@@ -125,6 +129,12 @@ vi.mock('@mindwtr/core', async () => ({
     SYNC_LOCAL_INSECURE_URL_OPTIONS: { allowLocalHostnames: true, allowPrivateIpRanges: true },
 }));
 
+vi.mock('@/lib/app-log', () => ({
+    logInfo: vi.fn(),
+    logWarn: vi.fn(),
+    logError: vi.fn(),
+}));
+
 vi.mock('@/lib/storage-file', () => ({
     pickAndParseSyncFolder: vi.fn(),
 }));
@@ -157,6 +167,8 @@ vi.mock('@/lib/sync-service', () => ({
 }));
 
 vi.mock('@/lib/background-sync-task', () => ({
+    getMobileBackgroundSyncInterval: mocked.getMobileBackgroundSyncInterval,
+    setMobileBackgroundSyncInterval: mocked.setMobileBackgroundSyncInterval,
     syncMobileBackgroundSyncRegistration: mocked.syncMobileBackgroundSyncRegistration,
 }));
 
@@ -340,9 +352,14 @@ beforeEach(() => {
     mocked.resetSyncStatusForBackendSwitch.mockReset();
     mocked.syncMobileBackgroundSyncRegistration.mockReset();
     mocked.syncMobileBackgroundSyncRegistration.mockResolvedValue({ action: 'unchanged' });
+    mocked.getMobileBackgroundSyncInterval.mockReset();
+    mocked.getMobileBackgroundSyncInterval.mockResolvedValue('15m');
+    mocked.setMobileBackgroundSyncInterval.mockReset();
+    mocked.setMobileBackgroundSyncInterval.mockResolvedValue(undefined);
     mocked.showSettingsErrorToast.mockReset();
     mocked.showSettingsWarning.mockReset();
     mocked.showToast.mockReset();
+    vi.mocked(pickAndParseSyncFolder).mockReset();
 });
 
 afterEach(() => {
@@ -383,6 +400,37 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.asyncStorage.setItem).toHaveBeenCalledWith(CLOUD_PROVIDER_KEY, 'selfhosted');
     });
 
+    it('loads the persisted background sync interval on mount', async () => {
+        mocked.getMobileBackgroundSyncInterval.mockResolvedValue('1h');
+
+        await renderHarness();
+
+        expect(latestHookResult?.backgroundSyncInterval).toBe('1h');
+    });
+
+    it('defaults the background sync interval to 15m when nothing is stored', async () => {
+        mocked.getMobileBackgroundSyncInterval.mockResolvedValue('15m');
+
+        await renderHarness();
+
+        expect(latestHookResult?.backgroundSyncInterval).toBe('15m');
+    });
+
+    it('persists a selected background sync interval and reconciles the registration', async () => {
+        await renderHarness();
+        mocked.syncMobileBackgroundSyncRegistration.mockClear();
+
+        await act(async () => {
+            latestHookResult?.handleSetBackgroundSyncInterval('6h');
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(latestHookResult?.backgroundSyncInterval).toBe('6h');
+        expect(mocked.setMobileBackgroundSyncInterval).toHaveBeenCalledWith('6h');
+        expect(mocked.syncMobileBackgroundSyncRegistration).toHaveBeenCalledTimes(1);
+    });
+
     it('disables a persisted Dropbox backend when this build has no Dropbox client', async () => {
         seedStorage([
             [SYNC_BACKEND_KEY, 'cloud'],
@@ -397,12 +445,14 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.asyncStorage.setItem).toHaveBeenCalledWith(CLOUD_PROVIDER_KEY, 'selfhosted');
     });
 
-    it('updates hook-owned state when selecting a cloud provider and backend', async () => {
+    it('activates a selected cloud provider whose target is already complete', async () => {
+        // Choosing iCloud used to only stage the switch inside the page, so
+        // leaving Settings silently lost it and the old backend kept syncing.
         await renderHarness({ supportsNativeICloudSync: true });
 
-        mocked.asyncStorage.multiSet.mockClear();
         mocked.asyncStorage.setItem.mockClear();
         mocked.addBreadcrumb.mockClear();
+        mocked.performMobileSync.mockClear();
         mocked.resetSyncStatusForBackendSwitch.mockClear();
 
         await act(async () => {
@@ -411,16 +461,127 @@ describe('useSyncSettingsTransportActions', () => {
 
         expect(latestHookResult?.cloudProvider).toBe('cloudkit');
         expect(latestHookResult?.syncBackend).toBe('cloudkit');
-        expect(mocked.asyncStorage.multiSet).not.toHaveBeenCalled();
+        expect(mocked.performMobileSync).toHaveBeenNthCalledWith(1, undefined, {
+            activationProbe: true,
+            manual: true,
+            configOverride: { backend: 'cloudkit' },
+        });
+        expect(mocked.asyncStorage.setItem).toHaveBeenCalledWith(SYNC_BACKEND_KEY, 'cloudkit');
+
+        mocked.performMobileSync.mockClear();
 
         await act(async () => {
             latestHookResult?.handleSelectSyncBackend('cloud');
         });
 
+        // Already proven: re-selecting the same backend must not re-activate.
         expect(latestHookResult?.syncBackend).toBe('cloudkit');
-        expect(mocked.asyncStorage.setItem).not.toHaveBeenCalledWith(SYNC_BACKEND_KEY, 'cloudkit');
         expect(mocked.addBreadcrumb).toHaveBeenCalledWith('settings:syncBackend:cloudkit');
+        expect(mocked.performMobileSync).not.toHaveBeenCalled();
         expect(mocked.resetSyncStatusForBackendSwitch).not.toHaveBeenCalled();
+    });
+
+    it('activates a selected backend whose saved settings are already complete', async () => {
+        seedStorage([
+            [WEBDAV_URL_KEY, 'https://dav.example.com'],
+            [WEBDAV_USERNAME_KEY, 'alice'],
+        ]);
+        seedSecrets([[WEBDAV_PASSWORD_KEY, 'secret']]);
+
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.asyncStorage.setItem.mockClear();
+
+        await act(async () => {
+            latestHookResult?.handleSelectSyncBackend('webdav');
+        });
+
+        expect(mocked.performMobileSync).toHaveBeenNthCalledWith(1, undefined, {
+            activationProbe: true,
+            manual: true,
+            configOverride: {
+                backend: 'webdav',
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'secret',
+                    url: 'https://dav.example.com',
+                    username: 'alice',
+                },
+            },
+        });
+        expect(mocked.asyncStorage.setItem).toHaveBeenCalledWith(SYNC_BACKEND_KEY, 'webdav');
+    });
+
+    it('stages a selected backend whose settings are still incomplete', async () => {
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+
+        await act(async () => {
+            latestHookResult?.handleSelectSyncBackend('webdav');
+        });
+
+        // No URL yet: the user still has a form to fill, so nothing runs and
+        // nothing warns.
+        expect(latestHookResult?.syncBackend).toBe('webdav');
+        expect(mocked.performMobileSync).not.toHaveBeenCalled();
+        expect(mocked.showSettingsWarning).not.toHaveBeenCalled();
+    });
+
+    it('activates saved WebDAV settings without a manual Sync now tap', async () => {
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+
+        await act(async () => {
+            await latestHookResult?.handleSaveWebDavSettings({
+                allowInsecureHttp: false,
+                password: 'secret',
+                url: '  https://dav.example.com/mindwtr/  ',
+                username: '  alice  ',
+            });
+        });
+
+        expect(mocked.performMobileSync).toHaveBeenNthCalledWith(1, undefined, {
+            activationProbe: true,
+            manual: true,
+            configOverride: {
+                backend: 'webdav',
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'secret',
+                    url: 'https://dav.example.com/mindwtr/',
+                    username: 'alice',
+                },
+            },
+        });
+        expect(mocked.setSecureConfigValue).toHaveBeenCalledWith(WEBDAV_PASSWORD_KEY, 'secret');
+    });
+
+    it('activates a freshly picked File Sync folder rather than the stale one in state', async () => {
+        seedStorage([[SYNC_PATH_KEY, 'file:///old-folder/data.json']]);
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        vi.mocked(pickAndParseSyncFolder).mockResolvedValue({
+            __fileUri: 'file:///picked-folder/data.json',
+            __fileBookmark: 'picked-bookmark',
+        } as never);
+
+        await act(async () => {
+            await latestHookResult?.handleSetSyncPath();
+        });
+
+        expect(mocked.performMobileSync).toHaveBeenNthCalledWith(1, 'file:///picked-folder/data.json', {
+            activationProbe: true,
+            manual: true,
+            configOverride: {
+                backend: 'file',
+                syncPath: 'file:///picked-folder/data.json',
+                syncPathBookmark: 'picked-bookmark',
+            },
+        });
+        expect(mocked.asyncStorage.multiSet).toHaveBeenCalledWith([
+            [SYNC_PATH_KEY, 'file:///picked-folder/data.json'],
+            [SYNC_PATH_BOOKMARK_KEY, 'picked-bookmark'],
+        ]);
     });
 
     it('keeps Dropbox selection in session state until its first sync succeeds', async () => {
@@ -1192,23 +1353,35 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.asyncStorage.multiSet).not.toHaveBeenCalled();
     });
 
-    it('stages a valid self-hosted token without claiming it is persisted', async () => {
+    it('activates saved self-hosted settings without a manual Sync now tap', async () => {
         await renderHarness();
         const validToken = 'a'.repeat(24);
+        mocked.performMobileSync.mockClear();
 
         await act(async () => {
             await latestHookResult?.handleSaveSelfHostedSettings({
                 allowInsecureHttp: false,
                 token: validToken,
-                url: 'https://cloud.example.com',
+                url: '  https://cloud.example.com  ',
             });
         });
 
         expect(mocked.showSettingsWarning).not.toHaveBeenCalled();
         expect(latestHookResult?.cloudToken).toBe(validToken);
-        expect(mocked.setSecureConfigValue).not.toHaveBeenCalled();
-        expect(mocked.asyncStorage.multiSet).not.toHaveBeenCalled();
-        expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+        expect(mocked.performMobileSync).toHaveBeenNthCalledWith(1, undefined, {
+            activationProbe: true,
+            manual: true,
+            configOverride: {
+                backend: 'cloud',
+                cloudProvider: 'selfhosted',
+                cloud: {
+                    allowInsecureHttp: false,
+                    token: validToken,
+                    url: 'https://cloud.example.com',
+                },
+            },
+        });
+        expect(mocked.setSecureConfigValue).toHaveBeenCalledWith(CLOUD_TOKEN_KEY, validToken);
     });
 
     it('activates Dropbox sync on connect without a manual Sync now tap', async () => {

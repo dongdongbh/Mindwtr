@@ -30,7 +30,7 @@
           "列表、日历与看板视图，支持提醒与重复任务",
           "免费开源、无广告"
         ],
-        "ReleaseNotes": "• 新增可选只读时间线、侧边栏视图开关，并支持批量分配项目分区。\n• 已归档项目保持只读；同步恢复会保护最后一份可信附件。\n• 重复任务、WebDAV 与功能开关的行为更可靠。\n• 自托管网页可打开云端附件，并预填云端地址。",
+        "ReleaseNotes": "• 项目支持开始日期，并可在时间线中查看项目跨度。\n• 同步设置通过验证后才会启用，WebDAV、Dropbox、文件同步和自托管同步的附件恢复更安全。\n• 无变化时同步会减少工作量，同时提供更清晰的状态和诊断。\n• 改进 Dropbox 登录、已归档项目操作和翻译。",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -82,7 +82,7 @@
           "List, calendar, and kanban views with reminders and repeating tasks",
           "Free and open source, no ads"
         ],
-        "ReleaseNotes": "• Add an optional read-only Timeline, hide sidebar views per device, and assign selected tasks to a project section.\n• Keep archived projects read-only and protect the last trusted attachment during sync recovery.\n• Improve recurrence editing, WebDAV compatibility, and feature-switch behavior.\n• Open Cloud-backed attachments in the self-hosted web app and prefill its Cloud URL.",
+        "ReleaseNotes": "• Add start dates to projects and see project spans in Timeline.\n• Sync settings activate after verification, with safer attachment recovery across WebDAV, Dropbox, File Sync, and self-hosted servers.\n• Idle syncs do less work, while sync status and diagnostics give clearer results.\n• Improve Dropbox sign-in, archived project actions, and localization.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -131,7 +131,7 @@
           "Listen-, Kalender- und Kanban-Ansichten mit Erinnerungen und Wiederholungen",
           "Kostenlos und Open Source, ohne Werbung"
         ],
-        "ReleaseNotes": "• Optionale schreibgeschützte Zeitleiste, ausblendbare Seitenleistenansichten und Sammelzuweisung zu Projektabschnitten.\n• Archivierte Projekte bleiben schreibgeschützt; Sync schützt die letzte verlässliche Anhangkopie.\n• Wiederholungen, WebDAV und Funktionsschalter arbeiten zuverlässiger.\n• Die selbst gehostete Web-App öffnet Cloud-Anhänge und kann die Cloud-URL vorgeben.",
+        "ReleaseNotes": "• Projekte erhalten Startdaten und erscheinen als Zeitraum in der Zeitleiste.\n• Sync-Einstellungen werden nach einer Prüfung aktiviert; Anhänge werden bei WebDAV, Dropbox, Dateisynchronisierung und eigenen Servern sicherer wiederhergestellt.\n• Leerlauf-Sync benötigt weniger Arbeit, während Status und Diagnose klarere Ergebnisse liefern.\n• Verbessert Dropbox-Anmeldung, archivierte Projekte und Übersetzungen.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -161,7 +161,7 @@
           "Vues liste, calendrier et kanban, rappels et tâches répétées",
           "Gratuit et open source, sans publicité"
         ],
-        "ReleaseNotes": "• Ajoutez une chronologie facultative en lecture seule, masquez des vues et classez plusieurs tâches dans une section.\n• Gardez les projets archivés en lecture seule et protégez la dernière copie fiable des pièces jointes.\n• Améliorez les récurrences, WebDAV et les options de fonction.\n• Ouvrez les pièces jointes Cloud dans l’app web auto-hébergée et préremplissez son URL Cloud.",
+        "ReleaseNotes": "• Ajoutez une date de début aux projets et affichez leur durée dans la chronologie.\n• Les réglages de synchronisation s’activent après vérification, avec une récupération plus sûre sur WebDAV, Dropbox, dossiers et serveurs auto-hébergés.\n• Les synchronisations sans changement demandent moins de travail et leur état devient plus clair.\n• Améliore la connexion Dropbox, les projets archivés et les traductions.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -190,7 +190,7 @@
           "Vistas de lista, calendario y kanban, con recordatorios y tareas repetidas",
           "Gratis y de código abierto, sin anuncios"
         ],
-        "ReleaseNotes": "• Añade una cronología opcional de solo lectura, oculta vistas y asigna varias tareas a una sección.\n• Mantén los proyectos archivados en solo lectura y protege la última copia fiable de los adjuntos.\n• Mejora las repeticiones, WebDAV y las opciones de función.\n• Abre adjuntos de Cloud en la app web autoalojada y rellena su URL de Cloud.",
+        "ReleaseNotes": "• Añade fechas de inicio a los proyectos y muestra su duración en la cronología.\n• Activa los ajustes de sincronización tras verificarlos y recupera adjuntos con más seguridad en WebDAV, Dropbox, carpetas y servidores propios.\n• Reduce el trabajo de las sincronizaciones sin cambios y aclara su estado.\n• Mejora el acceso a Dropbox, los proyectos archivados y las traducciones.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",

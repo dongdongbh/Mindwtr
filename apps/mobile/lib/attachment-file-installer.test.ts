@@ -19,6 +19,7 @@ const {
   deleteAsync,
   hashAsync,
   installAsync,
+  logInfo,
   prepareImmutableStageAsync,
   publishImmutableAsync,
   requireNativeModule,
@@ -29,6 +30,7 @@ const {
   deleteAsync: vi.fn(),
   hashAsync: vi.fn(),
   installAsync: vi.fn(),
+  logInfo: vi.fn(),
   prepareImmutableStageAsync: vi.fn(),
   publishImmutableAsync: vi.fn(),
   requireNativeModule: vi.fn(() => ({
@@ -47,6 +49,7 @@ const downloadHash = 'd'.repeat(64);
 vi.mock('expo-modules-core', () => ({
   requireNativeModule,
 }));
+vi.mock('./app-log', () => ({ logInfo }));
 vi.mock('./file-system', () => ({
   deleteAsync,
 }));
@@ -63,6 +66,8 @@ describe('installAttachmentFileGeneration', () => {
     deleteAsync.mockReset();
     deleteAsync.mockResolvedValue(undefined);
     installAsync.mockReset();
+    logInfo.mockReset();
+    logInfo.mockResolvedValue(null);
     hashAsync.mockReset();
     prepareImmutableStageAsync.mockReset();
     prepareImmutableStageAsync.mockImplementation(async (targetPath: string, operationId: string) => ({
@@ -122,6 +127,31 @@ describe('installAttachmentFileGeneration', () => {
       'file:///private/documents/attachments/a1',
       { kind: 'present', sha256: 'a'.repeat(64) },
       downloadHash,
+    );
+  });
+
+  it('logs positive release proof when Android uses the exclusive-copy fallback', async () => {
+    installAsync.mockResolvedValue({
+      status: 'installed',
+      publication: 'exclusive-copy',
+    });
+
+    await expect(installAttachmentFileGeneration(
+      'file:///private/cache/candidate',
+      'file:///private/documents/attachments/a1',
+      { kind: 'absent' },
+      downloadHash,
+    )).resolves.toEqual({ status: 'installed', publication: 'exclusive-copy' });
+
+    expect(logInfo).toHaveBeenCalledWith(
+      'Android attachment generation published with exclusive-copy fallback',
+      {
+        scope: 'sync',
+        extra: {
+          releaseCheck: 'v1.2.7/android-attachment-link-fallback',
+          publication: 'exclusive-copy',
+        },
+      },
     );
   });
 

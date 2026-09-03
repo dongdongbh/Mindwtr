@@ -30,8 +30,10 @@ import {
   WEBDAV_ALLOW_INSECURE_HTTP_KEY,
 } from './sync-constants';
 import { getSecureConfigValue } from './secure-config';
+import { readActiveSyncLocationScope } from './sync-location-scope';
 import { logInfo, logWarn, sanitizeLogMessage } from './app-log';
 import { isLikelyFilePath } from './sync-service-utils';
+import { backgroundSafeFetch } from './background-safe-fetch';
 
 export { ATTACHMENTS_DIR_NAME, buildCloudKey, extractExtension, getBaseSyncUrl, getCloudBaseUrl, reportProgress, validateAttachmentHash };
 // `collectAttachments` predates `collectAttachmentsById` moving into core (packages/core/src/
@@ -260,7 +262,7 @@ export type DropboxAccessTokenResolver = (forceRefresh: boolean) => Promise<stri
 export const runDropboxAuthorized = async <T,>(
   dropboxClientId: string,
   operation: (accessToken: string) => Promise<T>,
-  fetcher: typeof fetch = fetch,
+  fetcher: typeof fetch = backgroundSafeFetch,
   resolveAccessToken?: DropboxAccessTokenResolver,
 ): Promise<T> => {
   let resolver = resolveAccessToken;
@@ -776,6 +778,109 @@ export const createAttachmentLocalMigrationLimiter = (
   };
 };
 
+/** Once a day. Attachment bytes are immutable once uploaded, so the only thing a
+ *  presence pass can still discover is someone deleting files behind the app's back. */
+export const ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const ATTACHMENT_PRESENCE_RECONCILE_KEY = '@mindwtr_attachment_presence_reconcile_v1';
+
+type AttachmentPresenceStamp = { scope: string; at: number };
+
+/**
+ * Identity of the place attachments live: the backend plus the location/account that
+ * decides which remote a `cloudKey` points at. Read from device config rather than passed
+ * in, so `hasPendingAttachmentSyncWork` keeps its `(appData, options)` signature and the
+ * two gates that consult it (that predicate, and each backend's own presence pass) can
+ * never disagree about what "the same backend configuration" means.
+ *
+ * Shared with sync-encryption discovery scoping (#1138) via `readActiveSyncLocationScope`
+ * so the two features can never disagree about what "the same sync location" means. That
+ * helper normalizes URLs where this one used raw values, so the first run after upgrading
+ * sees a changed scope and reconciles once — exactly the "don't know" path below.
+ */
+const readAttachmentPresenceScope = readActiveSyncLocationScope;
+
+const readAttachmentPresenceStamp = async (): Promise<AttachmentPresenceStamp | null> => {
+  try {
+    const raw = await AsyncStorage.getItem(ATTACHMENT_PRESENCE_RECONCILE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AttachmentPresenceStamp> | null;
+    if (typeof parsed?.scope !== 'string' || !Number.isFinite(parsed?.at)) return null;
+    return { scope: parsed.scope, at: Number(parsed.at) };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * #1119 follow-up: should the full per-attachment reconciliation pass run now?
+ *
+ * An uploaded attachment's remote key is derived from its id and its bytes never change,
+ * so re-proving presence on every cycle re-establishes something already known — at the
+ * cost of a MKCOL, one HEAD per attachment and three native stats per attachment on every
+ * idle cycle, plus whatever the phase running at all costs upstream. The proof is still
+ * worth having, because a user can delete files on the server directly; it is not worth
+ * having hourly.
+ *
+ * Due when: nothing has ever reconciled, the stamp is unreadable, the backend
+ * configuration changed under it, it is older than a day, or the clock moved backwards
+ * since it was written. Each of those is "don't know", and every "don't know" reconciles.
+ */
+export const isAttachmentPresenceReconciliationDue = async (): Promise<boolean> => {
+  const [scope, stamp] = await Promise.all([
+    readAttachmentPresenceScope(),
+    readAttachmentPresenceStamp(),
+  ]);
+  if (scope === null || !stamp || stamp.scope !== scope) return true;
+  const elapsed = Date.now() - stamp.at;
+  return elapsed < 0 || elapsed >= ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS;
+};
+
+/**
+ * Records that a full per-attachment pass just ran to completion against the current
+ * backend configuration. Called by each backend at the end of its own pass rather than by
+ * the predicate above, so a pass that never ran (or aborted) leaves the stamp alone and the
+ * next cycle retries instead of parking the reconciliation for a day.
+ */
+export const markAttachmentPresenceReconciled = async (): Promise<void> => {
+  const scope = await readAttachmentPresenceScope();
+  if (scope === null) return;
+  try {
+    const stamp: AttachmentPresenceStamp = { scope, at: Date.now() };
+    await AsyncStorage.setItem(ATTACHMENT_PRESENCE_RECONCILE_KEY, JSON.stringify(stamp));
+  } catch (error) {
+    logAttachmentWarn('Failed to record the attachment presence reconciliation stamp', error);
+  }
+};
+
+/**
+ * fresh-join-attachment-posture packet -10 (correction pass, fixed in the final fix pass —
+ * review finding B2): the durable "this device has completed at least one full cycle against
+ * the active location" fact for backends with no `FastSyncState` record — the file backend
+ * above all, since `buildFastSyncScope` returns `null` for it and always will. A presence
+ * stamp is only ever written at the END of a completed attachment pass
+ * (`markAttachmentPresenceReconciled`, called by each backend's own presence loop), so its
+ * existence — for THIS exact scope — proves a full cycle already ran here, which is all the
+ * sync-encryption posture gate needs to stop treating a fresh join as "already known safe".
+ * Scope-exact on purpose: a stamp from a previous location must not vouch for a new one.
+ *
+ * Takes NO scope argument on purpose: it derives the comparison scope itself via
+ * `readAttachmentPresenceScope` (= `readActiveSyncLocationScope`), the exact same derivation
+ * `markAttachmentPresenceReconciled` uses to write the stamp. B2 caught a caller passing
+ * `sync-service.ts`'s `this.locationScope` (built from the RESOLVED file path, e.g. with
+ * `/data.json` appended in memory for an iOS folder bookmark) instead — the two derivations
+ * disagree for that exact configuration, so the stamp compared unequal forever and this gate
+ * never established. Deriving the scope in the one place that also writes it makes the two
+ * sides symmetric by construction; no caller can reintroduce the mismatch.
+ */
+export const hasCompletedAttachmentPresenceReconciliation = async (): Promise<boolean> => {
+  const [scope, stamp] = await Promise.all([
+    readAttachmentPresenceScope(),
+    readAttachmentPresenceStamp(),
+  ]);
+  if (scope === null) return false;
+  return stamp !== null && stamp.scope === scope;
+};
+
 export const hasPendingAttachmentSyncWork = async (
   appData: AppData,
   options: { contentCheckEnabled?: boolean } = {},
@@ -784,6 +889,7 @@ export const hasPendingAttachmentSyncWork = async (
 
   const attachmentsById = collectAttachments(appData);
   let shouldCheckManagedStorage = false;
+  let hasReconcilableSteadyState = false;
 
   for (const attachment of attachmentsById.values()) {
     if (attachment.kind !== 'file') continue;
@@ -808,27 +914,55 @@ export const hasPendingAttachmentSyncWork = async (
     // counted as pending when the caller's backend actually wires content
     // detection; the lifecycle's own cheap mtime/size compare is the real cost
     // gate, this is just what lets the phase run at all.
+    //
+    // #1119 follow-up (audit F3): that made EVERY cycle run the whole phase for
+    // anyone owning one synced attachment. Two things genuinely need the phase from
+    // this state, and each now has its own signal rather than "always":
+    //
+    //  - another device's newer content. `resolveContentIdentity` in core's merge
+    //    (packages/core/src/sync.ts) lands an incoming content winner with NO
+    //    recorded contentMtimeMs/contentSize, precisely so the receiving device
+    //    re-checks and re-downloads. An absent recorded stat is therefore the
+    //    download signal, and it is already in the document — no local stat, no
+    //    request, no file bytes read.
+    //  - the remote copy deleted on the server behind the app's back. Nothing local
+    //    can show that, so it stays a real pass — just a periodic one.
+    //
+    // What is deliberately no longer detected within one cycle is a managed local
+    // file edited in place. Mobile has no path that does that: managed attachment
+    // files live in app-private storage and are only ever created (capture) or
+    // replaced by a download that re-records the stat in the same breath. The daily
+    // pass still catches it.
     if (options.contentCheckEnabled && attachment.cloudKey && hasLocalUri && attachment.localStatus === 'available') {
-      return true;
+      if (
+        attachment.pendingContentUpload === true
+        || !Number.isFinite(attachment.contentMtimeMs ?? NaN)
+        || !Number.isFinite(attachment.contentSize ?? NaN)
+      ) {
+        return true;
+      }
+      hasReconcilableSteadyState = true;
     }
     if (hasLocalUri) {
       shouldCheckManagedStorage = true;
     }
   }
 
-  if (!shouldCheckManagedStorage) return false;
-  const attachmentsDir = getManagedAttachmentsDir();
-  if (!attachmentsDir) return false;
-
-  for (const attachment of attachmentsById.values()) {
-    if (attachment.kind !== 'file') continue;
-    if (attachment.deletedAt) continue;
-    const uri = attachment.uri || '';
-    if (!uri || isHttpAttachmentUri(uri)) continue;
-    if (!uri.startsWith(attachmentsDir)) {
-      return true;
+  const attachmentsDir = shouldCheckManagedStorage ? getManagedAttachmentsDir() : null;
+  if (attachmentsDir) {
+    for (const attachment of attachmentsById.values()) {
+      if (attachment.kind !== 'file') continue;
+      if (attachment.deletedAt) continue;
+      const uri = attachment.uri || '';
+      if (!uri || isHttpAttachmentUri(uri)) continue;
+      if (!uri.startsWith(attachmentsDir)) {
+        return true;
+      }
     }
   }
 
-  return false;
+  // Nothing in the document says there is work to do. The one remaining reason to run the
+  // phase is the periodic presence proof — and only when there is something to prove, so a
+  // library with no settled attachments never reads device config at all.
+  return hasReconcilableSteadyState && await isAttachmentPresenceReconciliationDue();
 };

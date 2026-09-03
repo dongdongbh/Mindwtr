@@ -186,6 +186,42 @@ describe('useTaskEditAttachments download settlement', () => {
     useTaskStore.setState({ _allTasks: [] });
   });
 
+  it('explains a desktop file link instead of handing another device\'s path to the OS', async () => {
+    // "Link to file…" on the desktop stores that computer's path; Android used
+    // to call Linking.openURL('D:\\Documents\\x.docx') and fail silently (#1001).
+    const Linking = await import('expo-linking');
+    const attachment = { ...makeAttachment(1), kind: 'link' as const, uri: 'D:\\Documents\\Document.docx', mimeType: undefined };
+    useTaskStore.setState({ _allTasks: [makeTask(attachment)] });
+    availabilityMock.ensureAttachmentAvailableDetailed.mockResolvedValue({ status: 'available', attachment });
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={attachment} />); });
+
+    await act(async () => { await expose.current!.openAttachment(attachment); });
+
+    expect(Linking.openURL).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', expect.stringContaining('another device'));
+    act(() => tree.unmount());
+  });
+
+  it('still opens a web link and reports a link the OS refuses', async () => {
+    const Linking = await import('expo-linking');
+    const attachment = { ...makeAttachment(1), kind: 'link' as const, uri: 'https://example.com/doc', mimeType: undefined };
+    useTaskStore.setState({ _allTasks: [makeTask(attachment)] });
+    availabilityMock.ensureAttachmentAvailableDetailed.mockResolvedValue({ status: 'available', attachment });
+    vi.mocked(Linking.openURL).mockRejectedValueOnce(new Error('No Activity found to handle Intent'));
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={attachment} />); });
+
+    await act(async () => { await expose.current!.openAttachment(attachment); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(Linking.openURL).toHaveBeenCalledWith('https://example.com/doc');
+    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', expect.stringContaining('Could not open this link'));
+    act(() => tree.unmount());
+  });
+
   it('restores missing state and shows localized conflict guidance without changing metadata', async () => {
     const attachment = makeAttachment(1);
     useTaskStore.setState({ _allTasks: [makeTask(attachment)] });

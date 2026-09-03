@@ -8,3 +8,10 @@ add_library(
   file_compat_lock.cpp
   stable_root_lock.cpp
 )
+
+target_link_options(
+  sync-file-lock
+  PRIVATE
+  "-Wl,-z,max-page-size=16384"
+  "-Wl,-z,common-page-size=16384"
+)

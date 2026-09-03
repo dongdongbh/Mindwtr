@@ -118,6 +118,7 @@ jobs:
           CERT_PATH="$RUNNER_TEMP/mindwtr-dev-id.p12"
 
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
           echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> "$GITHUB_ENV"
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -376,10 +377,13 @@ jobs:
           for attempt in 1 2 3; do
             log_file="${RUNNER_TEMP}/tauri-macos-build-${{ matrix.rust_target }}-${attempt}.log"
             echo "Running macOS bundle build (attempt ${attempt}/3)..."
-            # `--bundles app` only: the DMG is built later, by "Bundle macOS DMG",
-            # from the app this same directory holds AFTER the widget step embeds
-            # and re-signs it. Building the DMG here would package the app before
-            # the widget ever exists in it (#1054).
+            # `--bundles app` only: the widget is embedded into this app below by
+            # "Build and embed macOS widget", and the DMG is then built BY HAND
+            # via scripts/build-macos-dmg.sh -- NOT `tauri bundle --bundles dmg`,
+            # which regenerates and re-signs the .app from the compiled binary,
+            # discarding whatever was embedded into it. Running `tauri bundle`
+            # here, or at any point after the widget step, would silently ship
+            # without the widget (#1054).
             if bunx tauri build --target ${{ matrix.rust_target }} --bundles app 2>&1 | tee "${log_file}"; then
               exit 0
             fi
@@ -488,13 +492,41 @@ jobs:
         timeout-minutes: 20
         run: |
           set -euo pipefail
-          cd apps/desktop
-          # Packages the app already built (and widget-embedded, re-signed) above
-          # into a DMG, without rebuilding or re-signing the app itself -- `tauri
-          # bundle` only assembles installers from an existing `tauri build`
-          # output. Building the DMG as part of the original `tauri build` call
-          # would package the app *before* the widget step ever touched it (#1054).
-          bunx tauri bundle --target ${{ matrix.rust_target }} --bundles dmg
+          APP_DIR="apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/macos"
+          APP_PATH="$(find "$APP_DIR" -maxdepth 1 -name '*.app' | head -n 1)"
+          if [ -z "${APP_PATH:-}" ]; then
+            echo "::error::Built .app bundle not found in $APP_DIR"
+            exit 1
+          fi
+          # Packages the exact app built (and widget-embedded, re-signed) above,
+          # unmodified, into a DMG. `tauri bundle --bundles dmg` would instead
+          # regenerate and re-sign the .app from the compiled binary, discarding
+          # the widget embedded into it by "Build and embed macOS widget" (#1054).
+          bash scripts/build-macos-dmg.sh "$APP_PATH" "${{ matrix.rust_target }}" "${APPLE_SIGNING_IDENTITY:-}"
+        shell: bash
+
+      - name: Verify DMG contains the widget
+        if: env.APPLE_SIGNING_IDENTITY != ''
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          DMG_DIR="apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg"
+          DMG_PATH="$(find "$DMG_DIR" -maxdepth 1 -name '*.dmg' | head -n 1)"
+          if [ -z "${DMG_PATH:-}" ]; then
+            echo "::error::No DMG found in $DMG_DIR to verify."
+            exit 1
+          fi
+          MOUNT_POINT="$RUNNER_TEMP/mindwtr-dmg"
+          mkdir -p "$MOUNT_POINT"
+          trap 'hdiutil detach "$MOUNT_POINT" -force >/dev/null 2>&1 || true' EXIT
+          hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_POINT" "$DMG_PATH"
+          APPEX_BINARY="$MOUNT_POINT/Mindwtr.app/Contents/PlugIns/MindwtrWidgets.appex/Contents/MacOS/MindwtrWidgets"
+          if [ ! -f "$APPEX_BINARY" ]; then
+            echo "::error::$DMG_PATH does not contain the widget appex at Contents/PlugIns/MindwtrWidgets.appex -- the widget was dropped from the DMG (#1054)."
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$MOUNT_POINT/Mindwtr.app"
+          echo "Verified widget appex is present and signed in $DMG_PATH."
         shell: bash
 
       - name: Notarize DMG
