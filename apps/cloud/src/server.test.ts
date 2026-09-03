@@ -1664,6 +1664,7 @@ describe('cloud server namespace mode', () => {
             path: '/v1/data',
             body: { tasks: [], projects: [], sections: [], areas: [], settings: {} },
         },
+        { name: 'POST /v1/capture', method: 'POST', path: '/v1/capture', body: { transcription: 'Namespace probe' } },
         { name: 'POST /v1/calendar/feed', method: 'POST', path: '/v1/calendar/feed' },
         { name: 'DELETE /v1/calendar/feed', method: 'DELETE', path: '/v1/calendar/feed' },
         { name: 'POST /v1/attachments/orphans', method: 'POST', path: '/v1/attachments/orphans' },

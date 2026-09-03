@@ -79,6 +79,7 @@ import {
     handleAttachmentPathRequest,
     handleOrphanAttachmentGcRequest,
 } from './server-attachments';
+import { CAPTURE_ROUTE_PATH, handleCaptureRequest } from './server-capture';
 import {
     asStatus,
     pickTaskList,
@@ -150,6 +151,7 @@ const STATIC_CLOUD_ROUTES = new Set([
     '/v1/areas',
     '/v1/attachments/orphans',
     '/v1/calendar/feed',
+    '/v1/capture',
     '/v1/data',
     '/v1/projects',
     '/v1/search',
@@ -1325,6 +1327,30 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                         return errorResponse('Method not allowed', 405);
                     }, requestAbortController.signal);
                     if (groupResponse) return groupResponse;
+                }
+
+                // Generic capture webhook (#1148). Same auth, namespace, rate limit and
+                // per-token write lock as POST /v1/tasks; the whole-request byte cap is
+                // the attachment one, because the posted audio rides inside the body.
+                if (pathname === CAPTURE_ROUTE_PATH) {
+                    const captureResponse = await withNamespace(req, url, baseServerConfig, async (ctx) => (
+                        handleCaptureRequest(req, {
+                            dataDir,
+                            key: ctx.key,
+                            filePath: ctx.filePath,
+                            maxCaptureBytes: maxAttachmentBytes,
+                            maxTextBytes: maxBodyBytes,
+                            abortSignal: requestAbortController.signal,
+                            assertStorageRoot,
+                            withWriteLock: withRequestWriteLock,
+                            finalizeForWrite: (data, captureNowIso) => finalizeCloudDataForWrite(
+                                data,
+                                captureNowIso,
+                                FINALIZE_REJECT_INVALID_REST_WRITE,
+                            ),
+                        })
+                    ), requestAbortController.signal);
+                    if (captureResponse) return captureResponse;
                 }
 
                 if (pathname === '/v1/data') {
