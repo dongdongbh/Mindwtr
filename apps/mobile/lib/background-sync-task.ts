@@ -1,5 +1,6 @@
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { flushPendingSave } from '@mindwtr/core';
 
@@ -240,23 +241,57 @@ const defineMobileBackgroundSyncTask = () => {
 defineMobileBackgroundSyncTask();
 
 export async function syncMobileBackgroundSyncRegistration(): Promise<MobileBackgroundSyncRegistrationResult> {
-  const [configuration, status, taskManagerAvailable, registered, interval] = await Promise.all([
+  const [configuration, status, taskManagerAvailable, registered, interval, lastRegisteredInterval] = await Promise.all([
     getMobileSyncConfigurationStatus(),
     getBackgroundTaskStatus(),
     isTaskManagerAvailable(),
     isBackgroundTaskRegistered(),
     getMobileBackgroundSyncInterval(),
+    getLastRegisteredBackgroundSyncInterval(),
   ]);
   const available = taskManagerAvailable && status === BackgroundTask.BackgroundTaskStatus.Available;
   const shouldRegister = available
     && configuration.configured
     && supportsMobileScheduledBackgroundSync(configuration.backend)
     && interval !== 'off';
+  const appState = AppState.currentState;
+  const logDecision = (decision: string) => {
+    void logInfo('Mobile background sync registration checked', {
+      scope: 'sync',
+      extra: {
+        decision,
+        registered: String(registered),
+        storedInterval: lastRegisteredInterval ?? 'none',
+        interval,
+        appState: String(appState),
+        releaseCheck: 'v1.2.7/background-sync-registration',
+      },
+    });
+  };
+
+  // On a headless cold start TaskManager restores its persisted registrations
+  // asynchronously, so isTaskRegisteredAsync can answer false while our own
+  // record says a registration is live. Re-registering there makes
+  // expo-background-task cancel the very worker that woke the app (device
+  // test 2026-09-02: job released after 0.76 s, sync frozen mid-cycle). Trust
+  // the record until the app is on screen, where a re-registration is harmless.
+  if (shouldRegister && !registered && lastRegisteredInterval !== null && appState !== 'active') {
+    logDecision('deferred-until-foreground');
+    return {
+      action: 'unchanged',
+      available,
+      backend: configuration.backend,
+      configured: configuration.configured,
+      interval,
+      registered: true,
+      status,
+    };
+  }
 
   if (shouldRegister) {
     const minimumInterval = MOBILE_BACKGROUND_SYNC_INTERVAL_MINUTES[interval];
-    const lastRegisteredInterval = await getLastRegisteredBackgroundSyncInterval();
     const intervalChanged = registered && lastRegisteredInterval !== interval;
+    logDecision(!registered ? 'register' : intervalChanged ? 're-register' : 'unchanged');
     // Every registerTaskAsync call makes expo-background-task cancel its
     // current WorkManager worker and enqueue a fresh one with a full delay.
     // On a cold start woken by that very worker, re-registering cancelled the
@@ -286,6 +321,7 @@ export async function syncMobileBackgroundSyncRegistration(): Promise<MobileBack
   }
 
   if (registered) {
+    logDecision('unregister');
     await BackgroundTask.unregisterTaskAsync(MOBILE_BACKGROUND_SYNC_TASK_NAME);
     await clearLastRegisteredBackgroundSyncInterval();
     void logInfo('Mobile background sync unregistered', {

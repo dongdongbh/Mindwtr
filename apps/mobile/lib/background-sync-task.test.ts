@@ -73,6 +73,8 @@ const appLogMock = vi.hoisted(() => ({
 }));
 vi.mock('./app-log', () => appLogMock);
 vi.mock('./js-timers', () => ({ areJsTimersPaused: vi.fn(() => true) }));
+const reactNativeMock = vi.hoisted(() => ({ AppState: { currentState: 'active' as string } }));
+vi.mock('react-native', () => reactNativeMock);
 
 const loadModule = async () => import('./background-sync-task');
 
@@ -81,6 +83,7 @@ describe('mobile background sync task', () => {
     vi.resetModules();
     vi.clearAllMocks();
     taskManagerMock.state.executor = null;
+    reactNativeMock.AppState.currentState = 'active';
     taskManagerMock.isTaskDefined.mockReturnValue(false);
     taskManagerMock.isAvailableAsync.mockResolvedValue(true);
     taskManagerMock.isTaskRegisteredAsync.mockResolvedValue(false);
@@ -136,6 +139,28 @@ describe('mobile background sync task', () => {
     expect(backgroundTaskMock.registerTaskAsync).not.toHaveBeenCalled();
     expect(backgroundTaskMock.unregisterTaskAsync).not.toHaveBeenCalled();
     expect(result).toMatchObject({ action: 'unchanged', registered: true, interval: '15m' });
+  });
+
+  it('trusts its own registration record off screen so a headless cold start does not cancel the worker that woke it', async () => {
+    syncServiceMock.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'webdav', configured: true });
+    taskManagerMock.isTaskRegisteredAsync.mockResolvedValue(false);
+    const { BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY } = await import('./sync-constants');
+    asyncStorageMock.store.set(BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY, '15m');
+    reactNativeMock.AppState.currentState = 'background';
+
+    const module = await loadModule();
+    const deferred = await module.syncMobileBackgroundSyncRegistration();
+    expect(backgroundTaskMock.registerTaskAsync).not.toHaveBeenCalled();
+    expect(deferred).toMatchObject({ action: 'unchanged', registered: true });
+    expect(appLogMock.logInfo).toHaveBeenCalledWith('Mobile background sync registration checked', expect.objectContaining({
+      extra: expect.objectContaining({ decision: 'deferred-until-foreground', appState: 'background' }),
+    }));
+
+    // On screen the same inputs mean the registration really is gone: register.
+    reactNativeMock.AppState.currentState = 'active';
+    const registered = await module.syncMobileBackgroundSyncRegistration();
+    expect(backgroundTaskMock.registerTaskAsync).toHaveBeenCalledTimes(1);
+    expect(registered).toMatchObject({ action: 'registered', registered: true });
   });
 
   it('unregisters the task when sync is unavailable or unsupported', async () => {
