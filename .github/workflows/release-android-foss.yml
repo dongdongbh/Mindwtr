@@ -185,6 +185,16 @@ jobs:
           fi
           echo "FOSS APK signed with release key."
 
+      - name: Verify 16 KB native library alignment
+        run: |
+          mapfile -t apk_matches < <(find apps/mobile/build -maxdepth 1 -type f -name 'mindwtr-*-arm64-v8a-foss.apk' | sort)
+          if [[ "${#apk_matches[@]}" -ne 1 ]]; then
+            echo "Expected exactly one arm64 FOSS APK for 16 KB verification, found ${#apk_matches[@]}" >&2
+            printf '%s\n' "${apk_matches[@]}" >&2
+            exit 1
+          fi
+          bash scripts/ci/check-android-16kb-page-size.sh "${apk_matches[0]}"
+
       - name: Verify FOSS permission cleanup
         run: |
           mapfile -t apk_matches < <(find apps/mobile/build -maxdepth 1 -type f -name 'mindwtr-*-arm64-v8a-foss.apk' | sort)

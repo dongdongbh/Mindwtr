@@ -1,14 +1,15 @@
 import { requireNativeModule } from 'expo-modules-core';
 import { SyncFileGenerationCorruptError } from '@mindwtr/core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logInfo } from './app-log';
 
 export type AttachmentFileExpectedGeneration =
   | { kind: 'absent' }
   | { kind: 'present'; sha256: string };
 
 export type AttachmentFileInstallResult =
-  | { status: 'installed'; preservedPath?: string }
-  | { status: 'conflict'; preservedPath: string };
+  | { status: 'installed'; preservedPath?: string; publication?: 'exclusive-copy' }
+  | { status: 'conflict'; preservedPath: string; publication?: 'exclusive-copy' };
 
 export type AttachmentFileHashSnapshot = {
   sha256: string;
@@ -459,17 +460,20 @@ const parseNativeResult = (value: unknown): AttachmentFileInstallResult => {
     throw new Error('Attachment file installer returned an invalid result');
   }
   const result = value as Record<string, unknown>;
+  const publication = result.publication === 'exclusive-copy'
+    ? { publication: 'exclusive-copy' as const }
+    : {};
   if (result.status === 'installed') {
     return typeof result.preservedPath === 'string' && result.preservedPath.trim()
-      ? { status: 'installed', preservedPath: result.preservedPath }
-      : { status: 'installed' };
+      ? { status: 'installed', preservedPath: result.preservedPath, ...publication }
+      : { status: 'installed', ...publication };
   }
   if (
     result.status === 'conflict'
     && typeof result.preservedPath === 'string'
     && result.preservedPath.trim()
   ) {
-    return { status: 'conflict', preservedPath: result.preservedPath };
+    return { status: 'conflict', preservedPath: result.preservedPath, ...publication };
   }
   throw new Error('Attachment file installer returned an invalid result');
 };
@@ -528,7 +532,15 @@ export const installAttachmentFileGeneration = async (
     normalizedExpected,
     normalizedDownloadSha256,
   );
-  return parseNativeResult(result);
+  const parsed = parseNativeResult(result);
+  if (parsed.publication === 'exclusive-copy') {
+    await logInfo('Android attachment generation published with exclusive-copy fallback', {
+      scope: 'sync',
+      releaseCheck: 'v1.2.7/android-attachment-link-fallback',
+      publication: parsed.publication,
+    });
+  }
+  return parsed;
 };
 
 /** Hash a managed canonical attachment in native code without materializing its

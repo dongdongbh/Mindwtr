@@ -16,7 +16,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'releaseCheck', 'backend', 'statusPublished', 'lastSyncAt', 'lastSyncStatus',
     'artifact', 'cloudProvider', 'scheme', 'host', 'delivery', 'deduped',
     'platform', 'total', 'multiDay', 'allDay', 'spanning',
-    'presenceDue', 'hasScope', 'check', 'skipped',
+    'presenceDue', 'hasScope', 'check', 'skipped', 'publication',
     // background-sync-registration (apps/mobile/lib/background-sync-task.ts)
     'decision', 'registered', 'storedInterval', 'interval', 'appState',
 ];

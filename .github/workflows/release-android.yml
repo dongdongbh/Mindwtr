@@ -298,6 +298,11 @@ jobs:
           ANALYTICS_RELEASE_VERSION: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
           FEEDBACK_ENDPOINT_URL: ${{ vars.FEEDBACK_ENDPOINT_URL || vars.VITE_FEEDBACK_ENDPOINT_URL || 'https://feedback.mindwtr.app' }}
 
+      - name: Verify 16 KB native library alignment
+        run: |
+          VERSION=${{ needs.preflight.outputs.version }}
+          bash scripts/ci/check-android-16kb-page-size.sh "apps/mobile/build/mindwtr-${VERSION}.aab"
+
       - name: Upload Android AAB build artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -374,6 +379,11 @@ jobs:
           ANALYTICS_HEARTBEAT_CHANNEL: android-internal-test
           ANALYTICS_RELEASE_VERSION: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
           FEEDBACK_ENDPOINT_URL: ${{ vars.FEEDBACK_ENDPOINT_URL || vars.VITE_FEEDBACK_ENDPOINT_URL || 'https://feedback.mindwtr.app' }}
+
+      - name: Verify 16 KB native library alignment
+        run: |
+          VERSION=${{ needs.preflight.outputs.version }}
+          bash scripts/ci/check-android-16kb-page-size.sh "apps/mobile/build/mindwtr-${VERSION}-internal-${GITHUB_RUN_NUMBER}.aab"
 
       - name: Upload Android internal profileable AAB artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -453,6 +463,11 @@ jobs:
           ANALYTICS_HEARTBEAT_CHANNEL: android-direct
           ANALYTICS_RELEASE_VERSION: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
           FEEDBACK_ENDPOINT_URL: ${{ vars.FEEDBACK_ENDPOINT_URL || vars.VITE_FEEDBACK_ENDPOINT_URL || 'https://feedback.mindwtr.app' }}
+
+      - name: Verify 16 KB native library alignment
+        run: |
+          VERSION=${{ needs.preflight.outputs.version }}
+          bash scripts/ci/check-android-16kb-page-size.sh "apps/mobile/build/mindwtr-${VERSION}.apk"
 
       - name: Collect Android release artifacts
         run: |

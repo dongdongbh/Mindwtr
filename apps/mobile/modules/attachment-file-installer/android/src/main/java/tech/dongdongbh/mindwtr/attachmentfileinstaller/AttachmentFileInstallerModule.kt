@@ -70,6 +70,9 @@ internal sealed class CopyExclusiveOutcome {
 }
 
 internal class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
+  internal var usedExclusiveCopyFallback = false
+    private set
+
   override fun canonical(file: File): File = file.canonicalFile
 
   override fun ensureDirectory(directory: File) {
@@ -285,13 +288,18 @@ internal class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
         }
         true
       }
-      is LinkAttemptOutcome.Retry -> when (val copied = copyExclusive(source, destination)) {
-        CopyExclusiveOutcome.AlreadyExists -> false
-        CopyExclusiveOutcome.Published -> true
-        is CopyExclusiveOutcome.Failed -> throw AttachmentInstallerFailure(
-          "Could not publish attachment generation (${copied.errno?.let(::describeErrno) ?: "copy failed"})",
-          copied.cause,
-        )
+      is LinkAttemptOutcome.Retry -> {
+        when (val copied = copyExclusive(source, destination)) {
+          CopyExclusiveOutcome.AlreadyExists -> false
+          CopyExclusiveOutcome.Published -> {
+            usedExclusiveCopyFallback = true
+            true
+          }
+          is CopyExclusiveOutcome.Failed -> throw AttachmentInstallerFailure(
+            "Could not publish attachment generation (${copied.errno?.let(::describeErrno) ?: "copy failed"})",
+            copied.cause,
+          )
+        }
       }
       is LinkAttemptOutcome.Failed -> throw AttachmentInstallerFailure(
         "Could not publish attachment generation (${describeErrno(attempt.errno)})",
@@ -525,10 +533,11 @@ class AttachmentFileInstallerModule : Module() {
       try {
         val filesRoot = context.filesDir.canonicalFile
         val cacheRoot = context.cacheDir.canonicalFile
+        val fileOps = AndroidAttachmentInstallerFileOps()
         val installer = AttachmentFileInstallerCore(
           targetRoot = File(filesRoot, "attachments"),
           sourceRoots = listOf(filesRoot, cacheRoot),
-          ops = AndroidAttachmentInstallerFileOps(),
+          ops = fileOps,
         )
         val outcome = installer.install(
           stagedInput = fileFromPath(stagedPath),
@@ -539,12 +548,13 @@ class AttachmentFileInstallerModule : Module() {
         when (outcome) {
           is AttachmentInstallOutcome.Installed -> buildMap {
             put("status", "installed")
+            if (fileOps.usedExclusiveCopyFallback) put("publication", "exclusive-copy")
             outcome.preservedFile?.let { put("preservedPath", Uri.fromFile(it).toString()) }
           }
-          is AttachmentInstallOutcome.Conflict -> mapOf(
-            "status" to "conflict",
-            "preservedPath" to Uri.fromFile(outcome.preservedFile).toString(),
-          )
+          is AttachmentInstallOutcome.Conflict -> buildMap {
+            put("status", "conflict")
+            put("preservedPath", Uri.fromFile(outcome.preservedFile).toString())
+          }
         }
       } catch (error: AttachmentFileInstallerException) {
         throw error

@@ -43,6 +43,7 @@ class AndroidAttachmentInstallerFileOpsTest {
       val published = ops.moveExclusive(source, destination)
 
       assertTrue(published)
+      assertTrue(ops.usedExclusiveCopyFallback)
       assertEquals("attachment bytes", destination.readText())
       assertFalse(source.exists())
     }
@@ -63,6 +64,7 @@ class AndroidAttachmentInstallerFileOpsTest {
       val published = ops.moveExclusive(source, destination)
 
       assertFalse(published)
+      assertFalse(ops.usedExclusiveCopyFallback)
       assertEquals("already published", destination.readText())
       assertTrue(source.exists())
       assertEquals("candidate bytes", source.readText())
@@ -83,6 +85,7 @@ class AndroidAttachmentInstallerFileOpsTest {
         ops.moveExclusive(source, destination)
         fail("expected AttachmentInstallerFailure naming the errno")
       } catch (error: AttachmentInstallerFailure) {
+        assertFalse(ops.usedExclusiveCopyFallback)
         assertTrue(error.message.orEmpty().contains("(EIO)"))
       }
     }
