@@ -441,6 +441,34 @@ describe('runSharedSyncCycle', () => {
         expect(io.writeRemote).toHaveBeenCalledTimes(1);
     });
 
+    it('skips the candidate attachment proof on a device without attachment storage (#1119)', async () => {
+        const remoteTask = createTask('t-remote', 'Remote task');
+        remoteTask.attachments = [{
+            id: 'attachment-remote',
+            kind: 'file',
+            title: 'scan.pdf',
+            uri: '',
+            cloudKey: 'attachments/scan.pdf',
+            fileHash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            createdAt: remoteTask.createdAt,
+            updatedAt: remoteTask.updatedAt,
+        }];
+        const syncAttachments = vi.fn(async () => false);
+        const { io, run } = createHarness({
+            local: createData([]),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            policy: { attachmentPhasesEnabled: false },
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
+        expect(syncAttachments).not.toHaveBeenCalled();
+    });
+
     it('keeps candidate remote data out of durable local storage when an activation probe fails', async () => {
         const local = createData([createTask('t-local', 'Local task')]);
         const remote = createData([createTask('t-remote', 'Remote task')]);

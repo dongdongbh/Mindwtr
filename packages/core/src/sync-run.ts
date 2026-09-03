@@ -1353,6 +1353,12 @@ class SharedSyncRunMachine {
      *  immediately before the merged document is written remotely. */
     private async prepareRemoteWriteData(data: AppData): Promise<AppData> {
         if (this.options.activationProbe) {
+            // A device with no attachment storage (the web app) can never
+            // download or upload a file, so it has nothing to prove: the
+            // records stay unavailable here exactly as every later cycle keeps
+            // them. Demanding proof refused every setup against a location
+            // that held attachments (#1119).
+            if (!this.policy.attachmentPhasesEnabled) return data;
             const activationSnapshot = prepareActivationAttachmentSnapshot(
                 data,
                 this.state.remoteDataForCompare,
