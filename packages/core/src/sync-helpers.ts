@@ -315,9 +315,24 @@ export const sanitizeAppDataForRemote = (data: AppData): AppData => {
     };
 };
 
+const isIdKeyed = (item: unknown): item is { id: string } => (
+    !!item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string'
+);
+
+// Lists of id-keyed records (entities, attachments, checklist items) compare
+// by content, not position. A merge emits the local side's order first, so two
+// devices that added records concurrently hold the same set in different
+// orders forever; comparing positionally made every fingerprint differ, every
+// cycle upload, and the self-hosted server report a merge each time (#1136).
+// Position carries no meaning for these lists: ordering lives in explicit
+// order fields, and every reorder bumps the owner's updatedAt anyway.
 const normalizeForSyncComparison = (value: unknown): unknown => {
     if (Array.isArray(value)) {
-        return value.map((item) => normalizeForSyncComparison(item));
+        const items = value.map((item) => normalizeForSyncComparison(item));
+        if (items.length > 1 && items.every(isIdKeyed)) {
+            items.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+        }
+        return items;
     }
     if (value && typeof value === 'object') {
         const record = value as Record<string, unknown>;
@@ -352,7 +367,7 @@ const hashStableSyncJson = (value: string): string => {
 
 export const computeStableValueFingerprint = (value: unknown): string => {
     const json = toStableSyncJson(value);
-    return `stable-v1:${json.length}:${hashStableSyncJson(json)}`;
+    return `stable-v2:${json.length}:${hashStableSyncJson(json)}`;
 };
 
 export const computeSyncPayloadFingerprint = (data: AppData): string =>

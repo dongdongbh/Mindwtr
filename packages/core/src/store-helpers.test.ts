@@ -20,7 +20,7 @@ import {
     reuseSettingsIfEquivalent,
     selectFocusedCount,
 } from './store-helpers';
-import type { Project, Section, Task } from './types';
+import type { Attachment, Project, Section, Task } from './types';
 import type { SaveBaseState } from './store-types';
 
 const createTask = (
@@ -1019,5 +1019,38 @@ describe('persist', () => {
         expect(() => persist(set, debouncedSave, baseState, { tasks: [createTask('t1'), createTask('t3')] }))
             .toThrow(/Refusing to save a partial task snapshot; missing existing ids: t2/);
         expect(debouncedSave).not.toHaveBeenCalled();
+    });
+});
+
+describe('reconcileEntityCollection attachments (#1136)', () => {
+    const attachment = (overrides: Partial<Attachment> = {}): Attachment => ({
+        id: 'att-1',
+        kind: 'file' as const,
+        title: 'scan.pdf',
+        uri: 'file:///attachments/att-1.pdf',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        ...overrides,
+    });
+
+    it('replaces an owner whose attachments changed under an unchanged revision tuple', () => {
+        const existing = createTask('t1', 'project-1', 0, { attachments: [attachment()] });
+        const incoming = createTask('t1', 'project-1', 0, {
+            attachments: [attachment({ deletedAt: '2026-01-01T00:00:00.000Z' })],
+        });
+
+        expect(hasSameEntityIdentity(existing, incoming)).toBe(false);
+        const result = reconcileEntityCollection([existing], buildEntityMap([existing]), [incoming]);
+        expect(result.items[0]).toBe(incoming);
+    });
+
+    it('still reuses an owner whose attachments are equal by content', () => {
+        const existing = createTask('t1', 'project-1', 0, { attachments: [attachment()] });
+        const incoming = createTask('t1', 'project-1', 0, { attachments: [attachment()] });
+
+        expect(hasSameEntityIdentity(existing, incoming)).toBe(true);
+        const result = reconcileEntityCollection([existing], buildEntityMap([existing]), [incoming]);
+        expect(result.items).toEqual([existing]);
+        expect(result.items[0]).toBe(existing);
     });
 });

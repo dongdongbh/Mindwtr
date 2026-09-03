@@ -10,7 +10,7 @@ import { isTaskActionable, isTaskFinished } from './task-status';
 import { safeParseDate } from './date';
 import { filterNotDeleted } from './sync-helpers';
 import { nextRevision, normalizeRevision } from './sync-revision';
-import type { AiSettings, AppData, Area, Person, Project, Section, Task, TaskStatus } from './types';
+import type { AiSettings, AppData, Area, Attachment, Person, Project, Section, Task, TaskStatus } from './types';
 import { generateUUID as uuidv4 } from './uuid';
 import type { DerivedState, SaveBaseState, TaskStore } from './store-types';
 
@@ -511,12 +511,33 @@ export const reuseArrayIfShallowEqual = <T>(previous: T[], next: T[]): T[] => (
         : next
 );
 
+// Attachments carry their own per-record LWW (deletedAt, cloudKey, localStatus,
+// contentRev) and a merge can change them WITHOUT touching the owner's revision
+// tuple. Reusing the existing owner object on that tuple alone kept a task's
+// pre-merge attachments alive in the store; the post-load persist then wrote
+// them back over what the sync cycle had just stored, every cycle (#1136).
+const haveSameAttachments = (left?: Attachment[], right?: Attachment[]): boolean => {
+    if (left === right) return true;
+    const leftItems = left ?? [];
+    const rightItems = right ?? [];
+    if (leftItems.length !== rightItems.length) return false;
+    for (let index = 0; index < leftItems.length; index += 1) {
+        if (leftItems[index] === rightItems[index]) continue;
+        if (JSON.stringify(leftItems[index]) !== JSON.stringify(rightItems[index])) return false;
+    }
+    return true;
+};
+
 export const hasSameEntityIdentity = <T extends EntityWithRevision>(existing: T, incoming: T): boolean => (
     existing.updatedAt === incoming.updatedAt
     && normalizeRevision(existing.rev) === normalizeRevision(incoming.rev)
     && existing.revBy === incoming.revBy
     && existing.deletedAt === incoming.deletedAt
     && existing.purgedAt === incoming.purgedAt
+    && haveSameAttachments(
+        (existing as { attachments?: Attachment[] }).attachments,
+        (incoming as { attachments?: Attachment[] }).attachments,
+    )
 );
 
 export const reconcileEntityCollection = <T extends EntityWithRevision>(
