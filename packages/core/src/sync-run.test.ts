@@ -788,7 +788,7 @@ describe('runSharedSyncCycle', () => {
 
         expect(result).toMatchObject({
             success: false,
-            error: '[cloud] Candidate attachment proof failed for attachment-candidate-404-mismatch',
+            error: expect.stringContaining('[cloud] Candidate attachment proof failed for attachment-candidate-404-mismatch'),
         });
         expect(syncAttachments).toHaveBeenCalledTimes(1);
         expect(io.writeRemote).not.toHaveBeenCalled();
@@ -934,7 +934,7 @@ describe('runSharedSyncCycle', () => {
 
         expect(result).toMatchObject({
             success: false,
-            error: '[cloud] Candidate attachment proof failed for attachment-remote-only',
+            error: expect.stringContaining('[cloud] Candidate attachment proof failed for attachment-remote-only'),
         });
         expect(syncAttachments).toHaveBeenCalledTimes(1);
         expect(io.writeRemote).not.toHaveBeenCalled();
@@ -996,7 +996,7 @@ describe('runSharedSyncCycle', () => {
 
         expect(result).toMatchObject({
             success: false,
-            error: '[cloud] Candidate attachment proof failed for attachment-1',
+            error: expect.stringContaining('[cloud] Candidate attachment proof failed for attachment-1'),
         });
         expect(io.writeRemote).not.toHaveBeenCalled();
         expect(storage.persistLocal).not.toHaveBeenCalled();
@@ -2564,7 +2564,7 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
 
         expect(result).toMatchObject({
             success: false,
-            error: '[cloud] Candidate attachment proof failed for attachment-held',
+            error: expect.stringContaining('[cloud] Candidate attachment proof failed for attachment-held'),
         });
         expect(io.writeRemote).not.toHaveBeenCalled();
     });
@@ -2604,7 +2604,7 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
 
         expect(result).toMatchObject({
             success: false,
-            error: '[cloud] Candidate attachment proof failed for attachment-local-read-failure',
+            error: expect.stringContaining('[cloud] Candidate attachment proof failed for attachment-local-read-failure'),
         });
         expect(syncAttachments).toHaveBeenCalledTimes(1);
         expect(io.writeRemote).not.toHaveBeenCalled();
@@ -2690,8 +2690,11 @@ describe('activation proof with metadata-only attachments (no blob anywhere)', (
 
         expect(result).toMatchObject({
             success: false,
-            error: '[cloud] Candidate attachment proof failed for attachment-old-backend',
+            error: expect.stringContaining('[cloud] Candidate attachment proof failed for attachment-old-backend'),
         });
+        // The refusal names the file, its owner, and the cross-backend cause (#1151).
+        expect(result.error).toContain('"Only on the old backend" on task "Old backend attachment"');
+        expect(result.error).toContain('uploaded to iCloud');
         expect(io.writeRemote).not.toHaveBeenCalled();
     });
 
@@ -2718,7 +2721,7 @@ describe('activation proof with metadata-only attachments (no blob anywhere)', (
 
         expect(result).toMatchObject({
             success: false,
-            error: '[cloud] Candidate attachment proof failed for attachment-unreadable',
+            error: expect.stringContaining('[cloud] Candidate attachment proof failed for attachment-unreadable'),
         });
         expect(io.writeRemote).not.toHaveBeenCalled();
     });
