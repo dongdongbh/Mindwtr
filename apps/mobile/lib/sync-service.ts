@@ -88,6 +88,8 @@ import {
   revalidateMobileFileSyncLease,
   releaseMobileFileSyncLease,
 } from './sync-file-lock';
+import { backgroundSafeFetch, setBackgroundSafeFetchDeadline } from './background-safe-fetch';
+import './js-timers';
 
 const DEFAULT_SYNC_TIMEOUT_MS = 30_000;
 const WEBDAV_RETRY_OPTIONS = { maxAttempts: 5, baseDelayMs: 2000, maxDelayMs: 30_000 };
@@ -558,7 +560,7 @@ class MobileSyncRun {
   private lastOfflineNetworkStatus: MobileNetworkStatus | null = null;
   private networkSubscription: { remove?: () => void } | null = null;
   private readonly requestAbortController = new AbortController();
-  private readonly fetchWithAbort = createAbortableFetch(fetch, { baseSignal: this.requestAbortController.signal });
+  private readonly fetchWithAbort = createAbortableFetch(backgroundSafeFetch, { baseSignal: this.requestAbortController.signal });
 
   private webdavConfig: MobileWebDavSyncConfig | null = null;
   private cloudConfig: MobileCloudSyncConfig | null = null;
@@ -2114,6 +2116,8 @@ export async function performMobileSync(
   }
   return result;
 }
+
+export { setBackgroundSafeFetchDeadline as setMobileSyncRequestDeadline };
 
 export function abortMobileSync(): boolean {
   if (!activeMobileSyncAbortController) return false;

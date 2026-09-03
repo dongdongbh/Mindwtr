@@ -35,6 +35,7 @@ const coreMock = vi.hoisted(() => ({
 
 const syncServiceMock = vi.hoisted(() => ({
   abortMobileSync: vi.fn(),
+  setMobileSyncRequestDeadline: vi.fn(),
   getMobileSyncConfigurationStatus: vi.fn(),
   performMobileSync: vi.fn(),
 }));
@@ -119,6 +120,20 @@ describe('mobile background sync task', () => {
       configured: true,
       registered: true,
     });
+  });
+
+  it('leaves an already live registration alone so a mid-run worker is not cancelled', async () => {
+    syncServiceMock.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'webdav', configured: true });
+    taskManagerMock.isTaskRegisteredAsync.mockResolvedValue(true);
+    const { BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY } = await import('./sync-constants');
+    asyncStorageMock.store.set(BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY, '15m');
+
+    const module = await loadModule();
+    const result = await module.syncMobileBackgroundSyncRegistration();
+
+    expect(backgroundTaskMock.registerTaskAsync).not.toHaveBeenCalled();
+    expect(backgroundTaskMock.unregisterTaskAsync).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ action: 'unchanged', registered: true, interval: '15m' });
   });
 
   it('unregisters the task when sync is unavailable or unsupported', async () => {
@@ -224,6 +239,11 @@ describe('mobile background sync task', () => {
       expect(await run).toBe(backgroundTaskMock.BackgroundTaskResult.Failed);
       expect(syncServiceMock.abortMobileSync).toHaveBeenCalledTimes(1);
       expect(storageAdapterMock.quiesceMobileStorage).toHaveBeenCalledTimes(1);
+      // The request deadline is what holds while timers are paused; it must be
+      // armed for the run and cleared afterwards.
+      const deadlineCalls = syncServiceMock.setMobileSyncRequestDeadline.mock.calls;
+      expect(deadlineCalls[0]?.[0]).toBeGreaterThan(Date.now() - 1);
+      expect(deadlineCalls.at(-1)?.[0]).toBeNull();
     } finally {
       vi.useRealTimers();
     }

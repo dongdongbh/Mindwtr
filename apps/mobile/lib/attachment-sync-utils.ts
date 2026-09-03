@@ -33,6 +33,7 @@ import { getSecureConfigValue } from './secure-config';
 import { readActiveSyncLocationScope } from './sync-location-scope';
 import { logInfo, logWarn, sanitizeLogMessage } from './app-log';
 import { isLikelyFilePath } from './sync-service-utils';
+import { backgroundSafeFetch } from './background-safe-fetch';
 
 export { ATTACHMENTS_DIR_NAME, buildCloudKey, extractExtension, getBaseSyncUrl, getCloudBaseUrl, reportProgress, validateAttachmentHash };
 // `collectAttachments` predates `collectAttachmentsById` moving into core (packages/core/src/
@@ -261,7 +262,7 @@ export type DropboxAccessTokenResolver = (forceRefresh: boolean) => Promise<stri
 export const runDropboxAuthorized = async <T,>(
   dropboxClientId: string,
   operation: (accessToken: string) => Promise<T>,
-  fetcher: typeof fetch = fetch,
+  fetcher: typeof fetch = backgroundSafeFetch,
   resolveAccessToken?: DropboxAccessTokenResolver,
 ): Promise<T> => {
   let resolver = resolveAccessToken;

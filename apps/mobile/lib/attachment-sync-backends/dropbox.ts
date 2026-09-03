@@ -52,6 +52,7 @@ import {
   resolveAttachmentDownloadTargetPath,
   sealAttachmentBytesForUpload,
 } from './common';
+import { backgroundSafeFetch } from '../background-safe-fetch';
 
 export type DropboxAttachmentSyncOptions = {
   activationProbe?: boolean;
@@ -96,7 +97,7 @@ const isAbortLikeError = (error: unknown, signal?: AbortSignal): boolean => (
 export const syncDropboxAttachments = async (
   appData: AppData,
   dropboxClientId: string,
-  fetcher: typeof fetch = fetch,
+  fetcher: typeof fetch = backgroundSafeFetch,
   options: DropboxAttachmentSyncOptions = {}
 ): Promise<AppData | false> => {
   if (!dropboxClientId) return false;

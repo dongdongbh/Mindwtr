@@ -6,7 +6,7 @@ import { flushPendingSave } from '@mindwtr/core';
 import type { SyncBackend } from './sync-service-utils';
 import { logInfo, logWarn } from './app-log';
 import { quiesceMobileStorage } from './storage-adapter';
-import { abortMobileSync, getMobileSyncConfigurationStatus, performMobileSync } from './sync-service';
+import { abortMobileSync, getMobileSyncConfigurationStatus, performMobileSync, setMobileSyncRequestDeadline } from './sync-service';
 import {
   BACKGROUND_SYNC_INTERVAL_KEY,
   BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY,
@@ -23,6 +23,11 @@ export const MOBILE_BACKGROUND_SYNC_MINIMUM_INTERVAL_MINUTES = 15;
 // device the job held a wakelock for the whole allowance whenever the sync did
 // not settle (#1001). The run is abandoned well inside that allowance instead,
 // so the job always returns and the wakelock is released.
+//
+// Android pauses JavaScript timers while the app is not in the foreground, so
+// the setTimeout race below only fires when the app is visible. The deadline
+// that holds in the background is the request deadline handed to the sync's
+// fetch, which refuses to start a request past it and caps each request at it.
 export const MOBILE_BACKGROUND_SYNC_DEADLINE_MS = 4 * 60 * 1000;
 export const MOBILE_BACKGROUND_SYNC_QUIESCE_DEADLINE_MS = 20 * 1000;
 
@@ -162,6 +167,7 @@ const performBackgroundSyncWork = async (): Promise<BackgroundTask.BackgroundTas
 };
 
 const runMobileBackgroundSync = async (): Promise<BackgroundTask.BackgroundTaskResult> => {
+  setMobileSyncRequestDeadline(Date.now() + MOBILE_BACKGROUND_SYNC_DEADLINE_MS);
   try {
     return await withDeadline(performBackgroundSyncWork(), MOBILE_BACKGROUND_SYNC_DEADLINE_MS, () => {
       abortMobileSync();
@@ -175,6 +181,7 @@ const runMobileBackgroundSync = async (): Promise<BackgroundTask.BackgroundTaskR
     logBackgroundSyncWarning('Mobile background sync crashed', error);
     return BackgroundTask.BackgroundTaskResult.Failed;
   } finally {
+    setMobileSyncRequestDeadline(null);
     // This runs in a headless RN instance that is destroyed the moment the task
     // promise settles; deferred storage work must land before that, not after.
     // It gets its own short deadline for the same reason as the sync above.
@@ -223,14 +230,18 @@ export async function syncMobileBackgroundSyncRegistration(): Promise<MobileBack
     const minimumInterval = MOBILE_BACKGROUND_SYNC_INTERVAL_MINUTES[interval];
     const lastRegisteredInterval = await getLastRegisteredBackgroundSyncInterval();
     const intervalChanged = registered && lastRegisteredInterval !== interval;
-    if (intervalChanged) {
-      // expo-background-task ignores a changed minimumInterval on a plain
-      // re-registration; only unregister-then-register actually applies it.
-      await BackgroundTask.unregisterTaskAsync(MOBILE_BACKGROUND_SYNC_TASK_NAME);
-    }
-    await BackgroundTask.registerTaskAsync(MOBILE_BACKGROUND_SYNC_TASK_NAME, { minimumInterval });
-    await setLastRegisteredBackgroundSyncInterval(interval);
+    // Every registerTaskAsync call makes expo-background-task cancel its
+    // current WorkManager worker and enqueue a fresh one with a full delay.
+    // On a cold start woken by that very worker, re-registering cancelled the
+    // run that woke the app, so a task that is already live is left alone.
     if (!registered || intervalChanged) {
+      if (intervalChanged) {
+        // expo-background-task ignores a changed minimumInterval on a plain
+        // re-registration; only unregister-then-register actually applies it.
+        await BackgroundTask.unregisterTaskAsync(MOBILE_BACKGROUND_SYNC_TASK_NAME);
+      }
+      await BackgroundTask.registerTaskAsync(MOBILE_BACKGROUND_SYNC_TASK_NAME, { minimumInterval });
+      await setLastRegisteredBackgroundSyncInterval(interval);
       void logInfo('Mobile background sync registered', {
         scope: 'sync',
         extra: { backend: configuration.backend, interval },

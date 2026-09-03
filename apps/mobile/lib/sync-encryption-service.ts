@@ -100,6 +100,7 @@ import {
     SYNC_BACKEND_KEY,
     SYNC_PATH_KEY,
 } from './sync-constants';
+import { backgroundSafeFetch } from './background-safe-fetch';
 
 const BACKUP_FILE_NAME = `${SYNC_FILE_NAME}.bak`;
 const DROPBOX_PROVIDER = 'dropbox';
@@ -288,7 +289,7 @@ const listWebdavAttachmentKeys = async (
     collectionUrl,
     { method: 'PROPFIND', headers, body: DAV_PROPFIND_BODY, signal: options.signal },
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        options.fetcher ?? fetch,
+        options.fetcher ?? backgroundSafeFetch,
         'WebDAV attachment inventory timed out',
         async (response, signal) => {
           if (!response.ok) {
@@ -302,7 +303,7 @@ const listWebdavAttachmentKeys = async (
 
 const listDropboxAttachmentKeys = async (
     accessToken: string,
-    fetcher: typeof fetch = fetch,
+    fetcher: typeof fetch = backgroundSafeFetch,
 ): Promise<string[]> => {
     const keys = new Set<string>();
     for (const entry of await listDropboxFolderFiles(accessToken, '/attachments', fetcher)) {
