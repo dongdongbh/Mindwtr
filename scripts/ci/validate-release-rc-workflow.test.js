@@ -278,6 +278,23 @@ test("stable release validates tags and committed versions before any build or p
     expect(asNeedsList(workflow.jobs[jobName].needs)).toContain("validate");
   }
 
+  for (const jobName of [
+    "linux",
+    "macos",
+    "windows",
+    "ios-appstore",
+    "macos-appstore",
+  ]) {
+    const job = workflow.jobs[jobName];
+    expect(asNeedsList(job.needs)).toContain("android-version-code");
+    expect(job.if).toContain(
+      "needs['android-version-code'].result == 'success'",
+    );
+    expect(job.if).toContain(
+      "github.event_name == 'workflow_dispatch' && !inputs.run_android && !inputs.run_android_foss",
+    );
+  }
+
   const publishJobs = [
     "update-packages",
     "update-flathub",
