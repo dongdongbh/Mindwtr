@@ -74,6 +74,9 @@ jobs:
           node scripts/ci/check-package-lock-sync.js apps/desktop/package.json apps/desktop/package-lock.json --check-overrides
           node scripts/ci/check-mobile-foss-lock-sync.js
 
+      - name: EAS CLI lock install check
+        run: npm ci --prefix tools/eas-cli --ignore-scripts --legacy-peer-deps --dry-run
+
       - name: Google Play listing metadata check
         run: |
           python3 scripts/ci/prepare-google-play-listing-metadata.test.py

@@ -132,11 +132,18 @@ test("Android releases use the isolated, repository-locked EAS CLI", () => {
 
   expect(manifest.dependencies["eas-cli"]).toBe("21.5.0");
   expect(lock.packages["node_modules/eas-cli"].version).toBe("21.5.0");
-  expect(workflow).toContain("npm ci --prefix tools/eas-cli --ignore-scripts");
+  expect(workflow).toContain(
+    "npm ci --prefix tools/eas-cli --ignore-scripts --legacy-peer-deps",
+  );
   expect(workflow).toContain(
     "$GITHUB_WORKSPACE/tools/eas-cli/node_modules/.bin/eas",
   );
   expect(workflow).not.toContain("npm install -g eas-cli");
+
+  const ci = read(".github/workflows/ci.yml");
+  expect(ci).toContain(
+    "npm ci --prefix tools/eas-cli --ignore-scripts --legacy-peer-deps --dry-run",
+  );
 });
 
 test("Apple release workflows execute the locked Fastlane bundle", () => {

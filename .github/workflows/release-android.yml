@@ -268,7 +268,7 @@ jobs:
       - name: Install repository-locked EAS CLI
         run: |
           set -euo pipefail
-          npm ci --prefix tools/eas-cli --ignore-scripts
+          npm ci --prefix tools/eas-cli --ignore-scripts --legacy-peer-deps
           tools/eas-cli/node_modules/.bin/eas --version
 
       - name: Apply resolved Android versionCode
@@ -353,7 +353,7 @@ jobs:
       - name: Install repository-locked EAS CLI
         run: |
           set -euo pipefail
-          npm ci --prefix tools/eas-cli --ignore-scripts
+          npm ci --prefix tools/eas-cli --ignore-scripts --legacy-peer-deps
           tools/eas-cli/node_modules/.bin/eas --version
 
       - name: Apply resolved Android internal versionCode
@@ -437,7 +437,7 @@ jobs:
       - name: Install repository-locked EAS CLI
         run: |
           set -euo pipefail
-          npm ci --prefix tools/eas-cli --ignore-scripts
+          npm ci --prefix tools/eas-cli --ignore-scripts --legacy-peer-deps
           tools/eas-cli/node_modules/.bin/eas --version
 
       - name: Apply resolved Android versionCode
