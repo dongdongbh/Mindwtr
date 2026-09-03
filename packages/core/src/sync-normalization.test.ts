@@ -483,6 +483,24 @@ describe('sync normalization', () => {
         expect(normalized.attachments?.[0]?.cloudKey).toBeUndefined();
     });
 
+    it('normalizes project startDate the same way as dueDate', () => {
+        const project = {
+            ...createMockProject('project-1', '2026-01-01T00:00:00.000Z'),
+            dueDate: '2026-04-24',
+            startDate: '2026-04-20',
+        } satisfies Project;
+
+        const normalized = normalizeProjectForSyncMerge(project);
+
+        expect(normalized.dueDate).toBe('2026-04-24');
+        expect(normalized.startDate).toBe('2026-04-20');
+
+        // Blank strings normalize to undefined for startDate exactly like dueDate does.
+        const blank = normalizeProjectForSyncMerge({ ...project, dueDate: '   ', startDate: '   ' });
+        expect(blank.dueDate).toBeUndefined();
+        expect(blank.startDate).toBeUndefined();
+    });
+
     it('does not let one-sided revBy metadata decide equal-revision conflicts', () => {
         const updatedAt = '2026-01-01T00:00:00.000Z';
         const local = mockAppData([{

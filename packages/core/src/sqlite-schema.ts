@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS projects (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   deletedAt TEXT,
-  purgedAt TEXT
+  purgedAt TEXT,
+  startDate TEXT
 );
 
 CREATE TABLE IF NOT EXISTS areas (

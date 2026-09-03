@@ -265,6 +265,7 @@ const parseDgtPayload = (payload: Record<string, unknown>, counters: DgtWarningC
         areaSourceId: record.folderId,
         color: record.color,
         dueDate: record.dueDate,
+        startDate: record.startDate,
         supportNotes,
         isArchived: Boolean(record.completedAt),
         createdAt: record.createdAt,

@@ -80,6 +80,7 @@ const createMockDb = (
                         { name: 'updatedAt' },
                         { name: 'deletedAt' },
                         { name: 'purgedAt' },
+                        { name: 'startDate' },
                     ];
                 }
                 if (sql.startsWith('PRAGMA table_info(people)')) {
@@ -511,6 +512,32 @@ describe('mcp queries', () => {
         const projectSelects = calls.filter((call) => call.sql.startsWith('SELECT') && call.sql.includes('FROM projects'));
         expect(projectSelects).toHaveLength(2);
         expect(projectSelects.every((call) => call.sql.includes('taskSortBy'))).toBe(true);
+    });
+
+    test('listProjects and getProject preserve startDate from sqlite, the same as dueDate', () => {
+        const now = '2026-02-01T00:00:00.000Z';
+        const { db, calls } = createMockDb([
+            {
+                id: 'p1',
+                title: 'Release',
+                status: 'active',
+                color: '#3B82F6',
+                orderNum: 0,
+                tagIds: '[]',
+                isSequential: 0,
+                dueDate: '2026-05-10',
+                startDate: '2026-04-15',
+                createdAt: now,
+                updatedAt: now,
+            },
+        ]);
+
+        expect(listProjects(db)[0]?.dueDate).toBe('2026-05-10');
+        expect(listProjects(db)[0]?.startDate).toBe('2026-04-15');
+        expect(getProject(db, { id: 'p1' }).startDate).toBe('2026-04-15');
+
+        const projectSelects = calls.filter((call) => call.sql.startsWith('SELECT') && call.sql.includes('FROM projects'));
+        expect(projectSelects.every((call) => call.sql.includes('startDate'))).toBe(true);
     });
 
     test('listPeople maps active managed people from sqlite rows', () => {

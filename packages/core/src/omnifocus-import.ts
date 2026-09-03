@@ -121,6 +121,7 @@ export type ParsedOmniFocusProject = {
     name: string;
     order: number;
     sourceKey: string;
+    startDate?: string;
     status: Project['status'];
     supportNotes?: string;
     tagIds: string[];
@@ -432,6 +433,7 @@ const parseCsvImport = (csvText: string, counters: OmniFocusWarningCounters): Pa
             const project = ensureProjectRecord(projectsByKey, row.name, allocateProjectOrder);
             project.status = parseProjectStatus(row.statusText || '');
             project.dueDate = dueMapping.value ?? project.dueDate;
+            project.startDate = startMapping.value ?? project.startDate;
             project.supportNotes = mergeProjectSupportNotes(
                 project.supportNotes,
                 joinDescription([
@@ -995,6 +997,7 @@ const parseJsonImport = (
             areaSourceKey: ensureAreaRecord(project.folderId, project.folderName),
             status: project.completed || rootTask?.completed ? 'archived' : parseProjectStatus(project.statusText || rootTask?.statusText || ''),
             dueDate: dateNotes.dueDate,
+            startDate: dateNotes.startTime,
             supportNotes: joinDescription([
                 project.note,
                 rootTask?.note,
@@ -1031,6 +1034,7 @@ const parseJsonImport = (
             order: projects.length,
             status: task.completed ? 'archived' : parseProjectStatus(task.statusText || ''),
             dueDate: dateNotes.dueDate,
+            startDate: dateNotes.startTime,
             supportNotes: joinDescription([
                 task.note,
                 dateNotes.plannedNote,

@@ -142,7 +142,8 @@ CREATE TABLE IF NOT EXISTS projects (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   deletedAt TEXT,
-  purgedAt TEXT
+  purgedAt TEXT,
+  startDate TEXT
 );
 
 CREATE TABLE IF NOT EXISTS areas (
@@ -525,6 +526,7 @@ fn initialize_sqlite_schema(conn: &mut Connection) -> Result<i64, String> {
         ensure_column(&transaction, "projects", "sequentialScope", "TEXT")?;
         ensure_column(&transaction, "projects", "taskSortBy", "TEXT")?;
         ensure_projects_due_date_column(&transaction)?;
+        ensure_column(&transaction, "projects", "startDate", "TEXT")?;
         ensure_projects_purged_at_column(&transaction)?;
         ensure_projects_area_order_index(&transaction)?;
         ensure_sync_revision_columns(&transaction)?;
@@ -2059,6 +2061,11 @@ fn row_to_project_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Erro
             map.insert("dueDate".to_string(), Value::String(v));
         }
     }
+    if let Ok(val) = row.get::<_, Option<String>>("startDate") {
+        if let Some(v) = val {
+            map.insert("startDate".to_string(), Value::String(v));
+        }
+    }
     if let Ok(val) = row.get::<_, Option<String>>("reviewAt") {
         if let Some(v) = val {
             map.insert("reviewAt".to_string(), Value::String(v));
@@ -3102,7 +3109,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
         let tag_ids_json = json_str_or_default(project.get("tagIds"), "[]");
         let attachments_json = json_str(project.get("attachments"));
         conn.execute(
-            "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+            "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
             params![
                 project.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
                 project.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3126,6 +3133,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
                 project.get("updatedAt").and_then(|v| v.as_str()).unwrap_or_default(),
                 project.get("deletedAt").and_then(|v| v.as_str()),
                 project.get("purgedAt").and_then(|v| v.as_str()),
+                project.get("startDate").and_then(|v| v.as_str()),
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -5316,6 +5324,41 @@ mod tests {
     }
 
     #[test]
+    fn ensure_column_migrates_legacy_projects_table_missing_start_date() {
+        let conn = Connection::open_in_memory().expect("should open in-memory db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE projects (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL,
+              color TEXT NOT NULL,
+              dueDate TEXT
+            );
+            "#,
+        )
+        .expect("should create legacy projects table");
+
+        ensure_column(&conn, "projects", "startDate", "TEXT").expect("should add startDate column");
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(projects)")
+            .expect("should inspect project columns");
+        let column_names: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("should read project columns")
+            .map(|row| row.expect("column row"))
+            .collect();
+        assert!(column_names.iter().any(|name| name == "startDate"));
+
+        // Idempotent: running it again against a table that already has the column is a no-op,
+        // not an error (matches how ensureProjectColumns/ensure_column are called on every
+        // startup, not just once).
+        ensure_column(&conn, "projects", "startDate", "TEXT")
+            .expect("should be a no-op when startDate already exists");
+    }
+
+    #[test]
     fn ensure_projects_purged_at_column_migrates_legacy_schema() {
         let conn = Connection::open_in_memory().expect("should open in-memory db");
         conn.execute_batch(
@@ -5815,6 +5858,7 @@ mod tests {
                 "updatedAt": "2026-06-01T08:00:00.000Z"
             }],
             "dueDate": "2026-06-10T12:00:00.000Z",
+            "startDate": "2026-06-01T09:00:00.000Z",
             "reviewAt": "2026-06-11T09:00:00.000Z",
             "areaId": "area-1",
             "areaTitle": "Work",
@@ -5931,6 +5975,7 @@ mod tests {
             "supportNotes",
             "attachments",
             "dueDate",
+            "startDate",
             "reviewAt",
             "areaId",
             "areaTitle",

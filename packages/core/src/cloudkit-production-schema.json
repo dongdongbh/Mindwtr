@@ -73,7 +73,9 @@
                 "deletedAt",
                 "purgedAt"
             ],
-            "pendingProduction": []
+            "pendingProduction": [
+                "startDate"
+            ]
         },
         "MindwtrSection": {
             "deployed": [

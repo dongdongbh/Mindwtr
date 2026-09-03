@@ -25,7 +25,7 @@ const buildOmniFocusJsonZip = (): Uint8Array => zipSync({
                 name: 'Test project',
                 note: 'Root project note',
                 dueDate: null,
-                deferDate: null,
+                deferDate: '2026-04-15',
                 plannedDate: null,
                 flagged: false,
                 completed: false,
@@ -161,7 +161,7 @@ describe('omnifocus import', () => {
     it('parses OmniFocus CSV rows into projects and tasks, preserving unmapped fields in notes', () => {
         const csv = [
             'Task ID,Type,Name,Status,Project,Context,Start Date,Planned Date,Due Date,Completion Date,Duration,Flagged,Notes,Tags',
-            '1,Project,House Renovation,Active,,,,,2026-05-10,,,0,Project support note,Home',
+            '1,Project,House Renovation,Active,,,2026-04-28,,2026-05-10,,,0,Project support note,Home',
             '2,Action,Buy paint,Available,House Renovation,Errands,2026-05-01,2026-05-03,2026-05-06,,45m,1,Eggshell white,Deep Work',
             '3,Action,Inbox follow-up,Completed,,Calls,"May 7, 2026","May 8, 2026","May 9, 2026","May 10, 2026",,0,Call contractor,Phone',
             '4,Action Group,Pack tools,Available,House Renovation,,,,,,0,,Prep list,Workshop',
@@ -189,6 +189,7 @@ describe('omnifocus import', () => {
             name: 'House Renovation',
             status: 'active',
             dueDate: '2026-05-10',
+            startDate: '2026-04-28',
             tagIds: ['#home'],
         });
         expect(parsed?.projects[0]?.supportNotes).toContain('Project support note');
@@ -268,7 +269,7 @@ describe('omnifocus import', () => {
             fileName: 'OmniFocus Export.csv',
             text: [
                 'Task ID,Type,Name,Status,Project,Context,Start Date,Planned Date,Due Date,Completion Date,Duration,Flagged,Notes,Tags',
-                '1,Project,House Renovation,Active,,,,,2026-05-10,,,0,Project support note,Home',
+                '1,Project,House Renovation,Active,,,2026-04-28,,2026-05-10,,,0,Project support note,Home',
                 '2,Action,Buy paint,Available,House Renovation,Errands,2026-05-01,,2026-05-06,,45m,1,Eggshell white,Deep Work',
                 '3,Action,Inbox follow-up,Available,,Calls,,,,,,0,Call contractor,Phone',
             ].join('\n'),
@@ -314,6 +315,7 @@ describe('omnifocus import', () => {
             title: 'House Renovation (OmniFocus)',
             status: 'active',
             dueDate: '2026-05-10',
+            startDate: '2026-04-28',
             supportNotes: 'Project support note',
             tagIds: ['#home'],
         });
@@ -368,6 +370,7 @@ describe('omnifocus import', () => {
             areaSourceKey: 'omnifocus-area:folder-1',
             name: 'Test project',
             status: 'active',
+            startDate: '2026-04-15',
             tagIds: ['#tag 1'],
         });
         expect(parsed?.projects[0]?.supportNotes).toContain('Metadata project note');
@@ -473,6 +476,7 @@ describe('omnifocus import', () => {
         expect(importedProject).toMatchObject({
             areaId: importedArea?.id,
             status: 'active',
+            startDate: '2026-04-15',
             tagIds: ['#tag 1'],
             title: 'Test project',
         });

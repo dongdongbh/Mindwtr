@@ -124,6 +124,7 @@ type ProjectSqliteRow = Record<string, unknown> & {
   supportNotes?: string | null;
   attachments?: unknown;
   dueDate?: string | null;
+  startDate?: string | null;
   reviewAt?: string | null;
   areaId?: string | null;
   areaTitle?: string | null;
@@ -327,8 +328,12 @@ const getProjectColumns = (db: DbClient) => {
     const names = new Set<string>(columns.map((col) => String(col.name)));
     const hasOrderNum = names.has('orderNum');
     const hasDueDate = names.has('dueDate');
+    const hasStartDate = names.has('startDate');
     const selectColumns = BASE_PROJECT_COLUMNS.filter(
-      (name) => names.has(name) && (hasOrderNum || name !== 'orderNum') && (hasDueDate || name !== 'dueDate')
+      (name) => names.has(name)
+        && (hasOrderNum || name !== 'orderNum')
+        && (hasDueDate || name !== 'dueDate')
+        && (hasStartDate || name !== 'startDate')
     );
     const resolved = { hasOrderNum, selectColumns };
     projectColumnsCache.set(db, resolved);
