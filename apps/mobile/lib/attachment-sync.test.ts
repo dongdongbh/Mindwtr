@@ -117,6 +117,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   return {
     ...actual,
     MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES: 15,
+    cloudAttachmentExists: vi.fn(),
     cloudGetFile: vi.fn(),
     cloudDeleteFile: vi.fn(),
     cloudPutFile: vi.fn(),
@@ -139,6 +140,7 @@ vi.mock('./dropbox-sync', () => ({
   DropboxUnauthorizedError: class DropboxUnauthorizedError extends Error {},
   downloadDropboxFile: vi.fn(),
   getDropboxFileMetadata: vi.fn(),
+  listDropboxFolderFiles: vi.fn(),
   uploadDropboxFile: vi.fn(),
   uploadDropboxFileVersioned: vi.fn(),
 }));
@@ -247,8 +249,15 @@ describe('attachment sync', () => {
       lastModified: null,
       contentLength: null,
     });
+    // #1119 follow-up: the presence pre-pass may only ever clear on a DEFINITIVE not-found,
+    // so the unconfigured defaults are "the blob is there" and "no listing was obtained" —
+    // both of which change nothing. A test that wants a repair says so explicitly.
+    vi.mocked(core.cloudAttachmentExists).mockResolvedValue(true);
     const dropbox = await import('./dropbox-sync');
     vi.mocked(dropbox.getDropboxFileMetadata).mockResolvedValue({ rev: null });
+    vi.mocked(dropbox.listDropboxFolderFiles).mockRejectedValue(
+      new Error('Dropbox folder listing fixture not configured'),
+    );
     fileSystemMock.getInfoAsync.mockReset();
     fileSystemMock.makeDirectoryAsync.mockResolvedValue(undefined);
     fileSystemMock.copyAsync.mockResolvedValue(undefined);
@@ -5040,6 +5049,186 @@ describe('attachment sync', () => {
       expect(data.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
       expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
       expect(appData.settings.attachments?.pendingRemoteDeletes).toHaveLength(1);
+    });
+  });
+
+  // #1119 follow-up: a blob deleted on the server can only be restored by a device that
+  // still holds the bytes. WebDAV has repaired that since #1119; these are the same repair
+  // for Dropbox (one folder listing) and the self-hosted cloud (one probe per blob), mirroring
+  // apps/desktop/src/lib/sync-attachment-backends.test.ts.
+  describe('remote attachment presence repair (#1119 follow-up)', () => {
+    const BYTES = new Uint8Array([1, 2, 3]);
+    const localUri = 'file://document/attachments/settled.txt';
+
+    /** cloudKey set, readable managed bytes, nothing pending: the one shape the repair may act on. */
+    const uploadedData = (): AppData => singleAttachmentData({
+      id: 'settled',
+      title: 'settled.txt',
+      uri: localUri,
+      cloudKey: 'attachments/settled.txt',
+      localStatus: 'available',
+      size: BYTES.byteLength,
+      fileHash: sha256Hex(BYTES),
+      contentMtimeMs: 1000,
+      contentSize: BYTES.byteLength,
+    });
+
+    const cloudKeyOf = (appData: AppData): string | undefined => appData.tasks[0].attachments?.[0]?.cloudKey;
+
+    beforeEach(async () => {
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')
+          ? { exists: true, size: BYTES.byteLength, modificationTime: 1 }
+          : { exists: false }
+      ));
+      fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(BYTES));
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.cloudPutFile).mockResolvedValue(undefined);
+    });
+
+    const runCloud = (appData: AppData) => attachmentSync.syncCloudAttachments(
+      appData,
+      { url: 'https://cloud.example/v1/data', token: 'token' },
+      'https://cloud.example/v1',
+      { phase: 'post-merge' },
+    );
+
+    const runDropbox = (appData: AppData) => attachmentSync.syncDropboxAttachments(
+      appData,
+      'dropbox-client-id',
+      fetch,
+      { phase: 'post-merge' },
+    );
+
+    it('cloud: a definitive not-found clears the cloud reference and the same pass re-uploads', async () => {
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.cloudAttachmentExists).mockResolvedValue(false);
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runCloud(appData), appData);
+
+      expect(core.cloudAttachmentExists).toHaveBeenCalledWith(
+        'https://cloud.example/v1/attachments/settled.txt',
+        // React Native buffers whole response bodies, so the probe must never be allowed
+        // to fall back to a GET: that would download every attachment once a day.
+        expect.objectContaining({ partialBodyReads: false }),
+      );
+      expect(core.cloudPutFile).toHaveBeenCalledTimes(1);
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+    });
+
+    it('cloud: a probe that cannot tell changes nothing and uploads nothing', async () => {
+      const core = await import('@mindwtr/core');
+      // Stands in for a server with no HEAD route, which on this transport is unknowable.
+      vi.mocked(core.cloudAttachmentExists).mockImplementation(async (_url, options) => {
+        options?.onHeadUnsupported?.();
+        return null;
+      });
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runCloud(appData), appData);
+
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+    });
+
+    it('cloud: a present blob is left alone', async () => {
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.cloudAttachmentExists).mockResolvedValue(true);
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runCloud(appData), appData);
+
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+    });
+
+    it('dropbox: a blob missing from the folder listing is cleared and re-uploaded', async () => {
+      const dropbox = await import('./dropbox-sync');
+      vi.mocked(dropbox.listDropboxFolderFiles).mockResolvedValue([
+        { name: 'someone-elses.txt', pathLower: '/attachments/someone-elses.txt' },
+      ]);
+      vi.mocked(dropbox.uploadDropboxFileVersioned).mockResolvedValue(undefined as never);
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runDropbox(appData), appData);
+
+      expect(dropbox.listDropboxFolderFiles).toHaveBeenCalledTimes(1);
+      expect(dropbox.listDropboxFolderFiles).toHaveBeenCalledWith(
+        expect.any(String),
+        '/attachments',
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(dropbox.uploadDropboxFileVersioned).toHaveBeenCalledTimes(1);
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+    });
+
+    it('dropbox: a listing that fails changes nothing and uploads nothing', async () => {
+      const dropbox = await import('./dropbox-sync');
+      vi.mocked(dropbox.listDropboxFolderFiles).mockRejectedValue(new Error('network down'));
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runDropbox(appData), appData);
+
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+      expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+    });
+
+    it('dropbox: a listed blob is left alone', async () => {
+      const dropbox = await import('./dropbox-sync');
+      vi.mocked(dropbox.listDropboxFolderFiles).mockResolvedValue([
+        { name: 'settled.txt', pathLower: '/attachments/settled.txt' },
+      ]);
+      const appData = uploadedData();
+
+      const { data } = syncResult(await runDropbox(appData), appData);
+
+      expect(cloudKeyOf(data)).toBe('attachments/settled.txt');
+      expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+    });
+
+    it('asks nothing at all inside the daily interval', async () => {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      const core = await import('@mindwtr/core');
+      const dropbox = await import('./dropbox-sync');
+      const scope = JSON.stringify(['cloud', 'dropbox']);
+      vi.mocked(AsyncStorage.getItem).mockImplementation(async (key: string) => {
+        if (key === '@mindwtr_attachment_presence_reconcile_v1') {
+          return JSON.stringify({ scope, at: Date.now() });
+        }
+        if (key === '@mindwtr_sync_backend') return 'cloud';
+        if (key === '@mindwtr_cloud_provider') return 'dropbox';
+        return null;
+      });
+
+      await runDropbox(uploadedData());
+      await runCloud(uploadedData());
+
+      expect(dropbox.listDropboxFolderFiles).not.toHaveBeenCalled();
+      expect(core.cloudAttachmentExists).not.toHaveBeenCalled();
+      vi.mocked(AsyncStorage.getItem).mockReset();
+      vi.mocked(AsyncStorage.getItem).mockResolvedValue(null);
+    });
+
+    it('never clears a cloud reference for an attachment whose bytes are not readable here', async () => {
+      const core = await import('@mindwtr/core');
+      const dropbox = await import('./dropbox-sync');
+      vi.mocked(core.cloudAttachmentExists).mockResolvedValue(false);
+      vi.mocked(dropbox.listDropboxFolderFiles).mockResolvedValue([]);
+      fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+
+      const forCloud = uploadedData();
+      const forDropbox = uploadedData();
+      const cloudResult = syncResult(await runCloud(forCloud), forCloud);
+      const dropboxResult = syncResult(await runDropbox(forDropbox), forDropbox);
+
+      // Clearing here would drop the only pointer to bytes this device cannot re-upload.
+      expect(cloudKeyOf(cloudResult.data)).toBe('attachments/settled.txt');
+      expect(cloudKeyOf(dropboxResult.data)).toBe('attachments/settled.txt');
+      // Nothing was even asked: the candidate walk found no attachment it could repair.
+      expect(core.cloudAttachmentExists).not.toHaveBeenCalled();
+      expect(dropbox.listDropboxFolderFiles).not.toHaveBeenCalled();
     });
   });
 });

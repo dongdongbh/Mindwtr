@@ -5,11 +5,13 @@ import {
     discardResponseBody,
     fetchWithTimeout,
     fetchWithTimeoutAndConsume,
+    isAbortError,
     MAX_ERROR_BODY_BYTES,
     MAX_DOWNLOAD_BYTES,
     MAX_SYNC_DOCUMENT_BYTES,
     readResponseBody,
     readResponseText,
+    ResponseTooLargeError,
     SYNC_LOCAL_INSECURE_URL_OPTIONS,
     toUint8Array,
 } from './http-utils';
@@ -373,6 +375,57 @@ export async function cloudGetFile(
             return await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES, signal);
         },
     );
+}
+
+export type CloudAttachmentPresenceOptions = CloudOptions & {
+    /**
+     * Can this caller's transport stop reading a response body once it has seen the
+     * headers? Desktop's streaming fetch can; React Native's XHR transport
+     * (apps/mobile/lib/background-safe-fetch.ts) cannot — it buffers the whole reply
+     * before the promise resolves. Only a caller that answers `true` may use the
+     * GET fallback below, because for everyone else that "cheap probe" is a full
+     * download of every attachment.
+     */
+    partialBodyReads?: boolean;
+    /** Called when the server has no HEAD route and this caller cannot fall back, so the
+     *  caller can say so once instead of silently proving nothing. */
+    onHeadUnsupported?: () => void;
+};
+
+/**
+ * #1119 follow-up: does the self-hosted server still hold this attachment blob?
+ * `true` yes, `false` definitively no, `null` could not tell — and only `false` may ever
+ * be acted on (see `attachment-presence-repair.ts`).
+ *
+ * HEAD is the real probe. Servers older than the release that added
+ * `HEAD /v1/attachments/:path` answer 405 Method Not Allowed, which is not an answer, so a
+ * caller whose transport can abandon a body early retries as a GET with a one-byte ceiling:
+ * `readResponseBody` rejects on the declared content-length and cancels before a single
+ * chunk is read. A caller that cannot do that gets `null` — one wasted request rather than
+ * a full download of the whole library.
+ */
+export async function cloudAttachmentExists(
+    url: string,
+    options: CloudAttachmentPresenceOptions = {},
+): Promise<boolean | null> {
+    try {
+        return (await cloudHeadJson(url, options)).exists;
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        if (!(error instanceof CloudHttpError) || error.status !== 405) return null;
+        if (!options.partialBodyReads) {
+            options.onHeadUnsupported?.();
+            return null;
+        }
+    }
+    try {
+        await cloudGetFile(url, { ...options, maxBytes: 1, onProgress: undefined });
+        return true;
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        if (error instanceof ResponseTooLargeError) return true;
+        return error instanceof CloudHttpError && error.status === 404 ? false : null;
+    }
 }
 
 export async function cloudDeleteFile(

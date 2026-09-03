@@ -110,6 +110,7 @@ export * from './attachment-validation';
 export * from './attachment-change-detection';
 export * from './attachment-progress';
 export * from './attachment-transfer';
+export * from './attachment-presence-repair';
 export * from './attachment-paths';
 export * from './attachment-draft-settlement';
 export * from './attachment-cleanup';

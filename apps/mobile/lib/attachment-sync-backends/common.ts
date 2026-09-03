@@ -9,8 +9,10 @@ import {
   decryptRemoteArtifactOrThrow,
   encryptSyncArtifact,
   inspectSyncArtifact,
+  isAttachmentPresenceRepairCandidate,
   isSha256Hex,
   MAX_DOWNLOAD_BYTES,
+  repairMissingRemoteAttachments,
   ResponseTooLargeError,
   runAttachmentTransferLifecycle,
   SYNC_ENCRYPTION_LOG_EVENTS,
@@ -35,6 +37,8 @@ import {
   createAttachmentLocalMigrationLimiter,
   DEFAULT_CONTENT_TYPE,
   getLocalAttachmentPresence,
+  isHttpAttachmentUri,
+  logAttachmentInfo,
   logAttachmentWarn,
   readFileAsBytes,
   reportProgress,
@@ -776,6 +780,65 @@ export const migrateAttachmentsLocallyBeforeSync = async (
     if (result.skipped) attachmentsById.delete(attachment.id);
   }
   return patches;
+};
+
+/** One request per attachment is the fallback shape, so the pass is bounded. See the
+ *  ceiling note on `repairMissingRemoteAttachments`'s `maxChecks` in core. */
+export const CLOUD_ATTACHMENT_PRESENCE_MAX_CHECKS_PER_PASS = 200;
+
+/**
+ * #1119 follow-up: the "does the sync location still hold this blob?" pre-pass for Dropbox
+ * and the self-hosted cloud, mirroring desktop's `reconcileRemoteAttachmentPresence` in
+ * apps/desktop/src/lib/sync-attachment-backends.ts so the two apps repair the same way.
+ * WebDAV keeps its own inline loop on both platforms, because that walk also prunes
+ * unreadable attachments and clears download backoffs.
+ *
+ * Only an attachment this device can actually re-upload is eligible — `canUploadAttachmentFrom`
+ * plus readable local bytes — because clearing `cloudKey` is a request to upload again, and a
+ * device with no readable copy would just drop the pointer to the blob. The rest of the
+ * safety rule (a definitive not-found and nothing else may clear anything) lives in core.
+ *
+ * Returns whether the proof ran to the end: `false` means the caller must not advance the
+ * once-a-day stamp, so the next cycle retries.
+ */
+export const reconcileRemoteAttachmentPresence = async (options: {
+  label: string;
+  attachmentsById: Map<string, Attachment>;
+  /** Opens the pass. Called only once there is something to ask about, so a library with
+   *  nothing to prove costs no request at all; `null` means the remote could not be asked
+   *  (a listing that failed), which proves nothing and clears nothing. */
+  createProbe: () => Promise<((attachment: Attachment) => Promise<boolean | null>) | null>;
+  recordPatch: (attachment: Attachment) => void;
+  maxChecks?: number;
+  signal?: AbortSignal;
+}): Promise<boolean> => {
+  const candidates: Attachment[] = [];
+  for (const original of options.attachmentsById.values()) {
+    assertAttachmentSyncNotAborted(options.signal);
+    if (!isAttachmentPresenceRepairCandidate(original)) continue;
+    const uri = original.uri || '';
+    if (!uri || isHttpAttachmentUri(uri) || !canUploadAttachmentFrom(uri)) continue;
+    if (await getLocalAttachmentPresence(uri) !== 'present') continue;
+    candidates.push(original);
+  }
+  if (candidates.length === 0) return true;
+
+  const probe = await options.createProbe();
+  if (!probe) return false;
+
+  const result = await repairMissingRemoteAttachments({
+    candidates,
+    probe,
+    clear: (original) => options.recordPatch({ ...original, cloudKey: undefined }),
+    maxChecks: options.maxChecks,
+    log: logAttachmentInfo,
+  });
+  logAttachmentInfo(`${options.label} attachment presence pass`, {
+    checked: String(result.checked),
+    cleared: String(result.cleared),
+    complete: result.complete ? 'true' : 'false',
+  });
+  return result.complete;
 };
 
 export const waitForAttachmentSyncDelay = async (ms: number, signal?: AbortSignal): Promise<void> => {

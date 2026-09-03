@@ -1,6 +1,7 @@
 import {
   applyAttachmentPatches,
   applyAttachmentContentStat,
+  cloudAttachmentExists,
   cloudGetFile,
   cloudPutFile,
   computeSha256Hex,
@@ -12,7 +13,12 @@ import {
   type AttachmentDownloadExpectation,
   type LocalFileStat,
 } from '@mindwtr/core';
-import { logAttachmentWarn, markAttachmentPresenceReconciled } from '../attachment-sync-utils';
+import {
+  isAttachmentPresenceReconciliationDue,
+  logAttachmentInfo,
+  logAttachmentWarn,
+  markAttachmentPresenceReconciled,
+} from '../attachment-sync-utils';
 import { getMobileCloudRequestOptions } from '../webdav-request-options';
 import {
   buildCloudKey,
@@ -32,9 +38,11 @@ import {
 import {
   migrateAttachmentsLocallyBeforeSync,
   checkBespokeAttachmentRemoteWinner,
+  CLOUD_ATTACHMENT_PRESENCE_MAX_CHECKS_PER_PASS,
   createMobileAttachmentUploadSnapshot,
   installAttachmentDownloadBytes,
   prepareBespokeAttachmentContentCandidate,
+  reconcileRemoteAttachmentPresence,
   refreshBespokeAttachmentDownloadedContentStat,
   uploadCloudFileWithFileSystem,
 } from './common';
@@ -93,6 +101,36 @@ export const syncCloudAttachments = async (
 
   const pendingUploadMutations: PendingCloudUploadMutation[] = [];
   const cloudRequestOptions = getMobileCloudRequestOptions(cloudConfig.allowInsecureHttp);
+
+  // #1119 follow-up: prove the server still holds every blob this device has a cloudKey for,
+  // at most once a day, before the loop below decides what to upload. This backend has no
+  // folder listing to lean on (the self-hosted server exposes none), so it is one bounded
+  // probe per attachment — see `cloudAttachmentExists` for why that probe is a capped GET
+  // and not a HEAD. Anything cleared here falls into the ordinary upload branch in the same
+  // pass. (Mirrors desktop's pre-pass in apps/desktop/src/lib/sync-attachment-backends.ts.)
+  const reconcilePresence = options.activationProbe || await isAttachmentPresenceReconciliationDue();
+  const presenceProven = !reconcilePresence || await reconcileRemoteAttachmentPresence({
+    label: 'Cloud',
+    attachmentsById,
+    recordPatch,
+    signal: options.signal,
+    maxChecks: CLOUD_ATTACHMENT_PRESENCE_MAX_CHECKS_PER_PASS,
+    createProbe: async () => (attachment) => cloudAttachmentExists(
+      `${baseSyncUrl}/${attachment.cloudKey}`,
+      {
+        ...cloudRequestOptions,
+        token: cloudConfig.token,
+        ...(options.signal ? { signal: options.signal } : {}),
+        // React Native's transport buffers the whole reply before resolving, so the GET
+        // fallback would download every attachment instead of probing it. Without a HEAD
+        // route on the server this phone simply cannot tell, and tells nobody otherwise.
+        partialBodyReads: false,
+        onHeadUnsupported: () => logAttachmentInfo('Sync server is too old for attachment presence checks', {
+          reason: 'no-head-route',
+        }),
+      },
+    ),
+  });
 
   for (const original of attachmentsById.values()) {
     if (original.kind !== 'file') continue;
@@ -389,12 +427,13 @@ export const syncCloudAttachments = async (
     reportProgress(pending.attachment.id, 'upload', pending.totalBytes, pending.totalBytes, 'completed');
   }
 
-  // A completed pass is this backend's whole reconciliation: it refreshed every
-  // attachment's local presence and settled every transfer. Stamping it lets
-  // `hasPendingAttachmentSyncWork` keep the steady state quiet until the next one is due
-  // (audit F3). Never stamped for an activation probe, whose subject is the candidate
+  // Same rule as WebDAV: only a pass whose presence proof ran to the end may advance the
+  // stamp, so a probe the server could not answer retries next cycle instead of parking the
+  // repair for a day. Never stamped for an activation probe, whose subject is the candidate
   // configuration rather than the committed one the stamp names.
-  if (!options.activationProbe) await markAttachmentPresenceReconciled();
+  if (reconcilePresence && presenceProven && !options.activationProbe) {
+    await markAttachmentPresenceReconciled();
+  }
 
   const nextData = applyAttachmentPatches(appData, allPatches);
   return nextData !== appData ? nextData : false;

@@ -81,6 +81,7 @@ const cloudKitMocks = vi.hoisted(() => {
 const dropboxMocks = vi.hoisted(() => ({
     downloadDropboxFile: vi.fn(),
     getDropboxFileMetadata: vi.fn(),
+    listDropboxFolderFiles: vi.fn(),
     uploadDropboxFile: vi.fn(),
 }));
 
@@ -111,6 +112,7 @@ vi.mock('./cloudkit-sync', () => cloudKitMocks);
 vi.mock('./dropbox-sync', () => ({
     downloadDropboxFile: dropboxMocks.downloadDropboxFile,
     getDropboxFileMetadata: dropboxMocks.getDropboxFileMetadata,
+    listDropboxFolderFiles: dropboxMocks.listDropboxFolderFiles,
     uploadDropboxFileVersioned: dropboxMocks.uploadDropboxFile,
     DropboxConflictError: class DropboxConflictError extends Error {},
     DropboxFileNotFoundError: class DropboxFileNotFoundError extends Error {},
@@ -234,6 +236,9 @@ describe('desktop sync attachment backends', () => {
             contentLength: null,
         });
         dropboxMocks.getDropboxFileMetadata.mockResolvedValue({ rev: null });
+        dropboxMocks.listDropboxFolderFiles.mockResolvedValue([
+            { name: 'attachment-1.txt', pathLower: '/attachments/attachment-1.txt' },
+        ]);
     });
 
     afterEach(() => {
@@ -2176,16 +2181,214 @@ describe('desktop sync attachment backends', () => {
             expect(hasCompletedAttachmentPresenceReconciliation(fileScope)).toBe(true);
         });
 
-        it('(h) stamps for cloud, dropbox and cloudkit, which have no presence pass to gate', async () => {
-            const scope = JSON.stringify(['cloud', 'selfhosted', 'https://cloud.example']);
-            await syncCloudAttachments(
-                settledData(),
-                { url: 'https://cloud.example', token: 't' },
-                'https://cloud.example',
-                webdavDeps(scope),
-            );
+        it('(h) stamps for cloudkit, which has no presence pass to gate', async () => {
+            const scope = JSON.stringify(['cloudkit']);
+
+            await syncCloudKitAttachments(settledData(), webdavDeps(scope));
 
             expect(hasCompletedAttachmentPresenceReconciliation(scope)).toBe(true);
+        });
+    });
+
+    // #1119 follow-up: a blob deleted on the server can only be restored by a device that
+    // still holds the bytes. WebDAV has repaired that since #1119; these are the same repair
+    // for Dropbox (one folder listing) and the self-hosted cloud (one probe per blob).
+    describe('remote attachment presence repair (#1119 follow-up)', () => {
+        const CLOUD_SCOPE = JSON.stringify(['cloud', 'selfhosted', 'https://cloud.example']);
+        const DROPBOX_SCOPE = JSON.stringify(['cloud', 'dropbox']);
+
+        /** cloudKey set, bytes readable here, nothing pending: the one shape the repair may act on. */
+        const uploadedData = (): AppData => {
+            const appData = createCandidateAttachmentData();
+            Object.assign(appData.tasks[0].attachments![0], { contentMtimeMs: 1000, contentSize: 3 });
+            return appData;
+        };
+
+        const cloudKeyOf = (appData: AppData): string | undefined =>
+            appData.tasks[0].attachments![0].cloudKey;
+
+        const depsWith = (
+            presenceScope: string,
+            fetcher: ReturnType<typeof vi.fn>,
+        ): AttachmentBackendDeps => ({
+            getTauriFetch: async () => fetcher as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(async () => 'secret'),
+            presenceScope,
+        });
+
+        /** A self-hosted server that answers the presence HEAD however the test says, and
+         *  accepts the re-upload PUT. */
+        const cloudFetcher = (presence: Response) => vi.fn(async (_url: string, init?: RequestInit) => (
+            init?.method === 'HEAD' ? presence : new Response(null, { status: 200 })
+        ));
+        const methodsOf = (fetcher: ReturnType<typeof vi.fn>): string[] =>
+            fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? 'GET');
+
+        const runCloud = (appData: AppData, deps: AttachmentBackendDeps) => syncCloudAttachments(
+            appData,
+            { url: 'https://cloud.example/v1/data', token: 't' },
+            'https://cloud.example/v1',
+            deps,
+        );
+
+        beforeEach(() => {
+            clearAttachmentPresenceStamp();
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
+        });
+
+        afterEach(() => {
+            clearAttachmentPresenceStamp();
+        });
+
+        it('cloud: a 404 clears the cloud reference and the same pass re-uploads the bytes', async () => {
+            const fetcher = cloudFetcher(new Response(null, { status: 404 }));
+            const appData = uploadedData();
+
+            const result = expectFoldedData(await runCloud(appData, depsWith(CLOUD_SCOPE, fetcher)));
+
+            // The blob was gone, so the lifecycle uploaded it again under the same key.
+            expect(cloudKeyOf(result)).toBe('attachments/attachment-1.txt');
+            expect(methodsOf(fetcher)).toEqual(['HEAD', 'PUT']);
+        });
+
+        it('cloud: an error leaves the cloud reference alone and uploads nothing', async () => {
+            const fetcher = cloudFetcher(new Response(null, { status: 500 }));
+            const appData = uploadedData();
+
+            const result = await runCloud(appData, depsWith(CLOUD_SCOPE, fetcher));
+
+            const folded = typeof result === 'object' && result !== null ? result : appData;
+            expect(cloudKeyOf(folded)).toBe('attachments/attachment-1.txt');
+            expect(methodsOf(fetcher)).toEqual(['HEAD']);
+            // A pass that could not prove anything must not park the repair for a day.
+            expect(hasCompletedAttachmentPresenceReconciliation(CLOUD_SCOPE)).toBe(false);
+        });
+
+        it('cloud: a present blob is neither downloaded nor re-uploaded, and the pass stamps', async () => {
+            const fetcher = cloudFetcher(new Response(null, {
+                status: 200,
+                headers: { 'content-length': '3' },
+            }));
+
+            await runCloud(uploadedData(), depsWith(CLOUD_SCOPE, fetcher));
+
+            expect(methodsOf(fetcher)).toEqual(['HEAD']);
+            expect(hasCompletedAttachmentPresenceReconciliation(CLOUD_SCOPE)).toBe(true);
+        });
+
+        it('cloud: falls back to a bodiless GET against a server with no HEAD route', async () => {
+            // Desktop's fetch streams, so the fallback cancels after the headers. The blob
+            // is present, so nothing is cleared and nothing is uploaded.
+            const fetcher = vi.fn(async (_url: string, init?: RequestInit) => (
+                init?.method === 'HEAD'
+                    ? new Response(null, { status: 405 })
+                    : new Response(new Uint8Array([1, 2, 3]).buffer, {
+                        status: 200,
+                        headers: { 'content-length': '3' },
+                    })
+            ));
+
+            await runCloud(uploadedData(), depsWith(CLOUD_SCOPE, fetcher));
+
+            expect(methodsOf(fetcher)).toEqual(['HEAD', 'GET']);
+            expect(hasCompletedAttachmentPresenceReconciliation(CLOUD_SCOPE)).toBe(true);
+        });
+
+        it('cloud: skips the whole probe inside the daily interval', async () => {
+            markAttachmentPresenceReconciled(CLOUD_SCOPE);
+            const fetcher = cloudFetcher(new Response(null, { status: 404 }));
+
+            await runCloud(uploadedData(), depsWith(CLOUD_SCOPE, fetcher));
+
+            expect(fetcher).not.toHaveBeenCalled();
+        });
+
+        it('dropbox: a blob missing from the folder listing is cleared and re-uploaded', async () => {
+            dropboxMocks.listDropboxFolderFiles.mockResolvedValue([
+                { name: 'someone-elses.txt', pathLower: '/attachments/someone-elses.txt' },
+            ]);
+            dropboxMocks.uploadDropboxFile.mockResolvedValue(undefined);
+            const deps = depsWith(DROPBOX_SCOPE, vi.fn());
+
+            const result = expectFoldedData(
+                await syncDropboxAttachments(uploadedData(), async () => 'dropbox-token', deps),
+            );
+
+            expect(dropboxMocks.listDropboxFolderFiles).toHaveBeenCalledTimes(1);
+            expect(dropboxMocks.listDropboxFolderFiles).toHaveBeenCalledWith(
+                'dropbox-token',
+                '/attachments',
+                expect.anything(),
+                expect.anything(),
+            );
+            expect(dropboxMocks.uploadDropboxFile).toHaveBeenCalledTimes(1);
+            expect(cloudKeyOf(result)).toBe('attachments/attachment-1.txt');
+        });
+
+        it('dropbox: a listing that fails changes nothing and does not stamp', async () => {
+            dropboxMocks.listDropboxFolderFiles.mockRejectedValue(new Error('network down'));
+            const deps = depsWith(DROPBOX_SCOPE, vi.fn());
+            const appData = uploadedData();
+
+            const result = await syncDropboxAttachments(appData, async () => 'dropbox-token', deps);
+
+            const folded = typeof result === 'object' && result !== null ? result : appData;
+            expect(cloudKeyOf(folded)).toBe('attachments/attachment-1.txt');
+            expect(dropboxMocks.uploadDropboxFile).not.toHaveBeenCalled();
+            expect(hasCompletedAttachmentPresenceReconciliation(DROPBOX_SCOPE)).toBe(false);
+        });
+
+        it('dropbox: a listed blob is left alone and the pass stamps', async () => {
+            const deps = depsWith(DROPBOX_SCOPE, vi.fn());
+
+            await syncDropboxAttachments(uploadedData(), async () => 'dropbox-token', deps);
+
+            expect(dropboxMocks.uploadDropboxFile).not.toHaveBeenCalled();
+            expect(hasCompletedAttachmentPresenceReconciliation(DROPBOX_SCOPE)).toBe(true);
+        });
+
+        it('dropbox: issues no listing at all inside the daily interval', async () => {
+            markAttachmentPresenceReconciled(DROPBOX_SCOPE);
+
+            await syncDropboxAttachments(uploadedData(), async () => 'dropbox-token', depsWith(DROPBOX_SCOPE, vi.fn()));
+
+            expect(dropboxMocks.listDropboxFolderFiles).not.toHaveBeenCalled();
+        });
+
+        it('dropbox: an activation probe proves the candidate folder without stamping', async () => {
+            markAttachmentPresenceReconciled(DROPBOX_SCOPE);
+            clearAttachmentPresenceStamp();
+            const deps = depsWith(DROPBOX_SCOPE, vi.fn());
+
+            await syncDropboxAttachments(
+                uploadedData(),
+                async () => 'dropbox-token',
+                deps,
+                activationHelpers(),
+            );
+
+            expect(dropboxMocks.listDropboxFolderFiles).toHaveBeenCalledTimes(1);
+            expect(hasCompletedAttachmentPresenceReconciliation(DROPBOX_SCOPE)).toBe(false);
+        });
+
+        it('never clears a cloud reference for an attachment whose bytes are not readable here', async () => {
+            dropboxMocks.listDropboxFolderFiles.mockResolvedValue([]);
+            fsMocks.exists.mockResolvedValue(false);
+            const appData = uploadedData();
+
+            const result = await syncDropboxAttachments(
+                appData,
+                async () => 'dropbox-token',
+                depsWith(DROPBOX_SCOPE, vi.fn()),
+            );
+
+            const folded = typeof result === 'object' && result !== null ? result : appData;
+            // Clearing here would drop the only pointer to bytes this device cannot re-upload.
+            expect(cloudKeyOf(folded)).toBe('attachments/attachment-1.txt');
         });
     });
 });

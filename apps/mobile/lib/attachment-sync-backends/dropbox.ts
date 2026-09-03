@@ -1,6 +1,8 @@
 import {
   applyAttachmentPatches,
   applyAttachmentContentStat,
+  createDropboxAttachmentPresenceIndex,
+  DROPBOX_ATTACHMENTS_PATH,
   isAbortError,
   isSha256Hex,
   isSyncRemoteMutationFenceError,
@@ -16,6 +18,7 @@ import {
   DropboxFileNotFoundError,
   downloadDropboxFile,
   getDropboxFileMetadata,
+  listDropboxFolderFiles,
   uploadDropboxFileVersioned,
 } from '../dropbox-sync';
 import {
@@ -30,6 +33,7 @@ import {
   getLocalAttachmentPresence,
   isContentAttachmentUri,
   isHttpAttachmentUri,
+  isAttachmentPresenceReconciliationDue,
   logAttachmentInfo,
   logAttachmentWarn,
   markAttachmentPresenceReconciled,
@@ -48,6 +52,7 @@ import {
   installAttachmentDownloadBytes,
   openAttachmentBytesFromDownload,
   prepareBespokeAttachmentContentCandidate,
+  reconcileRemoteAttachmentPresence,
   refreshBespokeAttachmentDownloadedContentStat,
   resolveAttachmentDownloadTargetPath,
   sealAttachmentBytesForUpload,
@@ -115,6 +120,40 @@ export const syncDropboxAttachments = async (
     const nextData = applyAttachmentPatches(appData, allPatches);
     return nextData !== appData ? nextData : false;
   };
+
+  // #1119 follow-up: prove Dropbox still holds every blob this device has a cloudKey for,
+  // at most once a day, before the loop below decides what to upload. One `list_folder`
+  // answers the whole pass however many attachments there are; a listing that fails proves
+  // nothing and clears nothing. Anything cleared here falls into the ordinary upload branch
+  // in the same pass, so the repair completes without waiting for another cycle.
+  // (Mirrors desktop's pre-pass in apps/desktop/src/lib/sync-attachment-backends.ts.)
+  const reconcilePresence = options.activationProbe || await isAttachmentPresenceReconciliationDue();
+  const presenceProven = !reconcilePresence || await reconcileRemoteAttachmentPresence({
+    label: 'Dropbox',
+    attachmentsById,
+    recordPatch,
+    signal: options.signal,
+    createProbe: async () => {
+      try {
+        const isPresent = createDropboxAttachmentPresenceIndex(await runDropboxAuthorized(
+          dropboxClientId,
+          (accessToken) => listDropboxFolderFiles(
+            accessToken,
+            DROPBOX_ATTACHMENTS_PATH,
+            fetcher,
+            { signal: options.signal },
+          ),
+          fetcher,
+          options.resolveAccessToken,
+        ));
+        return async (attachment) => isPresent(attachment.cloudKey ?? '');
+      } catch (error) {
+        if (isAbortLikeError(error, options.signal)) throw error;
+        logAttachmentWarn('Failed to list Dropbox attachments for the presence pass', error);
+        return null;
+      }
+    },
+  });
 
   const downloadQueue: DropboxDownloadCandidate[] = [];
   const pendingUploadMutations: PendingDropboxUploadMutation[] = [];
@@ -406,12 +445,13 @@ export const syncDropboxAttachments = async (
     }
   }
 
-  // A completed pass is this backend's whole reconciliation: it refreshed every
-  // attachment's local presence and settled every transfer. Stamping it lets
-  // `hasPendingAttachmentSyncWork` keep the steady state quiet until the next one is due
-  // (audit F3). Never stamped for an activation probe, whose subject is the candidate
-  // configuration rather than the committed one the stamp names.
-  if (!options.activationProbe) await markAttachmentPresenceReconciled();
+  // Same rule as WebDAV: only a pass whose presence proof ran to the end may advance the
+  // stamp, so a listing the server could not answer retries next cycle instead of parking
+  // the repair for a day. Never stamped for an activation probe, whose subject is the
+  // candidate configuration rather than the committed one the stamp names.
+  if (reconcilePresence && presenceProven && !options.activationProbe) {
+    await markAttachmentPresenceReconciled();
+  }
 
   return foldPatches();
 };

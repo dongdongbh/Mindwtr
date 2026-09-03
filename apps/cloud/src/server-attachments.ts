@@ -268,10 +268,15 @@ const getBlockedAttachmentSignature = (bytes: Uint8Array): string | null => {
 };
 
 /**
- * Route body for GET/PUT/DELETE /v1/attachments/:path, once withNamespace has already
+ * Route body for HEAD/GET/PUT/DELETE /v1/attachments/:path, once withNamespace has already
  * resolved and validated the on-disk path (see resolveAttachmentPath in
  * server-storage.ts). Takes the resolved path rather than resolving it itself, so it
  * can be exercised directly against a temp directory without a live server.
+ *
+ * HEAD shares GET's body below and drops the bytes at the end. It exists for the #1119
+ * attachment presence pass: a client that cannot stop a response body early (React Native's
+ * XHR transport buffers the whole reply before resolving) would otherwise have to download
+ * every attachment to learn whether it is still there.
  */
 export async function handleAttachmentPathRequest(
     req: Request,
@@ -286,7 +291,7 @@ export async function handleAttachmentPathRequest(
 ): Promise<Response> {
     const { rootRealPath, filePath } = resolved;
 
-    if (req.method === 'GET') {
+    if (req.method === 'GET' || req.method === 'HEAD') {
         options.assertStorageRoot?.();
         if (!existsSync(filePath)) {
             options.assertStorageRoot?.();
@@ -303,6 +308,12 @@ export async function handleAttachmentPathRequest(
             const headers = new Headers();
             headers.set('Access-Control-Allow-Origin', corsOrigin);
             headers.set('Content-Type', 'application/octet-stream');
+            // ponytail: HEAD still reads the file, so its status and Content-Length cannot
+            // disagree with GET's. Stat instead of read if presence checks ever get hot.
+            if (req.method === 'HEAD') {
+                headers.set('Content-Length', String(file.byteLength));
+                return new Response(null, { status: 200, headers });
+            }
             return new Response(file, { status: 200, headers });
         } catch {
             options.assertStorageRoot?.();

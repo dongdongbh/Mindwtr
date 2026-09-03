@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     CLOUD_SYNC_TOKEN_PATTERN,
     CloudHttpError,
+    cloudAttachmentExists,
     cloudDeleteFile,
     cloudGetFile,
     cloudGetJson,
@@ -429,4 +430,90 @@ describe('cloudGetFile download cap', () => {
         })).rejects.toThrow('Cloud request timed out');
         expect(cancel).toHaveBeenCalledOnce();
     }, 100);
+});
+
+describe('cloudAttachmentExists (#1119 follow-up)', () => {
+    const url = 'https://example.com/v1/attachments/attachments/a.txt';
+    const statusResponse = (status: number, headers: Record<string, string> = {}) => ({
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: 'x',
+        headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+        body: null,
+        arrayBuffer: async () => new ArrayBuffer(0),
+        text: async () => '',
+    } as unknown as Response);
+
+    /** A GET whose body would have to be streamed to be read. */
+    const streamingFileResponse = (read: ReturnType<typeof vi.fn>) => ({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: { get: (name: string) => (name.toLowerCase() === 'content-length' ? '4096' : null) },
+        body: { getReader: () => ({ read, cancel: async () => {} }) },
+        arrayBuffer: vi.fn(),
+    } as unknown as Response);
+
+    it('answers from a HEAD, without a GET at all', async () => {
+        const fetcher = vi.fn(async () => statusResponse(200, { 'content-length': '4096' }));
+
+        await expect(cloudAttachmentExists(url, { fetcher })).resolves.toBe(true);
+        expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit).method)).toEqual(['HEAD']);
+    });
+
+    it('reports a HEAD 404 as a definitive absence', async () => {
+        const fetcher = vi.fn(async () => statusResponse(404));
+
+        await expect(cloudAttachmentExists(url, { fetcher })).resolves.toBe(false);
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([401, 403, 429, 500, 503])('cannot tell from HEAD %i, and does not retry as a GET', async (status) => {
+        const fetcher = vi.fn(async () => statusResponse(status));
+
+        await expect(cloudAttachmentExists(url, { fetcher })).resolves.toBeNull();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
+    it('cannot tell when the request fails outright', async () => {
+        await expect(cloudAttachmentExists(url, {
+            fetcher: async () => { throw new Error('network down'); },
+        })).resolves.toBeNull();
+    });
+
+    describe('a server with no HEAD route (405)', () => {
+        it('falls back to a bodiless GET when the caller can stop a body early', async () => {
+            const read = vi.fn();
+            const fetcher = vi.fn(async (_url: string, init?: RequestInit) => (
+                init?.method === 'HEAD' ? statusResponse(405) : streamingFileResponse(read)
+            ));
+
+            await expect(cloudAttachmentExists(url, { fetcher, partialBodyReads: true }))
+                .resolves.toBe(true);
+            expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit).method))
+                .toEqual(['HEAD', 'GET']);
+            // The one-byte ceiling rejects on the declared length, so no chunk is ever read.
+            expect(read).not.toHaveBeenCalled();
+        });
+
+        it('still reports a definitive absence through the fallback GET', async () => {
+            const fetcher = vi.fn(async (_url: string, init?: RequestInit) => (
+                statusResponse(init?.method === 'HEAD' ? 405 : 404)
+            ));
+
+            await expect(cloudAttachmentExists(url, { fetcher, partialBodyReads: true }))
+                .resolves.toBe(false);
+        });
+
+        it('cannot tell, and makes no GET, when the caller buffers whole bodies', async () => {
+            const fetcher = vi.fn(async () => statusResponse(405));
+            const onHeadUnsupported = vi.fn();
+
+            await expect(cloudAttachmentExists(url, { fetcher, partialBodyReads: false, onHeadUnsupported }))
+                .resolves.toBeNull();
+            // The GET would be a full download on this transport, not a probe.
+            expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit).method)).toEqual(['HEAD']);
+            expect(onHeadUnsupported).toHaveBeenCalledTimes(1);
+        });
+    });
 });
