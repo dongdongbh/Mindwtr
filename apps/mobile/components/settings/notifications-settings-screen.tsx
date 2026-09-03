@@ -20,6 +20,7 @@ import {
 } from '@/lib/persistent-capture-notification';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 
+import { ExactAlarmNoticeRow, useExactAlarmPermission } from './exact-alarm-notice';
 import { SettingRow, SettingToggleRow } from './setting-row';
 import { useSettingsLocalization, useSettingsScrollContent } from './settings.hooks';
 import { SettingsTopBar } from './settings.shell';
@@ -37,6 +38,7 @@ export function NotificationsSettingsScreen() {
     const [weeklyReviewDayPickerOpen, setWeeklyReviewDayPickerOpen] = useState(false);
 
     const notificationsEnabled = areTaskRemindersEnabled(settings);
+    const { showNotice: showExactAlarmNotice } = useExactAlarmPermission(notificationsEnabled);
     const startDateNotificationsEnabled = areStartDateRemindersEnabled(settings);
     const dueDateNotificationsEnabled = areDueDateRemindersEnabled(settings);
     const dailyDigestMorningEnabled = settings.dailyDigestMorningEnabled === true;
@@ -237,6 +239,15 @@ export function NotificationsSettingsScreen() {
                                 .catch(console.error);
                         }}
                     />
+
+                    {showExactAlarmNotice && (
+                        <ExactAlarmNoticeRow
+                            divider
+                            label={t('settings.exactAlarmsLabel')}
+                            description={t('settings.exactAlarmsDesc')}
+                            actionLabel={t('settings.exactAlarmsAllow')}
+                        />
+                    )}
 
                     {isPersistentCaptureSupported() && (
                         <SettingToggleRow

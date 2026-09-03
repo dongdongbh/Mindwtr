@@ -2,6 +2,7 @@ import {
   getLocalNotificationPermissionStatus,
   cancelLocalPomodoroCompletionNotification,
   requestLocalNotificationPermission,
+  rescheduleLocalAlarmsAsExact,
   scheduleLocalPomodoroCompletionNotification,
   sendLocalMobileNotification,
   setLocalNotificationOpenHandler,
@@ -39,6 +40,10 @@ export async function getNotificationPermissionStatus(): Promise<NotificationPer
 
 export async function startMobileNotifications(): Promise<void> {
   await startLocalMobileNotifications();
+}
+
+export async function rescheduleMobileAlarmsAsExact(): Promise<void> {
+  await rescheduleLocalAlarmsAsExact();
 }
 
 export async function stopMobileNotifications(): Promise<void> {

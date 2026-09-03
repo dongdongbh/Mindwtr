@@ -1082,6 +1082,30 @@ export async function startLocalMobileNotifications(): Promise<void> {
   }));
 }
 
+// AlarmManager decides exact vs inexact when the alarm is *created*, so alarms
+// that were scheduled while "Alarms & reminders" was denied stay inexact after
+// the user allows it. `scheduleAlarmForKey` skips any key whose config
+// signature is unchanged, so a plain reschedule cycle would re-confirm every
+// stale alarm instead of re-creating it. Cancel first, then run the one
+// existing cycle so it rebuilds them all as exact.
+export async function rescheduleLocalAlarmsAsExact(): Promise<void> {
+  if (!started) return;
+  const api = await loadAlarmApi();
+  if (!api) return;
+  logNotificationInfo('Rebuilding alarms as exact after exact-alarm permission grant');
+  rescheduleQueue = rescheduleQueue
+    .catch(() => undefined)
+    .then(async () => {
+      await loadAlarmMapIfNeeded();
+      for (const key of Array.from(alarmMap.keys())) {
+        await cancelAlarmByKey(api, key);
+      }
+      await runRescheduleCycle(api);
+    })
+    .catch((error) => logNotificationError('Failed to rebuild alarms as exact', error));
+  await rescheduleQueue;
+}
+
 export async function stopLocalMobileNotifications(): Promise<void> {
   logNotificationInfo('Stop requested');
   clearRescheduleTimer();

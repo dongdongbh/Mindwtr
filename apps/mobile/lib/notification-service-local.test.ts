@@ -140,6 +140,7 @@ vi.mock('@/modules/notification-open-intents', () => ({
 import {
   __localNotificationTestUtils,
   cancelLocalPomodoroCompletionNotification,
+  rescheduleLocalAlarmsAsExact,
   scheduleLocalPomodoroCompletionNotification,
   sendLocalMobileNotification,
   setLocalNotificationOpenHandler,
@@ -450,6 +451,42 @@ describe('notification-service-local', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('rescheduleLocalAlarmsAsExact', () => {
+    // AlarmManager fixes exact-vs-inexact when the alarm is created, so an
+    // alarm scheduled while "Alarms & reminders" was denied stays inexact
+    // (#528). The rebuild has to cancel first: scheduleAlarmForKey skips any
+    // key whose config signature is unchanged, which every one of them is.
+    const scheduleOneReminder = async () => {
+      mockStoreState.tasks = [
+        { id: 'task-1', title: 'Task one', dueDate: new Date(Date.now() + 5 * 60 * 1000).toISOString() },
+      ];
+      await startLocalMobileNotifications();
+      expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
+    };
+
+    it('cancels and re-creates every scheduled alarm', async () => {
+      await scheduleOneReminder();
+      mockAlarmScheduleAlarm.mockClear();
+      mockAlarmDeleteAlarm.mockClear();
+
+      await rescheduleLocalAlarmsAsExact();
+
+      expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(99);
+      expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
+      expect(__localNotificationTestUtils.getAlarmMapSnapshot().size).toBe(1);
+      const cancelOrder = mockAlarmDeleteAlarm.mock.invocationCallOrder[0];
+      const scheduleOrder = mockAlarmScheduleAlarm.mock.invocationCallOrder[0];
+      expect(scheduleOrder).toBeGreaterThan(cancelOrder);
+    });
+
+    it('is a no-op while the notification service is not running', async () => {
+      await rescheduleLocalAlarmsAsExact();
+
+      expect(mockAlarmScheduleAlarm).not.toHaveBeenCalled();
+      expect(mockAlarmDeleteAlarm).not.toHaveBeenCalled();
+    });
   });
 
   it('logs reminder scheduling diagnostics without task title or description content', async () => {

@@ -43,6 +43,7 @@ import {
     useTaskStore,
 } from '@mindwtr/core';
 
+import { ExactAlarmNoticeRow, useExactAlarmPermission } from './exact-alarm-notice';
 import { SettingRow, SettingToggleRow } from './setting-row';
 import type { SettingsScreen } from './settings.constants';
 import { useSettingsLocalization, useSettingsScrollContent } from './settings.hooks';
@@ -137,6 +138,9 @@ export function GtdSettingsScreen({
     // Defaults on: the alert is the point of the timer, and an off-by-default
     // switch is what made #528 read as broken.
     const pomodoroCompletionAlert = settings.gtd?.pomodoro?.completionAlert !== false;
+    const { showNotice: showExactAlarmNotice } = useExactAlarmPermission(
+        screen === 'gtd-pomodoro' && pomodoroCompletionAlert
+    );
     const [pomodoroFocusDraft, setPomodoroFocusDraft] = useState(String(pomodoroCustomDurations.focusMinutes));
     const [pomodoroBreakDraft, setPomodoroBreakDraft] = useState(String(pomodoroCustomDurations.breakMinutes));
     const [defaultScheduleTimeDraft, setDefaultScheduleTimeDraft] = useState(defaultScheduleTime);
@@ -697,6 +701,14 @@ export function GtdSettingsScreen({
                                 value={pomodoroCompletionAlert}
                                 onChange={(value) => updatePomodoroSettings({ completionAlert: value })}
                             />
+                            {showExactAlarmNotice && (
+                                <ExactAlarmNoticeRow
+                                    divider
+                                    label={t('settings.exactAlarmsLabel')}
+                                    description={t('settings.exactAlarmsDesc')}
+                                    actionLabel={t('settings.exactAlarmsAllow')}
+                                />
+                            )}
                         </View>
                     )}
                 </ScrollView>
