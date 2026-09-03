@@ -33,7 +33,7 @@ Field names are checked against the log sanitizer by `packages/core/src/release-
 - **`v1.2.7/webdav-plaintext-degrade`** — both apps already log `WebDAV read returned no strong ETag; using the plaintext compatibility write` with the `etag` the server actually sent (`apps/mobile/lib/sync-service.ts`, `apps/desktop/src/lib/sync-service.ts`, 6ca1b0375).
 - **`v1.2.7/local-only-upload`** — `packages/core/src/sync-run.ts` already logs `Sync local reconcile` with `reconcile: 'aligned-skip'` (and `'idle-cache'` when the carried idle snapshot spared the full local read).
 - **`v1.2.7/suspended-timeout-offline`** — the sync failure path logs `Sync failed` carrying the error text, which ends in `the request was interrupted while the app was suspended` (`SUSPENDED_REQUEST_MESSAGE`, core `http-utils.ts`).
-- **`v1.2.7/background-sync-registration`** — owned by the background-sync worker, not by this pass. `Mobile background sync registered` with its interval already exists under **General**; the registration-decision line and its guard land in `apps/mobile/lib/background-sync-task.ts` separately. Add its bullet here when it ships, and add its field names to the sanitizer guard test.
+- **`v1.2.7/background-sync-registration`** — added (67075324c). `apps/mobile/lib/background-sync-task.ts`, message `Mobile background sync registration checked` with `decision` (register | re-register | unchanged | unregister | deferred-until-foreground), `registered`, `storedInterval`, `interval`, `appState`. A tester's log must show `deferred-until-foreground` on a headless cold start and never a re-register there; `Mobile background sync registered` with its interval stays under General.
 
 ### Not added
 
