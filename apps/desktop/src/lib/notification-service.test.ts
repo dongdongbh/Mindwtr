@@ -1,13 +1,41 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NotificationSettings, Task } from '@mindwtr/core';
 
 import { buildReminderSchedule, getNextScheduledAt, useTaskStore } from '@mindwtr/core';
 
+const runtimeMock = vi.hoisted(() => ({
+    isTauriRuntime: vi.fn(() => false),
+    isFlatpakRuntime: vi.fn(() => false),
+    isWindowsRuntime: vi.fn(() => false),
+}));
+const pluginMock = vi.hoisted(() => ({
+    sendNotification: vi.fn(),
+    isPermissionGranted: vi.fn(async () => true),
+    requestPermission: vi.fn(async () => 'granted'),
+}));
+type LogCall = (
+    message: string,
+    context?: { scope?: string; extra?: Record<string, unknown> },
+) => Promise<string | null>;
+const logMock = vi.hoisted(() => ({
+    logInfo: vi.fn<LogCall>(async () => null),
+    logWarn: vi.fn<LogCall>(async () => null),
+}));
+
+vi.mock('./runtime', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('./runtime')>()),
+    ...runtimeMock,
+}));
+vi.mock('@tauri-apps/plugin-notification', () => pluginMock);
+vi.mock('./app-log', () => logMock);
+
+import { setNativeInvokeTransport } from './tauri-invoke';
 import {
     buildDesktopTaskNotificationBody,
     resolveDesktopReminderGates,
     resolveDueRepeatToFire,
     resolvePollCatchUpMs,
+    sendDesktopImmediateNotification,
     startDesktopNotifications,
     stopDesktopNotifications,
 } from './notification-service';
@@ -73,6 +101,7 @@ describe('resolveDueRepeatToFire', () => {
         expect(resolveDueRepeatToFire(repeatTask, now, undefined, opts)).toEqual({
             key: '2026-06-17T09:00:00.000Z#2',
             index: 2,
+            scheduledAt: new Date('2026-06-17T09:20:00.000Z'),
         });
     });
 
@@ -88,6 +117,7 @@ describe('resolveDueRepeatToFire', () => {
         expect(resolveDueRepeatToFire(moved, now, '2026-06-17T09:00:00.000Z#2', opts)).toEqual({
             key: '2026-06-17T10:00:00.000Z#2',
             index: 2,
+            scheduledAt: new Date('2026-06-17T10:20:00.000Z'),
         });
     });
 
@@ -109,6 +139,7 @@ describe('resolveDueRepeatToFire', () => {
         expect(resolveDueRepeatToFire(repeatTask, now, undefined, { ...opts, catchUpMs: 60_000 })).toEqual({
             key: '2026-06-17T09:00:00.000Z#1',
             index: 1,
+            scheduledAt: new Date('2026-06-17T09:10:00.000Z'),
         });
     });
 
@@ -263,5 +294,121 @@ describe('startDesktopNotifications sends the weekly review while notificationsE
         await startDesktopNotifications();
 
         expect(NotificationSpy).toHaveBeenCalledTimes(1);
+    });
+});
+
+// #1146: on a Microsoft Store (MSIX) install the notification plugin passes a foreign
+// application id, Windows rejects the notifier and the plugin discards the error, so no toast
+// ever appears. The renderer must try the packaged Rust command first on Windows and fall back
+// to the plugin when the process is not packaged.
+describe('Windows packaged notification path (#1146)', () => {
+    const initialStoreState = useTaskStore.getState();
+
+    beforeEach(() => {
+        runtimeMock.isTauriRuntime.mockReturnValue(true);
+        runtimeMock.isFlatpakRuntime.mockReturnValue(false);
+        runtimeMock.isWindowsRuntime.mockReturnValue(false);
+        useTaskStore.setState({ settings: { notificationsEnabled: true } });
+    });
+
+    afterEach(() => {
+        setNativeInvokeTransport(null);
+        vi.clearAllMocks();
+        runtimeMock.isTauriRuntime.mockReturnValue(false);
+        runtimeMock.isWindowsRuntime.mockReturnValue(false);
+        useTaskStore.setState(initialStoreState, true);
+    });
+
+    function captureInvokes(reject?: string) {
+        const commands: string[] = [];
+        setNativeInvokeTransport(async (command: string) => {
+            commands.push(command);
+            if (reject && command === reject) throw new Error('Windows package identity is unavailable');
+            return undefined as never;
+        });
+        return commands;
+    }
+
+    it('sends through the packaged command and skips the plugin when it resolves', async () => {
+        runtimeMock.isWindowsRuntime.mockReturnValue(true);
+        const commands = captureInvokes();
+
+        await sendDesktopImmediateNotification('Prepare report', 'Due date reminders');
+
+        expect(commands).toContain('send_windows_packaged_notification');
+        expect(pluginMock.sendNotification).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the plugin when the process is not packaged', async () => {
+        runtimeMock.isWindowsRuntime.mockReturnValue(true);
+        const commands = captureInvokes('send_windows_packaged_notification');
+
+        await sendDesktopImmediateNotification('Prepare report', 'Due date reminders');
+
+        expect(commands).toContain('send_windows_packaged_notification');
+        expect(pluginMock.sendNotification).toHaveBeenCalledTimes(1);
+        expect(logMock.logWarn).toHaveBeenCalledWith(
+            'Desktop notification send failed',
+            expect.objectContaining({
+                extra: expect.objectContaining({
+                    releaseCheck: 'v1.2.8/desktop-notification-path',
+                    path: 'windows-packaged',
+                }),
+            }),
+        );
+    });
+
+    it('never invokes the packaged command off Windows', async () => {
+        const commands = captureInvokes();
+
+        await sendDesktopImmediateNotification('Prepare report', 'Due date reminders');
+
+        expect(commands).not.toContain('send_windows_packaged_notification');
+        expect(pluginMock.sendNotification).toHaveBeenCalledTimes(1);
+    });
+});
+
+// #1146: a Store user whose toasts never appear needs the log to separate "the scheduler never
+// fired" from "the send failed". One line per fired reminder, carrying no task text.
+describe('fired reminders are logged (#1146)', () => {
+    const initialStoreState = useTaskStore.getState();
+
+    afterEach(() => {
+        stopDesktopNotifications();
+        useTaskStore.setState(initialStoreState, true);
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    it('writes one Desktop reminder fired line without the task title or body', async () => {
+        const fixedNow = new Date(2026, 6, 31, 9, 0, 0, 0);
+        vi.useFakeTimers();
+        vi.setSystemTime(fixedNow);
+
+        // `tasks` is derived: the store contract wants the write on `_allTasks`.
+        useTaskStore.setState({
+            _allTasks: [{ ...baseTask, dueDate: fixedNow.toISOString() }],
+            _allProjects: [],
+            settings: { notificationsEnabled: true },
+        });
+
+        const NotificationSpy = vi.fn() as any;
+        NotificationSpy.permission = 'granted';
+        vi.stubGlobal('Notification', NotificationSpy);
+
+        await startDesktopNotifications();
+
+        const fired = logMock.logInfo.mock.calls.filter(([message]) => message === 'Desktop reminder fired');
+        expect(fired).toHaveLength(1);
+        const extra = fired[0][1]?.extra as Record<string, unknown>;
+        expect(extra).toMatchObject({
+            releaseCheck: 'v1.2.8/desktop-reminder-fired',
+            kind: 'task',
+            entity: 'task',
+            fireAt: fixedNow.toISOString(),
+        });
+        expect(extra.appState).toMatch(/^(focused|hidden)$/);
+        expect(JSON.stringify(extra)).not.toContain(baseTask.title);
     });
 });

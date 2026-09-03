@@ -18,8 +18,9 @@ import {
     getSystemDefaultLanguage,
 } from '@mindwtr/core';
 import { useTaskStore } from '@mindwtr/core';
-import { isFlatpakRuntime, isTauriRuntime } from './runtime';
+import { isFlatpakRuntime, isTauriRuntime, isWindowsRuntime } from './runtime';
 import { invokeNative } from './tauri-invoke';
+import { logInfo, logWarn } from './app-log';
 
 const notifiedAtByTask = new Map<string, string>();
 const repeatNotifiedByTask = new Map<string, string>();
@@ -78,7 +79,7 @@ export function resolveDueRepeatToFire(
     now: Date,
     alreadyNotifiedKey: string | undefined,
     options: { includeDueDate: boolean; catchUpMs?: number },
-): { key: string; index: number } | null {
+): { key: string; index: number; scheduledAt: Date } | null {
     const catchUpMs = options.catchUpMs ?? REPEAT_CATCH_UP_MS;
     const repeats = getTaskReminderPlan(task, now, {
         includeDueDate: options.includeDueDate,
@@ -94,7 +95,7 @@ export function resolveDueRepeatToFire(
     }
     if (!chosen || chosen.repeatIndex === undefined) return null;
     if (alreadyNotifiedKey === chosen.dedupeKey) return null;
-    return { key: chosen.dedupeKey, index: chosen.repeatIndex };
+    return { key: chosen.dedupeKey, index: chosen.repeatIndex, scheduledAt: chosen.scheduledAt };
 }
 
 function getCurrentLanguage(): Language {
@@ -167,6 +168,28 @@ export async function sendDesktopImmediateNotification(title: string, body?: str
     await sendNotification(title, body);
 }
 
+const NOTIFICATION_PATH_CHECK = 'v1.2.8/desktop-notification-path';
+const REMINDER_FIRED_CHECK = 'v1.2.8/desktop-reminder-fired';
+
+/** Never carries the title or body: a reminder's text is the user's own task content. */
+function logNotificationSent(path: string): void {
+    void logInfo('Desktop notification sent', {
+        scope: 'notification',
+        extra: { releaseCheck: NOTIFICATION_PATH_CHECK, path },
+    });
+}
+
+function logNotificationFailed(path: string, error: unknown): void {
+    void logWarn('Desktop notification send failed', {
+        scope: 'notification',
+        extra: {
+            releaseCheck: NOTIFICATION_PATH_CHECK,
+            path,
+            error: error instanceof Error ? error.message : String(error),
+        },
+    });
+}
+
 async function sendFlatpakPortalNotification(title: string, body?: string): Promise<boolean> {
     if (!isTauriRuntime() || !isFlatpakRuntime()) return false;
 
@@ -176,21 +199,52 @@ async function sendFlatpakPortalNotification(title: string, body?: string): Prom
             body: body?.trim() ? body : undefined,
         });
         return true;
-    } catch {
+    } catch (error) {
+        logNotificationFailed('flatpak', error);
+        return false;
+    }
+}
+
+/**
+ * Sends through the Windows package identity, which is the only notifier an MSIX (Microsoft
+ * Store) install can use. `tauri-plugin-notification` always passes the Tauri identifier as an
+ * application id; Windows rejects that id in a packaged process and the plugin swallows the
+ * error, so Store users saw no reminder toasts at all (#1146). The command reports "not
+ * packaged" on every other Windows install, and those fall through to the plugin as before.
+ */
+async function sendWindowsPackagedNotification(title: string, body?: string): Promise<boolean> {
+    if (!isTauriRuntime() || !isWindowsRuntime()) return false;
+
+    try {
+        await invokeNative('send_windows_packaged_notification', {
+            title,
+            body: body?.trim() ? body : undefined,
+        });
+        return true;
+    } catch (error) {
+        logNotificationFailed('windows-packaged', error);
         return false;
     }
 }
 
 async function sendNotification(title: string, body?: string) {
     if (await sendFlatpakPortalNotification(title, body)) {
+        logNotificationSent('flatpak');
+        return;
+    }
+
+    if (await sendWindowsPackagedNotification(title, body)) {
+        logNotificationSent('windows-packaged');
         return;
     }
 
     if (tauriNotificationApi?.sendNotification) {
         try {
             tauriNotificationApi.sendNotification({ title, body });
+            logNotificationSent('plugin');
             return;
-        } catch {
+        } catch (error) {
+            logNotificationFailed('plugin', error);
             // Fall back to Web Notifications below.
         }
     }
@@ -198,10 +252,32 @@ async function sendNotification(title: string, body?: string) {
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
             new Notification(title, body ? { body } : undefined);
-        } catch {
-            // ignore
+            logNotificationSent('web');
+        } catch (error) {
+            logNotificationFailed('web', error);
         }
     }
+}
+
+/**
+ * One line per reminder the desktop poll loop actually fires, so a log from a user who sees no
+ * toast separates "the scheduler never fired" from "the send path failed" (#1146). Task text is
+ * never logged.
+ */
+function logReminderFired(kind: 'due-repeat' | 'task' | 'project', fireAt: string): void {
+    void logInfo('Desktop reminder fired', {
+        scope: 'notification',
+        extra: {
+            releaseCheck: REMINDER_FIRED_CHECK,
+            kind,
+            entity: kind === 'project' ? 'project' : 'task',
+            fireAt,
+            appState:
+                typeof document !== 'undefined' && document.visibilityState === 'visible'
+                    ? 'focused'
+                    : 'hidden',
+        },
+    });
 }
 
 export type DesktopReminderGates = {
@@ -264,6 +340,7 @@ function checkDueAndNotify() {
     tasks.forEach((task: Task) => {
         const repeat = resolveDueRepeatToFire(task, now, repeatNotifiedByTask.get(task.id), { includeDueDate, catchUpMs });
         if (!repeat) return;
+        logReminderFired('due-repeat', repeat.scheduledAt.toISOString());
         void sendNotification(task.title, buildDesktopTaskNotificationBody(task, 'due-repeat', tr));
         repeatNotifiedByTask.set(task.id, repeat.key);
     });
@@ -281,10 +358,12 @@ function checkDueAndNotify() {
         const projectId = request.data.projectId;
         if (taskId) {
             if (notifiedAtByTask.get(taskId) === fireIso) continue;
+            logReminderFired('task', fireIso);
             void sendNotification(request.title, request.message);
             notifiedAtByTask.set(taskId, fireIso);
         } else if (projectId) {
             if (notifiedAtByProject.get(projectId) === fireIso) continue;
+            logReminderFired('project', fireIso);
             void sendNotification(request.title, request.message);
             notifiedAtByProject.set(projectId, fireIso);
         } else {

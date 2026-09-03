@@ -6,6 +6,15 @@ export function isFlatpakRuntime(): boolean {
     return typeof window !== 'undefined' && Boolean((window as any).__MINDWTR_FLATPAK__);
 }
 
+/**
+ * Whether the desktop shell is running on Windows. Read from the user agent because the
+ * renderer has no synchronous platform call, and every Windows WebView2 user agent carries
+ * "Windows" in its platform token.
+ */
+export function isWindowsRuntime(): boolean {
+    return typeof navigator !== 'undefined' && (navigator.userAgent ?? '').includes('Windows');
+}
+
 type DesktopTimerHost = {
     setTimeout: typeof globalThis.setTimeout;
     clearTimeout: typeof globalThis.clearTimeout;

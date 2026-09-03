@@ -19,6 +19,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'presenceDue', 'hasScope', 'check', 'skipped', 'publication',
     // background-sync-registration (apps/mobile/lib/background-sync-task.ts)
     'decision', 'registered', 'storedInterval', 'interval', 'appState',
+    // desktop-reminder-fired / desktop-notification-path (apps/desktop/src/lib/notification-service.tsx)
+    'kind', 'entity', 'fireAt', 'path', 'error',
 ];
 
 describe('release diagnostics field names', () => {

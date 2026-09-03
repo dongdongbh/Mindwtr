@@ -12,6 +12,15 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 - `Mobile background sync registered` with interval (same file).
 - Desktop `Sync backend selected; running the verification sync to activate it` (`useSyncSettings.ts`).
 
+## v1.2.8 (add before tagging, trim in the release after)
+
+Field names are checked against the log sanitizer by `packages/core/src/release-diagnostics-fields.test.ts`. Add every new field name to that test's list.
+
+### Added
+
+- **`v1.2.8/desktop-reminder-fired`** — `apps/desktop/src/lib/notification-service.tsx`, in `checkDueAndNotify` (`logReminderFired`), at all three fire sites: due-time repeats, task reminders and project review reminders. Message: `Desktop reminder fired`. Fields: `kind` (`due-repeat` | `task` | `project`), `entity` (`task` | `project`), `fireAt` (ISO occurrence time), `appState` (`focused` | `hidden`). No task title or body is ever logged. Tester's log: a user who sees no toast now has one line proving the scheduler fired, which separates a scheduling bug from a delivery bug (#1146).
+- **`v1.2.8/desktop-notification-path`** — same file, in `sendNotification` (`logNotificationSent` / `logNotificationFailed`). Messages: `Desktop notification sent` and `Desktop notification send failed`. Fields: `path` (`flatpak` | `windows-packaged` | `plugin` | `web`) and, on the failure line, `error`. Tester's log: on a Microsoft Store install the line must read `path=windows-packaged`; a Store install that still falls through to `plugin` means the packaged command rejected, and the warning names the HRESULT it rejected with (#1146).
+
 ## v1.2.7 (add before tagging, trim in the release after)
 
 Field names are checked against the log sanitizer by `packages/core/src/release-diagnostics-fields.test.ts`. `shouldRedactKey` matches by SUBSTRING, so `skippedPasses` (contains `pass`), `monkeyIndex` (contains `key`) and `userAgent` (contains `user`) are silently replaced with `[redacted]`. Add every new field name to that test's list.
