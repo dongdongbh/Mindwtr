@@ -147,8 +147,10 @@ describe('installAttachmentFileGeneration', () => {
       'Android attachment generation published with exclusive-copy fallback',
       {
         scope: 'sync',
-        releaseCheck: 'v1.2.7/android-attachment-link-fallback',
-        publication: 'exclusive-copy',
+        extra: {
+          releaseCheck: 'v1.2.7/android-attachment-link-fallback',
+          publication: 'exclusive-copy',
+        },
       },
     );
   });

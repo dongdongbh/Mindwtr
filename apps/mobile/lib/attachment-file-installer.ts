@@ -536,8 +536,10 @@ export const installAttachmentFileGeneration = async (
   if (parsed.publication === 'exclusive-copy') {
     await logInfo('Android attachment generation published with exclusive-copy fallback', {
       scope: 'sync',
-      releaseCheck: 'v1.2.7/android-attachment-link-fallback',
-      publication: parsed.publication,
+      extra: {
+        releaseCheck: 'v1.2.7/android-attachment-link-fallback',
+        publication: parsed.publication,
+      },
     });
   }
   return parsed;
