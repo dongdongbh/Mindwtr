@@ -1,4 +1,3 @@
-import * as Application from 'expo-application';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { NativeModules, Platform } from 'react-native';
 
@@ -57,7 +56,10 @@ export async function refreshExactAlarmPermission(): Promise<boolean> {
 /** Opens the system "Alarms & reminders" screen for this app. */
 export async function openExactAlarmSettings(): Promise<void> {
   if (!isExactAlarmPermissionRelevant()) return;
-  const packageName = Application.applicationId;
+  // expo-application resolves its native module at import time, which every
+  // settings screen test would then have to mock; load it only when the user
+  // actually taps Allow.
+  const { applicationId: packageName } = await import('expo-application');
   await IntentLauncher.startActivityAsync(
     IntentLauncher.ActivityAction.REQUEST_SCHEDULE_EXACT_ALARM,
     packageName ? { data: `package:${packageName}` } : undefined
