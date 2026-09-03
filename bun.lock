@@ -76,14 +76,14 @@
     },
     "apps/cloud": {
       "name": "mindwtr-cloud",
-      "version": "1.2.6",
+      "version": "1.2.7",
       "dependencies": {
         "@mindwtr/core": "workspace:*",
       },
     },
     "apps/desktop": {
       "name": "mindwtr",
-      "version": "1.2.6",
+      "version": "1.2.7",
       "dependencies": {
         "@dnd-kit/core": "^6.1.0",
         "@dnd-kit/sortable": "^8.0.0",
@@ -96,7 +96,7 @@
         "@tauri-apps/plugin-http": "2.5.4",
         "@tauri-apps/plugin-notification": "2.3.3",
         "@tauri-apps/plugin-shell": "2.3.3",
-        "@xmldom/xmldom": "0.8.13",
+        "@xmldom/xmldom": "0.8.15",
         "clsx": "^2.1.0",
         "date-fns": "^4.1.0",
         "fflate": "^0.8.2",
@@ -136,7 +136,7 @@
     },
     "apps/mcp-server": {
       "name": "mindwtr-mcp",
-      "version": "1.1.6",
+      "version": "1.1.7",
       "bin": {
         "mindwtr-mcp": "dist/cli.js",
       },
@@ -150,7 +150,7 @@
     },
     "apps/mobile": {
       "name": "mobile",
-      "version": "1.2.6",
+      "version": "1.2.7",
       "dependencies": {
         "@babel/runtime": "^7.28.4",
         "@expo/metro-runtime": "^6.1.2",
@@ -241,7 +241,7 @@
     },
     "packages/core": {
       "name": "@mindwtr/core",
-      "version": "1.2.6",
+      "version": "1.2.7",
       "dependencies": {
         "@babel/runtime": "^7.28.4",
         "@noble/hashes": "^2.3.0",

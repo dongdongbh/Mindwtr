@@ -1,0 +1,1 @@
+Unterstützt 16-KB-Speicherseiten auf aktuellen Android-Geräten. Fügt Projektstartdaten, weitere Projektaktionen und einstellbaren Hintergrund-Sync hinzu. Verbessert die Anhangwiederherstellung für alle Sync-Arten sowie Kalenderdaten, Weckerhinweise, Dropbox-Anmeldung, Sync-Status, Diagnose und Übersetzungen.

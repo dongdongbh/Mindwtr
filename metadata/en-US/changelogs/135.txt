@@ -1,0 +1,1 @@
+Supports 16 KB memory pages on current Android devices. Adds project start dates, more project actions, and configurable background sync. Improves attachment recovery across every sync backend, calendar dates, exact-alarm guidance, Dropbox sign-in, sync status, diagnostics, and localization.

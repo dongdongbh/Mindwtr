@@ -1,0 +1,1 @@
+Admite páginas de memoria de 16 KB en dispositivos Android actuales. Añade fechas de inicio, más acciones para proyectos y sincronización en segundo plano configurable. Mejora la recuperación de adjuntos en todos los métodos de sincronización, el calendario, las alarmas, Dropbox, el estado, los diagnósticos y las traducciones.

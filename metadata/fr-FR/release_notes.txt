@@ -1,4 +1,4 @@
-- Les projets archivés empêchent les changements de tâche, liste, état, achèvement et Focus.
-- La récupération garde la dernière copie fiable des pièces jointes et vérifie mieux les fichiers distants absents.
-- Les récurrences conservent ancre, fuseau et règles; les revues changent de jour à minuit local.
-- Les options de priorité et de durée contrôlent saisie, tri, calendrier et widgets.
+- Ajoutez une date de début aux projets et affichez leur durée dans la chronologie.
+- Les réglages de synchronisation s’activent après vérification, avec une récupération plus sûre des pièces jointes sur WebDAV, Dropbox, dossiers, iCloud et serveurs auto-hébergés.
+- Les synchronisations sans changement demandent moins de travail et leur état devient plus clair.
+- Améliore les dates du calendrier, la connexion Dropbox, les projets archivés et les traductions.

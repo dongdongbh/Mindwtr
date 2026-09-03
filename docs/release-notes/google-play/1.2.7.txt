@@ -1,0 +1,30 @@
+<en-US>
+- Supports 16 KB memory pages on current Android devices.
+- Adds project start dates and more project actions.
+- Adds configurable background sync for WebDAV, Dropbox, iCloud, and self-hosted sync.
+- Improves attachment recovery, calendar dates, exact-alarm guidance, and sync status.
+</en-US>
+<de-DE>
+- Unterstützt 16-KB-Speicherseiten auf aktuellen Android-Geräten.
+- Fügt Projektstartdaten und weitere Projektaktionen hinzu.
+- Fügt einstellbaren Hintergrund-Sync für WebDAV, Dropbox, iCloud und selbst gehosteten Sync hinzu.
+- Verbessert Anhangwiederherstellung, Kalenderdaten, Weckerhinweise und Sync-Status.
+</de-DE>
+<es-ES>
+- Admite páginas de memoria de 16 KB en dispositivos Android actuales.
+- Añade fechas de inicio y más acciones para proyectos.
+- Añade sincronización en segundo plano configurable para WebDAV, Dropbox, iCloud y servidores propios.
+- Mejora la recuperación de adjuntos, el calendario, las alarmas y el estado de sincronización.
+</es-ES>
+<fr-FR>
+- Prend en charge les pages mémoire de 16 Ko sur les appareils Android actuels.
+- Ajoute une date de début et plus d’actions aux projets.
+- Ajoute une synchronisation en arrière-plan réglable pour WebDAV, Dropbox, iCloud et les serveurs auto-hébergés.
+- Améliore la récupération des pièces jointes, le calendrier, les alarmes et l’état de synchronisation.
+</fr-FR>
+<zh-CN>
+- 支持当前 Android 设备使用的 16 KB 内存页。
+- 新增项目开始日期和更多项目操作。
+- WebDAV、Dropbox、iCloud 和自托管同步支持自定义后台同步间隔。
+- 改进附件恢复、日历日期、精确闹钟提示和同步状态。
+</zh-CN>

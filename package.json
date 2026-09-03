@@ -194,7 +194,7 @@
     "webidl-conversions": "^8.0.0",
     "whatwg-url-without-unicode": "^8.0.0-3"
   },
-  "version": "1.2.6",
+  "version": "1.2.7",
   "op-sqlite": {
     "fts5": true
   },

@@ -88,6 +88,21 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="1.2.7" date="2026-09-03">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.7</url>
+      <description>
+        <p>Mindwtr 1.2.7 adds project start dates, faster sync cycles, and safer attachment recovery.</p>
+        <p xml:lang="de">Mindwtr 1.2.7 bringt Projektstartdaten, schnellere Sync-Zyklen und eine sicherere Anhangwiederherstellung.</p>
+        <ul>
+          <li>Projects can show start and due date spans in Timeline, with more direct task and project actions.</li>
+          <li xml:lang="de">Projekte zeigen Start- und Faelligkeitszeitraeume in der Zeitleiste und bieten mehr direkte Aufgaben- und Projektaktionen.</li>
+          <li>WebDAV, Dropbox, File Sync, and self-hosted sync skip redundant work while preserving conditional-write and encryption safeguards.</li>
+          <li xml:lang="de">WebDAV, Dropbox, Dateisynchronisierung und selbst gehosteter Sync ueberspringen doppelte Arbeit und behalten Schreib- und Verschluesselungsschutz bei.</li>
+          <li>Attachment recovery, Dropbox sign-in, sync status, and diagnostics now handle more failure cases.</li>
+          <li xml:lang="de">Anhangwiederherstellung, Dropbox-Anmeldung, Sync-Status und Diagnose behandeln mehr Fehlerfaelle.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.6" date="2026-09-01">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.6</url>
       <description>
