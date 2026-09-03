@@ -177,7 +177,7 @@ enum CloudKitRecordMapper {
         FieldSpec(jsKey: "updatedAt", ckKey: "updatedAt", kind: .date),
         FieldSpec(jsKey: "deletedAt", ckKey: "deletedAt", kind: .date),
         FieldSpec(jsKey: "purgedAt", ckKey: "purgedAt", kind: .date),
-        FieldSpec(jsKey: "startDate", ckKey: "startDate", kind: .date),
+        FieldSpec(jsKey: "startDate", ckKey: "startDateText", kind: .date), // "startDate" exists in Production as a Date field; date kinds are written as strings, so it can never be used
     ]
 
     // MARK: - Section Fields
