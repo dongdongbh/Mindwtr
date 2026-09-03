@@ -99,17 +99,6 @@ test("rejects explicit package-registry URLs in AUR recipes", () => {
     "prepare() {\n  bun install --registry=https://registry.npmjs.org\n}\n";
   expect(() =>
     validatePackageDir({
-      packageDir: fixture({
-        packageName: "mindwtr",
-        extraPkgbuild: registryCommand,
-      }),
-      packageName: "mindwtr",
-      policyPath,
-    }),
-  ).toThrow("PKGBUILD contains an untrusted URL");
-
-  expect(() =>
-    validatePackageDir({
       packageDir: fixture({ extraPkgbuild: registryCommand }),
       packageName: "mindwtr-bin",
       policyPath,

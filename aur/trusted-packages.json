@@ -3,36 +3,30 @@
   "upstreamRepository": "https://github.com/dongdongbh/Mindwtr",
   "releaseSigningKeyFingerprint": "0358999BBE704F588B9094979E553245CB17047D",
   "packages": {
-    "mindwtr": {
-      "maintainer": "yochananmarqos",
-      "coMaintainers": ["dongdongbh"],
-      "trackedFiles": [
-        ".SRCINFO",
-        ".gitignore",
-        ".nvchecker.toml",
-        "LICENSE",
-        "PKGBUILD",
-        "bun.lock",
-        "mindwtr.desktop",
-        "pnpm-lock.yaml",
-        "pnpm-workspace.yaml",
-        "tauri-v2-schema.patch"
-      ]
-    },
     "mindwtr-bin": {
       "maintainer": "dongdongbh",
       "coMaintainers": [],
-      "trackedFiles": [".SRCINFO", ".gitignore", "PKGBUILD"]
+      "trackedFiles": [
+        ".SRCINFO",
+        ".gitignore",
+        "PKGBUILD"
+      ]
     },
     "mindwtr-beta-bin": {
       "maintainer": "dongdongbh",
       "coMaintainers": [],
-      "trackedFiles": [".SRCINFO", "PKGBUILD"]
+      "trackedFiles": [
+        ".SRCINFO",
+        "PKGBUILD"
+      ]
     },
     "mindwtr-bin-beta": {
       "maintainer": "dongdongbh",
       "coMaintainers": [],
-      "trackedFiles": [".SRCINFO", "PKGBUILD"]
+      "trackedFiles": [
+        ".SRCINFO",
+        "PKGBUILD"
+      ]
     }
   }
 }
