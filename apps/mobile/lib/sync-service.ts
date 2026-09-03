@@ -1579,6 +1579,11 @@ class MobileSyncRun {
    *  retries of its own. */
   private createBackendTransport(ctx: SyncBackendContext): SyncTransport {
     return {
+      // Fence ports deliberately skip `fetchWithAbort`: a lifecycle abort mid-cycle
+      // (app to background, background-job deadline) used to cancel the release
+      // requests in `run()`'s finally, leaving a lease that blocked every device
+      // for up to the 5-minute TTL. Fence requests are tiny and bounded by
+      // DEFAULT_SYNC_TIMEOUT_MS, so letting them finish is cheaper than a stale lock.
       acquireWebdavRemoteMutationFence: async () => {
         const webdavConfig = this.webdavConfig;
         if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
@@ -1599,7 +1604,7 @@ class MobileSyncRun {
               username: webdavConfig.username,
               password: webdavConfig.password,
               timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
-              fetcher: this.fetchWithAbort,
+              fetcher: backgroundSafeFetch,
             }),
             { ownerId: 'mindwtr-mobile', purpose: 'ordinary-sync' },
           );
@@ -1609,8 +1614,7 @@ class MobileSyncRun {
         }
       },
       acquireDropboxRemoteMutationFence: (token) => acquireSyncRemoteMutationFence(
-        createDropboxSyncRemoteMutationFencePort(token, this.fetchWithAbort, {
-          signal: this.requestAbortController.signal,
+        createDropboxSyncRemoteMutationFencePort(token, backgroundSafeFetch, {
           timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
         }),
         { ownerId: 'mindwtr-mobile', purpose: 'ordinary-sync' },
@@ -2065,11 +2069,15 @@ const MIN_FOLLOW_UP_DELAY_MS = 1_000;
 const MAX_FOLLOW_UP_DELAY_MS = 5 * 60_000;
 
 const mobileSyncOrchestrator = createSyncOrchestrator<MobileSyncRequest | undefined, MobileSyncResult>({
-  getFollowUpDelayMs: (lastCycleDurationMs) => {
-    const delayMs = Math.min(Math.max(lastCycleDurationMs, MIN_FOLLOW_UP_DELAY_MS), MAX_FOLLOW_UP_DELAY_MS);
+  getFollowUpDelayMs: (lastCycleDurationMs, minimumDelayMs) => {
+    const pacedDelayMs = Math.min(Math.max(lastCycleDurationMs, MIN_FOLLOW_UP_DELAY_MS), MAX_FOLLOW_UP_DELAY_MS);
+    // A busy remote fence or File Sync lock asks for a longer wait than pacing;
+    // log the delay that actually applies so a 229s fence wait stops reading as 1.2s.
+    const delayMs = Math.max(pacedDelayMs, minimumDelayMs);
     logSyncInfo('Sync follow-up scheduled', {
       delayMs: String(delayMs),
       lastCycleDurationMs: String(lastCycleDurationMs),
+      minimumDelayMs: String(minimumDelayMs),
     });
     return delayMs;
   },

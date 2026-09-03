@@ -2609,11 +2609,16 @@ export class SyncService {
         };
 
         const transport: SyncTransport = {
+            // Fence ports deliberately skip the cycle's abort signal: an abort
+            // mid-cycle used to cancel the release requests in `run()`'s finally,
+            // leaving a lease that blocked every device for up to the 5-minute TTL.
+            // Fence requests are tiny and timeout-bounded, so letting them finish
+            // is cheaper than a stale lock.
             acquireWebdavRemoteMutationFence: async () => {
                 const webdavConfig = context.webdavConfig;
                 if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
                 const password = await resolveWebdavPassword(webdavConfig);
-                const fetcher = await createFetchWithAbortForContext(context);
+                const fetcher = (await getTauriFetch()) ?? fetch;
                 return acquireSyncRemoteMutationFence(
                     createWebdavSyncRemoteMutationFencePort(
                         normalizeWebdavUrl(webdavConfig.url),
@@ -2628,11 +2633,9 @@ export class SyncService {
                 );
             },
             acquireDropboxRemoteMutationFence: async (token) => {
-                const fetcher = await createFetchWithAbortForContext(context);
+                const fetcher = (await getTauriFetch()) ?? fetch;
                 return acquireSyncRemoteMutationFence(
-                    createDropboxSyncRemoteMutationFencePort(token, fetcher, {
-                        signal: context.requestAbortController.signal,
-                    }),
+                    createDropboxSyncRemoteMutationFencePort(token, fetcher),
                     { ownerId: 'mindwtr-desktop', purpose: 'ordinary-sync' },
                 );
             },

@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { computeStableValueFingerprint, SyncRemoteMutationFenceLostError } from '@mindwtr/core';
 
 import * as syncServiceModule from './sync-service';
+import { backgroundSafeFetch } from './background-safe-fetch';
 
 const emptyData = {
   tasks: [],
@@ -502,10 +503,12 @@ describe('mobile Dropbox sync transient retry', () => {
     });
 
     expect(result.success).toBe(true);
+    // The fence port must not ride the cycle's abort signal: a lifecycle abort
+    // would cancel the release in `run()`'s finally and leave a stale lease.
     expect(coreMocks.createDropboxSyncRemoteMutationFencePort).toHaveBeenCalledWith(
       'candidate-access-token',
-      expect.any(Function),
-      expect.objectContaining({ timeoutMs: 30_000 }),
+      backgroundSafeFetch,
+      { timeoutMs: 30_000 },
     );
     expect(coreMocks.acquireSyncRemoteMutationFence).toHaveBeenCalledWith(
       { provider: 'dropbox-fence-port' },

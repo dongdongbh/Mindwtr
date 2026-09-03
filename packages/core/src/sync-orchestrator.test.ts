@@ -147,6 +147,27 @@ describe('sync orchestrator', () => {
         }
     });
 
+    it('hands the requested minimum delay to getFollowUpDelayMs so callers can log the effective wait', async () => {
+        vi.useFakeTimers();
+        try {
+            const seen: Array<[number, number]> = [];
+            const orchestrator = createSyncOrchestrator<undefined, void>({
+                getFollowUpDelayMs: (lastCycleDurationMs, minimumDelayMs) => {
+                    seen.push([lastCycleDurationMs, minimumDelayMs]);
+                    return 1_000;
+                },
+                runCycle: async (_arg, { requestFollowUpAfter }) => {
+                    if (seen.length === 0) requestFollowUpAfter(229_000);
+                },
+            });
+
+            await orchestrator.run(undefined);
+            expect(seen).toEqual([[expect.any(Number), 229_000]]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('lets a direct manual run replace the delayed background request', async () => {
         vi.useFakeTimers();
         try {
