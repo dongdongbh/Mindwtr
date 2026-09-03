@@ -686,9 +686,14 @@ describe('mcp service', () => {
       const projects = await service.listProjects();
       const tasks = await service.listTasks({});
       expect(addTaskAttempts).toBe(2);
-      expect(projects.filter((project) => project.title === 'Launch')).toHaveLength(1);
-      expect(tasks.filter((task) => task.title === 'Ship it')).toHaveLength(1);
-      expect(tasks[0]?.projectId).toBe(projects[0]?.id);
+      const launchProjects = projects.filter((project) => project.title === 'Launch');
+      const shipTasks = tasks.filter((task) => task.title === 'Ship it');
+      expect(launchProjects).toHaveLength(1);
+      expect(shipTasks).toHaveLength(1);
+      // By title, not by index: `bun test` runs every file in one process and the
+      // core adapter's singleton store can carry another file's projects into this
+      // list, so `projects[0]` is not necessarily Launch (CI run 33716419352).
+      expect(shipTasks[0]?.projectId).toBe(launchProjects[0]?.id);
     } finally {
       await service.close();
     }
