@@ -37,7 +37,10 @@ const SNAPSHOT_RETENTION_RECENT_COUNT: usize = 2;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const STORAGE_RETRY_ATTEMPTS: usize = 4;
 const STORAGE_RETRY_BASE_DELAY_MS: u64 = 120;
-const STORAGE_SCHEMA_VERSION: i64 = 6;
+// Version 7 adds projects.startDate. Increment this whenever SQLITE_SCHEMA or
+// an ensure_* migration changes; otherwise the warm schema-state fast path can
+// incorrectly skip the migration on an existing database.
+const STORAGE_SCHEMA_VERSION: i64 = 7;
 const STORAGE_SCHEMA_STATE_TABLE: &str = "storage_schema_state";
 // Version 4 adds assignedTo to the desktop-native FTS schema and forces one
 // content rebuild after the corrected triggers are installed.
@@ -5356,6 +5359,35 @@ mod tests {
         // startup, not just once).
         ensure_column(&conn, "projects", "startDate", "TEXT")
             .expect("should be a no-op when startDate already exists");
+    }
+
+    #[test]
+    fn sqlite_open_migrates_version_six_projects_table_missing_start_date() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp.path().join("version-six-projects.sqlite");
+        let conn = Connection::open(&db_path).expect("open legacy database");
+        let version_six_schema = SQLITE_SCHEMA.replace(
+            "  purgedAt TEXT,\n  startDate TEXT\n);",
+            "  purgedAt TEXT\n);",
+        );
+        assert_ne!(version_six_schema, SQLITE_SCHEMA, "fixture must omit projects.startDate");
+        conn.execute_batch(&version_six_schema)
+            .expect("create version six schema");
+        let schema_generation = sqlite_schema_generation(&conn).expect("read legacy generation");
+        conn.execute(
+            "INSERT INTO storage_schema_state (id, storage_version, schema_generation) VALUES (1, 6, ?1)",
+            params![schema_generation],
+        )
+        .expect("record version six schema state");
+        drop(conn);
+
+        let reopened = open_sqlite_path(&db_path).expect("migrate version six database");
+
+        assert!(has_column(&reopened, "projects", "startDate").expect("inspect project columns"));
+        let state = stored_sqlite_schema_state(&reopened)
+            .expect("read migrated state")
+            .expect("migrated state row");
+        assert_eq!(state.storage_version, STORAGE_SCHEMA_VERSION);
     }
 
     #[test]
