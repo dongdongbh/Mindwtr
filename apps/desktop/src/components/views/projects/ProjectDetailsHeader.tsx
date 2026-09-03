@@ -1,6 +1,6 @@
 import { format } from 'date-fns';
 import { safeParseDate, tFallback, type Project } from '@mindwtr/core';
-import { Archive as ArchiveIcon, Calendar, CalendarClock, ChevronDown, ChevronRight, Copy, FolderOpenDot, HelpCircle, ListOrdered, Loader2, RotateCcw, Signal, Trash2 } from 'lucide-react';
+import { Archive as ArchiveIcon, Calendar, CalendarClock, CalendarRange, ChevronDown, ChevronRight, Copy, FolderOpenDot, HelpCircle, ListOrdered, Loader2, RotateCcw, Signal, Trash2 } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 
 type ProjectProgress = {
@@ -76,8 +76,10 @@ export function ProjectDetailsHeader({
         'Sequential projects surface one available action at a time. Parallel projects can surface multiple independent Next tasks.'
     );
     const detailsLabel = tFallback(t, 'taskEdit.details', 'Details');
+    const startDateValue = project.startDate ? safeParseDate(project.startDate) : null;
     const dueDateValue = dueDate ? safeParseDate(dueDate) : null;
     const reviewDate = reviewAt ? safeParseDate(reviewAt) : null;
+    const startLabelPrefix = tFallback(t, 'taskEdit.startDateLabel', 'Start');
     const dueLabelPrefix = tFallback(t, 'taskEdit.dueDateLabel', 'Due');
     const reviewLabelPrefix = tFallback(t, 'projects.reviewAt', 'Review');
     const summaryItems = [
@@ -98,6 +100,11 @@ export function ProjectDetailsHeader({
                 ? tFallback(t, 'projects.sequential', 'Sequential')
                 : tFallback(t, 'projects.parallel', 'Parallel'),
         },
+        ...(startDateValue ? [{
+            key: 'start',
+            icon: CalendarRange,
+            label: `${startLabelPrefix}: ${format(startDateValue, 'MMM d')}`,
+        }] : []),
         ...(dueDateValue ? [{
             key: 'due',
             icon: Calendar,

@@ -74,6 +74,7 @@ const translate = vi.hoisted(() => (key: string) => ({
     'status.waiting': 'Waiting',
     'taskEdit.details': 'Details',
     'taskEdit.dueDateLabel': 'Due Date',
+    'taskEdit.startDateLabel': 'Start Date',
     'taskEdit.tagsLabel': 'Tags',
 }[key] ?? key));
 
@@ -619,6 +620,40 @@ describe('ProjectDetailModal metadata pickers', () => {
         });
 
         expect(tree.root.findAllByType(DateTimePicker)).toHaveLength(1);
+    });
+
+    it('saves a picked project start date and clears it again', () => {
+        let tree!: ReturnType<typeof create>;
+
+        act(() => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps()} />);
+        });
+
+        expandProjectDetails(tree);
+
+        act(() => {
+            tree.root.findByProps({ testID: 'project-start-date-picker' }).props.onPress();
+        });
+        act(() => {
+            tree.root.findByType(DateTimePicker).props.onChange({}, new Date('2026-10-05T00:00:00.000Z'));
+        });
+
+        expect(storeActions.updateProject).toHaveBeenCalledWith('project-1', { startDate: '2026-10-05' });
+        expect(tree.root.findAllByType(DateTimePicker)).toHaveLength(0);
+
+        // The clear button only exists once a date is stored, and the mocked
+        // store never writes back, so it needs a project that already has one.
+        let stored!: ReturnType<typeof create>;
+        act(() => {
+            stored = create(<ProjectDetailModal {...createProjectDetailModalProps({
+                project: { ...project('active'), startDate: '2026-10-05' },
+            })} />);
+        });
+        expandProjectDetails(stored);
+        act(() => {
+            stored.root.findByProps({ accessibilityLabel: 'Clear Start Date' }).props.onPress();
+        });
+        expect(storeActions.updateProject).toHaveBeenLastCalledWith('project-1', { startDate: undefined });
     });
 });
 

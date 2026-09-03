@@ -614,6 +614,7 @@ export function ProjectDetailModal({
     }];
     const [showProjectMeta, setShowProjectMeta] = React.useState(false);
     const [showStatusMenu, setShowStatusMenu] = React.useState(false);
+    const [showStartDatePicker, setShowStartDatePicker] = React.useState(false);
     const [showDueDatePicker, setShowDueDatePicker] = React.useState(false);
     const [showReviewPicker, setShowReviewPicker] = React.useState(false);
     // Persisted device-locally so the choice survives app restarts, matching
@@ -1452,6 +1453,53 @@ export function ProjectDetailModal({
 
                                         <View style={[styles.reviewContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                                             <View style={styles.projectMetadataRow}>
+                                                <Text style={[styles.reviewLabel, { color: tc.text }]}>{tFallback(t, 'taskEdit.startDateLabel', 'Start Date')}</Text>
+                                                <View style={styles.projectMetadataControls}>
+                                                    <TouchableOpacity
+                                                        style={[styles.projectMetadataValueButton, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
+                                                        onPress={() => setShowStartDatePicker(true)}
+                                                        disabled={isArchivedProject}
+                                                        accessibilityRole="button"
+                                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                        accessibilityState={{ disabled: isArchivedProject }}
+                                                        testID="project-start-date-picker"
+                                                    >
+                                                        <Text style={[styles.projectMetadataValueText, { color: tc.text }]} numberOfLines={1}>
+                                                            {formatProjectDate(selectedProject.startDate, t('common.notSet'))}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                    {!!selectedProject.startDate ? (
+                                                        <TouchableOpacity
+                                                            accessibilityRole="button"
+                                                            accessibilityLabel={`${t('common.clear')} ${tFallback(t, 'taskEdit.startDateLabel', 'Start Date')}`}
+                                                            style={styles.projectMetadataClearButton}
+                                                            onPress={() => {
+                                                                updateMutableSelectedProject({ startDate: undefined });
+                                                            }}
+                                                            disabled={isArchivedProject}
+                                                            accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                            accessibilityState={{ disabled: isArchivedProject }}
+                                                        >
+                                                            <Ionicons name="close-circle-outline" size={19} color={tc.secondaryText} />
+                                                        </TouchableOpacity>
+                                                    ) : null}
+                                                </View>
+                                            </View>
+                                            {showStartDatePicker ? (
+                                                <DateTimePicker
+                                                    value={safeParseDate(selectedProject.startDate) ?? new Date()}
+                                                    mode="date"
+                                                    display="default"
+                                                    onChange={(_, date) => {
+                                                        setShowStartDatePicker(false);
+                                                        if (date) {
+                                                            const iso = date.toISOString().slice(0, 10);
+                                                            updateMutableSelectedProject({ startDate: iso });
+                                                        }
+                                                    }}
+                                                />
+                                            ) : null}
+                                            <View style={[styles.projectMetadataRow, styles.projectMetadataRowDivider, { borderTopColor: tc.border }]}>
                                                 <Text style={[styles.reviewLabel, { color: tc.text }]}>{tFallback(t, 'taskEdit.dueDateLabel', 'Due Date')}</Text>
                                                 <View style={styles.projectMetadataControls}>
                                                     <TouchableOpacity

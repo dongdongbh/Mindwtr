@@ -26,6 +26,7 @@ const translations: Record<string, string> = {
     'status.someday': 'Someday',
     'status.waiting': 'Waiting',
     'taskEdit.dueDateLabel': 'Due Date',
+    'taskEdit.startDateLabel': 'Start Date',
     'taskEdit.tagsLabel': 'Tags',
 };
 
@@ -63,6 +64,8 @@ const defaultProps = {
     onSequentialScopeChange: vi.fn(),
     status: 'active' as Project['status'],
     onChangeStatus: vi.fn(),
+    startDateValue: '',
+    onStartDateChange: vi.fn(),
     dueDateValue: '',
     onDueDateChange: vi.fn(),
     reviewAtValue: '',
@@ -90,5 +93,20 @@ describe('ProjectDetailsFields', () => {
         fireEvent.keyDown(tagInput, { key: 'Enter' });
 
         expect(defaultProps.onTagDraftChange).toHaveBeenCalledWith('#client, ');
+    });
+
+    it('offers a start date beside the due date and reports what was typed', () => {
+        const onStartDateChange = vi.fn();
+        render(
+            <LanguageProvider>
+                <ProjectDetailsFields {...defaultProps} onStartDateChange={onStartDateChange} />
+            </LanguageProvider>
+        );
+
+        const startInput = screen.getByLabelText('Start Date');
+        expect(screen.getByLabelText('Due Date')).toBeTruthy();
+
+        fireEvent.change(startInput, { target: { value: '2026-10-05' } });
+        expect(onStartDateChange).toHaveBeenCalledWith('2026-10-05');
     });
 });

@@ -24,6 +24,7 @@ const translations: Record<string, string> = {
     'status.waiting': 'Waiting',
     'taskEdit.details': 'Details',
     'taskEdit.dueDateLabel': 'Due Date',
+    'taskEdit.startDateLabel': 'Start Date',
 };
 
 const t = (key: string) => translations[key] ?? key;
@@ -48,6 +49,7 @@ describe('ProjectDetailsHeader', () => {
         const project = buildProject({
             status: 'waiting',
             tagIds: ['#client'],
+            startDate: '2026-03-24',
             dueDate: '2026-03-28',
             reviewAt: '2026-03-30T09:00:00',
         });
@@ -80,6 +82,7 @@ describe('ProjectDetailsHeader', () => {
         screen.getByText('Waiting');
         screen.getByText('Ops');
         screen.getByText('Sequential');
+        screen.getByText('Start Date: Mar 24');
         screen.getByText('Due Date: Mar 28');
         screen.getByText('Review Date: Mar 30');
         screen.getByText('#client');
@@ -118,6 +121,7 @@ describe('ProjectDetailsHeader', () => {
         screen.getByText('Active');
         screen.getByText('Parallel');
         expect(screen.queryByText('Ops')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Start Date:/i)).not.toBeInTheDocument();
         expect(screen.queryByText(/Due Date:/i)).not.toBeInTheDocument();
         expect(screen.queryByText(/Review Date:/i)).not.toBeInTheDocument();
     });

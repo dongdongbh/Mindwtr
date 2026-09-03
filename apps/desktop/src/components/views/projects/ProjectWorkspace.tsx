@@ -1806,6 +1806,8 @@ export function ProjectWorkspace({
                                         onSequentialScopeChange={(sequentialScope) => updateMutableSelectedProject({ sequentialScope })}
                                         status={selectedProject.status}
                                         onChangeStatus={(status) => updateMutableSelectedProject({ status })}
+                                        startDateValue={toDateInputValue(selectedProject.startDate)}
+                                        onStartDateChange={(value) => updateMutableSelectedProject({ startDate: value || undefined })}
                                         dueDateValue={toDateInputValue(selectedProject.dueDate)}
                                         onDueDateChange={(value) => updateMutableSelectedProject({ dueDate: value || undefined })}
                                         reviewAtValue={toDateTimeLocalValue(selectedProject.reviewAt)}

@@ -86,3 +86,4 @@ Changes collected after `v1.2.6` and before the next version tag.
 
 - Self-hosted server: the attachment endpoint now answers HEAD, so a device can ask whether an attachment file is still on the server without downloading it. (#1119)
 - Android and iOS: searching Settings for "timeline" no longer offers a result that leads to a Features screen with no such row. The Timeline view exists on desktop only. (#1145)
+- Desktop and mobile: a project can now carry its own start date, next to the due date in the project details. On the desktop Timeline, a project with either date is drawn as its own slim bar above its tasks, so a project that runs over weeks reads as one span instead of a pile of task bars. When only one of the two dates is set, the bar reaches to the earliest start or latest due date among the project's tasks, and clicking the project's name on the Timeline opens the project. (email report)
