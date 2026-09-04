@@ -92,6 +92,18 @@ jobs:
       - name: Large-store performance budgets
         run: bun run test:perf
 
+      - name: Perf budget summary
+        if: always()
+        run: node scripts/ci/write-perf-summary.js packages/core/.perf/measurements.json
+
+      - name: Upload perf measurements artifact
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: core-perf-measurements
+          path: packages/core/.perf/measurements.json
+          if-no-files-found: ignore
+
   # Repo/metadata governance checks (release, store listing, locale, workflow)
   governance:
     runs-on: ubuntu-latest
