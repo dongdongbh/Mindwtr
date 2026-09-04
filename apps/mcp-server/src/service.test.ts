@@ -486,6 +486,119 @@ describe('mcp service', () => {
     expect(written[2]).toMatchObject({ kind: 'link', uri: 'obsidian://open?vault=v&file=n' });
   });
 
+  // runCoreWriteWithRetries retries the WHOLE callback (see its comment in service.ts), so the
+  // attachments read must live INSIDE that callback and re-run on every attempt. If it were
+  // read once before the retry loop and closed over (the old bug), a write that lands between
+  // the failed first attempt and the retried second attempt - tombstoning link-1 here - would
+  // be invisible to the retried write, resurrecting link-1 in the row it writes.
+  test('updateTask re-reads stored attachments on every retry attempt', async () => {
+    let receivedUpdateInput: any = null;
+    let getTaskCalls = 0;
+    let updateTaskAttempts = 0;
+    const fakeDb = {} as any;
+    const storedTaskBeforeRace = {
+      id: 't1',
+      title: 'Task',
+      status: 'inbox',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      attachments: [
+        { id: 'link-1', kind: 'link', title: 'Old note', uri: 'https://example.com/old', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+      ],
+    };
+    // Simulates a concurrent write (the app, or a second MCP call) tombstoning link-1 in the
+    // window between the first failed attempt and the retried second attempt.
+    const storedTaskAfterRace = {
+      ...storedTaskBeforeRace,
+      attachments: [
+        { ...storedTaskBeforeRace.attachments[0], deletedAt: '2026-01-01T12:00:00.000Z', updatedAt: '2026-01-01T12:00:00.000Z' },
+      ],
+    };
+    const deps = {
+      openMindwtrDb: async () => ({ db: fakeDb }),
+      closeDb: () => undefined,
+      getTask: () => {
+        getTaskCalls += 1;
+        return getTaskCalls === 1 ? storedTaskBeforeRace : storedTaskAfterRace;
+      },
+      getProject: () => ({ id: 'p1', title: 'Project' }),
+      parseQuickAdd: () => ({ title: '', props: {} }),
+      runCoreService: async (_options: any, fn: any) =>
+        fn({
+          updateTask: async (input: any) => {
+            updateTaskAttempts += 1;
+            if (updateTaskAttempts === 1) throw new Error('SQLITE_BUSY: database is locked');
+            receivedUpdateInput = input;
+            return { id: input.id, title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-02' };
+          },
+        }),
+    };
+    const service = createService({ readonly: false }, deps as any);
+
+    await service.updateTask({ id: 't1', attachments: [{ uri: 'obsidian://open?vault=v&file=n' }] } as any);
+
+    expect(updateTaskAttempts).toBe(2);
+    expect(getTaskCalls).toBe(2);
+    const written = receivedUpdateInput.updates.attachments;
+    // The row already had link-1 tombstoned by the time the retry re-reads it, so the
+    // retried write must keep it tombstoned rather than reviving it from a stale read.
+    const oldLink = written.find((item: any) => item.id === 'link-1');
+    expect(oldLink.deletedAt).toBe('2026-01-01T12:00:00.000Z');
+    const newLink = written.find((item: any) => item.uri === 'obsidian://open?vault=v&file=n');
+    expect(newLink.deletedAt).toBeUndefined();
+  });
+
+  // Same invariant as updateTask above, for updateProject.
+  test('updateProject re-reads stored attachments on every retry attempt', async () => {
+    let receivedUpdateInput: any = null;
+    let getProjectCalls = 0;
+    let updateProjectAttempts = 0;
+    const fakeDb = {} as any;
+    const storedProjectBeforeRace = {
+      id: 'p1',
+      title: 'Project',
+      attachments: [
+        { id: 'link-1', kind: 'link', title: 'Old note', uri: 'https://example.com/old', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+      ],
+    };
+    const storedProjectAfterRace = {
+      ...storedProjectBeforeRace,
+      attachments: [
+        { ...storedProjectBeforeRace.attachments[0], deletedAt: '2026-01-01T12:00:00.000Z', updatedAt: '2026-01-01T12:00:00.000Z' },
+      ],
+    };
+    const deps = {
+      openMindwtrDb: async () => ({ db: fakeDb }),
+      closeDb: () => undefined,
+      getTask: () => ({ id: 't1' }),
+      getProject: () => {
+        getProjectCalls += 1;
+        return getProjectCalls === 1 ? storedProjectBeforeRace : storedProjectAfterRace;
+      },
+      parseQuickAdd: () => ({ title: '', props: {} }),
+      runCoreService: async (_options: any, fn: any) =>
+        fn({
+          updateProject: async (input: any) => {
+            updateProjectAttempts += 1;
+            if (updateProjectAttempts === 1) throw new Error('SQLITE_BUSY: database is locked');
+            receivedUpdateInput = input;
+            return { id: input.id, title: 'Project' };
+          },
+        }),
+    };
+    const service = createService({ readonly: false }, deps as any);
+
+    await service.updateProject({ id: 'p1', attachments: [{ uri: 'obsidian://open?vault=v&file=n' }] } as any);
+
+    expect(updateProjectAttempts).toBe(2);
+    expect(getProjectCalls).toBe(2);
+    const written = receivedUpdateInput.updates.attachments;
+    const oldLink = written.find((item: any) => item.id === 'link-1');
+    expect(oldLink.deletedAt).toBe('2026-01-01T12:00:00.000Z');
+    const newLink = written.find((item: any) => item.uri === 'obsidian://open?vault=v&file=n');
+    expect(newLink.deletedAt).toBeUndefined();
+  });
+
   test('rejects addTask when token values are blank', async () => {
     const fakeDb = {} as any;
     const deps = {

@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- MCP: `mindwtr_update_task` and `mindwtr_update_project` re-read the stored attachments inside the retried write, so a link removed by the app or by another agent while the update was being retried stays removed instead of coming back.
+
 - MCP: `mindwtr_add_task`, `mindwtr_update_task`, `mindwtr_add_project` and `mindwtr_update_project` now refuse a link attachment whose uri points at a network share (`\\host\share`, `//host/share` or `file://host/...`), because opening such a link on Windows makes the desktop contact that host before any check runs. `https://`, `obsidian://`, `file:///` and plain local paths keep working as before.
 
 - Desktop: choosing Reference while processing the inbox now offers the project and area pickers, so a note lands in its project in one step, and the task status menus on rows and in the editor list Reference for every task, so a task inside a project can be turned into a reference without leaving the project. (#1155)

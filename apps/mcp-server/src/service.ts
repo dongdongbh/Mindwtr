@@ -543,13 +543,15 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
     },
     updateTask: async (input) => {
       const updates = buildTaskUpdates(input);
-      if (input.attachments !== undefined) {
-        // Read the SQLite row, not the store's visible list: it carries tombstoned
-        // attachment records, which the written list must keep (see link-attachments.ts).
-        const existing = await withDb((db) => deps.getTask(db, { id: input.id }));
-        updates.attachments = applyLinkAttachments(existing.attachments, input.attachments);
-      }
       return runCoreWriteWithRetries(options, deps, async (core) => {
+        if (input.attachments !== undefined) {
+          // Read the SQLite row, not the store's visible list: it carries tombstoned
+          // attachment records, which the written list must keep (see link-attachments.ts).
+          // Re-read on EVERY attempt (invariant 2 above) so a write racing this one
+          // between attempts is not resurrected or dropped.
+          const existing = await withDb((db) => deps.getTask(db, { id: input.id }));
+          updates.attachments = applyLinkAttachments(existing.attachments, input.attachments);
+        }
         return core.updateTask({ id: input.id, updates });
       });
     },
@@ -576,16 +578,15 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
         });
       }),
     updateProject: async (input) => {
-      const attachments = input.attachments === undefined
-        ? undefined
-        // Same reason as updateTask: the row keeps tombstoned attachment records.
-        : applyLinkAttachments(
-          (await withDb((db) => deps.getProject(db, { id: input.id }))).attachments,
-          input.attachments,
-        );
       return runCoreWriteWithRetries(options, deps, async (core) => {
         const updates: Partial<CoreProject> = {};
-        if (attachments !== undefined) updates.attachments = attachments;
+        if (input.attachments !== undefined) {
+          // Same reason as updateTask: the row keeps tombstoned attachment records.
+          // Re-read on EVERY attempt (invariant 2 above) so a write racing this one
+          // between attempts is not resurrected or dropped.
+          const existing = await withDb((db) => deps.getProject(db, { id: input.id }));
+          updates.attachments = applyLinkAttachments(existing.attachments, input.attachments);
+        }
         if (input.title !== undefined) updates.title = validateProjectTitle(input.title);
         if (input.color !== undefined) updates.color = input.color ?? undefined;
         if (input.status !== undefined) updates.status = parseProjectStatus(input.status);
