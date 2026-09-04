@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, type AppStateStatus, Platform } from 'react-native';
 
-import { flushPendingSave, getInMemorySyncChangeFingerprint, hasActiveMobileNotificationFeature, nameNotifyListener, resolveSyncFailureCooldownMs, useTaskStore } from '@mindwtr/core';
+import { createAutoSyncController, flushPendingSave, getInMemorySyncChangeFingerprint, hasActiveMobileNotificationFeature, nameNotifyListener, useTaskStore, type AutoSyncController } from '@mindwtr/core';
 
 import type { ToastOptions } from '@/contexts/toast-context';
 import { getNotificationPermissionStatus, startMobileNotifications, stopMobileNotifications } from '@/lib/notification-service';
@@ -118,19 +118,10 @@ export function useRootLayoutSyncEffects({
     showToast,
 }: UseRootLayoutSyncEffectsParams) {
     const appState = useRef(AppState.currentState);
-    const lastAutoSyncAt = useRef(0);
-    const lastSyncDurationMs = useRef(0);
-    const syncDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const syncThrottleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const widgetRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const syncInFlight = useRef<Promise<void> | null>(null);
-    const syncPending = useRef(false);
-    const backgroundSyncPending = useRef(false);
     const isActive = useRef(true);
     const lastLoggedAutoSyncError = useRef<string | null>(null);
     const lastLoggedAutoSyncErrorAt = useRef(0);
-    const autoSyncRetryAfter = useRef(0);
-    const consecutiveSyncFailures = useRef(0);
     const notificationPermissionWarningShown = useRef(false);
     const syncCadenceRef = useRef<AutoSyncCadence>(AUTO_SYNC_CADENCE_REMOTE);
     const syncBackendCacheRef = useRef<{ backend: SyncBackend; readAt: number }>({
@@ -143,6 +134,7 @@ export function useRootLayoutSyncEffects({
     const openSyncSettingsRef = useRef(openSyncSettings);
     const openNotificationsSettingsRef = useRef(openNotificationsSettings);
     const syncUiCopyRef = useRef<SyncUiCopy>(buildSyncUiCopy(resolveText));
+    const controllerRef = useRef<AutoSyncController | null>(null);
 
     useEffect(() => {
         showToastRef.current = showToast;
@@ -202,175 +194,118 @@ export function useRootLayoutSyncEffects({
         lastAppStateSyncTriggerAt.current = now;
     }, []);
 
-    const clearSyncThrottleTimer = useCallback(() => {
-        if (!syncThrottleTimer.current) return;
-        clearTimeout(syncThrottleTimer.current);
-        syncThrottleTimer.current = null;
+    const reportAutoSyncFailure = useCallback((error: string) => {
+        const nowMs = Date.now();
+        const shouldLog = error !== lastLoggedAutoSyncError.current
+            || nowMs - lastLoggedAutoSyncErrorAt.current > 10 * 60 * 1000;
+        if (!shouldLog) return;
+        lastLoggedAutoSyncError.current = error;
+        lastLoggedAutoSyncErrorAt.current = nowMs;
+        void logWarn('Auto-sync failed', {
+            scope: 'sync',
+            extra: { error },
+        });
+        const uiCopy = syncUiCopyRef.current;
+        const syncIssueMessage = (() => {
+            switch (classifySyncFailure(error)) {
+                case 'auth':
+                    return uiCopy.syncIssueAuthMessage;
+                case 'permission':
+                    return uiCopy.syncIssuePermissionMessage;
+                case 'rateLimited':
+                    return uiCopy.syncIssueRateLimitedMessage;
+                case 'misconfigured':
+                    return uiCopy.syncIssueMisconfiguredMessage;
+                case 'conflict':
+                    return uiCopy.syncIssueConflictMessage;
+                case 'encryptionState':
+                    return uiCopy.syncIssueEncryptionStateMessage;
+                case 'encryption':
+                    return uiCopy.syncIssueEncryptionMessage;
+                case 'fileLockUnavailable':
+                    return uiCopy.syncIssueFileLockUnavailableMessage;
+                default:
+                    return uiCopy.syncIssueGenericMessage;
+            }
+        })();
+        showToastRef.current({
+            title: uiCopy.syncIssueTitle,
+            message: syncIssueMessage,
+            tone: 'warning',
+            durationMs: 5200,
+            actionLabel: uiCopy.openActionLabel,
+            onAction: () => {
+                openSyncSettingsRef.current();
+            },
+        });
     }, []);
 
-    const runSync = useCallback((minIntervalMs?: number) => {
-        const requestedMinIntervalMs = typeof minIntervalMs === 'number'
-            ? minIntervalMs
-            : syncCadenceRef.current.minIntervalMs;
-        // Explicit 0 (manual sync, app-state transitions) bypasses pacing entirely;
-        // auto triggers stretch the interval when cycles run long on this device.
-        const effectiveMinIntervalMs = requestedMinIntervalMs > 0
-            ? Math.max(
-                requestedMinIntervalMs,
-                Math.min(lastSyncDurationMs.current * ADAPTIVE_SYNC_DURATION_MULTIPLIER, MAX_ADAPTIVE_SYNC_INTERVAL_MS),
-            )
-            : requestedMinIntervalMs;
-        if (!isActive.current) return;
-        if (syncInFlight.current && appState.current !== 'active') {
-            backgroundSyncPending.current = true;
-            syncPending.current = true;
-            return;
-        }
-        if (syncInFlight.current) {
-            return;
-        }
-        // A failed cycle parks the automatic triggers until its cooldown expires,
-        // so a CloudKit throttle is not met with another request on the next
-        // debounce. Pending edits stay queued and the timer below retries once.
-        // Every trigger here is automatic — app-state changes, CloudKit change
-        // notifications, startup — so every one of them waits. Exempting the
-        // explicit-0 callers let a throttled device fire again on the very next
-        // foreground/background switch, which is how testing across two devices
-        // stayed stuck (#948). The user-facing Sync now button does not come
-        // through here; it calls performMobileSync directly and still forces a
-        // run. This matches the desktop controller, where only `manual` sets
-        // bypassFailureCooldown.
-        if (Date.now() < autoSyncRetryAfter.current) {
-            if (!syncThrottleTimer.current) {
-                const waitMs = Math.max(0, autoSyncRetryAfter.current - Date.now());
-                syncThrottleTimer.current = setTimeout(() => {
-                    syncThrottleTimer.current = null;
-                    runSync(0);
-                }, waitMs);
-            }
-            return;
-        }
-        const now = Date.now();
-        if (now - lastAutoSyncAt.current < effectiveMinIntervalMs) {
-            if (!syncThrottleTimer.current) {
-                const waitMs = Math.max(0, effectiveMinIntervalMs - (now - lastAutoSyncAt.current));
-                syncThrottleTimer.current = setTimeout(() => {
-                    syncThrottleTimer.current = null;
-                    runSync(0);
-                }, waitMs);
-            }
-            return;
-        }
-        lastAutoSyncAt.current = now;
-        syncPending.current = false;
-
-        const syncStartedAt = now;
-        const appStateAtSyncStart = appState.current;
-        syncInFlight.current = (async () => {
-            await flushPendingSave().catch(logAppError);
-            const result = await performMobileSync().catch((error) => ({ success: false, error: String(error) }));
-            if (result.success) {
-                autoSyncRetryAfter.current = 0;
-                consecutiveSyncFailures.current = 0;
-                // A successful automatic cycle satisfies the pending work.
-                clearSyncThrottleTimer();
-            }
-            if (!result.success && result.error) {
-                if (isLikelyOfflineSyncError(result.error)) {
-                    return;
+    // One controller for the life of the hook: the shared pacing machine in core,
+    // configured with the mobile policy switches. Everything the controller does
+    // not own — the payload fingerprint, AppState wiring, the per-backend cadence
+    // read, widget and notification recomputes — stays here.
+    const getController = useCallback((): AutoSyncController => {
+        if (controllerRef.current) return controllerRef.current;
+        controllerRef.current = createAutoSyncController({
+            // A rejected cycle must reach the failure cooldown like any other
+            // failed one, so the throw is converted here rather than propagated.
+            performSync: () => performMobileSync().catch((error) => ({ success: false, error: String(error) })),
+            flushPendingSave,
+            reportError: (_label, error) => logAppError(error),
+            isRuntimeActive: () => isActive.current,
+            onSyncFailure: reportAutoSyncFailure,
+            // Being offline is not a backend refusing us: no cooldown, no toast.
+            // A failure with no message carries nothing to back off from either.
+            isIgnorableFailure: (error) => !error || isLikelyOfflineSyncError(error),
+            getCadence: () => syncCadenceRef.current,
+            refreshCadence: refreshSyncCadence,
+            // The fingerprint runs once per quiet period, not per write (#766).
+            shouldSyncOnDebouncedChange: () => {
+                const currentFingerprint = readCurrentSyncChangeFingerprint();
+                const previousFingerprint = lastAutoSyncPayloadFingerprint.current;
+                if (currentFingerprint) {
+                    lastAutoSyncPayloadFingerprint.current = currentFingerprint;
                 }
-                // Honour the delay CloudKit asked for (CKErrorRetryAfterKey);
-                // otherwise back off from the same base the desktop uses (#948).
-                consecutiveSyncFailures.current += 1;
-                autoSyncRetryAfter.current = Date.now() + resolveSyncFailureCooldownMs({
-                    error: result.error,
-                    consecutiveFailures: consecutiveSyncFailures.current,
-                    baseMs: AUTO_SYNC_FAILURE_COOLDOWN_MS,
-                    maxMs: MAX_AUTO_SYNC_FAILURE_COOLDOWN_MS,
-                });
-                // This timer is shared with ordinary pacing. A failure takes
-                // ownership immediately and a later failure replaces it with
-                // the newly-grown deadline, so no lifecycle trigger is needed.
-                clearSyncThrottleTimer();
-                const retryWaitMs = Math.max(0, autoSyncRetryAfter.current - Date.now());
-                syncThrottleTimer.current = setTimeout(() => {
-                    syncThrottleTimer.current = null;
-                    runSync(0);
-                }, retryWaitMs);
-                const nowMs = Date.now();
-                const shouldLog = result.error !== lastLoggedAutoSyncError.current
-                    || nowMs - lastLoggedAutoSyncErrorAt.current > 10 * 60 * 1000;
-                if (shouldLog) {
-                    lastLoggedAutoSyncError.current = result.error;
-                    lastLoggedAutoSyncErrorAt.current = nowMs;
-                    void logWarn('Auto-sync failed', {
-                        scope: 'sync',
-                        extra: { error: result.error },
-                    });
-                    const uiCopy = syncUiCopyRef.current;
-                    const syncIssueMessage = (() => {
-                        switch (classifySyncFailure(result.error)) {
-                            case 'auth':
-                                return uiCopy.syncIssueAuthMessage;
-                            case 'permission':
-                                return uiCopy.syncIssuePermissionMessage;
-                            case 'rateLimited':
-                                return uiCopy.syncIssueRateLimitedMessage;
-                            case 'misconfigured':
-                                return uiCopy.syncIssueMisconfiguredMessage;
-                            case 'conflict':
-                                return uiCopy.syncIssueConflictMessage;
-                            case 'encryptionState':
-                                return uiCopy.syncIssueEncryptionStateMessage;
-                            case 'encryption':
-                                return uiCopy.syncIssueEncryptionMessage;
-                            case 'fileLockUnavailable':
-                                return uiCopy.syncIssueFileLockUnavailableMessage;
-                            default:
-                                return uiCopy.syncIssueGenericMessage;
-                        }
-                    })();
-                    showToastRef.current({
-                        title: uiCopy.syncIssueTitle,
-                        message: syncIssueMessage,
-                        tone: 'warning',
-                        durationMs: 5200,
-                        actionLabel: uiCopy.openActionLabel,
-                        onAction: () => {
-                            openSyncSettingsRef.current();
-                        },
-                    });
-                }
-            }
-        })().finally(() => {
-            syncInFlight.current = null;
-            // Measure the pacing interval from cycle END: a cycle that runs longer
-            // than the interval must not roll straight into the next one (#766).
-            lastSyncDurationMs.current = Date.now() - syncStartedAt;
-            lastAutoSyncAt.current = Date.now();
-            if (appStateAtSyncStart !== 'active' && backgroundSyncPending.current) {
-                backgroundSyncPending.current = false;
-                syncPending.current = true;
-                return;
-            }
-            if (syncPending.current && isActive.current) {
-                runSync(syncCadenceRef.current.minIntervalMs);
-            }
+                return !(currentFingerprint && previousFingerprint && currentFingerprint === previousFingerprint);
+            },
+            adaptivePacing: {
+                durationMultiplier: ADAPTIVE_SYNC_DURATION_MULTIPLIER,
+                maxIntervalMs: MAX_ADAPTIVE_SYNC_INTERVAL_MS,
+            },
+            isSuspended: () => appState.current !== 'active',
+            // Both preserve mobile's existing pacing exactly: the first-change
+            // debounce applies once per foreground session, and a throttle or
+            // cooldown retry that a newer cycle already overtook is dropped.
+            continuousDebounceUntilSuspend: true,
+            skipRetryWhileCycleRunning: true,
+            autoFailureCooldownMs: AUTO_SYNC_FAILURE_COOLDOWN_MS,
+            maxFailureCooldownMs: MAX_AUTO_SYNC_FAILURE_COOLDOWN_MS,
+            // No foreground heartbeat on mobile; background sync is a platform job
+            // (`background-sync-task.ts`), never a JS timer.
+            periodicSyncIntervalMs: null,
         });
-    }, [clearSyncThrottleTimer]);
+        return controllerRef.current;
+    }, [reportAutoSyncFailure, readCurrentSyncChangeFingerprint, refreshSyncCadence]);
 
+    // Every trigger routed through here is automatic — app-state changes, CloudKit
+    // change notifications, startup — so every one of them waits out a failure
+    // cooldown. Exempting them let a throttled device fire again on the very next
+    // foreground/background switch, which is how testing across two devices stayed
+    // stuck (#948). The user-facing Sync now button does not come through here; it
+    // calls performMobileSync directly and still forces a run.
     const requestSync = useCallback((minIntervalMs?: number) => {
-        syncPending.current = true;
+        const controller = getController();
         if (typeof minIntervalMs === 'number') {
-            runSync(minIntervalMs);
+            void controller.requestAutoSync(minIntervalMs, 'external').catch(logAppError);
             return;
         }
         void refreshSyncCadence()
-            .then((cadence) => runSync(cadence.minIntervalMs))
+            .then(() => controller.requestAutoSync(undefined, 'external'))
             .catch(logAppError);
-    }, [refreshSyncCadence, runSync]);
+    }, [getController, refreshSyncCadence]);
 
     useEffect(() => {
+        const controller = getController();
         void refreshSyncCadence().catch(logAppError);
         reconcileBackgroundSyncTask();
         lastAutoSyncPayloadFingerprint.current = readCurrentSyncChangeFingerprint();
@@ -388,46 +323,23 @@ export function useRootLayoutSyncEffects({
                 // Manual sync bypasses this hook, but its successful status
                 // update must still cancel an automatic retry left by a prior
                 // failure.
-                autoSyncRetryAfter.current = 0;
-                consecutiveSyncFailures.current = 0;
-                clearSyncThrottleTimer();
+                controller.notifyExternalSyncSuccess();
             }
             // Cheap check first: the fingerprint reads a small tuple digest, not the
             // whole dataset, but it still must not run on every store update (#766).
             // Data writes always bump lastDataChangeAt, so skipping the fingerprint
             // here is safe.
             if (state.lastDataChangeAt === prevState.lastDataChangeAt) return;
-            const cadence = syncCadenceRef.current;
-            const hadTimer = !!syncDebounceTimer.current;
-            if (syncDebounceTimer.current) {
-                clearTimeout(syncDebounceTimer.current);
-            }
-            const debounceMs = hadTimer ? cadence.debounceContinuousChangeMs : cadence.debounceFirstChangeMs;
-            syncDebounceTimer.current = setTimeout(() => {
-                if (!isActive.current) return;
-                // The fingerprint dedupe runs here, once per quiet period, so a burst
-                // of edits pays for the tuple digest once instead of on every write
-                // (#766).
-                const currentFingerprint = readCurrentSyncChangeFingerprint();
-                const previousFingerprint = lastAutoSyncPayloadFingerprint.current;
-                if (currentFingerprint) {
-                    lastAutoSyncPayloadFingerprint.current = currentFingerprint;
-                }
-                if (currentFingerprint && previousFingerprint && currentFingerprint === previousFingerprint) return;
-                requestSync();
-            }, debounceMs);
+            controller.handleDataChange();
         }));
 
         return () => {
             unsubscribe();
-            if (syncDebounceTimer.current) {
-                clearTimeout(syncDebounceTimer.current);
-            }
-            clearSyncThrottleTimer();
         };
-    }, [clearSyncThrottleTimer, readCurrentSyncChangeFingerprint, requestSync, refreshSyncCadence]);
+    }, [getController, readCurrentSyncChangeFingerprint, refreshSyncCadence]);
 
     useEffect(() => {
+        const controller = getController();
         const handleAppStateChange = (nextAppState: AppStateStatus) => {
             if (!isActive.current) return;
             const previousState = appState.current;
@@ -435,17 +347,16 @@ export function useRootLayoutSyncEffects({
             const nextInactiveOrBackground = nextAppState === 'inactive' || nextAppState === 'background';
             if (wasInactiveOrBackground && nextAppState === 'active') {
                 reconcileBackgroundSyncTask();
-                if (backgroundSyncPending.current) {
-                    backgroundSyncPending.current = false;
-                    requestSync(0);
+                if (controller.takePendingSuspendedRequest()) {
+                    void controller.requestAutoSync(0, 'app-state-resume').catch(logAppError);
                 } else {
                     void refreshSyncCadence()
                         .then((cadence) => {
                             const now = Date.now();
-                            if (now - lastAutoSyncAt.current > cadence.foregroundMinIntervalMs) {
+                            if (now - controller.getLastAutoSyncAt() > cadence.foregroundMinIntervalMs) {
                                 if (shouldDedupeAppStateSyncTrigger(now)) return;
                                 markAppStateSyncTrigger(now);
-                                requestSync(0);
+                                void controller.requestAutoSync(0, 'app-state-active').catch(logAppError);
                             }
                         })
                         .catch(logAppError);
@@ -488,21 +399,12 @@ export function useRootLayoutSyncEffects({
             }
             if (previousState === 'active' && nextInactiveOrBackground) {
                 reconcileBackgroundSyncTask();
-                if (syncDebounceTimer.current) {
-                    clearTimeout(syncDebounceTimer.current);
-                    syncDebounceTimer.current = null;
-                }
-                // Normal pacing should not block the background attempt, but a
-                // failure retry must keep its owned deadline even if this
-                // lifecycle transition is deduped.
-                if (autoSyncRetryAfter.current === 0) {
-                    clearSyncThrottleTimer();
-                }
+                controller.handleSuspend();
                 abortMobileSync();
                 const now = Date.now();
                 if (!shouldDedupeAppStateSyncTrigger(now)) {
                     markAppStateSyncTrigger(now);
-                    requestSync(0);
+                    void controller.requestAutoSync(0, 'app-state-background').catch(logAppError);
                 }
             }
             appState.current = nextAppState;
@@ -510,28 +412,24 @@ export function useRootLayoutSyncEffects({
 
         const subscription = AppState.addEventListener('change', handleAppStateChange);
         const unsubscribeCloudKit = subscribeToCloudKitChanges(() => {
-            requestSync(0);
+            void controller.requestAutoSync(0, 'cloudkit').catch(logAppError);
         });
 
         return () => {
             subscription?.remove();
             unsubscribeCloudKit();
             isActive.current = false;
-            if (syncDebounceTimer.current) {
-                clearTimeout(syncDebounceTimer.current);
-            }
-            clearSyncThrottleTimer();
+            controller.dispose();
+            controllerRef.current = null;
             if (widgetRefreshTimer.current) {
                 clearTimeout(widgetRefreshTimer.current);
             }
-            syncInFlight.current = null;
             flushPendingSave().catch(logAppError);
         };
     }, [
-        clearSyncThrottleTimer,
+        getController,
         markAppStateSyncTrigger,
         refreshSyncCadence,
-        requestSync,
         shouldDedupeAppStateSyncTrigger,
     ]);
 

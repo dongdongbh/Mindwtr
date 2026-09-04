@@ -18,6 +18,7 @@ import {
     DONATION_PROMPT_ANNOUNCEMENT,
     addBreadcrumb,
     configureDateFormatting,
+    createAutoSyncController,
     flushPendingSave,
     getAnnouncementDismissalStorageKey,
     isSupportedLanguage,
@@ -71,7 +72,6 @@ import { syncNativeProxyUrl } from './lib/tauri-http';
 import { persistLastView, readRestorableLastView } from './lib/session-restore';
 import { readViewFromUrl, writeViewToUrl } from './lib/view-url-params';
 import { logError, logInfo } from './lib/app-log';
-import { createDesktopAutoSyncController } from './lib/auto-sync-controller';
 import {
     createEmailCaptureController,
     registerEmailCaptureController,
@@ -869,7 +869,7 @@ function App() {
             }
         };
 
-        const autoSyncController = createDesktopAutoSyncController({
+        const autoSyncController = createAutoSyncController({
             canSync: () => canDesktopAutoSync(SyncService),
             syncEncryptionSuspension: async () => {
                 // Both states are terminal until the user acts, so neither may keep auto-sync

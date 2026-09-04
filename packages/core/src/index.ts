@@ -44,6 +44,7 @@ export * from './sync-log-utils';
 export * from './sync-client-helpers';
 export * from './sync-runtime-utils';
 export * from './sync-orchestrator';
+export * from './auto-sync-controller';
 export * from './sync-configuration-transaction';
 export * from './sync-service-utils';
 export * from './sync-run';
