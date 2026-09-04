@@ -425,8 +425,9 @@ const assertActivationAttachmentsProven = (
     noLocalBytesIds: ReadonlySet<string>,
     backend: SyncBackend,
     originalCloudKeys: ReadonlyMap<string, string>,
-): void => {
+): string[] => {
     const resolved = new Set<string>();
+    const deferred: string[] = [];
     const owners: Array<['task' | 'project', { title?: string; deletedAt?: string; attachments?: Attachment[] }]> = [
         ...data.tasks.map((task) => ['task', task] as ['task', typeof task]),
         ...data.projects.map((project) => ['project', project] as ['project', typeof project]),
@@ -463,6 +464,23 @@ const assertActivationAttachmentsProven = (
                 if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
                 continue;
             }
+            // File Sync: a blob the folder does not hold yet is not a verdict. A
+            // replicator (Syncthing, a mounted drive) can deliver it after the
+            // switch, and this device holds no bytes that waiting could lose. Keep
+            // the key, leave the record missing for a later cycle to download,
+            // instead of refusing the folder forever (a fresh desktop joining a
+            // folder whose attachments/ had not arrived, 2026-09-04 feedback).
+            if (
+                backend === 'file'
+                && noLocalBytesIds.has(attachment.id)
+                && attachment.cloudKey
+                && attachment.localStatus === 'missing'
+                && attachment.pendingContentUpload !== true
+            ) {
+                deferred.push(attachment.id);
+                if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
+                continue;
+            }
             if (
                 !attachment.cloudKey
                 || attachment.localStatus !== 'available'
@@ -478,6 +496,7 @@ const assertActivationAttachmentsProven = (
     if (resolved.size !== expectedIds.size) {
         throw new Error(`Candidate attachment proof incomplete: expected ${expectedIds.size}, proved ${resolved.size}`);
     }
+    return deferred;
 };
 
 class SharedSyncRunMachine {
@@ -1443,7 +1462,7 @@ class SharedSyncRunMachine {
                     ? result
                     : fallbackRetry.data;
             }
-            assertActivationAttachmentsProven(
+            const deferredIds = assertActivationAttachmentsProven(
                 provenData,
                 activationSnapshot.expectedIds,
                 activationSnapshot.metadataOnlyIds,
@@ -1451,6 +1470,17 @@ class SharedSyncRunMachine {
                 this.backend,
                 activationSnapshot.originalCloudKeys,
             );
+            if (deferredIds.length > 0) {
+                this.notifier.logWarningExtra(
+                    'Sync folder activation accepted attachments the folder does not hold yet',
+                    {
+                        releaseCheck: '1.2.8/file-activation-absent-blobs',
+                        backend: this.backend,
+                        deferred: String(deferredIds.length),
+                        ids: deferredIds.slice(0, 5).join(','),
+                    },
+                );
+            }
             this.ensureLocalSnapshotFresh();
             this.notifier.onDiagnostic?.({
                 event: 'attachments-prepare-complete',

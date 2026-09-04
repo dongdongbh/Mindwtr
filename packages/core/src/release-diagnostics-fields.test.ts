@@ -21,6 +21,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'decision', 'registered', 'storedInterval', 'interval', 'appState',
     // desktop-reminder-fired / desktop-notification-path (apps/desktop/src/lib/notification-service.tsx)
     'kind', 'entity', 'fireAt', 'path', 'error',
+    'deferred', 'ids',
 ];
 
 describe('release diagnostics field names', () => {

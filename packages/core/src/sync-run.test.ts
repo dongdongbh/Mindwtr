@@ -2523,6 +2523,78 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
         ]);
     });
 
+    it('activates a sync folder whose blob has not arrived yet when this device holds no bytes', async () => {
+        // A fresh desktop joins a Syncthing folder that carries data.json but not
+        // attachments/ yet: the file backend finds no blob, tombstones nothing, and
+        // leaves the record keyed + missing. Refusing here strands the folder
+        // forever; the record stays downloadable for a later cycle instead.
+        const remoteTask = createTask('t-absent-blob', 'Blob not synced yet');
+        remoteTask.attachments = [fileAttachment('attachment-absent', 'Arrives later')];
+        const syncAttachments = vi.fn(async (data: AppData) => data);
+        const { harness, io, run } = createHarness({
+            backend: 'file',
+            local: createData(),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
+        // The key survives (localStatus is device-local and never written remotely)
+        // and nothing was tombstoned, so a later cycle can still download it.
+        expect(harness.remote?.tasks[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'attachment-absent',
+                cloudKey: 'attachments/attachment-absent.txt',
+            }),
+        ]);
+        expect(harness.remote?.tasks[0]?.attachments?.[0]?.deletedAt).toBeUndefined();
+        expect(harness.warnings).toContainEqual(
+            expect.objectContaining({ message: 'Sync folder activation accepted attachments the folder does not hold yet' }),
+        );
+    });
+
+    it('still refuses a sync folder whose blob is absent when this device held bytes for the record', async () => {
+        const localTask = createTask('t-held-absent', 'Held here, absent there');
+        localTask.attachments = [{
+            id: 'attachment-held-absent',
+            kind: 'file',
+            title: 'Held locally',
+            uri: '/managed/held-absent.txt',
+            localStatus: 'available',
+            fileHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const remoteTask = cloneAppData(createData([localTask])).tasks[0]!;
+        remoteTask.attachments![0] = {
+            ...remoteTask.attachments![0]!,
+            uri: '',
+            cloudKey: 'attachments/attachment-held-absent.txt',
+            fileHash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            localStatus: 'missing',
+        };
+        const syncAttachments = vi.fn(async (data: AppData) => data);
+        const { io, run } = createHarness({
+            backend: 'file',
+            local: createData([localTask]),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            error: expect.stringContaining('Candidate attachment proof failed for attachment-held-absent'),
+        });
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
     it('refuses activation when the trial tombstones a record this device held bytes for', async () => {
         const localTask = createTask('t-held-bytes', 'Held bytes');
         localTask.attachments = [{
