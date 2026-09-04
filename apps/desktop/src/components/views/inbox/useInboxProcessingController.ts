@@ -163,7 +163,7 @@ export function useInboxProcessingController({
         areas,
         settings,
     });
-    const { showAreaField, showContextsField, showTagsField } = visibility;
+    const { showAreaField, showContextsField, showProjectField, showTagsField } = visibility;
     const quickAddParseOptions = useMemo(
         () => buildQuickAddParseOptions(settings, { tasks, people }),
         [people, settings, tasks],
@@ -432,7 +432,10 @@ export function useInboxProcessingController({
             return;
         }
         if (action === 'reference') {
-            if (processingMode === 'guided' && (showContextsField || showTagsField)) {
+            if (
+                processingMode === 'guided'
+                && (showContextsField || showTagsField || showProjectField || showAreaField)
+            ) {
                 goToStep('reference');
                 return;
             }
@@ -450,7 +453,9 @@ export function useInboxProcessingController({
         goToStep,
         processingMode,
         processingTask,
+        showAreaField,
         showContextsField,
+        showProjectField,
         showTagsField,
     ]);
 

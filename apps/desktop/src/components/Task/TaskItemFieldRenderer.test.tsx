@@ -927,6 +927,23 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(setField).toHaveBeenCalledWith('status', 'waiting');
     });
 
+    // #1155: Reference used to appear only once the task already was one, so a
+    // task inside a project could not be turned into a reference.
+    it('offers Reference as a status choice for a task that is not one yet', () => {
+        const setField = vi.fn();
+
+        const { getByRole } = render(
+            <TaskItemFieldRenderer
+                fieldId="status"
+                {...createProps({ setField })}
+            />
+        );
+
+        fireEvent.click(getByRole('button', { name: 'Reference' }));
+
+        expect(setField).toHaveBeenCalledWith('status', 'reference');
+    });
+
     it('changes status pill choices with arrow keys', () => {
         const setField = vi.fn();
 

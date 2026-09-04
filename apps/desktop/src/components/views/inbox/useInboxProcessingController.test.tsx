@@ -140,6 +140,37 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         expect(updateTask).not.toHaveBeenCalled();
     });
 
+    // #1155: Reference has to reach its organization step on the project/area
+    // pickers alone, or hiding the context step makes them unreachable.
+    it('routes guided Reference through organization controls when only containers are shown', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask, {
+            gtd: { inboxProcessing: { contextStepEnabled: false } },
+        } as Parameters<typeof useInboxProcessingController>[0]['settings']);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleNotActionable('reference');
+        });
+
+        expect(result.current.wizardProps.processingStep).toBe('reference');
+        expect(updateTask).not.toHaveBeenCalled();
+
+        act(() => {
+            result.current.wizardProps.setField('projectId', 'p1');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleConfirmReference();
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'reference',
+            projectId: 'p1',
+        }));
+    });
+
     it('keeps picked organization fields when delegated to Waiting', async () => {
         const updateTask = vi.fn(async () => ({ success: true }));
         const { result } = renderController(updateTask);

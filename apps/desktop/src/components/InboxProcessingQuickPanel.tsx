@@ -605,9 +605,12 @@ export function InboxProcessingQuickPanel({
                     </div>
                 ) : null}
 
-                {showReferenceOrganizationFields && organizationTokenFields ? (
+                {showReferenceOrganizationFields && (organizationContainerFields || organizationTokenFields) ? (
                     <div className="rounded-lg border border-status-reference/20 bg-status-reference/5 p-3">
-                        {organizationTokenFields}
+                        <div className="space-y-3">
+                            {organizationContainerFields}
+                            {organizationTokenFields}
+                        </div>
                     </div>
                 ) : null}
 

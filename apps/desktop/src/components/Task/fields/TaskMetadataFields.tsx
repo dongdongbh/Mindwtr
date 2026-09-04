@@ -577,7 +577,7 @@ export function StatusField({
         { value: 'next', label: t('status.next') },
         { value: 'waiting', label: t('status.waiting') },
         { value: 'someday', label: t('status.someday') },
-        ...(value === 'reference' ? [{ value: 'reference' as const, label: t('status.reference') }] : []),
+        { value: 'reference', label: t('status.reference') },
         { value: 'done', label: t('status.done'), onContextMenu: onRequestBackdatedComplete },
         { value: 'archived', label: t('status.archived') },
     ];

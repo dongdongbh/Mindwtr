@@ -843,9 +843,13 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
 
             {(processingStep === 'context' || processingStep === 'reference') && (
                 <div className="space-y-4">
-                    <p className="text-center text-sm text-muted-foreground">
-                        {t('process.contextDesc')} {t('process.selectMultipleHint')}
-                    </p>
+                    {showContextsField || showTagsField ? (
+                        <p className="text-center text-sm text-muted-foreground">
+                            {t('process.contextDesc')} {t('process.selectMultipleHint')}
+                        </p>
+                    ) : null}
+
+                    {isReferenceOrganizationStep ? projectAssignmentFields : null}
 
                     {((showContextsField && selectedContexts.length > 0) || (showTagsField && selectedTags.length > 0)) && (
                         <div className="flex flex-wrap gap-2 justify-center p-3 bg-primary/10 rounded-lg">
