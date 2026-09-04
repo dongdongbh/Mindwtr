@@ -1841,12 +1841,12 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
     if !recurrence_val.is_null() {
         map.insert("recurrence".to_string(), recurrence_val);
     }
-    // Canonical wire form is `true` or ABSENT, never `false` (the merge rule in
+    // Canonical wire form is `true` only with recurrence, otherwise ABSENT (the merge rule in
     // packages/core/src/sync-normalization.ts). Reading a stored 0 (or NULL) back
     // as absent keeps this reader in step with the JS codec's fromPresentBool and
     // absorbs every legacy row without a migration.
     if let Ok(val) = row.get::<_, i64>("showFutureRecurrence") {
-        if val != 0 {
+        if val != 0 && map.contains_key("recurrence") {
             map.insert("showFutureRecurrence".to_string(), Value::Bool(true));
         }
     }
@@ -5091,8 +5091,11 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = OFF;")
             .expect("should disable fixture foreign keys");
 
-        let write = |id: &str, value: Option<bool>| {
+        let write = |id: &str, value: Option<bool>, has_recurrence: bool| {
             let mut task = fixture.clone();
+            if !has_recurrence {
+                task.remove("recurrence");
+            }
             task.insert("id".to_string(), Value::String(id.to_string()));
             match value {
                 Some(flag) => {
@@ -5111,9 +5114,21 @@ mod tests {
                 .cloned()
         };
 
-        write("sfr-true", Some(true));
-        write("sfr-false", Some(false));
-        write("sfr-absent", None);
+        write("sfr-true", Some(true), true);
+        write("sfr-false", Some(false), true);
+        write("sfr-absent", None, true);
+        write("sfr-no-recurrence", Some(true), false);
+        // Pin the persisted shape produced by an external writer: the flag is
+        // still 1 even though recurrence is SQL NULL.
+        let stored: (i64, Option<String>) = conn
+            .query_row(
+                "SELECT showFutureRecurrence, recurrence FROM tasks WHERE id = ?1",
+                ["sfr-no-recurrence"],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("should read stored recurrence columns");
+        assert_eq!(stored, (1, None));
+        assert_eq!(read("sfr-no-recurrence"), None);
 
         assert_eq!(read("sfr-true"), Some(Value::Bool(true)));
         // Stored 0, and every legacy row already on disk, read back ABSENT.

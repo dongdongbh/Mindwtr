@@ -219,6 +219,7 @@ export const taskToSqliteRow = (task: Task): unknown[] =>
     sqliteRowFromColumnValues(TASK_SQLITE_COLUMNS, taskColumnValues(task));
 
 export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
+    const recurrence = fromJson<unknown>(row.recurrence, null) as Task['recurrence'];
     const orderNumRaw = row.orderNum;
     const order = orderNumRaw === null || orderNumRaw === undefined ? undefined : Number(orderNumRaw);
     return {
@@ -232,9 +233,9 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
         startTime: fromOptional(row.startTime as string | null),
         relativeStartOffset: fromJson<unknown>(row.relativeStartOffset, undefined) as Task['relativeStartOffset'],
         dueDate: fromOptional(row.dueDate as string | null),
-        recurrence: fromJson<unknown>(row.recurrence, null) as Task['recurrence'],
-        // `true | undefined`, never `false` — see fromPresentBool.
-        showFutureRecurrence: fromPresentBool(row.showFutureRecurrence),
+        recurrence,
+        // `true` only with recurrence, otherwise absent — see sync-normalization.ts.
+        showFutureRecurrence: recurrence ? fromPresentBool(row.showFutureRecurrence) : undefined,
         pushCount: row.pushCount === null || row.pushCount === undefined ? undefined : Number(row.pushCount),
         repeatReminderMinutes: row.repeatReminderMinutes === null || row.repeatReminderMinutes === undefined
             ? undefined

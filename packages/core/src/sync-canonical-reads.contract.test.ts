@@ -30,7 +30,7 @@
  */
 import { performance } from 'node:perf_hooks';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mergeAppDataWithStats, performSyncCycle } from './sync';
+import { mergeAppData, mergeAppDataWithStats, performSyncCycle } from './sync';
 import { parseSyncDocument, toRemoteSyncDocument } from './sync-document';
 import { purgeExpiredTombstones } from './sync-tombstones';
 import { validateMergedSyncData } from './sync-normalization';
@@ -612,6 +612,36 @@ describe('canonical local reads contract', () => {
         const changed = results.filter((entry) => !entry.identical);
         expect(changed.map((entry) => entry.label)).toEqual([]);
     }, 120_000);
+
+    const persistTaskPatchAndRead = async (updates: Partial<Task>): Promise<AppData> => {
+        resetForTests();
+        useTaskStore.setState({
+            tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
+            isLoading: false, error: null,
+            _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
+            _tasksById: new Map(), _projectsById: new Map(), _sectionsById: new Map(),
+            _areasById: new Map(), _peopleById: new Map(),
+            lastDataChangeAt: 0,
+        });
+        let saved: AppData | undefined;
+        setStorageAdapter({
+            getData: async () => throughLocalStorage({ ...emptyData(), tasks: [task('field-task')] }),
+            saveData: async (data) => { saved = structuredClone(data); },
+        });
+        await useTaskStore.getState().fetchData({ silent: true });
+        await useTaskStore.getState().updateTask('field-task', updates);
+        await flushPendingSave();
+        if (!saved) throw new Error('The field update did not persist a snapshot');
+        return throughLocalStorage(saved);
+    };
+
+    it('reads showFutureRecurrence canonically after a store write without recurrence', async () => {
+        const readBack = await persistTaskPatchAndRead({ showFutureRecurrence: true });
+
+        expect(readBack.tasks[0].recurrence).toBeFalsy();
+        expect(readBack.tasks[0].showFutureRecurrence).toBeUndefined();
+        expect(remoteBytes(readBack)).toBe(remoteBytes(mergeAppData(readBack, emptyData())));
+    });
 
     // -----------------------------------------------------------------------
     // Part 2: every store write action, driven off the store's own action map
