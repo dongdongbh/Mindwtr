@@ -850,7 +850,7 @@ describe('useSyncSettings cloud token validation', () => {
 
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
         expect(showToast).toHaveBeenCalledWith(
-            'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+            'Another Mindwtr device is holding this sync location for a moment. Sync will retry on its own.',
             'info',
             6000,
         );
