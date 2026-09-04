@@ -374,6 +374,37 @@ describe('TimelineView (#1111)', () => {
         expect(barFor('oneday')?.style.width).toBe('10px');
     });
 
+    it('opens centered on today and re-centers when the zoom changes', () => {
+        const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+        const scrollLeft = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollLeft');
+        const positions = new WeakMap<Element, number>();
+        Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1000 });
+        Object.defineProperty(Element.prototype, 'scrollLeft', {
+            configurable: true,
+            get() { return positions.get(this) ?? 0; },
+            set(value: number) { positions.set(this, value); },
+        });
+        try {
+            // 200 days before today through 150 after: wider than the pane at every zoom.
+            setStore({
+                tasks: [
+                    makeTask({ id: 'past', title: 'Past', startTime: iso(-200), dueDate: iso(-190) }),
+                    makeTask({ id: 'future', title: 'Future', startTime: iso(100), dueDate: iso(150) }),
+                ],
+            });
+            renderTimeline();
+            const scroller = screen.getByTestId('timeline-scroller');
+            // Week zoom is 12px per day: today sits 2400px in, centered in a 1000px pane past the 224px gutter.
+            expect(scroller.scrollLeft).toBe(224 + 200 * 12 - 500);
+            fireEvent.click(screen.getByRole('button', { name: 'Day' }));
+            expect(scroller.scrollLeft).toBe(224 + 200 * 32 - 500);
+        } finally {
+            if (clientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidth);
+            else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+            if (scrollLeft) Object.defineProperty(Element.prototype, 'scrollLeft', scrollLeft);
+        }
+    });
+
     it('marks today and shows the empty state when nothing is dated', () => {
         setStore({ tasks: [makeTask({ id: 'dated', title: 'Dated', dueDate: iso(1) })] });
         const { unmount } = renderTimeline();

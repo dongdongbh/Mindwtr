@@ -529,6 +529,16 @@ export function TimelineView() {
         scroller.scrollLeft = Math.max(0, GUTTER_WIDTH + todayLeft - scroller.clientWidth / 2);
     }, [todayLeft, todayVisible]);
 
+    // Open on today and re-center whenever the zoom changes, once the pane is
+    // measured (#1111). Data edits never re-center: a user who scrolled away
+    // stays where they are.
+    const centeredZoomRef = React.useRef<TimelineZoom | null>(null);
+    React.useLayoutEffect(() => {
+        if (viewportWidth === 0 || centeredZoomRef.current === zoom) return;
+        centeredZoomRef.current = zoom;
+        scrollToToday();
+    }, [scrollToToday, viewportWidth, zoom]);
+
     const showEarlierWindow = React.useCallback(() => {
         if (!range || earlierOmitted === 0) return;
         setWindowStart(addDays(range.from, -MAX_SPAN_DAYS));
@@ -783,7 +793,7 @@ export function TimelineView() {
                             // only scrolls once they outgrow the viewport.
                             <div className="min-h-0 flex-1 pb-4">
                         <div className="flex max-h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-                            <div ref={scrollRef} className="min-h-0 overflow-auto">
+                            <div ref={scrollRef} data-testid="timeline-scroller" className="min-h-0 overflow-auto">
                                 <div className="relative flex flex-col" style={{ width: contentWidth }}>
                                     <div
                                         className="sticky top-0 z-30 flex border-b border-border bg-card"
