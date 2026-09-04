@@ -91,16 +91,16 @@ Selection was automatic: every HIGH-confidence actionable finding from the Phase
 
 | # | Plan | Findings | Effort | Status |
 |---|------|----------|--------|--------|
-| 067 | deferred-remote-write-outcome | BUG-01 | S | TODO |
-| 068 | app-readme-drift | DOCS-01..05 (five commits) | S | TODO |
-| 069 | delete-unused-process-inbox-helper | TEST-04 | S | TODO |
-| 070 | mobile-weekly-review-test-unstub | TEST-01 | M | TODO |
-| 071 | e2e-gtd-loops | TEST-02 | M | TODO |
-| 072 | axe-contrast-gate-themes | TEST-03 | M | TODO |
-| 073 | desktop-overlay-derived-state | PERF-01, PERF-03 (two commits) | S | TODO |
-| 074 | cleartext-banner-polling | PERF-02 | S | TODO |
-| 075 | ci-core-job-split | DX-01 | S | TODO |
-| 076 | dx-batch-vite-typecheck-perf-record | DX-03, DX-04, DX-02 (three commits; after 075) | S | TODO |
+| 067 | deferred-remote-write-outcome | BUG-01 | S | DONE (84d5ea4ed; post-switch deferred case keeps B4's wording as an info toast) |
+| 068 | app-readme-drift | DOCS-01..05 (five commits) | S | DONE (dd4f268ed, 02a48e494, 9c44f7e6f, 1950bbc90, cc8aecaa7) |
+| 069 | delete-unused-process-inbox-helper | TEST-04 | S | DONE (f7c480f97) |
+| 070 | mobile-weekly-review-test-unstub | TEST-01 | M | DONE (69687b2d2; mutation-checked against core) |
+| 071 | e2e-gtd-loops | TEST-02 | M | DONE (2f6232541, c71daa570, b476316e2) |
+| 072 | axe-contrast-gate-themes | TEST-03 | M | DONE (eee154f94; allowlist keyed theme·rule·colour pair, 21 pre-existing violations in 7 themes) |
+| 073 | desktop-overlay-derived-state | PERF-01, PERF-03 (two commits) | S | DONE (71ab902bc, becc04eed) |
+| 074 | cleartext-banner-polling | PERF-02 | S | DONE (c1282df4d) |
+| 075 | ci-core-job-split | DX-01 | S | DONE (a545e540c) |
+| 076 | dx-batch-vite-typecheck-perf-record | DX-03, DX-04, DX-02 (three commits; after 075) | S | DONE (22c84e485, b9d22254b, 2f2f6cb93) |
 
 Fixed directly during the loop without a plan (see the loop ledger): BUG-R1 mobile attachment timers (c9541342e) and the thirty Phase 1 findings.
 
