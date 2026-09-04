@@ -79,6 +79,29 @@ describe('buildMacWidgetPayload', () => {
         expect(payload.items.map((item) => item.id)).toEqual(['step-1']);
     });
 
+    it('gives the sequential project slot to the later step that is due today', () => {
+        // The widget must name the same next action the Focus screen does
+        // (#1090). Selecting by chain order alone showed 'step-1' here.
+        const project = makeProject({ id: 'seq-project', isSequential: true });
+        const dueToday = new Date();
+        dueToday.setHours(17, 0, 0, 0);
+        const data = makeData(
+            [
+                makeTask({ id: 'step-1', status: 'next', projectId: 'seq-project', order: 0 }),
+                makeTask({
+                    id: 'step-3',
+                    status: 'next',
+                    projectId: 'seq-project',
+                    order: 2,
+                    dueDate: dueToday.toISOString(),
+                }),
+            ],
+            [project],
+        );
+        const payload = buildMacWidgetPayload(data, 'en', false);
+        expect(payload.items.map((item) => item.id)).toEqual(['step-3']);
+    });
+
     it('caps the item list at MAC_WIDGET_MAX_ITEMS', () => {
         const tasks = Array.from({ length: MAC_WIDGET_MAX_ITEMS + 5 }, (_, index) =>
             makeTask({ id: `task-${index}`, status: 'next' }));

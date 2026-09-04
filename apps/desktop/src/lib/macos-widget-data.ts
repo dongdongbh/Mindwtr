@@ -1,12 +1,12 @@
 /**
  * Builds the JSON payload the macOS WidgetKit "Tasks" widget reads (#1054).
  *
- * This mirrors the shape and "today focus" selection logic of
- * `apps/mobile/lib/widget-data.ts` (`buildWidgetPayload`) so the Mac widget
- * looks and behaves like the iOS one, but is its own small module rather than
- * a shared import: the mobile module depends on `react-native-android-widget`
- * (for `ColorProp`) and AsyncStorage, neither of which exist in the desktop
- * runtime, and moving it into `@mindwtr/core` was explicitly out of scope.
+ * The "today focus" selection itself lives in core
+ * (`computeTodayFocusTasks`), shared with the iOS/Android builder so both
+ * widgets and the Focus screens name the same next action. Only the payload
+ * shaping stays here: the mobile builder depends on
+ * `react-native-android-widget` (for `ColorProp`) and AsyncStorage, neither of
+ * which exists in the desktop runtime.
  *
  * Two deliberate shape differences from the iOS payload:
  *  - No `focusUri` / `quickCaptureUri`. The desktop app registers no
@@ -21,16 +21,13 @@ import {
     type AppData,
     type AppTheme,
     type Language,
-    getSequentialFirstTaskIds,
+    computeTodayFocusTasks,
     getTranslationsSync,
     isTaskActionable,
     isTaskInActiveProject,
     loadTranslations,
     resolveTaskSortByForFeatures,
     resolveThemeColorScheme,
-    safeParseDate,
-    safeParseDueDate,
-    sortTasksBy,
     type TaskSortBy,
 } from '@mindwtr/core';
 
@@ -105,78 +102,6 @@ const resolveMacWidgetPalette = (themeMode: string | undefined, systemIsDark: bo
     return isDark ? DARK_PALETTE : LIGHT_PALETTE;
 };
 
-// Ported from apps/mobile/lib/widget-data.ts's computeTodayFocusTasks so the
-// Mac widget shows the same "Today" selection: starred tasks first, then
-// next actions due/starting today or otherwise actionable, respecting
-// sequential-project gating. Kept in sync manually -- there is no shared
-// home for this without moving it into core, which is out of scope for #1054.
-function computeTodayFocusTasks(
-    activeTasks: AppData['tasks'],
-    projects: AppData['projects'],
-    widgetSort: TaskSortBy,
-    startOfToday: Date,
-    endOfToday: Date,
-): { starredTasks: AppData['tasks']; focusTasks: AppData['tasks'] } {
-    const sequentialProjectIds = new Set(
-        projects.filter((project) => project.isSequential && !project.deletedAt).map((project) => project.id)
-    );
-    const sequentialWithinSectionProjectIds = new Set(
-        projects
-            .filter((project) => project.isSequential && project.sequentialScope === 'section' && !project.deletedAt)
-            .map((project) => project.id)
-    );
-
-    const isPlannedForFuture = (task: AppData['tasks'][number]) => {
-        const start = safeParseDate(task.startTime);
-        return Boolean(start && start > endOfToday);
-    };
-    const isScheduleCandidate = (task: AppData['tasks'][number]) => {
-        const due = safeParseDueDate(task.dueDate);
-        const start = safeParseDate(task.startTime);
-        const startsToday = Boolean(start && start >= startOfToday && start <= endOfToday);
-        return Boolean(due && due <= endOfToday) || startsToday;
-    };
-
-    const sequentialFirstTaskIds = getSequentialFirstTaskIds(
-        activeTasks.filter((task) => (
-            task.status === 'waiting'
-            || (task.status === 'next' && (!isPlannedForFuture(task) || isScheduleCandidate(task)))
-        )),
-        sequentialProjectIds,
-        { sectionScopedProjectIds: sequentialWithinSectionProjectIds },
-    );
-    const isSequentialBlocked = (task: AppData['tasks'][number]) => {
-        if (!task.projectId) return false;
-        if (!sequentialProjectIds.has(task.projectId)) return false;
-        return !sequentialFirstTaskIds.has(task.id);
-    };
-
-    const scheduleTasks = activeTasks.filter((task) => {
-        if (task.status !== 'next') return false;
-        if (isSequentialBlocked(task)) return false;
-        return isScheduleCandidate(task);
-    });
-    const scheduleTaskIds = new Set(scheduleTasks.map((task) => task.id));
-    const nextTasks = activeTasks.filter((task) => {
-        if (task.status !== 'next') return false;
-        if (isPlannedForFuture(task)) return false;
-        if (isSequentialBlocked(task)) return false;
-        return !scheduleTaskIds.has(task.id);
-    });
-
-    const starredTasks = activeTasks.filter((task) => (
-        task.isFocusedToday === true
-        && (!isPlannedForFuture(task) || isScheduleCandidate(task))
-    ));
-    const starredTaskIds = new Set(starredTasks.map((task) => task.id));
-    const focusTasks = [...scheduleTasks, ...nextTasks].filter((task) => !starredTaskIds.has(task.id));
-
-    return {
-        starredTasks: sortTasksBy(starredTasks, widgetSort),
-        focusTasks: sortTasksBy(focusTasks, widgetSort),
-    };
-}
-
 export function buildMacWidgetPayload(data: AppData, language: Language, systemIsDark: boolean): MacWidgetPayload {
     void loadTranslations(language);
     const tr = getTranslationsSync(language);
@@ -184,8 +109,6 @@ export function buildMacWidgetPayload(data: AppData, language: Language, systemI
     const projects = data.projects || [];
     const projectById = new Map(projects.map((project) => [project.id, project]));
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     const themeMode = typeof data.settings?.theme === 'string' ? data.settings.theme : 'system';
     const palette = resolveMacWidgetPalette(themeMode, systemIsDark);
 
@@ -197,13 +120,12 @@ export function buildMacWidgetPayload(data: AppData, language: Language, systemI
     });
 
     const widgetSort = resolveTaskSort(data);
-    const { starredTasks, focusTasks } = computeTodayFocusTasks(
+    const { starredTasks, focusTasks } = computeTodayFocusTasks({
         activeTasks,
         projects,
-        widgetSort,
-        startOfToday,
-        endOfToday,
-    );
+        sortBy: widgetSort,
+        now,
+    });
     const listSource = [...starredTasks, ...focusTasks];
 
     const items = listSource.slice(0, MAC_WIDGET_MAX_ITEMS).map((task) => ({
