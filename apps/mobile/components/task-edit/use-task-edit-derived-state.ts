@@ -159,10 +159,6 @@ export function useTaskEditDerivedState({
     // existing task can be assigned a person without first customizing the
     // editor layout. An explicit saved customization that hides the field wins.
     const isAssignedToExplicitlyHidden = settings.gtd?.taskEditor?.hidden?.includes('assignedTo') ?? false;
-    const availableStatusOptions = useMemo(
-        () => (isReference ? STATUS_OPTIONS : STATUS_OPTIONS.filter((status) => status !== 'reference')),
-        [isReference]
-    );
     const disabledFields = useMemo(() => {
         const next = new Set<TaskEditorFieldId>();
         if (!prioritiesEnabled) next.add('priority');
@@ -314,7 +310,10 @@ export function useTaskEditDerivedState({
 
     return {
         activeProjectId,
-        availableStatusOptions,
+        // Reference is offered from every status, matching desktop (#1155) and
+        // the row status badge; the editor no longer hides it behind "already a
+        // reference".
+        availableStatusOptions: STATUS_OPTIONS,
         basicFields,
         dailyInterval,
         detailsFields,

@@ -55,6 +55,40 @@ describe('useTaskEditDerivedState', () => {
         expect(derived?.showStatusField).toBe(false);
     });
 
+    // #1155: Reference is a destination for any task, not a status you can only
+    // keep once you are already there.
+    it('offers Reference in the status list for a next-action task', () => {
+        let derived: ReturnType<typeof useTaskEditDerivedState> | undefined;
+
+        function Probe() {
+            derived = useTaskEditDerivedState({
+                task: baseTask,
+                checklist: baseTask.checklist,
+                draft: createTaskDraft(baseTask),
+                settings: {},
+                projects: [],
+                sections: [],
+                prioritiesEnabled: true,
+                timeEstimatesEnabled: true,
+                contextInputDraft: '',
+                descriptionDraft: '',
+                tagInputDraft: '',
+                visibleAttachmentsLength: 0,
+                t: (key) => key,
+            });
+            return null;
+        }
+
+        renderer.act(() => {
+            renderer.create(React.createElement(Probe));
+        });
+
+        expect(baseTask.status).not.toBe('reference');
+        expect(derived?.availableStatusOptions).toEqual(
+            ['inbox', 'next', 'waiting', 'someday', 'done', 'reference'],
+        );
+    });
+
     it('hides every configured field when hidden fields have no task content', () => {
         let derived: ReturnType<typeof useTaskEditDerivedState> | undefined;
         const settings: AppData['settings'] = {
