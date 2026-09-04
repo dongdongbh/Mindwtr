@@ -48,6 +48,7 @@ import {
 } from '../attachment-sync-utils';
 import { installAttachmentFileGeneration, type AttachmentFileInstallResult } from '../attachment-file-installer';
 import { isExpoGo } from '../expo-go';
+import { areJsTimersPaused } from '../js-timers';
 import { logSyncEncryptionEvent } from '../sync-encryption-state';
 import { mobileSyncCryptoPrimitives } from '../sync-crypto-native';
 import { assertMobileWebdavConnection } from '../webdav-request-options';
@@ -844,6 +845,10 @@ export const reconcileRemoteAttachmentPresence = async (options: {
 export const waitForAttachmentSyncDelay = async (ms: number, signal?: AbortSignal): Promise<void> => {
   assertAttachmentSyncNotAborted(signal);
   if (ms <= 0) return;
+  // Android pauses every JS timer while the app is backgrounded (js-timers.ts), and the
+  // background sync task runs exactly then. A bare setTimeout here never fires, so the
+  // WorkManager job would hold its wakelock until the OS kills it (#1001-class drain).
+  if (areJsTimersPaused()) return;
   if (!signal) {
     await new Promise((resolve) => setTimeout(resolve, ms));
     return;
@@ -945,7 +950,10 @@ const runUploadTask = async <T,>(
     onAbort = () => beginCancellation(createUploadAbortError(signal));
 
     signal?.addEventListener('abort', onAbort, { once: true });
-    if (timeoutMs !== undefined) {
+    // While Android has JS timers paused (background), this setTimeout would never fire.
+    // Don't arm it: the job-level deadline (setMobileSyncRequestDeadline) and the native
+    // upload task's own completion still bound how long the wait can run.
+    if (timeoutMs !== undefined && !areJsTimersPaused()) {
       timeoutId = setTimeout(() => {
         beginCancellation(new Error(timeoutMessage));
       }, timeoutMs);
