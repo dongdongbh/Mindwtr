@@ -14,7 +14,7 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 - Android: a background sync that uploaded two or more attachments to WebDAV could stall until the app was reopened, holding the system's background job for its whole allowance and draining the battery. The short pause between attachment requests and the upload time limit both waited on a timer Android never fires while the app is in the background; both now step aside while timers are paused, as the rest of the background path already did. (#1001)
 
-- Sync: a completion date written through MCP onto a task that is not done or archived was read back from the local database in a form the sync normalizer would still strip, the same class of problem as the repeat flag above; both readers now surface a completion date only on done or archived tasks, and a contract test now checks every synced task field this way. (#1001)
+- Sync: a completion date stored on a task that is not done or archived (a direct field write through the core store, which no app screen and no MCP tool produces on its own) was read back from the local database in a form the sync normalizer would still strip, the same class of problem as the repeat flag above; both readers now surface a completion date only on done or archived tasks, and a contract test now checks every synced task field this way. (#1001)
 
 - Sync: a task whose "show future occurrences" flag was set through MCP on a task with no repeat rule read back from the local database in a form the sync normalizer would still change, which on 1.2.7 desktops failed the next automatic sync once before self-healing. Both the desktop (Rust) and the phone (TypeScript) readers now treat the flag as set only when the task actually repeats. (#1001)
 

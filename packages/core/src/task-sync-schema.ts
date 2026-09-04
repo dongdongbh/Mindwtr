@@ -9,6 +9,7 @@
 // with a field pending; stable releases may not.
 import schemaFixture from './task-sync-schema.fixture.json';
 import type { Task } from './types';
+import { normalizeTaskStatus } from './task-status';
 import {
     fromBool,
     fromJson,
@@ -268,9 +269,14 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
         // patches the field directly without a status transition (e.g. MCP
         // `completedAt` on a task that is not done); that stale byte would
         // otherwise pass the reader unnormalized until the next load/merge.
-        completedAt: (row.status === 'done' || row.status === 'archived')
-            ? fromOptional(row.completedAt as string | null)
-            : undefined,
+        completedAt: (() => {
+            // Compare the normalized status: mapSqliteTaskRow normalizes it AFTER this
+            // codec runs, so a stored 'Done' must not lose its completion date here.
+            const status = normalizeTaskStatus(String(row.status ?? ''));
+            return status === 'done' || status === 'archived'
+                ? fromOptional(row.completedAt as string | null)
+                : undefined;
+        })(),
         statusBeforeProjectArchive: fromOptional(row.statusBeforeProjectArchive as Task['statusBeforeProjectArchive'] | null),
         // Nullable BY DESIGN (Task.completedAtBeforeProjectArchive: string | null) — do not
         // route through fromOptional, a stored `null` must stay `null`.
