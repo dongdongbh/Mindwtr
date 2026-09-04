@@ -67,6 +67,7 @@ export function KeybindingHelpModal({
         ...(timelineEnabled ? [{ keys: 'gt', labelKey: 'keybindings.goTimeline' }] : []),
         { keys: 'gd', labelKey: 'keybindings.goDone' },
         { keys: 'ga', labelKey: 'keybindings.goArchived' },
+        { keys: 'gT', labelKey: 'keybindings.goTrash', fallbackLabel: 'Go to Trash' },
         { keys: '1-9 / Shift+A 1-9', labelKey: 'keybindings.switchArea', fallbackLabel: 'Switch to Area 1-9' },
         { keys: '0 / Shift+A 0', labelKey: 'keybindings.clearAreaFilter', fallbackLabel: 'Clear area filter' },
     ];
@@ -121,6 +122,7 @@ export function KeybindingHelpModal({
         ...(timelineEnabled ? [{ keys: 'Alt-t', labelKey: 'keybindings.goTimeline' }] : []),
         { keys: 'Alt-d', labelKey: 'keybindings.goDone' },
         { keys: 'Alt-A', labelKey: 'keybindings.goArchived' },
+        { keys: 'Alt-T', labelKey: 'keybindings.goTrash', fallbackLabel: 'Go to Trash' },
         { keys: '1-9 / Shift+A 1-9', labelKey: 'keybindings.switchArea', fallbackLabel: 'Switch to Area 1-9' },
         { keys: '0 / Shift+A 0', labelKey: 'keybindings.clearAreaFilter', fallbackLabel: 'Clear area filter' },
     ];

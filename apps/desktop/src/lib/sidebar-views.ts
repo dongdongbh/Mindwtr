@@ -1,6 +1,8 @@
 // Sidebar entries the user can hide from Settings -> General (#1115). This is
 // a device-local presentation choice: hiding an entry never disables the view
-// itself, which stays reachable through search, keybindings, and task status.
+// itself, which stays reachable through its go-to keybinding and through task
+// status. Global search returns tasks and projects, never views, so it is not
+// a route back to a hidden entry.
 // Inbox and Projects are deliberately absent — they are the structural core of
 // the workflow and always render. Obsidian is absent because its own
 // integration toggle already controls its sidebar presence, and Timeline is

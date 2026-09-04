@@ -439,6 +439,42 @@ describe('KeybindingProvider (vim)', () => {
         expect(onNavigate).toHaveBeenCalledWith('settings');
     });
 
+    // Trash can be hidden from the sidebar (#1115) and global search never
+    // returns views, so the go-to chord is its only keyboard route back.
+    it.each([
+        {
+            style: 'vim' as const,
+            press: () => {
+                fireEvent.keyDown(window, { key: 'g' });
+                fireEvent.keyDown(window, { key: 'T', shiftKey: true });
+            },
+        },
+        {
+            style: 'emacs' as const,
+            press: () => {
+                fireEvent.keyDown(window, { key: 'T', altKey: true, shiftKey: true });
+            },
+        },
+    ])('navigates to Trash with the capital T go-to chord in $style style', ({ style, press }) => {
+        const onNavigate = vi.fn();
+        useTaskStore.setState((state) => ({
+            settings: { ...state.settings, keybindingStyle: style },
+        }));
+
+        render(
+            <LanguageProvider>
+                <KeybindingProvider currentView="inbox" onNavigate={onNavigate}>
+                    <DummyList />
+                </KeybindingProvider>
+            </LanguageProvider>
+        );
+
+        (document.activeElement as HTMLElement | null)?.blur?.();
+        press();
+
+        expect(onNavigate).toHaveBeenCalledWith('trash');
+    });
+
     it('dispatches global edit cancel on Escape while editing', () => {
         const cancelListener = vi.fn();
         window.addEventListener('mindwtr:cancel-task-edit', cancelListener);

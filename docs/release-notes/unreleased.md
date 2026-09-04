@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop: Trash has a go-to keyboard chord, `g T` in the Vim preset and `Alt+Shift+T` in the Emacs preset, so a Trash hidden through Settings → Sidebar views stays reachable, and the setting's description now says hidden views stay reachable through their go-to chord rather than from search, which never opened views. (#1115)
+
 - Desktop: the Daily Review focus step shows your configured Today's Focus limit (for example "1 / 1" or "2 / 5") instead of always "/ 3", so it no longer invites picks the star control then refuses.
 
 - Desktop: each Daily Review step now shows every task it counts. The step header said, for example, "23 tasks" while only the first ten were listed, so the rest could not be reviewed from inside the review. The phone was fixed the same way in 1.2.6.

@@ -375,6 +375,9 @@ export function KeybindingProvider({
         ...(timelineEnabled ? { t: 'timeline' } : {}),
         d: 'done',
         a: 'archived',
+        // Capital T: lowercase t is Timeline. Trash can be hidden from the
+        // sidebar (#1115), so a go-to chord is its only keyboard route.
+        T: 'trash',
     }), [timelineEnabled]);
 
     const emacsAltMap = useMemo<Record<string, string>>(() => ({
@@ -392,6 +395,7 @@ export function KeybindingProvider({
         ...(timelineEnabled ? { t: 'timeline' } : {}),
         d: 'done',
         A: 'archived',
+        T: 'trash',
     }), [timelineEnabled]);
 
     useEffect(() => {

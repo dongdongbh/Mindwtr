@@ -33,6 +33,7 @@ describe('KeybindingHelpModal', () => {
         expect(getByText('1-9 / Shift+A 1-9')).toBeInTheDocument();
         expect(getByText('0 / Shift+A 0')).toBeInTheDocument();
         expect(getByText('dd')).toBeInTheDocument();
+        expect(getByText('gT')).toBeInTheDocument();
         expect(queryByText('Alt-i')).not.toBeInTheDocument();
     });
 
@@ -47,6 +48,7 @@ describe('KeybindingHelpModal', () => {
         expect(getByText('In-app quick add')).toBeInTheDocument();
         expect(getByText('Alt-i')).toBeInTheDocument();
         expect(getByText('Alt-A')).toBeInTheDocument();
+        expect(getByText('Alt-T')).toBeInTheDocument();
         expect(getByText('Ctrl-n / Ctrl-p / ↑ / ↓')).toBeInTheDocument();
         expect(getByText('F11')).toBeInTheDocument();
         expect(queryByText('gi')).not.toBeInTheDocument();
