@@ -97,8 +97,14 @@ Selection was automatic: every HIGH-confidence actionable finding from the Phase
 | 070 | mobile-weekly-review-test-unstub | TEST-01 | M | TODO |
 | 071 | e2e-gtd-loops | TEST-02 | M | TODO |
 | 072 | axe-contrast-gate-themes | TEST-03 | M | TODO |
+| 073 | desktop-overlay-derived-state | PERF-01, PERF-03 (two commits) | S | TODO |
+| 074 | cleartext-banner-polling | PERF-02 | S | TODO |
+| 075 | ci-core-job-split | DX-01 | S | TODO |
+| 076 | dx-batch-vite-typecheck-perf-record | DX-03, DX-04, DX-02 (three commits; after 075) | S | TODO |
 
 Fixed directly during the loop without a plan (see the loop ledger): BUG-R1 mobile attachment timers (c9541342e) and the thirty Phase 1 findings.
+
+Architecture deepening (Phase 3, from the architecture audit): DEBT-01 editor field rosters → core (Strong), DEBT-04 widget builders on the Focus sequential rule (Strong), DEBT-02 auto-sync pacing controller → core (Strong), DEBT-03 device-local cache rules → core, lazy version (Worth exploring, accepted: two real adapters and one recorded drift), DEBT-06 task-list sort rosters → core (Worth exploring, accepted: "FOUR allowlists" trap). DEBT-05 (dev-runtime gate helper: store.ts enforces when `process` is undefined, i.e. desktop production THROWS on a write-contract violation while mobile repairs silently) is a maintainer polarity decision → deferred, recorded here. DX-05 (roster parity gate) is superseded by DEBT-01/06.
 
 ### Direction (recorded, not built)
 - **DIR-01** expandable projects in the desktop sidebar (promised on #1116): `buildProjectGroups` and `getProjectNextActionState` already exist; device-local expand state can follow `HIDDEN_SIDEBAR_VIEWS_STORAGE_KEY`. Needs a design spike (default collapsed state, area nesting, badges). Desktop first.
