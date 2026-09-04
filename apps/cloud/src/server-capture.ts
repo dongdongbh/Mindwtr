@@ -14,6 +14,7 @@ import {
 } from './server-config';
 import {
     abandonPreparedFilePublication,
+    durablyRemoveFile,
     isBodyReadError,
     prepareFilePublicationSafely,
     publishPreparedFilePublication,
@@ -365,12 +366,32 @@ export async function handleCaptureRequest(
             if (storeResponse) return storeResponse;
         }
 
-        throwIfRequestAborted(options.abortSignal);
-        writeCloudData(options.filePath, finalized, { assertStorageRoot: options.assertStorageRoot });
+        // From here on, the audio (if any) is already on disk. An abort or a writeCloudData
+        // throw would otherwise leave it orphaned: no task ever ends up referencing its
+        // cloudKey, so nothing later cleans it up.
+        try {
+            throwIfRequestAborted(options.abortSignal);
+            writeCloudData(options.filePath, finalized, { assertStorageRoot: options.assertStorageRoot });
+        } catch (error) {
+            if (audio && attachment?.cloudKey) removeOrphanedCaptureAudio(attachment.cloudKey, options);
+            throw error;
+        }
         const savedTask = finalized.tasks.find((item) => item.id === task.id) ?? task;
         // Report what was actually stored, in case the shared finalize pass touched it.
         return jsonResponse({ task: savedTask, attachment: savedTask.attachments?.[0] ?? null }, { status: 201 });
     });
+}
+
+/** Best-effort cleanup for the gap above: removes an audio file storeCaptureAudio already
+ *  published when the task record that would reference it never gets written. Errors from
+ *  the removal itself are swallowed - the original error is what the caller rethrows. */
+function removeOrphanedCaptureAudio(cloudKey: string, options: CaptureRequestOptions): void {
+    try {
+        const resolved = resolveAttachmentPath(options.dataDir, options.key, cloudKey, { create: false });
+        if (resolved) durablyRemoveFile(resolved.filePath);
+    } catch {
+        // best effort only
+    }
 }
 
 /** Publishes the audio bytes through the same durable path PUT

@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'crypto';
-import { mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { AppData, Attachment, Task } from '@mindwtr/core';
 import { startCloudServer } from './server';
 import {
     buildCaptureTaskText,
+    handleCaptureRequest,
     parseRecordedAtMs,
     readDeclaredPartContentType,
     resolveCaptureCreatedAt,
@@ -421,6 +422,73 @@ describe('POST /v1/capture', () => {
         const download = await fetch(`${harness.url}/v1/attachments/${attachment.cloudKey}`, { headers: AUTH });
         expect(download.status).toBe(200);
         expect(new Uint8Array(await download.arrayBuffer()).byteLength).toBe(AUDIO_BYTES.byteLength);
+    });
+
+    // storeCaptureAudio publishes the audio bytes, then throwIfRequestAborted and
+    // writeCloudData run. A throw in that gap used to leave the just-published file
+    // orphaned on disk (no task ever ends up referencing its cloudKey). Calls
+    // handleCaptureRequest directly (not through the HTTP server) so a hand-rolled
+    // assertStorageRoot can fail deterministically right after the audio is durably
+    // on disk, without a real race.
+    test('removes the just-published audio file when the write after it fails', async () => {
+        const dataDir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-capture-cleanup-'));
+        try {
+            const key = 'cleanup-ns';
+            const filePath = join(dataDir, `${key}.json`);
+            writeFileSync(filePath, JSON.stringify({
+                tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
+            }));
+
+            let assertCalls = 0;
+            // storeCaptureAudio calls assertStorageRoot once up front (server-capture.ts),
+            // then publishPreparedFilePublication calls it three more times around the
+            // rename that actually publishes the file (server-storage.ts:732-742). Failing
+            // from the 5th call on therefore always lands after the audio is durably on
+            // disk, in the writeCloudData step that follows.
+            const assertStorageRoot = () => {
+                assertCalls += 1;
+                if (assertCalls > 4) throw new Error('storage root changed');
+            };
+
+            const request = new Request('http://cloud.test/v1/capture', {
+                method: 'POST',
+                headers: { 'content-type': `multipart/form-data; boundary=${BOUNDARY}` },
+                body: new Blob([buildMultipartBody(captureParts({
+                    transcription: 'Book the dentist',
+                    audio: { bytes: AUDIO_BYTES, type: 'audio/mp4', name: 'recording.m4a' },
+                }))]),
+            });
+
+            await expect(handleCaptureRequest(request, {
+                dataDir,
+                key,
+                filePath,
+                maxCaptureBytes: 10_000_000,
+                maxTextBytes: 100_000,
+                abortSignal: new AbortController().signal,
+                assertStorageRoot,
+                withWriteLock: async (_key, handler) => handler(),
+                finalizeForWrite: (data) => data,
+            })).rejects.toThrow('storage root changed');
+
+            expect(assertCalls).toBeGreaterThan(4);
+
+            // cloudKey already carries an "attachments/" prefix (buildCloudKey), so the
+            // real file lands a level deeper than this directory - walk recursively and
+            // check no audio file bytes were left behind anywhere under it, rather than
+            // assuming the directory tree itself is empty (an empty parent dir is fine).
+            const attachmentsDir = join(dataDir, key, 'attachments');
+            const remainingAudioFiles = existsSync(attachmentsDir)
+                ? (readdirSync(attachmentsDir, { recursive: true }) as string[]).filter((name) => name.endsWith('.m4a'))
+                : [];
+            expect(remainingAudioFiles).toEqual([]);
+
+            // The failed write never persisted the task either.
+            const stored = JSON.parse(readFileSync(filePath, 'utf8')) as AppData;
+            expect(stored.tasks).toHaveLength(0);
+        } finally {
+            rmSync(dataDir, { recursive: true, force: true });
+        }
     });
 
     test('rejects any method other than POST', async () => {
