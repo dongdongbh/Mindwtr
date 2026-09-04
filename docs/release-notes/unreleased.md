@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Translations: thirty-seven sentences in twelve languages had lost the place where a number or name is filled in (for example the focus limit in "Max. 3 focus items" or the count in "N matches in this view"), so they showed a fixed number or nothing; they are rewritten with the value back in place, and a build check keeps every translation's fill-in slots in step with the English source.
+
 - Translations: eighteen pieces of text were English in every language because their entries were never added to the dictionary, among them the whole "External sync change detected" dialog on the desktop (Use external / Merge / Keep local), the bulk-action failure messages, the section reorder hint and several labels on the phone's Review screen. They are now translated in Chinese (Simplified and Traditional), Japanese, Persian and Swedish, and a build check stops new text from shipping without a dictionary entry.
 
 - Android: a background sync that uploaded two or more attachments to WebDAV could stall until the app was reopened, holding the system's background job for its whole allowance and draining the battery. The short pause between attachment requests and the upload time limit both waited on a timer Android never fires while the app is in the background; both now step aside while timers are paused, as the rest of the background path already did. (#1001)

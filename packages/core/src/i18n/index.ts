@@ -82,11 +82,31 @@ export function resolveI18nText(
     return options?.values ? formatI18nTemplate(text, options.values) : text;
 }
 
+/**
+ * What counts as an interpolation slot. Both brace styles are live: en.ts uses
+ * `{{count}}` for most keys and bare `{count}` for others (calendar.searchMatches,
+ * task.markedDone, the recurrence descriptions), and this pattern has always
+ * accepted either.
+ *
+ * Exported so the parity guard measures slots with the exact expression that fills
+ * them. A locale that drops a slot renders a sentence with the number or name
+ * silently missing — "matches in this view" with no count — which no other check
+ * sees, because the value is otherwise a perfectly good translation.
+ */
+export const I18N_TEMPLATE_SLOT_PATTERN = /\{\{?\s*([A-Za-z0-9_]+)\s*\}\}?/g;
+
+/** The set of slot names in `template`, sorted, for comparing a translation to its English source. */
+export function i18nTemplateSlots(template: string): string[] {
+    const names = new Set<string>();
+    for (const match of template.matchAll(I18N_TEMPLATE_SLOT_PATTERN)) names.add(match[1]);
+    return [...names].sort();
+}
+
 export function formatI18nTemplate(
     template: string,
     values: I18nTemplateValues,
 ): string {
-    return template.replace(/\{\{?\s*([A-Za-z0-9_]+)\s*\}\}?/g, (match, key: string) => (
+    return template.replace(I18N_TEMPLATE_SLOT_PATTERN, (match, key: string) => (
         Object.prototype.hasOwnProperty.call(values, key)
             ? String(values[key] ?? '')
             : match

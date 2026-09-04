@@ -1,3 +1,5 @@
+import { I18N_TEMPLATE_SLOT_PATTERN } from './index';
+
 export const allowedEnglishMirrorTerms = [
     'Mindwtr',
     'Apple',
@@ -123,7 +125,10 @@ export function isAllowedEnglishMirrorKey(locale: string, key: string): boolean 
 export function stripAllowedEnglishTerms(value: string): string {
     let next = value
         .replace(/[A-Za-z][A-Za-z0-9+.-]*:\/\/\S*/g, '')
-        .replace(/\{\{\s*[A-Za-z0-9_]+\s*\}\}/g, '')
+        // Both brace styles, via the pattern that actually fills them. This used to strip only
+        // `{{name}}`, so a bare `{count}` — equally a real slot to formatI18nTemplate — left the
+        // word "count" behind and read as untranslated English to the check below.
+        .replace(I18N_TEMPLATE_SLOT_PATTERN, '')
         .replace(/\/[A-Za-z][A-Za-z0-9:_-]*/g, '')
         .replace(/[+#@!][A-Za-z][A-Za-z0-9:_-]*/g, '');
 

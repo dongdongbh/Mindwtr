@@ -1459,7 +1459,7 @@ export const koOverrides: Record<string, string> = {
         'agenda.focusHint': '아래 할 일에 별표를 클릭하여 오늘의 집중에 추가하세요 (최대 {{count}}개).',
         'agenda.addToFocus': '오늘의 집중에 추가',
         'agenda.removeFromFocus': '집중에서 제거',
-        'agenda.maxFocusItems': '최대 3개의 중점 항목',
+        'agenda.maxFocusItems': '최대 {{count}}개의 중점 항목',
         'projects.addToFocus': '집중에 추가',
         'projects.removeFromFocus': '집중에서 제거',
         'projects.maxFocusedProjects': '집중 프로젝트는 최대 5개까지 가능합니다',
