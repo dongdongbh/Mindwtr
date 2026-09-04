@@ -419,9 +419,9 @@ Any MCP-compatible client can work as long as it can launch a **stdio** server w
 - `mindwtr_restore_task` **(requires `--write`)**
   - Input: `{ id }`
 - `mindwtr_add_project` **(requires `--write`)**
-  - Input: `{ title, color?, status?, areaId?, isSequential?, isFocused?, dueDate?, reviewAt?, supportNotes?, attachments? }`
+  - Input: `{ title, color?, status?, areaId?, isSequential?, isFocused?, dueDate?, startDate?, reviewAt?, supportNotes?, attachments? }`
 - `mindwtr_update_project` **(requires `--write`)**
-  - Input: `{ id, title?, color?, status?, areaId?, isSequential?, isFocused?, dueDate?, reviewAt?, supportNotes?, attachments? }`
+  - Input: `{ id, title?, color?, status?, areaId?, isSequential?, isFocused?, dueDate?, startDate?, reviewAt?, supportNotes?, attachments? }`
   - `attachments` follows the same rule as `mindwtr_update_task`: link attachments only, the list is the complete set of links, and `null` clears them.
 - `mindwtr_delete_project` **(requires `--write`)**
   - Input: `{ id }`
