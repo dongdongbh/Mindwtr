@@ -1256,7 +1256,7 @@ export const deOverrides: Record<string, string> = {
         'settings.densityComfortable': 'Komfortabel',
         'settings.densityCompact': 'Kompakt',
         'settings.densityCondensed': 'Verdichtet',
-        'settings.globalQuickAddShortcut': 'Globales schnell Hinzufügen Tastaturkürzel',
+        'settings.globalQuickAddShortcut': 'Globales Tastaturkürzel für Schnell-Hinzufügen',
         'settings.globalQuickAddShortcutDesc': 'Wird systemweit für eine schnelle Erfassung verwendet, auch wenn Mindwtr nicht fokussiert ist.',
         'settings.windowDecorations': 'Fensterdekorationen',
         'settings.windowDecorationsDesc': 'Systemtitelleiste und Fensterränder anzeigen.',
