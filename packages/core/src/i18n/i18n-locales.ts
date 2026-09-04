@@ -32,8 +32,17 @@ type LocaleDescriptorCommon = {
 // Below it, Latin text in a value is almost always an untranslated leftover. At or above it
 // the locale is essentially complete and the English still in it is deliberate — brand names,
 // protocols, search operators, file extensions — so the check only yields false positives.
-// Compared against translatedKeyFloor (the ratcheted commitment) rather than measured
-// coverage, so a locale can't fall back under the check the moment en.ts grows.
+// Compared against translatedKeyFloor (the ratcheted commitment) rather than measured coverage,
+// so a locale does not fall under the check merely by translating fewer keys than en.ts has.
+//
+// It CAN still be crossed by English growth, and this comment used to claim otherwise. The
+// denominator is the live en key count, so a floor sitting just above 90% slides under it as
+// en.ts grows, with no change to that locale at all: ko at 2240 read 90.07% against 2487
+// English keys and 89.42% against 2505, which switched the check on and flagged 113 values
+// that were the deliberate English this ceiling exists to allow. The remedy is to re-pin that
+// locale's floor to its measured translated count -- the sanctioned ratchet direction, and
+// what keeps the ratio honest -- not to lower the ceiling. ko has been re-pinned twice this
+// way now, which is the signal that a floor left stale near the ceiling is the real hazard.
 export const MIXED_ENGLISH_COVERAGE_CEILING = 90;
 
 // The translation commitment a locale is held to. Either the minimum NUMBER of English keys
