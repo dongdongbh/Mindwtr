@@ -139,6 +139,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
             return acc;
         }, {} as Record<string, string>);
     }, [staleItems]);
+    // Deliberately over tasks (visible tasks), not the store's _tasksById
+    // (all tasks incl. hidden) — PERF-03 leaves this site alone on purpose.
     const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
     const staleTaskEntries = useMemo(() => staleItems
         .filter((item) => !item.id.startsWith('project:'))

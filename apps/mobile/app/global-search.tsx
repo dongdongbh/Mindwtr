@@ -67,8 +67,9 @@ const decodeSearchParam = (value: string | string[] | undefined): string => {
 };
 
 export default function SearchScreen() {
-    const { _allTasks, projects, areas, settings, updateSettings, updateTask, setHighlightTask } = useTaskStore((state) => ({
+    const { _allTasks, _tasksById, projects, areas, settings, updateSettings, updateTask, setHighlightTask } = useTaskStore((state) => ({
         _allTasks: state._allTasks,
+        _tasksById: state._tasksById,
         projects: state.projects,
         areas: state.areas,
         settings: state.settings,
@@ -216,7 +217,9 @@ export default function SearchScreen() {
             : null,
         [_allTasks, editingTaskId]
     );
-    const taskById = useMemo(() => new Map(_allTasks.map((task) => [task.id, task])), [_allTasks]);
+    // The store already maintains _tasksById over the same _allTasks array
+    // (PERF-03); no need to rebuild a fresh Map on every render.
+    const taskById = _tasksById;
     // Search rows are SearchTaskResult, which deliberately carries no
     // completedAt — the full task behind the row does (#991). The label word is
     // what tells a completion date from a deadline, so neither is ever shown

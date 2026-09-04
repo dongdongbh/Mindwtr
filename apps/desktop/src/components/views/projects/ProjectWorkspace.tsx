@@ -769,6 +769,8 @@ export function ProjectWorkspace({
         () => visibleProjectTaskList.map((task) => task.id),
         [visibleProjectTaskList],
     );
+    // Deliberately over allTasks (visible tasks), not the store's _tasksById
+    // (all tasks incl. hidden) — PERF-03 leaves this site alone on purpose.
     const tasksById = useMemo(() => new Map(allTasks.map((task) => [task.id, task])), [allTasks]);
     const {
         activeAction,

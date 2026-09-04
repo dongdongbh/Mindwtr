@@ -2,7 +2,7 @@ import React from 'react';
 import { FlatList, Text, TouchableOpacity } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { safeFormatDate, type Task } from '@mindwtr/core';
+import { buildEntityMap, safeFormatDate, type Task } from '@mindwtr/core';
 
 const routerPushMock = vi.hoisted(() => vi.fn());
 const setHighlightTaskMock = vi.hoisted(() => vi.fn());
@@ -14,6 +14,15 @@ const storageAdapterState = vi.hoisted(() => ({
 }));
 const storeState = vi.hoisted(() => ({
     _allTasks: [] as Task[],
+    // PERF-03: the component reads _tasksById straight from the store
+    // instead of rebuilding a Map from _allTasks on every render. This mock
+    // has no real store behind it, so mirror that field as a getter over
+    // whichever tasks the test currently has assigned to _allTasks — every
+    // `storeState._allTasks = tasks` assignment below keeps it correct with
+    // no other test needing to change.
+    get _tasksById() {
+        return buildEntityMap(this._allTasks);
+    },
     projects: [],
     areas: [],
     settings: {

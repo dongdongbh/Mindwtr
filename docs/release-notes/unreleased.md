@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop and mobile: the search screens look tasks up through the store's existing id map instead of rebuilding their own map of every task whenever the library changes.
+
 - Desktop: the global search palette and the quick-add dialog, which are always mounted even when closed, no longer rebuild the whole task index on every task write. On a large library that was about 13 ms of interface-thread work per edit charged to two invisible overlays. (#1001)
 
 - Widgets (Android, iOS, macOS) and the iOS Shortcuts focus list: for a step-by-step project the widget now shows the same next action as the Focus screen. The screen gives the project's one slot to a later step that is due today or due for review; the widgets still used the older order-only rule and named the first step instead, so the two surfaces disagreed exactly for projects with a deadline.

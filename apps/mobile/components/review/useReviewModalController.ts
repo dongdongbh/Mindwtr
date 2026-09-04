@@ -340,6 +340,8 @@ export function useReviewModalController({
         acc[item.id] = item.title;
         return acc;
     }, {} as Record<string, string>), [staleItems]);
+    // Deliberately over tasks (visible tasks), not the store's _tasksById
+    // (all tasks incl. hidden) — PERF-03 leaves this site alone on purpose.
     const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
     const staleTasks = useMemo(() => staleItems.flatMap((item) => {
         if (item.id.startsWith('project:')) return [];
