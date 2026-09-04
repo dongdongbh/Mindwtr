@@ -1,13 +1,22 @@
 import type { AppSettings, Area, DefaultProjectFlowMode, FeatureSettings, GtdSettings, TaskEditorFieldId, TaskEditorPresentation, TaskEditorSectionId, TimeEstimate } from '@mindwtr/core';
 import {
+    DEFAULT_TASK_EDITOR_ORDER,
+    DEFAULT_TASK_EDITOR_VISIBLE,
+    DEFAULT_TASK_EDITOR_SECTION_BY_FIELD,
+    DEFAULT_TASK_EDITOR_SECTION_OPEN,
     FOCUS_TASK_LIMIT_OPTIONS,
     formatTimeEstimateLabel,
+    getTaskEditorSectionAssignments,
+    getTaskEditorSectionOpenDefaults,
+    isTaskEditorSectionableField,
     normalizeClockTimeInput,
     normalizeFocusTaskLimit,
     getDefaultTaskAreaMode,
     resolveDefaultNewTaskAreaId,
     resolveFeatureFlags,
     sanitizePomodoroDurations,
+    TASK_EDITOR_FIXED_FIELDS,
+    TASK_EDITOR_SECTION_ORDER,
 } from '@mindwtr/core';
 
 import { useEffect, useRef, useState } from 'react';
@@ -17,17 +26,6 @@ import { reportSettingsFailure } from './settings-feedback';
 import { dispatchDesktopOnboardingEvent } from '../../../lib/desktop-onboarding-events';
 import { useUiStore } from '../../../store/ui-store';
 import type { Language } from '../../../contexts/language-context';
-import {
-    DEFAULT_TASK_EDITOR_ORDER,
-    DEFAULT_TASK_EDITOR_VISIBLE,
-    DEFAULT_TASK_EDITOR_SECTION_BY_FIELD,
-    DEFAULT_TASK_EDITOR_SECTION_OPEN,
-    TASK_EDITOR_FIXED_FIELDS,
-    TASK_EDITOR_SECTION_ORDER,
-    getTaskEditorSectionAssignments,
-    getTaskEditorSectionOpenDefaults,
-    isTaskEditorSectionableField,
-} from '../../Task/task-item-helpers';
 import { Switch } from '../../ui/Switch';
 import { SettingField, SettingRow, SettingsDisclosureCard } from './SettingRow';
 

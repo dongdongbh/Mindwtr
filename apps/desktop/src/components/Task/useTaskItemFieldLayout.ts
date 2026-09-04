@@ -2,11 +2,11 @@ import { useCallback, useMemo } from 'react';
 import type { AppData, Task, TaskDraft, TaskEditorFieldId } from '@mindwtr/core';
 import {
     DEFAULT_TASK_EDITOR_HIDDEN,
-    DEFAULT_TASK_EDITOR_ORDER,
     TASK_EDITOR_FIXED_FIELDS,
     getTaskEditorSectionAssignments,
     getTaskEditorSectionOpenDefaults,
-} from './task-item-helpers';
+    normalizeTaskEditorOrder,
+} from '@mindwtr/core';
 
 type UseTaskItemFieldLayoutParams = {
     settings: AppData['settings'] | undefined;
@@ -65,12 +65,10 @@ export function useTaskItemFieldLayout({
         return disabled;
     }, [prioritiesEnabled, timeEstimatesEnabled]);
 
-    const taskEditorOrder = useMemo(() => {
-        const known = new Set(DEFAULT_TASK_EDITOR_ORDER);
-        const normalized = savedOrder.filter((id) => known.has(id));
-        const missing = DEFAULT_TASK_EDITOR_ORDER.filter((id) => !normalized.includes(id));
-        return [...normalized, ...missing].filter((id) => !disabledFields.has(id));
-    }, [savedOrder, disabledFields]);
+    const taskEditorOrder = useMemo(
+        () => normalizeTaskEditorOrder(savedOrder, disabledFields),
+        [savedOrder, disabledFields]
+    );
     const hiddenSet = useMemo(() => {
         const known = new Set(taskEditorOrder);
         const next = new Set(savedHidden.filter((id) => known.has(id)));

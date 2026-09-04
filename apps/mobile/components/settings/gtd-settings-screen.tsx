@@ -5,15 +5,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import {
     buildTaskEditorPresetConfig,
-    DEFAULT_TASK_EDITOR_ORDER,
-    DEFAULT_TASK_EDITOR_SECTION_BY_FIELD,
-    DEFAULT_TASK_EDITOR_SECTION_OPEN,
-    DEFAULT_TASK_EDITOR_VISIBLE,
-    TASK_EDITOR_FIXED_FIELDS,
-    TASK_EDITOR_SECTION_ORDER,
-    getTaskEditorSectionAssignments,
-    getTaskEditorSectionOpenDefaults,
-    isTaskEditorSectionableField,
     resolveTaskEditorPresetId,
     type TaskEditorPresetId,
 } from '@/components/task-edit/task-edit-modal.utils';
@@ -24,8 +15,15 @@ import { dispatchMobileOnboardingEvent } from '@/lib/mobile-onboarding-events';
 import { logSettingsError } from '@/lib/settings-utils';
 import { useToast } from '@/contexts/toast-context';
 import {
+    DEFAULT_TASK_EDITOR_ORDER,
+    DEFAULT_TASK_EDITOR_SECTION_BY_FIELD,
+    DEFAULT_TASK_EDITOR_SECTION_OPEN,
+    DEFAULT_TASK_EDITOR_VISIBLE,
     FOCUS_TASK_LIMIT_OPTIONS,
     formatTimeEstimateLabel,
+    getTaskEditorSectionAssignments,
+    getTaskEditorSectionOpenDefaults,
+    isTaskEditorSectionableField,
     normalizeClockTimeInput,
     normalizeFocusTaskLimit,
     getDefaultTaskAreaMode,
@@ -34,6 +32,8 @@ import {
     sanitizePomodoroDurations,
     shallow,
     tFallback,
+    TASK_EDITOR_FIXED_FIELDS,
+    TASK_EDITOR_SECTION_ORDER,
     type DefaultProjectFlowMode,
     type FeatureSettings,
     type GtdSettings,

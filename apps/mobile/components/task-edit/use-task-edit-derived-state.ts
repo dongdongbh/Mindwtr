@@ -1,10 +1,16 @@
 import { useCallback, useMemo } from 'react';
 import {
+    DEFAULT_TASK_EDITOR_ORDER,
+    DEFAULT_TASK_EDITOR_VISIBLE,
     filterProjectsBySelectedArea,
     formatTimeEstimateLabel as formatCoreTimeEstimateLabel,
+    getTaskEditorSectionAssignments,
+    getTaskEditorSectionOpenDefaults,
     isCustomTimeEstimate,
+    normalizeTaskEditorOrder,
     parseRRuleString,
     safeParseDate,
+    TASK_EDITOR_FIXED_FIELDS,
     type AppData,
     type Project,
     type RecurrenceRule,
@@ -22,14 +28,7 @@ import {
     getRecurrenceStrategyValue,
     WEEKDAY_ORDER,
 } from './recurrence-utils';
-import {
-    DEFAULT_TASK_EDITOR_ORDER,
-    DEFAULT_TASK_EDITOR_VISIBLE,
-    getTaskEditorSectionAssignments,
-    getTaskEditorSectionOpenDefaults,
-    STATUS_OPTIONS,
-    TASK_EDITOR_FIXED_FIELDS,
-} from './task-edit-modal.utils';
+import { STATUS_OPTIONS } from './task-edit-modal.utils';
 import type { PickerOption } from './TaskEditFieldRenderer.types';
 
 const DEFAULT_TIME_ESTIMATE_PRESETS: TimeEstimate[] = ['5min', '10min', '30min', '1hr', '2hr', '3hr', '4hr', '4hr+'];
@@ -165,12 +164,10 @@ export function useTaskEditDerivedState({
         if (!timeEstimatesEnabled) next.add('timeEstimate');
         return next;
     }, [prioritiesEnabled, timeEstimatesEnabled]);
-    const taskEditorOrder = useMemo(() => {
-        const known = new Set(DEFAULT_TASK_EDITOR_ORDER);
-        const normalized = savedOrder.filter((id) => known.has(id));
-        const missing = DEFAULT_TASK_EDITOR_ORDER.filter((id) => !normalized.includes(id));
-        return [...normalized, ...missing].filter((id) => !disabledFields.has(id));
-    }, [disabledFields, savedOrder]);
+    const taskEditorOrder = useMemo(
+        () => normalizeTaskEditorOrder(savedOrder, disabledFields),
+        [disabledFields, savedOrder]
+    );
     const sectionAssignments = useMemo(
         () => getTaskEditorSectionAssignments(settings.gtd?.taskEditor),
         [settings.gtd?.taskEditor]

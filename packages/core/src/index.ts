@@ -171,5 +171,6 @@ export * from './person-sync-schema';
 export * from './import-source-reader';
 export * from './settings-search-keys';
 export * from './task-recurrence-fields';
+export * from './task-editor-layout';
 export * from './shared-api-write-limits';
 export * from './task-query';

@@ -2,10 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
     buildTaskEditorPresetConfig,
-    DEFAULT_TASK_EDITOR_VISIBLE,
     getTaskEditTabOffset,
-    getTaskEditorSectionAssignments,
-    getTaskEditorSectionOpenDefaults,
     resolveTaskEditorPresetId,
     syncTaskEditPagerPosition,
 } from './task-edit-modal.utils';
@@ -62,66 +59,7 @@ describe('task-edit-modal pager sync', () => {
         expect(scrollTo).not.toHaveBeenCalled();
     });
 
-    it('merges saved task editor section overrides with defaults', () => {
-        expect(getTaskEditorSectionAssignments({
-            sections: {
-                dueDate: 'scheduling',
-                tags: 'details',
-            },
-        })).toMatchObject({
-            dueDate: 'scheduling',
-            tags: 'details',
-            section: 'basic',
-            contexts: 'basic',
-        });
-    });
-
-    it('uses saved section-open defaults when present', () => {
-        expect(getTaskEditorSectionOpenDefaults({
-            sectionOpen: {
-                scheduling: true,
-                details: false,
-            },
-        })).toEqual({
-            basic: true,
-            scheduling: true,
-            organization: false,
-            details: false,
-        });
-    });
-
-    it('keeps optional sections collapsed by default', () => {
-        expect(getTaskEditorSectionOpenDefaults(undefined)).toEqual({
-            basic: true,
-            scheduling: false,
-            organization: false,
-            details: false,
-        });
-    });
-
     it('keeps the standard preset shallow while leaving collapsed sections discoverable', () => {
-        expect(DEFAULT_TASK_EDITOR_VISIBLE).toEqual(expect.arrayContaining([
-            'status',
-            'project',
-            'area',
-            'contexts',
-            'dueDate',
-            'recurrence',
-            'startTime',
-            'reviewAt',
-            'tags',
-            'description',
-            'attachments',
-            'checklist',
-        ]));
-        expect(DEFAULT_TASK_EDITOR_VISIBLE).not.toEqual(expect.arrayContaining([
-            'section',
-            'priority',
-            'energyLevel',
-            'timeEstimate',
-            'assignedTo',
-            'location',
-        ]));
         const standardPreset = buildTaskEditorPresetConfig('standard');
         expect(standardPreset.hidden).not.toEqual(expect.arrayContaining([
             'recurrence',
