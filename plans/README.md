@@ -85,6 +85,37 @@ Selection non-interactive: every HIGH-confidence actionable finding became a pla
 
 Dependency notes: 031 after 024 (shared vi.mock idiom for un-stubbing); 032's DX-01 (lockfile) lands as an isolated commit before other work touches node_modules; 024 items 1→5→8→9 are ordered internally.
 
+## Phase 2 plans — review-improve loop 2026-09-04 (stamped against `992113e77`)
+
+Selection was automatic: every HIGH-confidence actionable finding from the Phase 2 improve audit (`.orchestrator/tasks/review-loop-20260904/improve-*.md`, git-excluded working state) became a plan; direction items are recorded below, not built.
+
+| # | Plan | Findings | Effort | Status |
+|---|------|----------|--------|--------|
+| 067 | deferred-remote-write-outcome | BUG-01 | S | TODO |
+| 068 | app-readme-drift | DOCS-01..05 (five commits) | S | TODO |
+| 069 | delete-unused-process-inbox-helper | TEST-04 | S | TODO |
+| 070 | mobile-weekly-review-test-unstub | TEST-01 | M | TODO |
+| 071 | e2e-gtd-loops | TEST-02 | M | TODO |
+| 072 | axe-contrast-gate-themes | TEST-03 | M | TODO |
+
+Fixed directly during the loop without a plan (see the loop ledger): BUG-R1 mobile attachment timers (c9541342e) and the thirty Phase 1 findings.
+
+### Direction (recorded, not built)
+- **DIR-01** expandable projects in the desktop sidebar (promised on #1116): `buildProjectGroups` and `getProjectNextActionState` already exist; device-local expand state can follow `HIDDEN_SIDEBAR_VIEWS_STORAGE_KEY`. Needs a design spike (default collapsed state, area nesting, badges). Desktop first.
+- **DIR-02** widen the shared review contract from step order to step content (bucket key + cap per step from `buildReviewSteps`) so both Daily Review modals read truncation and the focus limit from core. Medium; narrows divergence, cannot dedupe JSX.
+- **DIR-03** one quick-add token registry (token + label key + gating flag) feeding the help sentence and the editor badges; spike the assembled-sentence grammar in zh/ja/fa/sv first.
+- **Investigate**: Daily Review step order is re-listed per platform (`DailyReviewModal.tsx` ~:199-214, mobile sibling) and consulted from core only through `hasWork`; add a contract test before it diverges.
+
+### Deferred (this run)
+- **DEPS-R1** quick-xml 0.39.4 (RUSTSEC-2026-0194/0195) and rkyv 0.7.46 (RUSTSEC-2026-0235): `cargo update --precise` refuses both (wayland-scanner/ashpd/rfd/tauri-plugin-dialog pin quick-xml ^0.39; rust_decimal/byte-unit/tauri-plugin-log pin rkyv 0.7). Wait for the parents; a `[patch.crates-io]` override is not worth the risk for build-time XML and an unreached deserializer.
+- **DEPS-R2** image-size (Metro build-time transitive, no fixed release): monitor.
+- **B12** ~75 call-site keys still missing from en.ts (Obsidian view 38, People manager, Saved filters, Pomodoro phases, mobile context-automation): allowlisted shrink-only in `apps/desktop/src/test/i18n-missing-keys.test.ts` and `apps/mobile/tests/i18n-missing-keys.test.ts`; ~375-525 translations = own task.
+- `formatFocusTaskLimitText`'s literal-`3` fallback (`packages/core/src/focus-utils.ts:12-18`) is dead now that every locale carries `{{count}}` (guarded); delete with its test in a follow-up.
+
+## Plans 035–066 (2026-08-26..31 loop, reconciled 2026-09-04)
+
+All executed in the 1.2.5-rc → 1.2.6 window; each plan file records its own outcome and index rows were never added at the time. Treat every one of 035–066 as DONE unless its file says otherwise.
+
 ## Deferred (recorded, deliberately not planned this run)
 
 - **DEPS-03** ~50 RN transitives pinned as direct root dependencies (from 7703fdee2, none imported by root code): removal is mechanical but requires a lockfile review + real Android build round — own maintenance window, alongside DEPS-02 (Expo 54→57).
