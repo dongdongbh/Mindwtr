@@ -422,6 +422,14 @@ export function TimelineView() {
                 // shows the part of the project that falls inside it.
                 if (hi >= 0 && lo <= range.days - 1) {
                     span = { lo: Math.max(0, lo), hi: Math.min(range.days - 1, hi) };
+                } else if (group.rows.length === 0) {
+                    // Whole project outside the window and every task row under
+                    // it omitted: a header with a dot, a title and a blank track
+                    // tells the reader nothing. Count it in the same notice the
+                    // omitted tasks go to, so Earlier/Later brings it back.
+                    if (hi < 0) earlierOmitted += 1;
+                    else laterOmitted += 1;
+                    continue;
                 }
             }
             flattened.push({

@@ -432,6 +432,35 @@ describe('TimelineView (#1111)', () => {
         expect(screen.getByText('Nothing scheduled yet')).toBeTruthy();
     });
 
+    it('counts a project windowed entirely out instead of drawing an empty row for it', () => {
+        setStore({
+            projects: [{
+                id: 'gone',
+                title: 'Finished remodel',
+                status: 'active',
+                startDate: iso(-365),
+                dueDate: iso(-360),
+                createdAt: iso(-400),
+                updatedAt: iso(-400),
+            } as Project],
+            tasks: [
+                makeTask({ id: 'old', title: 'Old task', projectId: 'gone', dueDate: iso(-364) }),
+                makeTask({ id: 'visible', title: 'Visible task', dueDate: iso(150) }),
+            ],
+        });
+        renderTimeline();
+
+        expect(rowLabels()).not.toContain('Finished remodel');
+        expect(projectBarFor('gone')).toBeNull();
+        expect(barFor('old')).toBeNull();
+        expect(barFor('visible')).not.toBeNull();
+        // One omitted task plus the project itself.
+        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('+2 tasks');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Earlier' }));
+        expect(rowLabels()).toContain('Finished remodel');
+    });
+
     it('keeps scheduled tasks recoverable when the bounded window omits them', () => {
         setStore({
             tasks: [

@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop Timeline: a project whose dates all fall outside the visible window no longer shows as a bare row with nothing drawn; it is counted in the Earlier or Later notice like the tasks that are out of view. (#1111)
+
 - Desktop Timeline: the chart can be focused with the keyboard and scrolled sideways with the arrow keys, and screen readers now announce the chart and the zoom control by name. (#1111)
 
 - Mobile: the task editor's status list now offers Reference for every task, as the status badge on the same screen and the desktop already did, so a note can be filed as reference material without leaving the editor. (#1155)
