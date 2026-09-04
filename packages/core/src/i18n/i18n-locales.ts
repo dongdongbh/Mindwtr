@@ -81,6 +81,25 @@ export function isMixedEnglishChecked(descriptor: LocaleDescriptor, englishKeyCo
     return (descriptor.translatedKeyFloor / englishKeyCount) * 100 < MIXED_ENGLISH_COVERAGE_CEILING;
 }
 
+/**
+ * Whether a locale is checked for substituted English (see englishResidueWords in
+ * locale-quality.ts). The complement of isMixedEnglishChecked's population: that check
+ * only works where any Latin word is suspicious, so Latin-script locales had no
+ * equivalent and went unchecked entirely.
+ *
+ * No coverage ceiling here, deliberately. The ceiling above exists because a nearly
+ * complete non-Latin locale keeps English brand names on purpose and the check turns
+ * into noise. This check does not have that failure mode: it fires only on an English
+ * function word that survived from the same key's English source, which a finished
+ * translation never has at any coverage level. Swedish is at full parity and flags zero.
+ *
+ * Lives beside isMixedEnglishChecked for the same reason that one does: locale-parity.test.ts
+ * and scripts/i18n-locale-parity.ts must agree, and the script used to hand-keep its roster.
+ */
+export function isEnglishResidueChecked(descriptor: LocaleDescriptor): boolean {
+    return descriptor.mode === 'overrides' && !descriptor.nonLatin;
+}
+
 export const LOCALES = {
     vi: {
         loadSync: () => require('./locales/vi') as typeof import('./locales/vi'),

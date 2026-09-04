@@ -2,8 +2,13 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { en } from '../packages/core/src/i18n/locales/en';
-import { LOCALES, isMixedEnglishChecked } from '../packages/core/src/i18n/i18n-locales';
-import { hasTranslatableEnglishText, isAllowedEnglishMirrorKey } from '../packages/core/src/i18n/locale-quality';
+import { LOCALES, isEnglishResidueChecked, isMixedEnglishChecked } from '../packages/core/src/i18n/i18n-locales';
+import {
+    englishResidueWords,
+    hasTranslatableEnglishText,
+    isAllowedEnglishMirrorKey,
+    isAllowedEnglishResidueKey,
+} from '../packages/core/src/i18n/locale-quality';
 import { i18nTemplateSlots } from '../packages/core/src/i18n/index';
 
 type Dictionary = Record<string, string>;
@@ -26,6 +31,7 @@ const localeTargets = Object.entries(LOCALES).map(([locale, descriptor]) => ({
     // Must translate every English key, not just a floor's worth of them.
     fullParity: descriptor.translatedKeyFloor === 'all',
     mixedEnglishChecked: isMixedEnglishChecked(descriptor, englishKeys.length),
+    englishResidueChecked: isEnglishResidueChecked(descriptor),
 }));
 
 const args = new Set(process.argv.slice(2));
@@ -113,6 +119,15 @@ for (const target of localeTargets) {
     // i18n-locales.ts on why the script and the test derive from the same helpers). Kept out
     // of fixableKeys deliberately: a dropped {{count}} is repaired by rewriting the sentence
     // in that language, never by --fix deleting the translation and falling back to English.
+    // Latin-script counterpart of mixedEnglishKeys (see englishResidueWords). Like the slot
+    // check, kept out of fixableKeys: the repair is a real translation, not a deletion.
+    const englishResidueKeys = target.englishResidueChecked
+        ? Object.keys(dictionary).filter((key) => (
+            key in en
+            && !isAllowedEnglishResidueKey(target.locale, key)
+            && englishResidueWords(target.locale, dictionary[key], en[key]).length > 0
+        ))
+        : [];
     const slotMismatchKeys = Object.keys(dictionary).filter((key) => (
         key in en && i18nTemplateSlots(dictionary[key]).join(',') !== i18nTemplateSlots(en[key]).join(',')
     ));
@@ -129,17 +144,18 @@ for (const target of localeTargets) {
         (shouldFix && fixableKeys.has(key) ? undefined : dictionary[key]) ?? en[key],
     ])));
 
-    if (missingKeys.length === 0 && unknownKeys.length === 0 && mirroredEnglishKeys.length === 0 && mixedEnglishKeys.length === 0 && slotMismatchKeys.length === 0) {
+    if (missingKeys.length === 0 && unknownKeys.length === 0 && mirroredEnglishKeys.length === 0 && mixedEnglishKeys.length === 0 && slotMismatchKeys.length === 0 && englishResidueKeys.length === 0) {
         console.log(`${target.locale}: ok`);
         continue;
     }
 
-    problemCount += missingKeys.length + unknownKeys.length + mirroredEnglishKeys.length + mixedEnglishKeys.length + slotMismatchKeys.length;
+    problemCount += missingKeys.length + unknownKeys.length + mirroredEnglishKeys.length + mixedEnglishKeys.length + slotMismatchKeys.length + englishResidueKeys.length;
     if (missingKeys.length > 0) console.log(`${target.locale}: missing ${missingKeys.length} keys`);
     if (unknownKeys.length > 0) console.log(`${target.locale}: unknown ${unknownKeys.length} keys`);
     if (mirroredEnglishKeys.length > 0) console.log(`${target.locale}: mirrored English ${mirroredEnglishKeys.length} keys`);
     if (mixedEnglishKeys.length > 0) console.log(`${target.locale}: mixed English ${mixedEnglishKeys.length} keys`);
     if (slotMismatchKeys.length > 0) console.log(`${target.locale}: placeholder slot mismatch ${slotMismatchKeys.length} keys`);
+    if (englishResidueKeys.length > 0) console.log(`${target.locale}: word-substituted English ${englishResidueKeys.length} keys`);
     if (shouldFix) {
         if (missingKeys.length > 0) {
             console.log(`${target.locale}: missing full-parity translations require manual translation`);
@@ -155,6 +171,7 @@ for (const target of localeTargets) {
             ['mirrored', mirroredEnglishKeys],
             ['mixed English', mixedEnglishKeys],
             ['placeholder slots', slotMismatchKeys],
+            ['substituted English', englishResidueKeys],
         ] as const) {
             for (const key of keys.slice(0, 20)) {
                 console.log(`  - ${label}: ${key}`);

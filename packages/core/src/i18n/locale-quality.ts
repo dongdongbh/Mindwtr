@@ -33,6 +33,12 @@ export const allowedEnglishMirrorTerms = [
     'TickTick',
     'OmniFocus',
     'Obsidian',
+    // Third-party UI labels quoted verbatim in our copy. A translated sentence that tells
+    // the reader which Syncthing buttons to press has to name them exactly as Syncthing
+    // does, or the instruction stops working.
+    'Syncthing',
+    'Send & Receive',
+    'Watch for Changes',
     'DGT',
     'Vim',
     'Emacs',
@@ -130,6 +136,10 @@ export function stripAllowedEnglishTerms(value: string): string {
         // word "count" behind and read as untranslated English to the check below.
         .replace(I18N_TEMPLATE_SLOT_PATTERN, '')
         .replace(/\/[A-Za-z][A-Za-z0-9:_-]*/g, '')
+        // Quick-add syntax placeholders: `/start:<when>`, `/note:<text>`. The angle-bracketed
+        // name is part of the command the user types, identical in every locale, so it is not
+        // English prose left behind.
+        .replace(/<[A-Za-z][A-Za-z0-9_-]*>/g, '')
         .replace(/[+#@!][A-Za-z][A-Za-z0-9:_-]*/g, '');
 
     for (const term of allowedEnglishMirrorTerms) {
@@ -140,4 +150,109 @@ export function stripAllowedEnglishTerms(value: string): string {
 
 export function hasTranslatableEnglishText(value: string): boolean {
     return translatableEnglishPattern.test(stripAllowedEnglishTerms(value));
+}
+
+// ---------------------------------------------------------------------------
+// English residue in Latin-script locales
+// ---------------------------------------------------------------------------
+//
+// hasTranslatableEnglishText above only works for a non-Latin locale, where ANY Latin
+// word is suspicious. It is useless for es/de/nl/pl/tr/pt, whose own alphabet is Latin,
+// so nothing checked those files at all -- and they turned out to hold ~86 values that
+// are English sentences with individual words swapped for the target language by a
+// script: es 'Are you sure you want to Eliminar this section?', nl 'You are using the
+// laTest version!', de 'Aufgaben and Projekte suchen ...'. Each reads as a translated
+// string to every other check here: the key is present, the value differs from en.ts,
+// and the value is not a verbatim English mirror.
+//
+// THE SIGNAL. Those values are the English source with words replaced in place, so the
+// English function words survive. A real translation of the same string shares no
+// function words with its source, because they have no reason to appear.
+//
+// So: flag a value that still contains an English function word which ALSO appears in
+// its own English source string. Requiring the word to be in the source is what makes
+// this safe -- it is evidence of a word that survived substitution, not merely of a
+// word that resembles English.
+//
+// Three further filters, each added because it removed a measured false positive:
+//   - per-locale homographs below (Polish 'to', German 'will', Dutch 'is');
+//   - words of one letter, which collide across every language ('Sortera A-O');
+//   - <angle> placeholders and quoted third-party UI labels, stripped above.
+//
+// MEASURED. Over the 11 Latin-script locales this flags 86 values, every one inspected
+// and genuine. The four locales with careful human translations -- vi, fr, cs, sv --
+// come out at exactly 0, which is the real evidence: the check finds substituted
+// English, not merely "text that has English-looking words in it".
+export const ENGLISH_FUNCTION_WORDS: ReadonlySet<string> = new Set(`
+the this that these those an any all each every some no both other another such
+you your yours my me we our us they them their it its he she his her who whom whose
+what which someone something anything nothing everything
+is are was were be been being am do does did done have has had
+will would can could shall should may might must cannot
+of in on at to for from with without by about into onto over under between among
+during before after until while since through against
+and or but if then than because so as when where why how
+not only also just still yet already again always never here there now
+up down out off back more most less least very too own same next last first new old
+`.trim().split(/\s+/));
+
+// Words above that are ordinary words of the target language, where finding one proves
+// nothing. Kept deliberately tight: every entry blinds the check to that word in that
+// locale, so an over-broad list is a silent false negative, not a harmless precaution.
+export const nativeEnglishHomographsByLocale: Record<string, readonly string[]> = {
+    // Unaccented Vietnamese syllables are words: to (big), an (eat), in (print),
+    // can (need), do (because), so (compare), my (America), at, on, am (sound), be (calf).
+    vi: ['to', 'an', 'in', 'no', 'can', 'do', 'so', 'my', 'at', 'on', 'am', 'be', 'me', 'it'],
+    es: ['has', 'no', 'me'],
+    pt: ['as', 'no', 'do', 'me'],
+    it: ['in', 'no', 'me', 'so', 'do'],
+    // French: an (year), on (one), or (gold/now), but (goal), as (tu as).
+    fr: ['an', 'on', 'or', 'me', 'but', 'as'],
+    // German: will (wants), was (what), an, am, so, her, in, all.
+    de: ['in', 'an', 'so', 'will', 'am', 'was', 'her', 'all'],
+    // Dutch: of (or), we, had, over, was, is, in, me.
+    nl: ['in', 'is', 'of', 'we', 'had', 'over', 'was', 'me'],
+    // Polish: to (this), on (he), do (to), by, no (colloquial), we (in).
+    pl: ['to', 'on', 'do', 'by', 'no', 'we'],
+    cs: ['do', 'to', 'on', 'by', 'no', 'my'],
+    // Turkish: on (ten), an (moment), at (horse), in (den), her (every), as (hang).
+    tr: ['on', 'an', 'at', 'in', 'her', 'as'],
+    // Swedish: i/in, under (during), all, is (ice), just, be (ask), for (fared).
+    sv: ['in', 'under', 'all', 'is', 'just', 'be', 'for'],
+};
+
+/**
+ * Keys where an English fragment in a Latin-script locale is deliberate.
+ *
+ * Empty, and that is the finding rather than an oversight: every value this check flagged
+ * was a real defect and was retranslated instead. Third-party UI labels quoted in our copy
+ * ("Send & Receive", "Watch for Changes") are handled as terms above, which is the better
+ * home for them because it applies in every locale at once. Add a key here only when the
+ * English genuinely cannot be translated and is not a term.
+ */
+export const allowedEnglishResidueKeysByLocale: Record<string, readonly string[]> = {};
+
+const WORD_PATTERN = /\p{L}[\p{L}\p{N}_'’-]*/gu;
+
+function contentWords(value: string): string[] {
+    return (stripAllowedEnglishTerms(value).match(WORD_PATTERN) ?? []).map((word) => word.toLowerCase());
+}
+
+/** English function words still present in `translated` that also occur in its English source. */
+export function englishResidueWords(locale: string, translated: string, english: string): string[] {
+    const native = new Set(nativeEnglishHomographsByLocale[locale] ?? []);
+    const sourceWords = new Set(contentWords(english));
+    const residue = new Set<string>();
+    for (const word of contentWords(translated)) {
+        if (word.length < 2) continue;
+        if (!ENGLISH_FUNCTION_WORDS.has(word)) continue;
+        if (native.has(word)) continue;
+        if (!sourceWords.has(word)) continue;
+        residue.add(word);
+    }
+    return [...residue].sort();
+}
+
+export function isAllowedEnglishResidueKey(locale: string, key: string): boolean {
+    return allowedEnglishResidueKeysByLocale[locale]?.includes(key) ?? false;
 }

@@ -609,7 +609,7 @@ export const deOverrides: Record<string, string> = {
         'review.inboxStep': 'Posteingang verarbeiten',
         'review.inboxStepDesc': 'Ihre Posteingang-Elemente abklären und organisieren.',
         'review.inboxZero': 'Ziel: Posteingang leeren',
-        'review.inboxZeroDesc': 'Elemente in Ihrem Posteingang. Verarbeiten Sie diese, indem Sie abklären, um was es sich handelt und verteilen Sie diese auf Nächste Aktionen, Projekte, or Papierkorb.',
+        'review.inboxZeroDesc': 'Elemente in Ihrem Posteingang. Verarbeiten Sie diese, indem Sie abklären, um was es sich handelt und verteilen Sie diese auf Nächste Aktionen, Projekte oder Papierkorb.',
         'review.inboxEmpty': 'Posteingang ist leer! Gut gemacht.',
         'review.calendarStep': 'Kalender-Revision',
         'review.calendarStepDesc': 'Revidieren Sie Ihren Kalender für die nächste 7 Tage.',
@@ -1171,7 +1171,7 @@ export const deOverrides: Record<string, string> = {
         
         // Search
         'search.title': 'Suchen',
-        'search.placeholder': 'Aufgaben and Projekte suchen ...',
+        'search.placeholder': 'Aufgaben und Projekte suchen ...',
         'search.scopeHint': 'Aufgaben, Projekte, Personen',
         'search.noResults': 'Nichts gefunden',
         'search.searching': 'Suchen ...',

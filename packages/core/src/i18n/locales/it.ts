@@ -608,7 +608,7 @@ export const itOverrides: Record<string, string> = {
         'projects.availableNextAction': 'Prossima azione disponibile',
         'projects.laterInSequence': 'Più avanti nella sequenza',
         'projects.projectTypeHelpLabel': 'Aiuto tipo progetto',
-        'projects.projectTypeHelpText': 'I progetti sequenziali mostrano una sola azione disponibile alla volta. I progetti paralleli possono mostrare più attività Next indipendenti.',
+        'projects.projectTypeHelpText': 'I progetti sequenziali mostrano una sola azione disponibile alla volta. I progetti paralleli possono mostrare più attività Prossime indipendenti.',
         'projects.sequential': 'Sequenziale',
         'projects.parallel': 'Parallelo',
         'projects.sequentialTooltip': 'Sequenziale: solo la prima attività compare in Prossime azioni',
