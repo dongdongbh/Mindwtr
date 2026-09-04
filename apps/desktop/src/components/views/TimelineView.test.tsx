@@ -108,7 +108,24 @@ describe('TimelineView (#1111)', () => {
         renderTimeline();
         expect(barFor('start-only')?.dataset.variant).toBe('mini');
         expect(barFor('due-only')?.dataset.variant).toBe('mini');
-        expect(barFor('start-only')?.style.width).toBe('14px');
+        expect(barFor('start-only')?.style.width).toBe('12px');
+    });
+
+    it('draws task bars thinner than the solid project bar and gridlines as real elements, not a gradient', () => {
+        setStore({
+            projects: [{ id: 'p1', title: 'Remodel', status: 'active', startDate: iso(0), dueDate: iso(20), createdAt: iso(-60), updatedAt: iso(-60) } as Project],
+            tasks: [makeTask({ id: 't1', title: 'Tiles', projectId: 'p1', startTime: iso(1), dueDate: iso(6) })],
+        });
+        renderTimeline();
+        const projectHeight = Number.parseFloat(projectBarFor('p1')?.style.height ?? '0');
+        const taskHeight = Number.parseFloat(barFor('t1')?.style.height ?? '0');
+        expect(projectHeight).toBeGreaterThan(taskHeight);
+        // Week zoom over a 21-day range: at least two week boundaries inside it.
+        const gridlines = document.querySelectorAll('[data-testid="timeline-gridline-minor"]');
+        expect(gridlines.length).toBeGreaterThanOrEqual(2);
+        const withGradient = Array.from(document.querySelectorAll<HTMLElement>('div'))
+            .filter((element) => element.style.backgroundImage.includes('gradient'));
+        expect(withGradient).toHaveLength(0);
     });
 
     it('leaves out undated, done and deleted tasks', () => {

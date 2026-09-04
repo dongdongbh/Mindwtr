@@ -42,12 +42,12 @@ const DAY_WIDTH: Record<TimelineZoom, number> = { day: 32, week: 12, month: 4 };
 /** Floor for a span bar, so a one-day span is still a bar and not a hairline. */
 const MIN_BAR_WIDTH = 10;
 /** A task dated on one side only is a moment, not a span: a small dot on its day. */
-const MARKER_WIDTH = 14;
-const MARKER_HEIGHT = 14;
+const MARKER_WIDTH = 12;
+const MARKER_HEIGHT = 12;
 const ROW_HEIGHT = 30;
-const BAR_HEIGHT = 20;
-/** The project rail: half a task bar's height, so it reads as the container. */
-const PROJECT_BAR_HEIGHT = 10;
+const BAR_HEIGHT = 10;
+/** The project bar is the thicker, solid one, so it reads as the parent of the thin tinted task bars (#1111). */
+const PROJECT_BAR_HEIGHT = 14;
 const AXIS_HEIGHT = 44;
 /** The sticky name column: every row's title lives here, not floating on the canvas. */
 const GUTTER_WIDTH = 224;
@@ -456,10 +456,11 @@ export function TimelineView() {
     // coarser unit (the year once the columns are months), the bottom one the
     // minor ticks for the zoom. Both are thinned to a minimum pixel spacing.
     const axis = React.useMemo(() => {
-        if (!range) return { major: [] as AxisTick[], minor: [] as AxisTick[], monthLines: [] as number[] };
+        if (!range) return { major: [] as AxisTick[], minor: [] as AxisTick[], monthLines: [] as number[], minorLines: [] as number[] };
         const majorCandidates: AxisTick[] = [];
         const minorCandidates: AxisTick[] = [];
         const monthLines: number[] = [];
+        const minorLines: number[] = [];
         for (let index = 0; index < range.days; index += 1) {
             const day = addDays(range.from, index);
             const left = index * dayWidth;
@@ -483,29 +484,20 @@ export function TimelineView() {
                     left,
                     label: (zoom === 'month' ? axisDateFormatters.month : axisDateFormatters.day).format(day),
                 });
+                // Minor gridlines are real elements, never a repeating gradient:
+                // a gradient with a fractional period is resampled on scaled
+                // displays into soft vertical bands that testers read as
+                // shading (#1111). Month starts already have their own line.
+                if (zoom !== 'month' && index > 0 && !isMonthStart) minorLines.push(left);
             }
         }
         return {
             major: thinTicks(majorCandidates, MIN_MAJOR_LABEL_GAP),
             minor: thinTicks(minorCandidates, MIN_MINOR_LABEL_GAP),
             monthLines,
+            minorLines,
         };
     }, [axisDateFormatters, calendarSystem, dayWidth, range, weekStartsOn, zoom]);
-
-    // Minor gridlines are a repeating gradient rather than one div per tick:
-    // at day zoom that is 400 columns the browser paints for free.
-    const minorGridStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-        if (!range || zoom === 'month') return undefined;
-        const step = zoom === 'day' ? dayWidth : dayWidth * 7;
-        const offset = zoom === 'week'
-            ? ((weekStartsOn - range.from.getDay() + 7) % 7) * dayWidth
-            : 0;
-        return {
-            backgroundImage: `repeating-linear-gradient(to right, hsl(var(--border) / 0.5) 0 1px, transparent 1px ${step}px)`,
-            backgroundPosition: `${offset}px 0`,
-            backgroundRepeat: 'repeat',
-        };
-    }, [dayWidth, range, weekStartsOn, zoom]);
 
     const shouldVirtualize = rows.length > VIRTUALIZE_ABOVE_ROWS;
     const rowVirtualizer = useVirtualizer({
@@ -848,8 +840,16 @@ export function TimelineView() {
                                         <div
                                             aria-hidden
                                             className="pointer-events-none absolute inset-y-0 z-0"
-                                            style={{ left: GUTTER_WIDTH, width: trackWidth, ...minorGridStyle }}
+                                            style={{ left: GUTTER_WIDTH, width: trackWidth }}
                                         >
+                                            {axis.minorLines.map((left) => (
+                                                <div
+                                                    key={`grid-minor-${left}`}
+                                                    data-testid="timeline-gridline-minor"
+                                                    className="absolute inset-y-0 w-px bg-border/50"
+                                                    style={{ left }}
+                                                />
+                                            ))}
                                             {axis.monthLines.map((left) => (
                                                 <div
                                                     key={`grid-month-${left}`}
