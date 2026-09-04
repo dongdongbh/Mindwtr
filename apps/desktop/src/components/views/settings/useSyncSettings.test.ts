@@ -1176,6 +1176,67 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showSaved).toHaveBeenCalledTimes(1);
     });
 
+    // The commit already landed, so "your previous sync settings are still
+    // active" would be a lie for any later non-success.
+    it.each([
+        { label: 'a deferred remote write', follow: { success: true, remoteWriteDeferred: true } },
+        { label: 'an unexplained failure', follow: { success: false } },
+    ])('reports the new backend as active when the follow-up sync ends in $label', async ({ follow }) => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync)
+            .mockResolvedValueOnce({ success: true })
+            .mockResolvedValueOnce(follow as never);
+
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
+        act(() => {
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledTimes(1);
+        expect(showToast).toHaveBeenCalledWith(
+            'The new sync settings are active, but this sync did not finish. Mindwtr will retry on its own.',
+            'error',
+        );
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Sync did not complete. Your previous sync settings are still active.',
+            'error',
+        );
+    });
+
+    it('still says the previous sync settings are active when no new backend was committed', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.spyOn(SyncService, 'getSyncBackend').mockResolvedValue('cloud');
+        vi.spyOn(SyncService, 'getCloudConfig').mockResolvedValue({
+            url: 'https://example.com',
+            token: 'a'.repeat(24),
+            rememberToken: true,
+            allowInsecureHttp: false,
+        });
+        vi.mocked(SyncService.performSync).mockResolvedValue({ success: false } as never);
+
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'Sync did not complete. Your previous sync settings are still active.',
+            'error',
+        );
+    });
+
     it('lets Off supersede a gated activation probe and resolves only its captured candidate', async () => {
         vi.mocked(SyncService.getCloudProvider).mockResolvedValue('dropbox');
         vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');

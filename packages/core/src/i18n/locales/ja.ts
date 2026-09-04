@@ -1905,6 +1905,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.sync.readyToVerify': '設定の準備ができました。「今すぐ同期」を実行すると、確認のうえ保存されます。',
         'settings.sync.verificationFailed': '同期の設定を確認できませんでした。前の同期設定がそのまま使われています。',
         'settings.sync.incomplete': '同期が完了しませんでした。前の同期設定がそのまま使われています。',
+        'settings.sync.incompleteAfterSwitch': '新しい同期設定は有効になりましたが、今回の同期は完了しませんでした。Mindwtr が自動的に再試行します。',
         'settings.selectSyncFolderTitle': '同期フォルダを選択',
         // Mobile-only copy migrated from keyed helpers.
         'calendar.mobile.1Day': '1日',

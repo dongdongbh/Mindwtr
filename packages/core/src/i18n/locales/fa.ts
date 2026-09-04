@@ -1866,6 +1866,7 @@ export const faOverrides: Record<string, string> = {
         'settings.sync.readyToVerify': 'تنظیمات آماده‌اند. برای بررسی و ذخیره، اکنون همگام‌سازی کنید.',
         'settings.sync.verificationFailed': 'تنظیم همگام‌سازی تأیید نشد. تنظیمات پیشین همگام‌سازی همچنان فعال است.',
         'settings.sync.incomplete': 'همگام‌سازی کامل نشد. تنظیمات پیشین همگام‌سازی همچنان فعال است.',
+        'settings.sync.incompleteAfterSwitch': 'تنظیمات جدید همگام‌سازی فعال شد، اما این همگام‌سازی کامل نشد. Mindwtr خودش دوباره تلاش می‌کند.',
         'settings.selectSyncFolderTitle': 'انتخاب پوشه همگام‌سازی',
 
         'calendar.mobile.1Day': '۱ روز',

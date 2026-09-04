@@ -1033,6 +1033,10 @@ export const useSyncSettings = ({
         const activationGeneration = syncConfigurationGeneration.current;
         const activationCredentialHandle = dropboxCredentialHandleRef.current;
         let activationCleanupDeferred: 'remote' | 'file' | null = null;
+        // Once the proven configuration is committed the switch has already
+        // landed, so a later non-success must not claim the previous settings
+        // are still active.
+        let committedNewSyncConfiguration = false;
         const resolveCapturedCredential = async () => {
             if (!activationCredentialHandle) return;
             await discardDropboxCredential(activationCredentialHandle, {
@@ -1292,6 +1296,7 @@ export const useSyncSettings = ({
                     activationGeneration,
                 );
                 if (!committedCurrentConfiguration) return;
+                committedNewSyncConfiguration = true;
                 if (activationCleanupDeferred) {
                     if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
                     else showRemoteFenceFeedback('cleanup');
@@ -1387,7 +1392,12 @@ export const useSyncSettings = ({
                         'settings.syncEncryptionErrorBackendIncompatible',
                         'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
                     )
-                    : resolveText(
+                    : committedNewSyncConfiguration
+                      ? resolveText(
+                        'settings.sync.incompleteAfterSwitch',
+                        'The new sync settings are active, but this sync did not finish. Mindwtr will retry on its own.',
+                    )
+                      : resolveText(
                         'settings.sync.incomplete',
                         'Sync did not complete. Your previous sync settings are still active.',
                     );

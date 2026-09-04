@@ -1900,6 +1900,7 @@ export const en: Record<string, string> = {
         'settings.sync.readyToVerify': 'Settings ready. Sync now to verify and save them.',
         'settings.sync.verificationFailed': 'Sync setup could not be verified. Your previous sync settings are still active.',
         'settings.sync.incomplete': 'Sync did not complete. Your previous sync settings are still active.',
+        'settings.sync.incompleteAfterSwitch': 'The new sync settings are active, but this sync did not finish. Mindwtr will retry on its own.',
         'settings.selectSyncFolderTitle': 'Select sync folder',
         // Mobile-only copy migrated from keyed helpers.
         'calendar.mobile.1Day': '1 day',

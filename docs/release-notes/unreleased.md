@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop: after switching sync backends, a follow-up sync that does not finish (for example because another device holds the location) now says the new settings are active and that sync will retry, instead of the old message claiming the previous sync settings were still in use.
+
 - Desktop: Trash has a go-to keyboard chord, `g T` in the Vim preset and `Alt+Shift+T` in the Emacs preset, so a Trash hidden through Settings → Sidebar views stays reachable, and the setting's description now says hidden views stay reachable through their go-to chord rather than from search, which never opened views. (#1115)
 
 - Desktop: the Daily Review focus step shows your configured Today's Focus limit (for example "1 / 1" or "2 / 5") instead of always "/ 3", so it no longer invites picks the star control then refuses.
