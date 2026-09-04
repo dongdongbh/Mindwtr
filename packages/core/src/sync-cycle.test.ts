@@ -79,6 +79,27 @@ describe('performSyncCycle', () => {
         expect(result.data.tasks.map((task) => task.id).sort()).toEqual(['local-1', 'remote-1']);
     });
 
+    it('still merges a remote with no entities but a settings key when the empty-remote skip flag is set', async () => {
+        // The empty-remote check compared five entity arrays but never
+        // `settings` (#A3), so a remote document holding only a settings
+        // change (no tasks/projects/sections/areas/people) was treated as
+        // "empty" and discarded whenever the fast-path flag was armed.
+        const local = mockAppData([createMockTask('local-1', '2023-01-02')]);
+        const incoming: AppData = { ...mockAppData(), settings: { theme: 'dark' } };
+        let written: AppData | null = null;
+
+        const result = await performSyncCycle({
+            readLocal: async () => local,
+            readRemote: async () => incoming,
+            writeLocal: async (data) => { written = data; },
+            writeRemote: async () => {},
+            skipEmptyRemoteMerge: () => true,
+        });
+
+        expect((written as AppData | null)?.settings?.theme).toBe('dark');
+        expect(result.data.settings?.theme).toBe('dark');
+    });
+
     it('returns conflict status when merge finds conflicts', async () => {
         const local = mockAppData([{
             ...createMockTask('1', '2023-01-02'),

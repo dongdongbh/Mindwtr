@@ -1293,7 +1293,8 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
         && remoteData.projects.length === 0
         && remoteData.sections.length === 0
         && remoteData.areas.length === 0
-        && (remoteData.people?.length ?? 0) === 0;
+        && (remoteData.people?.length ?? 0) === 0
+        && Object.keys(remoteData.settings ?? {}).length === 0;
     const mergeResult: MergeResult = io.skipEmptyRemoteMerge?.() === true && remoteIsEmpty
         ? { data: localData, stats: createLocalOnlyMergeStats(localData) }
         : mergeAppDataWithStats(localData, remoteData, {
