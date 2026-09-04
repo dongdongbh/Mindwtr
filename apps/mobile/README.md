@@ -97,6 +97,7 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 
 ### 2. Install Android SDK
 
+```bash
 # Create SDK directory
 mkdir -p ~/Android/Sdk/cmdline-tools
 
@@ -116,8 +117,11 @@ source ~/.zshrc
 # Accept licenses and install components
 yes | sdkmanager --licenses
 sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
+```
 
 ### 3. Build APK
+
+See "Build (ABI-split APKs)" under Android Environment below for the build commands.
 
 ## iOS Builds (EAS)
 
