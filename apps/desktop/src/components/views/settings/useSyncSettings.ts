@@ -1383,6 +1383,23 @@ export const useSyncSettings = ({
                 if (isTauri) {
                     setSnapshots(await SyncService.listDataSnapshots());
                 }
+            } else if (
+                result.success
+                && (result.remoteWriteDeferred || result.skipped === 'pendingRemoteWriteBackoff')
+            ) {
+                // Healthy outcome: merged and saved locally, upload already
+                // scheduled. Right after a backend switch the fact that matters
+                // is that the switch landed, so keep B4's wording there, just
+                // not as an error.
+                showToast(committedNewSyncConfiguration
+                    ? resolveText(
+                        'settings.sync.incompleteAfterSwitch',
+                        'The new sync settings are active, but this sync did not finish. Mindwtr will retry on its own.',
+                    )
+                    : resolveText(
+                        'settings.sync.remoteWriteDeferred',
+                        'Your changes are saved on this device. Another device is writing to the sync location right now; Mindwtr will upload them on its own shortly.',
+                    ), 'info');
             } else {
                 if (result.error) {
                     void logError(new Error(result.error), { scope: 'sync', step: 'performResult' });

@@ -722,6 +722,11 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });
 
+    // This is the activation PROBE path (a candidate backend is being proven
+    // before commit), not the plain Sync-now path: a deferred write there is
+    // correctly inconclusive, not proof the new backend works, so it must
+    // still refuse to commit (mirrors desktop's 'preserves the proven
+    // backend on ... deferred write').
     it('reports a deferred remote write as an error even though performMobileSync succeeded', async () => {
         mocked.performMobileSync.mockResolvedValue({
             success: true,
@@ -1230,20 +1235,7 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });
 
-    it.each([
-        {
-            outcome: 'failed',
-            result: { success: false, error: 'Document sync failed.' },
-        },
-        {
-            outcome: 'deferred',
-            result: {
-                success: true,
-                remoteWriteDeferred: true,
-                error: 'Remote write failed. Retrying in the background.',
-            },
-        },
-    ])('prioritizes a $outcome document sync result over attachment guidance', async ({ result }) => {
+    it("prioritizes a 'failed' document sync result over attachment guidance", async () => {
         seedStorage([
             [SYNC_BACKEND_KEY, 'webdav'],
             [WEBDAV_URL_KEY, 'https://dav.example.com/mindwtr/'],
@@ -1254,7 +1246,8 @@ describe('useSyncSettingsTransportActions', () => {
         await renderHarness();
         mocked.performMobileSync.mockClear();
         mocked.performMobileSync.mockResolvedValueOnce({
-            ...result,
+            success: false,
+            error: 'Document sync failed.',
             fileAttachmentUploadBlocked: 'too-large',
         });
 
@@ -1266,6 +1259,44 @@ describe('useSyncSettingsTransportActions', () => {
             'settings.syncMobile.error',
             'Retry sync later.',
         );
+        expect(mocked.showSettingsWarning).not.toHaveBeenCalledWith(
+            'common.notice',
+            'settings.syncFileAttachmentTooLarge',
+            6000,
+        );
+        expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    });
+
+    // A deferred document write is a healthy outcome, not a failure — it
+    // still wins over the (also non-failure) attachment-size guidance, but
+    // with the new informational notice rather than the old error toast.
+    it("prioritizes a 'deferred' document sync result over attachment guidance", async () => {
+        seedStorage([
+            [SYNC_BACKEND_KEY, 'webdav'],
+            [WEBDAV_URL_KEY, 'https://dav.example.com/mindwtr/'],
+            [WEBDAV_USERNAME_KEY, 'alice'],
+            [WEBDAV_ALLOW_INSECURE_HTTP_KEY, 'false'],
+        ]);
+        seedSecrets([[WEBDAV_PASSWORD_KEY, 'persisted-secret']]);
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: true,
+            remoteWriteDeferred: true,
+            error: 'Remote write failed. Retrying in the background.',
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+
+        await act(async () => {
+            await latestHookResult?.handleSync();
+        });
+
+        expect(mocked.showToast).toHaveBeenCalledWith({
+            title: 'common.notice',
+            message: 'settings.sync.remoteWriteDeferred',
+            tone: 'info',
+        });
+        expect(mocked.showSettingsErrorToast).not.toHaveBeenCalled();
         expect(mocked.showSettingsWarning).not.toHaveBeenCalledWith(
             'common.notice',
             'settings.syncFileAttachmentTooLarge',
@@ -1314,6 +1345,36 @@ describe('useSyncSettingsTransportActions', () => {
                 expect.anything(),
             );
         }
+    });
+
+    // A merged-but-deferred cycle (another device holds the remote write; a
+    // retry is already scheduled) is a healthy outcome, not a failure — it
+    // must never throw 'Unknown error' or otherwise report as one (plan 067).
+    it.each([
+        ['remoteWriteDeferred', { success: true, remoteWriteDeferred: true }],
+        ['pendingRemoteWriteBackoff', { success: true, skipped: 'pendingRemoteWriteBackoff', remoteWriteDeferred: true }],
+    ])('shows an informational notice, never an error, for a plain %s cycle', async (_label, syncResult) => {
+        seedStorage([
+            [SYNC_BACKEND_KEY, 'webdav'],
+            [WEBDAV_URL_KEY, 'https://dav.example.com/mindwtr/'],
+            [WEBDAV_USERNAME_KEY, 'alice'],
+            [WEBDAV_ALLOW_INSECURE_HTTP_KEY, 'false'],
+        ]);
+        seedSecrets([[WEBDAV_PASSWORD_KEY, 'persisted-secret']]);
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce(syncResult);
+
+        await act(async () => {
+            await latestHookResult?.handleSync();
+        });
+
+        expect(mocked.showToast).toHaveBeenCalledWith({
+            title: 'common.notice',
+            message: 'settings.sync.remoteWriteDeferred',
+            tone: 'info',
+        });
+        expect(mocked.showSettingsErrorToast).not.toHaveBeenCalled();
     });
 
     it('rejects a self-hosted token that is too short and does not persist it', async () => {

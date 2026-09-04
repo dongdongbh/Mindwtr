@@ -1921,6 +1921,7 @@ export const en: Record<string, string> = {
         'settings.sync.verificationFailed': 'Sync setup could not be verified. Your previous sync settings are still active.',
         'settings.sync.incomplete': 'Sync did not complete. Your previous sync settings are still active.',
         'settings.sync.incompleteAfterSwitch': 'The new sync settings are active, but this sync did not finish. Mindwtr will retry on its own.',
+        'settings.sync.remoteWriteDeferred': 'Your changes are saved on this device. Another device is writing to the sync location right now; Mindwtr will upload them on its own shortly.',
         'settings.selectSyncFolderTitle': 'Select sync folder',
         // Mobile-only copy migrated from keyed helpers.
         'calendar.mobile.1Day': '1 day',

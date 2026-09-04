@@ -1887,6 +1887,7 @@ export const svOverrides: Record<string, string> = {
         'settings.sync.verificationFailed': 'Synkroniseringen kunde inte verifieras. Dina tidigare synkroniseringsinställningar är fortfarande aktiva.',
         'settings.sync.incomplete': 'Synkroniseringen slutfördes inte. Dina tidigare synkroniseringsinställningar är fortfarande aktiva.',
         'settings.sync.incompleteAfterSwitch': 'De nya synkroniseringsinställningarna är aktiva, men den här synkroniseringen slutfördes inte. Mindwtr försöker igen automatiskt.',
+        'settings.sync.remoteWriteDeferred': 'Dina ändringar är sparade på den här enheten. En annan enhet skriver till synkroniseringsplatsen just nu; Mindwtr laddar upp dem automatiskt inom kort.',
         'settings.selectSyncFolderTitle': 'Välj synkmapp',
         'calendar.mobile.1Day': '1 dag',
         'calendar.mobile.day': 'Dag',

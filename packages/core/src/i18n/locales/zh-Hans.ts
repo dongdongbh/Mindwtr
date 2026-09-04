@@ -1779,6 +1779,7 @@ export const zhHans: Record<string, string> = {
         'settings.sync.verificationFailed': '无法验证同步设置。之前的同步设置仍然有效。',
         'settings.sync.incomplete': '同步未完成。之前的同步设置仍然有效。',
         'settings.sync.incompleteAfterSwitch': '新的同步设置已生效，但这次同步未完成。Mindwtr 会自动重试。',
+        'settings.sync.remoteWriteDeferred': '您的更改已保存在此设备上。另一台设备目前正在写入同步位置，Mindwtr 会自动为您上传这些更改。',
         'settings.selectSyncFolderTitle': '选择同步文件夹',
         'ai.working': '处理中...',
         'attachments.retryTranscription': '重新转录',

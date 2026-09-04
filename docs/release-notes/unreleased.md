@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Sync: pressing Sync now while another device holds the sync location (your changes merged and were saved on this device, and the upload is already scheduled to retry) showed a red failure, on the desktop claiming "Your previous sync settings are still active" and on the phone "Unknown error". Both now show a short notice that the changes are saved and will upload on their own; right after a backend switch the desktop keeps saying the new settings are active, as a notice rather than an error.
+
 - Translations: ninety-one Spanish, Dutch, Turkish, Polish, Portuguese, German and Italian sentences were English with single words swapped (for example "Are you sure you want to Eliminar this section?"), including the notice that asks permission before task data is sent to an AI provider; all are rewritten in natural language, and a build check now catches this pattern in every Latin-alphabet language.
 
 - Translations: thirty-seven sentences in twelve languages had lost the place where a number or name is filled in (for example the focus limit in "Max. 3 focus items" or the count in "N matches in this view"), so they showed a fixed number or nothing; they are rewritten with the value back in place, and a build check keeps every translation's fill-in slots in step with the English source.
