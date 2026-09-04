@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { TimelineView, resolveTimelineTrack } from './TimelineView';
+import { TimelineView, resolveTimelineTrack, taskBarTint } from './TimelineView';
 import { LanguageProvider } from '../../contexts/language-context';
 import { configureDateFormatting, useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
 
@@ -108,7 +108,24 @@ describe('TimelineView (#1111)', () => {
         renderTimeline();
         expect(barFor('start-only')?.dataset.variant).toBe('mini');
         expect(barFor('due-only')?.dataset.variant).toBe('mini');
-        expect(barFor('start-only')?.style.width).toBe('14px');
+        expect(barFor('start-only')?.style.width).toBe('12px');
+    });
+
+    it('draws task bars thinner than the solid project bar and gridlines as real elements, not a gradient', () => {
+        setStore({
+            projects: [{ id: 'p1', title: 'Remodel', status: 'active', startDate: iso(0), dueDate: iso(20), createdAt: iso(-60), updatedAt: iso(-60) } as Project],
+            tasks: [makeTask({ id: 't1', title: 'Tiles', projectId: 'p1', startTime: iso(1), dueDate: iso(6) })],
+        });
+        renderTimeline();
+        const projectHeight = Number.parseFloat(projectBarFor('p1')?.style.height ?? '0');
+        const taskHeight = Number.parseFloat(barFor('t1')?.style.height ?? '0');
+        expect(projectHeight).toBeGreaterThan(taskHeight);
+        // Week zoom over a 21-day range: at least two week boundaries inside it.
+        const gridlines = document.querySelectorAll('[data-testid="timeline-gridline-minor"]');
+        expect(gridlines.length).toBeGreaterThanOrEqual(2);
+        const withGradient = Array.from(document.querySelectorAll<HTMLElement>('div'))
+            .filter((element) => element.style.backgroundImage.includes('gradient'));
+        expect(withGradient).toHaveLength(0);
     });
 
     it('leaves out undated, done and deleted tasks', () => {
@@ -124,7 +141,7 @@ describe('TimelineView (#1111)', () => {
         expect(bars().map((bar) => bar.dataset.taskId)).toEqual(['dated']);
     });
 
-    it('colors a bar with the same accent the calendar gives that task', () => {
+    it('tints a bar with the same accent the calendar gives that task', () => {
         setStore({
             tasks: [
                 makeTask({ id: 'in-area', title: 'In area', projectId: 'p1', startTime: iso(0), dueDate: iso(1) }),
@@ -140,9 +157,11 @@ describe('TimelineView (#1111)', () => {
             areas: [{ id: 'a1', name: 'Work', color: '#ff0000', createdAt: iso(-60), updatedAt: iso(-60) } as unknown as Area],
         });
         renderTimeline();
-        expect(barFor('in-area')?.style.backgroundColor).toBe('rgb(255, 0, 0)');
-        expect(barFor('plain')?.style.backgroundColor).toBe('rgb(0, 255, 0)');
-        expect(barFor('loose')?.style.backgroundColor).toBe('rgb(255, 0, 0)');
+        // Same hue as the calendar, drawn at the calm strength a task bar uses.
+        expect(barFor('in-area')?.style.backgroundColor).toBe('rgba(255, 0, 0, 0.25)');
+        expect(barFor('plain')?.style.backgroundColor).toBe('rgba(0, 255, 0, 0.25)');
+        expect(barFor('loose')?.style.backgroundColor).toBe('rgba(255, 0, 0, 0.25)');
+        expect(barFor('plain')?.style.border).toBe('1px solid rgba(0, 255, 0, 0.7)');
     });
 
     it('groups rows by project with unassigned tasks last', () => {
@@ -271,6 +290,70 @@ describe('TimelineView (#1111)', () => {
         });
     });
 
+    describe('project group and task bar hierarchy', () => {
+        const twoProjectStore = () => setStore({
+            tasks: [
+                makeTask({ id: 'owned', title: 'Owned task', projectId: 'p1', startTime: iso(0), dueDate: iso(3) }),
+                makeTask({ id: 'other', title: 'Other task', projectId: 'p2', startTime: iso(0), dueDate: iso(3) }),
+                makeTask({ id: 'loose', title: 'Loose task', startTime: iso(0), dueDate: iso(3) }),
+            ],
+            projects: [
+                { id: 'p1', title: 'First', status: 'active', color: '#00ff00', startDate: iso(0).slice(0, 10), dueDate: iso(3).slice(0, 10), createdAt: iso(-60), updatedAt: iso(-60) } as Project,
+                { id: 'p2', title: 'Second', status: 'active', color: '#0000ff', createdAt: iso(-59), updatedAt: iso(-59) } as Project,
+            ],
+        });
+
+        it('rules off every project group but the first', () => {
+            twoProjectStore();
+            renderTimeline();
+
+            // Three groups: First, Second and No project. The first opens the
+            // list, so only the two that start a new block carry a rule.
+            expect(rowLabels()).toEqual(['First', 'Owned task', 'Second', 'Other task', 'No project', 'Loose task']);
+            expect(screen.getAllByTestId('timeline-group-separator')).toHaveLength(2);
+        });
+
+        it('draws a task bar as a tint of the project bar, with no title on it', () => {
+            twoProjectStore();
+            renderTimeline();
+
+            const projectBar = projectBarFor('p1');
+            const taskBar = barFor('owned');
+            expect(projectBar?.style.backgroundColor).toBe('rgb(0, 255, 0)');
+            expect(taskBar?.style.backgroundColor).not.toBe(projectBar?.style.backgroundColor);
+            expect(taskBar?.style.backgroundColor).toBe('rgba(0, 255, 0, 0.25)');
+            // The sticky name column is the only place the title is written.
+            expect(taskBar?.textContent).toBe('');
+            expect(screen.getAllByText('Owned task')).toHaveLength(1);
+        });
+
+        it('tints a mini marker and an accent-colored bar the same way', () => {
+            setStore({
+                tasks: [
+                    makeTask({ id: 'mini', title: 'One sided', projectId: 'p1', dueDate: iso(1) }),
+                    makeTask({ id: 'accent', title: 'No color', startTime: iso(0), dueDate: iso(2) }),
+                ],
+                projects: [{ id: 'p1', title: 'First', status: 'active', color: '#00ff00', createdAt: iso(-60), updatedAt: iso(-60) } as Project],
+            });
+            renderTimeline();
+
+            expect(barFor('mini')?.dataset.variant).toBe('mini');
+            expect(barFor('mini')?.style.backgroundColor).toBe('rgba(0, 255, 0, 0.25)');
+            // A task with no area or project keeps the accent, tinted with the token.
+            expect(barFor('accent')?.style.backgroundColor).toBe('hsl(var(--primary) / 0.25)');
+            expect(bars().every((bar) => bar.textContent === '')).toBe(true);
+        });
+
+        it('falls back to the accent token for a color it cannot read', () => {
+            expect(taskBarTint('#00ff00')).toEqual({ fill: 'rgba(0, 255, 0, 0.25)', border: 'rgba(0, 255, 0, 0.7)' });
+            // Shorthand hex and an 8-digit widget color both resolve.
+            expect(taskBarTint('#0f0').fill).toBe('rgba(0, 255, 0, 0.25)');
+            expect(taskBarTint('#00ff00ff').fill).toBe('rgba(0, 255, 0, 0.25)');
+            expect(taskBarTint(undefined).fill).toBe('hsl(var(--primary) / 0.25)');
+            expect(taskBarTint('not a color').border).toBe('hsl(var(--primary) / 0.7)');
+        });
+    });
+
     it('splits the month-zoom axis into a year tier and month ticks, and floors thin bars', () => {
         // The shipped axis printed "MMM yyyy" on every month start, which
         // collided at 4px per day; the year moves to the top tier instead.
@@ -289,6 +372,37 @@ describe('TimelineView (#1111)', () => {
         expect(minor.every((label) => /^[A-Za-z]+$/.test(label))).toBe(true);
         // One day is 4px at month zoom; a bar never renders as a sliver.
         expect(barFor('oneday')?.style.width).toBe('10px');
+    });
+
+    it('opens centered on today and re-centers when the zoom changes', () => {
+        const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+        const scrollLeft = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollLeft');
+        const positions = new WeakMap<Element, number>();
+        Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1000 });
+        Object.defineProperty(Element.prototype, 'scrollLeft', {
+            configurable: true,
+            get() { return positions.get(this) ?? 0; },
+            set(value: number) { positions.set(this, value); },
+        });
+        try {
+            // 200 days before today through 150 after: wider than the pane at every zoom.
+            setStore({
+                tasks: [
+                    makeTask({ id: 'past', title: 'Past', startTime: iso(-200), dueDate: iso(-190) }),
+                    makeTask({ id: 'future', title: 'Future', startTime: iso(100), dueDate: iso(150) }),
+                ],
+            });
+            renderTimeline();
+            const scroller = screen.getByTestId('timeline-scroller');
+            // Week zoom is 12px per day: today sits 2400px in, centered in a 1000px pane past the 224px gutter.
+            expect(scroller.scrollLeft).toBe(224 + 200 * 12 - 500);
+            fireEvent.click(screen.getByRole('button', { name: 'Day' }));
+            expect(scroller.scrollLeft).toBe(224 + 200 * 32 - 500);
+        } finally {
+            if (clientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidth);
+            else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+            if (scrollLeft) Object.defineProperty(Element.prototype, 'scrollLeft', scrollLeft);
+        }
     });
 
     it('marks today and shows the empty state when nothing is dated', () => {

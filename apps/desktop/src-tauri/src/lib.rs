@@ -290,6 +290,74 @@ async fn send_flatpak_notification(_title: String, _body: Option<String>) -> Res
     Err("Flatpak notification portal is only available on Linux".to_string())
 }
 
+/// Sends a Windows toast through the process's own package identity.
+///
+/// `tauri-plugin-notification` always calls `CreateToastNotifierWithId(<tauri identifier>)`.
+/// In an MSIX (Microsoft Store) install that identifier is not the package's AUMID, Windows
+/// rejects the notifier, and the plugin discards the error, so a tray-resident app shows no
+/// reminder toast at all (#1146). A packaged process must use `CreateToastNotifier()` with no
+/// id. Unpackaged installs (NSIS, portable) keep the plugin path: their shortcut registers the
+/// AUMID the plugin passes.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn send_windows_packaged_notification(title: String, body: Option<String>) -> Result<(), String> {
+    use windows::core::HSTRING;
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager, ToastTemplateType};
+
+    if install::current_package_family_name().is_none() {
+        return Err("Windows package identity is unavailable".to_string());
+    }
+
+    let trimmed_title = title.trim();
+    if trimmed_title.is_empty() {
+        return Err("Notification title is required".to_string());
+    }
+    let trimmed_body = body.as_deref().map(str::trim).unwrap_or("");
+
+    fn win_err(context: &str, error: windows::core::Error) -> String {
+        format!("{context}: {} (HRESULT 0x{:08X})", error.message(), error.code().0)
+    }
+
+    // Two-line template: title in the first text node, body in the second.
+    let xml: XmlDocument = ToastNotificationManager::GetTemplateContent(ToastTemplateType::ToastText02)
+        .map_err(|error| win_err("Failed to load the toast template", error))?;
+    let text_nodes = xml
+        .GetElementsByTagName(&HSTRING::from("text"))
+        .map_err(|error| win_err("Failed to read the toast template text nodes", error))?;
+
+    for (index, value) in [trimmed_title, trimmed_body].iter().enumerate() {
+        if value.is_empty() {
+            continue;
+        }
+        let node = text_nodes
+            .GetAt(index as u32)
+            .map_err(|error| win_err("Failed to address a toast text node", error))?;
+        let text = xml
+            .CreateTextNode(&HSTRING::from(*value))
+            .map_err(|error| win_err("Failed to create a toast text node", error))?;
+        node.AppendChild(&text)
+            .map_err(|error| win_err("Failed to fill a toast text node", error))?;
+    }
+
+    let toast = ToastNotification::CreateToastNotification(&xml)
+        .map_err(|error| win_err("Failed to create the toast", error))?;
+    ToastNotificationManager::CreateToastNotifier()
+        .map_err(|error| win_err("Failed to create the packaged toast notifier", error))?
+        .Show(&toast)
+        .map_err(|error| win_err("Failed to show the toast", error))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn send_windows_packaged_notification(
+    _title: String,
+    _body: Option<String>,
+) -> Result<(), String> {
+    Err("Windows packaged notifications are only available on Windows".to_string())
+}
+
 #[cfg(target_os = "macos")]
 const MENU_HELP_DOCS_ID: &str = "help_docs";
 #[cfg(target_os = "macos")]
@@ -1764,6 +1832,7 @@ pub fn run() {
             get_launch_at_startup_enabled,
             set_launch_at_startup_enabled,
             send_flatpak_notification,
+            send_windows_packaged_notification,
             get_local_api_server_status,
             set_local_api_server_config,
             get_email_capture_config,

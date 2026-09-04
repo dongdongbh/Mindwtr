@@ -1,6 +1,6 @@
 # Release diagnostics ledger
 
-Maintainer file, not user docs. Every stable or RC release adds one log line per change that field testers are asked to confirm, and removes the previous release's lines once that release has been out. The rule lives in the `publish-release` and `publish-rc-release` skills.
+Maintainer file, not user docs. Every stable or RC release adds one log line per change that field testers are asked to confirm, and removes the previous release's lines once their issues are confirmed or closed; unconfirmed lines are carried forward under the new version. Complicated fixes add their line in the fix commit (AGENTS.md "Diagnostic log rides complicated fixes"); simple UI fixes need none; the release pass (`publish-release`, `publish-rc-release`) adds the rest and does the trim.
 
 Convention: a release-specific line carries `extra.releaseCheck = "<version>/<slug>"` so it can be found with `git grep -n releaseCheck` and trimmed by version. General diagnostics (the sync trail, `[sync-encryption]` events, `Mobile background sync started`/`finished`, activation proofs) never carry `releaseCheck` and are never trimmed.
 
@@ -11,6 +11,15 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 - `Mobile background sync started` / `finished` / `run took longer than a minute` (`apps/mobile/lib/background-sync-task.ts`, #1001).
 - `Mobile background sync registered` with interval (same file).
 - Desktop `Sync backend selected; running the verification sync to activate it` (`useSyncSettings.ts`).
+
+## v1.2.8 (add before tagging, trim in the release after)
+
+Field names are checked against the log sanitizer by `packages/core/src/release-diagnostics-fields.test.ts`. Add every new field name to that test's list.
+
+### Added
+
+- **`v1.2.8/desktop-reminder-fired`** — `apps/desktop/src/lib/notification-service.tsx`, in `checkDueAndNotify` (`logReminderFired`), at all three fire sites: due-time repeats, task reminders and project review reminders. Message: `Desktop reminder fired`. Fields: `kind` (`due-repeat` | `task` | `project`), `entity` (`task` | `project`), `fireAt` (ISO occurrence time), `appState` (`focused` | `hidden`). No task title or body is ever logged. Tester's log: a user who sees no toast now has one line proving the scheduler fired, which separates a scheduling bug from a delivery bug (#1146).
+- **`v1.2.8/desktop-notification-path`** — same file, in `sendNotification` (`logNotificationSent` / `logNotificationFailed`). Messages: `Desktop notification sent` and `Desktop notification send failed`. Fields: `path` (`flatpak` | `windows-packaged` | `plugin` | `web`) and, on the failure line, `error`. Tester's log: on a Microsoft Store install the line must read `path=windows-packaged`; a Store install that still falls through to `plugin` means the packaged command rejected, and the warning names the HRESULT it rejected with (#1146).
 
 ## v1.2.7 (add before tagging, trim in the release after)
 

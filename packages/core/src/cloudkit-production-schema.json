@@ -1,5 +1,5 @@
 {
- "comment": "CloudKit Production container schema state by record type. 'deployed' is the repository assertion for keys already exercised by stable releases or explicitly confirmed in the Production dashboard. New keys stay in 'pendingProduction' until that dashboard check is complete; stable releases fail while any pending key remains.",
+ "comment": "CloudKit Production container schema state by record type. 'deployed' is the repository assertion for keys already exercised by stable releases or explicitly confirmed in the Production dashboard. New keys stay in 'pendingProduction' until that dashboard check is complete; stable releases fail while any pending key remains. MindwtrProject.startDate exists in Production as a Date/Time field by mistake (1.2.7); every date kind is written as a String, so that key is retired and the start date lives in startDateText (String).",
  "records": {
   "MindwtrTask": {
    "deployed": [
@@ -72,7 +72,7 @@
     "updatedAt",
     "deletedAt",
     "purgedAt",
-    "startDate"
+    "startDateText"
    ],
    "pendingProduction": []
   },

@@ -250,8 +250,12 @@ function SyncSettingsView({
                 return t('settings.syncFileLockUnavailable');
             case 'fileGenerationCorrupt':
                 return t('settings.syncFileGenerationCorrupt');
-            default:
-                return t('settings.syncFailureGeneric');
+            default: {
+                // An unclassified failure used to show only "Review Settings → Sync and
+                // try again", which hid the one line that named the cause (#1151).
+                const detail = (error instanceof Error ? error.message : String(error ?? '')).trim();
+                return detail ? `${t('settings.syncFailureGeneric')}\n${detail}` : t('settings.syncFailureGeneric');
+            }
         }
     }, [t]);
 

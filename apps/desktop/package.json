@@ -39,7 +39,7 @@
     "@tauri-apps/plugin-shell": "2.3.3",
     "clsx": "^2.1.0",
     "date-fns": "^4.1.0",
-    "fflate": "^0.8.2",
+    "fflate": "^0.8.3",
     "lucide-react": "^0.344.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",

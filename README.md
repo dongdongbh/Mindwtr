@@ -160,6 +160,7 @@ Mindwtr is simple by default, powerful when you need it, and forgiving when life
 - ⏳ **Waiting For** - Delegated items
 - 💭 **Someday/Maybe** - Deferred ideas
 - 📅 **Calendar** - Time-based planning with adjustable mobile week density
+- 📊 **Timeline** - Dated tasks and projects as bars from start to due date, colored by project, with day/week/month zoom (desktop, optional)
 - 📋 **Board** - Kanban-style drag-and-drop
 - 📝 **Review** - Daily + weekly review workflows
 - 📦 **Archived** - Hidden history, searchable when needed

@@ -56,7 +56,7 @@ pub(crate) fn is_windows_store_install() -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn current_package_family_name() -> Option<String> {
+pub(crate) fn current_package_family_name() -> Option<String> {
     use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
     use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFamilyName;
 

@@ -293,6 +293,9 @@ const prepareActivationAttachmentSnapshot = (
     localFallbacks: Map<string, Attachment>;
     metadataOnlyIds: Set<string>;
     noLocalBytesIds: Set<string>;
+    /** The key each record carried before the trial cleared it, so a refusal can
+     *  still say which sync location the file lives on (#1151). */
+    originalCloudKeys: Map<string, string>;
 } => {
     const candidateAttachments = new Map<string, Attachment>();
     if (candidateRemoteData) {
@@ -311,10 +314,13 @@ const prepareActivationAttachmentSnapshot = (
     const localFallbacks = new Map<string, Attachment>();
     const metadataOnlyIds = new Set<string>();
     const noLocalBytesIds = new Set<string>();
+    const originalCloudKeys = new Map<string, string>();
     const count = visitLiveFileAttachments(candidate, (attachment) => {
         expectedIds.add(attachment.id);
         const candidateAttachment = candidateAttachments.get(attachment.id);
         const localAttachment = localAttachments.get(attachment.id);
+        const originalKey = candidateAttachment?.cloudKey || localAttachment?.cloudKey || attachment.cloudKey;
+        if (originalKey) originalCloudKeys.set(attachment.id, originalKey);
         // This device holds no bytes for the record (never had it, or already knew
         // the file is missing) and cannot reach it on the previous backend either.
         const noLocalBytes = !localAttachment?.cloudKey
@@ -352,7 +358,7 @@ const prepareActivationAttachmentSnapshot = (
         }
         attachment.localStatus = 'missing';
     });
-    return { data: candidate, count, expectedIds, localFallbacks, metadataOnlyIds, noLocalBytesIds };
+    return { data: candidate, count, expectedIds, localFallbacks, metadataOnlyIds, noLocalBytesIds, originalCloudKeys };
 };
 
 const prepareActivationFallbackRetry = (
@@ -379,14 +385,53 @@ const prepareActivationFallbackRetry = (
     return count > 0 ? { data: retryData, count } : { data, count: 0 };
 };
 
+const CLOUDKIT_KEY_PREFIX = 'cloudkit:';
+const clipTitle = (value: string | undefined, max = 60): string => {
+    const trimmed = (value ?? '').trim();
+    if (!trimmed) return '';
+    return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
+};
+
+/** The refusal names the file and its owner, and says why (#1151): a UUID alone
+ *  sent a reporter to curl and jq against /v1/data to find the task. */
+const describeUnprovenAttachment = (
+    ownerType: 'task' | 'project',
+    owner: { title?: string },
+    attachment: Attachment,
+    backend: SyncBackend,
+    originalCloudKey: string | undefined,
+): string => {
+    const name = clipTitle(attachment.title) || attachment.id;
+    const ownerTitle = clipTitle(owner.title);
+    const where = ownerTitle ? ` on ${ownerType} "${ownerTitle}"` : '';
+    const key = originalCloudKey || attachment.cloudKey || '';
+    let reason: string;
+    if (key && backend !== 'cloudkit' && key.startsWith(CLOUDKIT_KEY_PREFIX)) {
+        reason = 'it was uploaded to iCloud and is not reachable from this sync location; re-add the file on a device that still has it';
+    } else if (key && backend === 'cloudkit' && !key.startsWith(CLOUDKIT_KEY_PREFIX)) {
+        reason = 'it was uploaded to another sync location and is not reachable from iCloud; re-add the file on a device that still has it';
+    } else if (!key) {
+        reason = 'no copy of the file exists on this device or at the new sync location';
+    } else {
+        reason = 'the file could not be fetched from the new sync location';
+    }
+    return `Candidate attachment proof failed for ${attachment.id} ("${name}"${where}): ${reason}`;
+};
+
 const assertActivationAttachmentsProven = (
     data: AppData,
     expectedIds: ReadonlySet<string>,
     metadataOnlyIds: ReadonlySet<string>,
     noLocalBytesIds: ReadonlySet<string>,
+    backend: SyncBackend,
+    originalCloudKeys: ReadonlyMap<string, string>,
 ): void => {
     const resolved = new Set<string>();
-    for (const owner of [...data.tasks, ...data.projects]) {
+    const owners: Array<['task' | 'project', { title?: string; deletedAt?: string; attachments?: Attachment[] }]> = [
+        ...data.tasks.map((task) => ['task', task] as ['task', typeof task]),
+        ...data.projects.map((project) => ['project', project] as ['project', typeof project]),
+    ];
+    for (const [ownerType, owner] of owners) {
         for (const attachment of owner.attachments ?? []) {
             if (attachment.kind !== 'file') continue;
             if (owner.deletedAt || attachment.deletedAt) {
@@ -398,7 +443,7 @@ const assertActivationAttachmentsProven = (
                     // local bytes involved it stays a refusal (the exact-copy retry
                     // above already had its one attempt).
                     if (!noLocalBytesIds.has(attachment.id)) {
-                        throw new Error(`Candidate attachment proof failed for ${attachment.id}`);
+                        throw new Error(describeUnprovenAttachment(ownerType, owner, attachment, backend, originalCloudKeys.get(attachment.id)));
                     }
                     resolved.add(attachment.id);
                 }
@@ -423,7 +468,7 @@ const assertActivationAttachmentsProven = (
                 || attachment.localStatus !== 'available'
                 || attachment.pendingContentUpload === true
             ) {
-                throw new Error(`Candidate attachment proof failed for ${attachment.id}`);
+                throw new Error(describeUnprovenAttachment(ownerType, owner, attachment, backend, originalCloudKeys.get(attachment.id)));
             }
             if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
         }
@@ -1353,6 +1398,12 @@ class SharedSyncRunMachine {
      *  immediately before the merged document is written remotely. */
     private async prepareRemoteWriteData(data: AppData): Promise<AppData> {
         if (this.options.activationProbe) {
+            // A device with no attachment storage (the web app) can never
+            // download or upload a file, so it has nothing to prove: the
+            // records stay unavailable here exactly as every later cycle keeps
+            // them. Demanding proof refused every setup against a location
+            // that held attachments (#1119).
+            if (!this.policy.attachmentPhasesEnabled) return data;
             const activationSnapshot = prepareActivationAttachmentSnapshot(
                 data,
                 this.state.remoteDataForCompare,
@@ -1397,6 +1448,8 @@ class SharedSyncRunMachine {
                 activationSnapshot.expectedIds,
                 activationSnapshot.metadataOnlyIds,
                 activationSnapshot.noLocalBytesIds,
+                this.backend,
+                activationSnapshot.originalCloudKeys,
             );
             this.ensureLocalSnapshotFresh();
             this.notifier.onDiagnostic?.({
