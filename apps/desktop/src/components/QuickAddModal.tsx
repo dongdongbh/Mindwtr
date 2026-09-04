@@ -30,6 +30,7 @@ import {
     type Area,
     type Attachment,
     type CaptureSessionId,
+    type DerivedState,
     type Project,
     type QuickAddResult,
     type Task,
@@ -152,6 +153,17 @@ async function readTextFile(file: File): Promise<string> {
     });
 }
 
+// Closed modal renders nothing (see the isOpen guard below); reading
+// getDerivedState() unconditionally forced the full derived-state rebuild
+// (12ms at 5k tasks) on every task write for this invisible overlay
+// (PERF-01). Only allContexts/allTags/focusedCount are used while closed is
+// skipped.
+const EMPTY_QUICK_ADD_DERIVED: Pick<DerivedState, 'allContexts' | 'allTags' | 'focusedCount'> = Object.freeze({
+    allContexts: [],
+    allTags: [],
+    focusedCount: 0,
+});
+
 export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) {
     const titleId = useId();
     const getDerivedState = useTaskStore((state) => state.getDerivedState);
@@ -170,14 +182,14 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const setProjectView = useUiStore((state) => state.setProjectView);
     const setEditingTaskId = useUiStore((state) => state.setEditingTaskId);
     const showToast = useUiStore((state) => state.showToast);
-    const derivedState = getDerivedState();
+    const [isOpen, setIsOpen] = useState(false);
+    const derivedState = isOpen ? getDerivedState() : EMPTY_QUICK_ADD_DERIVED;
     const { allContexts, allTags } = derivedState;
     const suggestionTokens = useMemo(
         () => Array.from(new Set([...allContexts, ...allTags])).sort(),
         [allContexts, allTags]
     );
     const { t } = useLanguage();
-    const [isOpen, setIsOpen] = useState(false);
     const [value, setValue] = useState('');
     const [selectedAreaId, setSelectedAreaId] = useState('');
     const [initialProps, setInitialProps] = useState<Partial<Task> | null>(null);

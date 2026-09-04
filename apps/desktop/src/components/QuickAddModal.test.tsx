@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useTaskStore } from '@mindwtr/core';
+import { buildEntityMap, useTaskStore, type Task } from '@mindwtr/core';
 import type { ComponentProps } from 'react';
 
 import { LanguageProvider } from '../contexts/language-context';
@@ -8,6 +8,9 @@ import { QuickAddModal } from './QuickAddModal';
 import { QUICK_ADD_MAIN_WINDOW_LABEL, QUICK_ADD_SAVED_EVENT } from '../lib/quick-add-saved-event';
 import { MAX_AUDIO_RECORDING_SECONDS } from '../lib/audio-capture-buffer';
 import { useUiStore } from '../store/ui-store';
+// Not re-exported from the core barrel; see focused-count-selector.test.ts
+// for why the relative path (not a re-export) is used here.
+import { beginNotifyProfile, endNotifyProfile } from '../../../../packages/core/src/store-notify-profiler';
 
 const tauriMocks = vi.hoisted(() => ({
     emitTo: vi.fn(async () => undefined),
@@ -1390,5 +1393,70 @@ describe('QuickAddModal', () => {
 
         expect(useTaskStore.getState().tasks).toHaveLength(100);
         expect(commits).toBe(1);
+    });
+});
+
+// PERF-01: the closed Quick Add modal is mounted at the app root and used to
+// call getDerivedState() unconditionally in its render body. QuickAddModal
+// does not itself subscribe to _allTasks, so an ambient re-render of this
+// always-mounted overlay (e.g. its parent, App.tsx, re-rendering for an
+// unrelated reason) is what actually paid the derived-state rebuild in
+// production; the areas write below stands in for that ambient re-render.
+// The gate is `isOpen ? getDerivedState() : EMPTY_QUICK_ADD_DERIVED` in
+// QuickAddModal.tsx.
+describe('QuickAddModal closed-overlay derived-state gating (PERF-01)', () => {
+    const BASE_ISO = '2026-05-01T09:00:00.000Z';
+    const bigTasks: Task[] = Array.from({ length: 7_000 }, (_, index) => ({
+        id: `perf-task-${index}`,
+        title: `Synthetic task ${index}`,
+        status: 'next',
+        tags: [],
+        contexts: [],
+        createdAt: BASE_ISO,
+        updatedAt: BASE_ISO,
+    }));
+
+    beforeEach(() => {
+        act(() => {
+            useTaskStore.setState({
+                _allTasks: bigTasks,
+                _tasksById: buildEntityMap(bigTasks),
+            });
+        });
+    });
+
+    it('costs zero derived-state rebuilds on a write plus a re-render while closed', async () => {
+        renderQuickAddModal();
+
+        beginNotifyProfile();
+        let profile: ReturnType<typeof endNotifyProfile>;
+        try {
+            await act(async () => {
+                // Invalidate the derived-state cache the way a task write does…
+                await useTaskStore.getState().updateTask('perf-task-3333', { title: 'closed-overlay edit' });
+                // …then re-render this always-mounted overlay while it stays
+                // closed, standing in for an ambient parent re-render.
+                useTaskStore.setState((state) => ({ areas: [...state.areas] }));
+            });
+        } finally {
+            profile = endNotifyProfile();
+        }
+        expect(profile?.derivedRebuildCount).toBe(0);
+    });
+
+    // Canary proving the profiler catches this regression class: reading
+    // getDerivedState() unconditionally on every re-render (the pre-fix
+    // shape) shows up as a rebuild for the same store write (red first).
+    it('rebuilds when a listener reads getDerivedState() unconditionally (old shape)', async () => {
+        const unsubscribe = useTaskStore.subscribe((state) => state.getDerivedState());
+        beginNotifyProfile();
+        let profile: ReturnType<typeof endNotifyProfile>;
+        try {
+            await useTaskStore.getState().updateTask('perf-task-4444', { title: 'canary edit' });
+        } finally {
+            profile = endNotifyProfile();
+            unsubscribe();
+        }
+        expect(profile?.derivedRebuildCount).toBeGreaterThan(0);
     });
 });

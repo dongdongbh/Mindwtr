@@ -20,7 +20,8 @@ import { shallow,
     isAreaFilterSelectionActive,
     resolveAreaFilterSelection,
     taskMatchesAreaFilterSelection,
-    projectMatchesAreaFilterSelection, tFallback, } from '@mindwtr/core';
+    projectMatchesAreaFilterSelection, tFallback,
+    type DerivedState, } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';
 import { getUrgencyColor } from './Task/TaskItemDisplay';
@@ -47,6 +48,15 @@ interface GlobalSearchProps {
 }
 
 export const resolveGlobalSearchTaskView = resolveTaskNavigationView;
+
+// Closed search renders nothing (see the isOpen guard below); reading
+// getDerivedState() unconditionally forced the full derived-state rebuild
+// (12ms at 5k tasks) on every task write for this invisible overlay
+// (PERF-01). Only allContexts/allTags are used while closed is skipped.
+const EMPTY_SEARCH_DERIVED: Pick<DerivedState, 'allContexts' | 'allTags'> = Object.freeze({
+    allContexts: [],
+    allTags: [],
+});
 
 export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: GlobalSearchProps) {
     const dialogTitleId = useId();
@@ -94,7 +104,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
         }),
         shallow
     );
-    const { allContexts, allTags } = getDerivedState();
+    const { allContexts, allTags } = isOpen ? getDerivedState() : EMPTY_SEARCH_DERIVED;
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
     // Search results are SearchTaskResult rows, which deliberately carry no

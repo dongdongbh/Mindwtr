@@ -1,9 +1,12 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AREA_FILTER_ALL, safeFormatDate, useTaskStore, type Area, type Task } from '@mindwtr/core';
+import { AREA_FILTER_ALL, buildEntityMap, safeFormatDate, useTaskStore, type Area, type Task } from '@mindwtr/core';
 import { LanguageProvider } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
 import { GlobalSearch } from './GlobalSearch';
+// Not re-exported from the core barrel; see focused-count-selector.test.ts
+// for why the relative path (not a re-export) is used here.
+import { beginNotifyProfile, endNotifyProfile } from '../../../../packages/core/src/store-notify-profiler';
 
 const initialTaskState = useTaskStore.getState();
 const initialUiState = useUiStore.getState();
@@ -491,5 +494,73 @@ describe('GlobalSearch', () => {
             // Finished with nothing to report: no fallback to the due date.
             expect(rowFor('Zeta unstamped').textContent).not.toMatch(/Due|Completed/);
         });
+    });
+});
+
+// PERF-01: the closed search dialog is mounted at the app root and used to
+// call getDerivedState() unconditionally in its render body, so every task
+// write paid the full derived-state rebuild (12ms at 5k tasks, see plan
+// 073) for an overlay nobody could see. The gate is `isOpen ? getDerivedState()
+// : EMPTY_SEARCH_DERIVED` in GlobalSearch.tsx.
+describe('GlobalSearch closed-overlay derived-state gating (PERF-01)', () => {
+    const BASE_ISO = '2026-05-01T09:00:00.000Z';
+    const bigTasks: Task[] = Array.from({ length: 7_000 }, (_, index) => ({
+        id: `perf-task-${index}`,
+        title: `Synthetic task ${index}`,
+        status: 'next',
+        tags: [],
+        contexts: [],
+        createdAt: BASE_ISO,
+        updatedAt: BASE_ISO,
+    }));
+
+    beforeEach(() => {
+        useTaskStore.setState(initialTaskState, true);
+        useUiStore.setState(initialUiState, true);
+        useTaskStore.setState({
+            _allTasks: bigTasks,
+            _tasksById: buildEntityMap(bigTasks),
+        });
+    });
+
+    afterEach(() => {
+        useUiStore.setState(initialUiState, true);
+    });
+
+    it('costs zero derived-state rebuilds on a write while closed', async () => {
+        render(
+            <LanguageProvider>
+                <GlobalSearch onNavigate={vi.fn()} />
+            </LanguageProvider>
+        );
+
+        beginNotifyProfile();
+        let profile: ReturnType<typeof endNotifyProfile>;
+        try {
+            await act(async () => {
+                await useTaskStore.getState().updateTask('perf-task-3333', { title: 'closed-overlay edit' });
+            });
+        } finally {
+            profile = endNotifyProfile();
+        }
+        expect(profile?.derivedRebuildCount).toBe(0);
+    });
+
+    // Canary proving the profiler actually catches this regression class:
+    // the pre-fix render body read getDerivedState() every render regardless
+    // of isOpen. Subscribing that exact shape directly (rather than through
+    // the component) shows the write above would have failed loudly had the
+    // gate been missing (red first).
+    it('rebuilds when a listener reads getDerivedState() unconditionally (old shape)', async () => {
+        const unsubscribe = useTaskStore.subscribe((state) => state.getDerivedState());
+        beginNotifyProfile();
+        let profile: ReturnType<typeof endNotifyProfile>;
+        try {
+            await useTaskStore.getState().updateTask('perf-task-4444', { title: 'canary edit' });
+        } finally {
+            profile = endNotifyProfile();
+            unsubscribe();
+        }
+        expect(profile?.derivedRebuildCount).toBeGreaterThan(0);
     });
 });
