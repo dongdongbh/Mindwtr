@@ -218,7 +218,11 @@ export const LOCALES = {
         nonLatin: true,
         // Rewritten end to end by a native speaker in #934 (64 -> ~100%), replacing a machine
         // translation that rendered brand names as common nouns ('Gemini' as the constellation).
-        translatedKeyFloor: 2240,
+        // Re-pinned 2240 -> 2297, the count ko actually translates: at 2240 the ratio against a
+        // growing en.ts sat on 90.00%, so a single new English key dropped ko back under
+        // MIXED_ENGLISH_COVERAGE_CEILING and the mixed-English check fired on deliberate English
+        // (E-Ink, Material 3, Base URL, quick-add token syntax).
+        translatedKeyFloor: 2297,
     },
     it: {
         loadSync: () => require('./locales/it') as typeof import('./locales/it'),
