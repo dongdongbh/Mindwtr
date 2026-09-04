@@ -475,15 +475,24 @@ describe('POST /v1/capture', () => {
                 tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
             }));
 
+            const attachmentsDir = join(dataDir, key, 'attachments');
+            let publishedAudioFilesAtFailure: string[] = [];
             let assertCalls = 0;
             // storeCaptureAudio calls assertStorageRoot once up front (server-capture.ts),
             // then publishPreparedFilePublication calls it three more times around the
             // rename that actually publishes the file (server-storage.ts:732-742). Failing
-            // from the 5th call on therefore always lands after the audio is durably on
-            // disk, in the writeCloudData step that follows.
+            // from the 5th call should land in writeCloudData after publication. Check
+            // the file at the injection point so a call-count change cannot hide a gap.
             const assertStorageRoot = () => {
                 assertCalls += 1;
-                if (assertCalls > 4) throw new Error('storage root changed');
+                if (assertCalls > 4) {
+                    publishedAudioFilesAtFailure = existsSync(attachmentsDir)
+                        ? (readdirSync(attachmentsDir, { recursive: true }) as string[]).filter((name) => name.endsWith('.m4a'))
+                        : [];
+                    expect(publishedAudioFilesAtFailure).toHaveLength(1);
+                    expect(existsSync(join(attachmentsDir, publishedAudioFilesAtFailure[0]))).toBe(true);
+                    throw new Error('storage root changed');
+                }
             };
 
             const request = new Request('http://cloud.test/v1/capture', {
@@ -508,12 +517,12 @@ describe('POST /v1/capture', () => {
             })).rejects.toThrow('storage root changed');
 
             expect(assertCalls).toBeGreaterThan(4);
+            expect(publishedAudioFilesAtFailure).toHaveLength(1);
 
             // cloudKey already carries an "attachments/" prefix (buildCloudKey), so the
             // real file lands a level deeper than this directory - walk recursively and
             // check no audio file bytes were left behind anywhere under it, rather than
             // assuming the directory tree itself is empty (an empty parent dir is fine).
-            const attachmentsDir = join(dataDir, key, 'attachments');
             const remainingAudioFiles = existsSync(attachmentsDir)
                 ? (readdirSync(attachmentsDir, { recursive: true }) as string[]).filter((name) => name.endsWith('.m4a'))
                 : [];
