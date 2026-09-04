@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Sync: a completion date written through MCP onto a task that is not done or archived was read back from the local database in a form the sync normalizer would still strip, the same class of problem as the repeat flag above; both readers now surface a completion date only on done or archived tasks, and a contract test now checks every synced task field this way. (#1001)
+
 - Sync: a task whose "show future occurrences" flag was set through MCP on a task with no repeat rule read back from the local database in a form the sync normalizer would still change, which on 1.2.7 desktops failed the next automatic sync once before self-healing. Both the desktop (Rust) and the phone (TypeScript) readers now treat the flag as set only when the task actually repeats. (#1001)
 
 - Desktop and web app: an automatic sync that could upload the local library without merging first (a change made only on this device) still paid a full merge and two whole-library serializations on the interface thread in 1.2.7, because a development-only self-check was accidentally active in those builds; and when a task written through MCP looked different after the normalizing pass, that self-check failed the whole sync cycle instead of staying silent. The check now runs only in development builds. (#1001)

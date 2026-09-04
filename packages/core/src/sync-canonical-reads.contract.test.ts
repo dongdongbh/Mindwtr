@@ -36,7 +36,7 @@ import { purgeExpiredTombstones } from './sync-tombstones';
 import { validateMergedSyncData } from './sync-normalization';
 import { toStableSyncJson } from './sync-helpers';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
-import { TASK_SQLITE_COLUMNS, taskToSqliteRow } from './task-sync-schema';
+import { TASK_SQLITE_COLUMNS, TASK_SYNC_FIELD_SCHEMA, TASK_SYNC_SCHEMA_FIXTURE, taskToSqliteRow } from './task-sync-schema';
 import { mapSqliteTaskRow } from './sqlite-adapter';
 import { PROJECT_SQLITE_COLUMNS, projectFromSqliteRow, projectToSqliteRow } from './project-sync-schema';
 import { SECTION_SQLITE_COLUMNS, sectionFromSqliteRow, sectionToSqliteRow } from './section-sync-schema';
@@ -641,6 +641,34 @@ describe('canonical local reads contract', () => {
         expect(readBack.tasks[0].recurrence).toBeFalsy();
         expect(readBack.tasks[0].showFutureRecurrence).toBeUndefined();
         expect(remoteBytes(readBack)).toBe(remoteBytes(mergeAppData(readBack, emptyData())));
+    });
+
+    it('reads each synced task boolean or optional field canonically in isolation', async () => {
+        const fields = TASK_SYNC_FIELD_SCHEMA.filter((field) => (
+            field.sync === 'content'
+            && (field.nullability !== 'required' || field.cloudKit?.kind === 'boolean')
+        ));
+        // Scoped to `sync: 'content'` fields — the payload shape an ordinary
+        // caller (desktop editor, MCP) can set with a single field patch.
+        // `archive-metadata`/`revision-metadata`/`tombstone`/`order` fields
+        // are never set this way: archive fields flow through the
+        // archive/unarchive actions, purgedAt/deletedAt through tombstone
+        // compaction (tombstone-compaction.ts), rev/revBy are stamped by
+        // applyTaskUpdates itself — each has its own dedicated write path and
+        // its own coverage, so patching one in isolation here would assert a
+        // write shape that store-tasks.ts never actually produces.
+        for (const field of fields) {
+            expect(Object.hasOwn(TASK_SYNC_SCHEMA_FIXTURE, field.name), `${field.name}: fixture coverage`).toBe(true);
+            const fixtureValue = TASK_SYNC_SCHEMA_FIXTURE[field.name];
+            const values = field.cloudKit?.kind === 'boolean' ? [true, false] : [fixtureValue];
+            for (const value of values) {
+                // Start from a plain task for EACH field/value, never the
+                // exhaustive fixture whose recurrence can mask a boolean bug.
+                const readBack = await persistTaskPatchAndRead({ [field.name]: value });
+                expect(remoteBytes(readBack), `${field.name}=${JSON.stringify(value)}`)
+                    .toBe(remoteBytes(mergeAppData(readBack, emptyData())));
+            }
+        }
     });
 
     // -----------------------------------------------------------------------

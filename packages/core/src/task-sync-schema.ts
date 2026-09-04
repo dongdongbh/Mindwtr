@@ -262,7 +262,15 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
             : Number(row.timeSpentMinutes),
         suppressMindwtrReminders: fromBool(row.suppressMindwtrReminders),
         reviewAt: fromOptional(row.reviewAt as string | null),
-        completedAt: fromOptional(row.completedAt as string | null),
+        // Canonical only when the status is done/archived, else absent — the
+        // same rule normalizeTaskForLoad applies on every load/merge
+        // (task-status.ts). A row can carry a stale completedAt when a caller
+        // patches the field directly without a status transition (e.g. MCP
+        // `completedAt` on a task that is not done); that stale byte would
+        // otherwise pass the reader unnormalized until the next load/merge.
+        completedAt: (row.status === 'done' || row.status === 'archived')
+            ? fromOptional(row.completedAt as string | null)
+            : undefined,
         statusBeforeProjectArchive: fromOptional(row.statusBeforeProjectArchive as Task['statusBeforeProjectArchive'] | null),
         // Nullable BY DESIGN (Task.completedAtBeforeProjectArchive: string | null) — do not
         // route through fromOptional, a stored `null` must stay `null`.
