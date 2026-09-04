@@ -28,7 +28,7 @@ Tauri v2 desktop app for the Mindwtr productivity system.
 
 ### Notifications
 
-- **Due Date Reminders** - Desktop notifications with snooze
+- **Due Date Reminders** - Desktop notifications
 - **Daily Digest** - Morning briefing + evening review prompts
 
 ### Views
