@@ -1,14 +1,25 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildReviewSteps, getWeeklyReviewBuckets, type Project, type Task } from '@mindwtr/core';
 
+import { CompactText } from './compact-text';
 import { ReviewModal } from './review-modal';
+import { styles } from './review-modal.styles';
 
 const { mockStorageGetItem, mockStorageRemoveItem, mockStorageSetItem } = vi.hoisted(() => ({
     mockStorageGetItem: vi.fn(),
     mockStorageRemoveItem: vi.fn(),
     mockStorageSetItem: vi.fn(),
 }));
+
+// The real core bucket builders run in this file, so "now" is pinned: stale
+// items, the look-back week, and the calendar window are all measured against
+// it. Wednesday 2026-03-04; the default (Sunday) review week starts 2026-03-01.
+const NOW = new Date(2026, 2, 4, 10, 0, 0);
+// Local-time fixture timestamps. UTC literals would land in the previous week
+// (and outside the look-back window) for any test machine behind UTC.
+const at = (day: number, hour = 9) => new Date(2026, 2, day, hour, 0, 0).toISOString();
 
 const defaultTasks = [
     {
@@ -17,8 +28,8 @@ const defaultTasks = [
         status: 'inbox',
         contexts: [],
         tags: [],
-        createdAt: '2026-03-01T00:00:00.000Z',
-        updatedAt: '2026-03-01T00:00:00.000Z',
+        createdAt: at(2),
+        updatedAt: at(2),
     },
     {
         id: 'waiting-1',
@@ -26,8 +37,8 @@ const defaultTasks = [
         status: 'waiting',
         contexts: [],
         tags: [],
-        createdAt: '2026-03-01T00:00:00.000Z',
-        updatedAt: '2026-03-01T00:00:00.000Z',
+        createdAt: at(2),
+        updatedAt: at(2),
     },
     {
         id: 'project-task-1',
@@ -36,8 +47,20 @@ const defaultTasks = [
         projectId: 'project-1',
         contexts: ['@home'],
         tags: [],
-        createdAt: '2026-03-01T00:00:00.000Z',
-        updatedAt: '2026-03-01T00:00:00.000Z',
+        createdAt: at(2),
+        updatedAt: at(2),
+    },
+    {
+        // Inside the calendar step's 7-day window, so that step has work.
+        id: 'due-1',
+        title: 'Due soon',
+        status: 'next',
+        projectId: 'project-1',
+        dueDate: '2026-03-05',
+        contexts: [],
+        tags: [],
+        createdAt: at(2),
+        updatedAt: at(2),
     },
 ];
 
@@ -46,10 +69,35 @@ const defaultProjects = [
         id: 'project-1',
         title: 'Project One',
         status: 'active',
-        createdAt: '2026-03-01T00:00:00.000Z',
-        updatedAt: '2026-03-01T00:00:00.000Z',
+        createdAt: at(2),
+        updatedAt: at(2),
     },
 ];
+
+// A task completed inside the current review week. The look-back counts it, no
+// bucket does, so the completed step stays the first step with work.
+const doneTask = (overrides: Record<string, unknown> = {}) => ({
+    id: 'done-1',
+    title: 'Shipped the thing',
+    status: 'done',
+    contexts: [],
+    tags: [],
+    completedAt: at(2, 12),
+    createdAt: at(1),
+    updatedAt: at(2, 12),
+    ...overrides,
+});
+
+// Finishing a task in a project counts as "moved forward" whatever the project's
+// own status is; an archived one keeps `projectEntries` (and so the projects
+// step) empty, which is what these look-back tests need.
+const archivedProject = {
+    id: 'project-archived',
+    title: 'Wrapped up',
+    status: 'archived',
+    createdAt: at(1),
+    updatedAt: at(3),
+};
 
 const defaultSettings = {
     ai: { enabled: false },
@@ -65,14 +113,6 @@ const storeState = {
     deleteTask: vi.fn(),
     batchUpdateTasks: vi.fn(),
     addTask: vi.fn(),
-};
-
-const mockLookBack = {
-    completedCount: 0,
-    projectsMovedCount: 0,
-    estimatedTaskCount: 0,
-    estimatedMinutes: 0,
-    trackedMinutes: 0,
 };
 
 vi.mock('react-native', async () => {
@@ -102,124 +142,15 @@ vi.mock('react-native', async () => {
     };
 });
 
-vi.mock('@mindwtr/core', async (importOriginal) => ({
-    resolveReviewStepSession: (await importOriginal<typeof import('@mindwtr/core')>()).resolveReviewStepSession,
-    parseStoredReviewStepSession: (await importOriginal<typeof import('@mindwtr/core')>()).parseStoredReviewStepSession,
-    buildQuickAddParseOptions: (await importOriginal<typeof import('@mindwtr/core')>()).buildQuickAddParseOptions,
-    useTaskStore: Object.assign(() => storeState, { getState: () => storeState }),
-    shallow: vi.fn((a, b) => a === b),
-    normalizeClockTimeInput: vi.fn(() => null),
-    isNaturalLanguageDatesEnabled: vi.fn((settings?: { gtd?: { naturalLanguageDates?: boolean } } | null) =>
-        settings?.gtd?.naturalLanguageDates !== false),
-    parseProjectNextActionInput: vi.fn((input: string, context: { projectId: string }) => ({
-        title: input,
-        props: { projectId: context.projectId, status: 'next' },
-    })),
-    getMindSweepGroups: vi.fn(() => [
-        {
-            id: 'test-group',
-            scope: 'personal',
-            titleKey: 'mindSweep.group.test.title',
-            promptKeys: ['mindSweep.group.test.p1'],
-        },
-    ]),
-    createAIProvider: vi.fn(),
-    formatI18nTemplate: vi.fn((template: string, values: Record<string, string | number>) =>
-        template.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (match, key) => String(values[key] ?? match))),
-    partitionByReviewDate: vi.fn((items: unknown[]) => ({ due: [], scheduled: [], unscheduled: items })),
-    isTaskInActiveProject: vi.fn(() => true),
-    safeFormatDate: vi.fn(() => '2026-03-15'),
-    safeParseDate: vi.fn((value?: string) => (value ? new Date(value) : null)),
-    safeParseDueDate: vi.fn(() => null),
-    formatTimeSpentLabel: (await importOriginal<typeof import('@mindwtr/core')>()).formatTimeSpentLabel,
-    // Real implementation on purpose: the look-back rows depend on its default
-    // polarity (estimates ON when `features` is missing).
-    resolveFeatureFlags: (await importOriginal<typeof import('@mindwtr/core')>()).resolveFeatureFlags,
-    // Weekly Review candidate/bucket derivation moved to core (review-buckets
-    // refactor); these fakes mirror the real functions closely enough for
-    // this file's fixtures, composed from the primitives already mocked above.
-    getWeeklyReviewBuckets: vi.fn((tasks: any[], projects: any[]) => {
-        const inbox = tasks.filter((task: any) => task.status === 'inbox' && !task.deletedAt);
-        const waiting = tasks.filter((task: any) => task.status === 'waiting' && !task.deletedAt);
-        const someday = tasks.filter((task: any) => task.status === 'someday' && !task.deletedAt);
-        const activeProjects = projects.filter((project: any) => project.status === 'active' && !project.deletedAt);
-        const contextGroupsByName = new Map<string, any[]>();
-        tasks.forEach((task: any) => {
-            if (task.deletedAt || ['done', 'archived', 'reference'].includes(task.status)) return;
-            (task.contexts ?? []).forEach((context: string) => {
-                const list = contextGroupsByName.get(context) ?? [];
-                list.push(task);
-                contextGroupsByName.set(context, list);
-            });
-        });
-        const projectEntries = activeProjects.map((project: any) => {
-            const projectTasks = tasks.filter((task: any) => (
-                task.projectId === project.id
-                && !task.deletedAt
-                && task.status !== 'done'
-                && task.status !== 'reference'
-            ));
-            return {
-                project,
-                tasks: projectTasks,
-                nextActionState: projectTasks.some((task: any) => task.status === 'next')
-                    ? 'next'
-                    : projectTasks.some((task: any) => task.status === 'waiting') ? 'waiting' : 'none',
-            };
-        });
-        return {
-            inbox,
-            waitingGroups: { due: [], scheduled: [], unscheduled: waiting },
-            somedayGroups: { due: [], scheduled: [], unscheduled: someday },
-            projectEntries,
-            staleItems: [],
-            summary: {
-                inboxCount: inbox.length,
-                activeProjectCount: projectEntries.length,
-                projectsWithoutNextAction: projectEntries.filter((entry: any) => !entry.hasNextAction).length,
-                staleWaitingCount: 0,
-            },
-            lookBack: { ...mockLookBack },
-            contextGroups: Array.from(contextGroupsByName.entries()).map(([context, contextTasks]) => ({ context, tasks: contextTasks })),
-            calendarItems: [],
-        };
-    }),
-    getExternalCalendarDaySummaries: vi.fn(() => []),
-    buildReviewSteps: vi.fn((buckets: any, opts: any) => {
-        if (opts?.kind === 'daily') {
-            const dailySteps: Array<{ id: string; hasWork: boolean }> = [
-                { id: 'today', hasWork: false },
-                { id: 'inbox', hasWork: buckets.inbox.length > 0 },
-                { id: 'waiting', hasWork: buckets.waiting.length > 0 },
-            ];
-            if (opts.includeFocusStep !== false) {
-                dailySteps.push({ id: 'focus', hasWork: buckets.focusCandidates.length > 0 });
-            }
-            dailySteps.push({ id: 'completed', hasWork: true });
-            return dailySteps;
-        }
-        const weeklySteps: Array<{ id: string; hasWork: boolean }> = [
-            { id: 'inbox', hasWork: buckets.inbox.length > 0 },
-            { id: 'stale', hasWork: buckets.staleItems.length > 0 },
-            {
-                id: 'calendar',
-                hasWork: buckets.calendarItems.length > 0
-                    || (opts.externalCalendarDayCount ?? 0) > 0
-                    || Boolean(opts.externalCalendarHasError),
-            },
-            { id: 'waiting', hasWork: buckets.waitingGroups.due.length + buckets.waitingGroups.unscheduled.length > 0 },
-        ];
-        if (opts.includeContextStep !== false) {
-            weeklySteps.push({ id: 'contexts', hasWork: buckets.contextGroups.length > 0 });
-        }
-        weeklySteps.push(
-            { id: 'projects', hasWork: buckets.projectEntries.length > 0 },
-            { id: 'someday', hasWork: buckets.somedayGroups.due.length + buckets.somedayGroups.unscheduled.length > 0 },
-            { id: 'completed', hasWork: true },
-        );
-        return weeklySteps;
-    }),
-}));
+// Only the store is faked; every review rule (buckets, step order, quick-add
+// parsing) runs for real, the way daily-review-modal.test.tsx does it.
+vi.mock('@mindwtr/core', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@mindwtr/core')>();
+    return {
+        ...actual,
+        useTaskStore: Object.assign(() => storeState, { getState: () => storeState }),
+    };
+});
 
 vi.mock('../contexts/theme-context', () => ({
     useTheme: () => ({ isDark: false }),
@@ -347,20 +278,56 @@ const flattenText = (value: unknown): string => {
     return '';
 };
 
+// Step-rail titles are drawn for every step, present or skipped, so they cannot
+// say which step is open. Each of these lines is rendered by exactly one step
+// body.
+const STEP_BODY_TEXT: Record<string, string> = {
+    inbox: 'Clear Your Inbox',
+    stale: 'No recent activity.',
+    calendar: 'Review your hard landscape first',
+    waiting: 'Follow Up on Waiting Items',
+    contexts: 'Review your contexts and make sure',
+    projects: 'Review Your Projects',
+    someday: 'Revisit Someday/Maybe',
+    completed: 'Review Complete!',
+};
+
+const STEP_RAIL_TITLE: Record<string, string> = {
+    inbox: 'Inbox',
+    stale: 'Stale items',
+    calendar: 'Calendar',
+    waiting: 'Waiting For',
+    contexts: 'Contexts',
+    projects: 'Projects',
+    someday: 'Someday/Maybe',
+    completed: 'Done!',
+};
+
+/** The open step, or the list of matches when the body is ambiguous. */
+const currentStepOf = (tree: ReturnType<typeof create>): string | string[] => {
+    const open = Object.entries(STEP_BODY_TEXT)
+        .filter(([, text]) => tree.root
+            .findAll((node) => flattenText(node.props?.children).includes(text)).length > 0)
+        .map(([id]) => id);
+    return open.length === 1 ? open[0] : open;
+};
+
+const railTitlesOf = (tree: ReturnType<typeof create>) => {
+    const rail = tree.root
+        .findAll((node) => node.props?.contentContainerStyle === styles.stepRailContent)[0];
+    return rail.findAllByType(CompactText).map((node) => node.props.children);
+};
+
 describe('ReviewModal', () => {
     beforeEach(() => {
-        vi.useRealTimers();
+        // Pinned clock: the real bucket builders measure stale items, the
+        // look-back week and the calendar window against it.
+        vi.useFakeTimers();
+        vi.setSystemTime(NOW);
         vi.clearAllMocks();
         storeState.tasks = defaultTasks.map((task) => ({ ...task }));
         storeState.projects = defaultProjects.map((project) => ({ ...project }));
         storeState.settings = { ...defaultSettings };
-        Object.assign(mockLookBack, {
-            completedCount: 0,
-            projectsMovedCount: 0,
-            estimatedTaskCount: 0,
-            estimatedMinutes: 0,
-            trackedMinutes: 0,
-        });
         mockStorageGetItem.mockReset().mockResolvedValue(null);
         mockStorageRemoveItem.mockReset().mockResolvedValue(undefined);
         mockStorageSetItem.mockReset().mockResolvedValue(undefined);
@@ -377,10 +344,7 @@ describe('ReviewModal', () => {
             tree = create(<ReviewModal visible onClose={vi.fn()} />);
         });
 
-        const hasText = (text: string) =>
-            tree.root.findAll((node) => flattenText(node.props?.children).includes(text)).length > 0;
-
-        expect(hasText('Inbox')).toBe(true);
+        expect(currentStepOf(tree)).toBe('inbox');
         expect(
             tree.root.findAll((node) => node.props?.accessibilityLabel === 'inbox.processButton').length,
         ).toBeGreaterThan(0);
@@ -398,7 +362,8 @@ describe('ReviewModal', () => {
             nextButton.props.onPress();
         });
 
-        expect(hasText('Calendar')).toBe(true);
+        // Stale is skipped (nothing is stale), so Next lands on Calendar.
+        expect(currentStepOf(tree)).toBe('calendar');
 
         const backLabel = tree.root.find((node) => flattenText(node.props?.children) === '← Back');
         const backButton = backLabel.parent;
@@ -410,12 +375,10 @@ describe('ReviewModal', () => {
             backButton.props.onPress();
         });
 
-        expect(hasText('Inbox')).toBe(true);
+        expect(currentStepOf(tree)).toBe('inbox');
     });
 
     it('resumes within the local review week, preserves Close, and clears on Finish', async () => {
-        vi.useFakeTimers();
-        vi.setSystemTime(new Date(2026, 2, 4, 10, 0, 0));
         storeState.settings = {
             ...defaultSettings,
             weekStart: 'monday',
@@ -432,7 +395,7 @@ describe('ReviewModal', () => {
             await Promise.resolve();
         });
 
-        expect(tree.root.findAll((node) => flattenText(node.props?.children).includes('Waiting For')).length).toBeGreaterThan(0);
+        expect(currentStepOf(tree)).toBe('waiting');
         const closeButton = tree.root.findByProps({ accessibilityLabel: 'Close' });
         await act(async () => {
             closeButton.props.onPress();
@@ -472,7 +435,9 @@ describe('ReviewModal', () => {
             await Promise.resolve();
         });
 
-        expect(tree.root.findAll((node) => flattenText(node.props?.children).includes('Waiting For')).length).toBeGreaterThan(0);
+        // Inbox is empty, so the initial 'inbox' step canonicalizes to Calendar;
+        // the stored checkpoint then wins.
+        expect(currentStepOf(tree)).toBe('waiting');
     });
 
     it('does not let delayed resume hydration overwrite an immediate step choice', async () => {
@@ -489,9 +454,7 @@ describe('ReviewModal', () => {
         await act(async () => {
             nextLabel.parent?.props.onPress();
         });
-        const hasWaitingTitle = () => tree.root
-            .findAll((node) => flattenText(node.props?.children).includes('Waiting For')).length > 0;
-        expect(hasWaitingTitle()).toBe(true);
+        expect(currentStepOf(tree)).toBe('calendar');
 
         await act(async () => {
             resolveStored(JSON.stringify({
@@ -501,7 +464,7 @@ describe('ReviewModal', () => {
             await Promise.resolve();
         });
 
-        expect(hasWaitingTitle()).toBe(true);
+        expect(currentStepOf(tree)).toBe('calendar');
     });
 
     it('keeps the full Process Inbox step inside one vertical scroll surface', async () => {
@@ -571,8 +534,17 @@ describe('ReviewModal', () => {
     });
 
     it('shows this week\'s completion, project, estimate, and tracked totals', async () => {
-        storeState.tasks = [];
-        storeState.projects = [];
+        // Two tasks finished this week, one of them in a project and carrying a
+        // 1h estimate with 45m tracked against it.
+        storeState.tasks = [
+            doneTask({
+                projectId: archivedProject.id,
+                timeEstimate: '1hr',
+                timeSpentMinutes: 45,
+            }),
+            doneTask({ id: 'done-2', title: 'Small chore', completedAt: at(3, 14) }),
+        ] as typeof storeState.tasks;
+        storeState.projects = [archivedProject] as typeof storeState.projects;
         storeState.settings = {
             ...defaultSettings,
             features: { timeEstimates: true, pomodoro: true },
@@ -581,13 +553,6 @@ describe('ReviewModal', () => {
                 pomodoro: { linkTask: true },
             },
         } as typeof storeState.settings;
-        Object.assign(mockLookBack, {
-            completedCount: 2,
-            projectsMovedCount: 1,
-            estimatedTaskCount: 1,
-            estimatedMinutes: 60,
-            trackedMinutes: 45,
-        });
         let tree!: ReturnType<typeof create>;
 
         await act(async () => {
@@ -605,7 +570,7 @@ describe('ReviewModal', () => {
     });
 
     it('shows the estimate look-back at defaults, with no features block stored', async () => {
-        storeState.tasks = [];
+        storeState.tasks = [doneTask({ timeEstimate: '1hr', timeSpentMinutes: 45 })] as typeof storeState.tasks;
         storeState.projects = [];
         // No `features` key at all: time estimates default ON, so the look-back
         // must render. `features?.timeEstimates === true` read this as OFF and
@@ -617,12 +582,6 @@ describe('ReviewModal', () => {
                 pomodoro: { linkTask: true },
             },
         } as typeof storeState.settings;
-        Object.assign(mockLookBack, {
-            completedCount: 1,
-            estimatedTaskCount: 1,
-            estimatedMinutes: 60,
-            trackedMinutes: 45,
-        });
         let tree!: ReturnType<typeof create>;
 
         await act(async () => {
@@ -638,7 +597,7 @@ describe('ReviewModal', () => {
     });
 
     it('keeps estimate lines hidden until time estimates are enabled', async () => {
-        storeState.tasks = [];
+        storeState.tasks = [doneTask({ timeEstimate: '1hr', timeSpentMinutes: 45 })] as typeof storeState.tasks;
         storeState.projects = [];
         storeState.settings = {
             ...defaultSettings,
@@ -648,12 +607,6 @@ describe('ReviewModal', () => {
                 pomodoro: { linkTask: true },
             },
         } as typeof storeState.settings;
-        Object.assign(mockLookBack, {
-            completedCount: 1,
-            estimatedTaskCount: 1,
-            estimatedMinutes: 60,
-            trackedMinutes: 45,
-        });
         let tree!: ReturnType<typeof create>;
 
         await act(async () => {
@@ -719,10 +672,13 @@ describe('ReviewModal', () => {
 
         await pressByText('Save & edit');
 
-        expect(storeState.addTask).toHaveBeenCalledWith('Buy cable @errands', {
-            projectId: 'project-1',
-            status: 'next',
-        });
+        // The real quick-add grammar runs here: the `@errands` token leaves the
+        // title and becomes a context on the new task.
+        expect(storeState.addTask).toHaveBeenCalledTimes(1);
+        const [savedTitle, savedProps] = storeState.addTask.mock.calls[0];
+        expect(savedTitle).toBe('Buy cable');
+        expect(savedProps).toMatchObject({ projectId: 'project-1', status: 'next' });
+        expect(savedProps.contexts).toEqual(['@errands']);
 
         const editModal = tree.root.find((node) => (node.type as unknown) === 'TaskEditModal');
         expect(editModal.props.visible).toBe(true);
@@ -759,5 +715,39 @@ describe('ReviewModal', () => {
         expect(after[1].task).toBe(before[1].task);
         expect(after[1].actions).toBe(before[1].actions);
         expect(after[1].tc).toBe(before[1].tc);
+    });
+
+    // The rail is the mobile copy of core's step order. Pinned against
+    // `buildReviewSteps` so the two cannot drift apart silently.
+    it('renders the canonical core step order in the rail', async () => {
+        const coreStepIds = (includeContextStep: boolean) => buildReviewSteps(
+            getWeeklyReviewBuckets(
+                storeState.tasks as unknown as Task[],
+                storeState.projects as unknown as Project[],
+            ),
+            { kind: 'weekly', includeContextStep },
+        ).map((step) => step.id);
+
+        expect(coreStepIds(false)).toEqual([
+            'inbox', 'stale', 'calendar', 'waiting', 'projects', 'someday', 'completed',
+        ]);
+        expect(coreStepIds(true)).toEqual([
+            'inbox', 'stale', 'calendar', 'waiting', 'contexts', 'projects', 'someday', 'completed',
+        ]);
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<ReviewModal visible onClose={vi.fn()} />);
+        });
+        expect(railTitlesOf(tree)).toEqual(coreStepIds(false).map((id) => STEP_RAIL_TITLE[id]));
+
+        storeState.settings = {
+            ...defaultSettings,
+            gtd: { weeklyReview: { includeContextStep: true } },
+        } as typeof storeState.settings;
+        await act(async () => {
+            tree.update(<ReviewModal visible onClose={vi.fn()} />);
+        });
+        expect(railTitlesOf(tree)).toEqual(coreStepIds(true).map((id) => STEP_RAIL_TITLE[id]));
     });
 });
