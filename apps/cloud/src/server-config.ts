@@ -70,6 +70,7 @@ type CloudOperationalLogContext = Partial<Record<
     | 'maxNamespaces'
     | 'method'
     | 'port'
+    | 'releaseCheck'
     | 'requestId'
     | 'route'
     | 'signal'

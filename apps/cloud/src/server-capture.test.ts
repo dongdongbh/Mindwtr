@@ -226,6 +226,9 @@ describe('POST /v1/capture', () => {
         const lines = captured.join('').split('\n').filter(Boolean).map((line) => JSON.parse(line));
         const proofLines = lines.filter((line) => line.message === 'Capture webhook request accepted');
         expect(proofLines).toHaveLength(2);
+        for (const line of proofLines) {
+            expect(line.context.releaseCheck).toBe('v1.2.8/cloud-capture-accepted');
+        }
         expect(proofLines[0].context.hasAudio).toBe('false');
         expect(proofLines[0].context.bodyKind).toBe('multipart');
         expect(typeof proofLines[0].context.bytes).toBe('number');
