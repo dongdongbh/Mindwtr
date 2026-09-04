@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop: editing a task no longer rebuilds the whole task index just so each visible row can read the Today's Focus count. On a large library every edit paid that rebuild on the interface thread; rows now read the count from a cached scan, as the phone already did since 1.2.7. (#1001)
+
 - Self-hosted server: when a `POST /v1/capture` request fails after its audio recording was already written to disk, the recording is removed again instead of staying behind as a file no task refers to.
 
 - MCP: `mindwtr_update_task` and `mindwtr_update_project` re-read the stored attachments inside the retried write, so a link removed by the app or by another agent while the update was being retried stays removed instead of coming back.
