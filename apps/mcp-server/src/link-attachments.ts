@@ -63,11 +63,16 @@ type NormalizedLinkInput = { id?: string; title: string; uri: string };
 // possibly a prompt-injected agent) must not be able to plant that. Reject only the
 // UNC/network-share forms; file:// and plain local paths stay allowed (#1154 contract).
 const isNetworkShareUri = (uri: string): boolean => {
-  if (uri.startsWith('\\\\')) return true; // \\host\share
-  if (/^\/\/[^/]/.test(uri)) return true; // //host/share
-  const fileUrlHost = /^file:\/\/([^/]*)/i.exec(uri)?.[1];
-  if (fileUrlHost !== undefined && fileUrlHost !== '' && fileUrlHost.toLowerCase() !== 'localhost') return true;
-  return false;
+  const scheme = /^[a-z][a-z0-9+.-]*:/i.exec(uri)?.[0];
+  if (!scheme) return /^[\/\\]{2}/.test(uri);
+  if (scheme.toLowerCase() !== 'file:') return false;
+
+  const normalized = uri.slice(scheme.length).replace(/\\/g, '/');
+  const authority = /^\/\/([^/]*)/.exec(normalized);
+  if (!authority) return false;
+  const host = authority[1].toLowerCase();
+  return (host !== '' && host !== 'localhost')
+    || normalized.slice(authority[0].length).startsWith('//');
 };
 
 const normalizeInputs = (inputs: readonly LinkAttachmentInput[]): NormalizedLinkInput[] => {

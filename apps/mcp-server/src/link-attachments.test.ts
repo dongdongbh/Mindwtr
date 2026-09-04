@@ -133,10 +133,19 @@ describe('applyLinkAttachments', () => {
       '//host/share/file.txt',
       'file://host/share/file.txt',
       'file://evil.example.com/x',
+      'file:////host/share/f',
+      'file://///host/share/f',
+      'file:\\\\host\\share',
+      '/\\host\\share',
+      '\\/host\\share',
+      'FILE://host/share',
+      'file://localhost//host/share',
     ];
     for (const uri of rejected) {
-      expect(() => applyLinkAttachments([], [{ uri }], NOW, makeId)).toThrow(ValidationError);
-      expect(() => buildLinkAttachments([{ uri }], NOW, makeId)).toThrow(ValidationError);
+      for (const input of [uri, `  ${uri}  `]) {
+        expect(() => applyLinkAttachments([], [{ uri: input }], NOW, makeId)).toThrow(ValidationError);
+        expect(() => buildLinkAttachments([{ uri: input }], NOW, makeId)).toThrow(ValidationError);
+      }
     }
   });
 
@@ -154,6 +163,7 @@ describe('applyLinkAttachments', () => {
     ];
     for (const uri of accepted) {
       expect(() => applyLinkAttachments([], [{ uri }], NOW, makeId)).not.toThrow();
+      expect(() => buildLinkAttachments([{ uri }], NOW, makeId)).not.toThrow();
     }
   });
 });
