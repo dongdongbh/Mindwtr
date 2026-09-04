@@ -647,10 +647,58 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
         };
     }, []);
 
+    // Loopback HTTP never leaves the machine, so the cleartext banner would nag
+    // about a setup the app itself auto-allows (base-options
+    // isAllowedInsecureUrl admits exactly https and loopback http). LAN HTTP
+    // keeps the banner: that traffic really does cross a network.
+    const isCleartextNetworkUrl = useCallback((rawUrl: string): boolean => {
+        const url = rawUrl.trim().toLowerCase();
+        return url.startsWith('http://') && !isAllowedInsecureUrl(url);
+    }, []);
+
+    // Pure derivation from an already-known configuration snapshot: no lock,
+    // no native call. Drives both the synchronous first-frame seed and the
+    // refresh after a configuration commit (PERF-02) — the 30s poll this
+    // replaced re-read the locked, persisted configuration on a timer with no
+    // in-flight guard, so its ticks queued behind whole sync cycles (tens of
+    // seconds on WebDAV) and drained as a burst of lock acquisitions.
+    const applyCleartextWarningFromConfiguration = useCallback((
+        configuration: ReturnType<typeof SyncService.getLastKnownSyncSelection>['configuration'],
+    ) => {
+        if (!configuration) return;
+        if (configuration.backend === 'webdav' && isCleartextNetworkUrl(configuration.webdav.url)) {
+            setCleartextSyncWarning(tFallback(t,
+                'settings.cleartextSyncWarningWebdav',
+                'WebDAV sync is using HTTP. Data is unencrypted; use it only on a trusted network.'
+            ));
+            return;
+        }
+        if (
+            configuration.backend === 'cloud'
+            && configuration.cloudProvider === 'selfhosted'
+            && isCleartextNetworkUrl(configuration.cloud.url)
+        ) {
+            setCleartextSyncWarning(tFallback(t,
+                'settings.cleartextSyncWarningCloud',
+                'Self-hosted sync is using HTTP. Data is unencrypted; use it only on a trusted network.'
+            ));
+            return;
+        }
+        setCleartextSyncWarning(null);
+    }, [isCleartextNetworkUrl, t]);
+
     useEffect(() => {
         void SyncService.refreshSyncBackendStatus();
-        return SyncService.subscribeSyncStatus(setSyncStatus);
-    }, []);
+        // refreshSyncBackendStatus() runs at the end of every
+        // commitProvenSyncConfiguration (sync-service.ts), so this
+        // subscription doubles as the "a configuration actually committed"
+        // signal — re-deriving the banner here needs no extra lock read,
+        // getLastKnownSyncSelection() is already fresh by the time it fires.
+        return SyncService.subscribeSyncStatus((status) => {
+            setSyncStatus(status);
+            applyCleartextWarningFromConfiguration(SyncService.getLastKnownSyncSelection().configuration);
+        });
+    }, [applyCleartextWarningFromConfiguration]);
 
     useEffect(() => {
         if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -661,58 +709,33 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
         return () => mediaQuery.removeEventListener?.('change', updateCompactViewport);
     }, []);
 
+    // Full (locked) read, kept only for events that can reflect a change this
+    // session did not itself make — another window or process editing the
+    // sync configuration on disk.
     const refreshCleartextSyncWarning = useCallback(async () => {
-        // Loopback HTTP never leaves the machine, so the cleartext banner would
-        // nag about a setup the app itself auto-allows (base-options
-        // isAllowedInsecureUrl admits exactly https and loopback http). LAN HTTP
-        // keeps the banner: that traffic really does cross a network.
-        const isCleartextNetworkUrl = (rawUrl: string): boolean => {
-            const url = rawUrl.trim().toLowerCase();
-            return url.startsWith('http://') && !isAllowedInsecureUrl(url);
-        };
         try {
             const configuration = await SyncService.getPersistedSyncConfigurationSnapshot();
-            if (configuration.backend === 'webdav') {
-                if (isCleartextNetworkUrl(configuration.webdav.url)) {
-                    setCleartextSyncWarning(tFallback(t,
-                        'settings.cleartextSyncWarningWebdav',
-                        'WebDAV sync is using HTTP. Data is unencrypted; use it only on a trusted network.'
-                    ));
-                    return;
-                }
-            } else if (
-                configuration.backend === 'cloud'
-                && configuration.cloudProvider === 'selfhosted'
-            ) {
-                if (isCleartextNetworkUrl(configuration.cloud.url)) {
-                    setCleartextSyncWarning(tFallback(t,
-                        'settings.cleartextSyncWarningCloud',
-                        'Self-hosted sync is using HTTP. Data is unencrypted; use it only on a trusted network.'
-                    ));
-                    return;
-                }
-            }
-            setCleartextSyncWarning(null);
+            applyCleartextWarningFromConfiguration(configuration);
         } catch {
             setCleartextSyncWarning(null);
         }
-    }, [t]);
+    }, [applyCleartextWarningFromConfiguration]);
 
     useEffect(() => {
+        // Synchronous first-frame seed — no lock, no wait behind a sync cycle —
+        // painted immediately, then corrected (usually a no-op) by the queued
+        // read below once it resolves.
+        applyCleartextWarningFromConfiguration(SyncService.getLastKnownSyncSelection().configuration);
         void refreshCleartextSyncWarning();
         const handleStorage = () => void refreshCleartextSyncWarning();
         const handleFocus = () => void refreshCleartextSyncWarning();
         window.addEventListener('storage', handleStorage);
         window.addEventListener('focus', handleFocus);
-        const timer = setInterval(() => {
-            void refreshCleartextSyncWarning();
-        }, 30_000);
         return () => {
             window.removeEventListener('storage', handleStorage);
             window.removeEventListener('focus', handleFocus);
-            clearInterval(timer);
         };
-    }, [refreshCleartextSyncWarning]);
+    }, [applyCleartextWarningFromConfiguration, refreshCleartextSyncWarning]);
 
     const handleAreaFilterChange = (selection: AreaFilterSelection) => {
         updateSettings({ filters: { ...(settings?.filters ?? {}), ...areaFilterSelectionToFilters(selection) } })

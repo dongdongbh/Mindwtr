@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop: the banner that warns about unencrypted sync no longer re-reads the stored sync configuration every 30 seconds through the same queue and lock the sync cycle uses; it is derived from the last known selection and refreshed when the configuration or sync status changes, on window focus, and on storage events.
+
 - Desktop and mobile: the search screens look tasks up through the store's existing id map instead of rebuilding their own map of every task whenever the library changes.
 
 - Desktop: the global search palette and the quick-add dialog, which are always mounted even when closed, no longer rebuild the whole task index on every task write. On a large library that was about 13 ms of interface-thread work per edit charged to two invisible overlays. (#1001)
