@@ -406,6 +406,86 @@ describe('mcp service', () => {
     expect(closedCoreAdapterCount).toBe(1);
   });
 
+  // The update rule is "this is the complete list of links": the row's file attachments and
+  // its tombstones must survive, and a live link left out has to be tombstoned rather than
+  // dropped (a dropped record is resurrected by the sync merge - see link-attachments.ts).
+  test('updateTask rewrites link attachments from the stored row', async () => {
+    let receivedUpdateInput: any = null;
+    const fakeDb = {} as any;
+    const storedTask = {
+      id: 't1',
+      title: 'Task',
+      status: 'inbox',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      attachments: [
+        { id: 'file-1', kind: 'file', title: 'Contract.pdf', uri: 'attachments/file-1.pdf', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+        { id: 'link-1', kind: 'link', title: 'Old note', uri: 'https://example.com/old', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+      ],
+    };
+    const deps = {
+      openMindwtrDb: async () => ({ db: fakeDb }),
+      closeDb: () => undefined,
+      getTask: () => storedTask,
+      getProject: () => ({ id: 'p1', title: 'Project' }),
+      parseQuickAdd: () => ({ title: '', props: {} }),
+      runCoreService: async (_options: any, fn: any) =>
+        fn({
+          updateTask: async (input: any) => {
+            receivedUpdateInput = input;
+            return { id: input.id, title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-02' };
+          },
+        }),
+    };
+    const service = createService({ readonly: false }, deps as any);
+
+    await service.updateTask({ id: 't1', attachments: [{ uri: 'obsidian://open?vault=v&file=n' }] } as any);
+
+    const written = receivedUpdateInput.updates.attachments;
+    expect(written).toHaveLength(3);
+    expect(written[0]).toEqual(storedTask.attachments[0]);
+    expect(written[1]).toMatchObject({ id: 'link-1', uri: 'https://example.com/old' });
+    expect(typeof written[1].deletedAt).toBe('string');
+    expect(written[2]).toMatchObject({ kind: 'link', uri: 'obsidian://open?vault=v&file=n' });
+    expect(written[2].deletedAt).toBeUndefined();
+  });
+
+  test('updateProject rewrites link attachments from the stored row', async () => {
+    let receivedUpdateInput: any = null;
+    const fakeDb = {} as any;
+    const storedProject = {
+      id: 'p1',
+      title: 'Project',
+      attachments: [
+        { id: 'file-1', kind: 'file', title: 'Plan.pdf', uri: 'attachments/file-1.pdf', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+        { id: 'link-1', kind: 'link', title: 'Old note', uri: 'https://example.com/old', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+      ],
+    };
+    const deps = {
+      openMindwtrDb: async () => ({ db: fakeDb }),
+      closeDb: () => undefined,
+      getTask: () => ({ id: 't1' }),
+      getProject: () => storedProject,
+      parseQuickAdd: () => ({ title: '', props: {} }),
+      runCoreService: async (_options: any, fn: any) =>
+        fn({
+          updateProject: async (input: any) => {
+            receivedUpdateInput = input;
+            return { id: input.id, title: 'Project' };
+          },
+        }),
+    };
+    const service = createService({ readonly: false }, deps as any);
+
+    await service.updateProject({ id: 'p1', attachments: [{ uri: 'obsidian://open?vault=v&file=n' }] } as any);
+
+    const written = receivedUpdateInput.updates.attachments;
+    expect(written).toHaveLength(3);
+    expect(written[0]).toEqual(storedProject.attachments[0]);
+    expect(typeof written[1].deletedAt).toBe('string');
+    expect(written[2]).toMatchObject({ kind: 'link', uri: 'obsidian://open?vault=v&file=n' });
+  });
+
   test('rejects addTask when token values are blank', async () => {
     const fakeDb = {} as any;
     const deps = {

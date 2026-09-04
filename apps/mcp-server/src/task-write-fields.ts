@@ -43,6 +43,8 @@ const DEDICATED_FIELD_NAMES = new Set<keyof Task>([
     'projectId',
     'sectionId',
     'timeEstimate',
+    // Link-kind attachments only, with their own merge rule (link-attachments.ts).
+    'attachments',
 ]);
 
 const isDerivedFromSchema = (name: keyof Task): boolean => (

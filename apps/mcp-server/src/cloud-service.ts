@@ -59,6 +59,7 @@ import type {
   UpdateTaskInput,
 } from './queries.js';
 import { pickDefinedTaskFields, TASK_CREATE_FIELD_NAMES, TASK_PATCH_FIELD_NAMES } from './task-write-fields.js';
+import { applyLinkAttachments, buildLinkAttachments } from './link-attachments.js';
 
 export type CloudServiceOptions = {
   url: string;
@@ -321,6 +322,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
         relativeStartOffset: normalizeOptionalTaskRelativeStartOffset(input.relativeStartOffset),
         timeSpentMinutes: normalizeOptionalTaskTimeSpentMinutes(input.timeSpentMinutes),
         repeatReminderMinutes: normalizeOptionalTaskRepeatReminderMinutes(input.repeatReminderMinutes),
+        attachments: buildLinkAttachments(input.attachments),
       });
       const body = hasQuickAdd ? { input: input.quickAdd, props } : { title: input.title, props };
       const result = await request<{ task: AppData['tasks'][number] }>('POST', '/tasks', body);
@@ -361,6 +363,11 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           patch[name] = value;
         }
       }
+      if (input.attachments !== undefined) {
+        // The stored record set, tombstones included, is what the merge rule needs.
+        const existing = await findTask({ id: input.id });
+        patch.attachments = applyLinkAttachments(existing.attachments, input.attachments);
+      }
       const result = await request<{ task: AppData['tasks'][number] }>('PATCH', `/tasks/${encodeURIComponent(input.id)}`, patch);
       return mapTask(result.task);
     },
@@ -385,6 +392,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           startDate: input.startDate ?? undefined,
           reviewAt: input.reviewAt ?? undefined,
           supportNotes: input.supportNotes ?? undefined,
+          attachments: buildLinkAttachments(input.attachments),
         }),
       });
       return mapProject(result.project);
@@ -401,6 +409,10 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       if (input.startDate !== undefined) patch.startDate = input.startDate;
       if (input.reviewAt !== undefined) patch.reviewAt = input.reviewAt;
       if (input.supportNotes !== undefined) patch.supportNotes = input.supportNotes;
+      if (input.attachments !== undefined) {
+        const existing = await findProject({ id: input.id });
+        patch.attachments = applyLinkAttachments(existing.attachments, input.attachments);
+      }
       const result = await request<{ project: AppData['projects'][number] }>('PATCH', `/projects/${encodeURIComponent(input.id)}`, patch);
       return mapProject(result.project);
     },

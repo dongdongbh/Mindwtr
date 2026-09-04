@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- MCP: `mindwtr_add_task`, `mindwtr_update_task`, `mindwtr_add_project` and `mindwtr_update_project` accept link attachments (`kind: "link"`, a title and a uri such as obsidian://, file:// or https://), so an agent can attach the clickable reference the app shows as a link. On update the list is the complete set of links: links left out are removed, file attachments are never touched. (#1154)
+
 - Desktop Timeline: the view is easier to read. A line now separates one project from the next, task bars are drawn in a lighter tint of the project color so the project bar stands out as their parent, a task title is shown once in the name column on the left instead of also on the bar, task bars are thinner than the solid project bar, the daily and weekly gridlines are drawn as crisp lines instead of a repeating pattern that blurred into soft vertical bands on scaled displays, and the view opens centered on today and re-centers when you change the zoom. (#1111)
 
 - Desktop: the buttons that appear when you hover a task row (start a Pomodoro, the three-dot menu, duplicate, delete, and the trash can on deleted rows) were invisible in 1.2.7. The cursor still changed over them and clicks still worked, but nothing was drawn. A security update of a stylesheet tool made every hover-revealed style disappear from the build; the tool is now on the corrected release and a build check guards it. (from in-app feedback)

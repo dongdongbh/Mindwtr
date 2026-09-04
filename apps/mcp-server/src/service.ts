@@ -56,6 +56,7 @@ import {
   type TaskRow,
   type UpdateTaskInput,
 } from './queries.js';
+import { applyLinkAttachments, buildLinkAttachments, type LinkAttachmentInput } from './link-attachments.js';
 import { closeCoreAdapter, runCoreService } from './core-adapter.js';
 import { pickDefinedTaskFields, TASK_CREATE_FIELD_NAMES, TASK_PATCH_FIELD_NAMES } from './task-write-fields.js';
 
@@ -290,6 +291,7 @@ export type AddProjectInput = {
   startDate?: string | null;
   reviewAt?: string | null;
   supportNotes?: string | null;
+  attachments?: LinkAttachmentInput[];
 };
 
 export type UpdateProjectInput = {
@@ -304,6 +306,7 @@ export type UpdateProjectInput = {
   startDate?: string | null;
   reviewAt?: string | null;
   supportNotes?: string | null;
+  attachments?: LinkAttachmentInput[] | null;
 };
 
 export type AddAreaInput = {
@@ -492,6 +495,7 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
               energyLevel: normalizedInput.energyLevel,
               assignedTo: normalizedInput.assignedTo,
               timeEstimate: normalizedInput.timeEstimate,
+              attachments: buildLinkAttachments(normalizedInput.attachments),
               ...generatedCreateTaskProps(normalizedInput),
             }),
           }, {
@@ -531,18 +535,24 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
             energyLevel: normalizedInput.energyLevel,
             assignedTo: normalizedInput.assignedTo,
             timeEstimate: normalizedInput.timeEstimate,
+            attachments: buildLinkAttachments(normalizedInput.attachments),
             ...generatedCreateTaskProps(normalizedInput),
           }),
         });
       });
     },
-    updateTask: async (input) =>
-      runCoreWriteWithRetries(options, deps, async (core) => {
-        return core.updateTask({
-          id: input.id,
-          updates: buildTaskUpdates(input),
-        });
-      }),
+    updateTask: async (input) => {
+      const updates = buildTaskUpdates(input);
+      if (input.attachments !== undefined) {
+        // Read the SQLite row, not the store's visible list: it carries tombstoned
+        // attachment records, which the written list must keep (see link-attachments.ts).
+        const existing = await withDb((db) => deps.getTask(db, { id: input.id }));
+        updates.attachments = applyLinkAttachments(existing.attachments, input.attachments);
+      }
+      return runCoreWriteWithRetries(options, deps, async (core) => {
+        return core.updateTask({ id: input.id, updates });
+      });
+    },
     completeTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.completeTask(id)),
     deleteTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.deleteTask(id)),
     restoreTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.restoreTask(id)),
@@ -561,12 +571,21 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
             startDate: input.startDate ?? undefined,
             reviewAt: input.reviewAt ?? undefined,
             supportNotes: input.supportNotes ?? undefined,
+            attachments: buildLinkAttachments(input.attachments),
           }) as Partial<CoreProject>,
         });
       }),
-    updateProject: async (input) =>
-      runCoreWriteWithRetries(options, deps, async (core) => {
+    updateProject: async (input) => {
+      const attachments = input.attachments === undefined
+        ? undefined
+        // Same reason as updateTask: the row keeps tombstoned attachment records.
+        : applyLinkAttachments(
+          (await withDb((db) => deps.getProject(db, { id: input.id }))).attachments,
+          input.attachments,
+        );
+      return runCoreWriteWithRetries(options, deps, async (core) => {
         const updates: Partial<CoreProject> = {};
+        if (attachments !== undefined) updates.attachments = attachments;
         if (input.title !== undefined) updates.title = validateProjectTitle(input.title);
         if (input.color !== undefined) updates.color = input.color ?? undefined;
         if (input.status !== undefined) updates.status = parseProjectStatus(input.status);
@@ -578,7 +597,8 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
         if (input.reviewAt !== undefined) updates.reviewAt = input.reviewAt ?? undefined;
         if (input.supportNotes !== undefined) updates.supportNotes = input.supportNotes ?? undefined;
         return core.updateProject({ id: input.id, updates });
-      }),
+      });
+    },
     deleteProject: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.deleteProject(id)),
     addSection: async (input) =>
       runCoreWriteWithRetries(options, deps, async (core) => {

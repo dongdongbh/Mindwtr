@@ -42,6 +42,7 @@ import type {
   TaskStatus,
   UpdateTaskInput,
 } from './queries.js';
+import { linkAttachmentsCreateSchema, linkAttachmentsUpdateSchema } from './link-attachments.js';
 import { buildTaskCreateFieldsShape, buildTaskUpdateFieldsShape } from './task-field-schemas.js';
 
 export { parseArgs, parseBooleanFlag } from './flags.js';
@@ -255,6 +256,7 @@ export const addTaskSchema = z.object({
   energyLevel: z.enum(['low', 'medium', 'high']).optional().describe('Energy level: low, medium, high'),
   assignedTo: z.string().optional().describe('Person this task is assigned to or waiting for'),
   timeEstimate: timeEstimateSchema.optional().describe('Time estimate preset or custom:<positive minutes>'),
+  attachments: linkAttachmentsCreateSchema.optional(),
   // Every other create-writable Task field (checklist, areaId, reviewAt, isFocusedToday,
   // taskMode, relativeStartOffset, location, ...) is derived from TASK_SYNC_FIELD_SCHEMA —
   // see task-write-fields.ts/task-field-schemas.ts. Adding a synced field there needs no
@@ -312,6 +314,7 @@ export const updateTaskSchema = z.object({
   energyLevel: z.enum(['low', 'medium', 'high']).nullable().optional(),
   assignedTo: z.string().nullable().optional(),
   timeEstimate: timeEstimateSchema.nullable().optional(),
+  attachments: linkAttachmentsUpdateSchema.optional(),
   // Every other patch-writable Task field (reviewAt, isFocusedToday, checklist, areaId,
   // order, boardOrder, focusOrder, ...) is derived from TASK_SYNC_FIELD_SCHEMA — see
   // task-write-fields.ts/task-field-schemas.ts. Adding a synced field there needs no edit
@@ -381,6 +384,7 @@ const addProjectSchema = z.object({
   startDate: isoDateLikeSchema.nullable().optional(),
   reviewAt: isoDateLikeSchema.nullable().optional(),
   supportNotes: z.string().nullable().optional(),
+  attachments: linkAttachmentsCreateSchema.optional(),
 });
 const updateProjectSchema = z.object({
   id: z.string(),
@@ -394,6 +398,7 @@ const updateProjectSchema = z.object({
   startDate: isoDateLikeSchema.nullable().optional(),
   reviewAt: isoDateLikeSchema.nullable().optional(),
   supportNotes: z.string().nullable().optional(),
+  attachments: linkAttachmentsUpdateSchema.optional(),
 });
 const deleteProjectSchema = z.object({
   id: z.string(),
