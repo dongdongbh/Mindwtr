@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -204,6 +204,39 @@ describe('POST /v1/capture', () => {
 
         const titles = (await readStoredTasks()).map((task) => task.title).sort();
         expect(titles).toEqual(['Call the plumber back', 'Renew the passport', 'Water the plants']);
+    });
+
+    test('logs a releaseCheck line proving the request arrived, with no transcription text or token', async () => {
+        const captured: string[] = [];
+        const stdoutSpy = spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+            captured.push(String(chunk));
+            return true;
+        });
+
+        try {
+            const multipart = await postFormCapture({ transcription: 'Secret errand text' });
+            expect(multipart.status).toBe(201);
+
+            const json = await postJsonCapture({ transcription: 'Another secret line' });
+            expect(json.status).toBe(201);
+        } finally {
+            stdoutSpy.mockRestore();
+        }
+
+        const lines = captured.join('').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+        const proofLines = lines.filter((line) => line.message === 'Capture webhook request accepted');
+        expect(proofLines).toHaveLength(2);
+        expect(proofLines[0].context.hasAudio).toBe('false');
+        expect(proofLines[0].context.bodyKind).toBe('multipart');
+        expect(typeof proofLines[0].context.bytes).toBe('number');
+        expect(proofLines[1].context.hasAudio).toBe('false');
+        expect(proofLines[1].context.bodyKind).toBe('json');
+        expect(typeof proofLines[1].context.bytes).toBe('number');
+
+        const serialized = captured.join('');
+        expect(serialized).not.toContain('Secret errand text');
+        expect(serialized).not.toContain('Another secret line');
+        expect(serialized).not.toContain(TOKEN);
     });
 
     test('accepts text and title as transcription aliases', async () => {

@@ -37,6 +37,7 @@ export type CloudFailureContext = {
 };
 
 export const CLOUD_LOG_MESSAGES = [
+    'Capture webhook request accepted',
     'Failed to clone cloud app data cache entry',
     'Failed to start server',
     'MINDWTR_CLOUD_ALLOW_ANY_TOKEN is enabled. Prefer MINDWTR_CLOUD_AUTH_TOKENS for stronger access control.',
@@ -60,8 +61,11 @@ export const CLOUD_LOG_MESSAGES = [
 type CloudLogMessage = typeof CLOUD_LOG_MESSAGES[number];
 type CloudOperationalLogContext = Partial<Record<
     | 'allowedTokens'
+    | 'bodyKind'
+    | 'bytes'
     | 'count'
     | 'elapsedMs'
+    | 'hasAudio'
     | 'hint'
     | 'maxNamespaces'
     | 'method'
