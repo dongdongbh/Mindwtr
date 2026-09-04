@@ -1474,7 +1474,7 @@ class SharedSyncRunMachine {
                 this.notifier.logWarningExtra(
                     'Sync folder activation accepted attachments the folder does not hold yet',
                     {
-                        releaseCheck: '1.2.8/file-activation-absent-blobs',
+                        releaseCheck: 'v1.2.8/file-activation-absent-blobs',
                         backend: this.backend,
                         deferred: String(deferredIds.length),
                         ids: deferredIds.slice(0, 5).join(','),
