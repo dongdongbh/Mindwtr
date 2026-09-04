@@ -978,8 +978,10 @@ class SharedSyncRunMachine {
      */
     private assertLocalOnlyUploadIsCanonical(data: AppData): void {
         if (!this.state.localOnlyUploadFingerprint) return;
-        // Same predicate the store's write contract uses (store.ts).
-        if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'development') return;
+        // Unlike the cheap store write contract, this full-document check must
+        // default to inert when a bundle does not define a process global.
+        const isDevelopment = typeof process !== 'undefined' && process.env?.NODE_ENV === 'development';
+        if (!isDevelopment) return;
         // The same empty document the real cycle merges against (sync.ts parses
         // an absent remote through parseSyncDocument), so the comparison is
         // byte-exact against what production does.

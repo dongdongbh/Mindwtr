@@ -3122,6 +3122,71 @@ describe('local-only upload fast path', () => {
             .toBeUndefined();
     });
 
+    it.each(['process-undefined', 'production', 'development'] as const)(
+        'runs the canonical-read backstop only in development (%s)',
+        async (environment) => {
+            let exerciseBackstop = false;
+            let fastPathArmed = false;
+            let documentReads = 0;
+            let writeFailure: unknown;
+            const afterBackstop = new Error('Reached the network check after the backstop');
+            const nonCanonical = rawLocal('Non-canonical local edit', 5, '2026-07-13T09:30:00.000Z');
+            const guardedDocument: AppData = {
+                ...nonCanonical,
+                get tasks() {
+                    documentReads += 1;
+                    if (environment !== 'development') {
+                        throw new Error('The backstop inspected the document outside development');
+                    }
+                    return nonCanonical.tasks;
+                },
+            };
+            const bundle = createHarness({
+                local: messyLocal('Local task'),
+                fastSyncScope: `scope-backstop-${environment}`,
+                policy: { preSyncAttachmentsBeforeFastCheck: true },
+                io: conditionalIo,
+                performSyncCycle: async (io) => {
+                    if (!exerciseBackstop) return performSyncCycle(io);
+                    fastPathArmed = io.skipEmptyRemoteMerge?.() === true;
+                    // Stop immediately after the backstop, before the real
+                    // upload's own serialization can touch the document.
+                    bundle.hooks.ensureNetworkStillAvailable = async () => { throw afterBackstop; };
+                    try {
+                        if (environment === 'process-undefined') {
+                            vi.stubGlobal('process', undefined);
+                        } else {
+                            vi.stubEnv('NODE_ENV', environment);
+                        }
+                        await io.writeRemote(guardedDocument);
+                    } catch (error) {
+                        writeFailure = error;
+                    } finally {
+                        vi.unstubAllGlobals();
+                        vi.unstubAllEnvs();
+                    }
+                    throw afterBackstop;
+                },
+            });
+            await settleThenEditLocally(bundle, 'Edited only here');
+            vi.mocked(bundle.io.writeRemote).mockClear();
+            exerciseBackstop = true;
+
+            await bundle.run();
+
+            expect(fastPathArmed).toBe(true);
+            expect(bundle.io.writeRemote).not.toHaveBeenCalled();
+            if (environment === 'development') {
+                expect(documentReads).toBeGreaterThan(0);
+                expect(writeFailure).toBeInstanceOf(Error);
+                expect((writeFailure as Error).message).toContain('Sync canonical-read invariant broken');
+            } else {
+                expect(documentReads).toBe(0);
+                expect(writeFailure).toBe(afterBackstop);
+            }
+        },
+    );
+
     it('reads the remote when the backend cannot make the write conditional', async () => {
         // Weak ETag, no ETag at all, legacy-plaintext WebDAV: the backend
         // refuses to adopt the fingerprint and the cycle runs in full.

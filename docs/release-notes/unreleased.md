@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop and web app: an automatic sync that could upload the local library without merging first (a change made only on this device) still paid a full merge and two whole-library serializations on the interface thread in 1.2.7, because a development-only self-check was accidentally active in those builds; and when a task written through MCP looked different after the normalizing pass, that self-check failed the whole sync cycle instead of staying silent. The check now runs only in development builds. (#1001)
+
 - Desktop Timeline: a project whose dates all fall outside the visible window no longer shows as a bare row with nothing drawn; it is counted in the Earlier or Later notice like the tasks that are out of view. (#1111)
 
 - Desktop Timeline: the chart can be focused with the keyboard and scrolled sideways with the arrow keys, and screen readers now announce the chart and the zoom control by name. (#1111)
