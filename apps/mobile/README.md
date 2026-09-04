@@ -305,20 +305,21 @@ Then open https://ui.perfetto.dev and correlate `MindwtrStartup` log phases with
 
 ## Data Storage
 
-Tasks are stored in AsyncStorage and synced via the shared @mindwtr/core package.
+Tasks are stored in SQLite via `@op-engineering/op-sqlite` and synced via the shared @mindwtr/core package. AsyncStorage remains only as the legacy-JSON migration source and a marker. See [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md).
 
 ## Project Structure
 
 ```
 apps/mobile/
 ├── app/                    # Expo Router pages
-│   ├── (tabs)/            # Tab navigation
-│   ├── _layout.tsx        # Root layout
-│   └── settings.tsx       # Settings page
+│   ├── (drawer)/           # Drawer navigation
+│   │   └── (tabs)/         # Tab navigation, includes settings.tsx
+│   ├── _layout.tsx         # Root layout
+│   └── capture-modal.tsx   # Quick-capture modal
 ├── components/            # React components
 ├── contexts/              # React contexts (theme, language)
 ├── lib/                   # Utilities
-│   ├── storage-adapter.ts # AsyncStorage integration
+│   ├── storage-adapter.ts # SQLite storage adapter
 │   └── storage-file.ts    # File operations for sync
 ├── global.css             # NativeWind entry CSS
 ├── tailwind.config.js     # Tailwind configuration
@@ -344,7 +345,7 @@ The mobile app uses NativeWind v4 for Tailwind CSS styling.
 ## Sync and Data
 
 ### Local Storage
-Data is stored in AsyncStorage and automatically synced with the shared Zustand store.
+Data is stored in SQLite and automatically synced with the shared Zustand store.
 
 ### File Sync
 Configure a sync folder in Settings to sync via:
