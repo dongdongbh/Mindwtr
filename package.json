@@ -106,7 +106,7 @@
     "lint:mcp": "bun run --filter mindwtr-mcp lint",
     "lint:all": "bun run lint:node && bun run lint:desktop && bun run lint:mobile && bun run lint:mcp",
     "typecheck": "bun run typecheck:core && bun run typecheck:cloud && bun run typecheck:desktop && bun run typecheck:mobile && bun run typecheck:mcp",
-    "typecheck:core": "bun run --filter @mindwtr/core build",
+    "typecheck:core": "bun run --filter @mindwtr/core typecheck",
     "typecheck:cloud": "bun run --filter mindwtr-cloud typecheck",
     "typecheck:desktop": "bunx tsc --noEmit -p apps/desktop/tsconfig.json",
     "typecheck:mobile": "bunx tsc --noEmit -p apps/mobile/tsconfig.json",

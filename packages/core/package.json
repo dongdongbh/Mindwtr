@@ -47,6 +47,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint -c ../../eslint.node.config.mjs \"src/**/*.ts\" --ignore-pattern \"src/**/*.test.ts\"",
     "bench": "vitest bench",
     "test": "vitest run",
