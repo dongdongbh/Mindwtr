@@ -6,7 +6,6 @@ import {
     mergeParsedProcessInboxFields,
     resolveProcessInboxContainerFields,
     resolveProcessInboxWorkflowEvent,
-    withParsedProcessInboxFields,
 } from './process-inbox-workflow';
 import { parseProcessInboxTitleInput } from './quick-add';
 
@@ -174,40 +173,18 @@ describe('resolveProcessInboxWorkflowEvent', () => {
     });
 });
 
-describe('withParsedProcessInboxFields', () => {
-    const parsed = {
-        contexts: ['@phone'],
-        tags: ['#urgent'],
-        assignedTo: 'Bob',
-        energyLevel: 'low' as const,
-    };
-
-    it('adds parsed tokens to the chips the user toggled instead of replacing them', () => {
-        const event = withParsedProcessInboxFields(
-            { type: 'next', fields: { contexts: ['@office'], tags: ['#home'] } },
-            parsed,
+describe('mergeParsedProcessInboxFields token parsing', () => {
+    it('unions parsed contexts and tags with the chips the user already toggled', () => {
+        const merged = mergeParsedProcessInboxFields(
+            { contexts: ['@office'], tags: ['#home'] },
+            { contexts: ['@phone'], tags: ['#urgent'] },
         );
-        expect(event).toEqual({
-            type: 'next',
-            fields: {
-                contexts: ['@office', '@phone'],
-                tags: ['#home', '#urgent'],
-                assignedTo: 'Bob',
-                energyLevel: 'low',
-            },
-        });
+        expect(merged.contexts).toEqual(['@office', '@phone']);
+        expect(merged.tags).toEqual(['#home', '#urgent']);
     });
 
-    it('keeps a delegate follow-up date while folding the tokens in', () => {
-        const event = withParsedProcessInboxFields(
-            { type: 'waiting', fields: {}, followUpAt: '2026-09-01T09:00:00.000Z' },
-            parsed,
-        );
-        expect(event).toMatchObject({
-            type: 'waiting',
-            followUpAt: '2026-09-01T09:00:00.000Z',
-            fields: { contexts: ['@phone'], assignedTo: 'Bob' },
-        });
+    it('lets a parsed assignedTo win over the picker, the only way an explicit token can act', () => {
+        expect(mergeParsedProcessInboxFields({}, { assignedTo: 'Bob' }).assignedTo).toBe('Bob');
     });
 
     // The parsed-token path is the only route a typed /priority: has into the
@@ -225,20 +202,6 @@ describe('withParsedProcessInboxFields', () => {
         const parsedTitle = parseProcessInboxTitleInput('Call plumber');
         expect(mergeParsedProcessInboxFields({ priority: 'urgent' }, parsedTitle.props).priority)
             .toBe('urgent');
-    });
-
-    it('leaves a discard alone — trashing writes nothing for a token to land on', () => {
-        expect(withParsedProcessInboxFields({ type: 'discard' }, parsed)).toEqual({ type: 'discard' });
-    });
-
-    it('folds parsed tokens into a skip without changing task status', () => {
-        expect(withParsedProcessInboxFields(
-            { type: 'skip', fields: { contexts: ['@office'] } },
-            parsed,
-        )).toMatchObject({
-            type: 'skip',
-            fields: { contexts: ['@office', '@phone'], tags: ['#urgent'] },
-        });
     });
 });
 

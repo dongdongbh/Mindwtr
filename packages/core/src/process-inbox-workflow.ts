@@ -59,6 +59,9 @@ export type ParsedProcessInboxTitleFields = Pick<
  * win over the picker, which is the only way an explicit token can act at all.
  * A parsed project still drops a directly assigned area (#958); a parsed area
  * leaves an existing project alone, since the project already carries one.
+ *
+ * This is the single seam both platforms' clarify controllers call before
+ * building their commit event (desktop's and mobile's `useInboxProcessingController`).
  */
 export function mergeParsedProcessInboxFields(
     fields: ProcessInboxWorkflowFields,
@@ -117,37 +120,6 @@ export type ProcessInboxWorkflowCommitResult<Step extends string> = {
     session: ProcessInboxSession<Step>;
     writeResult: StoreActionResult;
 };
-
-/**
- * Apply {@link mergeParsedProcessInboxFields} to whichever decision the user
- * picked. Written out per case so a new event type has to declare what a typed
- * token means for it instead of inheriting a spread.
- */
-export function withParsedProcessInboxFields(
-    event: ProcessInboxWorkflowEvent,
-    parsed: ParsedProcessInboxTitleFields,
-): ProcessInboxWorkflowEvent {
-    const merge = (fields: ProcessInboxWorkflowFields = {}) => mergeParsedProcessInboxFields(fields, parsed);
-    switch (event.type) {
-        // Trashing writes nothing, so there is nothing for a token to land on.
-        case 'discard':
-            return event;
-        case 'skip':
-            return { type: 'skip', fields: merge(event.fields) };
-        case 'someday':
-            return { type: 'someday', fields: merge(event.fields) };
-        case 'reference':
-            return { type: 'reference', fields: merge(event.fields) };
-        case 'complete':
-            return { type: 'complete', fields: merge(event.fields) };
-        case 'later':
-            return { type: 'later', fields: merge(event.fields) };
-        case 'next':
-            return { type: 'next', fields: merge(event.fields) };
-        case 'waiting':
-            return { type: 'waiting', fields: merge(event.fields), followUpAt: event.followUpAt };
-    }
-}
 
 function normalizeFields(fields: ProcessInboxWorkflowFields): ProcessInboxWorkflowFields {
     if (!Object.prototype.hasOwnProperty.call(fields, 'assignedTo')) return fields;
