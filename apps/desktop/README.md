@@ -18,7 +18,7 @@ Tauri v2 desktop app for the Mindwtr productivity system.
 - **Global Search** - Search operators (status:, context:, due:<=7d)
 - **Saved Searches** - Save and reuse search filters
 - **Bulk Actions** - Multi-select, batch move/tag/delete
-- **Task Dependencies** - Block tasks until prerequisites complete
+- **Sequential Projects** - Only the first unfinished task is offered as the next action
 - **Markdown Notes** - Rich text descriptions with preview
 - **Attachments** - Files and links on tasks
 - **Reusable Lists** - Duplicate tasks or reset checklists
