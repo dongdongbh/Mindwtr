@@ -238,6 +238,18 @@ describe('DailyReviewGuideModal', () => {
         expect(screen.getByText('focus task 11')).toBeInTheDocument();
     });
 
+    it.each([1, 10])('shows the configured focus limit of %i in the focus step header', (limit) => {
+        seedStep('focus', { status: 'next' });
+        useTaskStore.setState({
+            settings: { gtd: { dailyReview: { includeFocusStep: true }, focusTaskLimit: limit } },
+        });
+
+        render(<DailyReviewGuideModal onClose={vi.fn()} />);
+
+        const stepHeading = screen.getByRole('heading', { level: 3, name: "Today's Focus" });
+        expect(stepHeading.parentElement).toHaveTextContent(new RegExp(`0 / ${limit}$`));
+    });
+
     it('refreshes review buckets when the open review crosses local midnight', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date(2026, 6, 15, 23, 59, 59));

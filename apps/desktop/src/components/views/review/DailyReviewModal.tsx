@@ -461,7 +461,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
                             <h3 className="font-semibold mb-2">{t('dailyReview.focusStep')}</h3>
                             <p className="text-sm text-muted-foreground">{t('dailyReview.focusDesc')}</p>
                             <p className="text-sm text-muted-foreground mt-2">
-                                <span className="font-bold text-foreground">{focusedTasks.length}</span> / 3
+                                <span className="font-bold text-foreground">{focusedTasks.length}</span> / {focusTaskLimit}
                             </p>
                         </div>
                         {renderFocusList()}

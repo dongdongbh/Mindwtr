@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop: the Daily Review focus step shows your configured Today's Focus limit (for example "1 / 1" or "2 / 5") instead of always "/ 3", so it no longer invites picks the star control then refuses.
+
 - Desktop: each Daily Review step now shows every task it counts. The step header said, for example, "23 tasks" while only the first ten were listed, so the rest could not be reviewed from inside the review. The phone was fixed the same way in 1.2.6.
 
 - Desktop: editing a task no longer rebuilds the whole task index just so each visible row can read the Today's Focus count. On a large library every edit paid that rebuild on the interface thread; rows now read the count from a cached scan, as the phone already did since 1.2.7. (#1001)
