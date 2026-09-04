@@ -722,7 +722,11 @@ export function TimelineView() {
                                 {tFallback(t, 'calendar.today', 'Today')}
                             </button>
                         )}
-                        <div className="flex items-center rounded-md border border-border bg-card p-0.5" role="group">
+                        <div
+                            className="flex items-center rounded-md border border-border bg-card p-0.5"
+                            role="group"
+                            aria-label={tFallback(t, 'timeline.zoomLabel', 'Timeline zoom')}
+                        >
                             {ZOOM_LEVELS.map((level) => (
                                 <button
                                     key={level}
@@ -793,7 +797,17 @@ export function TimelineView() {
                             // only scrolls once they outgrow the viewport.
                             <div className="min-h-0 flex-1 pb-4">
                         <div className="flex max-h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-                            <div ref={scrollRef} data-testid="timeline-scroller" className="min-h-0 overflow-auto">
+                            {/* Focusable so the horizontal track can be scrolled with the
+                                arrow keys; without a tab stop the only way across the
+                                window was a pointer drag or the scrollbar. */}
+                            <div
+                                ref={scrollRef}
+                                data-testid="timeline-scroller"
+                                className="min-h-0 overflow-auto"
+                                tabIndex={0}
+                                role="region"
+                                aria-label={tFallback(t, 'timeline.trackRegionLabel', 'Timeline track')}
+                            >
                                 <div className="relative flex flex-col" style={{ width: contentWidth }}>
                                     <div
                                         className="sticky top-0 z-30 flex border-b border-border bg-card"

@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop Timeline: the chart can be focused with the keyboard and scrolled sideways with the arrow keys, and screen readers now announce the chart and the zoom control by name. (#1111)
+
 - Mobile: the task editor's status list now offers Reference for every task, as the status badge on the same screen and the desktop already did, so a note can be filed as reference material without leaving the editor. (#1155)
 
 - Desktop: after switching sync backends, a follow-up sync that does not finish (for example because another device holds the location) now says the new settings are active and that sync will retry, instead of the old message claiming the previous sync settings were still in use.

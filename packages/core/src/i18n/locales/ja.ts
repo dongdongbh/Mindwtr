@@ -29,6 +29,8 @@ export const jaOverrides: Record<string, string> = {
         'nav.timeline': 'タイムライン',
         'timeline.empty': '予定されたタスクはまだありません',
         'timeline.emptyHint': '開始日または期限日のあるタスクがバーとして表示されます。',
+        'timeline.trackRegionLabel': 'タイムラインのトラック',
+        'timeline.zoomLabel': 'タイムラインの表示倍率',
         'nav.projects': 'プロジェクト',
         'nav.contexts': 'コンテキスト',
         'nav.next': '次のアクション',

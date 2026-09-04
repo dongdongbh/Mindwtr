@@ -93,6 +93,8 @@ export const zhHant: Record<string, string> = {
         'nav.timeline': '時間軸',
         'timeline.empty': '還沒有排期的任務',
         'timeline.emptyHint': '設定了開始日期或截止日期的任務會在這裡顯示為色條。',
+        'timeline.trackRegionLabel': '時間軸軌道',
+        'timeline.zoomLabel': '時間軸縮放',
         'nav.projects': '項目',
         'nav.contexts': '情境',
         'nav.next': '下一步行動',

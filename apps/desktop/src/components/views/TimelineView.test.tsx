@@ -98,6 +98,21 @@ describe('TimelineView (#1111)', () => {
         expect(bar?.style.width).toBe('72px');
     });
 
+    it('exposes the horizontal track as a focusable named region and names the zoom group', () => {
+        setStore({
+            tasks: [makeTask({ id: 'span', title: 'Span task', startTime: iso(-2), dueDate: iso(3) })],
+        });
+        renderTimeline();
+
+        const track = screen.getByRole('region', { name: 'Timeline track' });
+        expect(track).toBe(screen.getByTestId('timeline-scroller'));
+        expect(track).toHaveAttribute('tabindex', '0');
+        track.focus();
+        expect(document.activeElement).toBe(track);
+
+        expect(screen.getByRole('group', { name: 'Timeline zoom' })).toBeInTheDocument();
+    });
+
     it('draws a compact mini-bar for a task dated on only one side', () => {
         setStore({
             tasks: [

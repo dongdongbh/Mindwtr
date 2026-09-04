@@ -17,6 +17,8 @@ export const svOverrides: Record<string, string> = {
         'nav.timeline': 'Tidslinje',
         'timeline.empty': 'Inget schemalagt än',
         'timeline.emptyHint': 'Uppgifter med start- eller förfallodatum visas här som staplar.',
+        'timeline.trackRegionLabel': 'Tidslinjespår',
+        'timeline.zoomLabel': 'Tidslinjezoom',
         'nav.projects': 'Projekt',
         'nav.contexts': 'Kontexter',
         'nav.next': 'Nästa steg',

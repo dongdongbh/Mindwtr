@@ -17,6 +17,8 @@ export const faOverrides: Record<string, string> = {
         'nav.timeline': 'خط زمانی',
         'timeline.empty': 'هنوز چیزی زمان‌بندی نشده است',
         'timeline.emptyHint': 'کارهایی که تاریخ شروع یا تاریخ سررسید دارند اینجا به صورت نوار نمایش داده می‌شوند.',
+        'timeline.trackRegionLabel': 'خط زمانی',
+        'timeline.zoomLabel': 'بزرگ‌نمایی خط زمانی',
         'nav.projects': 'پروژه‌ها',
         'nav.contexts': 'زمینه‌ها',
         'nav.next': 'اقدامات بعدی',
