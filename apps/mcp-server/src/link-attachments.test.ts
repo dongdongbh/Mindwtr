@@ -126,4 +126,34 @@ describe('applyLinkAttachments', () => {
     expect(() => applyLinkAttachments([file()], [{ id: 'file-1', uri: 'https://example.com/a' }], NOW, makeId))
       .toThrow(ValidationError);
   });
+
+  test('rejects UNC and network-share uri forms', () => {
+    const rejected = [
+      '\\\\host\\share\\file.txt',
+      '//host/share/file.txt',
+      'file://host/share/file.txt',
+      'file://evil.example.com/x',
+    ];
+    for (const uri of rejected) {
+      expect(() => applyLinkAttachments([], [{ uri }], NOW, makeId)).toThrow(ValidationError);
+      expect(() => buildLinkAttachments([{ uri }], NOW, makeId)).toThrow(ValidationError);
+    }
+  });
+
+  test('accepts local and file:// forms that are not network shares', () => {
+    const accepted = [
+      'file:///C:/x',
+      'file:///home/dd/plan.txt',
+      'file://localhost/home/dd/plan.txt',
+      'C:\\path\\to\\file.txt',
+      '/absolute/path/file.txt',
+      'relative/looking/path.txt',
+      'https://example.com/a',
+      'obsidian://open?vault=v&file=note',
+      'mailto:someone@example.com',
+    ];
+    for (const uri of accepted) {
+      expect(() => applyLinkAttachments([], [{ uri }], NOW, makeId)).not.toThrow();
+    }
+  });
 });

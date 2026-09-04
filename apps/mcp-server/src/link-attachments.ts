@@ -57,6 +57,19 @@ const defaultTitle = (uri: string): string => {
 
 type NormalizedLinkInput = { id?: string; title: string; uri: string };
 
+// Desktop's open_path canonicalizes any absolute local path before its allow-list check
+// (apps/desktop/src-tauri/src/platform.rs), and on Windows canonicalizing a UNC path performs
+// an SMB/NTLM handshake with the host. A writer holding only the sync token (an MCP client,
+// possibly a prompt-injected agent) must not be able to plant that. Reject only the
+// UNC/network-share forms; file:// and plain local paths stay allowed (#1154 contract).
+const isNetworkShareUri = (uri: string): boolean => {
+  if (uri.startsWith('\\\\')) return true; // \\host\share
+  if (/^\/\/[^/]/.test(uri)) return true; // //host/share
+  const fileUrlHost = /^file:\/\/([^/]*)/i.exec(uri)?.[1];
+  if (fileUrlHost !== undefined && fileUrlHost !== '' && fileUrlHost.toLowerCase() !== 'localhost') return true;
+  return false;
+};
+
 const normalizeInputs = (inputs: readonly LinkAttachmentInput[]): NormalizedLinkInput[] => {
   const seenUris = new Set<string>();
   const seenIds = new Set<string>();
@@ -64,6 +77,9 @@ const normalizeInputs = (inputs: readonly LinkAttachmentInput[]): NormalizedLink
   for (const input of inputs) {
     const uri = input.uri.trim();
     if (!uri) throw new ValidationError('Link attachment uri must not be empty');
+    if (isNetworkShareUri(uri)) {
+      throw new ValidationError(`Link attachment uri must not point at a network share: ${uri}`);
+    }
     const id = input.id?.trim() || undefined;
     if (id && seenIds.has(id)) throw new ValidationError(`Duplicate link attachment id: ${id}`);
     if (id) seenIds.add(id);
