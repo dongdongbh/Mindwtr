@@ -528,13 +528,29 @@ const haveSameAttachments = (left?: Attachment[], right?: Attachment[]): boolean
     return true;
 };
 
-export const hasSameEntityIdentity = <T extends EntityWithRevision>(existing: T, incoming: T): boolean => (
+const withoutAttachmentEquality = <T extends EntityWithRevision>(existing: T, incoming: T): boolean => (
     existing.updatedAt === incoming.updatedAt
     && normalizeRevision(existing.rev) === normalizeRevision(incoming.rev)
     && existing.revBy === incoming.revBy
     && existing.deletedAt === incoming.deletedAt
     && existing.purgedAt === incoming.purgedAt
+);
+
+export const hasSameEntityIdentity = <T extends EntityWithRevision>(existing: T, incoming: T): boolean => (
+    withoutAttachmentEquality(existing, incoming)
     && haveSameAttachments(
+        (existing as { attachments?: Attachment[] }).attachments,
+        (incoming as { attachments?: Attachment[] }).attachments,
+    )
+);
+
+// True only for the #1136 case: every revision/tombstone field matches (so
+// nothing else changed) and attachments are the only reason the entity was
+// replaced instead of reused. Used solely to size the releaseCheck line below
+// — never to change which branch reconcileEntityCollection takes.
+const isAttachmentOnlyDivergence = <T extends EntityWithRevision>(existing: T, incoming: T): boolean => (
+    withoutAttachmentEquality(existing, incoming)
+    && !haveSameAttachments(
         (existing as { attachments?: Attachment[] }).attachments,
         (incoming as { attachments?: Attachment[] }).attachments,
     )
@@ -544,14 +560,18 @@ export const reconcileEntityCollection = <T extends EntityWithRevision>(
     previousItems: readonly T[],
     previousById: Map<string, T>,
     incomingItems: readonly T[]
-): { items: T[]; byId: Map<string, T>; replacedCount: number } => {
+): { items: T[]; byId: Map<string, T>; replacedCount: number; attachmentOnlyReplacedCount: number } => {
     let changed = previousItems.length !== incomingItems.length;
     let replacedCount = 0;
+    let attachmentOnlyReplacedCount = 0;
     const nextItems = incomingItems.map((incoming, index) => {
         const existing = previousById.get(incoming.id);
         const reuseExisting = existing != null && hasSameEntityIdentity(existing, incoming);
         if (!reuseExisting) {
             replacedCount += 1;
+            if (existing != null && isAttachmentOnlyDivergence(existing, incoming)) {
+                attachmentOnlyReplacedCount += 1;
+            }
         }
         const resolved = reuseExisting ? existing : incoming;
         if (!changed && previousItems[index] !== resolved) {
@@ -565,6 +585,7 @@ export const reconcileEntityCollection = <T extends EntityWithRevision>(
             items: previousItems as T[],
             byId: previousById,
             replacedCount,
+            attachmentOnlyReplacedCount,
         };
     }
 
@@ -572,6 +593,7 @@ export const reconcileEntityCollection = <T extends EntityWithRevision>(
         items: nextItems,
         byId: buildEntityMap(nextItems),
         replacedCount,
+        attachmentOnlyReplacedCount,
     };
 };
 

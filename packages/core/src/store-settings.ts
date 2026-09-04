@@ -240,6 +240,7 @@ export const createSettingsActions = ({
             let setProducerMs = 0;
             let tasksReplaced = 0;
             let projectsReplaced = 0;
+            let attachmentOnlyTasksReplaced = 0;
             let settingsReused = false;
             let visibleTasksReused = false;
             let stateUpdateSkipped = false;
@@ -276,6 +277,7 @@ export const createSettingsActions = ({
                         const settingsForState = reuseSettingsIfEquivalent(state.settings, nextSettings);
                         tasksReplaced = nextTasks.replacedCount;
                         projectsReplaced = nextProjects.replacedCount;
+                        attachmentOnlyTasksReplaced = nextTasks.attachmentOnlyReplacedCount;
                         settingsReused = settingsForState === state.settings;
                         visibleTasksReused = visibleTasks === state.tasks;
                         const nextLastDataChangeAt = applied.length > 0
@@ -392,6 +394,24 @@ export const createSettingsActions = ({
                 return;
             }
             const totalFetchMs = Date.now() - fetchInvokedAt;
+            // Proves the #1136 fix actually fired: a task whose attachments changed
+            // (another device deleted or updated one) without the task's own
+            // revision/tombstone fields changing was replaced in the in-memory
+            // store instead of stale-cached, so this load's post-load persist
+            // writes the current attachments instead of overwriting them right
+            // back. One line per store load (never per task) — this branch can
+            // fire on every idle load once a peer starts touching attachments.
+            if (attachmentOnlyTasksReplaced > 0) {
+                logInfo('Sync store reconcile replaced tasks for an attachment-only change', {
+                    scope: 'store',
+                    category: 'storage',
+                    context: {
+                        releaseCheck: 'v1.2.8/attachment-only-task-replace',
+                        entity: 'task',
+                        count: attachmentOnlyTasksReplaced,
+                    },
+                });
+            }
             // Runtime diagnostic for shared beta logs: break the load pipeline down so a
             // slow refresh can be attributed to save-flush, storage read, or JS processing.
             if (totalFetchMs >= SLOW_FETCH_LOG_THRESHOLD_MS) {
