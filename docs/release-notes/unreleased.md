@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Translations: eighteen pieces of text were English in every language because their entries were never added to the dictionary, among them the whole "External sync change detected" dialog on the desktop (Use external / Merge / Keep local), the bulk-action failure messages, the section reorder hint and several labels on the phone's Review screen. They are now translated in Chinese (Simplified and Traditional), Japanese, Persian and Swedish, and a build check stops new text from shipping without a dictionary entry.
+
 - Android: a background sync that uploaded two or more attachments to WebDAV could stall until the app was reopened, holding the system's background job for its whole allowance and draining the battery. The short pause between attachment requests and the upload time limit both waited on a timer Android never fires while the app is in the background; both now step aside while timers are paused, as the rest of the background path already did. (#1001)
 
 - Sync: a completion date written through MCP onto a task that is not done or archived was read back from the local database in a form the sync normalizer would still strip, the same class of problem as the repeat flag above; both readers now surface a completion date only on done or archived tasks, and a contract test now checks every synced task field this way. (#1001)
