@@ -950,9 +950,12 @@ const runUploadTask = async <T,>(
     onAbort = () => beginCancellation(createUploadAbortError(signal));
 
     signal?.addEventListener('abort', onAbort, { once: true });
-    // While Android has JS timers paused (background), this setTimeout would never fire.
-    // Don't arm it: the job-level deadline (setMobileSyncRequestDeadline) and the native
-    // upload task's own completion still bound how long the wait can run.
+    // While Android has JS timers paused (background), this setTimeout would never fire,
+    // so don't arm it. Nothing in JavaScript bounds a stalled background upload after
+    // this: setMobileSyncRequestDeadline only covers backgroundSafeFetch (XHR), and the
+    // job-level withDeadline timer in background-sync-task.ts is itself a paused
+    // setTimeout. The only remaining bound is the OS job allowance (WorkManager kills
+    // the job); a native-backed AbortSignal for uploads is the open follow-up.
     if (timeoutMs !== undefined && !areJsTimersPaused()) {
       timeoutId = setTimeout(() => {
         beginCancellation(new Error(timeoutMessage));
