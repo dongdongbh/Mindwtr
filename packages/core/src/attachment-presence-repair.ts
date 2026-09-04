@@ -1,5 +1,8 @@
 import type { Attachment } from './types';
 
+// Re-verify remote attachment presence daily (#1001).
+export const ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
 /**
  * #1119 follow-up. When an attachment's remote blob is gone — deleted on the server, left
  * behind at a previous sync location, a lost upload — the only device that can repair it is

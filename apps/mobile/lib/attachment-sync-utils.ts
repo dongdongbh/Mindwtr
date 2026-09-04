@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from './file-system';
 import {
   ATTACHMENTS_DIR_NAME,
+  ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS,
   buildCloudKey,
   collectAttachmentsById,
   computeSha256Hex,
@@ -35,7 +36,7 @@ import { logInfo, logWarn, sanitizeLogMessage } from './app-log';
 import { isLikelyFilePath } from './sync-service-utils';
 import { backgroundSafeFetch } from './background-safe-fetch';
 
-export { ATTACHMENTS_DIR_NAME, buildCloudKey, extractExtension, getBaseSyncUrl, getCloudBaseUrl, reportProgress, validateAttachmentHash };
+export { ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS, ATTACHMENTS_DIR_NAME, buildCloudKey, extractExtension, getBaseSyncUrl, getCloudBaseUrl, reportProgress, validateAttachmentHash };
 // `collectAttachments` predates `collectAttachmentsById` moving into core (packages/core/src/
 // attachment-transfer.ts) — kept under its original name here so none of the 5 backend files
 // need a call-site rename.
@@ -778,9 +779,6 @@ export const createAttachmentLocalMigrationLimiter = (
   };
 };
 
-/** Once a day. Attachment bytes are immutable once uploaded, so the only thing a
- *  presence pass can still discover is someone deleting files behind the app's back. */
-export const ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const ATTACHMENT_PRESENCE_RECONCILE_KEY = '@mindwtr_attachment_presence_reconcile_v1';
 
 type AttachmentPresenceStamp = { scope: string; at: number };

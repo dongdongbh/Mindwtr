@@ -44,9 +44,9 @@
  * A null/empty scope always means doubt: reconcile, and never stamp.
  */
 
-/** Once a day. See the module comment for why a longer or shorter cadence is not the point:
- *  the pass can only discover a deletion made outside the app. */
-export const ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+import { ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS } from '@mindwtr/core';
+
+export { ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS };
 
 const ATTACHMENT_PRESENCE_RECONCILE_KEY = 'mindwtr-attachment-presence-reconcile-v1';
 
