@@ -114,8 +114,8 @@ describe('purged tombstone compaction is stable across load cycles', () => {
 
         const compacted = compactPurgedTaskForLocalStorage(purgedTask);
         const loaded = sqlRoundTrip(compacted);
-        // The codec really does rehydrate nulls — the shape under test.
-        expect(loaded.completedAtBeforeProjectArchive).toBeNull();
+        // The codec now reads a NULL project-archive column as absent (#1156).
+        expect(loaded.completedAtBeforeProjectArchive).toBeUndefined();
         expect(hasUncompactedPurgedTaskTombstone(loaded, true)).toBe(false);
         expect(hasUncompactedPurgedTaskTombstone(loaded, false)).toBe(false);
 

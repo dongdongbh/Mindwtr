@@ -21,6 +21,7 @@ import {
     normalizeProjectForSyncMerge,
     repairMergedSyncReferences,
     normalizeRevisionMetadata,
+    normalizeSectionForSyncMerge,
     normalizeTaskForSyncMerge,
     validateMergedSyncData,
 } from './sync-normalization';
@@ -822,7 +823,7 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
         ...local,
         tasks: (local.tasks || []).map((task) => normalizeRevisionMetadata(countRepair(task, normalizeTaskForSyncMerge(task, nowIso, true)))),
         projects: (local.projects || []).map((project) => normalizeRevisionMetadata(countRepair(project, normalizeProjectForSyncMerge(project, true)))),
-        sections: localSections.map((section) => normalizeRevisionMetadata(section)),
+        sections: localSections.map((section) => normalizeRevisionMetadata(normalizeSectionForSyncMerge(section))),
         areas: (local.areas || []).map((area) => normalizeRevisionMetadata(normalizeAreaForSyncMerge(area, nowIso))),
         people: (local.people || []).map((person) => normalizeRevisionMetadata(normalizePersonForSyncMerge(person, nowIso))),
     };
@@ -830,7 +831,7 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
         ...incoming,
         tasks: (incoming.tasks || []).map((task) => normalizeRevisionMetadata(countRepair(task, normalizeTaskForSyncMerge(task, nowIso)))),
         projects: (incoming.projects || []).map((project) => normalizeRevisionMetadata(countRepair(project, normalizeProjectForSyncMerge(project)))),
-        sections: incomingSections.map((section) => normalizeRevisionMetadata(section)),
+        sections: incomingSections.map((section) => normalizeRevisionMetadata(normalizeSectionForSyncMerge(section))),
         areas: (incoming.areas || []).map((area) => normalizeRevisionMetadata(normalizeAreaForSyncMerge(area, nowIso))),
         people: (incoming.people || []).map((person) => normalizeRevisionMetadata(normalizePersonForSyncMerge(person, nowIso))),
     };

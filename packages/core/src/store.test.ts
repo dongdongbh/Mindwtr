@@ -4397,7 +4397,7 @@ describe('TaskStore', () => {
         expect(projectTasks.find((task) => task.title === 'Already Archived')?.status).toBe('archived');
         expect(projectSections).toHaveLength(1);
         expect(projectSections[0].deletedAt).toBeTruthy();
-        expect(projectSections[0].deletedAtBeforeProjectArchive).toBeNull();
+        expect(projectSections[0].deletedAtBeforeProjectArchive).toBeUndefined();
     });
 
     it('should restore project-archived task and section state when unarchiving', async () => {

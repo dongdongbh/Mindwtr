@@ -69,10 +69,13 @@ export const toStringArray = (value: unknown): string[] => {
 // `field?: T | null`) in types.ts promises `undefined`, never `null`, for "absent". `null` and
 // `undefined` are NOT interchangeable here: `JSON.stringify` keeps a `null` key but drops an
 // `undefined` one (a visible wire-shape difference over MCP), and a caller's `=== undefined`
-// check silently stops matching. Use this for every optional-but-not-nullable field's read
-// codec; do NOT use it for a field declared `T | null` in types.ts (there are exactly three:
-// Task.completedAtBeforeProjectArchive, Task.isFocusedTodayBeforeProjectArchive,
-// Section.deletedAtBeforeProjectArchive) — those must keep `null` as `null`.
+// check silently stops matching. Use this for every optional field's read codec, including
+// the three declared `T | null` in types.ts (Task.completedAtBeforeProjectArchive,
+// Task.isFocusedTodayBeforeProjectArchive, Section.deletedAtBeforeProjectArchive): the column
+// cannot tell null from absent, the Rust reader drops NULL, and reading `null` back put a
+// key on every mobile task that the merge winner lacked, so the phone re-persisted every
+// cycle (#1156). Their readers treat `null` and absent alike, and the type keeps `| null`
+// only for documents older clients already uploaded.
 export const fromOptional = <T>(value: T | null): T | undefined => (value === null ? undefined : value);
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>

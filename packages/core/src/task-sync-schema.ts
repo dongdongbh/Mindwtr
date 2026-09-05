@@ -278,12 +278,12 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
                 : undefined;
         })(),
         statusBeforeProjectArchive: fromOptional(row.statusBeforeProjectArchive as Task['statusBeforeProjectArchive'] | null),
-        // Nullable BY DESIGN (Task.completedAtBeforeProjectArchive: string | null) — do not
-        // route through fromOptional, a stored `null` must stay `null`.
-        completedAtBeforeProjectArchive: row.completedAtBeforeProjectArchive as string | null | undefined,
-        // Nullable BY DESIGN (Task.isFocusedTodayBeforeProjectArchive: boolean | null) —
-        // fromNullableBool already preserves null as null.
-        isFocusedTodayBeforeProjectArchive: fromNullableBool(row.isFocusedTodayBeforeProjectArchive),
+        // NULL reads as absent even though the type allows `null`: SQLite stores absent and
+        // null in the same column, the desktop's Rust reader already drops NULL, and a phone
+        // that read these two back as `null` on every task carried 81 extra bytes per task
+        // that the merge winner never had, so the local persist differed every cycle (#1156).
+        completedAtBeforeProjectArchive: fromOptional(row.completedAtBeforeProjectArchive as string | null),
+        isFocusedTodayBeforeProjectArchive: fromOptional(fromNullableBool(row.isFocusedTodayBeforeProjectArchive) ?? null),
         projectArchivedAt: fromOptional(row.projectArchivedAt as string | null),
         rev: row.rev === null || row.rev === undefined ? undefined : Number(row.rev),
         revBy: fromOptional(row.revBy as string | null),

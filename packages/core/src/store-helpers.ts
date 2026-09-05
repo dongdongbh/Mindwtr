@@ -378,8 +378,8 @@ export const completeTaskForProjectArchive = (task: Task, archivedAt: string, de
     completedAt: archivedAt,
     isFocusedToday: false,
     statusBeforeProjectArchive: task.status,
-    completedAtBeforeProjectArchive: task.completedAt ?? null,
-    isFocusedTodayBeforeProjectArchive: task.isFocusedToday ?? null,
+    completedAtBeforeProjectArchive: task.completedAt,
+    isFocusedTodayBeforeProjectArchive: task.isFocusedToday,
     projectArchivedAt: archivedAt,
     updatedAt: archivedAt,
     rev: nextRevision(task.rev),
@@ -437,7 +437,7 @@ export const clearDeletedTaskProjectArchiveMetadata = (task: Task): Task => {
 export const archiveSectionForProjectArchive = (section: Section, archivedAt: string, deviceId?: string): Section => ({
     ...section,
     deletedAt: archivedAt,
-    deletedAtBeforeProjectArchive: section.deletedAt ?? null,
+    deletedAtBeforeProjectArchive: section.deletedAt,
     projectArchivedAt: archivedAt,
     updatedAt: archivedAt,
     rev: nextRevision(section.rev),
@@ -449,7 +449,9 @@ export const restoreSectionFromProjectArchive = (section: Section, restoredAt: s
     const shouldRestore =
         Boolean(archivedAt) &&
         section.deletedAt === archivedAt &&
-        section.deletedAtBeforeProjectArchive === null;
+        // `== null`: a live section archived by an older client carries `null`, a
+        // current one absent, and SQLite reads both back as absent (#1156).
+        section.deletedAtBeforeProjectArchive == null;
 
     if (!shouldRestore) {
         return section;

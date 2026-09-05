@@ -1212,6 +1212,13 @@ const createStorage = (): StorageAdapter => {
                 markStartupPhase('mobile.storage.get_data.widget_update_dispatched');
                 clearPreferJsonBackup();
                 markStartupPhase('mobile.storage.get_data.end');
+                const archiveMetadataRows = data.tasks.length + data.sections.length;
+                if (archiveMetadataRows > 0) {
+                    logStorageInfo('SQLite project archive metadata loaded in canonical form', {
+                        releaseCheck: 'v1.2.8/archive-metadata-canonical',
+                        count: String(archiveMetadataRows),
+                    });
+                }
                 return data;
             } catch (e) {
                 if (!isJsonBackupUsable()) {

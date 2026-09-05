@@ -67,7 +67,7 @@ export function getProjectSectionsForView(
             if (!section.deletedAt) return true;
             return archivedHistory
                 && section.projectArchivedAt === section.deletedAt
-                && section.deletedAtBeforeProjectArchive === null;
+                && section.deletedAtBeforeProjectArchive == null;
         })
         .sort(compareProjectSections);
 }
