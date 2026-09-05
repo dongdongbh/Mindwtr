@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Mobile Calendar: Week view now opens on five days instead of two, so a school or work week fits on one screen. Swipe up or down on the timeline to change the count as before; a count you already chose on this device is kept.
+
 - Desktop Calendar: the Day and Week timeline now grows with the window. It used to stop at a fixed height on tall screens and leave the rest of the window empty, which hid part of a full day of classes or meetings; the short-window minimum is unchanged. Month cells already say "+N more" when a day holds more than three items.
 
 - Desktop: the project header is now a single row. The title, status, area, and type chips sit inline, progress moves to the right, and Details, Duplicate, Archive, and Delete live in a "..." menu, so the task list starts higher on the page. (#1160)
