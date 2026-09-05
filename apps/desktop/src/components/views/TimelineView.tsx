@@ -645,13 +645,21 @@ export function TimelineView() {
                 </div>
             );
         }
-        const width = row.single
+        // Keep each task's source dates intact for labels and ordering, but draw
+        // only the part that intersects the bounded axis.
+        const drawingLo = Math.max(0, row.lo);
+        const drawingHi = Math.min(range!.days - 1, row.hi);
+        const naturalWidth = row.single
             ? MARKER_WIDTH
-            : Math.max(MIN_BAR_WIDTH, (row.hi - row.lo + 1) * dayWidth);
+            : Math.max(MIN_BAR_WIDTH, (drawingHi - drawingLo + 1) * dayWidth);
+        const width = Math.min(naturalWidth, trackWidth);
         const barHeight = row.single ? MARKER_HEIGHT : BAR_HEIGHT;
-        const left = row.single
-            ? Math.max(0, row.lo * dayWidth + (dayWidth - MARKER_WIDTH) / 2)
-            : row.lo * dayWidth;
+        const naturalLeft = row.single
+            ? drawingLo * dayWidth + (dayWidth - MARKER_WIDTH) / 2
+            : drawingLo * dayWidth;
+        // Centered markers and the minimum bar width can be wider than a day
+        // cell at month zoom. Shift them inward instead of widening the track.
+        const left = Math.min(Math.max(0, naturalLeft), Math.max(0, trackWidth - width));
         // The project bar keeps the full-strength area→project color; the work
         // under it is drawn as a tint of the same one. Mini markers included.
         const tint = taskBarTint(row.color);
