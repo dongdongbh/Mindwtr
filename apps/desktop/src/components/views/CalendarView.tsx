@@ -279,10 +279,11 @@ export function CalendarView() {
                 - main.getBoundingClientRect().top
                 + main.scrollTop;
             // 26rem floor keeps ~6.5 hours visible in short windows while still
-            // fitting 768px-tall laptops; 48rem cap matches the old clamp.
-            // Reserve LIST_END_GAP (1rem) plus the card's bottom border and
-            // sub-pixel rounding below the scroller.
-            setTimelineHeight(Math.min(768, Math.max(416, Math.floor(main.clientHeight - top - 18))));
+            // fitting 768px-tall laptops. No ceiling: a tall monitor shows more
+            // hours of a class timetable instead of stopping at 48rem with the
+            // rest of the window empty. Reserve LIST_END_GAP (1rem) plus the
+            // card's bottom border and sub-pixel rounding below the scroller.
+            setTimelineHeight(Math.max(416, Math.floor(main.clientHeight - top - 18)));
         };
         measure();
         const observer = new ResizeObserver(measure);
@@ -820,7 +821,7 @@ export function CalendarView() {
                         <div
                             ref={timelineScrollRef}
                             className="overflow-y-auto"
-                            style={{ height: timelineHeight ?? 'clamp(28rem, calc(100vh - 20rem), 48rem)' }}
+                            style={{ height: timelineHeight ?? 'max(28rem, calc(100vh - 20rem))' }}
                         >
                             <div className="grid" style={{ gridTemplateColumns: `4rem repeat(${timelineDays.length}, minmax(0, 1fr))` }}>
                                 <div className="relative border-r border-border bg-muted/20" style={{ height: (DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR) * DESKTOP_HOUR_HEIGHT }}>
