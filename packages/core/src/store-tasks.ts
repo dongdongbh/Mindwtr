@@ -897,6 +897,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
         const now = new Date().toISOString();
         let errorMessage: string | undefined;
         let convertedSectionId: string | undefined;
+        let convertedTaskCount = 0;
         set((state) => {
             const sourceTask = state._tasksById.get(id);
             if (!sourceTask || sourceTask.deletedAt) {
@@ -960,6 +961,8 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
                     tags: [],
                     contexts: [],
                     pushCount: 0,
+                    isFocusedToday: false,
+                    suppressMindwtrReminders: false,
                     projectId: containerResolution.projectId,
                     sectionId: containerResolution.sectionId,
                     areaId: containerResolution.areaId,
@@ -985,6 +988,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
                 ...checklistTasks,
             ];
             convertedSectionId = section.id;
+            convertedTaskCount = checklistTasks.length;
             persist(set, debouncedSave, state, {
                 tasks: nextAllTasks,
                 sections: nextAllSections,
@@ -999,9 +1003,16 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
         });
 
         if (errorMessage) return actionFail(errorMessage);
-        return convertedSectionId
-            ? actionOk({ id: convertedSectionId })
-            : actionFail('Task not found');
+        if (!convertedSectionId) return actionFail('Task not found');
+        logInfo('Task converted to section with canonical child tasks', {
+            scope: 'store',
+            category: 'storage',
+            context: {
+                releaseCheck: 'v1.2.8/section-conversion-canonical',
+                count: convertedTaskCount,
+            },
+        });
+        return actionOk({ id: convertedSectionId });
     },
 
     /**

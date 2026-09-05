@@ -22,7 +22,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // desktop-reminder-fired / desktop-notification-path (apps/desktop/src/lib/notification-service.tsx)
     'kind', 'entity', 'fireAt', 'path', 'error',
     'deferred', 'ids',
-    // attachment-only-task-replace (packages/core/src/store-settings.ts)
+    // attachment-only-task-replace (store-settings.ts) / section-conversion-canonical (store-tasks.ts)
     'count',
     // android-http-connect-timeout (apps/mobile/hooks/root-layout/use-root-layout-startup.ts)
     'connectTimeoutMs',
