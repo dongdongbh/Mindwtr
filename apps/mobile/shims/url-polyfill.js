@@ -86,11 +86,25 @@ class FallbackURL {
     constructor(url, base) {
         const href = base ? new FallbackURL(base).href + String(url || '') : String(url || '');
         this.href = href;
-        const match = href.match(/^(?:([a-z0-9.+-]+:))?(?:\/\/[^\/?#]*)?([^?#]*)(?:\?([^#]*))?(?:#(.*))?/i);
+        const match = href.match(/^(?:([a-z0-9.+-]+:))?(?:\/\/([^\/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?/i);
         this.protocol = match ? (match[1] || '') : '';
-        this.pathname = match ? (match[2] || '/') : '/';
-        this.search = match && match[3] ? '?' + match[3] : '';
-        this.hash = match && match[4] ? '#' + match[4] : '';
+        // Authority without credentials. `@expo/metro-runtime` builds
+        // `window.location` from this class (the Metro alias routes Expo's own
+        // URL polyfill here) and every dynamic `import()` in a dev client joins
+        // `location.origin` with the split-bundle path; an undefined origin
+        // killed that with "Cannot read property 'replace' of undefined".
+        const authority = match && match[2] ? match[2] : '';
+        const hostIndex = authority.lastIndexOf('@');
+        this.host = hostIndex >= 0 ? authority.slice(hostIndex + 1) : authority;
+        const portMatch = this.host.match(/:(\d*)$/);
+        this.port = portMatch ? portMatch[1] : '';
+        this.hostname = portMatch ? this.host.slice(0, -portMatch[0].length) : this.host;
+        this.origin = /^(?:https?|wss?):$/i.test(this.protocol) && this.host
+            ? `${this.protocol}//${this.host}`
+            : 'null';
+        this.pathname = match ? (match[3] || '/') : '/';
+        this.search = match && match[4] ? '?' + match[4] : '';
+        this.hash = match && match[5] ? '#' + match[5] : '';
         this.searchParams = new FallbackURLSearchParams(this.search);
     }
     toString() {

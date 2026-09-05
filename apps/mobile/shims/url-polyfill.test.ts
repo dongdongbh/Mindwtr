@@ -110,6 +110,34 @@ describe('URL Polyfill Shim', () => {
         expect(params.has('baz')).toBe(false);
     });
 
+    test('fallback URL exposes origin and host fields for the Expo location polyfill', async () => {
+        // @expo/metro-runtime builds window.location from this class and Expo's
+        // split-bundle loader joins location.origin with the chunk path, so an
+        // undefined origin breaks every dynamic import() in a dev client.
+        const OriginalURL = globalThis.URL;
+        try {
+            vi.resetModules();
+            globalThis.URL = undefined as unknown as typeof URL;
+            const fallbackModule = await import('./url-polyfill');
+            const FallbackURL = fallbackModule.URL as unknown as typeof URL;
+            const bundle = new FallbackURL('http://127.0.0.1:8081/apps/mobile/index.bundle//&platform=android&dev=true');
+            expect(bundle.origin).toBe('http://127.0.0.1:8081');
+            expect(bundle.host).toBe('127.0.0.1:8081');
+            expect(bundle.hostname).toBe('127.0.0.1');
+            expect(bundle.port).toBe('8081');
+            expect(bundle.pathname).toBe('/apps/mobile/index.bundle//&platform=android&dev=true');
+            const dav = new FallbackURL('https://user:pw@dav.example.com/remote.php/dav/');
+            expect(dav.origin).toBe('https://dav.example.com');
+            expect(dav.hostname).toBe('dav.example.com');
+            expect(dav.port).toBe('');
+            expect(new FallbackURL('file:///focus').origin).toBe('null');
+            expect(new FallbackURL('mindwtr:///focus').host).toBe('');
+        } finally {
+            globalThis.URL = OriginalURL;
+            vi.resetModules();
+        }
+    });
+
     test('fallback URL keeps href writable for navigation libraries', async () => {
         const OriginalURL = globalThis.URL;
         const OriginalURLSearchParams = globalThis.URLSearchParams;
