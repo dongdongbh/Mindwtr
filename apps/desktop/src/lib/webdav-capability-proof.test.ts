@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { serializeWebdavCapabilityProof } from '@mindwtr/core';
 
 import {
     ensureWebdavCapabilityProof,
@@ -20,24 +21,20 @@ describe('desktop WebDAV capability proof', () => {
         allowInsecureHttp: false,
     };
 
-    it('stores a versioned device-local identity without secret values', () => {
-        rememberWebdavCapabilityProof({ ...config, password: 'must-not-persist' } as never);
-
-        const proof = localStorage.getItem(WEBDAV_CAPABILITY_PROOF_STORAGE_KEY);
-        expect(proof).toContain('"version":1');
-        expect(proof).toContain('https://dav.example.com/mindwtr/data.json');
-        expect(proof).toContain('alice');
-        expect(proof).not.toContain('must-not-persist');
-    });
-
-    it.each([
-        ['endpoint', { ...config, url: 'https://other.example.com/mindwtr/' }],
-        ['username', { ...config, username: 'bob' }],
-        ['insecure transport policy', { ...config, allowInsecureHttp: true }],
-    ])('invalidates the proof when the %s changes', (_label, changedConfig) => {
+    // Serialization itself (what fields it covers, secret exclusion, normalization) is core's
+    // `serializeWebdavCapabilityProof` unit test; this only proves the wrapper actually
+    // persists that value under this platform's key.
+    it('stores the serialized proof under the platform storage key', () => {
         rememberWebdavCapabilityProof(config);
 
-        expect(hasWebdavCapabilityProof(changedConfig)).toBe(false);
+        expect(localStorage.getItem(WEBDAV_CAPABILITY_PROOF_STORAGE_KEY))
+            .toBe(serializeWebdavCapabilityProof(config));
+    });
+
+    it('invalidates the proof when the configuration changes', () => {
+        rememberWebdavCapabilityProof(config);
+
+        expect(hasWebdavCapabilityProof({ ...config, username: 'bob' })).toBe(false);
     });
 
     it('probes once for an unchanged configuration and records success', async () => {

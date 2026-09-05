@@ -1,5 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { normalizeWebdavUrl, type WebdavSyncCompatibility } from '@mindwtr/core';
+import {
+  serializeWebdavCapabilityProof,
+  type WebdavCapabilityProofConfig,
+  type WebdavSyncCompatibility,
+} from '@mindwtr/core';
+
+export type { WebdavCapabilityProofConfig };
 
 export const WEBDAV_CAPABILITY_PROOF_STORAGE_KEY = '@mindwtr_webdav_capability_proof_v1';
 export const WEBDAV_LEGACY_PROOF_STORAGE_KEY = '@mindwtr_webdav_legacy_proof_v1';
@@ -8,19 +14,6 @@ export const WEBDAV_LEGACY_PROOF_STORAGE_KEY = '@mindwtr_webdav_legacy_proof_v1'
 // then succeeded (Jianguoyun, roaming, 2026-08-31). A day bounds how long a server that
 // starts serving strong ETags goes unnoticed without asking the user to re-save.
 export const WEBDAV_LEGACY_PROOF_TTL_MS = 24 * 60 * 60_000;
-
-export type WebdavCapabilityProofConfig = {
-  url: string;
-  username?: string;
-  allowInsecureHttp?: boolean;
-};
-
-const serializeWebdavCapabilityProof = (config: WebdavCapabilityProofConfig): string => JSON.stringify({
-  version: 1,
-  endpoint: normalizeWebdavUrl(config.url.trim()),
-  username: config.username?.trim() ?? '',
-  allowInsecureHttp: config.allowInsecureHttp === true,
-});
 
 export const hasWebdavCapabilityProof = async (config: WebdavCapabilityProofConfig): Promise<boolean> => {
   try {

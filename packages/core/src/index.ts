@@ -100,6 +100,7 @@ export * from './obsidian-parser';
 export * from './tasknotes-parser';
 export * from './webdav';
 export * from './webdav-attachment-inventory';
+export * from './webdav-capability-proof';
 export * from './cloud';
 export * from './http-utils';
 export * from './retry-utils';
