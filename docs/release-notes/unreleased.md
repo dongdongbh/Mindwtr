@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop Timeline: the feature's description in Settings and the empty-state hint now say that dated projects appear as bars too, not only tasks. (#1111)
+
 - Desktop: the banner that warns about unencrypted sync no longer re-reads the stored sync configuration every 30 seconds through the same queue and lock the sync cycle uses; it is derived from the last known selection and refreshed when the configuration or sync status changes, on window focus, and on storage events.
 
 - Desktop and mobile: the search screens look tasks up through the store's existing id map instead of rebuilding their own map of every task whenever the library changes.

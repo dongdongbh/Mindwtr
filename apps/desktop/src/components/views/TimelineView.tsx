@@ -761,7 +761,7 @@ export function TimelineView() {
                             hasFilters={false}
                             emptyState={{
                                 title: tFallback(t, 'timeline.empty', 'Nothing scheduled yet'),
-                                body: tFallback(t, 'timeline.emptyHint', 'Tasks with a start or due date appear here as bars.'),
+                                body: tFallback(t, 'timeline.emptyHint', 'Projects and tasks with a start or due date appear here as bars.'),
                             }}
                             onAddTask={() => undefined}
                             t={t}
