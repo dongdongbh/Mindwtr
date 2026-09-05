@@ -6,6 +6,7 @@ import {
     SyncRemoteMutationFenceUnavailableError,
     type SyncRemoteMutationFencePort,
 } from './sync-remote-fence';
+import { consoleLogger, setLogger, type LogPayload } from './logger';
 
 const text = (value: Uint8Array | null): string | null => value ? new TextDecoder().decode(value) : null;
 
@@ -267,6 +268,103 @@ describe('remote sync mutation fence', () => {
         });
         await expect(lease.release()).rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
         expect(remote.removes).toHaveLength(0);
+    });
+
+    it('renews for the requested mutation horizon before a peer can reclaim it', async () => {
+        const remote = createPort();
+        const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 20_000 });
+        remote.setServerNow(1_064_000);
+
+        const logs: LogPayload[] = [];
+        setLogger((payload) => logs.push(payload));
+        try {
+            await lease.assertHeld(35_000);
+        } finally {
+            setLogger(consoleLogger);
+        }
+
+        expect(remote.writes).toHaveLength(2);
+        expect(JSON.parse(remote.writes[1]!.value)).toMatchObject({
+            renewedAt: 1_064_000,
+            expiresAt: 1_364_000,
+        });
+        expect(logs).toContainEqual(expect.objectContaining({
+            level: 'info',
+            message: 'Remote sync mutation fence renewed for mutation horizon',
+            scope: 'sync',
+            category: 'sync',
+            context: {
+                releaseCheck: 'v1.2.8/fence-mutation-horizon',
+                horizonMs: 35_000,
+                remainingMs: 65_000,
+            },
+        }));
+
+        remote.setServerNow(1_066_000);
+        await expect(acquire(remote.port, {
+            ownerId: 'device-b',
+            leaseId: 'lease-bbbbbbbb',
+            ttlMs: 300_000,
+            heartbeatMs: 20_000,
+        })).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+
+        remote.setServerNow(1_098_999);
+        await expect(acquire(remote.port, {
+            ownerId: 'device-b',
+            leaseId: 'lease-bbbbbbbb',
+            ttlMs: 300_000,
+            heartbeatMs: 20_000,
+        })).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+        await lease.release();
+    });
+
+    it.each([
+        ['legacy record', {}],
+        ['disabled heartbeat', { heartbeatMs: 0, renewedAt: 1_000_000 }],
+    ])('uses expiry as the authority horizon for a %s', async (_label, liveness) => {
+        const remote = createPort();
+        const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 20_000 });
+        remote.replace({
+            schema: 1,
+            leaseId: 'lease-aaaaaaaa',
+            ownerId: 'device-a',
+            purpose: 'ordinary-sync',
+            expiresAt: 1_300_000,
+            ...liveness,
+        });
+        remote.setServerNow(1_064_000);
+
+        await lease.assertHeld(35_000);
+
+        expect(remote.writes).toHaveLength(1);
+        await lease.release();
+    });
+
+    it('fails closed when the advertised heartbeat window cannot cover the mutation horizon', async () => {
+        const remote = createPort();
+        const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 5_000 });
+
+        await expect(lease.assertHeld(35_000)).rejects.toThrow(
+            'Remote sync mutation fence cannot cover the requested mutation horizon',
+        );
+        expect(remote.writes).toHaveLength(2);
+        await lease.release();
+    });
+
+    it('fails closed when renewal verification consumes the mutation horizon', async () => {
+        const remote = createPort();
+        const originalWrite = remote.port.write;
+        remote.port.write = async (bytes, expectedVersion) => {
+            await originalWrite(bytes, expectedVersion);
+            if (remote.writes.length === 2) remote.setServerNow(1_095_001);
+        };
+        const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 20_000 });
+        remote.setServerNow(1_064_000);
+
+        await expect(lease.assertHeld(35_000)).rejects.toThrow(
+            'Remote sync mutation fence cannot cover the requested mutation horizon',
+        );
+        await lease.release();
     });
 
     it('fails closed when server time or a safe existing version is unavailable', async () => {

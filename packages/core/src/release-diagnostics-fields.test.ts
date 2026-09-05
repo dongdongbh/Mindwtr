@@ -26,6 +26,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'count',
     // android-http-connect-timeout (apps/mobile/hooks/root-layout/use-root-layout-startup.ts)
     'connectTimeoutMs',
+    // fence-mutation-horizon (packages/core/src/sync-remote-fence.ts)
+    'horizonMs', 'remainingMs',
 ];
 
 describe('release diagnostics field names', () => {
