@@ -318,6 +318,10 @@ export async function acquireSyncRemoteMutationFence(
 
     let currentVersion = acquiredVersion;
     let lastKnownRemainingMs = acquiredRemainingMs;
+    // The timer keeps the configured heartbeatMs cadence. Only the advertised
+    // interval grows, and never shrinks, so a later renewal cannot truncate an
+    // in-flight mutation horizon already promised to the caller.
+    let advertisedHeartbeatMs = heartbeatMs;
     const monotonicNow = (): number => (
         typeof performance !== 'undefined' && typeof performance.now === 'function'
             ? performance.now()
@@ -382,7 +386,7 @@ export async function acquireSyncRemoteMutationFence(
             ownerId,
             purpose: options.purpose,
             expiresAt: serverNowMs + ttlMs,
-            heartbeatMs,
+            heartbeatMs: advertisedHeartbeatMs,
             renewedAt: serverNowMs,
         };
         try {
@@ -442,6 +446,12 @@ export async function acquireSyncRemoteMutationFence(
             }
             const { record, serverNowMs, readAgeMs } = await requireOwnedSnapshot();
             if (getSafeAuthorityRemainingMs(record, serverNowMs) - readAgeMs <= minRemainingMs) {
+                if (advertisedHeartbeatMs > 0) {
+                    advertisedHeartbeatMs = Math.max(
+                        advertisedHeartbeatMs,
+                        Math.ceil(minRemainingMs / ABANDONED_AFTER_MISSED_HEARTBEATS),
+                    );
+                }
                 const remainingMs = await renewOwned();
                 if (remainingMs <= minRemainingMs) {
                     throw new SyncRemoteMutationFenceLostError(

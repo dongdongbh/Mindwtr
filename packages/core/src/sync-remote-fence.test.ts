@@ -321,6 +321,54 @@ describe('remote sync mutation fence', () => {
         await lease.release();
     });
 
+    it('widens the default heartbeat advertisement for a 125-second upload horizon', async () => {
+        const remote = createPort();
+        const lease = await acquireSyncRemoteMutationFence(remote.port, {
+            ownerId: 'device-a',
+            purpose: 'ordinary-sync',
+            ttlMs: 300_000,
+            leaseId: 'lease-aaaaaaaa',
+        });
+
+        await lease.assertHeld(125_000);
+
+        expect(remote.writes).toHaveLength(2);
+        expect(JSON.parse(remote.writes[1]!.value)).toMatchObject({
+            heartbeatMs: 41_667,
+            renewedAt: 1_000_000,
+            expiresAt: 1_300_000,
+        });
+
+        remote.setServerNow(1_124_999);
+        await expect(acquire(remote.port, {
+            ownerId: 'device-b',
+            leaseId: 'lease-bbbbbbbb',
+            ttlMs: 300_000,
+            heartbeatMs: 20_000,
+        })).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+        await lease.release();
+    });
+
+    it('retains a widened advertisement across explicit and timer heartbeats without slowing cadence', async () => {
+        vi.useFakeTimers();
+        const remote = createPort();
+        try {
+            const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 20_000 });
+            await lease.assertHeld(125_000);
+            await lease.renew();
+
+            expect(JSON.parse(remote.writes[2]!.value).heartbeatMs).toBe(41_667);
+            await vi.advanceTimersByTimeAsync(19_999);
+            expect(remote.writes).toHaveLength(3);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(remote.writes).toHaveLength(4);
+            expect(JSON.parse(remote.writes[3]!.value).heartbeatMs).toBe(41_667);
+            await lease.release();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('deducts a slow authority read before promising the post-return mutation horizon', async () => {
         let monotonicMs = 0;
         const monotonicSpy = vi.spyOn(performance, 'now').mockImplementation(() => monotonicMs);
@@ -424,14 +472,37 @@ describe('remote sync mutation fence', () => {
         await lease.release();
     });
 
-    it('fails closed when the advertised heartbeat window cannot cover the mutation horizon', async () => {
+    it('widens a short heartbeat advertisement to cover the mutation horizon', async () => {
         const remote = createPort();
         const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 5_000 });
 
-        await expect(lease.assertHeld(35_000)).rejects.toThrow(
-            'Remote sync mutation fence cannot cover the requested mutation horizon',
-        );
+        await lease.assertHeld(35_000);
+
         expect(remote.writes).toHaveLength(2);
+        expect(JSON.parse(remote.writes[1]!.value).heartbeatMs).toBe(11_667);
+        await lease.release();
+    });
+
+    it('keeps a disabled heartbeat expiry-only when renewing for a long horizon', async () => {
+        const remote = createPort();
+        const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 0 });
+        remote.setServerNow(1_200_000);
+
+        await lease.assertHeld(125_000);
+
+        expect(remote.writes).toHaveLength(2);
+        expect(JSON.parse(remote.writes[1]!.value).heartbeatMs).toBe(0);
+        await lease.release();
+    });
+
+    it('rejects a requested mutation horizon that reaches the lease TTL', async () => {
+        const remote = createPort();
+        const lease = await acquire(remote.port, { ttlMs: 300_000 });
+
+        await expect(lease.assertHeld(300_000)).rejects.toThrow(
+            'Remote sync mutation fence remaining-time requirement is invalid',
+        );
+        expect(remote.writes).toHaveLength(1);
         await lease.release();
     });
 
