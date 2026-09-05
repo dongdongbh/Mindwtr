@@ -288,7 +288,8 @@ describe('remote sync mutation fence', () => {
             renewedAt: 1_064_000,
             expiresAt: 1_364_000,
         });
-        expect(logs).toContainEqual(expect.objectContaining({
+        const horizonLog = logs.find((entry) => entry.message === 'Remote sync mutation fence renewed for mutation horizon');
+        expect(horizonLog).toEqual(expect.objectContaining({
             level: 'info',
             message: 'Remote sync mutation fence renewed for mutation horizon',
             scope: 'sync',
@@ -296,9 +297,11 @@ describe('remote sync mutation fence', () => {
             context: {
                 releaseCheck: 'v1.2.8/fence-mutation-horizon',
                 horizonMs: 35_000,
-                remainingMs: 65_000,
+                remainingMs: expect.any(Number),
             },
         }));
+        expect(horizonLog?.context?.remainingMs).toBeGreaterThan(35_000);
+        expect(horizonLog?.context?.remainingMs).toBeLessThanOrEqual(65_000);
 
         remote.setServerNow(1_066_000);
         await expect(acquire(remote.port, {
@@ -316,6 +319,87 @@ describe('remote sync mutation fence', () => {
             heartbeatMs: 20_000,
         })).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
         await lease.release();
+    });
+
+    it('deducts a slow authority read before promising the post-return mutation horizon', async () => {
+        let monotonicMs = 0;
+        const monotonicSpy = vi.spyOn(performance, 'now').mockImplementation(() => monotonicMs);
+        const remote = createPort();
+        try {
+            const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 20_000 });
+            monotonicMs = 29_000;
+            remote.setServerNow(1_029_000);
+            const originalRead = remote.port.read;
+            let delayNextRead = true;
+            remote.port.read = async () => {
+                const snapshot = await originalRead();
+                if (delayNextRead) {
+                    delayNextRead = false;
+                    monotonicMs += 30_000;
+                    remote.setServerNow(1_059_000);
+                }
+                return snapshot;
+            };
+
+            await lease.assertHeld(35_000);
+
+            expect(remote.writes).toHaveLength(2);
+            expect(JSON.parse(remote.writes[1]!.value)).toMatchObject({
+                renewedAt: 1_059_000,
+                expiresAt: 1_359_000,
+            });
+
+            remote.setServerNow(1_093_999);
+            await expect(acquire(remote.port, {
+                ownerId: 'device-b',
+                leaseId: 'lease-bbbbbbbb',
+                ttlMs: 300_000,
+                heartbeatMs: 20_000,
+            })).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+            await lease.release();
+        } finally {
+            monotonicSpy.mockRestore();
+        }
+    });
+
+    it.each([
+        ['legacy record', {}],
+        ['disabled heartbeat', { heartbeatMs: 0, renewedAt: 1_000_000 }],
+    ])('deducts slow authority-read time from a %s expiry horizon', async (_label, liveness) => {
+        let monotonicMs = 0;
+        const monotonicSpy = vi.spyOn(performance, 'now').mockImplementation(() => monotonicMs);
+        const remote = createPort();
+        try {
+            const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 20_000 });
+            remote.replace({
+                schema: 1,
+                leaseId: 'lease-aaaaaaaa',
+                ownerId: 'device-a',
+                purpose: 'ordinary-sync',
+                expiresAt: 1_124_000,
+                ...liveness,
+            });
+            monotonicMs = 64_000;
+            remote.setServerNow(1_064_000);
+            const originalRead = remote.port.read;
+            let delayNextRead = true;
+            remote.port.read = async () => {
+                const snapshot = await originalRead();
+                if (delayNextRead) {
+                    delayNextRead = false;
+                    monotonicMs += 30_000;
+                    remote.setServerNow(1_094_000);
+                }
+                return snapshot;
+            };
+
+            await lease.assertHeld(35_000);
+
+            expect(remote.writes).toHaveLength(2);
+            await lease.release();
+        } finally {
+            monotonicSpy.mockRestore();
+        }
     });
 
     it.each([
@@ -365,6 +449,66 @@ describe('remote sync mutation fence', () => {
             'Remote sync mutation fence cannot cover the requested mutation horizon',
         );
         await lease.release();
+    });
+
+    it('fails closed when a slow renewal-verification response consumes the mutation horizon', async () => {
+        let monotonicMs = 0;
+        const monotonicSpy = vi.spyOn(performance, 'now').mockImplementation(() => monotonicMs);
+        const remote = createPort();
+        try {
+            const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 20_000 });
+            monotonicMs = 64_000;
+            remote.setServerNow(1_064_000);
+            const originalRead = remote.port.read;
+            remote.port.read = async () => {
+                const snapshot = await originalRead();
+                if (remote.writes.length === 2) {
+                    monotonicMs += 30_001;
+                    remote.setServerNow(1_094_001);
+                }
+                return snapshot;
+            };
+
+            await expect(lease.assertHeld(35_000)).rejects.toThrow(
+                'Remote sync mutation fence cannot cover the requested mutation horizon',
+            );
+            await lease.release();
+        } finally {
+            monotonicSpy.mockRestore();
+        }
+    });
+
+    it('keeps raw provider time when the ownership read before renewal is slow', async () => {
+        let monotonicMs = 0;
+        const monotonicSpy = vi.spyOn(performance, 'now').mockImplementation(() => monotonicMs);
+        const remote = createPort();
+        try {
+            const lease = await acquire(remote.port, { ttlMs: 300_000, heartbeatMs: 20_000 });
+            monotonicMs = 64_000;
+            remote.setServerNow(1_064_000);
+            const originalRead = remote.port.read;
+            let ownedReads = 0;
+            remote.port.read = async () => {
+                const snapshot = await originalRead();
+                ownedReads += 1;
+                if (ownedReads === 2) {
+                    monotonicMs += 30_000;
+                    remote.setServerNow(1_094_000);
+                }
+                return snapshot;
+            };
+
+            await expect(lease.assertHeld(35_000)).rejects.toThrow(
+                'Remote sync mutation fence cannot cover the requested mutation horizon',
+            );
+            expect(JSON.parse(remote.writes[1]!.value)).toMatchObject({
+                renewedAt: 1_064_000,
+                expiresAt: 1_364_000,
+            });
+            await lease.release();
+        } finally {
+            monotonicSpy.mockRestore();
+        }
     });
 
     it('fails closed when server time or a safe existing version is unavailable', async () => {

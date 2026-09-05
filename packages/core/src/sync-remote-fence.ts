@@ -323,6 +323,18 @@ export async function acquireSyncRemoteMutationFence(
             ? performance.now()
             : Date.now()
     );
+    const readAuthoritySnapshot = async (): Promise<{
+        snapshot: SyncRemoteMutationFenceSnapshot;
+        readAgeMs: number;
+    }> => {
+        const startedAtMs = monotonicNow();
+        const snapshot = await port.read();
+        const elapsedMs = monotonicNow() - startedAtMs;
+        return {
+            snapshot,
+            readAgeMs: Number.isFinite(elapsedMs) ? Math.ceil(Math.max(0, elapsedMs)) : 0,
+        };
+    };
     let remainingObservedAtMs = monotonicNow();
     let closed = false;
     let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
@@ -339,10 +351,11 @@ export async function acquireSyncRemoteMutationFence(
         snapshot: SyncRemoteMutationFenceSnapshot;
         record: SyncRemoteMutationFenceRecord;
         serverNowMs: number;
+        readAgeMs: number;
     }> => {
         if (closed) throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence is already released');
         if (lostError) throw lostError;
-        const snapshot = await port.read();
+        const { snapshot, readAgeMs } = await readAuthoritySnapshot();
         const serverNowMs = requireServerNow(snapshot);
         if (!snapshot.bytes || !snapshot.version) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence disappeared');
@@ -351,13 +364,14 @@ export async function acquireSyncRemoteMutationFence(
         if (record.leaseId !== leaseId || record.ownerId !== ownerId) {
             throw new SyncRemoteMutationFenceLostError();
         }
-        if (record.expiresAt <= serverNowMs) {
+        const expiryRemainingMs = record.expiresAt - serverNowMs - readAgeMs;
+        if (expiryRemainingMs <= 0) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence expired');
         }
         currentVersion = snapshot.version;
-        lastKnownRemainingMs = record.expiresAt - serverNowMs;
+        lastKnownRemainingMs = expiryRemainingMs;
         remainingObservedAtMs = monotonicNow();
-        return { snapshot, record, serverNowMs };
+        return { snapshot, record, serverNowMs, readAgeMs };
     };
 
     const renewOwned = async (): Promise<number> => {
@@ -377,7 +391,7 @@ export async function acquireSyncRemoteMutationFence(
             if (port.isConflict(error)) throw new SyncRemoteMutationFenceLostError();
             throw error;
         }
-        const verified = await port.read();
+        const { snapshot: verified, readAgeMs: verificationReadAgeMs } = await readAuthoritySnapshot();
         const verifiedServerNowMs = requireServerNow(verified);
         if (!verified.bytes || !verified.version) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence disappeared after renewal');
@@ -391,15 +405,15 @@ export async function acquireSyncRemoteMutationFence(
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence was replaced during renewal');
         }
         if (
-            verifiedRecord.expiresAt <= verifiedServerNowMs
+            verifiedRecord.expiresAt - verifiedServerNowMs - verificationReadAgeMs <= 0
             || isImpossibleFutureExpiry(verifiedRecord.expiresAt, verifiedServerNowMs)
         ) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence is not live after renewal');
         }
         currentVersion = verified.version;
-        lastKnownRemainingMs = verifiedRecord.expiresAt - verifiedServerNowMs;
+        lastKnownRemainingMs = verifiedRecord.expiresAt - verifiedServerNowMs - verificationReadAgeMs;
         remainingObservedAtMs = monotonicNow();
-        return getSafeAuthorityRemainingMs(verifiedRecord, verifiedServerNowMs);
+        return getSafeAuthorityRemainingMs(verifiedRecord, verifiedServerNowMs) - verificationReadAgeMs;
     };
 
     const scheduleHeartbeat = (): void => {
@@ -426,8 +440,8 @@ export async function acquireSyncRemoteMutationFence(
             if (!Number.isFinite(minRemainingMs) || minRemainingMs < 0 || minRemainingMs >= ttlMs) {
                 throw new Error('Remote sync mutation fence remaining-time requirement is invalid');
             }
-            const { record, serverNowMs } = await requireOwnedSnapshot();
-            if (getSafeAuthorityRemainingMs(record, serverNowMs) <= minRemainingMs) {
+            const { record, serverNowMs, readAgeMs } = await requireOwnedSnapshot();
+            if (getSafeAuthorityRemainingMs(record, serverNowMs) - readAgeMs <= minRemainingMs) {
                 const remainingMs = await renewOwned();
                 if (remainingMs <= minRemainingMs) {
                     throw new SyncRemoteMutationFenceLostError(
