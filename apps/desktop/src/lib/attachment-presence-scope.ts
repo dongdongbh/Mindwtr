@@ -44,13 +44,15 @@
  * A null/empty scope always means doubt: reconcile, and never stamp.
  */
 
-import { ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS } from '@mindwtr/core';
+import {
+    ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS,
+    isAttachmentPresenceStampFresh,
+    type AttachmentPresenceStamp,
+} from '@mindwtr/core';
 
 export { ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS };
 
 const ATTACHMENT_PRESENCE_RECONCILE_KEY = 'mindwtr-attachment-presence-reconcile-v1';
-
-type AttachmentPresenceStamp = { scope: string; at: number };
 
 const readAttachmentPresenceStamp = (): AttachmentPresenceStamp | null => {
     if (typeof localStorage === 'undefined') return null;
@@ -74,10 +76,7 @@ const readAttachmentPresenceStamp = (): AttachmentPresenceStamp | null => {
  */
 export const isAttachmentPresenceReconciliationDue = (scope: string | null | undefined): boolean => {
     if (!scope) return true;
-    const stamp = readAttachmentPresenceStamp();
-    if (!stamp || stamp.scope !== scope) return true;
-    const elapsed = Date.now() - stamp.at;
-    return elapsed < 0 || elapsed >= ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS;
+    return !isAttachmentPresenceStampFresh(readAttachmentPresenceStamp(), scope, Date.now());
 };
 
 /**

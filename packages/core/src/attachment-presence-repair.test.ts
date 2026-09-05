@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+    ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS,
     isAttachmentPresenceRepairCandidate,
+    isAttachmentPresenceStampFresh,
     repairMissingRemoteAttachments,
+    type AttachmentPresenceStamp,
 } from './attachment-presence-repair';
 import { createDropboxAttachmentPresenceIndex } from './dropbox';
 import type { Attachment } from './types';
@@ -143,5 +146,39 @@ describe('createDropboxAttachmentPresenceIndex', () => {
         // `listDropboxFolderFiles` returns [] both for an empty folder and for a folder that
         // no longer exists; either way Dropbox is not holding the blob.
         expect(createDropboxAttachmentPresenceIndex([])('attachments/kept.txt')).toBe(false);
+    });
+});
+
+describe('isAttachmentPresenceStampFresh', () => {
+    const SCOPE = JSON.stringify(['webdav', 'https://dav.example/mindwtr', 'alice']);
+    const OTHER_SCOPE = JSON.stringify(['webdav', 'https://other.example/mindwtr', 'alice']);
+    const NOW = 1_000_000_000;
+    const stampAt = (at: number): AttachmentPresenceStamp => ({ scope: SCOPE, at });
+
+    it('is fresh for a same-scope stamp within the interval', () => {
+        expect(isAttachmentPresenceStampFresh(stampAt(NOW - 1000), SCOPE, NOW)).toBe(true);
+    });
+
+    it('is stale once the interval has fully elapsed', () => {
+        const at = NOW - ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS;
+        expect(isAttachmentPresenceStampFresh(stampAt(at), SCOPE, NOW)).toBe(false);
+    });
+
+    it('is not fresh when the clock moved backwards since the stamp was written', () => {
+        expect(isAttachmentPresenceStampFresh(stampAt(NOW + 1000), SCOPE, NOW)).toBe(false);
+    });
+
+    it('is not fresh for a stamp written against a different scope', () => {
+        expect(isAttachmentPresenceStampFresh({ scope: OTHER_SCOPE, at: NOW }, SCOPE, NOW)).toBe(false);
+    });
+
+    it('is not fresh with no stamp at all', () => {
+        expect(isAttachmentPresenceStampFresh(null, SCOPE, NOW)).toBe(false);
+    });
+
+    it('is not fresh with no scope to compare against, even with a matching stamp', () => {
+        expect(isAttachmentPresenceStampFresh(stampAt(NOW), null, NOW)).toBe(false);
+        expect(isAttachmentPresenceStampFresh(stampAt(NOW), undefined, NOW)).toBe(false);
+        expect(isAttachmentPresenceStampFresh(stampAt(NOW), '', NOW)).toBe(false);
     });
 });

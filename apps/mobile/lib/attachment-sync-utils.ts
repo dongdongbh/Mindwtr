@@ -11,6 +11,7 @@ import {
   extractExtension,
   getBaseSyncUrl,
   getCloudBaseUrl,
+  isAttachmentPresenceStampFresh,
   isDropboxUnauthorizedError,
   markAttachmentUnrecoverable,
   reportProgress,
@@ -18,6 +19,7 @@ import {
   validateAttachmentHash,
   type AppData,
   type Attachment,
+  type AttachmentPresenceStamp,
   type LocalAttachmentPresence,
   type LocalFileStat,
 } from '@mindwtr/core';
@@ -781,8 +783,6 @@ export const createAttachmentLocalMigrationLimiter = (
 
 const ATTACHMENT_PRESENCE_RECONCILE_KEY = '@mindwtr_attachment_presence_reconcile_v1';
 
-type AttachmentPresenceStamp = { scope: string; at: number };
-
 /**
  * Identity of the place attachments live: the backend plus the location/account that
  * decides which remote a `cloudKey` points at. Read from device config rather than passed
@@ -828,9 +828,8 @@ export const isAttachmentPresenceReconciliationDue = async (): Promise<boolean> 
     readAttachmentPresenceScope(),
     readAttachmentPresenceStamp(),
   ]);
-  if (scope === null || !stamp || stamp.scope !== scope) return true;
-  const elapsed = Date.now() - stamp.at;
-  return elapsed < 0 || elapsed >= ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS;
+  if (scope === null) return true;
+  return !isAttachmentPresenceStampFresh(stamp, scope, Date.now());
 };
 
 /**
