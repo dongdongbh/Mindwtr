@@ -183,6 +183,7 @@
       "./plugins/android-network-security-config",
       "./plugins/android-system-bars",
       "./plugins/android-startup-trace",
+      "./plugins/android-font-scale-layout",
       "./plugins/patch-alarm-notification-gradle",
       "./plugins/patch-expo-background-task"
     ],
