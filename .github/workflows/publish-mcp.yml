@@ -197,8 +197,15 @@ jobs:
           set -euo pipefail
           SERVER_NAME=$(node -p "require('./apps/mcp-server/server.json').name")
           SERVER_VERSION=$(node -p "require('./apps/mcp-server/server.json').version")
-          RESPONSE=$(curl -fsSL --get --data-urlencode "search=$SERVER_NAME" "https://registry.modelcontextprotocol.io/v0.1/servers")
-          EXISTS=$(printf '%s' "$RESPONSE" | node -e "const fs = require('fs'); const data = JSON.parse(fs.readFileSync(0, 'utf8')); const name = process.argv[1]; const version = process.argv[2]; const found = Array.isArray(data.servers) && data.servers.some((entry) => entry.server?.name === name && entry.server?.version === version); process.stdout.write(found ? 'true' : 'false');" "$SERVER_NAME" "$SERVER_VERSION")
+          # Query the exact version, not the search listing: the listing lags a
+          # fresh publish by seconds, which let a retag run race the first tag's
+          # publish and fail with "cannot publish duplicate version" (v1.2.8).
+          ENCODED_NAME=$(node -p "encodeURIComponent(process.argv[1])" "$SERVER_NAME")
+          if curl -fsS -o /dev/null "https://registry.modelcontextprotocol.io/v0.1/servers/$ENCODED_NAME/versions/$SERVER_VERSION"; then
+            EXISTS=true
+          else
+            EXISTS=false
+          fi
           echo "exists=$EXISTS" >> "$GITHUB_OUTPUT"
           if [ "$EXISTS" = "true" ]; then
             echo "$SERVER_NAME version $SERVER_VERSION already exists in the MCP Registry; skipping registry publish."
@@ -210,4 +217,10 @@ jobs:
           set -euo pipefail
           ./mcp-publisher login github-oidc
           cd apps/mcp-server
-          ../../mcp-publisher publish
+          if ! ../../mcp-publisher publish 2>&1 | tee publish.log; then
+            if grep -q 'cannot publish duplicate version' publish.log; then
+              echo "The MCP Registry already holds this version (published by a concurrent run); treating as success."
+              exit 0
+            fi
+            exit 1
+          fi
