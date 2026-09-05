@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop Timeline: the Earlier and Later notices now say "N more" instead of "N tasks", since a project whose dates fall outside the window is counted there too. (#1111)
+
 - Desktop: switching sync to Off no longer leaves the unencrypted-sync warning banner on screen until the next window focus.
 
 - Desktop Timeline: the feature's description in Settings and the empty-state hint now say that dated projects appear as bars too, not only tasks. (#1111)

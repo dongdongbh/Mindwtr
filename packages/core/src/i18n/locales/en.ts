@@ -19,6 +19,7 @@ export const en: Record<string, string> = {
         'nav.timeline': 'Timeline',
         'timeline.empty': 'Nothing scheduled yet',
         'timeline.emptyHint': 'Projects and tasks with a start or due date appear here as bars.',
+        'timeline.omittedItems': '{{count}} more',
         'timeline.trackRegionLabel': 'Timeline track',
         'timeline.zoomLabel': 'Timeline zoom',
         'nav.projects': 'Projects',

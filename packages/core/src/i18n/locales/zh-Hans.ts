@@ -97,6 +97,7 @@ export const zhHans: Record<string, string> = {
         'nav.timeline': '时间线',
         'timeline.empty': '还没有排期的任务',
         'timeline.emptyHint': '设置了开始日期或截止日期的项目和任务会在这里显示为色条。',
+        'timeline.omittedItems': '还有 {{count}} 项',
         'timeline.trackRegionLabel': '时间线轨道',
         'timeline.zoomLabel': '时间线缩放',
         'nav.projects': '项目',

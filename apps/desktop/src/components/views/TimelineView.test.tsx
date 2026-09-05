@@ -455,7 +455,7 @@ describe('TimelineView (#1111)', () => {
         expect(barFor('old')).toBeNull();
         expect(barFor('visible')).not.toBeNull();
         // One omitted task plus the project itself.
-        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('+2 tasks');
+        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('2 more');
 
         fireEvent.click(screen.getByRole('button', { name: 'Earlier' }));
         expect(rowLabels()).toContain('Finished remodel');
@@ -471,13 +471,13 @@ describe('TimelineView (#1111)', () => {
         renderTimeline();
 
         expect(screen.queryByText('Nothing scheduled yet')).toBeNull();
-        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('+2 tasks');
+        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('2 more');
         expect(bars()).toHaveLength(0);
 
         fireEvent.click(screen.getByRole('button', { name: 'Earlier' }));
         expect(barFor('early')).not.toBeNull();
         expect(barFor('late')).toBeNull();
-        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('+1 tasks');
+        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('1 more');
 
         fireEvent.click(screen.getByRole('button', { name: 'Later' }));
         expect(barFor('early')).toBeNull();
