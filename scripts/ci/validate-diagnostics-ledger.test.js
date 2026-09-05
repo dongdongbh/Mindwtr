@@ -61,10 +61,10 @@ const sources = (await Promise.all([
   collectSources(path.join(root, "apps")),
 ])).flat();
 const codeSites = sources.flatMap(collectCodeSlugs);
-// Include quoted slugs anywhere in production source, including const declarations.
-const codeLiterals = new Set(sources.flatMap(({ source }) => [...source.matchAll(
-  /(['"])(v\d+\.\d+\.\d+\/[^'"\r\n]*)\1/g,
-)].map((match) => match[2])));
+function findUnemittedSlugs(slugs, sites) {
+  const emittedSlugs = new Set(sites.map(({ slug }) => slug));
+  return slugs.filter((slug) => !emittedSlugs.has(slug));
+}
 const ledgerSource = await readFile(
   path.join(root, "docs/release-notes/diagnostics-ledger.md"), "utf8",
 );
@@ -87,6 +87,18 @@ describe("release diagnostics ledger", () => {
     ]);
   });
 
+  it("rejects a ledger slug whose constant has no releaseCheck use", () => {
+    const slug = "v1.2.8/unused-check";
+    const sources = [{ file: "apps/example.ts", source: `
+      const CHECK = 'v1.2.8/unused-check';
+      logInfo('accepted', {});
+    ` }];
+    expect(findUnemittedSlugs([slug], sources.flatMap(collectCodeSlugs))).toEqual([slug]);
+    expect(findUnemittedSlugs([slug], [{
+      ...sources[0], source: sources[0].source + "logInfo('accepted', { releaseCheck: CHECK });",
+    }].flatMap(collectCodeSlugs))).toEqual([]);
+  });
+
   it("uses version-prefixed slugs at every code site", () => {
     expect(codeSites.length).toBeGreaterThan(0);
     expect(codeSites.filter(({ slug }) => !/^v\d+\.\d+\.\d+\/[a-z0-9-]+$/.test(slug)))
@@ -97,12 +109,12 @@ describe("release diagnostics ledger", () => {
     expect(codeSites.filter(({ slug }) => !ledger.has(slug))).toEqual([]);
   });
 
-  it("has a code literal for every slug under the top unreleased version heading", () => {
+  it("has a resolved releaseCheck site for every slug under the top unreleased version heading", () => {
     expect(topVersion).toBeDefined();
     const topSlugs = [...ledger].filter(([, headings]) => headings.includes(topVersion))
       .map(([slug]) => slug);
     expect(topSlugs.length).toBeGreaterThan(0);
-    expect(topSlugs.filter((slug) => !codeLiterals.has(slug))).toEqual([]);
+    expect(findUnemittedSlugs(topSlugs, codeSites)).toEqual([]);
   });
 
   it("keeps each code slug under its matching version heading", () => {
