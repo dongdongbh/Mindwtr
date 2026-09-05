@@ -227,6 +227,7 @@ const section = (id: string, title: string): Section => ({
 });
 
 const originalPlatformOs = Platform.OS;
+const originalTimeZone = process.env.TZ;
 
 const setPlatform = (os: typeof Platform.OS) => {
     Object.defineProperty(Platform, 'OS', {
@@ -328,6 +329,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    if (originalTimeZone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTimeZone;
     Object.defineProperty(Platform, 'OS', {
         configurable: true,
         value: originalPlatformOs,
@@ -591,7 +594,8 @@ describe('ProjectDetailModal metadata pickers', () => {
         expect(tree.root.findAllByProps({ testID: 'project-status-menu-item-waiting' })).toHaveLength(0);
     });
 
-    it('shows the due-date and review pickers on demand and writes the picked date', () => {
+    it('keeps a picked due date on its local calendar day in a negative offset and clears it', () => {
+        process.env.TZ = 'America/Los_Angeles';
         let tree!: ReturnType<typeof create>;
 
         act(() => {
@@ -609,11 +613,23 @@ describe('ProjectDetailModal metadata pickers', () => {
         expect(tree.root.findAllByType(DateTimePicker)).toHaveLength(1);
 
         act(() => {
-            tree.root.findByType(DateTimePicker).props.onChange({}, new Date('2026-08-01T00:00:00.000Z'));
+            tree.root.findByType(DateTimePicker).props.onChange({}, new Date(2026, 7, 1, 23, 30));
         });
 
         expect(storeActions.updateProject).toHaveBeenCalledWith('project-1', { dueDate: '2026-08-01' });
         expect(tree.root.findAllByType(DateTimePicker)).toHaveLength(0);
+
+        let stored!: ReturnType<typeof create>;
+        act(() => {
+            stored = create(<ProjectDetailModal {...createProjectDetailModalProps({
+                project: { ...project('active'), dueDate: '2026-08-01' },
+            })} />);
+        });
+        expandProjectDetails(stored);
+        act(() => {
+            stored.root.findByProps({ accessibilityLabel: 'Clear Due Date' }).props.onPress();
+        });
+        expect(storeActions.updateProject).toHaveBeenLastCalledWith('project-1', { dueDate: undefined });
 
         act(() => {
             tree.root.findByProps({ testID: 'project-review-date-picker' }).props.onPress();
@@ -622,7 +638,8 @@ describe('ProjectDetailModal metadata pickers', () => {
         expect(tree.root.findAllByType(DateTimePicker)).toHaveLength(1);
     });
 
-    it('saves a picked project start date and clears it again', () => {
+    it('keeps a picked start date on its local calendar day in a positive offset and clears it', () => {
+        process.env.TZ = 'Asia/Tokyo';
         let tree!: ReturnType<typeof create>;
 
         act(() => {
@@ -635,7 +652,7 @@ describe('ProjectDetailModal metadata pickers', () => {
             tree.root.findByProps({ testID: 'project-start-date-picker' }).props.onPress();
         });
         act(() => {
-            tree.root.findByType(DateTimePicker).props.onChange({}, new Date('2026-10-05T00:00:00.000Z'));
+            tree.root.findByType(DateTimePicker).props.onChange({}, new Date(2026, 9, 5, 0, 30));
         });
 
         expect(storeActions.updateProject).toHaveBeenCalledWith('project-1', { startDate: '2026-10-05' });
