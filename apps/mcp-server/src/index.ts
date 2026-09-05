@@ -863,8 +863,9 @@ export async function startMcpServer(argv: string[] = process.argv.slice(2)) {
       url: config.cloudUrl,
       token: config.cloudToken,
       allowInsecureHttp: config.allowInsecureHttp,
+      logInfo,
     })
-    : createService({ dbPath: config.dbPath, readonly: config.readonly });
+    : createService({ dbPath: config.dbPath, readonly: config.readonly }, undefined, logInfo);
 
   const httpConfig = config.http;
   if (httpConfig) {

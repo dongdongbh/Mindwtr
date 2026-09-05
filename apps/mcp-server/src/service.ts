@@ -447,7 +447,13 @@ export type MindwtrService = {
   close: () => Promise<void>;
 };
 
-export const createService = (options: DbOptions, deps: ServiceDeps = defaultServiceDeps): MindwtrService => {
+type McpOperationalLogger = (message: string, context?: Record<string, unknown>) => void;
+
+export const createService = (
+  options: DbOptions,
+  deps: ServiceDeps = defaultServiceDeps,
+  logInfo?: McpOperationalLogger,
+): MindwtrService => {
   const { withDb, close } = createDbAccessor(options, deps);
   return {
     listTasks: async (input) => withDb((db) => deps.listTasks(db, input)),
@@ -543,17 +549,26 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
     },
     updateTask: async (input) => {
       const updates = buildTaskUpdates(input);
-      return runCoreWriteWithRetries(options, deps, async (core) => {
+      const updated = await runCoreWriteWithRetries(options, deps, async (core) => {
         if (input.attachments !== undefined) {
-          // Read the SQLite row, not the store's visible list: it carries tombstoned
-          // attachment records, which the written list must keep (see link-attachments.ts).
-          // Re-read on EVERY attempt (invariant 2 above) so a write racing this one
-          // between attempts is not resurrected or dropped.
-          const existing = await withDb((db) => deps.getTask(db, { id: input.id }));
-          updates.attachments = applyLinkAttachments(existing.attachments, input.attachments);
+          return core.updateTask({
+            id: input.id,
+            updates: (current) => ({
+              ...updates,
+              attachments: applyLinkAttachments(current.attachments, input.attachments!),
+            }),
+          });
         }
         return core.updateTask({ id: input.id, updates });
       });
+      if (input.attachments !== undefined) {
+        logInfo?.('MCP attachment link replacement committed', {
+          releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+          backend: 'local',
+          entity: 'task',
+        });
+      }
+      return updated;
     },
     completeTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.completeTask(id)),
     deleteTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.deleteTask(id)),
@@ -578,15 +593,8 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
         });
       }),
     updateProject: async (input) => {
-      return runCoreWriteWithRetries(options, deps, async (core) => {
+      const updated = await runCoreWriteWithRetries(options, deps, async (core) => {
         const updates: Partial<CoreProject> = {};
-        if (input.attachments !== undefined) {
-          // Same reason as updateTask: the row keeps tombstoned attachment records.
-          // Re-read on EVERY attempt (invariant 2 above) so a write racing this one
-          // between attempts is not resurrected or dropped.
-          const existing = await withDb((db) => deps.getProject(db, { id: input.id }));
-          updates.attachments = applyLinkAttachments(existing.attachments, input.attachments);
-        }
         if (input.title !== undefined) updates.title = validateProjectTitle(input.title);
         if (input.color !== undefined) updates.color = input.color ?? undefined;
         if (input.status !== undefined) updates.status = parseProjectStatus(input.status);
@@ -597,8 +605,25 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
         if (input.startDate !== undefined) updates.startDate = input.startDate ?? undefined;
         if (input.reviewAt !== undefined) updates.reviewAt = input.reviewAt ?? undefined;
         if (input.supportNotes !== undefined) updates.supportNotes = input.supportNotes ?? undefined;
+        if (input.attachments !== undefined) {
+          return core.updateProject({
+            id: input.id,
+            updates: (current) => ({
+              ...updates,
+              attachments: applyLinkAttachments(current.attachments, input.attachments!),
+            }),
+          });
+        }
         return core.updateProject({ id: input.id, updates });
       });
+      if (input.attachments !== undefined) {
+        logInfo?.('MCP attachment link replacement committed', {
+          releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+          backend: 'local',
+          entity: 'project',
+        });
+      }
+      return updated;
     },
     deleteProject: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.deleteProject(id)),
     addSection: async (input) =>

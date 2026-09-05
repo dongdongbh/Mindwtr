@@ -2,6 +2,7 @@ import {
   buildTaskFocusEligibilityContext,
   CloudHttpError,
   cloudGetJson,
+  cloudGetJsonWithMetadata,
   cloudRequestJson,
   filterTasksBySearch,
   getTaskFocusEligibility,
@@ -67,6 +68,7 @@ export type CloudServiceOptions = {
   allowInsecureHttp?: boolean;
   fetcher?: typeof fetch;
   timeoutMs?: number;
+  logInfo?: (message: string, context?: Record<string, unknown>) => void;
 };
 
 type CloudData = AppData & { people: NonNullable<AppData['people']> };
@@ -81,6 +83,9 @@ const emptyAppData = (): CloudData => ({
 });
 
 type SoftDeleted = { deletedAt?: string | null };
+
+const CLOUD_ATTACHMENT_PATCH_ATTEMPTS = 3;
+const CLOUD_ENTITY_ETAG_REQUIRED_ERROR = 'Attachment link updates require Mindwtr Cloud 1.2.8 or newer; this server did not return a strong entity ETag.';
 
 const isLive = <T extends SoftDeleted>(item: T): boolean => !item.deletedAt;
 
@@ -172,12 +177,81 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
 
   const readData = async (): Promise<CloudData> => normalizeCloudData(await cloudGetJson<AppData>(dataUrl, requestOptions));
 
-  const request = async <T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> => {
+  const request = async <T>(
+    method: 'POST' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+  ): Promise<T> => {
     try {
-      return await cloudRequestJson<T>(method, `${apiBase}${path}`, body, requestOptions) as T;
+      return await cloudRequestJson<T>(method, `${apiBase}${path}`, body, {
+        ...requestOptions,
+        ...(headers ? { headers } : {}),
+      }) as T;
     } catch (error) {
       throw mapCloudError(error);
     }
+  };
+
+  const readEntityForConditionalPatch = async <T>(
+    path: string,
+    itemKey: 'task' | 'project',
+    label: string,
+  ): Promise<{ entity: T; etag: string }> => {
+    try {
+      const result = await cloudGetJsonWithMetadata<Record<'task' | 'project', T>>(
+        `${apiBase}${path}`,
+        { ...requestOptions, headers: { 'Accept-Encoding': 'identity' } },
+      );
+      const entity = result.data?.[itemKey];
+      if (!entity) throw new NotFoundError(`${label} not found`);
+      const etag = result.metadata.etag;
+      if (!etag || !/^"[^"]*"$/.test(etag)) {
+        throw new Error(CLOUD_ENTITY_ETAG_REQUIRED_ERROR);
+      }
+      return { entity, etag };
+    } catch (error) {
+      throw mapCloudError(error);
+    }
+  };
+
+  const conditionalAttachmentPatch = async <T extends SoftDeleted>(
+    path: string,
+    itemKey: 'task' | 'project',
+    label: string,
+    staticPatch: Record<string, unknown>,
+    links: Exclude<UpdateTaskInput['attachments'], undefined>,
+  ): Promise<T> => {
+    for (let attempt = 1; attempt <= CLOUD_ATTACHMENT_PATCH_ATTEMPTS; attempt += 1) {
+      const current = await readEntityForConditionalPatch<T & { attachments?: Task['attachments'] }>(
+        path,
+        itemKey,
+        label,
+      );
+      try {
+        const result = await request<Record<'task' | 'project', T>>(
+          'PATCH',
+          path,
+          {
+            ...staticPatch,
+            attachments: applyLinkAttachments(current.entity.attachments, links),
+          },
+          { 'If-Match': current.etag },
+        );
+        options.logInfo?.('MCP attachment link replacement committed', {
+          releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+          backend: 'cloud',
+          entity: itemKey,
+        });
+        return result[itemKey];
+      } catch (error) {
+        if (!(error instanceof CloudHttpError) || error.status !== 412) throw error;
+        if (attempt === CLOUD_ATTACHMENT_PATCH_ATTEMPTS) {
+          throw new Error(`${label} changed during attachment link update after ${CLOUD_ATTACHMENT_PATCH_ATTEMPTS} attempts; refresh and retry.`);
+        }
+      }
+    }
+    throw new Error(`${label} attachment link update failed`);
   };
 
   const deleteEntity = async <T extends SoftDeleted & { id: string }>(
@@ -364,9 +438,14 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
         }
       }
       if (input.attachments !== undefined) {
-        // The stored record set, tombstones included, is what the merge rule needs.
-        const existing = await findTask({ id: input.id });
-        patch.attachments = applyLinkAttachments(existing.attachments, input.attachments);
+        const task = await conditionalAttachmentPatch<AppData['tasks'][number]>(
+          `/tasks/${encodeURIComponent(input.id)}`,
+          'task',
+          'Task',
+          patch,
+          input.attachments,
+        );
+        return mapTask(task);
       }
       const result = await request<{ task: AppData['tasks'][number] }>('PATCH', `/tasks/${encodeURIComponent(input.id)}`, patch);
       return mapTask(result.task);
@@ -410,8 +489,14 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       if (input.reviewAt !== undefined) patch.reviewAt = input.reviewAt;
       if (input.supportNotes !== undefined) patch.supportNotes = input.supportNotes;
       if (input.attachments !== undefined) {
-        const existing = await findProject({ id: input.id });
-        patch.attachments = applyLinkAttachments(existing.attachments, input.attachments);
+        const project = await conditionalAttachmentPatch<AppData['projects'][number]>(
+          `/projects/${encodeURIComponent(input.id)}`,
+          'project',
+          'Project',
+          patch,
+          input.attachments,
+        );
+        return mapProject(project);
       }
       const result = await request<{ project: AppData['projects'][number] }>('PATCH', `/projects/${encodeURIComponent(input.id)}`, patch);
       return mapProject(result.project);

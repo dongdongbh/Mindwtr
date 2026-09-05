@@ -66,6 +66,11 @@ export type CloudJsonWriteResult = RemoteJsonWriteResult & {
     serverMergedRemoteData?: boolean;
 };
 
+export type CloudJsonReadResult<T> = {
+    data: T | null;
+    metadata: RemoteFileMetadata;
+};
+
 function buildHeaders(options: CloudOptions): Record<string, string> {
     const headers: Record<string, string> = { ...(options.headers || {}) };
     if (options.token) {
@@ -150,10 +155,10 @@ const parseCloudJsonWriteBody = async (
     }
 };
 
-export async function cloudGetJson<T>(
+export async function cloudGetJsonWithMetadata<T>(
     url: string,
     options: CloudOptions = {},
-): Promise<T | null> {
+): Promise<CloudJsonReadResult<T>> {
     assertCloudUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
     return await fetchWithTimeoutAndConsume(
@@ -167,12 +172,26 @@ export async function cloudGetJson<T>(
         fetcher,
         CLOUD_TIMEOUT_ERROR,
         async (res, signal) => {
-            if (res.status === 404) return null;
+            if (res.status === 404) {
+                return {
+                    data: null,
+                    metadata: {
+                        exists: false,
+                        fingerprint: null,
+                        etag: null,
+                        lastModified: null,
+                        contentLength: null,
+                    },
+                };
+            }
             if (!res.ok) throw cloudHttpError('Cloud GET', res);
 
             const text = await readResponseText(res, options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES, signal);
             try {
-                return JSON.parse(text) as T;
+                return {
+                    data: JSON.parse(text) as T,
+                    metadata: metadataFromHeaders(res.headers),
+                };
             } catch (error) {
                 if (/^\s*(?:<!doctype\s+html|<html\b)/i.test(text)) {
                     throw new Error(
@@ -183,6 +202,13 @@ export async function cloudGetJson<T>(
             }
         },
     );
+}
+
+export async function cloudGetJson<T>(
+    url: string,
+    options: CloudOptions = {},
+): Promise<T | null> {
+    return (await cloudGetJsonWithMetadata<T>(url, options)).data;
 }
 
 export async function cloudRequestJson<T>(

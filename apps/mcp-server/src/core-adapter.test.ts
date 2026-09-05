@@ -95,6 +95,73 @@ describe('MCP core write persistence contract', () => {
     ]);
   });
 
+  test('resolves a task patch factory from the freshly reloaded entity inside the write transaction', async () => {
+    const { service, state } = createHarness({
+      saveTask: async () => undefined,
+      saveData: async () => undefined,
+    });
+    const concurrentFile = {
+      id: 'file-1',
+      kind: 'file',
+      title: 'Contract v2.pdf',
+      uri: 'attachments/file-1.pdf',
+      createdAt: iso,
+      updatedAt: '2026-07-22T01:00:00.000Z',
+    };
+    state.fetchData = async () => {
+      state._allTasks = [{ ...state._allTasks[0], attachments: [concurrentFile] }];
+    };
+
+    await service.updateTask({
+      id: 'task-1',
+      updates: (current) => ({ attachments: [...(current.attachments ?? []), {
+        id: 'link-1',
+        kind: 'link',
+        title: 'Notes',
+        uri: 'https://example.com/notes',
+        createdAt: iso,
+        updatedAt: iso,
+      }] }),
+    });
+
+    expect(state._allTasks[0].attachments?.[0]).toEqual(concurrentFile);
+    expect(state._allTasks[0].attachments?.[1]).toMatchObject({ id: 'link-1', kind: 'link' });
+  });
+
+  test('resolves a project patch factory from the freshly reloaded entity inside the write transaction', async () => {
+    const { service, state } = createHarness({
+      saveTask: async () => undefined,
+      saveData: async () => undefined,
+    });
+    const concurrentlyDeletedFile = {
+      id: 'file-1',
+      kind: 'file',
+      title: 'Plan.pdf',
+      uri: 'attachments/file-1.pdf',
+      createdAt: iso,
+      updatedAt: '2026-07-22T01:00:00.000Z',
+      deletedAt: '2026-07-22T01:00:00.000Z',
+    };
+    state.fetchData = async () => {
+      state._allProjects = [{ ...state._allProjects[0], attachments: [concurrentlyDeletedFile] }];
+    };
+
+    await service.updateProject({
+      id: 'project-1',
+      updates: (current) => ({ attachments: [...(current.attachments ?? []), {
+        id: 'link-1',
+        kind: 'link',
+        title: 'Notes',
+        uri: 'https://example.com/notes',
+        createdAt: iso,
+        updatedAt: iso,
+      }] }),
+    });
+
+    expect(state._allProjects[0].attachments?.[0]).toEqual(concurrentlyDeletedFile);
+    expect(state._allProjects[0].attachments?.[1]).toMatchObject({ id: 'link-1', kind: 'link' });
+  });
+
   test('returns confirmed task writes with corruption guidance while project writes fail', async () => {
     const storageError = new Error('database disk image is malformed');
     const { service } = createHarness({

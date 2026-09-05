@@ -6,6 +6,7 @@ import {
     cloudDeleteFile,
     cloudGetFile,
     cloudGetJson,
+    cloudGetJsonWithMetadata,
     cloudHeadJson,
     cloudPutFile,
     cloudPutJson,
@@ -96,6 +97,22 @@ describe('cloud sync http helpers', () => {
         const fetcher = vi.fn(async () => okResponse(JSON.stringify({ ok: true })));
         const result = await cloudGetJson<{ ok: boolean }>('https://example.com/v1/data', { fetcher });
         expect(result).toEqual({ ok: true });
+    });
+
+    it('returns JSON and its response ETag from the same GET', async () => {
+        const fetcher = vi.fn(async () => new Response(
+            JSON.stringify({ task: { id: 't1' } }),
+            { status: 200, headers: { ETag: '"mindwtr-entity-sha256-abc"' } },
+        ));
+
+        const result = await cloudGetJsonWithMetadata<{ task: { id: string } }>(
+            'https://example.com/v1/tasks/t1',
+            { fetcher },
+        );
+
+        expect(result.data).toEqual({ task: { id: 't1' } });
+        expect(result.metadata.etag).toBe('"mindwtr-entity-sha256-abc"');
+        expect(fetcher).toHaveBeenCalledOnce();
     });
 
     it('throws on invalid json', async () => {

@@ -418,7 +418,7 @@ describe('cloud server utils', () => {
         expect(response.status).toBe(401);
         expect(response.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
         expect(response.headers.get('Access-Control-Allow-Origin')).toBe(corsOrigin);
-        expect(response.headers.get('Access-Control-Allow-Headers')).toBe('Authorization, Content-Type');
+        expect(response.headers.get('Access-Control-Allow-Headers')).toBe('Authorization, Content-Type, If-Match');
         expect(response.headers.get('Access-Control-Allow-Methods')).toBe('GET,HEAD,PUT,POST,PATCH,DELETE,OPTIONS');
     });
 
@@ -427,7 +427,7 @@ describe('cloud server utils', () => {
 
         expect(response.status).toBe(204);
         expect(response.headers.get('Access-Control-Allow-Origin')).toBe(corsOrigin);
-        expect(response.headers.get('Access-Control-Allow-Headers')).toBe('Authorization, Content-Type');
+        expect(response.headers.get('Access-Control-Allow-Headers')).toBe('Authorization, Content-Type, If-Match');
         expect(response.headers.get('Access-Control-Allow-Methods')).toBe('GET,HEAD,PUT,POST,PATCH,DELETE,OPTIONS');
         expect(await response.text()).toBe('');
     });
@@ -1842,7 +1842,7 @@ describe('cloud server api', () => {
 
         expect(response.status).toBe(204);
         expect(response.headers.get('Access-Control-Allow-Origin')).toBe(corsOrigin);
-        expect(response.headers.get('Access-Control-Allow-Headers')).toBe('Authorization, Content-Type');
+        expect(response.headers.get('Access-Control-Allow-Headers')).toBe('Authorization, Content-Type, If-Match');
         expect(response.headers.get('Access-Control-Allow-Methods')).toBe('GET,HEAD,PUT,POST,PATCH,DELETE,OPTIONS');
         const requestId = getRequestId(response);
         expect(response.headers.get('Access-Control-Expose-Headers')).toContain('X-Request-Id');
@@ -2728,6 +2728,138 @@ describe('cloud server api', () => {
             headers: authHeaders,
         });
         expect(archiveDeleted.status).toBe(404);
+    });
+
+    test('guards a task PATCH with the strong ETag from the individual GET', async () => {
+        const createResponse = await fetch(`${baseUrl}/v1/tasks`, {
+            method: 'POST',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({ title: 'Concurrent task' }),
+        });
+        const taskId = (await createResponse.json()).task.id as string;
+        const entityUrl = `${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`;
+
+        const initialGet = await fetch(entityUrl, { headers: authHeaders });
+        const initialEtag = initialGet.headers.get('etag');
+        expect(initialEtag).toMatch(/^"mindwtr-entity-sha256-[0-9a-f]{64}"$/);
+
+        const concurrentPatch = await fetch(entityUrl, {
+            method: 'PATCH',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({ description: 'written concurrently' }),
+        });
+        expect(concurrentPatch.status).toBe(200);
+
+        const stalePatch = await fetch(entityUrl, {
+            method: 'PATCH',
+            headers: {
+                ...authHeaders,
+                'content-type': 'application/json',
+                'if-match': initialEtag!,
+            },
+            body: JSON.stringify({ title: 'must not overwrite' }),
+        });
+        expect(stalePatch.status).toBe(412);
+        expect((await stalePatch.json()).error).toBe('Entity changed; refresh and retry');
+
+        const finalGet = await fetch(entityUrl, { headers: authHeaders });
+        const finalTask = (await finalGet.json()).task;
+        expect(finalTask.title).toBe('Concurrent task');
+        expect(finalTask.description).toBe('written concurrently');
+    });
+
+    test('accepts a project PATCH with the current individual-entity ETag', async () => {
+        const createResponse = await fetch(`${baseUrl}/v1/projects`, {
+            method: 'POST',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({ title: 'Concurrent project' }),
+        });
+        const projectId = (await createResponse.json()).project.id as string;
+        const entityUrl = `${baseUrl}/v1/projects/${encodeURIComponent(projectId)}`;
+        const initialGet = await fetch(entityUrl, { headers: authHeaders });
+        const initialEtag = initialGet.headers.get('etag');
+        expect(initialEtag).toMatch(/^"mindwtr-entity-sha256-[0-9a-f]{64}"$/);
+
+        const guardedPatch = await fetch(entityUrl, {
+            method: 'PATCH',
+            headers: {
+                ...authHeaders,
+                'content-type': 'application/json',
+                'if-match': initialEtag!,
+            },
+            body: JSON.stringify({ supportNotes: 'guarded update' }),
+        });
+
+        expect(guardedPatch.status).toBe(200);
+        expect((await guardedPatch.json()).project.supportNotes).toBe('guarded update');
+        expect(guardedPatch.headers.get('etag')).toMatch(/^"mindwtr-entity-sha256-[0-9a-f]{64}"$/);
+        expect(guardedPatch.headers.get('etag')).not.toBe(initialEtag);
+    });
+
+    test('changes task and project ETags for attachment content updates with unchanged parent revisions', async () => {
+        const taskId = crypto.randomUUID();
+        const unchangedRev = 7;
+        const baseAttachment = {
+            id: 'file-1',
+            kind: 'file' as const,
+            title: 'document.txt',
+            uri: '',
+            cloudKey: 'attachments/file-1.txt',
+            fileHash: 'a'.repeat(64),
+            contentRev: 1,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+        };
+        const task = makeTestTask({
+            id: taskId,
+            title: 'Attachment task',
+            rev: unchangedRev,
+            attachments: [baseAttachment],
+        });
+        const project = {
+            id: 'attachment-project',
+            title: 'Attachment project',
+            status: 'active' as const,
+            color: '#6B7280',
+            order: 0,
+            tagIds: [],
+            rev: unchangedRev,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            attachments: [baseAttachment],
+        };
+        const putData = async (contentRev: number, fileHash: string) => fetch(`${baseUrl}/v1/data`, {
+            method: 'PUT',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({
+                tasks: [{ ...task, attachments: [{ ...baseAttachment, contentRev, fileHash }] }],
+                projects: [{ ...project, attachments: [{ ...baseAttachment, contentRev, fileHash }] }],
+                sections: [],
+                areas: [],
+                settings: {},
+            } satisfies AppData),
+        });
+        expect((await putData(1, 'a'.repeat(64))).status).toBe(200);
+
+        const taskUrl = `${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`;
+        const projectUrl = `${baseUrl}/v1/projects/${encodeURIComponent(project.id)}`;
+        const beforeTask = await fetch(taskUrl, { headers: authHeaders });
+        const beforeProject = await fetch(projectUrl, { headers: authHeaders });
+        const taskEtag = beforeTask.headers.get('etag');
+        const projectEtag = beforeProject.headers.get('etag');
+
+        expect((await putData(2, 'b'.repeat(64))).status).toBe(200);
+        const afterTask = await fetch(taskUrl, { headers: authHeaders });
+        const afterProject = await fetch(projectUrl, { headers: authHeaders });
+        const afterTaskBody = await afterTask.json();
+        const afterProjectBody = await afterProject.json();
+
+        expect(afterTaskBody.task.rev).toBe(unchangedRev);
+        expect(afterProjectBody.project.rev).toBe(unchangedRev);
+        expect(afterTaskBody.task.attachments[0].contentRev).toBe(2);
+        expect(afterProjectBody.project.attachments[0].contentRev).toBe(2);
+        expect(afterTask.headers.get('etag')).not.toBe(taskEtag);
+        expect(afterProject.headers.get('etag')).not.toBe(projectEtag);
     });
 
     test('promotes an inbox task to next on PATCH startTime with no explicit status', async () => {
