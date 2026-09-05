@@ -24,6 +24,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'deferred', 'ids',
     // attachment-only-task-replace (packages/core/src/store-settings.ts)
     'count',
+    // android-http-connect-timeout (apps/mobile/hooks/root-layout/use-root-layout-startup.ts)
+    'connectTimeoutMs',
 ];
 
 describe('release diagnostics field names', () => {

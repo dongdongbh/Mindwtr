@@ -592,6 +592,10 @@ class SyncFileLockModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SyncFileLock")
 
+    // Proof for the startup log that SyncHttpClientPackage installed the bounded
+    // connect timeout before any request was made (#1150).
+    Constant("httpConnectTimeoutMs") { SyncHttpClientConfig.installedConnectTimeoutMs.toDouble() }
+
     OnDestroy {
       val errors = synchronized(stateGuard) {
         destroyed = true

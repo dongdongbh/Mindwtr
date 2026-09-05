@@ -26,5 +26,9 @@ android {
 }
 
 dependencies {
+  // SyncHttpClientPackage configures React Native's OkHttp client. expo-modules-core
+  // only depends on react-android as `implementation`, which Gradle does not expose
+  // transitively, so this module needs its own direct dependency.
+  implementation 'com.facebook.react:react-android'
   testImplementation 'junit:junit:4.13.2'
 }
