@@ -27,25 +27,22 @@ const SRC_ROOT = existsSync(LOCAL_SRC) ? LOCAL_SRC : join(process.cwd(), 'apps',
  * list is a list of the wrappers that existed the day it was written and goes
  * stale the next time somebody names one something else.
  *
- * So this matches the CALL SHAPE rather than the callee. Three rules, below. The
- * decisive one is rule 3: a key-shaped string literal immediately followed by a
- * prose string literal is the "key, English fallback" idiom no matter what the
- * function is called. Across 2050 matching desktop call sites it produced no false
- * positives; single-argument lookalikes that are not i18n (`files.get('a.b')`,
- * an `'audio.wav'` extension, an `'calendar.fill'` icon name) never pair with a
- * prose fallback and so never match.
+ * Match the call shape for wrappers: a key-shaped literal followed by any
+ * fallback expression, optionally preceded by `t`. The fallback can be computed;
+ * only the key must be static. Single-argument lookalikes still require a
+ * translator-shaped callee name.
  */
 const KEY_SHAPE = /^[a-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
-/** A fallback argument that reads as English copy rather than a flag like 'error'. */
-const PROSE_SHAPE = /[A-Za-z]{2}/;
 /**
- * Rule 1 is the one place a callee name is unavoidable: `translate('projects.reorderSections')`
+ * Rule 1 needs a callee name: `translate('projects.reorderSections')`
  * and `iconName('trash.fill')` are the same shape, so only the name separates them. It is a
  * family pattern rather than a list for the reason above. Measured across both apps the only
  * names it actually matches are `t`, `tr` and `translate` — every hit is a real lookup, and
  * the icon-name and file-extension literals that share the key shape are not calls at all.
  */
 const LOOKUP_NAME = /^(t|tr|translate\w*|resolve\w*|format\w*)$/;
+// C2-2: these APIs take dotted diagnostic/intent identifiers, not i18n keys.
+const NON_LOOKUP_NAMES = new Set(['markStartupPhase', 'measureStartupPhase', 'startActivityAsync']);
 
 const EXCLUDED_DIR_NAMES = new Set(['node_modules', 'coverage', '__tests__', 'dist', 'build']);
 
@@ -62,6 +59,7 @@ const EXCLUDED_DIR_NAMES = new Set(['node_modules', 'coverage', '__tests__', 'di
  */
 const KNOWN_MISSING_KEYS = new Set([
     'board.reorderFollowsSort',
+    'bulk.organizeApplied', // C2-2: newly exposed computed fallback/options argument.
     'calendar.collapsePlanningPanel',
     'calendar.expandPlanningPanel',
     'common.clearSearch',
@@ -146,9 +144,9 @@ function stringLiteralText(node: ts.Node | null | undefined): string | null {
 /**
  * The key argument of `node`, if `node` is an i18n lookup:
  *  1. `t('key')` / `translate('key')` — a one-argument lookup, matched by callee name.
- *  2. `f(t, 'key', 'English')`  — the tFallback / translateWithFallback shape.
- *  3. `f('key', 'English')`     — any wrapper taking a key and an English fallback.
- * Anything built from a variable or a template literal is dynamic and unresolvable
+ *  2. `f(t, 'key', fallback)`  — the tFallback / translateWithFallback shape.
+ *  3. `f('key', fallback)`     — any wrapper taking a key and an English fallback.
+ * A key built from a variable or a template literal is dynamic and unresolvable
  * without running the program; those call sites are out of scope here and are
  * covered instead by whatever union drives the interpolated value.
  */
@@ -158,18 +156,18 @@ function i18nKeyArgument(node: ts.CallExpression): ts.Expression | null {
     const calleeName = ts.isIdentifier(callee)
         ? String(callee.escapedText)
         : (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) ? String(callee.name.escapedText) : '');
+    if (NON_LOOKUP_NAMES.has(calleeName)) return null;
     if (args.length === 1 && stringLiteralText(args[0]) && LOOKUP_NAME.test(calleeName)) {
         return args[0];
     }
     if (
         args.length >= 3
         && ts.isIdentifier(args[0]) && args[0].escapedText === 't'
-        && stringLiteralText(args[1]) && stringLiteralText(args[2])
+        && KEY_SHAPE.test(stringLiteralText(args[1]) ?? '')
     ) {
         return args[1];
     }
-    const fallback = stringLiteralText(args[1]);
-    if (args.length >= 2 && stringLiteralText(args[0]) && fallback && PROSE_SHAPE.test(fallback)) {
+    if (args.length >= 2 && KEY_SHAPE.test(stringLiteralText(args[0]) ?? '')) {
         return args[0];
     }
     return null;
@@ -177,31 +175,33 @@ function i18nKeyArgument(node: ts.CallExpression): ts.Expression | null {
 
 type Reference = { key: string; site: string };
 
-function collectKeyReferences(): Reference[] {
+function scanKeyReferences(path: string, source: string): Reference[] {
     const references: Reference[] = [];
-    for (const path of collectSourceFiles(SRC_ROOT)) {
-        const sourceFile = ts.createSourceFile(
-            path,
-            readFileSync(path, 'utf8'),
-            ts.ScriptTarget.Latest,
-            true,
-            path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-        );
-        const visit = (node: ts.Node) => {
-            if (ts.isCallExpression(node)) {
-                const keyArgument = i18nKeyArgument(node);
-                const key = stringLiteralText(keyArgument);
-                if (key !== null && KEY_SHAPE.test(key)) {
-                    const { line } = sourceFile.getLineAndCharacterOfPosition(keyArgument!.getStart(sourceFile));
-                    const file = relative(SRC_ROOT, path).split('\\').join('/');
-                    references.push({ key, site: `${file}:${line + 1}` });
-                }
+    const sourceFile = ts.createSourceFile(
+        path,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const visit = (node: ts.Node) => {
+        if (ts.isCallExpression(node)) {
+            const keyArgument = i18nKeyArgument(node);
+            const key = stringLiteralText(keyArgument);
+            if (key !== null && KEY_SHAPE.test(key)) {
+                const { line } = sourceFile.getLineAndCharacterOfPosition(keyArgument!.getStart(sourceFile));
+                const file = relative(SRC_ROOT, path).split('\\').join('/');
+                references.push({ key, site: `${file}:${line + 1}` });
             }
-            ts.forEachChild(node, visit);
-        };
-        visit(sourceFile);
-    }
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
     return references;
+}
+
+function collectKeyReferences(): Reference[] {
+    return collectSourceFiles(SRC_ROOT).flatMap((path) => scanKeyReferences(path, readFileSync(path, 'utf8')));
 }
 
 describe('desktop i18n keys', () => {
@@ -231,5 +231,30 @@ describe('desktop i18n keys', () => {
     // it is collection time rather than test time and needs no raised timeout.
     it('still finds i18n call sites to check', () => {
         expect(references.length).toBeGreaterThanOrEqual(1500);
+    });
+});
+
+describe('i18n scanner computed fallbacks', () => {
+    it('ignores diagnostic identifiers, Android intents and dynamic keys', () => {
+        const source = `
+            markStartupPhase('js.data_load.attempt_start', { attempt: 1 });
+            measureStartupPhase('js.store.fetch_data', async () => load());
+            IntentLauncher.startActivityAsync('android.intent.action.VIEW', { data: uri });
+            resolveText(dynamicKey, fallbackText);
+            iconName('trash.fill');
+        `;
+        expect(scanKeyReferences(join(SRC_ROOT, 'fixture.ts'), source)).toEqual([]);
+    });
+
+    it.each([
+        "resolveText('closure.missingInline', `${n} matches`)",
+        "tFallback(t, 'closure.missingVariable', fallbackText)",
+    ])('recognizes a literal key in %s', (source) => {
+        const references = scanKeyReferences(join(SRC_ROOT, 'fixture.ts'), source);
+        expect(references).toEqual([{
+            key: source.includes('missingInline') ? 'closure.missingInline' : 'closure.missingVariable',
+            site: 'fixture.ts:1',
+        }]);
+        expect(Object.keys(getTranslationsSync('en'))).not.toContain(references[0]?.key);
     });
 });
