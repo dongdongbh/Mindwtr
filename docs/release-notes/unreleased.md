@@ -4,6 +4,8 @@ Changes collected after `v1.2.7` and before the next version tag.
 
 ## Full Change List
 
+- Desktop: attachment and link rows in the task editor and in project notes now highlight when the mouse is over them, so the Edit and Remove buttons read as belonging to that row. (#1159)
+
 - Desktop Timeline: the Earlier and Later notices now say "N more" instead of "N tasks", since a project whose dates fall outside the window is counted there too. (#1111)
 
 - Desktop: switching sync to Off no longer leaves the unencrypted-sync warning banner on screen until the next window focus.

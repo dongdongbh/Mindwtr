@@ -329,7 +329,7 @@ export function ProjectNotesSection({
                                 const isPointer = attachment.kind === 'link' || isBareFileReference(attachment);
                                 const fullTitle = isPointer ? attachment.uri : attachment.title;
                                 return (
-                                    <div key={attachment.id} className="flex items-center justify-between gap-2 text-xs rounded-md border border-border/60 px-2 py-1.5">
+                                    <div key={attachment.id} className="flex items-center justify-between gap-2 text-xs rounded-md border border-border/60 px-2 py-1.5 transition-colors hover:bg-muted/40">
                                         <div className="min-w-0 flex-1">
                                             <div className="flex min-w-0 items-center gap-1.5">
                                                 {isPointer

@@ -160,7 +160,7 @@ export function AttachmentsField({
                         const isPointer = attachment.kind === 'link' || isBareFileReference(attachment);
                         const fullTitle = isPointer ? attachment.uri : attachment.title;
                         return (
-                            <div key={attachment.id} className="flex items-center justify-between gap-2 text-xs">
+                            <div key={attachment.id} className="-mx-1.5 flex items-center justify-between gap-2 rounded-md px-1.5 py-1 text-xs transition-colors hover:bg-muted/40">
                                 <div className="flex min-w-0 items-center gap-1.5">
                                     {isPointer
                                         ? <Link2 className="w-3 h-3 shrink-0 text-muted-foreground" aria-hidden="true" />
