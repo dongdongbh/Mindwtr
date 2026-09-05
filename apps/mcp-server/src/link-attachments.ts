@@ -64,7 +64,7 @@ type NormalizedLinkInput = { id?: string; title: string; uri: string };
 // UNC/network-share forms; file:// and plain local paths stay allowed (#1154 contract).
 const isNetworkShareUri = (uri: string): boolean => {
   const scheme = /^[a-z][a-z0-9+.-]*:/i.exec(uri)?.[0];
-  if (!scheme) return /^[\/\\]{2}/.test(uri);
+  if (!scheme) return /^[/\\]{2}/.test(uri);
   if (scheme.toLowerCase() !== 'file:') return false;
 
   const normalized = uri.slice(scheme.length).replace(/\\/g, '/');
