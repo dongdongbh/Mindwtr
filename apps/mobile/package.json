@@ -9,6 +9,8 @@
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "ios": "expo run:ios",
+    "android:dev": "APP_VARIANT=development expo prebuild --clean --platform android && APP_VARIANT=development expo run:android",
+    "ios:dev": "APP_VARIANT=development expo prebuild --clean --platform ios && APP_VARIANT=development expo run:ios",
     "web": "expo start --web",
     "generate:android-monochrome-icon": "node scripts/generate_android_monochrome_icon.js",
     "startup:bench": "bash scripts/android_startup_benchmark.sh",

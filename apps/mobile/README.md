@@ -199,6 +199,19 @@ gh release list
 2. Run `bun mobile:start`
 3. Scan QR code with camera (iOS) or Expo Go (Android)
 
+### Development build (Mindwtr Dev)
+
+`expo start` only runs Metro; it never installs anything. A development build is the app itself compiled with `expo-dev-client`, and with the store's package id it would replace the Mindwtr you use and share its data. Build it as the separate **Mindwtr Dev** app instead:
+
+```bash
+bun mobile:android:dev     # phone on ADB or a running emulator
+bun mobile:ios:dev
+```
+
+That sets `APP_VARIANT=development`, which gives the build the name "Mindwtr Dev" and the ids `tech.dongdongbh.mindwtr.dev`, so both apps sit on the phone with their own data. The script runs `expo prebuild --clean` first because a native tree generated for one variant is not rebuilt by `expo run` on its own; run the same clean prebuild (without the variant) before the next store-id build. Afterwards, plain `bun mobile:start` is enough for TypeScript changes: open Mindwtr Dev, it connects to Metro and the "No apps connected" line goes away. Rebuild the dev app only after native changes (dependencies, config plugins, permissions, `app.json`).
+
+Both variants register the `mindwtr://` scheme, so Android asks once which app should open a link. On iOS the dev app shares the widget App Group and the CloudKit container with the store app; it uses CloudKit's Development environment, so iCloud data stays separate, but the two apps overwrite each other's widget payload.
+
 ### Android Emulator
 
 #### Option A: Android Studio (Recommended for Emulator)

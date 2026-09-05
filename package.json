@@ -116,6 +116,8 @@
     "mobile:start": "bun run --filter mobile start",
     "mobile:android": "bun run --filter mobile android",
     "mobile:ios": "bun run --filter mobile ios",
+    "mobile:android:dev": "bun run --filter mobile android:dev",
+    "mobile:ios:dev": "bun run --filter mobile ios:dev",
     "mobile:startup:bench": "bash apps/mobile/scripts/android_startup_benchmark.sh",
     "test:e2e": "playwright test",
     "i18n:check": "bun run scripts/i18n-locale-parity.ts --check",

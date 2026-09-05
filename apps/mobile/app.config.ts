@@ -35,6 +35,39 @@ const donationPromptEnabled = process.env.DONATION_PROMPT_ENABLED === '1'
   || process.env.DONATION_PROMPT_ENABLED === 'true';
 const promptTestControlsEnabled = process.env.PROMPT_TEST_CONTROLS_ENABLED === '1'
   || process.env.PROMPT_TEST_CONTROLS_ENABLED === 'true';
+// APP_VARIANT=development builds "Mindwtr Dev" with its own Android
+// applicationId / iOS bundle id, so a dev client installs beside the store app
+// instead of replacing it and keeps its own data. Every Android config plugin
+// derives its package from android.package, so the suffix carries through.
+// iOS keeps sharing the widget App Group and the CloudKit container with the
+// store app (both are literal strings in Swift and entitlements); a dev build
+// hits CloudKit's Development environment anyway, only widget payloads collide.
+const isDevVariant = (process.env.APP_VARIANT ?? '').trim() === 'development';
+const DEV_VARIANT_ID_SUFFIX = '.dev';
+const DEV_VARIANT_NAME_SUFFIX = ' Dev';
+
+const withDevVariant = (base: ExpoConfig): ExpoConfig => {
+  if (!isDevVariant) return base;
+  const plugins = (base.plugins ?? []).map((entry) => {
+    if (!Array.isArray(entry) || entry[0] !== './plugins/react-native-android-widget') return entry;
+    const props = (entry[1] ?? {}) as { widgets?: Array<{ label?: string }> };
+    return [entry[0], {
+      ...props,
+      // The launcher's widget picker lists both apps; label the dev one.
+      widgets: (props.widgets ?? []).map((widget) => ({
+        ...widget,
+        label: `${widget.label ?? base.name}${DEV_VARIANT_NAME_SUFFIX}`,
+      })),
+    }] as typeof entry;
+  });
+  return {
+    ...base,
+    name: `${base.name}${DEV_VARIANT_NAME_SUFFIX}`,
+    android: { ...base.android, package: `${base.android?.package}${DEV_VARIANT_ID_SUFFIX}` },
+    ios: { ...base.ios, bundleIdentifier: `${base.ios?.bundleIdentifier}${DEV_VARIANT_ID_SUFFIX}` },
+    plugins,
+  };
+};
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const base = config as ExpoConfig;
@@ -50,8 +83,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     promptTestControlsEnabled,
   };
 
-  return {
+  return withDevVariant({
     ...base,
     extra,
-  };
+  });
 };
