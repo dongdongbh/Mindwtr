@@ -782,6 +782,29 @@ describe('Layout collapsed sidebar area filter', () => {
 });
 
 describe('Layout sync security warning', () => {
+    it('clears the HTTP warning when sync is switched Off without a focus event', async () => {
+        // Use the setup's in-memory storage boundary and the real service path,
+        // including its cache, persistence and synchronous status subscribers.
+        vi.mocked(SyncService.refreshSyncBackendStatus).mockRestore();
+        vi.mocked(SyncService.subscribeSyncStatus).mockRestore();
+        vi.mocked(SyncService.getSyncStatus).mockRestore();
+        window.localStorage.setItem('mindwtr-sync-backend', 'webdav');
+        window.localStorage.setItem('mindwtr-webdav-url', 'http://192.168.1.50/dav');
+        window.localStorage.setItem('mindwtr-webdav-allow-insecure-http', 'true');
+        await SyncService.getPersistedSyncConfigurationSnapshot();
+
+        const { findByText, queryByText } = renderLayout();
+        expect(await findByText(/WebDAV sync is using HTTP/)).toBeInTheDocument();
+
+        await act(async () => {
+            await SyncService.setSyncBackend('off');
+        });
+
+        expect(window.localStorage.getItem('mindwtr-sync-backend')).toBe('off');
+        expect(SyncService.getSyncStatus().backend).toBe('off');
+        expect(queryByText(/WebDAV sync is using HTTP/)).not.toBeInTheDocument();
+    });
+
     it('shows a cleartext HTTP banner for WebDAV sync', async () => {
         const backendSpy = vi.spyOn(SyncService, 'getSyncBackend').mockResolvedValue('webdav');
         const webdavSpy = vi.spyOn(SyncService, 'getWebDavConfig').mockResolvedValue({

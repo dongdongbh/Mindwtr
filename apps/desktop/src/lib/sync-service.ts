@@ -1263,10 +1263,11 @@ export class SyncService {
      *  intermediate 'off' write, which would blink the footer and wipe the
      *  error text a failed save just produced. */
     static async noteSyncBackendPersisted(backend: SyncBackend): Promise<void> {
-        SyncService.updateSyncStatus({ backend });
         if (SyncService.lastConfigurationSnapshot) {
             SyncService.lastConfigurationSnapshot = { ...SyncService.lastConfigurationSnapshot, backend };
         }
+        // Status subscribers synchronously derive UI from the cached selection.
+        SyncService.updateSyncStatus({ backend });
         if (backend !== 'off') return;
         // Sync reporting ends with sync: once no future sync can clear it, a
         // stale conflict/error status would re-toast at every launch (#1001).
