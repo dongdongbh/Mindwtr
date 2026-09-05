@@ -46,7 +46,7 @@ import { useCollapsedGroupsViewState, useTaskGroupCollapse } from './list/useTas
 import { GroupBySelect } from './list/GroupBySelect';
 import { LIST_END_GAP, SortBySelect, ToolbarButton, VIEW_FILTER_INPUT } from './list/list-toolbar';
 import { useUiStore } from '../../store/ui-store';
-import { resolveNonDoneTaskSortBy } from '../../lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 
 type BulkTokenPickerState = {
     field: 'tags' | 'contexts';

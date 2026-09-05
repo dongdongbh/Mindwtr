@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useTaskStore } from '@mindwtr/core';
 
 import { ListHeader } from './ListHeader';
-import { resolveNonDoneTaskSortBy } from '../../../lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 import { openToolbarSelect } from '../../../test/toolbar-select';
 
 const translations: Record<string, string> = {

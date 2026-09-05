@@ -59,7 +59,7 @@ import { nextDensityMode } from '../../lib/density';
 import { AREA_FILTER_ALL, AREA_FILTER_NONE, areaFilterSelectionToValue, isTaskVisibleInArea, projectMatchesAreaFilterSelection, taskMatchesAreaFilterSelection } from '@mindwtr/core';
 import { useAreaVisibility } from '../../hooks/useVisibleTaskContext';
 import { sortDoneTasksForListView } from './list/done-sort';
-import { DONE_SORT_OPTIONS, LIST_END_GAP, VIEW_FILTER_INPUT } from './list/list-toolbar';
+import { DONE_TASK_LIST_SORT_OPTIONS, LIST_END_GAP, VIEW_FILTER_INPUT } from './list/list-toolbar';
 import {
     DONE_AXES,
     FOCUS_AXES,
@@ -91,7 +91,7 @@ import {
 } from './list/virtual-list';
 import { QuickAddSyntaxHint } from '../ui/QuickAddSyntaxHint';
 import { useFutureStartRevealTick, useLocalDayKey } from '../../hooks/useLocalDayKey';
-import { resolveDoneTaskSortBy, resolveNonDoneTaskSortBy } from '../../lib/task-list-sort';
+import { resolveDoneTaskSortBy, resolveNonDoneTaskSortBy } from '@mindwtr/core';
 
 
 interface ListViewProps {
@@ -990,7 +990,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                         showGroupBy
                         groupBy={activeGroupBy}
                         groupByOptions={groupByOptions}
-                        sortByOptions={statusFilter === 'done' ? DONE_SORT_OPTIONS : undefined}
+                        sortByOptions={statusFilter === 'done' ? DONE_TASK_LIST_SORT_OPTIONS : undefined}
                         onChangeGroupBy={(value) => {
                             if (statusFilter === 'reference') {
                                 setListOptions({ referenceGroupBy: value as ReferenceGroupBy });

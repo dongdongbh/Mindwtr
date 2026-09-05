@@ -59,6 +59,7 @@ export * from './sync-remote-fence';
 export * from './sync-remote-fence-providers';
 export * from './diceware';
 export * from './task-utils';
+export * from './task-list-sort-options';
 export * from './view-sections';
 export * from './task-speech';
 export * from './completion-grouping';

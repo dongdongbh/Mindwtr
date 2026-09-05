@@ -36,7 +36,7 @@ import { GroupBySelect } from './list/GroupBySelect';
 import { GroupedTaskList } from './list/GroupedTaskSections';
 import { useCollapsedGroupsViewState, useTaskGroupCollapse } from './list/useTaskGroupCollapse';
 import { ListFiltersPanel } from './list/ListFiltersPanel';
-import { DONE_SORT_OPTIONS, LIST_END_GAP, SortBySelect, ToolbarButton, VIEW_FILTER_INPUT } from './list/list-toolbar';
+import { DONE_TASK_LIST_SORT_OPTIONS, LIST_END_GAP, SortBySelect, ToolbarButton, VIEW_FILTER_INPUT } from './list/list-toolbar';
 import {
     PRIORITY_FILTER_OPTIONS,
     TIME_ESTIMATE_FILTER_OPTIONS,
@@ -53,7 +53,7 @@ import { useTaskSelection } from './list/useTaskSelection';
 import { useUiStore } from '../../store/ui-store';
 import { useLocalDayKey } from '../../hooks/useLocalDayKey';
 import { useAreaVisibility } from '../../hooks/useVisibleTaskContext';
-import { resolveDoneTaskSortBy } from '../../lib/task-list-sort';
+import { resolveDoneTaskSortBy } from '@mindwtr/core';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
 
 type ArchiveProjectRowProps = {
@@ -616,7 +616,7 @@ export function ArchiveView() {
                             </ToolbarButton>
                         )}
                         <SortBySelect
-                            options={DONE_SORT_OPTIONS}
+                            options={DONE_TASK_LIST_SORT_OPTIONS}
                             value={sortBy}
                             onChange={(value) => setListOptions({ archivedSortBy: value })}
                             t={t}

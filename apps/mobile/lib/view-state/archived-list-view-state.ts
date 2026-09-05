@@ -1,5 +1,5 @@
 import type { TaskSortBy } from '@mindwtr/core';
-import { DONE_TASK_LIST_SORT_OPTIONS } from '@/lib/task-list-sort';
+import { DONE_TASK_LIST_SORT_OPTIONS } from '@mindwtr/core';
 
 export const ARCHIVED_LIST_VIEW_STATE_STORAGE_KEY = 'mindwtr:view:archived:v1';
 // Same axes as Done: everything filed in Archive is finished work, so

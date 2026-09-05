@@ -26,7 +26,7 @@ import { usePersistedViewState } from '../../hooks/usePersistedViewState';
 import { CONTEXTS_AXES, groupTasks, sanitizeAxis, type ContextsGroupBy, type TaskGroup } from './list/next-grouping';
 import { GroupedTaskSections } from './list/GroupedTaskSections';
 import { useTaskSelection } from './list/useTaskSelection';
-import { resolveNonDoneTaskSortBy } from '../../lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 
 const STATUS_OPTIONS: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'done'];
 const REVIEW_VIEW_STATE_STORAGE_KEY = 'mindwtr:view:review:v1';

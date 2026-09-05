@@ -1,8 +1,7 @@
 import { createWithEqualityFn } from 'zustand/traditional';
-import { useTaskStore, type FilterCriteria, type TaskSortBy } from '@mindwtr/core';
+import { DONE_TASK_LIST_SORT_OPTIONS, useTaskStore, type FilterCriteria, type TaskSortBy } from '@mindwtr/core';
 import { DONE_AXES, FOCUS_AXES, REFERENCE_AXES, SOMEDAY_AXES, sanitizeAxis, type DoneGroupBy, type NextGroupBy, type ReferenceGroupBy, type SomedayGroupBy } from '../components/views/list/next-grouping';
 import { HIDDEN_SIDEBAR_VIEWS_STORAGE_KEY, sanitizeHiddenSidebarViews, type HideableSidebarViewId } from '../lib/sidebar-views';
-import { DONE_SORT_OPTIONS } from '../lib/task-list-sort';
 
 const toastTimeouts = new Map<string, number>();
 // These are the localStorage sanitizers for what the Focus/Next and Reference
@@ -73,10 +72,10 @@ function readStoredListOptions(): ListOptions {
         const raw = storage.getItem(LIST_OPTIONS_STORAGE_KEY);
         if (!raw) return DEFAULT_LIST_OPTIONS;
         const parsed = JSON.parse(raw) as Partial<ListOptions> | null;
-        const doneSortBy = DONE_SORT_OPTIONS.includes(parsed?.doneSortBy as TaskSortBy)
+        const doneSortBy = DONE_TASK_LIST_SORT_OPTIONS.includes(parsed?.doneSortBy as TaskSortBy)
             ? parsed?.doneSortBy as TaskSortBy
             : undefined;
-        const archivedSortBy = DONE_SORT_OPTIONS.includes(parsed?.archivedSortBy as TaskSortBy)
+        const archivedSortBy = DONE_TASK_LIST_SORT_OPTIONS.includes(parsed?.archivedSortBy as TaskSortBy)
             ? parsed?.archivedSortBy as TaskSortBy
             : undefined;
         // Every list shared nextGroupBy before #1063, so a key the blob does not

@@ -87,11 +87,8 @@ import {
 } from '@/hooks/use-task-filter-selections';
 import { usePruneSelectionToVisible, useTaskListSelection } from './use-task-list-selection';
 import { useLocalDayKey } from '@/hooks/use-local-day-key';
-import {
-  DONE_TASK_LIST_SORT_OPTIONS,
-  TASK_LIST_SORT_OPTIONS,
-  resolveTaskListSortBy,
-} from '@/lib/task-list-sort';
+import { DONE_TASK_LIST_SORT_OPTIONS, TASK_LIST_SORT_OPTIONS } from '@mindwtr/core';
+import { resolveTaskListSortBy } from '@/lib/task-list-sort';
 import { DONE_LIST_GROUP_OPTIONS } from '@/lib/view-state/done-list-view-state';
 import { useCollapsedTaskGroups } from '@/lib/view-state/task-group-collapse-state';
 

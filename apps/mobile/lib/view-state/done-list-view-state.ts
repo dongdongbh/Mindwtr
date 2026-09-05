@@ -1,5 +1,5 @@
 import type { TaskSortBy } from '@mindwtr/core';
-import { DONE_TASK_LIST_SORT_OPTIONS } from '@/lib/task-list-sort';
+import { DONE_TASK_LIST_SORT_OPTIONS } from '@mindwtr/core';
 
 export const DONE_LIST_VIEW_STATE_STORAGE_KEY = 'mindwtr:view:done:v1';
 export const DONE_LIST_GROUP_OPTIONS = ['none', 'completedDate', 'context', 'area', 'project', 'tag'] as const;

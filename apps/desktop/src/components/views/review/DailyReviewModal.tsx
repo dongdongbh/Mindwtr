@@ -26,7 +26,7 @@ import { InboxProcessor } from '../InboxProcessor';
 import { Dialog, DialogHeader } from '../../ui/Dialog';
 import { TaskItem } from '../../TaskItem';
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
-import { resolveNonDoneTaskSortBy } from '../../../lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 import { useLocalDayKey } from '../../../hooks/useLocalDayKey';
 
 type DailyReviewStep = 'today' | 'focus' | 'inbox' | 'waiting' | 'completed';

@@ -25,7 +25,7 @@ import { useTaskListScope } from './list/task-list-scope';
 import { LIST_END_GAP } from './list/list-toolbar';
 import { useTaskSelection } from './list/useTaskSelection';
 import { useUiStore } from '../../store/ui-store';
-import { resolveNonDoneTaskSortBy } from '../../lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 
 interface SearchViewProps {
     savedSearchId: string;
