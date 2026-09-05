@@ -2,7 +2,7 @@
   "name": "mobile",
   "license": "AGPL-3.0-only",
   "main": "index.js",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "scripts": {
     "postinstall": "node scripts/patch_query_string_cjs.js",
     "start": "expo start",

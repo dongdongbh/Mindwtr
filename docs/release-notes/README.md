@@ -104,6 +104,7 @@ Versioned notes for desktop/mobile/core/cloud releases live in this folder.
 - [v1.2.5](./1.2.5.md)
 - [v1.2.6](./1.2.6.md)
 - [v1.2.7](./1.2.7.md)
+- [v1.2.8](./1.2.8.md)
 
 ## Store-Specific Notes
 

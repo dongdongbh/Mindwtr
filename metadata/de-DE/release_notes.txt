@@ -1,4 +1,4 @@
-- Projekte erhalten Startdaten und erscheinen als Zeitraum in der Zeitleiste.
-- Sync-Einstellungen werden nach einer Prüfung aktiviert; Anhänge werden bei WebDAV, Dropbox, Dateisynchronisierung, iCloud und eigenen Servern sicherer wiederhergestellt.
-- Leerlauf-Sync benötigt weniger Arbeit, während Status und Diagnose klarere Ergebnisse liefern.
-- Kalenderdaten, Dropbox-Anmeldung, archivierte Projekte und Übersetzungen arbeiten zuverlässiger.
+- Notizen lassen sich direkt aus dem Eingang mit Projekt- und Bereichsauswahl sowie über das Statusmenü jeder Aufgabe als Referenz ablegen.
+- Der Sync wiederholt sich nicht mehr alle paar Sekunden, nachdem ein anderes Gerät Anhänge gelöscht hat; ein Abbruch gibt die Sperre frei, ein unprüfbarer Sync-Ort nennt Datei und Grund.
+- iCloud-Sync funktioniert wieder bei Projekten mit Startdatum und nennt die echte Ursache einer Ablehnung.
+- Wochenansicht mit fünf Tagen, Übersetzungen korrigiert.

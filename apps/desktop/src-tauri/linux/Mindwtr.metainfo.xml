@@ -88,6 +88,23 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="1.2.8" date="2026-09-05">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.8</url>
+      <description>
+        <p>Mindwtr 1.2.8 brings a compact project header, a more readable Timeline, quieter sync, and MCP link attachments.</p>
+        <p xml:lang="de">Mindwtr 1.2.8 bringt eine kompakte Projektkopfzeile, eine besser lesbare Zeitleiste, ruhigeren Sync und MCP-Link-Anhaenge.</p>
+        <ul>
+          <li>File a note as Reference straight from the Inbox with project and area pickers, and from any task's status menu.</li>
+          <li xml:lang="de">Notizen lassen sich direkt aus dem Eingang mit Projekt- und Bereichsauswahl sowie ueber das Statusmenue jeder Aufgabe als Referenz ablegen.</li>
+          <li>The project header fits one row with a menu for Details, Duplicate, Archive, and Delete; Timeline separates projects, opens centered on today, and stays crisp on scaled displays; hover-revealed row buttons are back; the Daily Review lists every task it counts; the calendar timeline fills tall windows.</li>
+          <li xml:lang="de">Die Projektkopfzeile passt in eine Zeile mit einem Menue fuer Details, Duplizieren, Archivieren und Loeschen; die Zeitleiste trennt Projekte, oeffnet zentriert auf heute und bleibt auf skalierten Anzeigen scharf; die beim Ueberfahren eingeblendeten Zeilenschaltflaechen sind zurueck; die taegliche Revision listet jede gezaehlte Aufgabe; die Kalenderzeitleiste fuellt hohe Fenster.</li>
+          <li>Sync no longer repeats every few seconds after another device deleted attachments, a File Sync folder can be joined before its attachments arrive, an interrupted sync releases its lock, and a sync location that cannot be verified names the file and the reason.</li>
+          <li xml:lang="de">Der Sync wiederholt sich nicht mehr alle paar Sekunden, nachdem ein anderes Geraet Anhaenge geloescht hat; ein Dateisynchronisierungsordner laesst sich beitreten, bevor seine Anhaenge eintreffen; ein abgebrochener Sync gibt seine Sperre frei, und ein nicht pruefbarer Sync-Ort nennt Datei und Grund.</li>
+          <li>MCP tools accept link attachments and refuse links to network shares, editing no longer rebuilds the task index for hidden overlays, and translations are corrected.</li>
+          <li xml:lang="de">MCP-Werkzeuge akzeptieren Link-Anhaenge und lehnen Links auf Netzwerkfreigaben ab, Bearbeiten baut den Aufgabenindex fuer verborgene Overlays nicht mehr neu auf, und Uebersetzungen sind korrigiert.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.7" date="2026-09-03">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.7</url>
       <description>

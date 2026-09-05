@@ -2,7 +2,7 @@
   "name": "mindwtr-cloud",
   "license": "AGPL-3.0-only",
   "private": true,
-  "version": "1.2.7",
+  "version": "1.2.8",
   "type": "module",
   "scripts": {
     "dev": "bun run src/server.ts",

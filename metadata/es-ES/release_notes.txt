@@ -1,4 +1,4 @@
-- Añade fechas de inicio a los proyectos y muestra su duración en la cronología.
-- Activa los ajustes de sincronización tras verificarlos y recupera adjuntos con más seguridad en WebDAV, Dropbox, carpetas, iCloud y servidores propios.
-- Reduce el trabajo de las sincronizaciones sin cambios y aclara el estado y los diagnósticos.
-- Mejora las fechas del calendario, el acceso a Dropbox, los proyectos archivados y las traducciones.
+- Archiva una nota como Referencia desde la Bandeja de entrada, con selectores de proyecto y área, y desde el menú de estado de cualquier tarea.
+- La sincronización ya no se repite cada pocos segundos tras borrar adjuntos en otro dispositivo; una interrupción libera el bloqueo y una ubicación no verificable indica el archivo.
+- iCloud vuelve a sincronizar bibliotecas con fecha de inicio de proyecto e indica la causa real de un rechazo.
+- Vista de semana con cinco días y traducciones corregidas.
