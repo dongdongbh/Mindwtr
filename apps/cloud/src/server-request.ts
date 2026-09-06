@@ -7,6 +7,7 @@ import {
     toRateLimitRoute,
     type AllowedAuthTokens,
 } from './server-auth';
+import { lookupCaptureToken, type TokenScope } from './server-capture-tokens';
 import { errorResponse } from './server-config';
 import type { RateLimiter } from './server-rate-limit';
 
@@ -50,6 +51,11 @@ export type ServerConfig = {
      * (see /v1/attachments/:path DELETE, which never mutates without an existing file).
      */
     guardMethods?: (method: string) => boolean;
+    /**
+     * Set only on POST /v1/capture: a capture-only token (#1178) authenticates
+     * there as its owner's namespace and is refused with 403 on every other route.
+     */
+    acceptsCaptureTokens?: boolean;
 };
 
 const defaultGuardMethods = (method: string): boolean => method !== 'GET' && method !== 'HEAD';
@@ -90,19 +96,35 @@ export async function withNamespace(
     req: Request,
     url: URL,
     cfg: ServerConfig,
-    handler: (ctx: { key: string; filePath: string }) => Promise<Response | null>,
+    handler: (ctx: { key: string; filePath: string; scope: TokenScope }) => Promise<Response | null>,
     signal?: AbortSignal,
 ): Promise<Response | null> {
     const token = getToken(req);
     if (!token) return cfg.unauthorizedResponse(req);
-    if (!isAuthorizedToken(token, cfg.allowedAuthTokens)) return cfg.unauthorizedResponse(req, token);
-    const key = tokenToKey(token);
+    let key: string;
+    let scope: TokenScope;
+    const captureToken = lookupCaptureToken(cfg.dataDir, token);
+    if (captureToken) {
+        if (!cfg.acceptsCaptureTokens || req.method !== 'POST') return errorResponse('Capture-only token', 403);
+        // A capture token lives only as long as its owner's full token is allowlisted...
+        if (cfg.allowedAuthTokens && !cfg.allowedAuthTokens.keys.has(captureToken.namespaceKey)) {
+            return cfg.unauthorizedResponse(req, token);
+        }
+        // ...and its namespace exists: it must never create one or pass admission.
+        if (!namespaceExists(cfg.dataDir, captureToken.namespaceKey)) return errorResponse('Capture token namespace missing', 403);
+        key = captureToken.namespaceKey;
+        scope = 'capture';
+    } else {
+        if (!isAuthorizedToken(token, cfg.allowedAuthTokens)) return cfg.unauthorizedResponse(req, token);
+        key = tokenToKey(token);
+        scope = 'full';
+    }
     const pathname = normalizeRequestPathname(url);
     const rateKey = `${key}:${req.method}:${toRateLimitRoute(pathname)}`;
     const rateLimitResponse = cfg.rateLimiter.check(rateKey, cfg.maxPerWindow);
     if (rateLimitResponse) return rateLimitResponse;
     const guardMethods = cfg.guardMethods ?? defaultGuardMethods;
-    if (guardMethods(req.method)) {
+    if (scope === 'full' && guardMethods(req.method)) {
         if (!cfg.allowedAuthTokens && !namespaceExists(cfg.dataDir, key)) {
             const admissionResponse = await cfg.runWithNamespaceAdmission(async (): Promise<Response | null> => {
                 // Recheck after taking the process-safe global lock. Write routes
@@ -123,5 +145,5 @@ export async function withNamespace(
         }
     }
     const filePath = join(cfg.dataDir, `${key}.json`);
-    return handler({ key, filePath });
+    return handler({ key, filePath, scope });
 }

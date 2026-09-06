@@ -37,6 +37,7 @@ export type CloudFailureContext = {
 };
 
 export const CLOUD_LOG_MESSAGES = [
+    'Capture token created',
     'Capture webhook request accepted',
     'Failed to clone cloud app data cache entry',
     'Failed to start server',
@@ -75,6 +76,7 @@ type CloudOperationalLogContext = Partial<Record<
     | 'route'
     | 'signal'
     | 'status'
+    | 'tokenScope'
     | 'trustedProxyIps',
     string | number
 >>;

@@ -81,6 +81,7 @@ import {
     handleOrphanAttachmentGcRequest,
 } from './server-attachments';
 import { CAPTURE_ROUTE_PATH, handleCaptureRequest } from './server-capture';
+import { CAPTURE_TOKENS_ROUTE_PATH, handleCaptureTokensRequest } from './server-capture-tokens';
 import {
     asStatus,
     pickTaskList,
@@ -153,6 +154,7 @@ const STATIC_CLOUD_ROUTES = new Set([
     '/v1/attachments/orphans',
     '/v1/calendar/feed',
     '/v1/capture',
+    '/v1/capture-tokens',
     '/v1/data',
     '/v1/projects',
     '/v1/search',
@@ -168,6 +170,7 @@ export function canonicalCloudRoute(pathname: string): string {
     if (/^\/v1\/projects\/[^/]+$/.test(pathname)) return '/v1/projects/:id';
     if (/^\/v1\/sections\/[^/]+$/.test(pathname)) return '/v1/sections/:id';
     if (/^\/v1\/areas\/[^/]+$/.test(pathname)) return '/v1/areas/:id';
+    if (/^\/v1\/capture-tokens\/[^/]+$/.test(pathname)) return '/v1/capture-tokens/:id';
     if (/^\/v1\/calendar\/[^/]+\.ics$/.test(pathname)) return '/v1/calendar/:token';
     if (pathname.startsWith('/v1/attachments/')) return '/v1/attachments/:path';
     return 'unmatched';
@@ -1094,6 +1097,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
         initializeNamespace: () => undefined,
     };
     const attachmentServerConfig: ServerConfig = { ...baseServerConfig, maxPerWindow: maxAttachmentPerWindow };
+    // The one route a capture-only token (#1178) may use.
+    const captureServerConfig: ServerConfig = { ...baseServerConfig, acceptsCaptureTokens: true };
     // /v1/attachments/orphans previously checked "is this POST or DELETE" *before*
     // ever consulting the namespace guard, so an unsupported method (e.g. PATCH)
     // fell straight through to 405 regardless of cap state; only guard POST/DELETE
@@ -1360,10 +1365,11 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                 // per-token write lock as POST /v1/tasks; the whole-request byte cap is
                 // the attachment one, because the posted audio rides inside the body.
                 if (pathname === CAPTURE_ROUTE_PATH) {
-                    const captureResponse = await withNamespace(req, url, baseServerConfig, async (ctx) => (
+                    const captureResponse = await withNamespace(req, url, captureServerConfig, async (ctx) => (
                         handleCaptureRequest(req, {
                             dataDir,
                             key: ctx.key,
+                            tokenScope: ctx.scope,
                             filePath: ctx.filePath,
                             maxCaptureBytes: maxAttachmentBytes,
                             maxTextBytes: maxBodyBytes,
@@ -1378,6 +1384,24 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                         })
                     ), requestAbortController.signal);
                     if (captureResponse) return captureResponse;
+                }
+
+                // Capture-token management (#1178): full token only; withNamespace
+                // refuses a capture token here with 403.
+                if (pathname === CAPTURE_TOKENS_ROUTE_PATH || pathname.startsWith(`${CAPTURE_TOKENS_ROUTE_PATH}/`)) {
+                    const captureTokensResponse = await withNamespace(req, url, baseServerConfig, async (ctx) => (
+                        handleCaptureTokensRequest(req, pathname, {
+                            dataDir,
+                            key: ctx.key,
+                            filePath: ctx.filePath,
+                            initializeNamespace: baseServerConfig.initializeNamespace,
+                            maxBodyBytes,
+                            abortSignal: requestAbortController.signal,
+                            assertStorageRoot,
+                            withWriteLock: withRequestWriteLock,
+                        })
+                    ), requestAbortController.signal);
+                    if (captureTokensResponse) return captureTokensResponse;
                 }
 
                 if (pathname === '/v1/data') {

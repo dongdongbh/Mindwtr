@@ -236,6 +236,7 @@ describe('POST /v1/capture', () => {
         expect(proofLines[1].context.hasAudio).toBe('false');
         expect(proofLines[1].context.bodyKind).toBe('json');
         expect(typeof proofLines[1].context.bytes).toBe('number');
+        expect(proofLines.map((line) => line.context.tokenScope)).toEqual(['full', 'full']);
 
         const serialized = captured.join('');
         expect(serialized).not.toContain('Secret errand text');
@@ -508,6 +509,7 @@ describe('POST /v1/capture', () => {
             await expect(handleCaptureRequest(request, {
                 dataDir,
                 key,
+                tokenScope: 'full',
                 filePath,
                 maxCaptureBytes: 10_000_000,
                 maxTextBytes: 100_000,

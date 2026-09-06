@@ -226,5 +226,8 @@ export function toRateLimitRoute(pathname: string): string {
     if (/^\/v1\/tasks\/[^/]+$/.test(pathname)) {
         return '/v1/tasks/:id';
     }
+    if (/^\/v1\/capture-tokens\/[^/]+$/.test(pathname)) {
+        return '/v1/capture-tokens/:id';
+    }
     return pathname;
 }

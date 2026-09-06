@@ -274,6 +274,8 @@ export type CaptureRequestOptions = {
     dataDir: string;
     /** Namespace key (the token digest), as resolved by withNamespace. */
     key: string;
+    /** Which kind of token authenticated the request (#1178); logged, never stored. */
+    tokenScope: 'full' | 'capture';
     filePath: string;
     /** Whole-request cap for a multipart capture; the audio rides inside it. */
     maxCaptureBytes: number;
@@ -380,6 +382,7 @@ export async function handleCaptureRequest(
             hasAudio: audio ? 'true' : 'false',
             bodyKind: isMultipart ? 'multipart' : contentType === 'application/json' ? 'json' : 'text',
             bytes: bytes.byteLength,
+            tokenScope: options.tokenScope,
         });
         // Report what was actually stored, in case the shared finalize pass touched it.
         return jsonResponse({ task: savedTask, attachment: savedTask.attachments?.[0] ?? null }, { status: 201 });

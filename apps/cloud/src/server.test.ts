@@ -2082,6 +2082,8 @@ describe('cloud server api', () => {
         expect(canonicalCloudRoute('/v1/tasks/task-secret/complete')).toBe('/v1/tasks/:id/complete');
         expect(canonicalCloudRoute('/v1/attachments/private/folder/file.pdf')).toBe('/v1/attachments/:path');
         expect(canonicalCloudRoute('/v1/calendar/private-token.ics')).toBe('/v1/calendar/:token');
+        expect(canonicalCloudRoute('/v1/capture-tokens')).toBe('/v1/capture-tokens');
+        expect(canonicalCloudRoute('/v1/capture-tokens/private-id')).toBe('/v1/capture-tokens/:id');
         expect(canonicalCloudRoute('/private/unknown/path')).toBe('unmatched');
     });
 
