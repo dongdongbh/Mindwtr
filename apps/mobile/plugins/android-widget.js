@@ -107,8 +107,11 @@ const buildWidgetStylesXml = () => `<?xml version="1.0" encoding="utf-8"?>
   <style name="${QUICK_CAPTURE_THEME}" parent="Theme.AppCompat.DayNight.Dialog">
     <item name="windowNoTitle">true</item>
     <item name="windowActionBar">false</item>
-    <item name="android:windowMinWidthMajor">65%</item>
-    <item name="android:windowMinWidthMinor">92%</item>
+    <item name="android:windowBackground">@android:color/transparent</item>
+    <item name="android:windowIsFloating">true</item>
+    <item name="android:backgroundDimEnabled">true</item>
+    <item name="android:windowMinWidthMajor">60%</item>
+    <item name="android:windowMinWidthMinor">90%</item>
     <item name="colorAccent">#2563EB</item>
   </style>
 </resources>

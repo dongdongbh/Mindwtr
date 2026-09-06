@@ -4,6 +4,7 @@
      Same values as widget-data.ts's light palette. -->
 <resources>
     <color name="mindwtr_widget_background">#F8FAFC</color>
+    <color name="mindwtr_widget_card">#FFFFFF</color>
     <color name="mindwtr_widget_text">#0F172A</color>
     <color name="mindwtr_widget_muted_text">#475569</color>
     <color name="mindwtr_widget_accent">#2563EB</color>

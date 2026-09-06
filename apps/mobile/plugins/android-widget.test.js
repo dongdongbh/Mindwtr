@@ -60,6 +60,9 @@ describe('android-widget', () => {
     const xml = buildWidgetStylesXml();
     expect(xml).toContain('parent="Theme.AppCompat.DayNight.Dialog"');
     expect(xml).toContain('<item name="windowNoTitle">true</item>');
+    // The dialog draws its own rounded surface in the app palette; the window itself stays clear.
+    expect(xml).toContain('<item name="android:windowBackground">@android:color/transparent</item>');
+    expect(xml).toContain('<item name="android:backgroundDimEnabled">true</item>');
   });
 
   it('registers the receiver, list service and capture activity with explicit boundaries, idempotently', () => {
