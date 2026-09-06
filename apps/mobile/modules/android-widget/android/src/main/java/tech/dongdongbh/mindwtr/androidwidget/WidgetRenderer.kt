@@ -68,10 +68,15 @@ object WidgetRenderer {
     payload: WidgetPayload,
     palette: WidgetPayload.Palette?,
   ) {
-    // Header band: the list's title (the date for Focus), the Inbox chip and "+".
-    val list = payload.listFor(WidgetListStore.read(context, appWidgetId))
-    views.setTextViewText(R.id.mindwtr_widget_title, list.dateLabel?.ifEmpty { null } ?: list.title)
+    // Header: Focus shows the date plus the Inbox chip; any other list shows its
+    // full title with a small count, so the header never reads as two lists.
+    val listId = WidgetListStore.read(context, appWidgetId)
+    val list = payload.listFor(listId)
+    val isFocus = listId == WidgetListStore.DEFAULT_LIST || payload.lists[listId] == null
+    val rowCount = if (list.sections.isEmpty()) list.items.size else list.sections.sumOf { it.items.size }
+    views.setTextViewText(R.id.mindwtr_widget_title, if (isFocus) list.dateLabel?.ifEmpty { null } ?: list.title else "${list.title} · $rowCount")
     views.setTextViewText(R.id.mindwtr_widget_subtitle, "${payload.inboxLabel} ${payload.inboxCount}")
+    views.setViewVisibility(R.id.mindwtr_widget_subtitle, if (isFocus) View.VISIBLE else View.GONE)
     views.setTextViewText(R.id.mindwtr_widget_empty, payload.emptyMessage)
     views.setViewVisibility(R.id.mindwtr_widget_empty, if (list.items.isEmpty() && list.sections.isEmpty()) View.VISIBLE else View.GONE)
 
@@ -100,11 +105,12 @@ object WidgetRenderer {
       PendingIntent.getActivity(context, REQUEST_ROW, rowTemplate, mutable),
     )
 
-    // The header shares the body surface (dd: a solid accent band contrasted
-    // too hard); the accent sits only on the date and the "+".
+    // Header = a low-alpha accent wash over the card with a hairline under it
+    // (dd: some contrast, not the solid band); the accent itself only on "+".
     palette?.let {
       views.setInt(R.id.mindwtr_widget_surface, "setColorFilter", it.background)
-      views.setTextColor(R.id.mindwtr_widget_title, it.accent)
+      views.setInt(R.id.mindwtr_widget_band, "setColorFilter", it.headerWash)
+      views.setTextColor(R.id.mindwtr_widget_title, it.text)
       views.setTextColor(R.id.mindwtr_widget_subtitle, it.mutedText)
       views.setTextColor(R.id.mindwtr_widget_capture, it.accent)
       views.setInt(R.id.mindwtr_widget_header_divider, "setBackgroundColor", it.border)

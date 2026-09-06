@@ -36,7 +36,7 @@ class WidgetPayloadTest {
       "emptyMessage": "All clear",
       "focusUri": "mindwtr:///focus",
       "themeMode": "dark",
-      "palette": {"background": "#111827", "card": "#1F2937", "text": "#F9FAFB", "mutedText": "#CBD5E1", "accent": "#2563EB", "onAccent": "#FFFFFF", "border": "#374151", "warning": "#F59E0B"},
+      "palette": {"background": "#111827", "card": "#1F2937", "text": "#F9FAFB", "mutedText": "#CBD5E1", "accent": "#2563EB", "onAccent": "#FFFFFF", "border": "#374151", "warning": "#F59E0B", "headerWash": "#2563EB2E"},
       "quickCapture": {"title": "Quick capture", "placeholder": "Add task to inbox...", "save": "Save", "cancel": "Cancel", "added": "Task added to Mindwtr."}
     }
   """.trimIndent()
@@ -67,6 +67,7 @@ class WidgetPayloadTest {
     assertEquals("Saturday, Sep 6", payload.dateLabel)
     assertEquals(0xFF374151.toInt(), payload.palette!!.border)
     assertEquals(0xFFF59E0B.toInt(), payload.palette!!.warning)
+    assertEquals(0x2E2563EB, payload.palette!!.headerWash)
     assertNull(payload.sections[1].items[0].contextLabel)
     val rows = TasksWidgetFactory.buildRows(WidgetPayload.ListPayload("", null, payload.sections, payload.items))
     assertEquals(4, rows.size)
@@ -131,7 +132,7 @@ class WidgetPayloadTest {
   @Test
   fun parsesHexColorsWithAndWithoutAlpha() {
     assertEquals(0xFF2563EB.toInt(), WidgetPayload.parseHexColor("#2563EB"))
-    assertEquals(0x802563EB.toInt(), WidgetPayload.parseHexColor("#802563EB"))
+    assertEquals(0x802563EB.toInt(), WidgetPayload.parseHexColor("#2563EB80"))
     assertNull(WidgetPayload.parseHexColor("blue"))
     assertNull(WidgetPayload.parseHexColor(null))
   }

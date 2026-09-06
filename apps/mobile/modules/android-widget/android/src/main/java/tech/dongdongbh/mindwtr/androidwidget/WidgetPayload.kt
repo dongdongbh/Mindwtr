@@ -57,6 +57,7 @@ data class WidgetPayload(
     val onAccent: Int,
     val border: Int,
     val warning: Int,
+    val headerWash: Int,
   )
 
   data class QuickCaptureLabels(
@@ -215,17 +216,22 @@ data class WidgetPayload(
         onAccent = parseHexColor(json.optString("onAccent")) ?: background,
         border = parseHexColor(json.optString("border")) ?: (parseHexColor(json.optString("mutedText")) ?: text),
         warning = parseHexColor(json.optString("warning")) ?: (parseHexColor(json.optString("accent")) ?: text),
+        headerWash = parseHexColor(json.optString("headerWash"))
+          ?: WidgetRenderer.withAlpha(parseHexColor(json.optString("accent")) ?: text, 0x2E),
       )
     }
 
     fun appUriOrNull(value: String?): String? = value?.takeIf { it.startsWith("mindwtr:") }
 
-    /** `#RRGGBB` or `#AARRGGBB` to an ARGB int; android.graphics.Color is a stub on the JVM. */
+    /**
+     * `#RRGGBB` or `#RRGGBBAA` (CSS order, what core's getAccentTint writes) to
+     * an ARGB int; android.graphics.Color is a stub on the JVM.
+     */
     fun parseHexColor(value: String?): Int? {
       val hex = value?.trim()?.removePrefix("#") ?: return null
       val digits = when (hex.length) {
         6 -> "FF$hex"
-        8 -> hex
+        8 -> hex.substring(6, 8) + hex.substring(0, 6)
         else -> return null
       }
       return digits.toLongOrNull(16)?.toInt()

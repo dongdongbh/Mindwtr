@@ -8,5 +8,6 @@
     <color name="mindwtr_widget_accent">#2563EB</color>
     <color name="mindwtr_widget_border">#374151</color>
     <color name="mindwtr_widget_warning">#F59E0B</color>
+    <color name="mindwtr_widget_header_wash">#2E2563EB</color>
     <color name="mindwtr_widget_on_accent">#FFFFFF</color>
 </resources>

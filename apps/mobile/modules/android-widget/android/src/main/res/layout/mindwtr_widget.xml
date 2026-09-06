@@ -31,8 +31,7 @@
                 android:layout_height="match_parent"
                 android:importantForAccessibility="no"
                 android:scaleType="fitXY"
-                android:src="@drawable/mindwtr_widget_band"
-                android:visibility="gone" />
+                android:src="@drawable/mindwtr_widget_band" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -49,7 +48,7 @@
                     android:layout_weight="1"
                     android:ellipsize="end"
                     android:singleLine="true"
-                    android:textColor="@color/mindwtr_widget_accent"
+                    android:textColor="@color/mindwtr_widget_text"
                     android:textSize="15sp"
                     android:textStyle="bold" />
 

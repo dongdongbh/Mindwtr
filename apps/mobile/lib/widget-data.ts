@@ -1,5 +1,6 @@
 import {
     computeTodayFocusTasks,
+    getAccentTint,
     getTaskAccentColor,
     getUpcomingDeferredTasks,
     hasTimeComponent,
@@ -103,6 +104,8 @@ export interface WidgetPalette {
     accent: WidgetColor;
     onAccent: WidgetColor;
     warning: WidgetColor;
+    // Accent wash for the widget header band over the card (core getAccentTint).
+    headerWash: WidgetColor;
 }
 
 // One list a placed Tasks widget can show (#1173); `focus` mirrors the
@@ -300,6 +303,7 @@ const resolveWidgetPalette = (
             accent: preset.tint,
             onAccent: preset.onTint,
             warning: preset.warning,
+            headerWash: (getAccentTint(preset.tint, isDarkPreset(preset) ? 0.18 : 0.12) ?? preset.tint) as WidgetColor,
         };
     }
 
@@ -318,6 +322,7 @@ const resolveWidgetPalette = (
             accent: '#2563EB',
             onAccent: '#FFFFFF',
             warning: '#F59E0B',
+            headerWash: getAccentTint('#2563EB', 0.18) as WidgetColor,
         };
     }
 
@@ -330,7 +335,18 @@ const resolveWidgetPalette = (
         accent: '#2563EB',
         onAccent: '#FFFFFF',
         warning: '#D97706',
+        headerWash: getAccentTint('#2563EB', 0.12) as WidgetColor,
     };
+};
+
+// A preset counts as dark when its background is darker than mid-grey.
+const isDarkPreset = (preset: { bg: string }): boolean => {
+    const hex = preset.bg.replace('#', '');
+    if (hex.length !== 6) return false;
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 < 128;
 };
 
 export function buildWidgetPayload(

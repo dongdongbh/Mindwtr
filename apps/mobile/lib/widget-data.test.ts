@@ -138,6 +138,7 @@ describe('widget-data', () => {
         expect(payload.sections[2].detail).toBeNull();
         expect(payload.dateLabel).toMatch(/\d/);
         expect(payload.palette.warning).toMatch(/^#/);
+        expect(payload.palette.headerWash).toMatch(/^#[0-9a-f]{8}$/i);
         expect(scheduleByTitle.get('Due today')?.contextLabel).toBe('Home');
         expect(payload.sections[2].items[0]).toMatchObject({ priorityColor: null, contextLabel: null });
         // Priorities off: the colour is gated with the feature.
