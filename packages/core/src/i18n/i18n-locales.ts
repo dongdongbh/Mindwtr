@@ -139,7 +139,9 @@ export const LOCALES = {
         mode: 'overrides',
         native: 'Español',
         nonLatin: false,
-        translatedKeyFloor: 1374,
+        // Complete translation with every English key translated. Keep this at full parity
+        // so new English UI copy cannot silently fall back in Spanish.
+        translatedKeyFloor: 'all',
     },
     hi: {
         loadSync: () => require('./locales/hi') as typeof import('./locales/hi'),

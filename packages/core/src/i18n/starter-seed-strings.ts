@@ -174,7 +174,7 @@ export const STARTER_SEED_STRINGS: Record<Language, Record<string, string>> = {
         "starter.weeklyReview.title": "做你的第一次每週回顧",
     },
     "es": {
-        "starter.focus.check1": "Abrir Foco",
+        "starter.focus.check1": "Abrir Enfoque",
         "starter.focus.check2": "Usa la estrella para elegir tus tareas principales",
         "starter.focus.check3": "Aplaza una tarea para ocultarla hasta que la necesites",
         "starter.focus.desc": "Elige las pocas cosas que de verdad harás hoy.",
