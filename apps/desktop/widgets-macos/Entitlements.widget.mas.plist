@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Mac App Store variant of Entitlements.widget.plist (#1054). Same
+         sandbox + App Group, plus the application-identifier and
+         team-identifier every App Store bundle must carry; the widget also
+         ships its own embedded.provisionprofile (copied in by
+         scripts/build-macos-widget.sh in App Store mode). -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <!-- scripts/build-macos-widget.sh substitutes this with
+             "$APPLE_TEAM_ID.tech.dongdongbh.mindwtr" at package time. -->
+        <string>__MINDWTR_MACOS_APP_GROUP__</string>
+    </array>
+    <!-- Both placeholders resolve to $APPLE_TEAM_ID at package time. -->
+    <key>com.apple.application-identifier</key>
+    <string>__MINDWTR_MACOS_TEAM_ID__.tech.dongdongbh.mindwtr.MindwtrWidgets</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>__MINDWTR_MACOS_TEAM_ID__</string>
+</dict>
+</plist>

@@ -30,5 +30,16 @@
     <string>5X9JC5PL7T.tech.dongdongbh.mindwtr</string>
     <key>com.apple.developer.team-identifier</key>
     <string>5X9JC5PL7T</string>
+    <!-- Shared with the macOS widget extension (#1054). The placeholder is
+         resolved to "$APPLE_TEAM_ID.tech.dongdongbh.mindwtr" and the app
+         re-signed by scripts/build-macos-widget.sh (App Store mode), which
+         runs after `tauri build`'s own first signature. When the App Store
+         build ships without the widget (no MAS_WIDGET_PROVISIONING_PROFILE
+         secret) release-macos-appstore.yml strips this key before the build,
+         so no placeholder ever reaches App Store Connect. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>__MINDWTR_MACOS_APP_GROUP__</string>
+    </array>
 </dict>
 </plist>

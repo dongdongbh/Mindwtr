@@ -2,29 +2,55 @@
 # Builds the macOS WidgetKit "Tasks" widget, embeds it into the already-built
 # Mindwtr.app bundle, and re-signs the outer bundle (#1054).
 #
-# Run on the macOS Developer-ID release runner, AFTER `tauri build --bundles app`
-# produces Mindwtr.app and BEFORE `tauri bundle --bundles dmg` packages it --
-# see .github/workflows/release-macos.yml. The DMG must be built from the app
-# this script modifies, not the other way around, or the widget never ships.
+# Run on the macOS release runner, AFTER `tauri build --bundles app` produces
+# Mindwtr.app and BEFORE the installer (DMG or App Store .pkg) is built from it
+# -- see .github/workflows/release-macos.yml and release-macos-appstore.yml.
+# The installer must be built from the app this script modifies, never by
+# re-running `tauri build`/`tauri bundle`, or the widget silently never ships.
 #
-# Requires an Apple Developer ID signing identity and team ID; skips (exit 0)
-# when neither is configured, e.g. an unsigned PR/fork build of the workflow.
-# Having only one of the two configured is treated as a broken environment
-# (exit 1), not a reason to silently skip.
+# Two distributions, selected by MINDWTR_WIDGET_DISTRIBUTION (default
+# "developer-id"):
+#
+#   developer-id  The notarized DMG. Host entitlements come from
+#                 Entitlements.mac.plist, widget entitlements from
+#                 Entitlements.widget.plist (sandbox + App Group only). The
+#                 App Group is unrestricted on macOS, so no provisioning
+#                 profile is involved anywhere.
+#
+#   appstore      The Mac App Store .pkg. Host entitlements come from
+#                 Entitlements.mas.plist, widget entitlements from
+#                 Entitlements.widget.mas.plist, which additionally carries the
+#                 application-identifier and team-identifier the App Store
+#                 requires for every signed bundle. App Store bundles also need
+#                 their own provisioning profile, so the widget's profile
+#                 (MINDWTR_WIDGET_PROVISIONING_PROFILE, a .provisionprofile for
+#                 bundle id tech.dongdongbh.mindwtr.MindwtrWidgets) is copied
+#                 to <appex>/Contents/embedded.provisionprofile before the
+#                 appex is signed. The host keeps the embedded.provisionprofile
+#                 `tauri build` already placed there.
+#
+# Requires a signing identity and team ID; skips (exit 0) when neither is
+# configured, e.g. an unsigned PR/fork build of the workflow. Having only one
+# of the two configured is treated as a broken environment (exit 1), not a
+# reason to silently skip.
 #
 # Usage: scripts/build-macos-widget.sh <path-to-Mindwtr.app> <apple-team-id> <signing-identity> <rust-target-triple>
+#   <rust-target-triple> is aarch64-apple-darwin, x86_64-apple-darwin, or
+#   universal-apple-darwin (each slice compiled separately, joined with lipo).
 set -euo pipefail
 
 APP_PATH="${1:-}"
 TEAM_ID="${2:-}"
 SIGNING_IDENTITY="${3:-}"
 RUST_TARGET="${4:-}"
+DISTRIBUTION="${MINDWTR_WIDGET_DISTRIBUTION:-developer-id}"
+WIDGET_PROVISIONING_PROFILE="${MINDWTR_WIDGET_PROVISIONING_PROFILE:-}"
 WIDGET_SRC_DIR="apps/desktop/widgets-macos"
-HOST_ENTITLEMENTS="apps/desktop/src-tauri/Entitlements.mac.plist"
 HOST_EXECUTABLE_NAME="mindwtr"
 WIDGET_BUNDLE_ID="tech.dongdongbh.mindwtr.MindwtrWidgets"
 WIDGET_EXECUTABLE_NAME="MindwtrWidgets"
 APP_GROUP_PLACEHOLDER="__MINDWTR_MACOS_APP_GROUP__"
+TEAM_ID_PLACEHOLDER="__MINDWTR_MACOS_TEAM_ID__"
 PLIST_BUDDY="${PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
 
 if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
@@ -33,7 +59,7 @@ if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
 fi
 
 if [ -z "$SIGNING_IDENTITY" ] && [ -z "$TEAM_ID" ]; then
-    echo "No Developer ID signing identity/team configured; skipping the macOS widget (#1054)."
+    echo "No signing identity/team configured; skipping the macOS widget (#1054)."
     exit 0
 fi
 
@@ -52,42 +78,76 @@ if [ -z "$RUST_TARGET" ]; then
 fi
 
 case "$RUST_TARGET" in
-    aarch64-apple-darwin) SWIFT_ARCH="arm64" ;;
-    x86_64-apple-darwin) SWIFT_ARCH="x86_64" ;;
+    aarch64-apple-darwin) SWIFT_ARCHS="arm64" ;;
+    x86_64-apple-darwin) SWIFT_ARCHS="x86_64" ;;
+    universal-apple-darwin) SWIFT_ARCHS="arm64 x86_64" ;;
     *)
         echo "::error::build-macos-widget.sh: unrecognized Rust target triple '${RUST_TARGET}'."
         exit 1
         ;;
 esac
 
+case "$DISTRIBUTION" in
+    developer-id)
+        HOST_ENTITLEMENTS="apps/desktop/src-tauri/Entitlements.mac.plist"
+        WIDGET_ENTITLEMENTS="$WIDGET_SRC_DIR/Entitlements.widget.plist"
+        ;;
+    appstore)
+        HOST_ENTITLEMENTS="apps/desktop/src-tauri/Entitlements.mas.plist"
+        WIDGET_ENTITLEMENTS="$WIDGET_SRC_DIR/Entitlements.widget.mas.plist"
+        if [ -z "$WIDGET_PROVISIONING_PROFILE" ] || [ ! -f "$WIDGET_PROVISIONING_PROFILE" ]; then
+            echo "::error::build-macos-widget.sh: App Store mode needs MINDWTR_WIDGET_PROVISIONING_PROFILE to point at the widget's .provisionprofile (got '${WIDGET_PROVISIONING_PROFILE}')."
+            exit 1
+        fi
+        ;;
+    *)
+        echo "::error::build-macos-widget.sh: unrecognized MINDWTR_WIDGET_DISTRIBUTION '${DISTRIBUTION}' (expected developer-id or appstore)."
+        exit 1
+        ;;
+esac
+
 APP_GROUP="${TEAM_ID}.tech.dongdongbh.mindwtr"
+WIDGET_APPLICATION_IDENTIFIER="${TEAM_ID}.${WIDGET_BUNDLE_ID}"
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
 APPEX_DIR="$WORKDIR/${WIDGET_EXECUTABLE_NAME}.appex"
 mkdir -p "$APPEX_DIR/Contents/MacOS"
+WIDGET_BINARY="$APPEX_DIR/Contents/MacOS/${WIDGET_EXECUTABLE_NAME}"
 
-echo "Compiling macOS widget Swift sources for ${SWIFT_ARCH} (from ${RUST_TARGET})..."
 SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
-swiftc \
-    -O \
-    -sdk "$SDK_PATH" \
-    -target "${SWIFT_ARCH}-apple-macos14.0" \
-    -parse-as-library \
-    -application-extension \
-    -emit-executable \
-    -o "$APPEX_DIR/Contents/MacOS/${WIDGET_EXECUTABLE_NAME}" \
-    "$WIDGET_SRC_DIR"/*.swift
+SLICES=()
+for SWIFT_ARCH in $SWIFT_ARCHS; do
+    SLICE="$WORKDIR/${WIDGET_EXECUTABLE_NAME}-${SWIFT_ARCH}"
+    echo "Compiling macOS widget Swift sources for ${SWIFT_ARCH} (from ${RUST_TARGET})..."
+    swiftc \
+        -O \
+        -sdk "$SDK_PATH" \
+        -target "${SWIFT_ARCH}-apple-macos14.0" \
+        -parse-as-library \
+        -application-extension \
+        -emit-executable \
+        -o "$SLICE" \
+        "$WIDGET_SRC_DIR"/*.swift
+    SLICES+=("$SLICE")
+done
+
+if [ "${#SLICES[@]}" -eq 1 ]; then
+    mv "${SLICES[0]}" "$WIDGET_BINARY"
+else
+    echo "Joining ${#SLICES[@]} widget slices into a universal binary..."
+    lipo -create "${SLICES[@]}" -output "$WIDGET_BINARY"
+fi
 
 echo "Assembling ${WIDGET_EXECUTABLE_NAME}.appex..."
 cp "$WIDGET_SRC_DIR/Info.plist" "$APPEX_DIR/Contents/Info.plist"
-cp "$WIDGET_SRC_DIR/Entitlements.widget.plist" "$WORKDIR/Entitlements.widget.plist"
+cp "$WIDGET_ENTITLEMENTS" "$WORKDIR/Entitlements.widget.plist"
 
 # A backup suffix works with both BSD and GNU sed, which keeps the packaging
 # path hermetically testable on non-macOS CI hosts too.
 sed -i.bak "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g" "$APPEX_DIR/Contents/Info.plist"
-sed -i.bak "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g" "$WORKDIR/Entitlements.widget.plist"
+sed -i.bak "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g; s/${TEAM_ID_PLACEHOLDER}/${TEAM_ID}/g" "$WORKDIR/Entitlements.widget.plist"
 rm -f "$APPEX_DIR/Contents/Info.plist.bak" "$WORKDIR/Entitlements.widget.plist.bak"
 
 APP_VERSION="$($PLIST_BUDDY -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
@@ -95,6 +155,13 @@ APP_BUILD="$($PLIST_BUDDY -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.p
 $PLIST_BUDDY -c "Set :CFBundleShortVersionString ${APP_VERSION}" "$APPEX_DIR/Contents/Info.plist"
 $PLIST_BUDDY -c "Set :CFBundleVersion ${APP_BUILD}" "$APPEX_DIR/Contents/Info.plist"
 $PLIST_BUDDY -c "Set :CFBundleIdentifier ${WIDGET_BUNDLE_ID}" "$APPEX_DIR/Contents/Info.plist"
+
+if [ "$DISTRIBUTION" = "appstore" ]; then
+    # Must land before signing: the profile is part of the sealed bundle, and
+    # App Store validation rejects a nested bundle without its own profile.
+    echo "Embedding the widget's App Store provisioning profile..."
+    cp "$WIDGET_PROVISIONING_PROFILE" "$APPEX_DIR/Contents/embedded.provisionprofile"
+fi
 
 echo "Signing ${WIDGET_EXECUTABLE_NAME}.appex with its own entitlements..."
 codesign --force --options runtime --timestamp \
@@ -110,7 +177,7 @@ rm -rf "${INSTALLED_APPEX:?}"
 cp -R "$APPEX_DIR" "$PLUGINS_DIR/"
 
 echo "Re-signing outer app bundle with the resolved App Group entitlement..."
-RESOLVED_HOST_ENTITLEMENTS="$WORKDIR/Entitlements.mac.resolved.plist"
+RESOLVED_HOST_ENTITLEMENTS="$WORKDIR/Entitlements.host.resolved.plist"
 sed "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g" "$HOST_ENTITLEMENTS" > "$RESOLVED_HOST_ENTITLEMENTS"
 
 # Deliberately NOT `--deep`: the appex above already carries its own,
@@ -129,9 +196,9 @@ codesign --force --options runtime --timestamp \
 # need checking is that this script's own work actually landed: the appex is
 # really there, and neither the host app nor the appex still carries the
 # unresolved placeholder or a group that doesn't match what the other side
-# has. This runs against the exact app that `tauri bundle --bundles dmg`
-# packages next, so a failure here is a failure before the DMG (and
-# notarization) ever sees a broken build.
+# has. This runs against the exact app the installer step packages next, so
+# a failure here is a failure before the DMG/.pkg (and notarization or App
+# Store upload) ever sees a broken build.
 
 assert_entitlement_group() {
     local target="$1"
@@ -164,6 +231,21 @@ APPEX_ENTITLEMENTS="$(codesign -d --entitlements :- "$INSTALLED_APPEX" 2>/dev/nu
 if ! printf '%s' "$APPEX_ENTITLEMENTS" | grep -q "com.apple.security.app-sandbox"; then
     echo "::error::Widget appex is missing the app-sandbox entitlement (mandatory for an appex even in a non-sandboxed host)."
     exit 1
+fi
+
+if [ "$DISTRIBUTION" = "appstore" ]; then
+    if [ ! -f "$INSTALLED_APPEX/Contents/embedded.provisionprofile" ]; then
+        echo "::error::Widget appex is missing Contents/embedded.provisionprofile (App Store validation rejects a nested bundle without its own profile)."
+        exit 1
+    fi
+    if printf '%s' "$APPEX_ENTITLEMENTS" | grep -q "$TEAM_ID_PLACEHOLDER"; then
+        echo "::error::Widget appex: still contains the unresolved placeholder ${TEAM_ID_PLACEHOLDER}."
+        exit 1
+    fi
+    if ! printf '%s' "$APPEX_ENTITLEMENTS" | grep -qF "<string>${WIDGET_APPLICATION_IDENTIFIER}</string>"; then
+        echo "::error::Widget appex: does not carry the expected application-identifier ${WIDGET_APPLICATION_IDENTIFIER}."
+        exit 1
+    fi
 fi
 
 # Cheap regression guard for the host/appex-mismatch failure mode (#1054): if

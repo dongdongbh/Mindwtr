@@ -140,11 +140,30 @@ jobs:
           MAS_INSTALLER_CERT_PASSWORD: ${{ secrets.MAS_INSTALLER_CERT_PASSWORD }}
           MAS_PROVISIONING_PROFILE: ${{ secrets.MAS_PROVISIONING_PROFILE }}
           MAS_SIGNING_IDENTITY: ${{ secrets.MAS_SIGNING_IDENTITY }}
+          # Optional (#1054): base64 of a Mac App Store provisioning profile for
+          # the widget extension's App ID tech.dongdongbh.mindwtr.MindwtrWidgets
+          # (developer portal: register that App ID, create a "Mac App Store
+          # Connect" profile for it, `base64 -i <file>.provisionprofile`). When
+          # set, the .pkg ships Contents/PlugIns/MindwtrWidgets.appex; when
+          # unset, the build is exactly the widget-less one it always was.
+          MAS_WIDGET_PROVISIONING_PROFILE: ${{ secrets.MAS_WIDGET_PROVISIONING_PROFILE }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
           IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
           IOS_ASC_PRIVATE_KEY: ${{ secrets.IOS_ASC_PRIVATE_KEY }}
         run: |
           set -euo pipefail
+          if [ -n "${MAS_WIDGET_PROVISIONING_PROFILE:-}" ]; then
+            echo "HAS_MAS_WIDGET_PROFILE=1" >> "$GITHUB_ENV"
+            echo "MAS_WIDGET_PROVISIONING_PROFILE is set: the App Store build will embed the macOS widget (#1054)."
+            if [ -z "${APPLE_TEAM_ID:-}" ]; then
+              echo "::error::MAS_WIDGET_PROVISIONING_PROFILE is set but APPLE_TEAM_ID is missing; the widget's App Group is derived from the team ID."
+              exit 1
+            fi
+          else
+            echo "HAS_MAS_WIDGET_PROFILE=0" >> "$GITHUB_ENV"
+            echo "MAS_WIDGET_PROVISIONING_PROFILE is not set: the App Store build ships without the macOS widget (#1054)."
+          fi
           CERT_B64="${MAS_CERTIFICATE:-${MAS_CERTIFICATE_BASE64:-${APPLE_CERTIFICATE:-}}}"
           CERT_PWD="${MAS_CERTIFICATE_PWD:-${MAS_CERTIFICATE_PASSWORD:-${APPLE_CERTIFICATE_PASSWORD:-}}}"
           INSTALLER_CERT_B64="${MAS_INSTALLER_CERTIFICATE:-}"
@@ -400,6 +419,26 @@ jobs:
           grep -n '"infoPlist"\|"files"' apps/desktop/src-tauri/tauri.conf.json || true
           grep -n '"infoPlist"\|"files"' apps/desktop/src-tauri/tauri.appstore.conf.json || true
 
+      - name: Drop the widget App Group from App Store entitlements
+        if: env.HAS_MAS_WIDGET_PROFILE != '1'
+        run: |
+          # Entitlements.mas.plist carries the __MINDWTR_MACOS_APP_GROUP__
+          # placeholder for the widget (#1054); only the widget embed step
+          # resolves it. Without the widget the placeholder would be signed
+          # into the host as-is and App Store Connect rejects app-group values
+          # that are not team-ID-prefixed, so remove the key to keep this
+          # build identical to the widget-less one.
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          path = Path("apps/desktop/src-tauri/Entitlements.mas.plist")
+          entitlements = plistlib.loads(path.read_bytes())
+          removed = entitlements.pop("com.apple.security.application-groups", None)
+          path.write_bytes(plistlib.dumps(entitlements))
+          print(f"Removed application-groups {removed!r} from {path} (no widget provisioning profile)")
+          PY
+
       - name: Validate Mac App Store entitlements
         run: |
           python3 - <<'PY'
@@ -438,6 +477,11 @@ jobs:
           # Bundled whisper bindings are only needed on this macOS build path.
           # Linux/AUR source builds must generate native bindings instead.
           WHISPER_DONT_GENERATE_BINDINGS: "1"
+          # build.rs bakes this into the binary as the widget's App Group ID
+          # (team-ID-prefixed). Only set when the widget actually ships so a
+          # build without the widget profile keeps the DEVTEAM placeholder and
+          # is byte-for-byte the build it always was (#1054).
+          APPLE_TEAM_ID: ${{ env.HAS_MAS_WIDGET_PROFILE == '1' && secrets.APPLE_TEAM_ID || '' }}
         run: |
           set -euo pipefail
           # rust-cache can restore stale CMake cache where GGML_NATIVE stayed ON.
@@ -453,6 +497,76 @@ jobs:
             --target universal-apple-darwin \
             --bundles app \
             --config src-tauri/tauri.appstore.conf.json
+
+      - name: Build and embed macOS widget (App Store)
+        if: env.HAS_MAS_WIDGET_PROFILE == '1'
+        timeout-minutes: 15
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MAS_SIGNING_IDENTITY: ${{ secrets.MAS_SIGNING_IDENTITY }}
+          MAS_WIDGET_PROVISIONING_PROFILE: ${{ secrets.MAS_WIDGET_PROVISIONING_PROFILE }}
+        run: |
+          set -euo pipefail
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          WIDGET_PROFILE_PATH="$RUNNER_TEMP/mindwtr-mas-widget.provisionprofile"
+          if ! echo "$MAS_WIDGET_PROVISIONING_PROFILE" | base64 --decode > "$WIDGET_PROFILE_PATH" 2>/dev/null; then
+            echo "$MAS_WIDGET_PROVISIONING_PROFILE" | base64 -D > "$WIDGET_PROFILE_PATH"
+          fi
+          APP_PATH="$(find apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)"
+          if [ -z "${APP_PATH:-}" ]; then
+            echo "::error::Built .app bundle not found"
+            exit 1
+          fi
+          # Modifies the .app in place. Nothing after this step may run
+          # `tauri build`/`tauri bundle` again: productbuild below packages
+          # this exact app, and a Tauri re-bundle would regenerate the .app
+          # from the binary and drop the widget (#1054).
+          MINDWTR_WIDGET_DISTRIBUTION=appstore \
+          MINDWTR_WIDGET_PROVISIONING_PROFILE="$WIDGET_PROFILE_PATH" \
+          bash scripts/build-macos-widget.sh "$APP_PATH" "$APPLE_TEAM_ID" "$MAS_SIGNING_IDENTITY" universal-apple-darwin
+
+      - name: Verify App Store app contains the widget
+        if: env.HAS_MAS_WIDGET_PROFILE == '1'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)"
+          if [ -z "${APP_PATH:-}" ]; then
+            echo "::error::Built .app bundle not found"
+            exit 1
+          fi
+          APPEX_PATH="$APP_PATH/Contents/PlugIns/MindwtrWidgets.appex"
+          if [ ! -f "$APPEX_PATH/Contents/MacOS/MindwtrWidgets" ]; then
+            echo "::error::$APP_PATH does not contain the widget appex at Contents/PlugIns/MindwtrWidgets.appex (#1054)."
+            exit 1
+          fi
+          if [ ! -f "$APPEX_PATH/Contents/embedded.provisionprofile" ]; then
+            echo "::error::Widget appex is missing Contents/embedded.provisionprofile; App Store Connect rejects nested bundles without their own profile."
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=4 "$APP_PATH"
+          APP_GROUP="${APPLE_TEAM_ID}.tech.dongdongbh.mindwtr"
+          HOST_ENTITLEMENTS_PATH="$RUNNER_TEMP/mas-host-entitlements.plist"
+          APPEX_ENTITLEMENTS_PATH="$RUNNER_TEMP/mas-widget-entitlements.plist"
+          codesign -d --entitlements :- "$APP_PATH" > "$HOST_ENTITLEMENTS_PATH" 2>/dev/null || true
+          codesign -d --entitlements :- "$APPEX_PATH" > "$APPEX_ENTITLEMENTS_PATH" 2>/dev/null || true
+          expect_entitlement() {
+            local file="$1"
+            local label="$2"
+            local needle="$3"
+            if ! grep -Fq "$needle" "$file"; then
+              echo "::error::${label} entitlements are missing ${needle}."
+              echo "Resolved entitlements:"
+              cat "$file" || true
+              exit 1
+            fi
+          }
+          expect_entitlement "$HOST_ENTITLEMENTS_PATH" "Host app" "<string>${APP_GROUP}</string>"
+          expect_entitlement "$APPEX_ENTITLEMENTS_PATH" "Widget appex" "<string>${APP_GROUP}</string>"
+          expect_entitlement "$APPEX_ENTITLEMENTS_PATH" "Widget appex" "<key>com.apple.security.app-sandbox</key>"
+          expect_entitlement "$APPEX_ENTITLEMENTS_PATH" "Widget appex" "<string>${APPLE_TEAM_ID}.tech.dongdongbh.mindwtr.MindwtrWidgets</string>"
+          echo "Verified widget appex is present, provisioned, and signed in $APP_PATH."
 
       - name: Build signed installer package
         timeout-minutes: 8
