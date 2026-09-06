@@ -5,6 +5,13 @@
 # (Mindwtr.desktop), so KWin's alt-tab switcher found no icon (#997). This
 # NoDisplay entry exists only to give compositors an exact-name match; the
 # visible menu entry stays Mindwtr.desktop.
+#
+# No StartupWMClass here on purpose. KDE's task manager resolves a window to a
+# launcher by StartupWMClass before it looks at basenames, hidden entries
+# included, and when two entries match it prefers the one whose basename
+# starts with the app id. With StartupWMClass on this file too, the window
+# resolved to this hidden entry instead of the pinned Mindwtr.desktop and
+# Plasma showed a second Mindwtr in the Task Manager (#1168).
 [Desktop Entry]
 Type=Application
 Name=Mindwtr
@@ -12,4 +19,3 @@ Exec=mindwtr
 Icon=mindwtr
 Terminal=false
 NoDisplay=true
-StartupWMClass=mindwtr
