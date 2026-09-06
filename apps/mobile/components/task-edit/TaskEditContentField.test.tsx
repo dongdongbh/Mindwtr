@@ -834,4 +834,89 @@ describe('TaskEditContentField', () => {
       'check-3',
     ]);
   });
+
+  it('keeps the description Preview/Edit toggle labelled while it becomes an icon button', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TaskEditContentField {...baseProps} fieldId="description" />);
+    });
+
+    const previewToggle = tree.root.findByProps({ accessibilityLabel: 'markdown.preview' });
+    expect(previewToggle.props.accessibilityRole).toBe('button');
+    expect(previewToggle.findAllByType(Text)).toHaveLength(0);
+    expect(previewToggle.findAll((node) => node.props?.size === 18).length).toBeGreaterThan(0);
+
+    act(() => {
+      previewToggle.props.onPress();
+    });
+    expect(baseProps.setShowDescriptionPreview).toHaveBeenCalledTimes(1);
+
+    // In preview mode the same control reads as Edit and shows a pencil.
+    let previewTree!: ReturnType<typeof create>;
+    act(() => {
+      previewTree = create(
+        <TaskEditContentField {...baseProps} fieldId="description" showDescriptionPreview />
+      );
+    });
+    const editToggle = previewTree.root.findByProps({ accessibilityLabel: 'markdown.edit' });
+    expect(editToggle.findAll((node) => node.props?.size === 18).length).toBeGreaterThan(0);
+  });
+
+  it('converts attachment Edit/Remove row actions to icon-only labelled buttons', () => {
+    const editLinkAttachment = vi.fn();
+    const removeAttachment = vi.fn();
+    const stylesWithAttachments = {
+      ...baseProps.styles,
+      attachmentHeader: {},
+      attachmentActions: {},
+      attachmentButton: {},
+      attachmentButtonText: {},
+      attachmentsList: {},
+      attachmentRow: {},
+      attachmentTitleWrap: {},
+      attachmentTitle: {},
+      attachmentDownload: {},
+      attachmentStatus: {},
+      attachmentRemove: {},
+      helperText: {},
+    };
+    const attachments = [{
+      id: 'a-1',
+      kind: 'link',
+      title: 'Example doc',
+      uri: 'https://example.com/doc',
+      localStatus: 'available',
+    }];
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <TaskEditContentField
+          {...baseProps}
+          styles={stylesWithAttachments}
+          fieldId="attachments"
+          visibleAttachments={attachments}
+          editLinkAttachment={editLinkAttachment}
+          removeAttachment={removeAttachment}
+        />
+      );
+    });
+
+    const editButton = tree.root.findByProps({ accessibilityLabel: 'common.edit' });
+    expect(editButton.props.accessibilityRole).toBe('button');
+    expect(editButton.findAllByType(Text)).toHaveLength(0);
+    expect(editButton.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
+
+    act(() => {
+      editButton.props.onPress();
+    });
+    expect(editLinkAttachment).toHaveBeenCalledWith(expect.objectContaining({ id: 'a-1' }));
+
+    const removeButton = tree.root.findByProps({ accessibilityLabel: 'attachments.remove' });
+    expect(removeButton.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
+
+    act(() => {
+      removeButton.props.onPress();
+    });
+    expect(removeAttachment).toHaveBeenCalledWith('a-1');
+  });
 });

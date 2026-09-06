@@ -1,6 +1,8 @@
 import React from 'react';
 import { Keyboard, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { AtSign, Tag } from 'lucide-react-native';
 
+import { FieldHeading } from './FieldHeading';
 import type { TaskEditFieldRendererProps } from './TaskEditFieldRenderer.types';
 
 type TokenFieldId = 'contexts' | 'tags';
@@ -47,7 +49,12 @@ export function TaskEditTokenField({
     if (fieldId === 'contexts') {
         return (
             <View style={styles.formGroup}>
-                <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.contextsLabel')}</Text>
+                <FieldHeading
+                    icon={AtSign}
+                    label={t('taskEdit.contextsLabel')}
+                    iconColor={tc.secondaryText}
+                    labelStyle={[styles.label, { color: tc.secondaryText }]}
+                />
                 <TextInput
                     style={[styles.input, inputStyle]}
                     value={contextInputDraft}
@@ -107,7 +114,12 @@ export function TaskEditTokenField({
 
     return (
         <View style={styles.formGroup}>
-            <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.tagsLabel')}</Text>
+            <FieldHeading
+                icon={Tag}
+                label={t('taskEdit.tagsLabel')}
+                iconColor={tc.secondaryText}
+                labelStyle={[styles.label, { color: tc.secondaryText }]}
+            />
             <TextInput
                 style={[styles.input, inputStyle]}
                 value={tagInputDraft}

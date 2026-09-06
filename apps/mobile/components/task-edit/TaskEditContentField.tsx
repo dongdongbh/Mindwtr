@@ -9,6 +9,15 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
+    AlignLeft,
+    Eye,
+    ListChecks,
+    Paperclip,
+    Pencil,
+    Trash2,
+    Navigation,
+} from 'lucide-react-native';
+import {
     generateUUID,
     getAttachmentDisplayTitle,
     isMarkdownEditorAssistEnabled,
@@ -21,6 +30,7 @@ import {
 
 import { MarkdownReferenceAutocomplete } from '../markdown-reference-autocomplete';
 import { MarkdownText } from '../markdown-text';
+import { FieldHeading } from './FieldHeading';
 import { getControlledTextInputSelection } from '../text-input-selection';
 import {
     applyMarkdownPairInsertionWithSelectionFallback,
@@ -361,12 +371,36 @@ export function TaskEditContentField({
                     <View
                         style={styles.inlineHeader}
                     >
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.descriptionLabel')}</Text>
+                        <FieldHeading
+                            icon={AlignLeft}
+                            label={t('taskEdit.descriptionLabel')}
+                            iconColor={tc.secondaryText}
+                            labelStyle={[styles.label, { color: tc.secondaryText }]}
+                        />
                         <View style={styles.inlineActions}>
-                            <TouchableOpacity onPress={() => setShowDescriptionPreview((value) => !value)}>
-                                <Text style={[styles.inlineAction, { color: tc.tint }]}>
-                                    {showDescriptionPreview ? t('markdown.edit') : t('markdown.preview')}
-                                </Text>
+                            <TouchableOpacity
+                                onPress={() => setShowDescriptionPreview((value) => !value)}
+                                accessibilityRole="button"
+                                accessibilityLabel={showDescriptionPreview ? t('markdown.edit') : t('markdown.preview')}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                                {showDescriptionPreview ? (
+                                    <Pencil
+                                        size={18}
+                                        color={tc.tint}
+                                        aria-hidden
+                                        accessible={false}
+                                        pointerEvents="none"
+                                    />
+                                ) : (
+                                    <Eye
+                                        size={18}
+                                        color={tc.tint}
+                                        aria-hidden
+                                        accessible={false}
+                                        pointerEvents="none"
+                                    />
+                                )}
                             </TouchableOpacity>
                             <TouchableOpacity
                                 onPress={openDescriptionExpandedEditor}
@@ -444,7 +478,12 @@ export function TaskEditContentField({
         case 'location':
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.locationLabel')}</Text>
+                    <FieldHeading
+                        icon={Navigation}
+                        label={t('taskEdit.locationLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <TextInput
                         style={[styles.input, inputStyle]}
                         value={draft?.location ?? ''}
@@ -465,7 +504,12 @@ export function TaskEditContentField({
             return (
                 <View style={styles.formGroup}>
                     <View style={styles.attachmentHeader}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('attachments.title')}</Text>
+                        <FieldHeading
+                            icon={Paperclip}
+                            label={t('attachments.title')}
+                            iconColor={tc.secondaryText}
+                            labelStyle={[styles.label, { color: tc.secondaryText }]}
+                        />
                     </View>
                     <View style={styles.attachmentActions}>
                         <TouchableOpacity
@@ -528,16 +572,36 @@ export function TaskEditContentField({
                                         ) : null}
                                         <View style={styles.attachmentActions}>
                                             {attachment.kind === 'link' ? (
-                                                <TouchableOpacity onPress={() => editLinkAttachment(attachment)}>
-                                                    <Text style={[styles.attachmentRemove, { color: tc.secondaryText }]}>
-                                                        {t('common.edit')}
-                                                    </Text>
+                                                <TouchableOpacity
+                                                    onPress={() => editLinkAttachment(attachment)}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={t('common.edit')}
+                                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                                    style={{ opacity: 0.85 }}
+                                                >
+                                                    <Pencil
+                                                        size={14}
+                                                        color={tc.tint}
+                                                        aria-hidden
+                                                        accessible={false}
+                                                        pointerEvents="none"
+                                                    />
                                                 </TouchableOpacity>
                                             ) : null}
-                                            <TouchableOpacity onPress={() => removeAttachment(attachment.id)}>
-                                                <Text style={[styles.attachmentRemove, { color: tc.secondaryText }]}>
-                                                    {t('attachments.remove')}
-                                                </Text>
+                                            <TouchableOpacity
+                                                onPress={() => removeAttachment(attachment.id)}
+                                                accessibilityRole="button"
+                                                accessibilityLabel={t('attachments.remove')}
+                                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                                style={{ opacity: 0.85 }}
+                                            >
+                                                <Trash2
+                                                    size={14}
+                                                    color={tc.tint}
+                                                    aria-hidden
+                                                    accessible={false}
+                                                    pointerEvents="none"
+                                                />
                                             </TouchableOpacity>
                                         </View>
                                     </View>
@@ -555,9 +619,13 @@ export function TaskEditContentField({
             return (
                 <View style={styles.formGroup}>
                     <View style={styles.checklistHeader}>
-                        <Text style={[styles.label, styles.checklistHeaderLabel, { color: tc.secondaryText }]}>
-                            {t('taskEdit.checklist')}
-                        </Text>
+                        <FieldHeading
+                            icon={ListChecks}
+                            label={t('taskEdit.checklist')}
+                            iconColor={tc.secondaryText}
+                            labelStyle={[styles.label, styles.checklistHeaderLabel, { color: tc.secondaryText }]}
+                            rowStyle={{ flex: 1, marginBottom: 0 }}
+                        />
                         {canReorderChecklist ? (
                             <TouchableOpacity
                                 accessibilityRole="button"
@@ -711,7 +779,7 @@ export function TaskEditContentField({
                                     );
                                 })}
                                 <TouchableOpacity
-                                    style={styles.addChecklistBtn}
+                                    style={[styles.addChecklistBtn, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
                                     onPress={() => {
                                         if (hasEmptyChecklistItem) return;
                                         const nextItem = {
@@ -724,7 +792,7 @@ export function TaskEditContentField({
                                     }}
                                     testID="mobile-checklist-add-item"
                                 >
-                                    <Text style={styles.addChecklistText}>+ {t('taskEdit.addItem')}</Text>
+                                    <Text style={[styles.addChecklistText, { color: tc.tint }]}>+ {t('taskEdit.addItem')}</Text>
                                 </TouchableOpacity>
                     {(checklist?.length ?? 0) > 0 && (
                                     <View style={styles.checklistActions}>

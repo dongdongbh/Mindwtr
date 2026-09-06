@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { Eye, Pencil } from 'lucide-react-native';
 import {
     applyMarkdownKeyboardShortcut,
     applyMarkdownToolbarAction,
@@ -493,9 +494,11 @@ export function ExpandedMarkdownEditor({
                             accessibilityRole="button"
                             accessibilityLabel={mode === 'edit' ? t('markdown.preview') : t('markdown.edit')}
                         >
-                            <Text style={[styles.modeButtonText, { color: tc.tint }]}>
-                                {mode === 'edit' ? t('markdown.preview') : t('markdown.edit')}
-                            </Text>
+                            {mode === 'edit' ? (
+                                <Eye size={18} color={tc.tint} aria-hidden accessible={false} pointerEvents="none" />
+                            ) : (
+                                <Pencil size={18} color={tc.tint} aria-hidden accessible={false} pointerEvents="none" />
+                            )}
                         </TouchableOpacity>
                     </View>
 

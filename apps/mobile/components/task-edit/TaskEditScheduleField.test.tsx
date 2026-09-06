@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { type ComponentProps } from 'react';
 import { Platform, Text, TextInput, TouchableOpacity } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -760,5 +760,48 @@ describe('TaskEditScheduleField', () => {
         expect(setDraftField).toHaveBeenCalledWith('recurrence', 'yearly');
         expect(setDraftField).toHaveBeenCalledWith('recurrenceStrategy', 'strict');
         expect(setDraftField).toHaveBeenCalledWith('recurrenceRRule', 'FREQ=YEARLY;INTERVAL=2');
+    });
+
+    it('turns the due-date time and clear chips into labelled icon buttons', () => {
+        const props = {
+            customWeekdays: [],
+            dailyInterval: 1,
+            draft: makeDraft({ dueDate: '2026-04-28' }),
+            fieldId: 'dueDate' as const,
+            formatDate: (value?: string) => value ?? '',
+            formatDueDate: (value?: string) => value ?? '',
+            getSafePickerDateValue: () => new Date('2026-04-28T09:20:00'),
+            monthlyPattern: 'date',
+            onDateChange: vi.fn(),
+            openCustomRecurrence: vi.fn(),
+            pendingDueDate: null,
+            pendingStartDate: null,
+            recurrenceOptions: [],
+            recurrenceRRuleValue: '',
+            recurrenceRuleValue: '',
+            recurrenceStrategyValue: 'strict',
+            recurrenceWeekdayButtons: [],
+            setCustomWeekdays: vi.fn(),
+            setDraftField: vi.fn(),
+            setShowDatePicker: vi.fn(),
+            showDatePicker: null,
+            styles,
+            t,
+            task: null,
+            tc,
+        } as unknown as ComponentProps<typeof TaskEditScheduleField>;
+        let tree!: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(<TaskEditScheduleField {...props} />);
+        });
+
+        const timeChip = tree.root.findByProps({ accessibilityLabel: 'Add time' });
+        expect(timeChip.props.accessibilityRole).toBe('button');
+        expect(timeChip.findAllByType(Text)).toHaveLength(0);
+        expect(timeChip.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
+
+        const clearChip = tree.root.findByProps({ accessibilityLabel: 'common.clear' });
+        expect(clearChip.props.accessibilityRole).toBe('button');
+        expect(clearChip.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
     });
 });
