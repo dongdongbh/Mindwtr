@@ -1,18 +1,20 @@
 import {
+    computeTodayFocusTasks,
+    getTranslationsSync,
+    getTranslator,
+    isTaskActionable,
+    isTaskInActiveProject,
+    loadTranslations,
+    resolveI18nText,
+    resolveTaskSortByForFeatures,
+    resolveThemeColorScheme,
+    safeParseDueDate,
+    sortTasksBy,
+    SUPPORTED_LANGUAGES,
     type AppData,
     type AppTheme,
     type Language,
     type TaskSortBy,
-    resolveTaskSortByForFeatures,
-    resolveThemeColorScheme,
-    safeParseDueDate,
-    SUPPORTED_LANGUAGES,
-    getTranslationsSync,
-    computeTodayFocusTasks,
-    isTaskActionable,
-    isTaskInActiveProject,
-    loadTranslations,
-    sortTasksBy,
 } from '@mindwtr/core';
 import { THEME_PRESETS, type ThemePresetName } from '../constants/theme-presets';
 
@@ -94,15 +96,17 @@ export interface AndroidTasksWidgetPayload extends TasksWidgetPayload {
     quickCapture: AndroidQuickCaptureLabels;
 }
 
+// Core's translator owns the locale-then-English chain; a second raw dictionary
+// read in this module would be the hand-rolled fallback the i18n ratchet forbids.
 export function buildAndroidQuickCaptureLabels(language: Language): AndroidQuickCaptureLabels {
     void loadTranslations(language);
-    const tr = getTranslationsSync(language);
+    const t = getTranslator(language);
     return {
-        title: tr['widget.capture'] ?? 'Quick capture',
-        placeholder: tr['inbox.addPlaceholder'] ?? 'Add task to inbox...',
-        save: tr['common.save'] ?? 'Save',
-        cancel: tr['common.cancel'] ?? 'Cancel',
-        added: tr['obsidian.bringIntoMindwtrSuccess'] ?? 'Task added to Mindwtr.',
+        title: resolveI18nText(t, 'widget.capture', { fallback: 'Quick capture' }),
+        placeholder: resolveI18nText(t, 'inbox.addPlaceholder', { fallback: 'Add task to inbox...' }),
+        save: resolveI18nText(t, 'common.save', { fallback: 'Save' }),
+        cancel: resolveI18nText(t, 'common.cancel', { fallback: 'Cancel' }),
+        added: resolveI18nText(t, 'obsidian.bringIntoMindwtrSuccess', { fallback: 'Task added to Mindwtr.' }),
     };
 }
 
