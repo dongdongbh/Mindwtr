@@ -7,17 +7,16 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 
 object PersistentCaptureNotifier {
   const val CHANNEL_ID = "mindwtr-persistent-capture"
   const val NOTIFICATION_ID = 41120
 
-  // Same URI and intent shape as CaptureTileService: a direct expo-router route,
-  // resolved natively, targeting MainActivity explicitly. The earlier
-  // open-feature deep link only brought the app to the foreground (#819).
-  private const val CAPTURE_URI = "mindwtr:///capture-quick?mode=text"
+  // Same target as CaptureTileService and the widget's "+": the native
+  // quick-capture dialog (modules/android-widget, #1169) saves to the Inbox
+  // queue and closes without bringing the app forward.
+  private const val QUICK_CAPTURE_ACTIVITY = "tech.dongdongbh.mindwtr.androidwidget.QuickCaptureActivity"
   private const val CONTENT_REQUEST_CODE = NOTIFICATION_ID
   private const val DISMISS_REQUEST_CODE = NOTIFICATION_ID + 1
 
@@ -60,9 +59,9 @@ object PersistentCaptureNotifier {
       notificationManager.createNotificationChannel(channel)
     }
 
-    val openIntent = Intent(Intent.ACTION_VIEW, Uri.parse(CAPTURE_URI)).apply {
-      setClassName(context.packageName, "${context.packageName}.MainActivity")
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+    val openIntent = Intent().apply {
+      setClassName(context.packageName, QUICK_CAPTURE_ACTIVITY)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE

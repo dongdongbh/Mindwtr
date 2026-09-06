@@ -13,7 +13,11 @@ const DEFAULT_CATEGORY = 'android.intent.category.DEFAULT';
 const BROWSABLE_CATEGORY = 'android.intent.category.BROWSABLE';
 const VOICE_CATEGORY = 'android.intent.category.VOICE';
 
-const SHORTCUTS_XML = `<?xml version="1.0" encoding="utf-8"?>
+// The native quick-capture dialog (modules/android-widget, #1169): saves to the
+// Inbox queue and closes without bringing the app forward.
+const QUICK_CAPTURE_ACTIVITY = 'tech.dongdongbh.mindwtr.androidwidget.QuickCaptureActivity';
+
+const buildShortcutsXml = (packageName) => `<?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
   <capability android:name="actions.intent.CREATE_THING">
     <intent android:action="android.intent.action.VIEW">
@@ -122,7 +126,8 @@ const SHORTCUTS_XML = `<?xml version="1.0" encoding="utf-8"?>
     android:shortcutShortLabel="@string/shortcut_add_task_short">
     <intent
       android:action="android.intent.action.VIEW"
-      android:data="mindwtr:///capture-quick?mode=text" />
+      android:targetPackage="${packageName}"
+      android:targetClass="${QUICK_CAPTURE_ACTIVITY}" />
   </shortcut>
   <shortcut
     android:enabled="true"
@@ -351,7 +356,8 @@ module.exports = function withAndroidAppShortcuts(config) {
       const valuesDir = path.join(cfg.modRequest.platformProjectRoot, 'app', 'src', 'main', 'res', 'values');
       await fs.promises.mkdir(xmlDir, { recursive: true });
       await fs.promises.mkdir(valuesDir, { recursive: true });
-      await fs.promises.writeFile(path.join(xmlDir, SHORTCUTS_FILE_NAME), SHORTCUTS_XML, 'utf8');
+      const packageName = cfg.android?.package || cfg.modRequest.projectName;
+      await fs.promises.writeFile(path.join(xmlDir, SHORTCUTS_FILE_NAME), buildShortcutsXml(packageName), 'utf8');
       await fs.promises.writeFile(path.join(valuesDir, SHORTCUTS_STRINGS_FILE_NAME), SHORTCUTS_STRINGS_XML, 'utf8');
       return cfg;
     },
@@ -362,5 +368,5 @@ module.exports.__testables = {
   addAndroidxCoreDependency,
   ensureManifestAppActions,
   SHORTCUTS_STRINGS_XML,
-  SHORTCUTS_XML,
+  buildShortcutsXml,
 };

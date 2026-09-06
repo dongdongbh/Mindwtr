@@ -10,17 +10,18 @@ const {
 } = plugin.__testables;
 
 describe('android-quick-settings-tile', () => {
-  it('generates a TileService that opens the existing quick capture route', () => {
+  it('generates a TileService that opens the native quick-capture dialog', () => {
     const source = buildCaptureTileServiceSource('tech.dongdongbh.mindwtr');
 
     expect(source).toContain('class CaptureTileService : TileService()');
-    expect(source).toContain('mindwtr:///capture-quick?mode=text');
+    expect(source).toContain('tech.dongdongbh.mindwtr.androidwidget.QuickCaptureActivity');
+    expect(source).not.toContain('capture-quick');
     expect(source).toContain('unlockAndRun { launchQuickCapture() }');
     expect(source).toContain('Build.VERSION_CODES.UPSIDE_DOWN_CAKE');
     expect(source).toContain('PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE');
     expect(source).toContain('startActivityAndCollapse(pendingIntent)');
     expect(source).toContain('startActivityAndCollapse(intent)');
-    expect(source).toContain('setClassName(packageName, "$packageName.MainActivity")');
+    expect(source).toContain('setClassName(packageName, QUICK_CAPTURE_ACTIVITY)');
   });
 
   it('adds the protected quick settings service to the Android manifest idempotently', () => {

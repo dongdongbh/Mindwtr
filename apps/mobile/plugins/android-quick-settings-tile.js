@@ -2,7 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins');
 
-const CAPTURE_URI = 'mindwtr:///capture-quick?mode=text';
+// The native quick-capture dialog (modules/android-widget, #1169): saves to the
+// Inbox queue and closes without bringing the app forward.
+const QUICK_CAPTURE_ACTIVITY = 'tech.dongdongbh.mindwtr.androidwidget.QuickCaptureActivity';
 const SERVICE_NAME = '.quicksettings.CaptureTileService';
 const SERVICE_PERMISSION = 'android.permission.BIND_QUICK_SETTINGS_TILE';
 const QS_TILE_ACTION = 'android.service.quicksettings.action.QS_TILE';
@@ -34,7 +36,6 @@ const buildCaptureTileServiceSource = (packageName) => `package ${packageName}.q
 
 import android.app.PendingIntent
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
@@ -73,9 +74,9 @@ class CaptureTileService : TileService() {
 
   @Suppress("DEPRECATION")
   private fun launchQuickCapture() {
-    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(CAPTURE_URI)).apply {
-      setClassName(packageName, "$packageName.MainActivity")
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+    val intent = Intent().apply {
+      setClassName(packageName, QUICK_CAPTURE_ACTIVITY)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -92,7 +93,7 @@ class CaptureTileService : TileService() {
   }
 
   companion object {
-    private const val CAPTURE_URI = "${CAPTURE_URI}"
+    private const val QUICK_CAPTURE_ACTIVITY = "${QUICK_CAPTURE_ACTIVITY}"
     private const val CAPTURE_REQUEST_CODE = 461
   }
 }

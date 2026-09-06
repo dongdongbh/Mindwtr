@@ -11,10 +11,12 @@ const fileSystemMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('./file-system', () => fileSystemMocks);
-vi.mock('./app-log', () => ({
+const appLogMocks = vi.hoisted(() => ({
     logError: vi.fn(async () => undefined),
+    logInfo: vi.fn(async () => undefined),
     logWarn: vi.fn(async () => undefined),
 }));
+vi.mock('./app-log', () => appLogMocks);
 
 import { buildPendingCaptureTaskProps, ingestPendingCaptures, parsePendingCapture } from './pending-captures';
 
@@ -144,6 +146,25 @@ describe('ingestPendingCaptures', () => {
         expect(addTask).toHaveBeenNthCalledWith(1, 'First', { status: 'inbox', tags: ['#home'] });
         expect(addTask).toHaveBeenNthCalledWith(2, 'Second', { status: 'inbox', tags: ['#home'] });
         expect(fileSystemMocks.deleteAsync).toHaveBeenCalledTimes(2);
+    });
+
+    it('logs the release check once per ingested Android quick-capture item, and never for a Shortcut item', async () => {
+        fileSystemMocks.readDirectoryAsync.mockResolvedValue(['a.json', 'b.json']);
+        fileSystemMocks.readAsStringAsync.mockImplementation(async (uri: string) => JSON.stringify(
+            uri.includes('a.json')
+                ? { id: 'a', title: 'From the dialog', createdAt: '2026-09-06T10:00:00.000Z', source: 'android-quick-capture' }
+                : { id: 'b', title: 'From the Shortcut' },
+        ));
+        const addTask = addTaskMock();
+
+        expect(await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings })).toBe(2);
+
+        expect(addTask).toHaveBeenNthCalledWith(1, 'From the dialog', { status: 'inbox' });
+        expect(appLogMocks.logInfo).toHaveBeenCalledTimes(1);
+        expect(appLogMocks.logInfo).toHaveBeenCalledWith('Quick capture dialog item ingested', {
+            scope: 'capture',
+            extra: { releaseCheck: 'v1.2.9/android-quick-capture-dialog' },
+        });
     });
 
     it('keeps the file when the store write reports failure', async () => {

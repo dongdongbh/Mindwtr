@@ -6,8 +6,10 @@ const {
   addAndroidxCoreDependency,
   ensureManifestAppActions,
   SHORTCUTS_STRINGS_XML,
-  SHORTCUTS_XML,
+  buildShortcutsXml,
 } = plugin.__testables;
+
+const SHORTCUTS_XML = buildShortcutsXml('tech.dongdongbh.mindwtr');
 
 describe('android-app-shortcuts', () => {
   it('generates App Actions capabilities and open-feature inline inventory', () => {
@@ -18,6 +20,10 @@ describe('android-app-shortcuts', () => {
     expect(SHORTCUTS_XML).toContain('actions.intent.OPEN_APP_FEATURE');
     expect(SHORTCUTS_XML).toContain('mindwtr:///open-feature{?feature}');
     expect(SHORTCUTS_XML).toContain('android:value="@array/app_action_feature_focus_names"');
+    expect(SHORTCUTS_XML).toContain('android:targetPackage="tech.dongdongbh.mindwtr"');
+    expect(SHORTCUTS_XML).toContain('android:targetClass="tech.dongdongbh.mindwtr.androidwidget.QuickCaptureActivity"');
+    expect(SHORTCUTS_XML).not.toContain('capture-quick');
+    expect(buildShortcutsXml('tech.dongdongbh.mindwtr.dev')).toContain('android:targetPackage="tech.dongdongbh.mindwtr.dev"');
     expect(SHORTCUTS_STRINGS_XML).toContain('<item>Today</item>');
     expect(SHORTCUTS_STRINGS_XML).toContain('<item>Quick capture</item>');
   });

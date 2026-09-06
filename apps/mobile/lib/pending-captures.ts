@@ -12,14 +12,18 @@ import {
     type Task,
 } from '@mindwtr/core';
 
-import { logError, logWarn } from './app-log';
+import { logError, logInfo, logWarn } from './app-log';
 import { normalizeShortcutTags } from './capture-deeplink';
 import { deleteAsync, documentDirectory, getInfoAsync, readAsStringAsync, readDirectoryAsync } from './file-system';
 
-// Background Shortcuts captures (#845): native Swift only appends JSON files
-// to this directory; every task write happens here, through the normal store
-// path, so revisions, save tracking, and sync merge behavior stay intact.
+// Background Shortcuts captures (#845) and the Android quick-capture dialog
+// (#1169, modules/android-widget PendingCaptureWriter.kt): native code only
+// appends JSON files to this directory; every task write happens here, through
+// the normal store path, so revisions, save tracking, and sync merge behavior
+// stay intact.
 export const PENDING_CAPTURES_DIRECTORY = 'pending-captures';
+export const ANDROID_QUICK_CAPTURE_SOURCE = 'android-quick-capture';
+const ANDROID_QUICK_CAPTURE_RELEASE_CHECK = 'v1.2.9/android-quick-capture-dialog';
 
 export type PendingCapture = {
     id: string;
@@ -30,6 +34,8 @@ export type PendingCapture = {
     createdAt?: string;
     dueDate?: string;
     startDate?: string;
+    // Which native writer queued the item; absent for the iOS Shortcut.
+    source?: string;
 };
 
 const trimOrUndefined = (value: unknown): string | undefined => {
@@ -80,6 +86,7 @@ export function parsePendingCapture(raw: string): PendingCapture | null {
     const tags = tagsRaw ? tagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean) : [];
     const dueDate = sanitizeStructuredDateInput(record.dueDate);
     const startDate = sanitizeStructuredDateInput(record.startDate);
+    const source = trimOrUndefined(record.source);
 
     return {
         id,
@@ -90,6 +97,7 @@ export function parsePendingCapture(raw: string): PendingCapture | null {
         ...(createdAt ? { createdAt } : {}),
         ...(dueDate ? { dueDate } : {}),
         ...(startDate ? { startDate } : {}),
+        ...(source ? { source } : {}),
     };
 }
 
@@ -248,6 +256,12 @@ export async function ingestPendingCaptures({ addTask, addProject, projects, are
         // worst re-ingests one capture.
         await deleteAsync(fileUri, { idempotent: true }).catch(() => undefined);
         ingested += 1;
+        if (capture.source === ANDROID_QUICK_CAPTURE_SOURCE) {
+            void logInfo('Quick capture dialog item ingested', {
+                scope: 'capture',
+                extra: { releaseCheck: ANDROID_QUICK_CAPTURE_RELEASE_CHECK },
+            });
+        }
     }
     return ingested;
 }
