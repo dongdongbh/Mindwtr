@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, FlatList, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import type { Area, Project, TaskPriority } from '@mindwtr/core';
+import { Check, Plus } from 'lucide-react-native';
 import { PriorityFlag } from '@/components/priority-flag';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { styles } from './quick-capture-sheet.styles';
@@ -182,9 +183,8 @@ export function QuickCaptureSheetPickers({
                 accessibilityRole="button"
                 accessibilityLabel={`${t('common.add')}: ${contextQuery.trim()}`}
               >
-                <Text style={[styles.pickerRowText, { color: tc.tint }]}>
-                  + {contextQuery.trim()}
-                </Text>
+                <Plus size={16} color={tc.tint} accessible={false} />
+                <Text style={[styles.pickerRowText, { color: tc.tint }]}>{contextQuery.trim()}</Text>
               </Pressable>
             )}
             {contextTags.length > 0 && (
@@ -245,9 +245,10 @@ export function QuickCaptureSheetPickers({
                       : `${t('common.add')}: ${token}`
                   }
                 >
-                  <Text style={[styles.pickerRowText, { color: tc.text }]}>
-                    {contextTags.some((item) => item.toLowerCase() === token.toLowerCase()) ? `✓ ${token}` : token}
-                  </Text>
+                  <Text style={[styles.pickerRowText, { color: tc.text }]}>{token}</Text>
+                  {contextTags.some((item) => item.toLowerCase() === token.toLowerCase()) ? (
+                    <Check size={16} color={tc.tint} accessible={false} />
+                  ) : null}
                 </Pressable>
               )}
               removeClippedSubviews={false}
@@ -284,7 +285,8 @@ export function QuickCaptureSheetPickers({
                 accessibilityRole="button"
                 accessibilityLabel={`${t('areas.create')}: ${trimmedAreaQuery}`}
               >
-                <Text style={[styles.pickerRowText, { color: tc.tint }]}>+ {t('areas.create')} &quot;{trimmedAreaQuery}&quot;</Text>
+                <Plus size={16} color={tc.tint} accessible={false} />
+                <Text style={[styles.pickerRowText, { color: tc.tint }]}>{t('areas.create')} &quot;{trimmedAreaQuery}&quot;</Text>
               </Pressable>
             )}
             <FlatList
@@ -316,9 +318,8 @@ export function QuickCaptureSheetPickers({
                   accessibilityState={{ selected: selectedAreaId === area.id }}
                   accessibilityLabel={area.name}
                 >
-                  <Text style={[styles.pickerRowText, { color: tc.text }]}>
-                    {selectedAreaId === area.id ? `✓ ${area.name}` : area.name}
-                  </Text>
+                  <Text style={[styles.pickerRowText, { color: tc.text }]}>{area.name}</Text>
+                  {selectedAreaId === area.id ? <Check size={16} color={tc.tint} accessible={false} /> : null}
                 </Pressable>
               )}
               removeClippedSubviews={false}
@@ -354,7 +355,8 @@ export function QuickCaptureSheetPickers({
                 accessibilityRole="button"
                 accessibilityLabel={`${t('projects.create')}: ${projectQuery.trim()}`}
               >
-                <Text style={[styles.pickerRowText, { color: tc.tint }]}>+ {t('projects.create')} &quot;{projectQuery.trim()}&quot;</Text>
+                <Plus size={16} color={tc.tint} accessible={false} />
+                <Text style={[styles.pickerRowText, { color: tc.tint }]}>{t('projects.create')} &quot;{projectQuery.trim()}&quot;</Text>
               </Pressable>
             )}
             <FlatList
@@ -403,7 +405,7 @@ export function QuickCaptureSheetPickers({
             <Text style={[styles.pickerTitle, { color: tc.text }]} accessibilityRole="header">{t('taskEdit.priorityLabel')}</Text>
             <Pressable
               onPress={() => onSelectPriority(null)}
-              style={[styles.pickerRow, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}
+              style={styles.pickerRow}
               accessibilityRole="button"
               accessibilityLabel={t('common.none')}
             >
@@ -416,7 +418,6 @@ export function QuickCaptureSheetPickers({
                 onPress={() => onSelectPriority(option)}
                 style={[
                   styles.pickerRow,
-                  { flexDirection: 'row', alignItems: 'center', gap: 8 },
                   selectedPriority === option ? { backgroundColor: tc.filterBg, borderRadius: 8 } : null,
                 ]}
                 accessibilityRole="button"
@@ -424,9 +425,8 @@ export function QuickCaptureSheetPickers({
                 accessibilityLabel={t(`priority.${option}`)}
               >
                 <PriorityFlag priority={option} />
-                <Text style={[styles.pickerRowText, { color: tc.text }]}>
-                  {selectedPriority === option ? `✓ ${t(`priority.${option}`)}` : t(`priority.${option}`)}
-                </Text>
+                <Text style={[styles.pickerRowText, { color: tc.text }]}>{t(`priority.${option}`)}</Text>
+                {selectedPriority === option ? <Check size={16} color={tc.tint} accessible={false} /> : null}
               </Pressable>
             ))}
           </View>

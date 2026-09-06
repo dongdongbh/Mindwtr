@@ -27,7 +27,6 @@ import { FocusStarIcon } from '../FocusStarIcon';
 import { MarkdownInlineText } from '../markdown-text';
 import { styles } from './swipeable-task-item.styles';
 import { CompactText } from '@/components/compact-text';
-import { PRIORITY_STRIP_COLORS } from '@/lib/priority-colors';
 
 interface SwipeableTaskItemContentProps {
     accessibilityActions: { label: string; name: string }[];

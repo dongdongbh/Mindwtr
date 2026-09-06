@@ -16,6 +16,7 @@ import {
     Pencil,
     Trash2,
     Navigation,
+    Plus,
 } from 'lucide-react-native';
 import {
     generateUUID,
@@ -792,7 +793,8 @@ export function TaskEditContentField({
                                     }}
                                     testID="mobile-checklist-add-item"
                                 >
-                                    <Text style={[styles.addChecklistText, { color: tc.tint }]}>+ {t('taskEdit.addItem')}</Text>
+                                    <Plus size={14} color={tc.tint} accessible={false} />
+                                    <Text style={[styles.addChecklistText, { color: tc.tint }]}>{t('taskEdit.addItem')}</Text>
                                 </TouchableOpacity>
                     {(checklist?.length ?? 0) > 0 && (
                                     <View style={styles.checklistActions}>

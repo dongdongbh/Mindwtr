@@ -29,7 +29,7 @@ vi.mock('../../hooks/use-theme-colors', () => ({
 }));
 
 describe('TaskEditHeader', () => {
-  it('uses labelled icon buttons for Save and Close', () => {
+  it('keeps the Save text and routes the X icon to onClose', () => {
     const onDone = vi.fn();
     const onClose = vi.fn();
     let tree!: renderer.ReactTestRenderer;
@@ -49,7 +49,10 @@ describe('TaskEditHeader', () => {
     const saveButton = tree.root.findByProps({ accessibilityLabel: 'Save' });
     const closeButton = tree.root.findByProps({ accessibilityLabel: 'Close' });
 
-    expect(saveButton.findAllByType(Text)).toHaveLength(0);
+    // Save keeps its word: a first-time user must be able to tell which
+    // control commits the draft. Close is the X icon on the left.
+    expect(saveButton.findAllByType(Text).map((node) => node.props.children)).toEqual(['Save']);
+    expect(closeButton.findAllByType(Text)).toHaveLength(0);
     act(() => saveButton.props.onPress());
     act(() => closeButton.props.onPress());
 

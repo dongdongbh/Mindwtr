@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Modal, Pressable, StyleSheet } from 'react-native';
-import { MoreHorizontal, Save, X } from 'lucide-react-native';
+import { MoreHorizontal, X } from 'lucide-react-native';
 
 import { AppPressable } from '../app-pressable';
 
@@ -79,11 +79,7 @@ export function TaskEditHeader({
             accessibilityRole="button"
             accessibilityLabel={doneLabel}
           >
-            {readOnly ? (
-              <X size={22} strokeWidth={2.25} color={tc.tint} accessible={false} />
-            ) : (
-              <Save size={22} strokeWidth={2.25} color={tc.tint} accessible={false} />
-            )}
+            <Text style={[styles.headerBtn, { color: tc.tint }]}>{doneLabel}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -195,6 +191,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     minHeight: 60,
+  },
+  headerBtn: {
+    fontSize: 18,
+    fontWeight: '700',
   },
   headerSide: {
     minWidth: 72,

@@ -8,6 +8,7 @@ import {
     normalizeAutocompleteTokens,
 } from './token-autocomplete';
 import { PriorityFlag } from './PriorityFlag';
+import { Sparkles } from 'lucide-react';
 
 type TriggerType = 'project' | 'context' | 'tag' | 'area' | 'person' | 'command';
 type SlashCommand =
@@ -673,7 +674,7 @@ export function TaskInput({
                                     : 'hover:bg-muted/50'
                             )}
                         >
-                            {option.kind === 'create' ? `✨ ${option.label}`
+                            {option.kind === 'create' ? <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{option.label}</span>
                                 : option.kind === 'command' && option.priority
                                     ? <span className="inline-flex items-center gap-1.5"><PriorityFlag priority={option.priority} />{option.label}</span>
                                     : option.label}

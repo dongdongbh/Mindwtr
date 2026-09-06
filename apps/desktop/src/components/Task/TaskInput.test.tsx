@@ -381,7 +381,7 @@ describe('TaskInput autocomplete', () => {
 
         expect(getAllByRole('option').map((option) => option.textContent)).toEqual([
             'Launch',
-            '✨ Create Project "La"',
+            'Create Project "La"',
         ]);
         fireEvent.keyDown(input, { key: 'Tab' });
 

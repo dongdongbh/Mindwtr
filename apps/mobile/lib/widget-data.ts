@@ -19,10 +19,10 @@ import {
     type Language,
     type Task,
     type TaskSortBy,
+    TASK_PRIORITY_COLORS,
 } from '@mindwtr/core';
 import { THEME_PRESETS, type ThemePresetName } from '../constants/theme-presets';
 import { buildFocusTaskSections, DEFAULT_FOCUS_SORT_BY, deriveFocusTaskLists } from './focus-sections';
-import { PRIORITY_STRIP_COLORS } from './priority-colors';
 
 export const WIDGET_DATA_KEY = 'mindwtr-data';
 export const WIDGET_LANGUAGE_KEY = 'mindwtr-language';
@@ -60,7 +60,7 @@ export interface WidgetTaskItem {
     // Deep link that opens this task (the app routes mindwtr://open?task=<id>);
     // the Android widget rows use it, iOS may ignore it.
     openUri: string;
-    // Priority heat-ramp hex (lib/priority-colors.ts); null when the task has
+    // Priority heat-ramp hex (core TASK_PRIORITY_COLORS); null when the task has
     // none or the Priorities feature is off.
     priorityColor: string | null;
     // Project title, else area name, else null.
@@ -315,7 +315,7 @@ export function buildWidgetPayload(
             statusLabel: tr[`status.${task.status}`] || task.status,
             ...computeDueLabel(task.dueDate, tr, language, startOfToday, endOfToday),
             openUri: `mindwtr://open?task=${encodeURIComponent(task.id)}`,
-            priorityColor: prioritiesEnabled && task.priority ? PRIORITY_STRIP_COLORS[task.priority] ?? null : null,
+            priorityColor: prioritiesEnabled && task.priority ? TASK_PRIORITY_COLORS[task.priority] ?? null : null,
             contextLabel: project?.title ?? area?.name ?? null,
         };
     };
