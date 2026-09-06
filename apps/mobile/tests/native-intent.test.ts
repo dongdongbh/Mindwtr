@@ -27,11 +27,11 @@ describe('redirectSystemPath', () => {
 
     it('routes widget and system quick capture links through the reliable root modal', () => {
         expect(redirectSystemPath({ path: 'mindwtr:///capture-quick?mode=text', initial: true }))
-            .toBe('/capture-modal');
+            .toBe('/capture-modal?origin=system');
         expect(redirectSystemPath({ path: 'mindwtr://capture-quick?mode=text', initial: false }))
-            .toBe('/capture-modal');
+            .toBe('/capture-modal?origin=system');
         expect(redirectSystemPath({ path: 'mindwtr://capture-quick', initial: true }))
-            .toBe('/capture-modal');
+            .toBe('/capture-modal?origin=system');
     });
 
     it('leaves shortcut capture and unrelated links untouched', () => {

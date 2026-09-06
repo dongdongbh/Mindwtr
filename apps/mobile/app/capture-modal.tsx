@@ -42,8 +42,8 @@ import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useToast } from '@/contexts/toast-context';
 import { useLanguage } from '../contexts/language-context';
 import { buildCopilotConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
-import { logError } from '../lib/app-log';
-import { addHardwareBackPressListener } from '@/lib/hardware-back';
+import { logError, logInfo } from '../lib/app-log';
+import { addHardwareBackPressListener, returnToPreviousApp } from '@/lib/hardware-back';
 import { showInvalidDateCommandToast } from '@/lib/quick-add-toast';
 import { ThemedAlertHost } from '@/components/themed-alert';
 import { QuickAddPreview } from '@/components/QuickAddPreview';
@@ -54,6 +54,8 @@ import { getProjectQuickCaptureReturnToProjectId } from '@/components/projects-s
 type CaptureSearchParams = {
   initialProps?: string;
   initialValue?: string;
+  /** 'system' when a widget, tile, shortcut or notification opened this route (#1169). */
+  origin?: string;
   project?: string;
   returnTo?: string;
   text?: string;
@@ -407,6 +409,8 @@ export default function CaptureScreen() {
 
   const placeholderColor = tc.secondaryText;
 
+  const launchedFromSystem = firstSearchParam(params.origin) === 'system';
+
   const closeCapture = React.useCallback(() => {
     // A real back entry always wins: the screen underneath is the one that
     // opened capture, still holding the open project. Replacing capture with
@@ -425,8 +429,22 @@ export default function CaptureScreen() {
     router.replace('/inbox');
   }, [returnTo, router]);
 
-  const handleCancel = () => {
+  // A capture that a widget, tile, shortcut or notification opened ends back
+  // on the screen the user came from, not on Mindwtr (#1169). Save & edit is
+  // the one exception: the user asked to stay in the editor.
+  const finishCapture = React.useCallback(() => {
     closeCapture();
+    if (!launchedFromSystem) return;
+    if (returnToPreviousApp()) {
+      void logInfo('Quick capture opened from a system entry point returned to the previous screen', {
+        scope: 'capture',
+        extra: { releaseCheck: 'v1.2.9/system-capture-return' },
+      });
+    }
+  }, [closeCapture, launchedFromSystem]);
+
+  const handleCancel = () => {
+    finishCapture();
   };
 
   const formatBulkConfirmTitle = (count: number) => (
@@ -575,7 +593,7 @@ export default function CaptureScreen() {
     });
     const result = await addTasks(taskInputs);
     if (result && typeof result === 'object' && result.success === false) return;
-    closeCapture();
+    finishCapture();
   };
 
   // Confirm on this screen rather than through Alert. This route is presented
@@ -590,7 +608,7 @@ export default function CaptureScreen() {
       return;
     }
     const shouldClose = await createTaskFromInput(value, { openAfterSave });
-    if (shouldClose) closeCapture();
+    if (shouldClose) finishCapture();
   };
 
   useEffect(() => {

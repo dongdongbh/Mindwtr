@@ -14,7 +14,7 @@ import { createAIProvider } from '@mindwtr/core';
 
 import CaptureScreen, { sanitizeCaptureReturnToParam } from '@/app/capture-modal';
 
-const { hardwareBack, openTaskScreen, parseQuickAdd, routerMocks, routeParams, stashPendingCaptureTaskOpen, storeState } = vi.hoisted(() => {
+const { hardwareBack, openTaskScreen, parseQuickAdd, returnToPreviousApp, routerMocks, routeParams, stashPendingCaptureTaskOpen, storeState } = vi.hoisted(() => {
   const parseQuickAdd = vi.fn<(value: string) => any>((value: string) => ({ title: value, props: {}, invalidDateCommands: [] }));
   return {
     hardwareBack: {
@@ -22,6 +22,7 @@ const { hardwareBack, openTaskScreen, parseQuickAdd, routerMocks, routeParams, s
       remove: vi.fn(),
     },
     openTaskScreen: vi.fn(),
+    returnToPreviousApp: vi.fn(),
     stashPendingCaptureTaskOpen: vi.fn(),
     parseQuickAdd,
     routerMocks: {
@@ -145,9 +146,11 @@ vi.mock('@/lib/ai-config', () => ({
 
 vi.mock('@/lib/app-log', () => ({
   logError: vi.fn(),
+  logInfo: vi.fn(),
 }));
 
 vi.mock('@/lib/hardware-back', () => ({
+  returnToPreviousApp,
   addHardwareBackPressListener: (handler: () => boolean) => {
     hardwareBack.handler = handler;
     return {
@@ -496,6 +499,66 @@ describe('CaptureScreen', () => {
       status: 'next',
       projectId: 'project-1',
     });
+  });
+
+  it('sends the app behind the previous screen after a capture opened by a system entry point (#1169)', async () => {
+    routeParams.current = { origin: 'system' };
+    routerMocks.canGoBack.mockReturnValue(false);
+    returnToPreviousApp.mockReturnValue(true);
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<CaptureScreen />);
+    });
+    act(() => {
+      tree.root.findByType(TextInput).props.onChangeText('Call the plumber');
+    });
+    await act(async () => {
+      await findTouchableByText(tree, 'Save').props.onPress();
+    });
+
+    expect(storeState.addTask).toHaveBeenCalledWith('Call the plumber', expect.objectContaining({ status: 'inbox' }));
+    expect(routerMocks.replace).toHaveBeenCalledWith('/inbox');
+    expect(returnToPreviousApp).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the app in front after a save from inside the app', async () => {
+    routeParams.current = {};
+    routerMocks.canGoBack.mockReturnValue(true);
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<CaptureScreen />);
+    });
+    act(() => {
+      tree.root.findByType(TextInput).props.onChangeText('Call the plumber');
+    });
+    await act(async () => {
+      await findTouchableByText(tree, 'Save').props.onPress();
+    });
+
+    expect(routerMocks.back).toHaveBeenCalled();
+    expect(returnToPreviousApp).not.toHaveBeenCalled();
+  });
+
+  it('stays in the editor when save and edit is chosen from a system entry point', async () => {
+    routeParams.current = { origin: 'system' };
+    routerMocks.canGoBack.mockReturnValue(false);
+    storeState.addTask.mockResolvedValueOnce({ success: true, id: 'task-1' });
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<CaptureScreen />);
+    });
+    act(() => {
+      tree.root.findByType(TextInput).props.onChangeText('Call the plumber');
+    });
+    await act(async () => {
+      await findTouchableByText(tree, 'Save & edit').props.onPress();
+    });
+
+    expect(openTaskScreen).toHaveBeenCalled();
+    expect(returnToPreviousApp).not.toHaveBeenCalled();
   });
 
   it('returns to the requested project route after saving a project task', async () => {

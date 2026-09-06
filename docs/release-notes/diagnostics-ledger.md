@@ -13,6 +13,12 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 - `Mobile background sync registration checked` with `decision` (register | re-register | unchanged | unregister | deferred-until-foreground), `registered`, `storedInterval`, `interval`, `appState` (same file; a headless cold start must log `deferred-until-foreground`, never a re-register). Promoted from v1.2.7 after ltguillaume confirmed the background-job fix on 1.2.7 (2026-09-03).
 - Desktop `Sync backend selected; running the verification sync to activate it` (`useSyncSettings.ts`).
 
+## v1.2.9 (add before tagging, trim in the release after)
+
+### Added
+
+- **`v1.2.9/system-capture-return`** — `apps/mobile/app/capture-modal.tsx`, in `finishCapture`, only when the route carries `origin=system` (set by `+native-intent.ts` for the widget, Quick Settings tile, app shortcut and capture notification) and `returnToPreviousApp` sent the Android activity to the back. Message: `Quick capture opened from a system entry point returned to the previous screen`. Fields: `releaseCheck`. A tester's log must show this line once per widget capture that ended on the home screen; a capture from the in-app + button never logs it. (#1169)
+
 ## v1.2.8 (add before tagging, trim in the release after)
 
 Field names are checked against the log sanitizer by `packages/core/src/release-diagnostics-fields.test.ts`. Add every new field name to that test's list.

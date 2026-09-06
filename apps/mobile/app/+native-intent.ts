@@ -27,8 +27,10 @@ export function redirectSystemPath({ path }: { path: string; initial: boolean })
         // during an Android widget/tile cold launch. The root capture modal is
         // purpose-built for system entry points and works on both cold and warm
         // launches. Current native widget/tile entry points request text mode.
+        // origin=system lets the modal send the app back behind the previous
+        // screen after the capture ends (#1169); in-app openers never set it.
         if (isQuickCaptureUrl(path)) {
-            return '/capture-modal';
+            return '/capture-modal?origin=system';
         }
     } catch {
         // redirectSystemPath must never throw; fall through to the original path.
