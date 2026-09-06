@@ -35,7 +35,7 @@ export const frOverrides: Record<string, string> = {
         'nav.sectionArchive': 'Archiver',
 
         // Quick Add
-        'quickAdd.help': 'L’ajout rapide prend en charge /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /area:<name> ou !Area, @context, #tag, +Project, %Person (ou %"Full Name").',
+        'quickAdd.help': 'L’ajout rapide prend en charge /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> ou !Area, @context, #tag, +Project, %Person (ou %"Full Name").',
         'quickAdd.example': 'Exemple : Appeler maman /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Essayez : Appeler maman /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Aide sur la syntaxe d’ajout rapide',
@@ -1026,7 +1026,7 @@ export const frOverrides: Record<string, string> = {
         'settings.cloudTokenInvalid': 'Le jeton de synchronisation doit comporter entre 20 et 512 caractères : lettres, chiffres ou . _ ~ + / = -',
         'settings.cloudSave': 'Enregistrer auto-hébergé',
         'settings.cloudHint': 'Utilisez l’URL de votre point de terminaison auto-hébergé.',
-        'settings.cloudBaseUrlHint': 'Utilisez l’URL de base. Mindwtr ajoutera /api/v1 automatiquement aux requêtes.',
+        'settings.cloudBaseUrlHint': 'Utilisez l’URL de base. Mindwtr ajoutera /v1/data automatiquement aux requêtes.',
         'settings.invalidUrlHttp': 'URL invalide. Utilisez http/https',
         'settings.testConnection': 'Tester la connexion',
         'settings.importTodoistSummary': '{{taskCount}} tâches dans {{projectCount}} projet(s) importés depuis Todoist',

@@ -8,6 +8,8 @@ import {
     hasTranslatableEnglishText,
     isAllowedEnglishMirrorKey,
     isAllowedEnglishResidueKey,
+    missingSlashCommandTokens,
+    quotedEnglishLabels,
 } from '../packages/core/src/i18n/locale-quality';
 import { i18nTemplateSlots } from '../packages/core/src/i18n/index';
 
@@ -131,6 +133,14 @@ for (const target of localeTargets) {
     const slotMismatchKeys = Object.keys(dictionary).filter((key) => (
         key in en && i18nTemplateSlots(dictionary[key]).join(',') !== i18nTemplateSlots(en[key]).join(',')
     ));
+    // Parser syntax and quoted button labels: see locale-quality.ts for why neither is
+    // visible to the checks above. Both repairs are wording, so neither is fixable.
+    const slashTokenKeys = Object.keys(dictionary).filter((key) => (
+        key in en && missingSlashCommandTokens(dictionary[key], en[key]).length > 0
+    ));
+    const quotedLabelKeys = Object.keys(dictionary).filter((key) => (
+        key in en && quotedEnglishLabels(key, dictionary[key], en, dictionary).length > 0
+    ));
     const missingKeys = target.fullParity
         ? englishKeys.filter((key) => !localeKeys.has(key))
         : [];
@@ -144,18 +154,20 @@ for (const target of localeTargets) {
         (shouldFix && fixableKeys.has(key) ? undefined : dictionary[key]) ?? en[key],
     ])));
 
-    if (missingKeys.length === 0 && unknownKeys.length === 0 && mirroredEnglishKeys.length === 0 && mixedEnglishKeys.length === 0 && slotMismatchKeys.length === 0 && englishResidueKeys.length === 0) {
+    if (missingKeys.length === 0 && unknownKeys.length === 0 && mirroredEnglishKeys.length === 0 && mixedEnglishKeys.length === 0 && slotMismatchKeys.length === 0 && englishResidueKeys.length === 0 && slashTokenKeys.length === 0 && quotedLabelKeys.length === 0) {
         console.log(`${target.locale}: ok`);
         continue;
     }
 
-    problemCount += missingKeys.length + unknownKeys.length + mirroredEnglishKeys.length + mixedEnglishKeys.length + slotMismatchKeys.length + englishResidueKeys.length;
+    problemCount += missingKeys.length + unknownKeys.length + mirroredEnglishKeys.length + mixedEnglishKeys.length + slotMismatchKeys.length + englishResidueKeys.length + slashTokenKeys.length + quotedLabelKeys.length;
     if (missingKeys.length > 0) console.log(`${target.locale}: missing ${missingKeys.length} keys`);
     if (unknownKeys.length > 0) console.log(`${target.locale}: unknown ${unknownKeys.length} keys`);
     if (mirroredEnglishKeys.length > 0) console.log(`${target.locale}: mirrored English ${mirroredEnglishKeys.length} keys`);
     if (mixedEnglishKeys.length > 0) console.log(`${target.locale}: mixed English ${mixedEnglishKeys.length} keys`);
     if (slotMismatchKeys.length > 0) console.log(`${target.locale}: placeholder slot mismatch ${slotMismatchKeys.length} keys`);
     if (englishResidueKeys.length > 0) console.log(`${target.locale}: word-substituted English ${englishResidueKeys.length} keys`);
+    if (slashTokenKeys.length > 0) console.log(`${target.locale}: missing slash command tokens ${slashTokenKeys.length} keys`);
+    if (quotedLabelKeys.length > 0) console.log(`${target.locale}: quoted English button labels ${quotedLabelKeys.length} keys`);
     if (shouldFix) {
         if (missingKeys.length > 0) {
             console.log(`${target.locale}: missing full-parity translations require manual translation`);
@@ -172,6 +184,8 @@ for (const target of localeTargets) {
             ['mixed English', mixedEnglishKeys],
             ['placeholder slots', slotMismatchKeys],
             ['substituted English', englishResidueKeys],
+            ['slash tokens', slashTokenKeys],
+            ['quoted labels', quotedLabelKeys],
         ] as const) {
             for (const key of keys.slice(0, 20)) {
                 console.log(`  - ${label}: ${key}`);

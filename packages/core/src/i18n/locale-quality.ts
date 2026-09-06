@@ -305,3 +305,64 @@ export function englishResidueWords(locale: string, translated: string, english:
 export function isAllowedEnglishResidueKey(locale: string, key: string): boolean {
     return allowedEnglishResidueKeysByLocale[locale]?.includes(key) ?? false;
 }
+
+// ---------------------------------------------------------------------------
+// Quick-add and search command tokens
+// ---------------------------------------------------------------------------
+//
+// `/due:`, `/next`, `/* focus`, `/area:` are parser syntax, identical in every locale, and
+// the help copy is where a user learns them. When English gains a token (`/* focus` landed
+// in en.ts and ten locales kept listing the old set) or a translation paraphrases one away
+// (fr rewrote "/v1/data" as "/api/v1" in the self-hosted hint), the sentence still reads as
+// a fluent translation to every other check here. So: every slash token in the English
+// source must appear verbatim in the translation. Paths count too (`/v1/data`), because a
+// wrong path is the same class of defect for the user who types it.
+const SLASH_COMMAND_TOKEN_PATTERN = /(?<![\p{L}\p{N}/.:])\/(?:\*|[a-z][a-z0-9]*:?)/gu;
+
+export function slashCommandTokens(value: string): string[] {
+    return [...new Set(value.match(SLASH_COMMAND_TOKEN_PATTERN) ?? [])];
+}
+
+/** Slash tokens the English source lists that the translation no longer contains. */
+export function missingSlashCommandTokens(translated: string, english: string): string[] {
+    const present = new Set(slashCommandTokens(translated));
+    return slashCommandTokens(english).filter((token) => !present.has(token));
+}
+
+// ---------------------------------------------------------------------------
+// Quoted UI labels
+// ---------------------------------------------------------------------------
+//
+// Help text tells the user which button to press by quoting its label: `tap "Export Backup"`.
+// A translation that keeps the English label in the quotes while the button itself is
+// translated under its own key ("Exportar copia de seguridad") sends the user looking for a
+// button that does not exist. es shipped three such strings with every gate green. The
+// signal: a quoted fragment that equals the English value of another key which this locale
+// translates to something else. A key the locale leaves untranslated still shows the
+// English label on screen, so quoting it in English is correct and is not flagged.
+//
+// Labels of four characters or fewer are skipped: "Auto", "Sync", "Done" also match an
+// ordinary word inside a sentence, and the measured hit on de was exactly that.
+const QUOTED_LABEL_PATTERN = /["“«„「]([^"”»“」]{5,60})["”»“」]/g;
+const QUOTED_LABEL_MAX_LENGTH = 40;
+
+/** Quoted English labels in `translated` whose own key this locale translates differently. */
+export function quotedEnglishLabels(
+    key: string,
+    translated: string,
+    english: Record<string, string>,
+    translations: Record<string, string>,
+): string[] {
+    const found: string[] = [];
+    for (const match of translated.matchAll(QUOTED_LABEL_PATTERN)) {
+        const label = match[1].trim();
+        if (label.length > QUOTED_LABEL_MAX_LENGTH || !/[A-Za-z]/.test(label) || /[{}]/.test(label)) continue;
+        const labelKeys = Object.keys(english).filter((other) => other !== key && english[other] === label);
+        if (labelKeys.length === 0) continue;
+        // Correct as long as ANY key with that label still shows it: kept verbatim, or
+        // untranslated and therefore rendered as the English fallback.
+        const stillShown = labelKeys.some((other) => translations[other] === undefined || translations[other] === label);
+        if (!stillShown) found.push(label);
+    }
+    return found;
+}

@@ -41,7 +41,7 @@ export const deOverrides: Record<string, string> = {
         'accessibility.mainContent': 'Hauptinhalt',
         
         //Quick Add        
-        'quickAdd.help': 'Schnell-Hinzufügen unterstützt /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /area:<name> oder !Area, @context, #tag, +Project, %Person (oder %"Full Name").',
+        'quickAdd.help': 'Schnell-Hinzufügen unterstützt /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> oder !Area, @context, #tag, +Project, %Person (oder %"Full Name").',
         'quickAdd.example': 'Beispiel: Mama anrufen /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tipp: Mama anrufen /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hilfe zur Schnell-Hinzufügen-Syntax',

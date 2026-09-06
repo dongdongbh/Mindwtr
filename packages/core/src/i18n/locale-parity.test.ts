@@ -25,6 +25,8 @@ import {
     hasTranslatableEnglishText,
     isAllowedEnglishMirrorKey,
     isAllowedEnglishResidueKey,
+    missingSlashCommandTokens,
+    quotedEnglishLabels,
 } from './locale-quality';
 import { i18nTemplateSlots } from './index';
 import { LOCALES, isEnglishResidueChecked, isMixedEnglishChecked, type Locale } from './i18n-locales';
@@ -195,5 +197,30 @@ describe('locale parity', () => {
         const translations = translationsByLocale[lang];
         const mixedEnglish = Object.keys(translations).filter((key) => hasTranslatableEnglishText(translations[key]));
         expect(mixedEnglish).toEqual([]);
+    });
+
+    // Parser syntax is the same in every language, and the help copy is where users learn it.
+    // Ten locales kept listing the pre-`/* focus` token set after en.ts grew, and fr rewrote
+    // the self-hosted path — both invisible to every check above. See slashCommandTokens.
+    it.each(locales)('keeps every slash command token from the English source in %s', (lang) => {
+        const translations = translationsByLocale[lang];
+        const dropped = Object.keys(translations)
+            .filter((key) => key in en)
+            .map((key) => ({ key, missing: missingSlashCommandTokens(translations[key], en[key]) }))
+            .filter(({ missing }) => missing.length > 0)
+            .map(({ key, missing }) => `${key}: missing [${missing.join(', ')}]`);
+        expect(dropped).toEqual([]);
+    });
+
+    // A help string that quotes a button by its English label while the button's own key is
+    // translated points the user at a label that is not on screen. See quotedEnglishLabels.
+    it.each(locales)('quotes button labels by their translated text in %s', (lang) => {
+        const translations = translationsByLocale[lang];
+        const stale = Object.keys(translations)
+            .filter((key) => key in en)
+            .map((key) => ({ key, labels: quotedEnglishLabels(key, translations[key], en, translations) }))
+            .filter(({ labels }) => labels.length > 0)
+            .map(({ key, labels }) => `${key}: quotes English [${labels.join(', ')}]`);
+        expect(stale).toEqual([]);
     });
 });
