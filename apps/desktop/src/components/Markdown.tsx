@@ -4,8 +4,14 @@ import { parseInlineMarkdown } from '@mindwtr/core';
 import { cn } from '../lib/utils';
 import { InternalMarkdownLink, type InternalMarkdownLinkContext, useInternalMarkdownLinkContext } from './InternalMarkdownLink';
 
-const TASK_LIST_RE = /^\s{0,3}(?:[-*+]\s+)?\[( |x|X)\]\s+(.+)$/;
-const BULLET_LIST_RE = /^\s{0,3}[-*+]\s+(.+)$/;
+const TASK_LIST_RE = /^(\s*)(?:[-*+]\s+)?\[( |x|X)\]\s+(.+)$/;
+const BULLET_LIST_RE = /^(\s*)[-*+]\s+(.+)$/;
+// Two spaces (or one tab) per level, the same width the core Tab indent helper and
+// the mobile renderer use, so a nested item previews at the same depth everywhere.
+const LIST_DEPTH_INDENT_PX = 14;
+const getListIndentDepth = (indent: string): number => (
+    Math.max(0, Math.floor(indent.replace(/\t/g, '    ').length / 2))
+);
 const HEADING_RE = /^(#{1,3})\s+(.+)$/;
 const HORIZONTAL_RULE_RE = /^(?:-{3,}|\*{3,}|_{3,})$/;
 
@@ -141,18 +147,18 @@ export function Markdown({ markdown, className }: { markdown: string; className?
 
         const taskListMatch = TASK_LIST_RE.exec(line);
         if (taskListMatch) {
-            const items: { checked: boolean; text: string }[] = [];
+            const items: { checked: boolean; depth: number; text: string }[] = [];
             const start = i;
             while (i < lines.length) {
                 const m = TASK_LIST_RE.exec(lines[i]);
                 if (!m) break;
-                items.push({ checked: m[1].toLowerCase() === 'x', text: m[2] });
+                items.push({ checked: m[2].toLowerCase() === 'x', depth: getListIndentDepth(m[1]), text: m[3] });
                 i += 1;
             }
             blocks.push(
                 <ul key={`task-ul-${start}`} className="space-y-1 pl-1">
                     {items.map((item, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
+                        <li key={idx} className="flex items-start gap-2" style={item.depth ? { marginLeft: item.depth * LIST_DEPTH_INDENT_PX } : undefined}>
                             <input
                                 type="checkbox"
                                 checked={item.checked}
@@ -170,18 +176,20 @@ export function Markdown({ markdown, className }: { markdown: string; className?
 
         const listMatch = BULLET_LIST_RE.exec(line);
         if (listMatch) {
-            const items: string[] = [];
+            const items: { depth: number; text: string }[] = [];
             const start = i;
             while (i < lines.length) {
                 const m = BULLET_LIST_RE.exec(lines[i]);
                 if (!m) break;
-                items.push(m[1]);
+                items.push({ depth: getListIndentDepth(m[1]), text: m[2] });
                 i += 1;
             }
             blocks.push(
                 <ul key={`ul-${start}`} className="list-disc pl-5 space-y-1">
                     {items.map((item, idx) => (
-                        <li key={idx}>{renderInline(item, { linkContext })}</li>
+                        <li key={idx} style={item.depth ? { marginLeft: item.depth * LIST_DEPTH_INDENT_PX } : undefined}>
+                            {renderInline(item.text, { linkContext })}
+                        </li>
                     ))}
                 </ul>
             );

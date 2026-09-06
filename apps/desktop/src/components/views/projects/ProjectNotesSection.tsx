@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link2, Maximize2, Paperclip } from 'lucide-react';
 import {
+    applyMarkdownKeyboardShortcut,
     applyMarkdownToolbarAction,
     continueMarkdownOnEnter,
     isMarkdownEditorAssistEnabled,
@@ -184,13 +185,19 @@ export function ProjectNotesSection({
             return;
         }
 
-        if (event.key !== 'Enter' || event.shiftKey || event.altKey) return;
-        const currentValue = event.currentTarget.value;
+        const isTab = event.key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey;
+        if (!isTab && (event.key !== 'Enter' || event.shiftKey || event.altKey)) return;
+        const textarea = event.currentTarget;
+        const currentValue = textarea.value;
         const selection = {
-            start: event.currentTarget.selectionStart ?? currentValue.length,
-            end: event.currentTarget.selectionEnd ?? currentValue.length,
+            start: textarea.selectionStart ?? currentValue.length,
+            end: textarea.selectionEnd ?? currentValue.length,
         };
-        const next = continueMarkdownOnEnter(currentValue, selection, { assist: markdownEditorAssist });
+        // Tab indents (Shift+Tab outdents) list items through the same core helper the
+        // task description editor uses; a no-op result keeps the browser focus move.
+        const next = isTab
+            ? applyMarkdownKeyboardShortcut(currentValue, selection, { key: 'Tab', shiftKey: event.shiftKey })
+            : continueMarkdownOnEnter(currentValue, selection, { assist: markdownEditorAssist });
         if (!next) return;
 
         event.preventDefault();
@@ -200,8 +207,8 @@ export function ProjectNotesSection({
         });
         notesSelectionRef.current = next.selection;
         requestAnimationFrame(() => {
-            textareaRef.current?.focus();
-            textareaRef.current?.setSelectionRange(next.selection.start, next.selection.end);
+            textarea.focus();
+            textarea.setSelectionRange(next.selection.start, next.selection.end);
         });
     };
 
