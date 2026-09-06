@@ -14,6 +14,7 @@ import {
   validateAttachmentHash,
 } from '@mindwtr/core';
 import * as FileSystem from '../file-system';
+import { logWarn } from '../app-log';
 import {
   buildCloudKey,
   attachmentNeedsManagedLocalCopy,
@@ -288,8 +289,19 @@ export const syncFileAttachments = async (
       }
       if (!options.activationProbe) return false;
       if (!remoteExists) {
-        attachment.cloudKey = undefined;
-        return true;
+        // A blob the folder does not hold yet is not a verdict on File Sync: a
+        // replicator (Syncthing, a mounted drive) can deliver it after the
+        // switch. Keep the key and leave the record missing so core's
+        // activation proof defers it (its `backend === 'file'` accept path
+        // needs the key to still be there), exactly as the desktop backend
+        // does. Clearing the key here turned that path into a refusal on
+        // every phone while the same folder activated on the desktop
+        // (2026-09-06 feedback).
+        void logWarn('File Sync activation left an attachment the folder does not hold yet', {
+          scope: 'attachment',
+          extra: { releaseCheck: 'v1.2.9/mobile-file-activation-absent-blob' },
+        });
+        return false;
       }
       attachment.localStatus = 'available';
       return true;

@@ -618,6 +618,60 @@ describe('attachment sync', () => {
     expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
   });
 
+  it('keeps the key of an absent SAF blob during activation so core can defer it instead of refusing', async () => {
+    const syncFileUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fdata.json';
+    const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';
+
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => {
+      if (uri === attachmentsDirUri) return [];
+      if (uri.includes('primary%3ADocuments%2FMindwtr%20Backup')) return [attachmentsDirUri];
+      return [];
+    });
+
+    const { syncFileAttachments } = attachmentSync;
+    const appData: AppData = {
+      tasks: [],
+      projects: [{
+        id: 'project-exam',
+        title: 'Reading all the books for the exam',
+        status: 'active',
+        color: '#94a3b8',
+        attachments: [{
+          id: 'absent-blob',
+          kind: 'file',
+          title: 'codifier.pdf',
+          uri: '',
+          cloudKey: 'attachments/absent-blob.pdf',
+          localStatus: 'missing',
+          createdAt: '2026-04-18T10:00:00.000Z',
+          updatedAt: '2026-04-18T10:00:00.000Z',
+        }],
+        createdAt: '2026-04-18T10:00:00.000Z',
+        updatedAt: '2026-04-18T10:00:00.000Z',
+      }] as AppData['projects'],
+      sections: [],
+      areas: [],
+      settings: {},
+    };
+
+    const { data } = syncResult(
+      await syncFileAttachments(appData, syncFileUri, undefined, { activationProbe: true }),
+      appData,
+    );
+
+    const appLog = await import('./app-log');
+    // The key is the only thing that lets core keep the record for a later
+    // download; clearing it produced "the file could not be fetched" forever.
+    expect(data.projects[0]?.attachments?.[0]).toMatchObject({
+      cloudKey: 'attachments/absent-blob.pdf',
+      localStatus: 'missing',
+    });
+    expect(vi.mocked(appLog.logWarn)).toHaveBeenCalledWith(
+      'File Sync activation left an attachment the folder does not hold yet',
+      expect.objectContaining({ extra: expect.objectContaining({ releaseCheck: 'v1.2.9/mobile-file-activation-absent-blob' }) }),
+    );
+  });
+
   it('reads the SAF attachments directory once per file-sync pass', async () => {
     const syncFileUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fdata.json';
     const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';

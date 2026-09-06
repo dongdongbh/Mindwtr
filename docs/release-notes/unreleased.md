@@ -4,6 +4,7 @@ Changes collected after `v1.2.8` and before the next version tag.
 
 ## Full Change List
 
+- Android: joining a File Sync folder (Syncthing, a mounted drive) no longer fails with "Candidate attachment proof failed … the file could not be fetched from the new sync location" when the folder does not yet hold one of the attachment files. The phone now keeps the attachment marked missing and picks the file up on a later sync once it arrives, the same way the desktop has since 1.2.8.
 - iOS: iCloud sync recovers after you clear Mindwtr's data in iCloud settings. The app used to remember that its iCloud zone existed and never created it again, so every sync failed with "zone was cleared by user" until you reinstalled. It now recreates the zone the first time iCloud reports it gone, reads it in full, and uploads this device's data again.
 - Linux (deb, rpm, AUR): pinning Mindwtr to KDE Plasma's Task Manager no longer produces a second Mindwtr entry when the app runs. The hidden desktop entry added for KWin's alt-tab icon also declared a window class, so Plasma matched the running window to the hidden entry instead of the pinned one. (#1168)
 - Desktop: timed blocks in the calendar's Day and Week grids now look like macOS Calendar: a light wash of the task's project or area color behind normal text, with that color as a bar on the block's left edge, instead of a solid block with white text. Tasks without a project or area color get the same shape in the accent color, and projected recurrences keep their dashed outline.
