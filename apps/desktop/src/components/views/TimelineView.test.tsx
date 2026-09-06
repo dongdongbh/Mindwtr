@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { TimelineView, resolveTimelineTrack, taskBarTint } from './TimelineView';
 import { LanguageProvider } from '../../contexts/language-context';
-import { configureDateFormatting, useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
+import { DEFAULT_PROJECT_COLOR, configureDateFormatting, useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
 
 const iso = (offsetDays: number): string => {
     const date = new Date();
@@ -345,6 +345,24 @@ describe('TimelineView (#1111)', () => {
             fireEvent.click(groupButton);
             window.removeEventListener('mindwtr:navigate', listener as EventListener);
             expect(navigations).toEqual(['projects']);
+        });
+
+        // Every project stores the placeholder grey until recolored; the group dot and
+        // bar must fall through to the area color like the task bars do (Discord report).
+        it('paints a never-recolored project with its area color instead of the placeholder grey', () => {
+            setStore({
+                tasks: groupTasks(),
+                projects: [projectWithDates({
+                    color: DEFAULT_PROJECT_COLOR,
+                    areaId: 'a1',
+                    startDate: iso(0).slice(0, 10),
+                    dueDate: iso(2).slice(0, 10),
+                })],
+                areas: [{ id: 'a1', name: 'Home', color: '#8b5cf6', order: 0, createdAt: iso(-60), updatedAt: iso(-60) } as Area],
+            });
+            renderTimeline();
+
+            expect(projectBarFor('p1')?.style.backgroundColor).toBe('rgb(139, 92, 246)');
         });
     });
 

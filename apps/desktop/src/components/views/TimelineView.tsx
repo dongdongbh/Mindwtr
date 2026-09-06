@@ -21,7 +21,7 @@ import { ErrorBoundary } from '../ErrorBoundary';
 import { cn } from '../../lib/utils';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { useUiStore } from '../../store/ui-store';
-import { getTaskAccentColor } from '../../lib/task-accent-color';
+import { getProjectAccentColor, getTaskAccentColor } from '../../lib/task-accent-color';
 import { useLanguage } from '../../contexts/language-context';
 import { useAreaVisibility } from '../../hooks/useVisibleTaskContext';
 import { usePersistedViewState } from '../../hooks/usePersistedViewState';
@@ -392,10 +392,9 @@ export function TimelineView() {
                 if (a.lo !== b.lo) return a.lo - b.lo;
                 return (safeParseDate(a.task.createdAt)?.getTime() ?? 0) - (safeParseDate(b.task.createdAt)?.getTime() ?? 0);
             });
-            // Project first, then its area — the same order the bars use.
-            const groupColor = group.project
-                ? group.project.color || (group.project.areaId ? areaById.get(group.project.areaId)?.color : undefined) || undefined
-                : undefined;
+            // Project first, then its area — the same helper the bars use, so a
+            // never-recolored project (placeholder grey) shows its area color.
+            const groupColor = group.project ? getProjectAccentColor(group.project, areaById) : undefined;
             // The group's extents, measured once here: the render loop never
             // walks a group's rows again.
             const projectSpan = group.project ? projectSpans.get(group.project.id) : undefined;

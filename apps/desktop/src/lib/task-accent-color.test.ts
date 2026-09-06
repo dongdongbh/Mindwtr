@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PROJECT_COLOR, type Area, type Project, type Task } from '@mindwtr/core';
-import { getTaskAccentColor } from './task-accent-color';
+import { getProjectAccentColor, getTaskAccentColor } from './task-accent-color';
 
 const task = (overrides: Partial<Task>): Task => ({
     id: 't1',
@@ -57,5 +57,23 @@ describe('getTaskAccentColor', () => {
         const [projects, areas] = maps([project({ areaId: 'a1' })], [area({ color: DEFAULT_PROJECT_COLOR })]);
         expect(getTaskAccentColor(task({ projectId: 'p1' }), projects, areas)).toBeUndefined();
         expect(getTaskAccentColor(task({}), projects, areas)).toBeUndefined();
+    });
+});
+
+describe('getProjectAccentColor', () => {
+    it('uses an explicitly chosen project color over the area', () => {
+        const [, areas] = maps([], [area({ color: '#8b5cf6' })]);
+        expect(getProjectAccentColor(project({ color: '#f97316', areaId: 'a1' }), areas)).toBe('#f97316');
+    });
+
+    it('falls through the never-changed default project color to the area color', () => {
+        const [, areas] = maps([], [area({ color: '#8b5cf6' })]);
+        expect(getProjectAccentColor(project({ areaId: 'a1' }), areas)).toBe('#8b5cf6');
+    });
+
+    it('returns undefined for a default-grey project with no area color', () => {
+        const [, areas] = maps([], [area({ color: DEFAULT_PROJECT_COLOR })]);
+        expect(getProjectAccentColor(project({ areaId: 'a1' }), areas)).toBeUndefined();
+        expect(getProjectAccentColor(project({}), areas)).toBeUndefined();
     });
 });
