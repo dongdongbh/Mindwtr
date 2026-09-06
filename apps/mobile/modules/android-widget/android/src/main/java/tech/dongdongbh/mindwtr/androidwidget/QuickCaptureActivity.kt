@@ -64,7 +64,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     Log.i(TAG, "quick capture queued ${written.name}")
     Toast.makeText(this, labels.added, Toast.LENGTH_SHORT).show()
     WidgetPayloadStore.incrementInboxCount(this)
-    MindwtrTasksWidgetProvider.refreshAll(this)
+    WidgetRenderer.refreshAll(this)
     finish()
   }
 

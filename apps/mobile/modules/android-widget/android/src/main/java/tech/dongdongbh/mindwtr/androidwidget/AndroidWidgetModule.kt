@@ -13,7 +13,7 @@ class AndroidWidgetModule : Module() {
     }
 
     Function("updateWidgets") {
-      appContext.reactContext?.let { MindwtrTasksWidgetProvider.refreshAll(it) }
+      appContext.reactContext?.let { WidgetRenderer.refreshAll(it) }
     }
   }
 }

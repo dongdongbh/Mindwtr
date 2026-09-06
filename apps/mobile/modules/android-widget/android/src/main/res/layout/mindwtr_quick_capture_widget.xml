@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1x1 "Quick capture" button: the same "+" as the Tasks widget header, with
+     the dialog title underneath. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/mindwtr_widget_capture"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical">
+
+    <FrameLayout
+        android:layout_width="44dp"
+        android:layout_height="44dp">
+
+        <ImageView
+            android:id="@+id/mindwtr_widget_capture_background"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:importantForAccessibility="no"
+            android:src="@drawable/mindwtr_widget_circle" />
+
+        <TextView
+            android:id="@+id/mindwtr_widget_capture_label"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:text="+"
+            android:textColor="@color/mindwtr_widget_on_accent"
+            android:textSize="26sp" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/mindwtr_widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:shadowColor="#80000000"
+        android:shadowRadius="3"
+        android:singleLine="true"
+        android:textColor="#FFFFFF"
+        android:textSize="11sp" />
+</LinearLayout>

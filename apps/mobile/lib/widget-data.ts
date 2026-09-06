@@ -51,6 +51,9 @@ export interface WidgetTaskItem {
     statusLabel: string;
     dueLabel: string | null;
     dueEmphasis: boolean;
+    // Deep link that opens this task (the app routes mindwtr://open?task=<id>);
+    // the Android widget rows use it, iOS may ignore it.
+    openUri: string;
 }
 
 // Hex only: the Android provider (modules/android-widget WidgetPayload.kt) and
@@ -285,6 +288,7 @@ export function buildWidgetPayload(
         title: task.title,
         statusLabel: tr[`status.${task.status}`] || task.status,
         ...computeDueLabel(task.dueDate, tr, language, startOfToday, endOfToday),
+        openUri: `mindwtr://open?task=${encodeURIComponent(task.id)}`,
     }));
     const hiddenTaskCount = Math.max(listSource.length - items.length, 0);
 

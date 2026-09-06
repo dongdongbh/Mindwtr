@@ -6,8 +6,9 @@ import org.json.JSONObject
 
 /**
  * The widget payload the React Native side publishes (widget-service.ts,
- * `AndroidTasksWidgetPayload`). Every string the widget or the quick-capture
- * dialog shows is localized in TypeScript; Kotlin only lays it out.
+ * `AndroidTasksWidgetPayload`), shared by every widget kind. Every string the
+ * widgets or the quick-capture dialog show is localized in TypeScript; Kotlin
+ * only lays it out. Unknown keys (such as a future `sections` array) are ignored.
  */
 data class WidgetPayload(
   val headerTitle: String,
@@ -20,7 +21,7 @@ data class WidgetPayload(
   val palette: Palette?,
   val quickCapture: QuickCaptureLabels,
 ) {
-  data class Item(val title: String, val dueLabel: String?, val dueEmphasis: Boolean)
+  data class Item(val title: String, val dueLabel: String?, val dueEmphasis: Boolean, val openUri: String?)
 
   data class Palette(
     val background: Int,
@@ -80,11 +81,12 @@ data class WidgetPayload(
           val title = item.optString("title").trim()
           if (title.isEmpty()) continue
           val dueLabel = item.optString("dueLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("dueLabel") }
-          items.add(Item(title, dueLabel, item.optBoolean("dueEmphasis", false)))
+          items.add(Item(title, dueLabel, item.optBoolean("dueEmphasis", false), appUriOrNull(item.optString("openUri"))))
         }
       }
-      // Only the app's own focus route may be launched from the header tap.
-      val focusUri = root.optString("focusUri").takeIf { it.startsWith("mindwtr:") } ?: DEFAULT_FOCUS_URI
+      // Only the app's own routes may be launched from a tap.
+      val focusUri = appUriOrNull(root.optString("focusUri")) ?: DEFAULT_FOCUS_URI
+      // `sections` (#1173 Focus kind) is tolerated and ignored until a kind reads it.
       val labels = root.optJSONObject("quickCapture")
       val quickCapture = QuickCaptureLabels(
         title = labels.stringOr("title", defaults.quickCapture.title),
@@ -118,6 +120,8 @@ data class WidgetPayload(
         onAccent = parseHexColor(json.optString("onAccent")) ?: background,
       )
     }
+
+    fun appUriOrNull(value: String?): String? = value?.takeIf { it.startsWith("mindwtr:") }
 
     /** `#RRGGBB` or `#AARRGGBB` to an ARGB int; android.graphics.Color is a stub on the JVM. */
     fun parseHexColor(value: String?): Int? {

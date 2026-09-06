@@ -4,9 +4,9 @@ const plugin = require('./android-widget');
 
 const {
   ACTIVITY_NAME,
-  RECEIVER_NAME,
   SERVICE_NAME,
   buildWidgetInfoXml,
+  buildWidgetKinds,
   buildWidgetStringsXml,
   buildWidgetStylesXml,
   ensureWidgetComponents,
@@ -28,7 +28,10 @@ describe('android-widget', () => {
     expect(props.resizeMode).toBe('horizontal|vertical');
     expect(props.previewImage).toBe('./assets/images/widget-preview.png');
 
-    const xml = buildWidgetInfoXml(props);
+    const [tasks, quickCapture] = buildWidgetKinds(props);
+    expect(tasks.kind).toBe('Tasks');
+    expect(tasks.receiver).toBe('tech.dongdongbh.mindwtr.androidwidget.TasksWidgetProvider');
+    const xml = buildWidgetInfoXml(tasks);
     expect(xml).toContain('android:minWidth="120dp"');
     expect(xml).toContain('android:minResizeWidth="120dp"');
     expect(xml).toContain('android:targetCellWidth="3"');
@@ -37,7 +40,17 @@ describe('android-widget', () => {
     expect(xml).toContain('android:initialLayout="@layout/mindwtr_widget"');
     expect(xml).toContain('android:previewImage="@drawable/mindwtr_widget_preview"');
     expect(xml).toContain('android:updatePeriodMillis="0"');
-    expect(buildWidgetStringsXml(props)).toContain('Inbox, focus, and quick capture');
+    expect(buildWidgetStringsXml([tasks, quickCapture])).toContain('Inbox, focus, and quick capture');
+
+    expect(quickCapture.kind).toBe('QuickCapture');
+    expect(quickCapture.receiver).toBe('tech.dongdongbh.mindwtr.androidwidget.QuickCaptureWidgetProvider');
+    const captureXml = buildWidgetInfoXml(quickCapture);
+    expect(captureXml).toContain('android:targetCellWidth="1"');
+    expect(captureXml).toContain('android:targetCellHeight="1"');
+    expect(captureXml).toContain('android:resizeMode="none"');
+    expect(captureXml).toContain('android:initialLayout="@layout/mindwtr_quick_capture_widget"');
+    expect(captureXml).not.toContain('previewImage');
+    expect(buildWidgetKinds(resolveProps({ label: 'Mindwtr Dev' })).map((kind) => kind.label)).toEqual(['Mindwtr Dev', 'Mindwtr Dev quick capture']);
   });
 
   it('derives the dialog theme from the AppCompat DayNight dialog without a title', () => {
@@ -56,9 +69,13 @@ describe('android-widget', () => {
 
     const application = manifest.manifest.application[0];
     expect(application.receiver).toEqual([{
-      $: { 'android:name': RECEIVER_NAME, 'android:label': 'Mindwtr Dev', 'android:exported': 'true' },
+      $: { 'android:name': 'tech.dongdongbh.mindwtr.androidwidget.TasksWidgetProvider', 'android:label': 'Mindwtr Dev', 'android:exported': 'true' },
       'intent-filter': [{ action: [{ $: { 'android:name': 'android.appwidget.action.APPWIDGET_UPDATE' } }] }],
       'meta-data': [{ $: { 'android:name': 'android.appwidget.provider', 'android:resource': '@xml/mindwtr_tasks_widget_info' } }],
+    }, {
+      $: { 'android:name': 'tech.dongdongbh.mindwtr.androidwidget.QuickCaptureWidgetProvider', 'android:label': 'Mindwtr Dev quick capture', 'android:exported': 'true' },
+      'intent-filter': [{ action: [{ $: { 'android:name': 'android.appwidget.action.APPWIDGET_UPDATE' } }] }],
+      'meta-data': [{ $: { 'android:name': 'android.appwidget.provider', 'android:resource': '@xml/mindwtr_quick_capture_widget_info' } }],
     }]);
     expect(application.service).toEqual([{
       $: { 'android:name': SERVICE_NAME, 'android:permission': 'android.permission.BIND_REMOTEVIEWS', 'android:exported': 'false' },
@@ -79,7 +96,7 @@ describe('android-widget', () => {
       manifest: {
         application: [{
           receiver: [{
-            $: { 'android:name': RECEIVER_NAME },
+            $: { 'android:name': 'tech.dongdongbh.mindwtr.androidwidget.TasksWidgetProvider' },
             'intent-filter': [{ action: [{ $: { 'android:name': 'android.intent.action.BOOT_COMPLETED' } }] }],
           }],
         }],

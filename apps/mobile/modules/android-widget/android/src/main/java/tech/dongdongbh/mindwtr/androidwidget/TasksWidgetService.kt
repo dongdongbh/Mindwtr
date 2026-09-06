@@ -3,18 +3,20 @@ package tech.dongdongbh.mindwtr.androidwidget
 import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.StyleSpan
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 
-/** Backs the widget's task list; one row per payload item. */
+/** Backs a widget's list; the adapter intent names the kind whose rows it serves. */
 class TasksWidgetService : RemoteViewsService() {
-  override fun onGetViewFactory(intent: Intent): RemoteViewsFactory = TasksWidgetFactory(applicationContext)
+  override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
+    TasksWidgetFactory(applicationContext, WidgetKind.fromName(intent.getStringExtra(WidgetRenderer.EXTRA_KIND)))
 }
 
-class TasksWidgetFactory(private val context: Context) : RemoteViewsService.RemoteViewsFactory {
+class TasksWidgetFactory(private val context: Context, private val kind: WidgetKind) : RemoteViewsService.RemoteViewsFactory {
   private var payload: WidgetPayload = WidgetPayload.EMPTY
 
   override fun onCreate() {
@@ -27,7 +29,9 @@ class TasksWidgetFactory(private val context: Context) : RemoteViewsService.Remo
 
   override fun onDestroy() {}
 
-  override fun getCount(): Int = payload.items.size
+  // Only the Tasks kind lists rows today; a sectioned Focus kind (#1173) would
+  // branch here on `kind` and read payload.sections.
+  override fun getCount(): Int = if (kind == WidgetKind.TASKS) payload.items.size else 0
 
   override fun getViewAt(position: Int): RemoteViews {
     val item = payload.items[position]
@@ -47,8 +51,9 @@ class TasksWidgetFactory(private val context: Context) : RemoteViewsService.Remo
     } else if (item.dueEmphasis) {
       views.setTextColor(R.id.mindwtr_widget_item_due, context.getColor(R.color.mindwtr_widget_accent))
     }
-    // Merged into the provider's row template (opens Focus); nothing to add.
-    views.setOnClickFillInIntent(R.id.mindwtr_widget_item, Intent())
+    // Merged into the renderer's row template, which fixes component + action
+    // and leaves the data to this row: the task's own open link, else Focus.
+    views.setOnClickFillInIntent(R.id.mindwtr_widget_item, Intent().setData(Uri.parse(item.openUri ?: payload.focusUri)))
     return views
   }
 

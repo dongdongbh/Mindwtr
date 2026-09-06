@@ -16,10 +16,11 @@ class WidgetPayloadTest {
       "inboxLabel": "Inbox",
       "inboxCount": 3,
       "items": [
-        {"id": "a", "title": "Call the bank", "statusLabel": "Next", "dueLabel": "Today", "dueEmphasis": true},
-        {"id": "b", "title": "Write report", "statusLabel": "Next", "dueLabel": null, "dueEmphasis": false},
+        {"id": "a", "title": "Call the bank", "statusLabel": "Next", "dueLabel": "Today", "dueEmphasis": true, "openUri": "mindwtr://open?task=a"},
+        {"id": "b", "title": "Write report", "statusLabel": "Next", "dueLabel": null, "dueEmphasis": false, "openUri": "https://evil.example"},
         {"id": "c", "title": "   ", "statusLabel": "Next", "dueLabel": null, "dueEmphasis": false}
       ],
+      "sections": [{"title": "Next", "items": []}],
       "emptyMessage": "All clear",
       "focusUri": "mindwtr:///focus",
       "themeMode": "dark",
@@ -41,6 +42,8 @@ class WidgetPayloadTest {
     assertEquals("Today", payload.items[0].dueLabel)
     assertTrue(payload.items[0].dueEmphasis)
     assertNull(payload.items[1].dueLabel)
+    assertEquals("mindwtr://open?task=a", payload.items[0].openUri)
+    assertNull("a non-app openUri must never reach a PendingIntent", payload.items[1].openUri)
     assertEquals(0xFF111827.toInt(), payload.palette!!.background)
     assertEquals(0xFF2563EB.toInt(), payload.palette!!.accent)
     assertFalse(payload.usesSystemColors)
