@@ -201,6 +201,7 @@ vi.mock('lucide-react-native', () => ({
   Check: (props: any) => React.createElement('Check', props),
   CircleDot: (props: any) => React.createElement('CircleDot', props),
   History: (props: any) => React.createElement('History', props),
+  Hourglass: (props: any) => React.createElement('Hourglass', props),
   ListChecks: (props: any) => React.createElement('ListChecks', props),
   Repeat: (props: any) => React.createElement('Repeat', props),
   RotateCcw: (props: any) => React.createElement('RotateCcw', props),
@@ -1143,7 +1144,10 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(renderedText).not.toContain('](');
   });
 
-  it('renders title-only with hideDetails, hiding the description preview and metadata parts', () => {
+  it('renders title-only with hideDetails, hiding the description preview, metadata parts and task age', () => {
+    storeState.settings = { features: {}, appearance: { showTaskAge: true } };
+    getTaskAgeLabel.mockReturnValue('2 days old');
+    getTaskStaleness.mockReturnValue('fresh');
     const renderRow = (hideDetails: boolean) => {
       let tree!: renderer.ReactTestRenderer;
       renderer.act(() => {
@@ -1181,11 +1185,13 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(hasText(shown, 'Client call')).toBe(true);
     expect(hasText(shown, 'Prep the deck')).toBe(true);
     expect(hasText(shown, 'Start: May 12, 2026, 8:30 AM')).toBe(true);
+    expect(hasText(shown, '2 days old')).toBe(true);
 
     const hidden = renderRow(true);
     expect(hasText(hidden, 'Client call')).toBe(true);
     expect(hasText(hidden, 'Prep the deck')).toBe(false);
     expect(hasText(hidden, 'Start: May 12, 2026, 8:30 AM')).toBe(false);
+    expect(hasText(hidden, '2 days old')).toBe(false);
   });
 
   it('shows the completion date and time for completed tasks', () => {

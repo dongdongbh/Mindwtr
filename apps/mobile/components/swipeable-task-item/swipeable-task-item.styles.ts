@@ -111,9 +111,14 @@ export const styles = StyleSheet.create({
         height: 6,
         borderRadius: 3,
     },
+    staleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 4,
+    },
     staleText: {
         fontSize: 11,
-        marginTop: 4,
     },
     checklistItems: {
         marginTop: 6,

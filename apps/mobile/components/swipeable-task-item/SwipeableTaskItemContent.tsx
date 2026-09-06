@@ -1,6 +1,6 @@
 import React, { type ReactNode, useMemo, useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
-import { CircleDot, History, ListChecks, Repeat } from 'lucide-react-native';
+import { CircleDot, History, Hourglass, ListChecks, Repeat } from 'lucide-react-native';
 import { useThemeTokens } from '../../hooks/use-theme-tokens';
 import { useStatusColors } from '../../hooks/use-status-colors';
 import {
@@ -179,7 +179,9 @@ export function SwipeableTaskItemContent({
         return safeFormatDate(completionTimestamp, 'Pp', completionTimestamp);
     })();
     const ageLabel = getTaskAgeLabel(task.createdAt, language as Language);
+    // Age is detail: the Focus "hide details" toggle drops it with the rest.
     const showAge = showTaskAge
+        && !hideDetails
         && task.status !== 'done'
         && task.status !== 'reference'
         && !!ageLabel;
@@ -613,9 +615,10 @@ export function SwipeableTaskItemContent({
                     </View>
                 )}
                 {showAge && (
-                    <Text style={[styles.staleText, { color: tc.secondaryText }]}>
-                        ⏱ {ageLabel}
-                    </Text>
+                    <View style={styles.staleRow}>
+                        <Hourglass size={11} color={tc.secondaryText} accessible={false} />
+                        <Text style={[styles.staleText, { color: tc.secondaryText }]}>{ageLabel}</Text>
+                    </View>
                 )}
             </View>
             {!hideStatusBadge && (
