@@ -90,7 +90,7 @@ const buildWidgetInfoXml = (kind) => `<?xml version="1.0" encoding="utf-8"?>
     android:initialLayout="@layout/${kind.layout}"${kind.previewImage ? `
     android:previewImage="@drawable/${WIDGET_PREVIEW_FILE_NAME.replace(/\.png$/, '')}"` : ''}
     android:resizeMode="${kind.resizeMode}"
-    android:widgetCategory="home_screen"
+    android:widgetCategory="home_screen|keyguard"
     android:description="@string/${kind.descriptionResource}" />
 `;
 
