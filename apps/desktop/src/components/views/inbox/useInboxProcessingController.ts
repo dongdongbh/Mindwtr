@@ -917,6 +917,8 @@ export function useInboxProcessingController({
             setConvertToProject,
             nextActionDraft,
             setNextActionDraft,
+            extraActionDrafts,
+            setExtraActionDrafts,
             addProject,
             onSubmit: handleQuickSubmit,
         }

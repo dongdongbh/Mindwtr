@@ -6,6 +6,7 @@ import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimate
 
 import { cn } from '../lib/utils';
 import { useNativeDateInputLocale } from '../hooks/use-native-date-input-locale';
+import { InboxNextActionDrafts } from './InboxNextActionDrafts';
 import {
     InboxProcessingScheduleFields,
     type InboxProcessingScheduleFieldKey,
@@ -67,6 +68,8 @@ export type InboxProcessingQuickPanelProps = {
     setConvertToProject: (value: boolean) => void;
     nextActionDraft: string;
     setNextActionDraft: (value: string) => void;
+    extraActionDrafts: string[];
+    setExtraActionDrafts: (value: string[]) => void;
     addProject: (title: string, color: string, initialProps?: Partial<Project>) => Promise<Project | null>;
     onSubmit: () => void | Promise<void>;
 };
@@ -136,6 +139,8 @@ export function InboxProcessingQuickPanel({
     setConvertToProject,
     nextActionDraft,
     setNextActionDraft,
+    extraActionDrafts,
+    setExtraActionDrafts,
     addProject,
     onSubmit,
 }: InboxProcessingQuickPanelProps) {
@@ -759,6 +764,7 @@ export function InboxProcessingQuickPanel({
                                 onClick={() => {
                                     if (!convertToProject) {
                                         setNextActionDraft('');
+                                        setExtraActionDrafts([]);
                                     }
                                     setConvertToProject(!convertToProject);
                                 }}
@@ -791,16 +797,15 @@ export function InboxProcessingQuickPanel({
                                         />
                                     </div>
                                 ) : null}
-                                <div className="space-y-1">
-                                    <label className="text-[11px] text-muted-foreground font-medium">{t('process.nextAction')}</label>
-                                    <input
-                                        aria-label={t('process.nextAction')}
-                                        value={nextActionDraft}
-                                        onChange={(event) => setNextActionDraft(event.target.value)}
-                                        placeholder={t('taskEdit.titleLabel')}
-                                        className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
-                                    />
-                                </div>
+                                <InboxNextActionDrafts
+                                    t={t}
+                                    nextActionDraft={nextActionDraft}
+                                    setNextActionDraft={setNextActionDraft}
+                                    extraActionDrafts={extraActionDrafts}
+                                    setExtraActionDrafts={setExtraActionDrafts}
+                                    labelClassName="text-[11px]"
+                                    inputClassName="bg-muted/50 focus:ring-primary/40 focus:outline-none"
+                                />
                             </div>
                         ) : organizationContainerFields}
 

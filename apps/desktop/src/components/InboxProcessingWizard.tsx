@@ -6,6 +6,7 @@ import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimate
 
 import { cn } from '../lib/utils';
 import { useNativeDateInputLocale } from '../hooks/use-native-date-input-locale';
+import { InboxNextActionDrafts } from './InboxNextActionDrafts';
 import {
     InboxProcessingScheduleFields,
     type InboxProcessingScheduleFieldKey,
@@ -1148,53 +1149,14 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     />
                                 </div>
                             ) : null}
-                            <div className="space-y-1">
-                                <label className="text-xs text-muted-foreground font-medium">{t('process.nextAction')}</label>
-                                <input
-                                    value={nextActionDraft}
-                                    onChange={(e) => setNextActionDraft(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key !== 'Enter' || !nextActionDraft.trim()) return;
-                                        e.preventDefault();
-                                        setExtraActionDrafts([...extraActionDrafts, '']);
-                                    }}
-                                    placeholder={t('taskEdit.titleLabel')}
-                                    className="w-full bg-card border border-border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-primary"
-                                />
-                                {extraActionDrafts.map((draft, index) => (
-                                    <div key={index} className="flex gap-2">
-                                        <input
-                                            autoFocus
-                                            value={draft}
-                                            onChange={(e) => setExtraActionDrafts(
-                                                extraActionDrafts.map((value, i) => (i === index ? e.target.value : value)),
-                                            )}
-                                            onKeyDown={(e) => {
-                                                if (e.key !== 'Enter' || index !== extraActionDrafts.length - 1 || !draft.trim()) return;
-                                                e.preventDefault();
-                                                setExtraActionDrafts([...extraActionDrafts, '']);
-                                            }}
-                                            placeholder={t('taskEdit.titleLabel')}
-                                            className="w-full bg-card border border-border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-primary"
-                                        />
-                                        <button
-                                            type="button"
-                                            aria-label={t('process.removeAction')}
-                                            onClick={() => setExtraActionDrafts(extraActionDrafts.filter((_, i) => i !== index))}
-                                            className="px-2 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
-                                        >
-                                            <X className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                ))}
-                                <button
-                                    type="button"
-                                    onClick={() => setExtraActionDrafts([...extraActionDrafts, ''])}
-                                    className="text-xs font-medium text-primary hover:underline"
-                                >
-                                    + {t('process.addAnotherAction')}
-                                </button>
-                            </div>
+                            <InboxNextActionDrafts
+                                t={t}
+                                nextActionDraft={nextActionDraft}
+                                setNextActionDraft={setNextActionDraft}
+                                extraActionDrafts={extraActionDrafts}
+                                setExtraActionDrafts={setExtraActionDrafts}
+                                inputClassName="bg-card"
+                            />
                             <button
                                 type="button"
                                 onClick={handleConvertToProject}

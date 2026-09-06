@@ -121,6 +121,8 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
             setConvertToProject={noop}
             nextActionDraft=""
             setNextActionDraft={noop}
+            extraActionDrafts={[]}
+            setExtraActionDrafts={noop}
             addProject={async () => null}
             onSubmit={noop}
             {...overrides}
@@ -219,6 +221,18 @@ describe('InboxProcessingQuickPanel draft editing', () => {
         fireEvent.change(title, { target: { value: 'Clarified launch' } });
 
         expect((getByLabelText('taskEdit.titleLabel') as HTMLInputElement).value).toBe('Clarified launch');
+    });
+
+    it('lets a quick-mode project conversion collect more than one next action (#1167)', () => {
+        const setExtraActionDrafts = vi.fn();
+        const { getByText, getAllByPlaceholderText } = render(
+            <QuickPanelHarness convertToProject extraActionDrafts={['Book venue']} setExtraActionDrafts={setExtraActionDrafts} />,
+        );
+
+        expect(getAllByPlaceholderText('taskEdit.titleLabel')).toHaveLength(2);
+        fireEvent.click(getByText('+ process.addAnotherAction'));
+
+        expect(setExtraActionDrafts).toHaveBeenCalledWith(['Book venue', '']);
     });
 
     it('uses the title input as the only project name input during conversion', () => {
