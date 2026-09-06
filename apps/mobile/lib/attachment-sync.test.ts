@@ -169,6 +169,14 @@ vi.mock('./app-log', () => ({
   sanitizeLogMessage: (value: string) => value,
 }));
 
+// BUG-R1: `common.ts` imports this (as `../js-timers`) to skip arming timers that would
+// never fire while Android has the app backgrounded. Default false (not paused) matches
+// the real predicate's behaviour under the test shim's default `Platform.OS`.
+const jsTimersMock = vi.hoisted(() => ({
+  areJsTimersPaused: vi.fn(() => false),
+}));
+vi.mock('./js-timers', () => jsTimersMock);
+
 // Loaded once, in a hook: the first import pulls the real @mindwtr/core barrel through
 // `importOriginal` and costs seconds. Inside a test body that cost lands on whichever test
 // runs first and can blow the 5s test timeout under parallel load.
@@ -233,6 +241,8 @@ describe('attachment sync', () => {
     vi.clearAllMocks();
     fileSystemMock.uploadAsync.mockReset();
     fileSystemMock.createUploadTask.mockReset();
+    jsTimersMock.areJsTimersPaused.mockReset();
+    jsTimersMock.areJsTimersPaused.mockReturnValue(false);
     modernFileSystemMock.create.mockReset();
     modernFileSystemMock.create.mockReturnValue(undefined);
     modernFileSystemMock.move.mockReset();
@@ -4773,6 +4783,85 @@ describe('attachment sync', () => {
       expect(settled).toBe(false);
       upload.reject(new Error('native upload terminated'));
       await expect(pending).rejects.toBeInstanceOf(StreamedUploadCancellationUnconfirmedError);
+    });
+
+    it('waitForAttachmentSyncDelay resolves at once, arming no timer, when Android has JS timers paused (BUG-R1)', async () => {
+      jsTimersMock.areJsTimersPaused.mockReturnValue(true);
+      const { waitForAttachmentSyncDelay } = await import('./attachment-sync-backends/common');
+      const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+
+      await expect(waitForAttachmentSyncDelay(400, new AbortController().signal)).resolves.toBeUndefined();
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+      setTimeoutSpy.mockRestore();
+    });
+
+    it('waitForAttachmentSyncDelay still waits, and still rejects on abort, when JS timers are not paused', async () => {
+      const { waitForAttachmentSyncDelay } = await import('./attachment-sync-backends/common');
+      const controller = new AbortController();
+
+      let settled = false;
+      const pending = waitForAttachmentSyncDelay(1_000, controller.signal).finally(() => { settled = true; });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(settled).toBe(false);
+      controller.abort('sync aborted for test');
+      await expect(pending).rejects.toThrow('sync aborted for test');
+    });
+
+    it('does not arm a streamed-upload timeout when JS timers are paused, and still resolves (BUG-R1)', async () => {
+      jsTimersMock.areJsTimersPaused.mockReturnValue(true);
+      const upload = deferred<{ status: number }>();
+      const cancelAsync = vi.fn(async () => undefined);
+      fileSystemMock.createUploadTask.mockReturnValue({ uploadAsync: () => upload.promise, cancelAsync });
+      const { uploadWebdavFileWithFileSystem } = await import('./attachment-sync-backends/common');
+
+      // timeoutMs=1: if the timeout were still armed, it would have fired well before the
+      // 20ms wait below and started cancellation.
+      const pending = uploadWebdavFileWithFileSystem(
+        'https://example.com/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'u',
+        'p',
+        false,
+        undefined,
+        3,
+        undefined,
+        null,
+        1,
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(cancelAsync).not.toHaveBeenCalled();
+      upload.resolve({ status: 200 });
+      await expect(pending).resolves.toBe(true);
+    });
+
+    it('still cancels a streamed upload on abort when JS timers are paused (BUG-R1)', async () => {
+      jsTimersMock.areJsTimersPaused.mockReturnValue(true);
+      const upload = deferred<{ status: number }>();
+      const cancelAsync = vi.fn(async () => undefined);
+      fileSystemMock.createUploadTask.mockReturnValue({ uploadAsync: () => upload.promise, cancelAsync });
+      const { uploadWebdavFileWithFileSystem } = await import('./attachment-sync-backends/common');
+      const controller = new AbortController();
+
+      const pending = uploadWebdavFileWithFileSystem(
+        'https://example.com/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'u',
+        'p',
+        false,
+        undefined,
+        3,
+        controller.signal,
+        null,
+        30_000,
+      );
+
+      controller.abort('upload aborted for test');
+      await vi.waitFor(() => expect(cancelAsync).toHaveBeenCalledOnce());
+      upload.reject(new Error('native upload cancelled'));
+      await expect(pending).rejects.toThrow('upload aborted for test');
     });
 
     it('defers a WebDAV edit during prepare and downloads when newer remote content wins', async () => {

@@ -850,7 +850,7 @@ describe('useSyncSettings cloud token validation', () => {
 
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
         expect(showToast).toHaveBeenCalledWith(
-            'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+            'Another Mindwtr device is holding this sync location for a moment. Sync will retry on its own.',
             'info',
             6000,
         );
@@ -1174,6 +1174,138 @@ describe('useSyncSettings cloud token validation', () => {
             vi.mocked(SyncService.performSync).mock.invocationCallOrder[1],
         );
         expect(showSaved).toHaveBeenCalledTimes(1);
+    });
+
+    // The commit already landed, so "your previous sync settings are still
+    // active" would be a lie for any later non-success.
+    it('reports the new backend as active when the follow-up sync ends in an unexplained failure', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync)
+            .mockResolvedValueOnce({ success: true })
+            .mockResolvedValueOnce({ success: false } as never);
+
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
+        act(() => {
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledTimes(1);
+        expect(showToast).toHaveBeenCalledWith(
+            'The new sync settings are active, but this sync did not finish. Mindwtr will retry on its own.',
+            'error',
+        );
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Sync did not complete. Your previous sync settings are still active.',
+            'error',
+        );
+    });
+
+    // A deferred remote write after a backend switch is a healthy outcome
+    // (another device holds the write, a retry is already scheduled), not a
+    // failure — the commit already landed, so this must not claim the sync
+    // "did not finish" either.
+    it('reports the new backend as active, as an informational notice, when a deferred remote write follows a backend switch', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync)
+            .mockResolvedValueOnce({ success: true })
+            .mockResolvedValueOnce({ success: true, remoteWriteDeferred: true } as never);
+
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await stageBackend(result, 'cloud');
+        act(() => {
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledTimes(1);
+        expect(showToast).toHaveBeenCalledWith(
+            'The new sync settings are active, but this sync did not finish. Mindwtr will retry on its own.',
+            'info',
+        );
+        expect(showToast).not.toHaveBeenCalledWith(
+            'The new sync settings are active, but this sync did not finish. Mindwtr will retry on its own.',
+            'error',
+        );
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Sync did not complete. Your previous sync settings are still active.',
+            'error',
+        );
+    });
+
+    it('still says the previous sync settings are active when no new backend was committed', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.spyOn(SyncService, 'getSyncBackend').mockResolvedValue('cloud');
+        vi.spyOn(SyncService, 'getCloudConfig').mockResolvedValue({
+            url: 'https://example.com',
+            token: 'a'.repeat(24),
+            rememberToken: true,
+            allowInsecureHttp: false,
+        });
+        vi.mocked(SyncService.performSync).mockResolvedValue({ success: false } as never);
+
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'Sync did not complete. Your previous sync settings are still active.',
+            'error',
+        );
+    });
+
+    // A merged-but-deferred cycle (another device holds the remote write; a
+    // retry is already scheduled) is a healthy outcome, not a failure — it
+    // must never show the "did not complete" red toast (#BUG-01).
+    it.each([
+        ['remoteWriteDeferred', { success: true, remoteWriteDeferred: true } as const],
+        ['pendingRemoteWriteBackoff', { success: true, skipped: 'pendingRemoteWriteBackoff', remoteWriteDeferred: true } as const],
+    ])('shows an informational notice, never the incomplete-sync toast, for a plain %s cycle', async (_label, syncResult) => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.spyOn(SyncService, 'getSyncBackend').mockResolvedValue('cloud');
+        vi.spyOn(SyncService, 'getCloudConfig').mockResolvedValue({
+            url: 'https://example.com',
+            token: 'a'.repeat(24),
+            rememberToken: true,
+            allowInsecureHttp: false,
+        });
+        vi.mocked(SyncService.performSync).mockResolvedValue(syncResult as never);
+
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'Your changes are saved on this device. Another device is writing to the sync location right now; Mindwtr will upload them on its own shortly.',
+            'info',
+        );
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Sync did not complete. Your previous sync settings are still active.',
+            'error',
+        );
     });
 
     it('lets Off supersede a gated activation probe and resolves only its captured candidate', async () => {
@@ -1677,20 +1809,7 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
     });
 
-    it.each([
-        {
-            outcome: 'failed',
-            result: { success: false, error: 'Document sync failed.' },
-        },
-        {
-            outcome: 'deferred',
-            result: {
-                success: true,
-                remoteWriteDeferred: true,
-                error: 'Remote write failed. Retrying in the background.',
-            },
-        },
-    ])('prioritizes a $outcome document sync result over attachment guidance', async ({ result: syncResult }) => {
+    it('prioritizes a failed document sync result over attachment guidance', async () => {
         vi.mocked(SyncService.getSyncBackend).mockResolvedValue('cloud');
         vi.mocked(SyncService.getCloudProvider).mockResolvedValue('selfhosted');
         vi.mocked(SyncService.getCloudConfig).mockResolvedValue({
@@ -1700,9 +1819,10 @@ describe('useSyncSettings cloud token validation', () => {
             allowInsecureHttp: false,
         });
         vi.mocked(SyncService.performSync).mockResolvedValueOnce({
-            ...syncResult,
+            success: false,
+            error: 'Document sync failed.',
             fileAttachmentUploadBlocked: 'too-large',
-        });
+        } as never);
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
         const { result } = setup();
@@ -1713,6 +1833,49 @@ describe('useSyncSettings cloud token validation', () => {
         });
 
         expect(showToast).toHaveBeenCalledWith(
+            'Sync did not complete. Your previous sync settings are still active.',
+            'error',
+        );
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+            'info',
+            6000,
+        );
+        expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
+    });
+
+    // A deferred document write is a healthy outcome, not a failure — it
+    // still wins over the (also non-failure) attachment-size guidance, but
+    // with the new informational copy rather than the old red toast.
+    it('prioritizes a deferred document sync result over attachment guidance', async () => {
+        vi.mocked(SyncService.getSyncBackend).mockResolvedValue('cloud');
+        vi.mocked(SyncService.getCloudProvider).mockResolvedValue('selfhosted');
+        vi.mocked(SyncService.getCloudConfig).mockResolvedValue({
+            url: 'https://example.com',
+            token: 'a'.repeat(24),
+            rememberToken: false,
+            allowInsecureHttp: false,
+        });
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            remoteWriteDeferred: true,
+            error: 'Remote write failed. Retrying in the background.',
+            fileAttachmentUploadBlocked: 'too-large',
+        } as never);
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup();
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('cloud'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(showToast).toHaveBeenCalledWith(
+            'Your changes are saved on this device. Another device is writing to the sync location right now; Mindwtr will upload them on its own shortly.',
+            'info',
+        );
+        expect(showToast).not.toHaveBeenCalledWith(
             'Sync did not complete. Your previous sync settings are still active.',
             'error',
         );

@@ -1,5 +1,7 @@
 import { performance } from 'node:perf_hooks';
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
     buildTasksByProjectId,
     buildTrashTimeline,
@@ -262,7 +264,14 @@ function measureBest(operation: () => number, attempts = 3): { durationMs: numbe
     return { durationMs: bestDurationMs, value: bestValue };
 }
 
+const PERF_MEASUREMENTS_PATH = '.perf/measurements.json';
+
+type PerfMeasurement = { actualMs: number; budgetMs: number; label: string; size: LargeStoreSize };
+
+const perfMeasurements: PerfMeasurement[] = [];
+
 function expectWithinBudget(label: string, size: LargeStoreSize, actualMs: number, budgetMs: number) {
+    perfMeasurements.push({ actualMs, budgetMs, label, size });
     expect(
         actualMs,
         `${label} took ${actualMs.toFixed(2)}ms with ${size.toLocaleString()} tasks; budget is ${budgetMs}ms`,
@@ -327,6 +336,11 @@ const operations: BudgetedOperation[] = [
 const describePerf = process.env.MINDWTR_PERF_TEST === '1' ? describe : describe.skip;
 
 describePerf('large-store performance budgets', () => {
+    afterAll(() => {
+        mkdirSync(dirname(PERF_MEASUREMENTS_PATH), { recursive: true });
+        writeFileSync(PERF_MEASUREMENTS_PATH, JSON.stringify(perfMeasurements, null, 2));
+    });
+
     it('builds a 5k-item Trash timeline within budget', () => {
         const fixture = createLargeStoreFixture(10_000);
         const tasks = fixture.tasks.slice(0, 4_750).map((task, index) => ({

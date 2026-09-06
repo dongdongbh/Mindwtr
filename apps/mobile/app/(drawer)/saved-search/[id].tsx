@@ -12,7 +12,7 @@ import { useThemeColors } from '@/hooks/use-theme-colors';
 import { taskMatchesAreaFilterSelection } from '@mindwtr/core';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { Trash2 } from 'lucide-react-native';
-import { resolveNonDoneTaskSortBy } from '@/lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 
 export default function SavedSearchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();

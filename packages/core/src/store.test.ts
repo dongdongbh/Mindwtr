@@ -9,6 +9,8 @@ import {
     setStorageAdapter,
 } from './store';
 import { buildEntityMap } from './store-helpers';
+import { computeSyncPayloadFingerprint } from './sync-helpers';
+import { mergeAppData } from './sync';
 import { shouldShowTaskForStart } from './task-utils';
 import type { StorageAdapter } from './storage';
 import type { AppData, Area, Project, Task } from './types';
@@ -786,10 +788,27 @@ describe('TaskStore', () => {
         vi.mocked(mockStorage.saveData).mockClear();
         const listener = vi.fn();
         const unsubscribe = useTaskStore.subscribe(listener);
+        const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
         try {
             const result = await convertTaskToSection(addResult.id!);
             expect(result.success).toBe(true);
             expect(listener).toHaveBeenCalledTimes(1);
+            const conversionLog = infoSpy.mock.calls.find(
+                ([message]) => message === 'Task converted to section with canonical child tasks'
+            );
+            expect(conversionLog).toBeTruthy();
+            const [, conversionMeta] = conversionLog ?? [];
+            expect(conversionMeta).toEqual(
+                expect.objectContaining({
+                    scope: 'store',
+                    category: 'storage',
+                    context: expect.any(String),
+                })
+            );
+            expect(parseLoggedContext(conversionMeta?.context)).toEqual({
+                releaseCheck: 'v1.2.8/section-conversion-canonical',
+                count: 2,
+            });
 
             const state = useTaskStore.getState();
             const section = state._allSections.find((candidate) => candidate.id === result.id);
@@ -808,6 +827,19 @@ describe('TaskStore', () => {
             ]);
             expect(sectionTasks[0].completedAt).toBeTruthy();
             expect(sectionTasks.every((candidate) => candidate.projectId === project!.id)).toBe(true);
+            expect(sectionTasks.every((candidate) => candidate.isFocusedToday === false)).toBe(true);
+            expect(sectionTasks.every((candidate) => candidate.suppressMindwtrReminders === false)).toBe(true);
+
+            const convertedData: AppData = {
+                tasks: state._allTasks,
+                projects: state._allProjects,
+                sections: state._allSections,
+                areas: state._allAreas,
+                people: state._allPeople,
+                settings: state.settings,
+            };
+            const alignedMerge = mergeAppData(convertedData, convertedData, { nowIso: section!.updatedAt });
+            expect(computeSyncPayloadFingerprint(convertedData)).toBe(computeSyncPayloadFingerprint(alignedMerge));
 
             const source = state._allTasks.find((candidate) => candidate.id === addResult.id);
             expect(source?.deletedAt).toBeTruthy();
@@ -833,6 +865,7 @@ describe('TaskStore', () => {
             expect(mockStorage.saveData).toHaveBeenCalledTimes(1);
         } finally {
             unsubscribe();
+            infoSpy.mockRestore();
         }
     });
 
@@ -4364,7 +4397,7 @@ describe('TaskStore', () => {
         expect(projectTasks.find((task) => task.title === 'Already Archived')?.status).toBe('archived');
         expect(projectSections).toHaveLength(1);
         expect(projectSections[0].deletedAt).toBeTruthy();
-        expect(projectSections[0].deletedAtBeforeProjectArchive).toBeNull();
+        expect(projectSections[0].deletedAtBeforeProjectArchive).toBeUndefined();
     });
 
     it('should restore project-archived task and section state when unarchiving', async () => {

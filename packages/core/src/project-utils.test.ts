@@ -63,7 +63,7 @@ describe('project-utils', () => {
             .toEqual([archivedSection]);
         expect(archivedSection).toMatchObject({
             deletedAt: '2026-08-31T10:00:00.000Z',
-            deletedAtBeforeProjectArchive: null,
+            deletedAtBeforeProjectArchive: undefined,
             projectArchivedAt: '2026-08-31T10:00:00.000Z',
             title: 'Historical planning',
             description: 'Decisions made before archive',

@@ -18,7 +18,7 @@ Tauri v2 desktop app for the Mindwtr productivity system.
 - **Global Search** - Search operators (status:, context:, due:<=7d)
 - **Saved Searches** - Save and reuse search filters
 - **Bulk Actions** - Multi-select, batch move/tag/delete
-- **Task Dependencies** - Block tasks until prerequisites complete
+- **Sequential Projects** - Only the first unfinished task is offered as the next action
 - **Markdown Notes** - Rich text descriptions with preview
 - **Attachments** - Files and links on tasks
 - **Reusable Lists** - Duplicate tasks or reset checklists
@@ -28,23 +28,27 @@ Tauri v2 desktop app for the Mindwtr productivity system.
 
 ### Notifications
 
-- **Due Date Reminders** - Desktop notifications with snooze
+- **Due Date Reminders** - Desktop notifications
 - **Daily Digest** - Morning briefing + evening review prompts
 
 ### Views
 
-| View          | Description                                            |
-| ------------- | ------------------------------------------------------ |
-| Inbox         | Capture and process incoming items                     |
-| Next Actions  | Context-filtered actionable tasks                      |
-| Projects      | Multi-step outcomes with areas                         |
-| Contexts      | Slash-delimited context filtering with parent matching |
-| Waiting For   | Delegated items                                        |
-| Someday/Maybe | Deferred ideas                                         |
-| Calendar      | Time-based view                                        |
-| Board         | Kanban drag-and-drop                                   |
-| Review        | Weekly review wizard                                   |
-| Settings      | Theme, sync, and preferences                           |
+| View                | Description                                            |
+| ------------------- | ------------------------------------------------------ |
+| Inbox               | Capture and process incoming items                     |
+| Next Actions        | Context-filtered actionable tasks                      |
+| Projects            | Multi-step outcomes with areas                         |
+| Contexts            | Slash-delimited context filtering with parent matching |
+| Waiting For         | Delegated items                                        |
+| Someday/Maybe       | Deferred ideas                                         |
+| Reference           | Non-actionable material kept for lookup                |
+| Calendar            | Time-based view                                        |
+| Board               | Kanban drag-and-drop                                   |
+| Timeline (optional) | Tasks and projects as bars from start to due date      |
+| Review              | Weekly review wizard                                   |
+| Done                | Completed tasks                                        |
+| Trash               | Deleted items, recoverable before permanent purge      |
+| Settings            | Theme, sync, and preferences                           |
 
 ## Tech Stack
 
@@ -106,7 +110,7 @@ Extract it to a writable folder and keep `portable.txt` next to `mindwtr.exe`.
 
 Tasks are saved to:
 
-- **Linux data**: `~/.local/share/mindwtr/data.json`
+- **Linux data**: `~/.local/share/mindwtr/mindwtr.db` (the working database), plus `~/.local/share/mindwtr/data.json` (the sync and backup snapshot)
 - **Linux config**: `~/.config/mindwtr/config.toml`
 
 Desktop Settings → Sync → Local Data shows the exact paths for your OS. If you used very early builds, data may exist under legacy Tauri directories like `~/.config/tech.dongdongbh.mindwtr/` and `~/.local/share/tech.dongdongbh.mindwtr/` and will be migrated automatically.

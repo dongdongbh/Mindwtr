@@ -17,6 +17,7 @@ test("CI executes the production-path large-store performance budgets", () => {
   expect(timelineSuite).toContain("LARGE_TASK_COUNT = 5_000");
   expect(mobileSuite).toContain("<TaskList");
   expect(mobileSuite).toContain("<ProjectDetailModal");
+  expect(workflow).toContain("name: Performance Budgets");
   expect(workflow.match(/run: bun run test:perf/g)).toHaveLength(1);
   expect(workflow).not.toContain("bun run --filter @mindwtr/core test:perf");
   expect(workflow).not.toContain("scripts/audit-performance.ts");

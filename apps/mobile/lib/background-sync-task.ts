@@ -264,7 +264,6 @@ export async function syncMobileBackgroundSyncRegistration(): Promise<MobileBack
         storedInterval: lastRegisteredInterval ?? 'none',
         interval,
         appState: String(appState),
-        releaseCheck: 'v1.2.7/background-sync-registration',
       },
     });
   };

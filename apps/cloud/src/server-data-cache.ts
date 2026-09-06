@@ -258,7 +258,7 @@ export const dataMetadataResponse = (filePath: string): Response => {
     const metadata = getDataFileMetadata(filePath);
     const headers = new Headers({
         'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match',
         'Access-Control-Allow-Methods': 'GET,HEAD,PUT,POST,PATCH,DELETE,OPTIONS',
         'Access-Control-Expose-Headers': 'ETag, Last-Modified, Content-Length',
         'Content-Length': String(metadata.size),
@@ -277,7 +277,7 @@ export const jsonFileResponse = (body: string | Uint8Array): Response => {
         : body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
     const headers = new Headers({
         'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match',
         'Access-Control-Allow-Methods': 'GET,HEAD,PUT,POST,PATCH,DELETE,OPTIONS',
         'Content-Length': String(contentLength),
         'Content-Type': 'application/json; charset=utf-8',

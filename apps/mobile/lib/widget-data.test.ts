@@ -346,6 +346,61 @@ describe('widget-data', () => {
         expect(payload.items.map((item) => item.id)).toEqual(['available-next']);
     });
 
+    it('gives the sequential project slot to the later step that is due today', () => {
+        // The widget must name the same next action the Focus screen does
+        // (#1090). Selecting by chain order alone showed 'step-1' here.
+        const now = new Date().toISOString();
+        const dueToday = daysFromNow(0);
+        dueToday.setHours(17, 0, 0, 0);
+        const data: AppData = {
+            ...baseData,
+            projects: [
+                {
+                    id: 'project-1',
+                    title: 'Sequential project',
+                    status: 'active',
+                    isSequential: true,
+                    color: '#123456',
+                    order: 0,
+                    tagIds: [],
+                    createdAt: now,
+                    updatedAt: now,
+                },
+            ],
+            tasks: [
+                {
+                    id: 'step-1',
+                    title: 'Step 1',
+                    status: 'next',
+                    projectId: 'project-1',
+                    order: 0,
+                    orderNum: 0,
+                    tags: [],
+                    contexts: [],
+                    createdAt: now,
+                    updatedAt: now,
+                },
+                {
+                    id: 'step-3',
+                    title: 'Step 3',
+                    status: 'next',
+                    projectId: 'project-1',
+                    order: 2,
+                    orderNum: 2,
+                    dueDate: dueToday.toISOString(),
+                    tags: [],
+                    contexts: [],
+                    createdAt: now,
+                    updatedAt: now,
+                },
+            ],
+        };
+
+        const payload = buildWidgetPayload(data, 'en');
+
+        expect(payload.items.map((item) => item.id)).toEqual(['step-3']);
+    });
+
     it('includes the first widget task from each section for section-scoped sequential projects', () => {
         const now = new Date().toISOString();
         const data: AppData = {

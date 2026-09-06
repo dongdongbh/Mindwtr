@@ -10,10 +10,12 @@ import {
     CLOUD_API_REV_BY,
     errorResponse,
     jsonResponse,
+    logInfo,
     MAX_TASK_TITLE_LENGTH,
 } from './server-config';
 import {
     abandonPreparedFilePublication,
+    durablyRemoveFile,
     isBodyReadError,
     prepareFilePublicationSafely,
     publishPreparedFilePublication,
@@ -365,12 +367,42 @@ export async function handleCaptureRequest(
             if (storeResponse) return storeResponse;
         }
 
-        throwIfRequestAborted(options.abortSignal);
-        writeCloudData(options.filePath, finalized, { assertStorageRoot: options.assertStorageRoot });
+        // From here on, the audio (if any) is already on disk. An abort or a writeCloudData
+        // throw would otherwise leave it orphaned: no task ever ends up referencing its
+        // cloudKey, so nothing later cleans it up.
+        try {
+            throwIfRequestAborted(options.abortSignal);
+            writeCloudData(options.filePath, finalized, { assertStorageRoot: options.assertStorageRoot });
+        } catch (error) {
+            if (audio && attachment?.cloudKey) removeOrphanedCaptureAudio(attachment.cloudKey, options);
+            throw error;
+        }
         const savedTask = finalized.tasks.find((item) => item.id === task.id) ?? task;
+        // A self-hoster's watch, phone shortcut, or script posts here with no UI
+        // feedback of its own; this is the only server-side proof the request
+        // ever arrived (03e9cb9eb added the route without one). No transcription
+        // text or token — only shape and size.
+        logInfo('Capture webhook request accepted', {
+            releaseCheck: 'v1.2.8/cloud-capture-accepted',
+            hasAudio: audio ? 'true' : 'false',
+            bodyKind: isMultipart ? 'multipart' : contentType === 'application/json' ? 'json' : 'text',
+            bytes: bytes.byteLength,
+        });
         // Report what was actually stored, in case the shared finalize pass touched it.
         return jsonResponse({ task: savedTask, attachment: savedTask.attachments?.[0] ?? null }, { status: 201 });
     });
+}
+
+/** Best-effort cleanup for the gap above: removes an audio file storeCaptureAudio already
+ *  published when the task record that would reference it never gets written. Errors from
+ *  the removal itself are swallowed - the original error is what the caller rethrows. */
+function removeOrphanedCaptureAudio(cloudKey: string, options: CaptureRequestOptions): void {
+    try {
+        const resolved = resolveAttachmentPath(options.dataDir, options.key, cloudKey, { create: false });
+        if (resolved) durablyRemoveFile(resolved.filePath);
+    } catch {
+        // best effort only
+    }
 }
 
 /** Publishes the audio bytes through the same durable path PUT

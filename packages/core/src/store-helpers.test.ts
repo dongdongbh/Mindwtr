@@ -1042,6 +1042,23 @@ describe('reconcileEntityCollection attachments (#1136)', () => {
         expect(hasSameEntityIdentity(existing, incoming)).toBe(false);
         const result = reconcileEntityCollection([existing], buildEntityMap([existing]), [incoming]);
         expect(result.items[0]).toBe(incoming);
+        // The releaseCheck line at store-settings.ts's fetchData reads this
+        // count to prove the #1136 fix actually fired.
+        expect(result.attachmentOnlyReplacedCount).toBe(1);
+    });
+
+    it('does not count a replacement caused by a real revision change as attachment-only', () => {
+        const existing = createTask('t1', 'project-1', 0, { attachments: [attachment()] });
+        const incoming = createTask('t1', 'project-1', 0, {
+            attachments: [attachment()],
+            title: 'Retitled',
+            updatedAt: '2026-02-01T00:00:00.000Z',
+            rev: (existing.rev ?? 0) + 1,
+        });
+
+        const result = reconcileEntityCollection([existing], buildEntityMap([existing]), [incoming]);
+        expect(result.items[0]).toBe(incoming);
+        expect(result.attachmentOnlyReplacedCount).toBe(0);
     });
 
     it('still reuses an owner whose attachments are equal by content', () => {

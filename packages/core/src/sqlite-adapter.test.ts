@@ -9,6 +9,19 @@ import { consoleLogger, setLogger, type LogPayload } from './logger';
 import { SQLITE_BASE_SCHEMA, SQLITE_FTS_SCHEMA } from './sqlite-schema';
 import type { AppData, Task } from './types';
 import { prepareRestoredBackupDataForSync } from './backup-transfer';
+import { mergeAppDataWithStats, performSyncCycle } from './sync';
+import { runSharedSyncCycle } from './sync-run';
+import type {
+    SyncBackendIO,
+    SyncRunNotifier,
+    SyncRunPlatformHooks,
+    SyncRunPolicy,
+    SyncRunStorage,
+    SyncRunStoreBridge,
+} from './sync-run-ports';
+import { areSyncPayloadsEqual } from './sync-helpers';
+import { computeRemoteSyncDocumentFingerprint, toRemoteSyncDocument } from './sync-document';
+import { restoreSectionFromProjectArchive, restoreTaskFromProjectArchive } from './store-helpers';
 
 const require = createRequire(import.meta.url);
 type BunStatement = {
@@ -324,7 +337,7 @@ describeSqlite('SqliteAdapter', () => {
         expect(task.attachments?.[0]?.contentSize).toBe(2048);
         expect(task.completedAt).toBe(archivedAt);
         expect(task.statusBeforeProjectArchive).toBe('next');
-        expect(task.completedAtBeforeProjectArchive).toBeNull();
+        expect(task.completedAtBeforeProjectArchive).toBeUndefined();
         expect(task.isFocusedTodayBeforeProjectArchive).toBe(true);
         expect(task.projectArchivedAt).toBe(archivedAt);
         expect(task.rev).toBe(5);
@@ -350,7 +363,7 @@ describeSqlite('SqliteAdapter', () => {
         const section = loaded.sections[0];
         expect(section.title).toBe('Milestones');
         expect(section.deletedAt).toBe(archivedAt);
-        expect(section.deletedAtBeforeProjectArchive).toBeNull();
+        expect(section.deletedAtBeforeProjectArchive).toBeUndefined();
         expect(section.projectArchivedAt).toBe(archivedAt);
         expect(section.rev).toBe(2);
         expect(section.revBy).toBe('device-desktop');
@@ -360,6 +373,242 @@ describeSqlite('SqliteAdapter', () => {
         expect(area.order).toBe(0);
         expect(area.rev).toBe(3);
         expect(area.revBy).toBe('device-desktop');
+    });
+
+    it('settles legacy null archive metadata across SQLite and self-hosted sync (#1156)', async () => {
+        const archivedAt = '2026-09-01T12:00:00.000Z';
+        const previousCompletion = '2026-08-31T12:00:00.000Z';
+        const restoredAt = '2026-09-05T13:00:00.000Z';
+        const attachment = {
+            id: 'attachment-1',
+            kind: 'link' as const,
+            title: 'Reference',
+            uri: 'https://example.com/reference',
+            createdAt: archivedAt,
+            updatedAt: archivedAt,
+        };
+        const canonical: AppData = {
+            tasks: [
+                {
+                    id: 'task-legacy-null',
+                    title: 'Legacy null task',
+                    status: 'done',
+                    completedAt: archivedAt,
+                    statusBeforeProjectArchive: 'next',
+                    projectArchivedAt: archivedAt,
+                    projectId: 'project-1',
+                    attachments: [attachment],
+                    tags: [],
+                    contexts: [],
+                    rev: 4,
+                    revBy: 'device-a',
+                    createdAt: archivedAt,
+                    updatedAt: archivedAt,
+                },
+                {
+                    id: 'task-explicit-state',
+                    title: 'Explicit archive state task',
+                    status: 'done',
+                    completedAt: archivedAt,
+                    statusBeforeProjectArchive: 'waiting',
+                    completedAtBeforeProjectArchive: previousCompletion,
+                    isFocusedTodayBeforeProjectArchive: false,
+                    projectArchivedAt: archivedAt,
+                    projectId: 'project-1',
+                    tags: [],
+                    contexts: [],
+                    rev: 5,
+                    revBy: 'device-a',
+                    createdAt: archivedAt,
+                    updatedAt: archivedAt,
+                },
+            ],
+            projects: [{
+                id: 'project-1',
+                title: 'Archived project',
+                status: 'archived',
+                color: '#6B7280',
+                order: 0,
+                tagIds: [],
+                rev: 3,
+                revBy: 'device-a',
+                createdAt: archivedAt,
+                updatedAt: archivedAt,
+            }],
+            sections: [
+                {
+                    id: 'section-legacy-null',
+                    projectId: 'project-1',
+                    title: 'Legacy null section',
+                    order: 0,
+                    isCollapsed: false,
+                    deletedAt: archivedAt,
+                    projectArchivedAt: archivedAt,
+                    rev: 2,
+                    revBy: 'device-a',
+                    createdAt: archivedAt,
+                    updatedAt: archivedAt,
+                },
+                {
+                    id: 'section-pre-deleted',
+                    projectId: 'project-1',
+                    title: 'Pre-deleted section',
+                    order: 1,
+                    isCollapsed: false,
+                    deletedAt: previousCompletion,
+                    deletedAtBeforeProjectArchive: previousCompletion,
+                    projectArchivedAt: archivedAt,
+                    rev: 2,
+                    revBy: 'device-a',
+                    createdAt: archivedAt,
+                    updatedAt: archivedAt,
+                },
+            ],
+            areas: [],
+            people: [],
+            settings: { syncPreferences: { gtd: true } },
+        };
+        await adapter.saveData(canonical);
+
+        let inMemory = await adapter.getData();
+        let remote = structuredClone(canonical);
+        remote.tasks[0].completedAtBeforeProjectArchive = null;
+        remote.tasks[0].isFocusedTodayBeforeProjectArchive = null;
+        remote.sections[0].deletedAtBeforeProjectArchive = null;
+        let localContentWrites = 0;
+        let remoteContentWrites = 0;
+        let fastState: Awaited<ReturnType<SyncRunStorage['readFastSyncState']>> = null;
+
+        const io: SyncBackendIO = {
+            readRemote: async () => structuredClone(remote),
+            writeRemote: async (incoming) => {
+                remoteContentWrites += 1;
+                const merged = mergeAppDataWithStats(remote, incoming, { nowIso: restoredAt }).data;
+                const incomingOnly = mergeAppDataWithStats({
+                    tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
+                }, incoming, { nowIso: restoredAt }).data;
+                remote = structuredClone(merged);
+                return {
+                    fingerprint: computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(remote)),
+                    serverMergedRemoteData: !areSyncPayloadsEqual(merged, incomingOnly),
+                };
+            },
+            readRemoteFingerprint: async () =>
+                computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(remote)),
+        };
+        const storage: SyncRunStorage = {
+            readPersistedLocal: () => adapter.getData(),
+            persistLocal: async (data) => {
+                localContentWrites += 1;
+                await adapter.saveData(data);
+                inMemory = await adapter.getData();
+                return inMemory;
+            },
+            persistSyncStatus: async () => {},
+            readFastSyncState: async () => fastState,
+            writeFastSyncState: async (state) => { fastState = state; },
+            injectExternalCalendars: async (data) => data,
+            persistExternalCalendars: async () => {},
+        };
+        const notifier: SyncRunNotifier = {
+            setStep: () => {},
+            logInfo: () => {},
+            logWarning: () => {},
+            logWarningExtra: () => {},
+            sanitizeLogMessage: (message) => message,
+            logSyncError: async () => null,
+            logMergeSummary: () => {},
+        };
+        const store: SyncRunStoreBridge = {
+            getLastDataChangeAt: () => 1,
+            getInMemorySnapshot: () => structuredClone(inMemory),
+            flushPendingSave: async () => {},
+            setUiError: () => {},
+            getSettings: () => inMemory.settings,
+        };
+        const hooks: SyncRunPlatformHooks = {
+            setupCycle: async () => ({
+                kind: 'ready',
+                backend: 'cloud',
+                cloudProvider: 'selfhosted',
+                io,
+                fastSyncScope: 'issue-1156',
+            }),
+            requestFollowUp: () => {},
+            requestFollowUpAfter: () => {},
+            formatErrorMessage: (error) => String(error),
+            finalizeErrorStatus: async () => {},
+            finalizeSuccess: async () => {},
+        };
+        const policy: SyncRunPolicy = {
+            preSyncAttachmentsBeforeFastCheck: false,
+            enableReadCheckSkip: false,
+            postMergeAttachmentErrorPolicy: 'warn',
+            attachmentPhasesEnabled: false,
+        };
+        const run = () => runSharedSyncCycle({
+            options: { manual: true },
+            storage,
+            notifier,
+            store,
+            hooks,
+            policy,
+            now: () => new Date(restoredAt),
+            performSyncCycle,
+        });
+
+        const first = await run();
+        expect(first.success).toBe(true);
+        expect(first.stats?.tasks.conflicts).toBe(0);
+        expect(first.stats?.sections.conflicts).toBe(0);
+        expect(remote.tasks[0].completedAtBeforeProjectArchive).toBeUndefined();
+        expect(remote.tasks[0].isFocusedTodayBeforeProjectArchive).toBeUndefined();
+        expect(remote.sections[0].deletedAtBeforeProjectArchive).toBeUndefined();
+
+        const firstLocalWrites = localContentWrites;
+        const firstRemoteWrites = remoteContentWrites;
+        inMemory = await adapter.getData();
+        const second = await run();
+
+        expect(second.success).toBe(true);
+        expect(second.stats?.tasks.conflicts).toBe(0);
+        expect(second.stats?.sections.conflicts).toBe(0);
+        expect(localContentWrites).toBe(firstLocalWrites);
+        expect(remoteContentWrites).toBe(firstRemoteWrites);
+        expect(inMemory.tasks.map((task) => task.id).sort()).toEqual([
+            'task-explicit-state',
+            'task-legacy-null',
+        ]);
+        expect(inMemory.sections.map((section) => section.id).sort()).toEqual([
+            'section-legacy-null',
+            'section-pre-deleted',
+        ]);
+        expect(inMemory.tasks[0].attachments?.map((item) => item.id)).toEqual(['attachment-1']);
+
+        const taskById = new Map(inMemory.tasks.map((task) => [task.id, task]));
+        const sectionById = new Map(inMemory.sections.map((section) => [section.id, section]));
+        const restoredLegacyTask = restoreTaskFromProjectArchive(
+            taskById.get('task-legacy-null')!, restoredAt, 'device-b',
+        );
+        const restoredExplicitTask = restoreTaskFromProjectArchive(
+            taskById.get('task-explicit-state')!, restoredAt, 'device-b',
+        );
+        const restoredLegacySection = restoreSectionFromProjectArchive(
+            sectionById.get('section-legacy-null')!, restoredAt, 'device-b',
+        );
+        const retainedPreDeletedSection = restoreSectionFromProjectArchive(
+            sectionById.get('section-pre-deleted')!, restoredAt, 'device-b',
+        );
+
+        expect(restoredLegacyTask).toMatchObject({ status: 'next', isFocusedToday: false });
+        expect(restoredLegacyTask.completedAt).toBeUndefined();
+        expect(restoredExplicitTask).toMatchObject({
+            status: 'waiting',
+            completedAt: previousCompletion,
+            isFocusedToday: false,
+        });
+        expect(restoredLegacySection.deletedAt).toBeUndefined();
+        expect(retainedPreDeletedSection).toBe(sectionById.get('section-pre-deleted'));
     });
 
     it('round-trips project taskSortBy and stores default as absent', async () => {

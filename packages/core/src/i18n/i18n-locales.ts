@@ -32,8 +32,17 @@ type LocaleDescriptorCommon = {
 // Below it, Latin text in a value is almost always an untranslated leftover. At or above it
 // the locale is essentially complete and the English still in it is deliberate — brand names,
 // protocols, search operators, file extensions — so the check only yields false positives.
-// Compared against translatedKeyFloor (the ratcheted commitment) rather than measured
-// coverage, so a locale can't fall back under the check the moment en.ts grows.
+// Compared against translatedKeyFloor (the ratcheted commitment) rather than measured coverage,
+// so a locale does not fall under the check merely by translating fewer keys than en.ts has.
+//
+// It CAN still be crossed by English growth, and this comment used to claim otherwise. The
+// denominator is the live en key count, so a floor sitting just above 90% slides under it as
+// en.ts grows, with no change to that locale at all: ko at 2240 read 90.07% against 2487
+// English keys and 89.42% against 2505, which switched the check on and flagged 113 values
+// that were the deliberate English this ceiling exists to allow. The remedy is to re-pin that
+// locale's floor to its measured translated count -- the sanctioned ratchet direction, and
+// what keeps the ratio honest -- not to lower the ceiling. ko has been re-pinned twice this
+// way now, which is the signal that a floor left stale near the ceiling is the real hazard.
 export const MIXED_ENGLISH_COVERAGE_CEILING = 90;
 
 // The translation commitment a locale is held to. Either the minimum NUMBER of English keys
@@ -70,6 +79,25 @@ export function isMixedEnglishChecked(descriptor: LocaleDescriptor, englishKeyCo
     if (descriptor.mode !== 'overrides' || !descriptor.nonLatin) return false;
     if (descriptor.translatedKeyFloor === 'all') return false;
     return (descriptor.translatedKeyFloor / englishKeyCount) * 100 < MIXED_ENGLISH_COVERAGE_CEILING;
+}
+
+/**
+ * Whether a locale is checked for substituted English (see englishResidueWords in
+ * locale-quality.ts). The complement of isMixedEnglishChecked's population: that check
+ * only works where any Latin word is suspicious, so Latin-script locales had no
+ * equivalent and went unchecked entirely.
+ *
+ * No coverage ceiling here, deliberately. The ceiling above exists because a nearly
+ * complete non-Latin locale keeps English brand names on purpose and the check turns
+ * into noise. This check does not have that failure mode: it fires only on an English
+ * function word that survived from the same key's English source, which a finished
+ * translation never has at any coverage level. Swedish is at full parity and flags zero.
+ *
+ * Lives beside isMixedEnglishChecked for the same reason that one does: locale-parity.test.ts
+ * and scripts/i18n-locale-parity.ts must agree, and the script used to hand-keep its roster.
+ */
+export function isEnglishResidueChecked(descriptor: LocaleDescriptor): boolean {
+    return descriptor.mode === 'overrides' && !descriptor.nonLatin;
 }
 
 export const LOCALES = {
@@ -218,7 +246,11 @@ export const LOCALES = {
         nonLatin: true,
         // Rewritten end to end by a native speaker in #934 (64 -> ~100%), replacing a machine
         // translation that rendered brand names as common nouns ('Gemini' as the constellation).
-        translatedKeyFloor: 2240,
+        // Re-pinned 2240 -> 2297, the count ko actually translates: at 2240 the ratio against a
+        // growing en.ts sat on 90.00%, so a single new English key dropped ko back under
+        // MIXED_ENGLISH_COVERAGE_CEILING and the mixed-English check fired on deliberate English
+        // (E-Ink, Material 3, Base URL, quick-add token syntax).
+        translatedKeyFloor: 2297,
     },
     it: {
         loadSync: () => require('./locales/it') as typeof import('./locales/it'),

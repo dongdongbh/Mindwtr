@@ -19,8 +19,15 @@ import { trOverrides } from './locales/tr';
 import { viOverrides } from './locales/vi';
 import { zhHans } from './locales/zh-Hans';
 import { zhHant } from './locales/zh-Hant';
-import { allowedEnglishMirrorKeysByLocale, hasTranslatableEnglishText, isAllowedEnglishMirrorKey } from './locale-quality';
-import { LOCALES, isMixedEnglishChecked, type Locale } from './i18n-locales';
+import {
+    allowedEnglishMirrorKeysByLocale,
+    englishResidueWords,
+    hasTranslatableEnglishText,
+    isAllowedEnglishMirrorKey,
+    isAllowedEnglishResidueKey,
+} from './locale-quality';
+import { i18nTemplateSlots } from './index';
+import { LOCALES, isEnglishResidueChecked, isMixedEnglishChecked, type Locale } from './i18n-locales';
 
 // The one hand-kept binding left in this file: LOCALES (i18n-locales.ts) describes each
 // locale's mode/translatedKeyFloor/nonLatin, but the concrete translation object still has to come
@@ -42,6 +49,7 @@ const locales = Object.entries(LOCALES) as Array<[Locale, (typeof LOCALES)[Local
 const fullParityLocales = locales.filter(([, descriptor]) => descriptor.translatedKeyFloor === 'all');
 const countFloorLocales = locales.filter(([, descriptor]) => typeof descriptor.translatedKeyFloor === 'number');
 const nonLatinOverrideLocales = locales.filter(([, descriptor]) => isMixedEnglishChecked(descriptor, englishKeyCount));
+const latinOverrideLocales = locales.filter(([, descriptor]) => isEnglishResidueChecked(descriptor));
 const recoverySettingsKeys = [
     'onboarding.startFreshTitle',
     'onboarding.toastNotCreated',
@@ -138,6 +146,49 @@ describe('locale parity', () => {
     it('keeps generated placeholder fragments out of source key names', () => {
         const generatedKeys = Object.keys(en).filter((key) => /(?:vValue|ValueValue|Value\d)/.test(key));
         expect(generatedKeys).toEqual([]);
+    });
+
+    // A translation can be fluent, idiomatic, reviewed, and still silently broken if it drops
+    // an interpolation slot: `calendar.searchMatches` rendered as "Suchtreffer" instead of
+    // "{count} Treffer in dieser Ansicht" loses the number with nothing to show for it, and no
+    // other check here can see it — key presence passes, mixed-English passes, the mirrored-
+    // English check passes because the value genuinely is German. Compared as SETS, so an
+    // invented slot the English source does not have fails too: that one renders as literal
+    // "{{whatever}}" on screen, because formatI18nTemplate leaves unknown names untouched.
+    //
+    // Both brace styles count, via the same pattern formatI18nTemplate fills them with, since
+    // en.ts uses `{{count}}` for most keys and bare `{count}` for a handful.
+    //
+    // No allow-list: a slot is machinery, not prose. Word order around it is the translator's
+    // to choose, and the slot itself is never the untranslatable part.
+    it.each(locales)('keeps interpolation slots intact in %s', (lang) => {
+        const translations = translationsByLocale[lang];
+        const mismatched = Object.keys(translations)
+            .filter((key) => key in en)
+            .map((key) => ({
+                key,
+                english: i18nTemplateSlots(en[key]),
+                translated: i18nTemplateSlots(translations[key]),
+            }))
+            .filter(({ english, translated }) => english.join(',') !== translated.join(','))
+            .map(({ key, english, translated }) => (
+                `${key}: en has [${english.join(', ')}], ${lang} has [${translated.join(', ')}]`
+            ));
+        expect(mismatched).toEqual([]);
+    });
+
+    // The Latin-script half of the same problem. See englishResidueWords in locale-quality.ts
+    // for the signal and the measured false-positive check; in short, a value that still
+    // carries an English function word from its own English source is a substituted English
+    // sentence, not a translation. Reported with the offending words so the fix is obvious.
+    it.each(latinOverrideLocales)('does not ship word-substituted English in %s', (lang) => {
+        const translations = translationsByLocale[lang];
+        const substituted = Object.keys(translations)
+            .filter((key) => key in en && !isAllowedEnglishResidueKey(lang, key))
+            .map((key) => ({ key, residue: englishResidueWords(lang, translations[key], en[key]) }))
+            .filter(({ residue }) => residue.length > 0)
+            .map(({ key, residue }) => `${key}: English left in place [${residue.join(', ')}]`);
+        expect(substituted).toEqual([]);
     });
 
     it.each(nonLatinOverrideLocales)('does not ship mixed English fragments in %s', (lang) => {

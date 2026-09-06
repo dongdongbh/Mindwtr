@@ -36,7 +36,7 @@ import { TaskEditModal } from './task-edit-modal';
 import { InboxProcessingModal } from './inbox-processing-modal';
 import { ErrorBoundary } from './ErrorBoundary';
 import { fetchExternalCalendarEvents } from '../lib/external-calendar';
-import { resolveNonDoneTaskSortBy } from '@/lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 import { useLocalDayKey } from '@/hooks/use-local-day-key';
 
 type DailyReviewStep = 'today' | 'focus' | 'inbox' | 'waiting' | 'completed';

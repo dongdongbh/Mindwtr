@@ -9,6 +9,7 @@
 // with a field pending; stable releases may not.
 import schemaFixture from './task-sync-schema.fixture.json';
 import type { Task } from './types';
+import { normalizeTaskStatus } from './task-status';
 import {
     fromBool,
     fromJson,
@@ -219,6 +220,7 @@ export const taskToSqliteRow = (task: Task): unknown[] =>
     sqliteRowFromColumnValues(TASK_SQLITE_COLUMNS, taskColumnValues(task));
 
 export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
+    const recurrence = fromJson<unknown>(row.recurrence, null) as Task['recurrence'];
     const orderNumRaw = row.orderNum;
     const order = orderNumRaw === null || orderNumRaw === undefined ? undefined : Number(orderNumRaw);
     return {
@@ -232,9 +234,9 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
         startTime: fromOptional(row.startTime as string | null),
         relativeStartOffset: fromJson<unknown>(row.relativeStartOffset, undefined) as Task['relativeStartOffset'],
         dueDate: fromOptional(row.dueDate as string | null),
-        recurrence: fromJson<unknown>(row.recurrence, null) as Task['recurrence'],
-        // `true | undefined`, never `false` — see fromPresentBool.
-        showFutureRecurrence: fromPresentBool(row.showFutureRecurrence),
+        recurrence,
+        // `true` only with recurrence, otherwise absent — see sync-normalization.ts.
+        showFutureRecurrence: recurrence ? fromPresentBool(row.showFutureRecurrence) : undefined,
         pushCount: row.pushCount === null || row.pushCount === undefined ? undefined : Number(row.pushCount),
         repeatReminderMinutes: row.repeatReminderMinutes === null || row.repeatReminderMinutes === undefined
             ? undefined
@@ -261,14 +263,27 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
             : Number(row.timeSpentMinutes),
         suppressMindwtrReminders: fromBool(row.suppressMindwtrReminders),
         reviewAt: fromOptional(row.reviewAt as string | null),
-        completedAt: fromOptional(row.completedAt as string | null),
+        // Canonical only when the status is done/archived, else absent — the
+        // same rule normalizeTaskForLoad applies on every load/merge
+        // (task-status.ts). A row can carry a stale completedAt when a caller
+        // patches the field directly without a status transition (e.g. MCP
+        // `completedAt` on a task that is not done); that stale byte would
+        // otherwise pass the reader unnormalized until the next load/merge.
+        completedAt: (() => {
+            // Compare the normalized status: mapSqliteTaskRow normalizes it AFTER this
+            // codec runs, so a stored 'Done' must not lose its completion date here.
+            const status = normalizeTaskStatus(String(row.status ?? ''));
+            return status === 'done' || status === 'archived'
+                ? fromOptional(row.completedAt as string | null)
+                : undefined;
+        })(),
         statusBeforeProjectArchive: fromOptional(row.statusBeforeProjectArchive as Task['statusBeforeProjectArchive'] | null),
-        // Nullable BY DESIGN (Task.completedAtBeforeProjectArchive: string | null) — do not
-        // route through fromOptional, a stored `null` must stay `null`.
-        completedAtBeforeProjectArchive: row.completedAtBeforeProjectArchive as string | null | undefined,
-        // Nullable BY DESIGN (Task.isFocusedTodayBeforeProjectArchive: boolean | null) —
-        // fromNullableBool already preserves null as null.
-        isFocusedTodayBeforeProjectArchive: fromNullableBool(row.isFocusedTodayBeforeProjectArchive),
+        // NULL reads as absent even though the type allows `null`: SQLite stores absent and
+        // null in the same column, the desktop's Rust reader already drops NULL, and a phone
+        // that read these two back as `null` on every task carried 81 extra bytes per task
+        // that the merge winner never had, so the local persist differed every cycle (#1156).
+        completedAtBeforeProjectArchive: fromOptional(row.completedAtBeforeProjectArchive as string | null),
+        isFocusedTodayBeforeProjectArchive: fromOptional(fromNullableBool(row.isFocusedTodayBeforeProjectArchive) ?? null),
         projectArchivedAt: fromOptional(row.projectArchivedAt as string | null),
         rev: row.rev === null || row.rev === undefined ? undefined : Number(row.rev),
         revBy: fromOptional(row.revBy as string | null),

@@ -38,7 +38,7 @@ import { useAreaVisibility } from '../../hooks/useVisibleTaskContext';
 import { usePersistedViewState } from '../../hooks/usePersistedViewState';
 import { useTaskListScope } from './list/task-list-scope';
 import { LIST_END_GAP, VIEW_FILTER_INPUT } from './list/list-toolbar';
-import { resolveNonDoneTaskSortBy } from '../../lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 
 const BOARD_VIEW_STATE_STORAGE_KEY = 'mindwtr:view:board:v1';
 

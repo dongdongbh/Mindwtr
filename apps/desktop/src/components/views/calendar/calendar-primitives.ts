@@ -23,7 +23,7 @@ export const CALENDAR_DAYS_IN_WEEK = 7;
  * The range and the clamp mirror mobile's `coerceCalendarWeekVisibleDays`
  * (`apps/mobile/components/views/calendar/calendar-view-mode.ts`) on purpose, so
  * the two platforms agree on what a day count means. Only the default differs:
- * mobile opens on 2 because a phone column has to stay readable, a desktop
+ * mobile opens on 5 (a school or work week in compact columns), a desktop
  * window is wide enough to start on the whole week.
  */
 export const CALENDAR_TIMELINE_DAY_COUNT_MIN = 2;

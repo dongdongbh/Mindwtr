@@ -178,7 +178,7 @@ Mindwtr is simple by default, powerful when you need it, and forgiving when life
 - ✅ **Audio Capture** - Quick voice capture with automatic transcription and task creation
 - 🧭 **Copilot Suggestions** - Optional context/tag/time hints while typing
 - 🍅 **Pomodoro Focus (Optional)** - 15/3, 25/5, 50/10 timer panel in Focus view with one optional custom preset
-- 🔔 **Notifications** - Separate start and due reminders with snooze
+- 🔔 **Notifications** - Separate start and due reminders (snooze on mobile)
 - 📊 **Daily Digest** - Morning briefing + evening review
 - 📅 **Weekly Review** - Customizable weekly reminder
 

@@ -61,6 +61,8 @@ type SerializedAsyncQueue = {
 
 type TaskWriteResult = Task & { storageWarning?: string };
 
+export type CoreEntityPatch<T> = Partial<T> | ((current: T) => Partial<T>);
+
 type CoreQuickAddSnapshot = {
   tasks: Task[];
   projects: Project[];
@@ -72,12 +74,12 @@ type CoreQuickAddSnapshot = {
 type CoreService = {
   getQuickAddSnapshot: () => Promise<CoreQuickAddSnapshot>;
   addTask: (input: { title: string; props?: Partial<Task> }) => Promise<TaskWriteResult>;
-  updateTask: (input: { id: string; updates: Partial<Task> }) => Promise<TaskWriteResult>;
+  updateTask: (input: { id: string; updates: CoreEntityPatch<Task> }) => Promise<TaskWriteResult>;
   completeTask: (id: string) => Promise<TaskWriteResult>;
   deleteTask: (id: string) => Promise<TaskWriteResult>;
   restoreTask: (id: string) => Promise<TaskWriteResult>;
   addProject: (input: { title: string; color: string; props?: Partial<Project> }) => Promise<Project>;
-  updateProject: (input: { id: string; updates: Partial<Project> }) => Promise<Project>;
+  updateProject: (input: { id: string; updates: CoreEntityPatch<Project> }) => Promise<Project>;
   deleteProject: (id: string) => Promise<Project>;
   addSection: (input: { projectId: string; title: string; props?: Partial<Section> }) => Promise<Section>;
   updateSection: (input: { id: string; updates: Partial<Section> }) => Promise<Section>;
@@ -286,7 +288,13 @@ export const createCorePersistenceService = (
     },
     updateTask: async ({ id, updates }) => writeTask(
       'update task',
-      (state) => state.updateTask(id, updates),
+      (state) => {
+        if (typeof updates !== 'function') return state.updateTask(id, updates);
+        // This callback runs only after fetchData, while runWriteTransaction holds the
+        // cross-process lock, so attachment patches cannot close over a stale pre-lock row.
+        const current = state._allTasks.find((task) => task.id === id);
+        return state.updateTask(id, current ? updates(current) : {});
+      },
       () => core.useTaskStore.getState()._allTasks.find((task) => task.id === id),
       `Task not found after update: ${id}`,
     ),
@@ -309,9 +317,16 @@ export const createCorePersistenceService = (
       `Task not found after restore: ${id}`,
     ),
     updateProject: async ({ id, updates }) => runWriteTransaction(async () => {
+      await core.useTaskStore.getState().fetchData();
       const state = core.useTaskStore.getState();
-      await state.fetchData();
-      ensureActionSucceeded('update project', await state.updateProject(id, updates));
+      const current = state._allProjects.find((project) => project.id === id);
+      const resolvedUpdates = typeof updates !== 'function'
+        ? updates
+        : current ? updates(current) : {};
+      ensureActionSucceeded(
+        'update project',
+        await state.updateProject(id, resolvedUpdates),
+      );
       await flushCoreSave(core);
       const updated = core.useTaskStore.getState()._allProjects.find((project) => project.id === id);
       if (!updated) throw new NotFoundError(`Project not found after update: ${id}`);

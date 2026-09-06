@@ -36,7 +36,7 @@
     "yaml": "2.8.3",
     "decode-uri-component": "0.5.0",
     "browserslist": "4.28.8",
-    "postcss-selector-parser": "6.1.3",
+    "postcss-selector-parser": "6.1.4",
     "@eslint/eslintrc": {
       "ajv": "6.14.0"
     },
@@ -87,7 +87,7 @@
     "body-parser": "2.3.0",
     "@hono/node-server": "2.0.12",
     "browserslist": "4.28.8",
-    "postcss-selector-parser": "6.1.3"
+    "postcss-selector-parser": "6.1.4"
   },
   "scripts": {
     "desktop:dev": "bun run --filter mindwtr dev",
@@ -97,7 +97,7 @@
     "test": "bun run --filter @mindwtr/core test && bun run --filter mindwtr test && bun run --filter mobile test && bun run --filter mindwtr-cloud test && bun run --filter mindwtr-mcp test",
     "verify": "bun run typecheck && bun run lint:all && bun run test && bun run native:test && bun run test:governance && bun run i18n:check && bun run schema:check && bun run docs:check-readme",
     "test:perf": "bun run --filter @mindwtr/core test:perf && bun --cwd apps/desktop test src/components/views/ListView.performance.test.tsx src/components/views/TimelineView.performance.test.tsx && bun --cwd apps/mobile test tests/large-store-performance.test.tsx",
-    "test:governance": "python3 scripts/ci/google-play-edit.test.py && bun test scripts/check-synced-field-parity.test.ts scripts/ci/check-android-16kb-page-size.test.js scripts/ci/validate-publish-repo-workflow.test.js scripts/ci/validate-release-rc-workflow.test.js scripts/ci/validate-release-notes-index.test.js scripts/ci/validate-docker-compose.test.js scripts/ci/validate-aur-package.test.js scripts/ci/update-flathub-checkout.test.js scripts/ci/validate-release-tool-pins.test.js scripts/ci/validate-performance-gate.test.js scripts/ci/validate-native-platform-ci.test.js scripts/ci/validate-dependency-audit.test.js scripts/ci/validate-release-macos-workflow.test.js",
+    "test:governance": "python3 scripts/ci/google-play-edit.test.py && bun test scripts/check-synced-field-parity.test.ts scripts/ci/check-android-16kb-page-size.test.js scripts/ci/validate-publish-repo-workflow.test.js scripts/ci/validate-release-rc-workflow.test.js scripts/ci/validate-release-notes-index.test.js scripts/ci/validate-docker-compose.test.js scripts/ci/validate-aur-package.test.js scripts/ci/update-flathub-checkout.test.js scripts/ci/validate-release-tool-pins.test.js scripts/ci/validate-performance-gate.test.js scripts/ci/validate-native-platform-ci.test.js scripts/ci/validate-dependency-audit.test.js scripts/ci/validate-release-macos-workflow.test.js scripts/ci/validate-diagnostics-ledger.test.js",
     "lint:core": "bun run --filter @mindwtr/core lint",
     "lint:cloud": "bun run --filter mindwtr-cloud lint",
     "lint:node": "bun run lint:core && bun run lint:cloud",
@@ -106,7 +106,7 @@
     "lint:mcp": "bun run --filter mindwtr-mcp lint",
     "lint:all": "bun run lint:node && bun run lint:desktop && bun run lint:mobile && bun run lint:mcp",
     "typecheck": "bun run typecheck:core && bun run typecheck:cloud && bun run typecheck:desktop && bun run typecheck:mobile && bun run typecheck:mcp",
-    "typecheck:core": "bun run --filter @mindwtr/core build",
+    "typecheck:core": "bun run --filter @mindwtr/core typecheck",
     "typecheck:cloud": "bun run --filter mindwtr-cloud typecheck",
     "typecheck:desktop": "bunx tsc --noEmit -p apps/desktop/tsconfig.json",
     "typecheck:mobile": "bunx tsc --noEmit -p apps/mobile/tsconfig.json",
@@ -116,6 +116,8 @@
     "mobile:start": "bun run --filter mobile start",
     "mobile:android": "bun run --filter mobile android",
     "mobile:ios": "bun run --filter mobile ios",
+    "mobile:android:dev": "bun run --filter mobile android:dev",
+    "mobile:ios:dev": "bun run --filter mobile ios:dev",
     "mobile:startup:bench": "bash apps/mobile/scripts/android_startup_benchmark.sh",
     "test:e2e": "playwright test",
     "i18n:check": "bun run scripts/i18n-locale-parity.ts --check",
@@ -194,7 +196,7 @@
     "webidl-conversions": "^8.0.0",
     "whatwg-url-without-unicode": "^8.0.0-3"
   },
-  "version": "1.2.7",
+  "version": "1.2.8",
   "op-sqlite": {
     "fts5": true
   },

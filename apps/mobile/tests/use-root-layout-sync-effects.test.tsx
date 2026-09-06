@@ -30,7 +30,7 @@ const {
   performMobileSync: vi.fn(async (): Promise<{ success: boolean; error?: string }> => ({ success: true })),
   storeSubscribe: vi.fn((..._args: unknown[]) => vi.fn()),
   syncMobileBackgroundSyncRegistration: vi.fn(async () => undefined),
-  subscribeToCloudKitChanges: vi.fn(() => vi.fn()),
+  subscribeToCloudKitChanges: vi.fn((_listener: () => void) => vi.fn()),
   updateMobileWidgetFromStore: vi.fn(async () => true),
 }));
 
@@ -63,10 +63,12 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 vi.mock('@mindwtr/core', async () => {
-  // The real cooldown maths, not a stub: leaving it off the mock meant every
-  // failed-sync path threw here, so no test could reach the cooldown at all.
-  const { resolveSyncFailureCooldownMs } = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
+  // The real pacing controller and cooldown maths, not stubs: this suite exists
+  // to prove the hook's wiring over the shared machine, and leaving the cooldown
+  // off the mock meant every failed-sync path threw here.
+  const { createAutoSyncController, resolveSyncFailureCooldownMs } = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   return {
+    createAutoSyncController,
     flushPendingSave,
     getInMemorySyncChangeFingerprint,
     hasActiveMobileNotificationFeature,
@@ -611,6 +613,55 @@ describe('useRootLayoutSyncEffects', () => {
       await vi.advanceTimersByTimeAsync(40_000);
       await flushMicrotasks();
     });
+    expect(performMobileSync).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      tree.unmount();
+    });
+    vi.useRealTimers();
+  });
+
+  // A cycle that STARTS in the foreground and is still running when the app
+  // backgrounds must keep the request that arrived during it, so returning to the
+  // foreground syncs immediately instead of waiting out the 30s foreground gate.
+  it('syncs on resume for a request that arrived during an active-started cycle', async () => {
+    vi.useFakeTimers();
+    let resolveSync: ((result: { success: boolean }) => void) | null = null;
+    performMobileSync.mockImplementation(() => new Promise((resolve) => {
+      resolveSync = resolve;
+    }));
+
+    let tree: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<TestHarness />);
+      await flushMicrotasks();
+    });
+    const listener = Array.from(appStateListeners)[0];
+    const cloudKitListener = subscribeToCloudKitChanges.mock.calls[0]?.[0];
+    expect(listener).toBeTypeOf('function');
+    expect(cloudKitListener).toBeTypeOf('function');
+
+    // The background transition starts a cycle while the app is still active.
+    await act(async () => {
+      listener('background');
+      await flushMicrotasks();
+    });
+    expect(performMobileSync).toHaveBeenCalledTimes(1);
+
+    // A CloudKit notification lands while that cycle is running and the app is background.
+    await act(async () => {
+      cloudKitListener?.();
+      await flushMicrotasks();
+      resolveSync?.({ success: true });
+      await flushMicrotasks();
+    });
+    expect(performMobileSync).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      listener('active');
+      await flushMicrotasks();
+    });
+
     expect(performMobileSync).toHaveBeenCalledTimes(2);
 
     await act(async () => {

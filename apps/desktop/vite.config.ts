@@ -45,12 +45,7 @@ export default defineConfig({
       ],
     },
   },
-  test: {
-    globals: true,
-    environment: 'jsdom',
-    css: true,
-    setupFiles: './src/test/setup.ts',
-  },
+  // Test config lives in vitest.config.ts (CONFIG_NAMES order wins over this file); this block is dead.
   build: {
     rollupOptions: {
       output: {

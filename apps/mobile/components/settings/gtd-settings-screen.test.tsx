@@ -44,6 +44,15 @@ const storeState: MockStoreState = {
 };
 
 vi.mock('@mindwtr/core', () => ({
+  DEFAULT_TASK_EDITOR_ORDER: ['status', 'project'],
+  DEFAULT_TASK_EDITOR_SECTION_BY_FIELD: { status: 'basic', project: 'basic' },
+  DEFAULT_TASK_EDITOR_SECTION_OPEN: { basic: true, scheduling: false, organization: false, details: false },
+  DEFAULT_TASK_EDITOR_VISIBLE: ['status', 'project'],
+  TASK_EDITOR_FIXED_FIELDS: ['status', 'project'],
+  TASK_EDITOR_SECTION_ORDER: ['basic', 'scheduling', 'organization', 'details'],
+  getTaskEditorSectionAssignments: () => ({ status: 'basic', project: 'basic' }),
+  getTaskEditorSectionOpenDefaults: () => ({ basic: true, scheduling: false, organization: false, details: false }),
+  isTaskEditorSectionableField: () => false,
   FOCUS_TASK_LIMIT_OPTIONS: [1, 3, 5, 10],
   getDefaultTaskAreaMode: (settings: AppData['settings']) => {
     const mode = settings?.gtd?.defaultAreaMode;
@@ -152,15 +161,6 @@ vi.mock('./settings.shell', () => ({
 
 vi.mock('@/components/task-edit/task-edit-modal.utils', () => ({
   buildTaskEditorPresetConfig: () => ({ order: ['status', 'project'], hidden: [], sections: {}, sectionOpen: {} }),
-  DEFAULT_TASK_EDITOR_ORDER: ['status', 'project'],
-  DEFAULT_TASK_EDITOR_SECTION_BY_FIELD: { status: 'basic', project: 'basic' },
-  DEFAULT_TASK_EDITOR_SECTION_OPEN: { basic: true, scheduling: false, organization: false, details: false },
-  DEFAULT_TASK_EDITOR_VISIBLE: ['status', 'project'],
-  TASK_EDITOR_FIXED_FIELDS: ['status', 'project'],
-  TASK_EDITOR_SECTION_ORDER: ['basic', 'scheduling', 'organization', 'details'],
-  getTaskEditorSectionAssignments: () => ({ status: 'basic', project: 'basic' }),
-  getTaskEditorSectionOpenDefaults: () => ({ basic: true, scheduling: false, organization: false, details: false }),
-  isTaskEditorSectionableField: () => false,
   resolveTaskEditorPresetId: () => 'custom',
 }));
 

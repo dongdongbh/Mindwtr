@@ -782,6 +782,29 @@ describe('Layout collapsed sidebar area filter', () => {
 });
 
 describe('Layout sync security warning', () => {
+    it('clears the HTTP warning when sync is switched Off without a focus event', async () => {
+        // Use the setup's in-memory storage boundary and the real service path,
+        // including its cache, persistence and synchronous status subscribers.
+        vi.mocked(SyncService.refreshSyncBackendStatus).mockRestore();
+        vi.mocked(SyncService.subscribeSyncStatus).mockRestore();
+        vi.mocked(SyncService.getSyncStatus).mockRestore();
+        window.localStorage.setItem('mindwtr-sync-backend', 'webdav');
+        window.localStorage.setItem('mindwtr-webdav-url', 'http://192.168.1.50/dav');
+        window.localStorage.setItem('mindwtr-webdav-allow-insecure-http', 'true');
+        await SyncService.getPersistedSyncConfigurationSnapshot();
+
+        const { findByText, queryByText } = renderLayout();
+        expect(await findByText(/WebDAV sync is using HTTP/)).toBeInTheDocument();
+
+        await act(async () => {
+            await SyncService.setSyncBackend('off');
+        });
+
+        expect(window.localStorage.getItem('mindwtr-sync-backend')).toBe('off');
+        expect(SyncService.getSyncStatus().backend).toBe('off');
+        expect(queryByText(/WebDAV sync is using HTTP/)).not.toBeInTheDocument();
+    });
+
     it('shows a cleartext HTTP banner for WebDAV sync', async () => {
         const backendSpy = vi.spyOn(SyncService, 'getSyncBackend').mockResolvedValue('webdav');
         const webdavSpy = vi.spyOn(SyncService, 'getWebDavConfig').mockResolvedValue({
@@ -900,6 +923,69 @@ describe('Layout sync security warning', () => {
             expect(queryByText(/WebDAV sync is using HTTP/)).not.toBeInTheDocument();
             expect(queryByText(/Self-hosted sync is using HTTP/)).not.toBeInTheDocument();
         } finally {
+            configurationSpy.mockRestore();
+        }
+    });
+
+    // PERF-02: this used to re-read the locked, persisted sync configuration
+    // on a bare 30s setInterval with no in-flight guard, which queued behind
+    // whole sync cycles (tens of seconds on WebDAV) and drained as a burst of
+    // lock acquisitions. The interval is gone; only mount and the storage/focus
+    // listeners below still read it.
+    it('does not poll the persisted sync configuration on a timer, but a focus event still refreshes it', async () => {
+        const configurationSpy = vi.spyOn(
+            SyncService,
+            'getPersistedSyncConfigurationSnapshot',
+        ).mockResolvedValue({
+            backend: 'file',
+            syncPath: '/tmp/sync',
+            webdav: {
+                url: '',
+                username: '',
+                password: null,
+                passwordAuthority: 'opaque',
+                hasPassword: false,
+                allowInsecureHttp: false,
+                allowWeakFingerprint: false,
+            },
+            cloudProvider: 'selfhosted',
+            cloud: {
+                url: '',
+                token: null,
+                tokenAuthority: 'opaque',
+                allowInsecureHttp: false,
+                rememberToken: false,
+            },
+        });
+
+        try {
+            // Fake timers must be in place before mount: a setInterval already
+            // running under the real clock would not be advanced below, and
+            // the test would pass for the wrong reason (real 30s never elapses
+            // in test wall-clock time).
+            vi.useFakeTimers();
+            renderLayout();
+            // The mount-time read is a real microtask chain; fake timers only
+            // stub setTimeout/setInterval, so flushing microtasks is enough.
+            await act(async () => {
+                await Promise.resolve();
+                await Promise.resolve();
+            });
+            expect(configurationSpy).toHaveBeenCalledTimes(1);
+
+            act(() => {
+                // The old 30s interval would have fired this call ~4 times.
+                vi.advanceTimersByTime(2 * 60_000);
+            });
+            expect(configurationSpy).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                window.dispatchEvent(new Event('focus'));
+                await Promise.resolve();
+            });
+            expect(configurationSpy).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
             configurationSpy.mockRestore();
         }
     });

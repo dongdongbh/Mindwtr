@@ -27,6 +27,7 @@ import {
     type TaskSortBy,
     getSequentialProjectTaskCues,
     resolveTaskSortByForFeatures,
+    safeFormatDate,
     safeParseDate,
     shallow,
     tFallback,
@@ -1493,8 +1494,7 @@ export function ProjectDetailModal({
                                                     onChange={(_, date) => {
                                                         setShowStartDatePicker(false);
                                                         if (date) {
-                                                            const iso = date.toISOString().slice(0, 10);
-                                                            updateMutableSelectedProject({ startDate: iso });
+                                                            updateMutableSelectedProject({ startDate: safeFormatDate(date, 'yyyy-MM-dd') });
                                                         }
                                                     }}
                                                 />
@@ -1540,8 +1540,7 @@ export function ProjectDetailModal({
                                                     onChange={(_, date) => {
                                                         setShowDueDatePicker(false);
                                                         if (date) {
-                                                            const iso = date.toISOString().slice(0, 10);
-                                                            updateMutableSelectedProject({ dueDate: iso });
+                                                            updateMutableSelectedProject({ dueDate: safeFormatDate(date, 'yyyy-MM-dd') });
                                                         }
                                                     }}
                                                 />

@@ -1,5 +1,14 @@
 import { Dimensions } from 'react-native';
-import { type TaskEditorFieldId, type TaskEditorSectionId, type TaskEditorSettings, type TaskStatus } from '@mindwtr/core';
+import {
+    DEFAULT_TASK_EDITOR_ORDER,
+    DEFAULT_TASK_EDITOR_SECTION_BY_FIELD,
+    DEFAULT_TASK_EDITOR_SECTION_OPEN,
+    DEFAULT_TASK_EDITOR_VISIBLE,
+    isTaskEditorSectionableField,
+    type TaskEditorFieldId,
+    type TaskEditorSectionId,
+    type TaskStatus,
+} from '@mindwtr/core';
 import { logError, logWarn } from '../../lib/app-log';
 
 export const STATUS_OPTIONS: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'done', 'reference'];
@@ -80,72 +89,6 @@ export const syncTaskEditPagerPosition = ({
     scrollNode?.getNode?.()?.scrollTo?.({ x, animated });
 };
 
-export const DEFAULT_TASK_EDITOR_ORDER: TaskEditorFieldId[] = [
-    'status',
-    'project',
-    'area',
-    'contexts',
-    'dueDate',
-    'section',
-    'recurrence',
-    'startTime',
-    'reviewAt',
-    'tags',
-    'description',
-    'attachments',
-    'checklist',
-    'priority',
-    'energyLevel',
-    'timeEstimate',
-    'assignedTo',
-    'location',
-];
-
-export const DEFAULT_TASK_EDITOR_VISIBLE: TaskEditorFieldId[] = [
-    'status',
-    'project',
-    'area',
-    'contexts',
-    'dueDate',
-    'recurrence',
-    'startTime',
-    'reviewAt',
-    'tags',
-    'description',
-    'attachments',
-    'checklist',
-];
-
-export const TASK_EDITOR_FIXED_FIELDS: TaskEditorFieldId[] = ['status', 'project', 'section', 'area'];
-
-export const TASK_EDITOR_SECTION_ORDER: TaskEditorSectionId[] = ['basic', 'scheduling', 'organization', 'details'];
-
-export const DEFAULT_TASK_EDITOR_SECTION_BY_FIELD: Record<TaskEditorFieldId, TaskEditorSectionId> = {
-    status: 'basic',
-    project: 'basic',
-    section: 'basic',
-    area: 'basic',
-    priority: 'organization',
-    energyLevel: 'organization',
-    assignedTo: 'organization',
-    contexts: 'basic',
-    tags: 'organization',
-    location: 'details',
-    timeEstimate: 'organization',
-    recurrence: 'scheduling',
-    startTime: 'scheduling',
-    dueDate: 'basic',
-    reviewAt: 'scheduling',
-    description: 'details',
-    textDirection: 'details',
-    attachments: 'details',
-    checklist: 'details',
-};
-
-export const TASK_EDITOR_SECTIONABLE_FIELDS: TaskEditorFieldId[] = DEFAULT_TASK_EDITOR_ORDER.filter(
-    (fieldId) => !TASK_EDITOR_FIXED_FIELDS.includes(fieldId) && fieldId !== 'textDirection'
-);
-
 export type TaskEditorPresetId = 'simple' | 'standard' | 'full' | 'custom';
 
 export type TaskEditorPresetConfig = {
@@ -155,49 +98,8 @@ export type TaskEditorPresetConfig = {
     sectionOpen: Partial<Record<TaskEditorSectionId, boolean>>;
 };
 
-export const DEFAULT_TASK_EDITOR_SECTION_OPEN: Record<TaskEditorSectionId, boolean> = {
-    basic: true,
-    scheduling: false,
-    organization: false,
-    details: false,
-};
-
 const isTaskEditorSectionId = (value: unknown): value is TaskEditorSectionId =>
     value === 'basic' || value === 'scheduling' || value === 'organization' || value === 'details';
-
-export const isTaskEditorSectionableField = (fieldId: TaskEditorFieldId): boolean =>
-    TASK_EDITOR_SECTIONABLE_FIELDS.includes(fieldId);
-
-export const getTaskEditorSectionAssignments = (
-    taskEditor: TaskEditorSettings | undefined
-): Record<TaskEditorFieldId, TaskEditorSectionId> => {
-    const savedSections = taskEditor?.sections ?? {};
-    const next = { ...DEFAULT_TASK_EDITOR_SECTION_BY_FIELD };
-    (Object.keys(savedSections) as TaskEditorFieldId[]).forEach((fieldId) => {
-        const sectionId = savedSections[fieldId];
-        if (!isTaskEditorSectionableField(fieldId) || !isTaskEditorSectionId(sectionId)) return;
-        next[fieldId] = sectionId;
-    });
-    return next;
-};
-
-export const getTaskEditorSectionOpenDefaults = (
-    taskEditor: TaskEditorSettings | undefined
-): Record<TaskEditorSectionId, boolean> => {
-    const savedSectionOpen = taskEditor?.sectionOpen ?? {};
-    return {
-        basic: DEFAULT_TASK_EDITOR_SECTION_OPEN.basic,
-        scheduling: typeof savedSectionOpen.scheduling === 'boolean'
-            ? savedSectionOpen.scheduling
-            : DEFAULT_TASK_EDITOR_SECTION_OPEN.scheduling,
-        organization: typeof savedSectionOpen.organization === 'boolean'
-            ? savedSectionOpen.organization
-            : DEFAULT_TASK_EDITOR_SECTION_OPEN.organization,
-        details: typeof savedSectionOpen.details === 'boolean'
-            ? savedSectionOpen.details
-            : DEFAULT_TASK_EDITOR_SECTION_OPEN.details,
-    };
-};
 
 const TASK_EDITOR_PRESET_VISIBLE_FIELDS: Record<Exclude<TaskEditorPresetId, 'custom'>, TaskEditorFieldId[]> = {
     simple: ['status', 'project', 'area', 'contexts', 'dueDate'],

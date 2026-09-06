@@ -406,6 +406,214 @@ describe('mcp service', () => {
     expect(closedCoreAdapterCount).toBe(1);
   });
 
+  // The update rule is "this is the complete list of links": the row's file attachments and
+  // its tombstones must survive, and a live link left out has to be tombstoned rather than
+  // dropped (a dropped record is resurrected by the sync merge - see link-attachments.ts).
+  test('updateTask rewrites links from the entity reloaded inside the core write lock', async () => {
+    let receivedUpdateInput: any = null;
+    const logs: Array<{ message: string; context?: Record<string, unknown> }> = [];
+    const fakeDb = {} as any;
+    const storedTask = {
+      id: 't1',
+      title: 'Task',
+      status: 'inbox',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      attachments: [
+        { id: 'file-1', kind: 'file', title: 'Contract v2.pdf', uri: 'attachments/file-1.pdf', createdAt: '2026-01-01', updatedAt: '2026-01-01T12:00:00.000Z' },
+        { id: 'file-2', kind: 'file', title: 'Appendix.pdf', uri: 'attachments/file-2.pdf', createdAt: '2026-01-01T12:00:00.000Z', updatedAt: '2026-01-01T12:00:00.000Z' },
+        { id: 'file-3', kind: 'file', title: 'Removed.pdf', uri: 'attachments/file-3.pdf', createdAt: '2026-01-01', updatedAt: '2026-01-01T12:00:00.000Z', deletedAt: '2026-01-01T12:00:00.000Z' },
+        { id: 'link-1', kind: 'link', title: 'Old note', uri: 'https://example.com/old', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+      ],
+    };
+    const deps = {
+      openMindwtrDb: async () => ({ db: fakeDb }),
+      closeDb: () => undefined,
+      getTask: () => { throw new Error('attachment replacement must not read before the core lock'); },
+      getProject: () => ({ id: 'p1', title: 'Project' }),
+      parseQuickAdd: () => ({ title: '', props: {} }),
+      runCoreService: async (_options: any, fn: any) =>
+        fn({
+          updateTask: async (input: any) => {
+            receivedUpdateInput = {
+              ...input,
+              updates: typeof input.updates === 'function' ? input.updates(storedTask) : input.updates,
+            };
+            return { id: input.id, title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-02' };
+          },
+        }),
+    };
+    const service = createService(
+      { readonly: false },
+      deps as any,
+      (message, context) => logs.push({ message, context }),
+    );
+
+    await service.updateTask({ id: 't1', attachments: [{ uri: 'obsidian://open?vault=v&file=n' }] } as any);
+
+    const written = receivedUpdateInput.updates.attachments;
+    expect(written).toHaveLength(5);
+    expect(written[0]).toEqual(storedTask.attachments[0]);
+    expect(written[1]).toEqual(storedTask.attachments[1]);
+    expect(written[2]).toEqual(storedTask.attachments[2]);
+    expect(written[3]).toMatchObject({ id: 'link-1', uri: 'https://example.com/old' });
+    expect(typeof written[3].deletedAt).toBe('string');
+    expect(written[4]).toMatchObject({ kind: 'link', uri: 'obsidian://open?vault=v&file=n' });
+    expect(written[4].deletedAt).toBeUndefined();
+    expect(logs).toEqual([{
+      message: 'MCP attachment link replacement committed',
+      context: {
+        releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+        backend: 'local',
+        entity: 'task',
+      },
+    }]);
+  });
+
+  test('updateProject rewrites links from the entity reloaded inside the core write lock', async () => {
+    let receivedUpdateInput: any = null;
+    const fakeDb = {} as any;
+    const storedProject = {
+      id: 'p1',
+      title: 'Project',
+      attachments: [
+        { id: 'file-1', kind: 'file', title: 'Plan v2.pdf', uri: 'attachments/file-1.pdf', createdAt: '2026-01-01', updatedAt: '2026-01-01T12:00:00.000Z' },
+        { id: 'file-2', kind: 'file', title: 'New.pdf', uri: 'attachments/file-2.pdf', createdAt: '2026-01-01T12:00:00.000Z', updatedAt: '2026-01-01T12:00:00.000Z' },
+        { id: 'file-3', kind: 'file', title: 'Deleted.pdf', uri: 'attachments/file-3.pdf', createdAt: '2026-01-01', updatedAt: '2026-01-01T12:00:00.000Z', deletedAt: '2026-01-01T12:00:00.000Z' },
+        { id: 'link-1', kind: 'link', title: 'Old note', uri: 'https://example.com/old', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+      ],
+    };
+    const deps = {
+      openMindwtrDb: async () => ({ db: fakeDb }),
+      closeDb: () => undefined,
+      getTask: () => ({ id: 't1' }),
+      getProject: () => { throw new Error('attachment replacement must not read before the core lock'); },
+      parseQuickAdd: () => ({ title: '', props: {} }),
+      runCoreService: async (_options: any, fn: any) =>
+        fn({
+          updateProject: async (input: any) => {
+            receivedUpdateInput = {
+              ...input,
+              updates: typeof input.updates === 'function' ? input.updates(storedProject) : input.updates,
+            };
+            return { id: input.id, title: 'Project' };
+          },
+        }),
+    };
+    const service = createService({ readonly: false }, deps as any);
+
+    await service.updateProject({ id: 'p1', attachments: [{ uri: 'obsidian://open?vault=v&file=n' }] } as any);
+
+    const written = receivedUpdateInput.updates.attachments;
+    expect(written).toHaveLength(5);
+    expect(written[0]).toEqual(storedProject.attachments[0]);
+    expect(written[1]).toEqual(storedProject.attachments[1]);
+    expect(written[2]).toEqual(storedProject.attachments[2]);
+    expect(typeof written[3].deletedAt).toBe('string');
+    expect(written[4]).toMatchObject({ kind: 'link', uri: 'obsidian://open?vault=v&file=n' });
+  });
+
+  test('updateTask recomputes its link patch from each retry attempt current entity', async () => {
+    let receivedUpdateInput: any = null;
+    let updateTaskAttempts = 0;
+    const fakeDb = {} as any;
+    const storedTaskBeforeRace = {
+      id: 't1',
+      title: 'Task',
+      status: 'inbox',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      attachments: [
+        { id: 'link-1', kind: 'link', title: 'Old note', uri: 'https://example.com/old', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+      ],
+    };
+    // Simulates a concurrent write (the app, or a second MCP call) tombstoning link-1 in the
+    // window between the first failed attempt and the retried second attempt.
+    const storedTaskAfterRace = {
+      ...storedTaskBeforeRace,
+      attachments: [
+        { ...storedTaskBeforeRace.attachments[0], deletedAt: '2026-01-01T12:00:00.000Z', updatedAt: '2026-01-01T12:00:00.000Z' },
+      ],
+    };
+    const deps = {
+      openMindwtrDb: async () => ({ db: fakeDb }),
+      closeDb: () => undefined,
+      getTask: () => { throw new Error('attachment replacement must not read before the core lock'); },
+      getProject: () => ({ id: 'p1', title: 'Project' }),
+      parseQuickAdd: () => ({ title: '', props: {} }),
+      runCoreService: async (_options: any, fn: any) =>
+        fn({
+          updateTask: async (input: any) => {
+            updateTaskAttempts += 1;
+            const current = updateTaskAttempts === 1 ? storedTaskBeforeRace : storedTaskAfterRace;
+            const updates = typeof input.updates === 'function' ? input.updates(current) : input.updates;
+            if (updateTaskAttempts === 1) throw new Error('SQLITE_BUSY: database is locked');
+            receivedUpdateInput = { ...input, updates };
+            return { id: input.id, title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-02' };
+          },
+        }),
+    };
+    const service = createService({ readonly: false }, deps as any);
+
+    await service.updateTask({ id: 't1', attachments: [{ uri: 'obsidian://open?vault=v&file=n' }] } as any);
+
+    expect(updateTaskAttempts).toBe(2);
+    const written = receivedUpdateInput.updates.attachments;
+    // The row already had link-1 tombstoned by the time the retry re-reads it, so the
+    // retried write must keep it tombstoned rather than reviving it from a stale read.
+    const oldLink = written.find((item: any) => item.id === 'link-1');
+    expect(oldLink.deletedAt).toBe('2026-01-01T12:00:00.000Z');
+    const newLink = written.find((item: any) => item.uri === 'obsidian://open?vault=v&file=n');
+    expect(newLink.deletedAt).toBeUndefined();
+  });
+
+  test('updateProject recomputes its link patch from each retry attempt current entity', async () => {
+    let receivedUpdateInput: any = null;
+    let updateProjectAttempts = 0;
+    const fakeDb = {} as any;
+    const storedProjectBeforeRace = {
+      id: 'p1',
+      title: 'Project',
+      attachments: [
+        { id: 'link-1', kind: 'link', title: 'Old note', uri: 'https://example.com/old', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+      ],
+    };
+    const storedProjectAfterRace = {
+      ...storedProjectBeforeRace,
+      attachments: [
+        { ...storedProjectBeforeRace.attachments[0], deletedAt: '2026-01-01T12:00:00.000Z', updatedAt: '2026-01-01T12:00:00.000Z' },
+      ],
+    };
+    const deps = {
+      openMindwtrDb: async () => ({ db: fakeDb }),
+      closeDb: () => undefined,
+      getTask: () => ({ id: 't1' }),
+      getProject: () => { throw new Error('attachment replacement must not read before the core lock'); },
+      parseQuickAdd: () => ({ title: '', props: {} }),
+      runCoreService: async (_options: any, fn: any) =>
+        fn({
+          updateProject: async (input: any) => {
+            updateProjectAttempts += 1;
+            const current = updateProjectAttempts === 1 ? storedProjectBeforeRace : storedProjectAfterRace;
+            const updates = typeof input.updates === 'function' ? input.updates(current) : input.updates;
+            if (updateProjectAttempts === 1) throw new Error('SQLITE_BUSY: database is locked');
+            receivedUpdateInput = { ...input, updates };
+            return { id: input.id, title: 'Project' };
+          },
+        }),
+    };
+    const service = createService({ readonly: false }, deps as any);
+
+    await service.updateProject({ id: 'p1', attachments: [{ uri: 'obsidian://open?vault=v&file=n' }] } as any);
+
+    expect(updateProjectAttempts).toBe(2);
+    const written = receivedUpdateInput.updates.attachments;
+    const oldLink = written.find((item: any) => item.id === 'link-1');
+    expect(oldLink.deletedAt).toBe('2026-01-01T12:00:00.000Z');
+    const newLink = written.find((item: any) => item.uri === 'obsidian://open?vault=v&file=n');
+    expect(newLink.deletedAt).toBeUndefined();
+  });
+
   test('rejects addTask when token values are blank', async () => {
     const fakeDb = {} as any;
     const deps = {

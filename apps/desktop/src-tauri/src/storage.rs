@@ -1841,12 +1841,12 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
     if !recurrence_val.is_null() {
         map.insert("recurrence".to_string(), recurrence_val);
     }
-    // Canonical wire form is `true` or ABSENT, never `false` (the merge rule in
+    // Canonical wire form is `true` only with recurrence, otherwise ABSENT (the merge rule in
     // packages/core/src/sync-normalization.ts). Reading a stored 0 (or NULL) back
     // as absent keeps this reader in step with the JS codec's fromPresentBool and
     // absorbs every legacy row without a migration.
     if let Ok(val) = row.get::<_, i64>("showFutureRecurrence") {
-        if val != 0 {
+        if val != 0 && map.contains_key("recurrence") {
             map.insert("showFutureRecurrence".to_string(), Value::Bool(true));
         }
     }
@@ -1949,8 +1949,16 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
             map.insert("reviewAt".to_string(), Value::String(v));
         }
     }
+    // Canonical only for done/archived rows, else ABSENT — the same rule
+    // normalizeTaskForLoad applies on every load/merge (task-status.ts). A
+    // caller that patches completedAt without a status transition (MCP) leaves
+    // a stale value in the column; keep this reader in step with the JS codec.
+    let status_keeps_completed_at = map
+        .get("status")
+        .and_then(Value::as_str)
+        .is_some_and(|status| status == "done" || status == "archived");
     if let Ok(val) = row.get::<_, Option<String>>("completedAt") {
-        if let Some(v) = val {
+        if let (Some(v), true) = (val, status_keeps_completed_at) {
             map.insert("completedAt".to_string(), Value::String(v));
         }
     }
@@ -5091,8 +5099,11 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = OFF;")
             .expect("should disable fixture foreign keys");
 
-        let write = |id: &str, value: Option<bool>| {
+        let write = |id: &str, value: Option<bool>, has_recurrence: bool| {
             let mut task = fixture.clone();
+            if !has_recurrence {
+                task.remove("recurrence");
+            }
             task.insert("id".to_string(), Value::String(id.to_string()));
             match value {
                 Some(flag) => {
@@ -5111,14 +5122,88 @@ mod tests {
                 .cloned()
         };
 
-        write("sfr-true", Some(true));
-        write("sfr-false", Some(false));
-        write("sfr-absent", None);
+        write("sfr-true", Some(true), true);
+        write("sfr-false", Some(false), true);
+        write("sfr-absent", None, true);
+        write("sfr-no-recurrence", Some(true), false);
+        // Pin the persisted shape produced by an external writer: the flag is
+        // still 1 even though recurrence is SQL NULL.
+        let stored: (i64, Option<String>) = conn
+            .query_row(
+                "SELECT showFutureRecurrence, recurrence FROM tasks WHERE id = ?1",
+                ["sfr-no-recurrence"],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("should read stored recurrence columns");
+        assert_eq!(stored, (1, None));
+        assert_eq!(read("sfr-no-recurrence"), None);
 
         assert_eq!(read("sfr-true"), Some(Value::Bool(true)));
         // Stored 0, and every legacy row already on disk, read back ABSENT.
         assert_eq!(read("sfr-false"), None);
         assert_eq!(read("sfr-absent"), None);
+    }
+
+    /// completedAt is canonical only on done/archived rows (task-status.ts
+    /// normalizeTaskForLoad); a row patched without a status transition keeps
+    /// the stale column value, and the reader must not surface it.
+    #[test]
+    fn completed_at_reads_absent_unless_done_or_archived() {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../../../packages/core/src/task-sync-schema.fixture.json"
+        ))
+        .expect("valid Task schema fixture");
+        let fixture = schema
+            .get("fixture")
+            .and_then(Value::as_object)
+            .expect("Task schema payload")
+            .clone();
+
+        let conn = Connection::open_in_memory().expect("should open in-memory db");
+        conn.execute_batch(SQLITE_SCHEMA)
+            .expect("should create schema");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("should disable fixture foreign keys");
+
+        let write = |id: &str, status: &str| {
+            let mut task = fixture.clone();
+            task.insert("id".to_string(), Value::String(id.to_string()));
+            task.insert("status".to_string(), Value::String(status.to_string()));
+            task.insert(
+                "completedAt".to_string(),
+                Value::String("2026-06-04T10:00:00.000Z".to_string()),
+            );
+            upsert_task_row(&conn, &Value::Object(task)).expect("should write task row");
+        };
+        let read = |id: &str| -> Option<Value> {
+            conn.query_row("SELECT * FROM tasks WHERE id = ?1", [id], row_to_task_value)
+                .expect("should map task row")
+                .get("completedAt")
+                .cloned()
+        };
+
+        write("ca-done", "done");
+        write("ca-archived", "archived");
+        write("ca-next", "next");
+        // The column keeps the stale value; only the reader hides it.
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT completedAt FROM tasks WHERE id = ?1",
+                ["ca-next"],
+                |row| row.get(0),
+            )
+            .expect("should read stored completedAt");
+        assert_eq!(stored.as_deref(), Some("2026-06-04T10:00:00.000Z"));
+
+        assert_eq!(
+            read("ca-done"),
+            Some(Value::String("2026-06-04T10:00:00.000Z".to_string()))
+        );
+        assert_eq!(
+            read("ca-archived"),
+            Some(Value::String("2026-06-04T10:00:00.000Z".to_string()))
+        );
+        assert_eq!(read("ca-next"), None);
     }
 
     /// Mirrors `packages/core/src/task-query.test.ts` and `local_api.rs`'s
@@ -5801,7 +5886,7 @@ mod tests {
         let task = serde_json::json!({
             "id": "task-full",
             "title": "Full task",
-            "status": "completed",
+            "status": "done",
             "priority": "high",
             "energyLevel": "medium",
             "assignedTo": "person-1",

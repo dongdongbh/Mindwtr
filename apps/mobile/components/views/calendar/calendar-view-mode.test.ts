@@ -121,7 +121,8 @@ describe('calendar view mode helpers', () => {
   });
 
   it('coerces visible week day counts into the supported density range', () => {
-    expect(coerceCalendarWeekVisibleDays(undefined)).toBe(2);
+    expect(coerceCalendarWeekVisibleDays(undefined)).toBe(5);
+    expect(coerceCalendarWeekVisibleDays(null)).toBe(5);
     expect(coerceCalendarWeekVisibleDays(1)).toBe(2);
     expect(coerceCalendarWeekVisibleDays(4.4)).toBe(4);
     expect(coerceCalendarWeekVisibleDays(8)).toBe(7);

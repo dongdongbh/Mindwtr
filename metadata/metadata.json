@@ -30,7 +30,7 @@
           "列表、日历与看板视图，支持提醒与重复任务",
           "免费开源、无广告"
         ],
-        "ReleaseNotes": "• 项目支持开始日期，并可在时间线中查看项目跨度。\n• 同步设置通过验证后才会启用，WebDAV、Dropbox、文件同步和自托管同步的附件恢复更安全。\n• 无变化时同步会减少工作量，同时提供更清晰的状态和诊断。\n• 改进 Dropbox 登录、已归档项目操作和翻译。",
+        "ReleaseNotes": "• 可直接在收件箱中把笔记归为“参考”并选择项目和领域，也可在任意任务的状态菜单中选择“参考”。\n• 项目标题栏改为单行并带“...”菜单，时间线更易读且打开时以今天为中心，鼠标悬停显示的行按钮恢复正常，每日回顾会显示它统计的所有任务。\n• 其他设备删除附件后，同步不再每隔几秒重复；同步中断后会释放同步锁；同步位置无法验证时会指出具体文件和原因。\n• 商店版本在应用驻留托盘时可再次显示提醒通知。\n• MCP 工具支持链接附件，并修正翻译。",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -82,7 +82,7 @@
           "List, calendar, and kanban views with reminders and repeating tasks",
           "Free and open source, no ads"
         ],
-        "ReleaseNotes": "• Add start dates to projects and see project spans in Timeline.\n• Sync settings activate after verification, with safer attachment recovery across WebDAV, Dropbox, File Sync, and self-hosted servers.\n• Idle syncs do less work, while sync status and diagnostics give clearer results.\n• Improve Dropbox sign-in, archived project actions, and localization.",
+        "ReleaseNotes": "• File a note as Reference straight from the Inbox, with project and area pickers, and from any task's status menu.\n• The project header is a single row with a \"...\" menu, Timeline is easier to read and opens centered on today, hover-revealed row buttons are back, and the Daily Review shows every task it counts.\n• Sync no longer repeats every few seconds after another device deleted attachments, an interrupted sync releases its lock, and a sync location that cannot be verified says which file and why.\n• Store installs show reminder notifications again while the app runs in the tray.\n• MCP tools accept link attachments, and translations are corrected.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -131,7 +131,7 @@
           "Listen-, Kalender- und Kanban-Ansichten mit Erinnerungen und Wiederholungen",
           "Kostenlos und Open Source, ohne Werbung"
         ],
-        "ReleaseNotes": "• Projekte erhalten Startdaten und erscheinen als Zeitraum in der Zeitleiste.\n• Sync-Einstellungen werden nach einer Prüfung aktiviert; Anhänge werden bei WebDAV, Dropbox, Dateisynchronisierung und eigenen Servern sicherer wiederhergestellt.\n• Leerlauf-Sync benötigt weniger Arbeit, während Status und Diagnose klarere Ergebnisse liefern.\n• Verbessert Dropbox-Anmeldung, archivierte Projekte und Übersetzungen.",
+        "ReleaseNotes": "• Legen Sie eine Notiz direkt aus dem Eingang als Referenz ab, mit Projekt- und Bereichsauswahl, sowie über das Statusmenü jeder Aufgabe.\n• Die Projektkopfzeile ist eine einzelne Zeile mit „…“-Menü, die Zeitleiste ist besser lesbar und öffnet zentriert auf heute, die beim Überfahren eingeblendeten Zeilenschaltflächen sind zurück, und die tägliche Revision zeigt jede gezählte Aufgabe.\n• Der Sync wiederholt sich nicht mehr alle paar Sekunden, nachdem ein anderes Gerät Anhänge gelöscht hat; ein abgebrochener Sync gibt seine Sperre frei, und ein nicht prüfbarer Sync-Ort nennt die Datei und den Grund.\n• Store-Installationen zeigen wieder Erinnerungsbenachrichtigungen, während die App im Infobereich läuft.\n• MCP-Werkzeuge akzeptieren Link-Anhänge, Übersetzungen sind korrigiert.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -161,7 +161,7 @@
           "Vues liste, calendrier et kanban, rappels et tâches répétées",
           "Gratuit et open source, sans publicité"
         ],
-        "ReleaseNotes": "• Ajoutez une date de début aux projets et affichez leur durée dans la chronologie.\n• Les réglages de synchronisation s’activent après vérification, avec une récupération plus sûre sur WebDAV, Dropbox, dossiers et serveurs auto-hébergés.\n• Les synchronisations sans changement demandent moins de travail et leur état devient plus clair.\n• Améliore la connexion Dropbox, les projets archivés et les traductions.",
+        "ReleaseNotes": "• Classez une note en Référence directement depuis la boîte de réception, avec les sélecteurs de projet et de domaine, et depuis le menu d’état de toute tâche.\n• L’en-tête de projet tient sur une ligne avec un menu « … », la chronologie est plus lisible et s’ouvre centrée sur aujourd’hui, les boutons de ligne affichés au survol sont de retour et la revue quotidienne affiche toutes les tâches qu’elle compte.\n• La synchronisation ne se répète plus toutes les quelques secondes après qu’un autre appareil a supprimé des pièces jointes ; une synchronisation interrompue libère son verrou et un emplacement impossible à vérifier indique le fichier et la raison.\n• Les installations depuis la boutique affichent à nouveau les notifications de rappel pendant que l’app tourne dans la zone de notification.\n• Les outils MCP acceptent les pièces jointes de type lien et des traductions sont corrigées.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -190,7 +190,7 @@
           "Vistas de lista, calendario y kanban, con recordatorios y tareas repetidas",
           "Gratis y de código abierto, sin anuncios"
         ],
-        "ReleaseNotes": "• Añade fechas de inicio a los proyectos y muestra su duración en la cronología.\n• Activa los ajustes de sincronización tras verificarlos y recupera adjuntos con más seguridad en WebDAV, Dropbox, carpetas y servidores propios.\n• Reduce el trabajo de las sincronizaciones sin cambios y aclara su estado.\n• Mejora el acceso a Dropbox, los proyectos archivados y las traducciones.",
+        "ReleaseNotes": "• Archiva una nota como Referencia directamente desde la Bandeja de entrada, con selectores de proyecto y área, y desde el menú de estado de cualquier tarea.\n• La cabecera del proyecto ocupa una sola fila con un menú «...», la cronología se lee mejor y abre centrada en hoy, vuelven los botones que aparecen al pasar el cursor por una fila y la revisión diaria muestra todas las tareas que cuenta.\n• La sincronización ya no se repite cada pocos segundos después de que otro dispositivo borre adjuntos, una sincronización interrumpida libera su bloqueo y una ubicación que no se puede verificar indica el archivo y el motivo.\n• Las instalaciones de la tienda vuelven a mostrar notificaciones de recordatorio mientras la app se ejecuta en la bandeja del sistema.\n• Las herramientas MCP aceptan adjuntos de enlace y se corrigen traducciones.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",

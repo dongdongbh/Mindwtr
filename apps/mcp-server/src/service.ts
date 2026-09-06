@@ -56,6 +56,7 @@ import {
   type TaskRow,
   type UpdateTaskInput,
 } from './queries.js';
+import { applyLinkAttachments, buildLinkAttachments, type LinkAttachmentInput } from './link-attachments.js';
 import { closeCoreAdapter, runCoreService } from './core-adapter.js';
 import { pickDefinedTaskFields, TASK_CREATE_FIELD_NAMES, TASK_PATCH_FIELD_NAMES } from './task-write-fields.js';
 
@@ -290,6 +291,7 @@ export type AddProjectInput = {
   startDate?: string | null;
   reviewAt?: string | null;
   supportNotes?: string | null;
+  attachments?: LinkAttachmentInput[];
 };
 
 export type UpdateProjectInput = {
@@ -304,6 +306,7 @@ export type UpdateProjectInput = {
   startDate?: string | null;
   reviewAt?: string | null;
   supportNotes?: string | null;
+  attachments?: LinkAttachmentInput[] | null;
 };
 
 export type AddAreaInput = {
@@ -444,7 +447,13 @@ export type MindwtrService = {
   close: () => Promise<void>;
 };
 
-export const createService = (options: DbOptions, deps: ServiceDeps = defaultServiceDeps): MindwtrService => {
+type McpOperationalLogger = (message: string, context?: Record<string, unknown>) => void;
+
+export const createService = (
+  options: DbOptions,
+  deps: ServiceDeps = defaultServiceDeps,
+  logInfo?: McpOperationalLogger,
+): MindwtrService => {
   const { withDb, close } = createDbAccessor(options, deps);
   return {
     listTasks: async (input) => withDb((db) => deps.listTasks(db, input)),
@@ -492,6 +501,7 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
               energyLevel: normalizedInput.energyLevel,
               assignedTo: normalizedInput.assignedTo,
               timeEstimate: normalizedInput.timeEstimate,
+              attachments: buildLinkAttachments(normalizedInput.attachments),
               ...generatedCreateTaskProps(normalizedInput),
             }),
           }, {
@@ -531,18 +541,35 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
             energyLevel: normalizedInput.energyLevel,
             assignedTo: normalizedInput.assignedTo,
             timeEstimate: normalizedInput.timeEstimate,
+            attachments: buildLinkAttachments(normalizedInput.attachments),
             ...generatedCreateTaskProps(normalizedInput),
           }),
         });
       });
     },
-    updateTask: async (input) =>
-      runCoreWriteWithRetries(options, deps, async (core) => {
-        return core.updateTask({
-          id: input.id,
-          updates: buildTaskUpdates(input),
+    updateTask: async (input) => {
+      const updates = buildTaskUpdates(input);
+      const updated = await runCoreWriteWithRetries(options, deps, async (core) => {
+        if (input.attachments !== undefined) {
+          return core.updateTask({
+            id: input.id,
+            updates: (current) => ({
+              ...updates,
+              attachments: applyLinkAttachments(current.attachments, input.attachments!),
+            }),
+          });
+        }
+        return core.updateTask({ id: input.id, updates });
+      });
+      if (input.attachments !== undefined) {
+        logInfo?.('MCP attachment link replacement committed', {
+          releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+          backend: 'local',
+          entity: 'task',
         });
-      }),
+      }
+      return updated;
+    },
     completeTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.completeTask(id)),
     deleteTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.deleteTask(id)),
     restoreTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.restoreTask(id)),
@@ -561,11 +588,12 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
             startDate: input.startDate ?? undefined,
             reviewAt: input.reviewAt ?? undefined,
             supportNotes: input.supportNotes ?? undefined,
+            attachments: buildLinkAttachments(input.attachments),
           }) as Partial<CoreProject>,
         });
       }),
-    updateProject: async (input) =>
-      runCoreWriteWithRetries(options, deps, async (core) => {
+    updateProject: async (input) => {
+      const updated = await runCoreWriteWithRetries(options, deps, async (core) => {
         const updates: Partial<CoreProject> = {};
         if (input.title !== undefined) updates.title = validateProjectTitle(input.title);
         if (input.color !== undefined) updates.color = input.color ?? undefined;
@@ -577,8 +605,26 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
         if (input.startDate !== undefined) updates.startDate = input.startDate ?? undefined;
         if (input.reviewAt !== undefined) updates.reviewAt = input.reviewAt ?? undefined;
         if (input.supportNotes !== undefined) updates.supportNotes = input.supportNotes ?? undefined;
+        if (input.attachments !== undefined) {
+          return core.updateProject({
+            id: input.id,
+            updates: (current) => ({
+              ...updates,
+              attachments: applyLinkAttachments(current.attachments, input.attachments!),
+            }),
+          });
+        }
         return core.updateProject({ id: input.id, updates });
-      }),
+      });
+      if (input.attachments !== undefined) {
+        logInfo?.('MCP attachment link replacement committed', {
+          releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+          backend: 'local',
+          entity: 'project',
+        });
+      }
+      return updated;
+    },
     deleteProject: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.deleteProject(id)),
     addSection: async (input) =>
       runCoreWriteWithRetries(options, deps, async (core) => {

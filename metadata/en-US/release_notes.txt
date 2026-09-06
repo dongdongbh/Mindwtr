@@ -1,4 +1,4 @@
-- Add start dates to projects and see project spans in Timeline.
-- Sync settings activate after a verification pass, with safer attachment recovery across WebDAV, Dropbox, File Sync, iCloud, and self-hosted servers.
-- Idle syncs do less work, while sync status and diagnostics give clearer results.
-- Calendar dates, Dropbox sign-in, archived project actions, and localization work more reliably.
+- File a note as Reference straight from the Inbox, with project and area pickers, and from any task's status menu.
+- Sync no longer repeats every few seconds after another device deleted attachments, an interrupted sync releases its lock, and an unverifiable sync location names the file and why.
+- iCloud sync works again for libraries with a project start date, and a refused save names the real cause.
+- Week view opens on five days, widgets match the app, and translations are corrected.

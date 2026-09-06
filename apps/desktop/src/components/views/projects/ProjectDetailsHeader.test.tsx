@@ -20,10 +20,12 @@ const translations: Record<string, string> = {
     'projects.title': 'Project title',
     'process.remaining': 'remaining',
     'status.active': 'Active',
+    'status.archived': 'Archived',
     'status.done': 'Done',
     'status.waiting': 'Waiting',
     'taskEdit.details': 'Details',
     'taskEdit.dueDateLabel': 'Due Date',
+    'taskEdit.moreOptions': 'More options',
     'taskEdit.startDateLabel': 'Start Date',
 };
 
@@ -43,8 +45,10 @@ function buildProject(overrides: Partial<Project> = {}): Project {
     };
 }
 
+const openMenu = () => fireEvent.click(screen.getByRole('button', { name: /^More options: / }));
+
 describe('ProjectDetailsHeader', () => {
-    it('shows compact project summary metadata and toggles details', () => {
+    it('shows compact project summary metadata and toggles details from the menu', () => {
         const onToggleDetails = vi.fn();
         const project = buildProject({
             status: 'waiting',
@@ -72,11 +76,11 @@ describe('ProjectDetailsHeader', () => {
                 onArchive={vi.fn()}
                 onReactivate={vi.fn()}
                 onDelete={vi.fn()}
+                projectProgress={{ total: 5, doneCount: 2, remainingCount: 3 }}
                 t={t}
             />
         );
 
-        expect(screen.getByRole('button', { name: /details/i })).toHaveAttribute('aria-expanded', 'false');
         expect(screen.getByDisplayValue('Launch site')).toHaveAttribute('title', 'Launch site');
         expect(screen.getByDisplayValue('Launch site').tagName).toBe('TEXTAREA');
         screen.getByText('Waiting');
@@ -86,44 +90,97 @@ describe('ProjectDetailsHeader', () => {
         screen.getByText('Due Date: Mar 28');
         screen.getByText('Review Date: Mar 30');
         screen.getByText('#client');
+        screen.getByText('2/5 Done • 3 remaining');
+
+        // Management actions stay out of the row until the menu opens.
+        expect(screen.queryByRole('menuitem', { name: 'Details' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Duplicate' })).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'Project type help' }));
         expect(screen.getByText('Sequential projects surface one available action at a time. Parallel projects can surface multiple independent Next tasks.')).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', { name: /details/i }));
+        openMenu();
+        expect(screen.getByRole('button', { name: 'More options: Launch site' })).toHaveAttribute('aria-expanded', 'true');
+        const details = screen.getByRole('menuitem', { name: 'Details' });
+        expect(details).toHaveAttribute('aria-expanded', 'false');
+        fireEvent.click(details);
         expect(onToggleDetails).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     });
 
-    it('renders the parallel summary and expanded state without optional chips', () => {
-        const project = buildProject();
+    it('routes duplicate, archive, and delete through the menu and closes it on Escape', () => {
+        const onDuplicate = vi.fn();
+        const onArchive = vi.fn();
+        const onDelete = vi.fn();
 
         render(
             <ProjectDetailsHeader
-                project={project}
+                project={buildProject()}
                 projectColor="#2563eb"
                 isSequential={false}
-                dueDate={project.dueDate}
-                editTitle={project.title}
+                editTitle="Launch site"
                 onEditTitleChange={vi.fn()}
                 onCommitTitle={vi.fn()}
                 onResetTitle={vi.fn()}
                 detailsExpanded
                 onToggleDetails={vi.fn()}
-                onDuplicate={vi.fn()}
-                onArchive={vi.fn()}
+                onDuplicate={onDuplicate}
+                onArchive={onArchive}
                 onReactivate={vi.fn()}
-                onDelete={vi.fn()}
+                onDelete={onDelete}
                 t={t}
             />
         );
 
-        expect(screen.getByRole('button', { name: /details/i })).toHaveAttribute('aria-expanded', 'true');
-        screen.getByText('Active');
-        screen.getByText('Parallel');
-        expect(screen.queryByText('Ops')).not.toBeInTheDocument();
-        expect(screen.queryByText(/Start Date:/i)).not.toBeInTheDocument();
-        expect(screen.queryByText(/Due Date:/i)).not.toBeInTheDocument();
-        expect(screen.queryByText(/Review Date:/i)).not.toBeInTheDocument();
+        openMenu();
+        expect(screen.getByRole('menuitem', { name: 'Details' })).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.queryByRole('menuitem', { name: 'Reactivate' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+        expect(onDuplicate).toHaveBeenCalledTimes(1);
+
+        openMenu();
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }));
+        expect(onArchive).toHaveBeenCalledTimes(1);
+
+        openMenu();
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+        expect(onDelete).toHaveBeenCalledTimes(1);
+
+        openMenu();
+        fireEvent.keyDown(window, { key: 'Escape' });
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('offers Reactivate instead of Archive and blocks Delete on a read-only archived project', () => {
+        const onReactivate = vi.fn();
+        const onDelete = vi.fn();
+
+        render(
+            <ProjectDetailsHeader
+                project={buildProject({ status: 'archived' })}
+                projectColor="#2563eb"
+                isSequential={false}
+                editTitle="Launch site"
+                onEditTitleChange={vi.fn()}
+                onCommitTitle={vi.fn()}
+                onResetTitle={vi.fn()}
+                detailsExpanded={false}
+                onToggleDetails={vi.fn()}
+                onDuplicate={vi.fn()}
+                onArchive={vi.fn()}
+                onReactivate={onReactivate}
+                onDelete={onDelete}
+                readOnly
+                readOnlyHint="Archived projects are read-only"
+                t={t}
+            />
+        );
+
+        openMenu();
+        expect(screen.queryByRole('menuitem', { name: 'Archive' })).not.toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Reactivate' }));
+        expect(onReactivate).toHaveBeenCalledTimes(1);
     });
 
     it('uses a container-responsive header layout so actions cannot hide long project titles', () => {

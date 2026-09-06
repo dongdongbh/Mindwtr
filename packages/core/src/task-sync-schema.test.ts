@@ -12,6 +12,7 @@ import {
     TASK_SYNC_SCHEMA_VERSION,
 } from './task-sync-schema';
 import cloudKitProductionSchema from './cloudkit-production-schema.json';
+import type { Task } from './types';
 
 const PRE_REFACTOR_TASK_CONTENT_COMPARISON_EXCLUDED_KEYS = [
     'rev', 'revBy', 'createdAt', 'updatedAt', 'purgedAt', 'order', 'orderNum', 'boardOrder',
@@ -79,6 +80,22 @@ describe('Task sync schema contract', () => {
             .toContain('viewSectionIds');
         expect(cloudKitProductionSchema.records.MindwtrTask.pendingProduction)
             .not.toContain('viewSectionIds');
+    });
+
+    it('reads NULL project-archive columns as absent so a phone-read task matches the merge winner (#1156)', () => {
+        const task: Task = { ...TASK_SYNC_SCHEMA_FIXTURE, completedAtBeforeProjectArchive: undefined, isFocusedTodayBeforeProjectArchive: undefined } as Task;
+        const row = taskToSqliteRow(task);
+        const record: Record<string, unknown> = {};
+        TASK_SQLITE_COLUMNS.forEach((column, index) => { record[column] = row[index]; });
+        expect(record.completedAtBeforeProjectArchive).toBeNull();
+        expect(record.isFocusedTodayBeforeProjectArchive).toBeNull();
+        const readBack = mapSqliteTaskRow(record);
+        expect('completedAtBeforeProjectArchive' in readBack && readBack.completedAtBeforeProjectArchive !== undefined).toBe(false);
+        expect(readBack.isFocusedTodayBeforeProjectArchive).toBeUndefined();
+        // A document an older client uploaded with explicit nulls converges to the same bytes.
+        const legacy = normalizeTaskForSyncMerge({ ...task, completedAtBeforeProjectArchive: null, isFocusedTodayBeforeProjectArchive: null }, task.updatedAt);
+        expect(JSON.stringify(legacy)).toBe(JSON.stringify(normalizeTaskForSyncMerge(task, task.updatedAt)));
+        expect(JSON.stringify(legacy)).not.toContain('"completedAtBeforeProjectArchive":null');
     });
 
     it('keeps the content-comparison excluded-key set aligned with the schema signature field', () => {

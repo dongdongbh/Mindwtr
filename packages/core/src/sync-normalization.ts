@@ -1,4 +1,4 @@
-import type { AppData, Area, Attachment, Person, Project, Task } from './types';
+import type { AppData, Area, Attachment, Person, Project, Section, Task } from './types';
 import { isSha256Hex } from './attachment-hash';
 import { normalizePersonName, normalizePersonNote, normalizePersonReferenceLink } from './people';
 import { normalizeProjectSequentialScope, normalizeProjectTaskSortBy } from './project-utils';
@@ -194,6 +194,13 @@ const normalizeProjectStatusForMerge = (value: unknown): Project['status'] => {
     return 'active';
 };
 
+/** Older clients uploaded `deletedAtBeforeProjectArchive: null`; absent is canonical (#1156). */
+export const normalizeSectionForSyncMerge = (section: Section): Section => (
+    section.deletedAtBeforeProjectArchive === null
+        ? { ...section, deletedAtBeforeProjectArchive: undefined }
+        : section
+);
+
 export const normalizeTaskForSyncMerge = (
     task: Task,
     nowIso: string,
@@ -242,8 +249,9 @@ export const normalizeTaskForSyncMerge = (
         reviewAt: normalized.reviewAt,
         completedAt: normalized.completedAt,
         statusBeforeProjectArchive: normalized.statusBeforeProjectArchive,
-        completedAtBeforeProjectArchive: normalized.completedAtBeforeProjectArchive,
-        isFocusedTodayBeforeProjectArchive: normalized.isFocusedTodayBeforeProjectArchive,
+        // Older clients uploaded these as explicit `null`; absent is the canonical shape (#1156).
+        completedAtBeforeProjectArchive: normalized.completedAtBeforeProjectArchive ?? undefined,
+        isFocusedTodayBeforeProjectArchive: normalized.isFocusedTodayBeforeProjectArchive ?? undefined,
         projectArchivedAt: normalized.projectArchivedAt,
         rev: normalized.rev,
         revBy: normalized.revBy,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 
 import {
     type AppData,
@@ -155,6 +156,19 @@ export function useRootLayoutStartup({
                             loggingReason: getStartupLoggingReason(loadedStore.settings.diagnostics?.loggingEnabled === true),
                         },
                     }).catch(() => {});
+                    if (Platform.OS === 'android') {
+                        // #1150 proof: the native listener must have bounded OkHttp's connect
+                        // before the first request, or an IPv6 blackhole still eats the 30 s timer.
+                        const connectTimeoutMs = requireOptionalNativeModule<{ httpConnectTimeoutMs?: number }>('SyncFileLock')
+                            ?.httpConnectTimeoutMs ?? 0;
+                        void logInfo('Android HTTP connect timeout installed', {
+                            scope: 'startup',
+                            extra: {
+                                releaseCheck: 'v1.2.8/android-http-connect-timeout',
+                                connectTimeoutMs: String(connectTimeoutMs),
+                            },
+                        }).catch(() => {});
+                    }
                 }
                 if (analyticsHeartbeatUrl) {
                     try {

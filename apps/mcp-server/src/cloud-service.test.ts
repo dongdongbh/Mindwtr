@@ -266,6 +266,286 @@ describe('cloud-backed MCP service', () => {
     });
   });
 
+  test('re-reads and recomputes a task link replacement after a conditional conflict', async () => {
+    const originalLink = {
+      id: 'link-old', kind: 'link' as const, title: 'Old', uri: 'https://example.com/old', createdAt: iso, updatedAt: iso,
+    };
+    const originalFile = {
+      id: 'file-1', kind: 'file' as const, title: 'Draft.pdf', uri: '', createdAt: iso, updatedAt: iso,
+    };
+    const changedFile = { ...originalFile, title: 'Final.pdf', updatedAt: '2026-01-02T00:00:00.000Z' };
+    const addedFile = {
+      id: 'file-2', kind: 'file' as const, title: 'Appendix.pdf', uri: '', createdAt: iso, updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const deletedFile = {
+      id: 'file-3', kind: 'file' as const, title: 'Removed.pdf', uri: '', createdAt: iso,
+      updatedAt: '2026-01-02T00:00:00.000Z', deletedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const afterConflict = {
+      ...cloudData.tasks[0],
+      attachments: [
+        changedFile,
+        addedFile,
+        deletedFile,
+        { ...originalLink, deletedAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
+      ],
+    };
+    const requests: Array<{ method: string; headers: Headers; body?: any }> = [];
+    const logs: Array<{ message: string; context?: Record<string, unknown> }> = [];
+    let getCount = 0;
+    let patchCount = 0;
+    const service = createCloudService({
+      url: 'https://mindwtr.example.com',
+      token: 'cloud-token',
+      logInfo: (message, context) => logs.push({ message, context }),
+      fetcher: async (_input, init) => {
+        const method = init?.method ?? 'GET';
+        const headers = new Headers(init?.headers);
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        requests.push({ method, headers, body });
+        if (method === 'GET') {
+          getCount += 1;
+          const task = getCount === 1
+            ? { ...cloudData.tasks[0], attachments: [originalFile, originalLink] }
+            : afterConflict;
+          return new Response(JSON.stringify({ task }), {
+            status: 200,
+            headers: { ETag: `"mindwtr-entity-sha256-${getCount}"` },
+          });
+        }
+        patchCount += 1;
+        if (patchCount === 1) {
+          return new Response(JSON.stringify({ error: 'Entity changed; refresh and retry' }), { status: 412 });
+        }
+        return new Response(JSON.stringify({ task: { ...afterConflict, attachments: body.attachments } }), { status: 200 });
+      },
+    });
+
+    const updated = await service.updateTask({
+      id: 'task-next',
+      attachments: [{ uri: 'obsidian://open?vault=work&file=notes' }],
+    });
+
+    expect(getCount).toBe(2);
+    expect(patchCount).toBe(2);
+    expect(requests.map((item) => item.method)).toEqual(['GET', 'PATCH', 'GET', 'PATCH']);
+    expect(requests[0].headers.get('accept-encoding')).toBe('identity');
+    expect(requests[1].headers.get('if-match')).toBe('"mindwtr-entity-sha256-1"');
+    expect(requests[3].headers.get('if-match')).toBe('"mindwtr-entity-sha256-2"');
+    expect(updated.attachments?.slice(0, 3)).toEqual([changedFile, addedFile, deletedFile]);
+    expect(updated.attachments?.[3]).toMatchObject({
+      id: 'link-old',
+      deletedAt: '2026-01-02T00:00:00.000Z',
+    });
+    expect(updated.attachments?.[4]).toMatchObject({
+      kind: 'link',
+      uri: 'obsidian://open?vault=work&file=notes',
+    });
+    expect(logs).toEqual([{
+      message: 'MCP attachment link replacement committed',
+      context: {
+        releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+        backend: 'cloud',
+        entity: 'task',
+      },
+    }]);
+  });
+
+  test('re-reads and recomputes a project link replacement after a conditional conflict', async () => {
+    const liveLink = {
+      id: 'project-link-old', kind: 'link' as const, title: 'Old', uri: 'https://example.com/old', createdAt: iso, updatedAt: iso,
+    };
+    const deletedFile = {
+      id: 'project-file-1', kind: 'file' as const, title: 'Deleted.pdf', uri: '', createdAt: iso,
+      updatedAt: '2026-01-02T00:00:00.000Z', deletedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const originalFile = {
+      id: 'project-file-2', kind: 'file' as const, title: 'Draft.pdf', uri: '', createdAt: iso, updatedAt: iso,
+    };
+    const changedFile = { ...originalFile, title: 'Final.pdf', updatedAt: '2026-01-02T00:00:00.000Z' };
+    const addedFile = {
+      id: 'project-file-3', kind: 'file' as const, title: 'New.pdf', uri: '', createdAt: iso, updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const beforeConflict = { ...cloudData.projects[0], attachments: [originalFile, liveLink] };
+    const afterConflict = { ...cloudData.projects[0], attachments: [changedFile, deletedFile, addedFile, liveLink] };
+    const requests: Array<{ method: string; headers: Headers; body?: any }> = [];
+    let getCount = 0;
+    let patchCount = 0;
+    const service = createCloudService({
+      url: 'https://mindwtr.example.com',
+      token: 'cloud-token',
+      fetcher: async (_input, init) => {
+        const method = init?.method ?? 'GET';
+        const headers = new Headers(init?.headers);
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        requests.push({ method, headers, body });
+        if (method === 'GET') {
+          getCount += 1;
+          return new Response(JSON.stringify({ project: getCount === 1 ? beforeConflict : afterConflict }), {
+            status: 200,
+            headers: { ETag: `"mindwtr-entity-sha256-project-${getCount}"` },
+          });
+        }
+        patchCount += 1;
+        if (patchCount === 1) {
+          return new Response(JSON.stringify({ error: 'Entity changed; refresh and retry' }), { status: 412 });
+        }
+        return new Response(JSON.stringify({ project: { ...afterConflict, attachments: body.attachments } }), { status: 200 });
+      },
+    });
+
+    const updated = await service.updateProject({
+      id: 'project-1',
+      attachments: [{ uri: 'obsidian://open?vault=work&file=project' }],
+    });
+
+    expect(getCount).toBe(2);
+    expect(patchCount).toBe(2);
+    expect(requests.map((item) => item.method)).toEqual(['GET', 'PATCH', 'GET', 'PATCH']);
+    expect(requests[3].headers.get('if-match')).toBe('"mindwtr-entity-sha256-project-2"');
+    expect(updated.attachments?.slice(0, 3)).toEqual([changedFile, deletedFile, addedFile]);
+    expect(updated.attachments?.[3]?.id).toBe('project-link-old');
+    expect(typeof updated.attachments?.[3]?.deletedAt).toBe('string');
+    expect(updated.attachments?.[4]).toMatchObject({
+      kind: 'link',
+      uri: 'obsidian://open?vault=work&file=project',
+    });
+  });
+
+  test('stops task and project conditional attachment writes after three conflicts', async () => {
+    for (const entity of ['task', 'project'] as const) {
+      let getCount = 0;
+      let patchCount = 0;
+      const service = createCloudService({
+        url: 'https://mindwtr.example.com',
+        token: 'cloud-token',
+        fetcher: async (_input, init) => {
+          const method = init?.method ?? 'GET';
+          if (method === 'GET') {
+            getCount += 1;
+            const value = entity === 'task' ? cloudData.tasks[0] : cloudData.projects[0];
+            return new Response(JSON.stringify({ [entity]: value }), {
+              status: 200,
+              headers: { ETag: `"mindwtr-entity-sha256-${entity}-${getCount}"` },
+            });
+          }
+          patchCount += 1;
+          return new Response(JSON.stringify({ error: 'Entity changed; refresh and retry' }), { status: 412 });
+        },
+      });
+
+      const operation = entity === 'task'
+        ? service.updateTask({ id: 'task-next', attachments: [] })
+        : service.updateProject({ id: 'project-1', attachments: [] });
+      await expect(operation).rejects.toThrow(
+        `${entity === 'task' ? 'Task' : 'Project'} changed during attachment link update after 3 attempts; refresh and retry.`,
+      );
+      expect(getCount).toBe(3);
+      expect(patchCount).toBe(3);
+    }
+  });
+
+  test('rejects task and project attachment writes before PATCH when the server lacks a strong ETag', async () => {
+    for (const entity of ['task', 'project'] as const) {
+      let patchCount = 0;
+      const service = createCloudService({
+        url: 'https://mindwtr.example.com',
+        token: 'cloud-token',
+        fetcher: async (_input, init) => {
+          const method = init?.method ?? 'GET';
+          if (method === 'PATCH') patchCount += 1;
+          const value = entity === 'task' ? cloudData.tasks[0] : cloudData.projects[0];
+          return new Response(JSON.stringify({ [entity]: value }), {
+            status: 200,
+            ...(entity === 'project' ? { headers: { ETag: 'W/"old-server"' } } : {}),
+          });
+        },
+      });
+
+      const operation = entity === 'task'
+        ? service.updateTask({ id: 'task-next', attachments: [] })
+        : service.updateProject({ id: 'project-1', attachments: [] });
+      await expect(operation).rejects.toThrow(
+        'Attachment link updates require Mindwtr Cloud 1.2.8 or newer; this server did not return a strong entity ETag.',
+      );
+      expect(patchCount).toBe(0);
+    }
+  });
+
+  test('keeps scalar task and project updates unconditional', async () => {
+    const requests: Array<{ method: string; headers: Headers; body?: any }> = [];
+    const service = createCloudService({
+      url: 'https://mindwtr.example.com',
+      token: 'cloud-token',
+      fetcher: async (input, init) => {
+        const method = init?.method ?? 'GET';
+        const headers = new Headers(init?.headers);
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        requests.push({ method, headers, body });
+        const isProject = String(input).includes('/projects/');
+        return new Response(JSON.stringify(isProject
+          ? { project: { ...cloudData.projects[0], ...body } }
+          : { task: { ...cloudData.tasks[0], ...body } }), { status: 200 });
+      },
+    });
+
+    await service.updateTask({ id: 'task-next', title: 'Renamed task' });
+    await service.updateProject({ id: 'project-1', title: 'Renamed project' });
+
+    expect(requests.map((item) => item.method)).toEqual(['PATCH', 'PATCH']);
+    expect(requests.every((item) => item.headers.get('if-match') === null)).toBe(true);
+    expect(requests.map((item) => item.body)).toEqual([
+      { title: 'Renamed task' },
+      { title: 'Renamed project' },
+    ]);
+  });
+
+  test('accepts null to remove every task and project link while preserving file records', async () => {
+    const file = {
+      id: 'file-1', kind: 'file' as const, title: 'Plan.pdf', uri: '', createdAt: iso, updatedAt: iso,
+    };
+    const liveLink = {
+      id: 'link-live', kind: 'link' as const, title: 'Live', uri: 'https://example.com/live', createdAt: iso, updatedAt: iso,
+    };
+    const deletedLink = {
+      id: 'link-deleted', kind: 'link' as const, title: 'Deleted', uri: 'https://example.com/deleted',
+      createdAt: iso, updatedAt: iso, deletedAt: iso,
+    };
+
+    for (const entity of ['task', 'project'] as const) {
+      let patchBody: {
+        attachments?: Array<{ id: string; deletedAt?: string; [key: string]: unknown }>;
+      } | undefined;
+      const base = entity === 'task' ? cloudData.tasks[0] : cloudData.projects[0];
+      const service = createCloudService({
+        url: 'https://mindwtr.example.com',
+        token: 'cloud-token',
+        fetcher: async (_input, init) => {
+          if ((init?.method ?? 'GET') === 'GET') {
+            return new Response(JSON.stringify({
+              [entity]: { ...base, attachments: [file, liveLink, deletedLink] },
+            }), { status: 200, headers: { ETag: `"mindwtr-entity-sha256-${entity}"` } });
+          }
+          patchBody = JSON.parse(String(init?.body));
+          return new Response(JSON.stringify({
+            [entity]: { ...base, attachments: patchBody?.attachments },
+          }), { status: 200 });
+        },
+      });
+
+      if (entity === 'task') {
+        await service.updateTask({ id: 'task-next', attachments: null });
+      } else {
+        await service.updateProject({ id: 'project-1', attachments: null });
+      }
+
+      expect(patchBody?.attachments?.[0]).toEqual(file);
+      expect(patchBody?.attachments?.[1]?.id).toBe('link-live');
+      expect(typeof patchBody?.attachments?.[1]?.deletedAt).toBe('string');
+      expect(patchBody?.attachments?.[2]).toEqual(deletedLink);
+    }
+  });
+
   test('maps cloud API errors onto MCP error types', async () => {
     const service = createCloudService({
       url: 'https://mindwtr.example.com',

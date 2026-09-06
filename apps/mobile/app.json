@@ -2,7 +2,7 @@
   "expo": {
     "name": "Mindwtr",
     "slug": "mindwtr",
-    "version": "1.2.7",
+    "version": "1.2.8",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "mindwtr",
@@ -53,7 +53,7 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "versionCode": 136,
+      "versionCode": 138,
       "package": "tech.dongdongbh.mindwtr",
       "permissions": [
         "RECORD_AUDIO",
@@ -183,6 +183,7 @@
       "./plugins/android-network-security-config",
       "./plugins/android-system-bars",
       "./plugins/android-startup-trace",
+      "./plugins/android-font-scale-layout",
       "./plugins/patch-alarm-notification-gradle",
       "./plugins/patch-expo-background-task"
     ],

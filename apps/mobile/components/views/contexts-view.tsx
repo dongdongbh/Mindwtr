@@ -43,7 +43,7 @@ import {
 } from './contexts-view-filter-utils';
 import { assertBulkActionSucceeded, useTaskListSelection } from '../use-task-list-selection';
 import { TASK_LIST_WINDOWING_PROPS } from '../task-list-windowing';
-import { resolveNonDoneTaskSortBy } from '@/lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 
 type BulkTokenPickerState = {
   field: 'tags' | 'contexts';

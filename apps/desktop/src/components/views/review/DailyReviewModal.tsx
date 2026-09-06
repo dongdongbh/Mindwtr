@@ -26,7 +26,7 @@ import { InboxProcessor } from '../InboxProcessor';
 import { Dialog, DialogHeader } from '../../ui/Dialog';
 import { TaskItem } from '../../TaskItem';
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
-import { resolveNonDoneTaskSortBy } from '../../../lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 import { useLocalDayKey } from '../../../hooks/useLocalDayKey';
 
 type DailyReviewStep = 'today' | 'focus' | 'inbox' | 'waiting' | 'completed';
@@ -290,7 +290,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
         }
         return (
             <div className="divide-y divide-border/30">
-                {list.slice(0, 10).map((task) => (
+                {list.map((task) => (
                     <div key={task.id} className={cn(options?.showFollowUpToday && "py-2")}>
                         <TaskItem task={task} showProjectBadgeInActions={false} />
                         {options?.showFollowUpToday && (
@@ -324,7 +324,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
         const focusedCount = focusedTasks.length;
         return (
             <div className="space-y-2">
-                {focusCandidates.slice(0, 10).map((task) => {
+                {focusCandidates.map((task) => {
                     const project = task.projectId ? projectMap.get(task.projectId) : null;
                     const canFocus = task.isFocusedToday || focusedCount < focusTaskLimit;
                     return (
@@ -461,7 +461,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
                             <h3 className="font-semibold mb-2">{t('dailyReview.focusStep')}</h3>
                             <p className="text-sm text-muted-foreground">{t('dailyReview.focusDesc')}</p>
                             <p className="text-sm text-muted-foreground mt-2">
-                                <span className="font-bold text-foreground">{focusedTasks.length}</span> / 3
+                                <span className="font-bold text-foreground">{focusedTasks.length}</span> / {focusTaskLimit}
                             </p>
                         </div>
                         {renderFocusList()}

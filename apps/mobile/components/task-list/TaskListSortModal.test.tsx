@@ -3,15 +3,19 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskListSortModal } from './TaskListSortModal';
-import { TASK_LIST_SORT_OPTIONS } from '@/lib/task-list-sort';
+import { TASK_LIST_SORT_OPTIONS } from '@mindwtr/core';
 
 let timeEstimatesEnabled = true;
 
-vi.mock('@mindwtr/core', () => ({
-  resolveFeatureFlags: () => ({ timeEstimates: timeEstimatesEnabled }),
-  resolveTaskSortByForFeatures: (sortBy: string) => sortBy,
-  useTaskStore: (selector: (state: unknown) => unknown) => selector({ settings: {} }),
-}));
+vi.mock('@mindwtr/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@mindwtr/core')>();
+  return {
+    ...actual,
+    resolveFeatureFlags: () => ({ timeEstimates: timeEstimatesEnabled }),
+    resolveTaskSortByForFeatures: (sortBy: string) => sortBy,
+    useTaskStore: (selector: (state: unknown) => unknown) => selector({ settings: {} }),
+  };
+});
 
 vi.mock('react-native', () => ({
   Modal: ({ children, visible }: any) => (visible ? React.createElement('div', null, children) : null),

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { serializeWebdavCapabilityProof } from '@mindwtr/core';
 
 import {
   ensureWebdavCapabilityProof,
@@ -38,24 +39,20 @@ describe('mobile WebDAV capability proof', () => {
     allowInsecureHttp: false,
   };
 
-  it('stores a versioned device-local identity without secret values', async () => {
-    await rememberWebdavCapabilityProof({ ...config, password: 'must-not-persist' } as never);
-
-    const proof = await AsyncStorage.getItem(WEBDAV_CAPABILITY_PROOF_STORAGE_KEY);
-    expect(proof).toContain('"version":1');
-    expect(proof).toContain('https://dav.example.com/mindwtr/data.json');
-    expect(proof).toContain('alice');
-    expect(proof).not.toContain('must-not-persist');
-  });
-
-  it.each([
-    ['endpoint', { ...config, url: 'https://other.example.com/mindwtr/' }],
-    ['username', { ...config, username: 'bob' }],
-    ['insecure transport policy', { ...config, allowInsecureHttp: true }],
-  ])('invalidates the proof when the %s changes', async (_label, changedConfig) => {
+  // Serialization itself (what fields it covers, secret exclusion, normalization) is core's
+  // `serializeWebdavCapabilityProof` unit test; this only proves the wrapper actually
+  // persists that value under this platform's key.
+  it('stores the serialized proof under the platform storage key', async () => {
     await rememberWebdavCapabilityProof(config);
 
-    await expect(hasWebdavCapabilityProof(changedConfig)).resolves.toBe(false);
+    await expect(AsyncStorage.getItem(WEBDAV_CAPABILITY_PROOF_STORAGE_KEY))
+      .resolves.toBe(serializeWebdavCapabilityProof(config));
+  });
+
+  it('invalidates the proof when the configuration changes', async () => {
+    await rememberWebdavCapabilityProof(config);
+
+    await expect(hasWebdavCapabilityProof({ ...config, username: 'bob' })).resolves.toBe(false);
   });
 
   it('probes once for an unchanged configuration and records success', async () => {

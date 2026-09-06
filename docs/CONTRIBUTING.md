@@ -73,6 +73,7 @@ Run all commands from the repository root.
 
 - Bun (workspace/package manager) — use the version in `.bun-version` (currently 1.3.5) or newer
 - Node.js 20 or newer — `apps/mcp-server` declares `"node": ">=20"` and is published to npm, so it must build and run on plain Node
+- Python 3 — `bun run verify` runs the governance tests, which include `scripts/ci/google-play-edit.test.py`
 - Git
 - Rust toolchain (required for Tauri desktop build/dev)
 - System webview dependencies for Tauri on your OS

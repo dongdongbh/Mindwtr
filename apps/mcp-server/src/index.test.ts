@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { NotFoundError } from './errors.js';
-import { parseArgs, parseBooleanFlag, registerMindwtrTools, resolveServerConfig, resolveServerModeFlags } from './index.js';
+import { addTaskSchema, parseArgs, parseBooleanFlag, registerMindwtrTools, resolveServerConfig, resolveServerModeFlags, updateTaskSchema } from './index.js';
 import type { Area, Person, Project, Section, Task } from './queries.js';
 import type { MindwtrService } from './service.js';
 
@@ -572,5 +572,14 @@ describe('mcp server index', () => {
 
     expect(result?.isError).toBe(true);
     expect(payload.code).toBe('not_found');
+  });
+});
+
+describe('link attachment tool inputs', () => {
+  test('accepts a link item and rejects a file-kind one', () => {
+    expect(addTaskSchema.safeParse({ title: 'T', attachments: [{ uri: 'obsidian://open?vault=v&file=n' }] }).success).toBe(true);
+    expect(updateTaskSchema.safeParse({ id: 't', attachments: [{ title: 'Note', uri: 'https://example.com/a' }] }).success).toBe(true);
+    expect(updateTaskSchema.safeParse({ id: 't', attachments: null }).success).toBe(true);
+    expect(updateTaskSchema.safeParse({ id: 't', attachments: [{ kind: 'file', uri: 'x' }] }).success).toBe(false);
   });
 });

@@ -1,8 +1,14 @@
 import type { ReactNode } from 'react';
 import { ArrowUpDown } from 'lucide-react';
-import { resolveFeatureFlags, tFallback, useTaskStore, type TaskSortBy } from '@mindwtr/core';
+import {
+    DONE_TASK_LIST_SORT_OPTIONS,
+    TASK_LIST_SORT_OPTIONS,
+    resolveFeatureFlags,
+    tFallback,
+    useTaskStore,
+    type TaskSortBy,
+} from '@mindwtr/core';
 import { cn } from '../../../lib/utils';
-import { DONE_SORT_OPTIONS, SORT_OPTIONS } from '../../../lib/task-list-sort';
 import { ToolbarSelect } from './ToolbarSelect';
 
 // One toolbar style for every list view. Focus, Review, Contexts and the status
@@ -25,7 +31,7 @@ export const VIEW_FILTER_INPUT = 'w-full rounded border border-border bg-backgro
 // it also carry `data-list-end` so the tripwire tests can find it.
 export const LIST_END_GAP = 'pb-4';
 
-export { DONE_SORT_OPTIONS, SORT_OPTIONS };
+export { DONE_TASK_LIST_SORT_OPTIONS, TASK_LIST_SORT_OPTIONS };
 
 type ToolbarButtonProps = {
     active?: boolean;
@@ -65,7 +71,7 @@ type SortBySelectProps = {
     t: (key: string) => string;
     className?: string;
     iconTestId?: string;
-    /** Defaults to SORT_OPTIONS; the Done list passes DONE_SORT_OPTIONS. */
+    /** Defaults to TASK_LIST_SORT_OPTIONS; the Done list passes DONE_TASK_LIST_SORT_OPTIONS. */
     options?: readonly TaskSortBy[];
 };
 
@@ -78,7 +84,7 @@ export function SortBySelect({ value, onChange, t, className, iconTestId, option
     // ('timeEstimate' reads as 'default' while the feature is off), so dropping
     // the option can never leave the trigger blank (#1107).
     const timeEstimatesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeEstimates);
-    const sortOptions = (options ?? SORT_OPTIONS).filter(
+    const sortOptions = (options ?? TASK_LIST_SORT_OPTIONS).filter(
         (option) => option !== 'timeEstimate' || timeEstimatesEnabled
     );
     return (

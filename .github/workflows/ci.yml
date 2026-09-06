@@ -47,8 +47,89 @@ jobs:
       - name: TypeScript check
         run: cd packages/core && bun run tsc --noEmit
 
+      - name: Run unit tests
+        run: bun run --filter @mindwtr/core test -- --coverage --coverage.thresholds.lines=70 --coverage.thresholds.statements=70 --coverage.thresholds.functions=50 --coverage.thresholds.branches=50
+
+      - name: Core coverage summary
+        if: always()
+        run: node scripts/ci/write-coverage-summary.js "Core Coverage" packages/core/coverage/coverage-summary.json --min-lines=70 --min-statements=70 --min-functions=50 --min-branches=50
+
+      - name: Upload core coverage artifact
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: core-coverage
+          path: packages/core/coverage
+          if-no-files-found: ignore
+
+  # Cross-package performance budgets (core, desktop ListView/TimelineView, mobile large-store)
+  performance:
+    runs-on: ubuntu-latest
+    name: Performance Budgets
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: ".bun-version"
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: |
+          set -e
+          bun install --frozen-lockfile || (echo "bun install failed, clearing cache and retrying..." && (bun pm cache rm || bun pm cache clean || true) && bun install --frozen-lockfile)
+
       - name: Large-store performance budgets
         run: bun run test:perf
+
+      - name: Perf budget summary
+        if: always()
+        run: node scripts/ci/write-perf-summary.js packages/core/.perf/measurements.json
+
+      - name: Upload perf measurements artifact
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: core-perf-measurements
+          path: packages/core/.perf/measurements.json
+          if-no-files-found: ignore
+
+  # Repo/metadata governance checks (release, store listing, locale, workflow)
+  governance:
+    runs-on: ubuntu-latest
+    name: Governance
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: ".bun-version"
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: |
+          set -e
+          bun install --frozen-lockfile || (echo "bun install failed, clearing cache and retrying..." && (bun pm cache rm || bun pm cache clean || true) && bun install --frozen-lockfile)
 
       - name: Locale parity check
         run: bun run i18n:check
@@ -97,21 +178,6 @@ jobs:
 
       - name: Apple property list syntax check
         run: python3 scripts/ci/validate-apple-plists.py
-
-      - name: Run unit tests
-        run: bun run --filter @mindwtr/core test -- --coverage --coverage.thresholds.lines=70 --coverage.thresholds.statements=70 --coverage.thresholds.functions=50 --coverage.thresholds.branches=50
-
-      - name: Core coverage summary
-        if: always()
-        run: node scripts/ci/write-coverage-summary.js "Core Coverage" packages/core/coverage/coverage-summary.json --min-lines=70 --min-statements=70 --min-functions=50 --min-branches=50
-
-      - name: Upload core coverage artifact
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: core-coverage
-          path: packages/core/coverage
-          if-no-files-found: ignore
 
   # Compile and execute the actual Swift/Objective-C CloudKit Task mappers.
   native-schema:

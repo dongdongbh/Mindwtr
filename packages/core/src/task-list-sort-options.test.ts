@@ -1,10 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import type { AppSettings } from '@mindwtr/core';
-import { resolveDoneTaskSortBy, resolveNonDoneTaskSortBy } from './task-list-sort';
+import type { AppSettings } from './types';
+import {
+    DONE_TASK_LIST_SORT_OPTIONS,
+    TASK_LIST_SORT_OPTIONS,
+    resolveDoneTaskSortBy,
+    resolveNonDoneTaskSortBy,
+} from './task-list-sort-options';
 
 const settingsWith = (timeEstimates: boolean) => ({ features: { timeEstimates } } as AppSettings);
 
-describe('task list sort preferences', () => {
+describe('task list sort rosters', () => {
+    it('keeps the ordinary roster fixed and Done appending only the legacy completed sort', () => {
+        expect(TASK_LIST_SORT_OPTIONS).toEqual([
+            'default',
+            'due',
+            'start',
+            'review',
+            'timeEstimate',
+            'title',
+            'created',
+            'created-desc',
+        ]);
+        expect(DONE_TASK_LIST_SORT_OPTIONS).toEqual([...TASK_LIST_SORT_OPTIONS, 'completed']);
+    });
+});
+
+describe('resolveNonDoneTaskSortBy / resolveDoneTaskSortBy', () => {
     it('keeps legacy completion sorting in Done and out of every ordinary view', () => {
         expect(resolveDoneTaskSortBy('completed', undefined, undefined)).toBe('completed');
         expect(resolveNonDoneTaskSortBy('completed', undefined)).toBe('default');

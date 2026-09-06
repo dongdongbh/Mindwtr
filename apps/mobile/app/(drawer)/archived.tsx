@@ -22,7 +22,7 @@ import { resolveTimeEstimateFilterOptions } from '@/components/time-estimate-fil
 import { taskMatchesFilterSelections, useTaskFilterSelections } from '@/hooks/use-task-filter-selections';
 import { useLocalDayKey } from '@/hooks/use-local-day-key';
 import { buildTaskGroupSections, getTaskGroupByLabel, type TaskGroupItem } from '@/lib/task-group-sections';
-import { DONE_TASK_LIST_SORT_OPTIONS } from '@/lib/task-list-sort';
+import { DONE_TASK_LIST_SORT_OPTIONS } from '@mindwtr/core';
 import {
     ARCHIVED_LIST_GROUP_OPTIONS,
     ARCHIVED_LIST_VIEW_STATE_STORAGE_KEY,

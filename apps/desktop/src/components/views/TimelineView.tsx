@@ -422,6 +422,14 @@ export function TimelineView() {
                 // shows the part of the project that falls inside it.
                 if (hi >= 0 && lo <= range.days - 1) {
                     span = { lo: Math.max(0, lo), hi: Math.min(range.days - 1, hi) };
+                } else if (group.rows.length === 0) {
+                    // Whole project outside the window and every task row under
+                    // it omitted: a header with a dot, a title and a blank track
+                    // tells the reader nothing. Count it in the same notice the
+                    // omitted tasks go to, so Earlier/Later brings it back.
+                    if (hi < 0) earlierOmitted += 1;
+                    else laterOmitted += 1;
+                    continue;
                 }
             }
             flattened.push({
@@ -637,13 +645,21 @@ export function TimelineView() {
                 </div>
             );
         }
-        const width = row.single
+        // Keep each task's source dates intact for labels and ordering, but draw
+        // only the part that intersects the bounded axis.
+        const drawingLo = Math.max(0, row.lo);
+        const drawingHi = Math.min(range!.days - 1, row.hi);
+        const naturalWidth = row.single
             ? MARKER_WIDTH
-            : Math.max(MIN_BAR_WIDTH, (row.hi - row.lo + 1) * dayWidth);
+            : Math.max(MIN_BAR_WIDTH, (drawingHi - drawingLo + 1) * dayWidth);
+        const width = Math.min(naturalWidth, trackWidth);
         const barHeight = row.single ? MARKER_HEIGHT : BAR_HEIGHT;
-        const left = row.single
-            ? Math.max(0, row.lo * dayWidth + (dayWidth - MARKER_WIDTH) / 2)
-            : row.lo * dayWidth;
+        const naturalLeft = row.single
+            ? drawingLo * dayWidth + (dayWidth - MARKER_WIDTH) / 2
+            : drawingLo * dayWidth;
+        // Centered markers and the minimum bar width can be wider than a day
+        // cell at month zoom. Shift them inward instead of widening the track.
+        const left = Math.min(Math.max(0, naturalLeft), Math.max(0, trackWidth - width));
         // The project bar keeps the full-strength area→project color; the work
         // under it is drawn as a tint of the same one. Mini markers included.
         const tint = taskBarTint(row.color);
@@ -722,7 +738,11 @@ export function TimelineView() {
                                 {tFallback(t, 'calendar.today', 'Today')}
                             </button>
                         )}
-                        <div className="flex items-center rounded-md border border-border bg-card p-0.5" role="group">
+                        <div
+                            className="flex items-center rounded-md border border-border bg-card p-0.5"
+                            role="group"
+                            aria-label={tFallback(t, 'timeline.zoomLabel', 'Timeline zoom')}
+                        >
                             {ZOOM_LEVELS.map((level) => (
                                 <button
                                     key={level}
@@ -749,7 +769,7 @@ export function TimelineView() {
                             hasFilters={false}
                             emptyState={{
                                 title: tFallback(t, 'timeline.empty', 'Nothing scheduled yet'),
-                                body: tFallback(t, 'timeline.emptyHint', 'Tasks with a start or due date appear here as bars.'),
+                                body: tFallback(t, 'timeline.emptyHint', 'Projects and tasks with a start or due date appear here as bars.'),
                             }}
                             onAddTask={() => undefined}
                             t={t}
@@ -763,7 +783,7 @@ export function TimelineView() {
                                 className="mb-3 flex shrink-0 items-center justify-between gap-3 rounded-md border border-border bg-muted/40 px-3 py-2"
                             >
                                 <span className="text-xs text-muted-foreground">
-                                    +{omittedCount} {t('common.tasks')}
+                                    {t('timeline.omittedItems').replace('{{count}}', String(omittedCount))}
                                 </span>
                                 <div className="flex items-center gap-2">
                                     {earlierOmitted > 0 && (
@@ -793,7 +813,17 @@ export function TimelineView() {
                             // only scrolls once they outgrow the viewport.
                             <div className="min-h-0 flex-1 pb-4">
                         <div className="flex max-h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-                            <div ref={scrollRef} data-testid="timeline-scroller" className="min-h-0 overflow-auto">
+                            {/* Focusable so the horizontal track can be scrolled with the
+                                arrow keys; without a tab stop the only way across the
+                                window was a pointer drag or the scrollbar. */}
+                            <div
+                                ref={scrollRef}
+                                data-testid="timeline-scroller"
+                                className="min-h-0 overflow-auto"
+                                tabIndex={0}
+                                role="region"
+                                aria-label={tFallback(t, 'timeline.trackRegionLabel', 'Timeline track')}
+                            >
                                 <div className="relative flex flex-col" style={{ width: contentWidth }}>
                                     <div
                                         className="sticky top-0 z-30 flex border-b border-border bg-card"

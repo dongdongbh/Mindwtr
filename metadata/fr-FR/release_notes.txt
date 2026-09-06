@@ -1,4 +1,4 @@
-- Ajoutez une date de début aux projets et affichez leur durée dans la chronologie.
-- Les réglages de synchronisation s’activent après vérification, avec une récupération plus sûre des pièces jointes sur WebDAV, Dropbox, dossiers, iCloud et serveurs auto-hébergés.
-- Les synchronisations sans changement demandent moins de travail et leur état devient plus clair.
-- Améliore les dates du calendrier, la connexion Dropbox, les projets archivés et les traductions.
+- Classez une note en Référence depuis la boîte de réception, avec projet et domaine, et depuis le menu d’état de toute tâche.
+- La synchronisation ne se répète plus toutes les quelques secondes après la suppression de pièces jointes ailleurs ; une interruption libère le verrou et un emplacement non vérifiable nomme le fichier.
+- iCloud synchronise à nouveau les bibliothèques avec une date de début de projet et nomme la vraie cause d’un refus.
+- Vue Semaine sur cinq jours, traductions corrigées.

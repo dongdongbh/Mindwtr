@@ -1,10 +1,16 @@
 import { useCallback, useMemo } from 'react';
 import {
+    DEFAULT_TASK_EDITOR_ORDER,
+    DEFAULT_TASK_EDITOR_VISIBLE,
     filterProjectsBySelectedArea,
     formatTimeEstimateLabel as formatCoreTimeEstimateLabel,
+    getTaskEditorSectionAssignments,
+    getTaskEditorSectionOpenDefaults,
     isCustomTimeEstimate,
+    normalizeTaskEditorOrder,
     parseRRuleString,
     safeParseDate,
+    TASK_EDITOR_FIXED_FIELDS,
     type AppData,
     type Project,
     type RecurrenceRule,
@@ -22,14 +28,7 @@ import {
     getRecurrenceStrategyValue,
     WEEKDAY_ORDER,
 } from './recurrence-utils';
-import {
-    DEFAULT_TASK_EDITOR_ORDER,
-    DEFAULT_TASK_EDITOR_VISIBLE,
-    getTaskEditorSectionAssignments,
-    getTaskEditorSectionOpenDefaults,
-    STATUS_OPTIONS,
-    TASK_EDITOR_FIXED_FIELDS,
-} from './task-edit-modal.utils';
+import { STATUS_OPTIONS } from './task-edit-modal.utils';
 import type { PickerOption } from './TaskEditFieldRenderer.types';
 
 const DEFAULT_TIME_ESTIMATE_PRESETS: TimeEstimate[] = ['5min', '10min', '30min', '1hr', '2hr', '3hr', '4hr', '4hr+'];
@@ -159,22 +158,16 @@ export function useTaskEditDerivedState({
     // existing task can be assigned a person without first customizing the
     // editor layout. An explicit saved customization that hides the field wins.
     const isAssignedToExplicitlyHidden = settings.gtd?.taskEditor?.hidden?.includes('assignedTo') ?? false;
-    const availableStatusOptions = useMemo(
-        () => (isReference ? STATUS_OPTIONS : STATUS_OPTIONS.filter((status) => status !== 'reference')),
-        [isReference]
-    );
     const disabledFields = useMemo(() => {
         const next = new Set<TaskEditorFieldId>();
         if (!prioritiesEnabled) next.add('priority');
         if (!timeEstimatesEnabled) next.add('timeEstimate');
         return next;
     }, [prioritiesEnabled, timeEstimatesEnabled]);
-    const taskEditorOrder = useMemo(() => {
-        const known = new Set(DEFAULT_TASK_EDITOR_ORDER);
-        const normalized = savedOrder.filter((id) => known.has(id));
-        const missing = DEFAULT_TASK_EDITOR_ORDER.filter((id) => !normalized.includes(id));
-        return [...normalized, ...missing].filter((id) => !disabledFields.has(id));
-    }, [disabledFields, savedOrder]);
+    const taskEditorOrder = useMemo(
+        () => normalizeTaskEditorOrder(savedOrder, disabledFields),
+        [disabledFields, savedOrder]
+    );
     const sectionAssignments = useMemo(
         () => getTaskEditorSectionAssignments(settings.gtd?.taskEditor),
         [settings.gtd?.taskEditor]
@@ -314,7 +307,10 @@ export function useTaskEditDerivedState({
 
     return {
         activeProjectId,
-        availableStatusOptions,
+        // Reference is offered from every status, matching desktop (#1155) and
+        // the row status badge; the editor no longer hides it behind "already a
+        // reference".
+        availableStatusOptions: STATUS_OPTIONS,
         basicFields,
         dailyInterval,
         detailsFields,

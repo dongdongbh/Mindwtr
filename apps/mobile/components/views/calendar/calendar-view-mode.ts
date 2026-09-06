@@ -8,7 +8,9 @@ export type CalendarViewMode = 'month' | 'day' | 'week' | 'schedule';
 
 export const CALENDAR_WEEK_VISIBLE_DAYS_MIN = 2;
 export const CALENDAR_WEEK_VISIBLE_DAYS_MAX = 7;
-export const CALENDAR_WEEK_VISIBLE_DAYS_DEFAULT = 2;
+// Five days = a school or work week on one phone screen; a 390px phone gives
+// each column ~67px, which the compact column styles are sized for.
+export const CALENDAR_WEEK_VISIBLE_DAYS_DEFAULT = 5;
 export const CALENDAR_WEEK_COLUMN_WIDTH_DEFAULT = 150;
 export const CALENDAR_WEEK_COLUMN_WIDTH_MIN = 40;
 export const CALENDAR_NAVIGATION_SWIPE_DISTANCE = 28;

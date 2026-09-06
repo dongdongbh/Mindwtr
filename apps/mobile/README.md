@@ -21,7 +21,7 @@ React Native mobile app for the Mindwtr productivity system.
 ### Productivity
 - **Global Search** - Search operators (status:, context:, due:<=7d)
 - **Saved Searches** - Save and reuse search filters
-- **Task Dependencies** - Block tasks until prerequisites complete
+- **Sequential Projects** - Only the first unfinished task is offered as the next action
 - **Markdown Notes** - Rich text descriptions
 - **Attachments** - Files, images, and links on tasks
 - **Reusable Lists** - Duplicate tasks or reset checklists
@@ -97,6 +97,7 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 
 ### 2. Install Android SDK
 
+```bash
 # Create SDK directory
 mkdir -p ~/Android/Sdk/cmdline-tools
 
@@ -116,8 +117,11 @@ source ~/.zshrc
 # Accept licenses and install components
 yes | sdkmanager --licenses
 sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
+```
 
 ### 3. Build APK
+
+See "Build (ABI-split APKs)" under Android Environment below for the build commands.
 
 ## iOS Builds (EAS)
 
@@ -194,6 +198,19 @@ gh release list
 1. Install Expo Go on your phone
 2. Run `bun mobile:start`
 3. Scan QR code with camera (iOS) or Expo Go (Android)
+
+### Development build (Mindwtr Dev)
+
+`expo start` only runs Metro; it never installs anything. A development build is the app itself compiled with `expo-dev-client`, and with the store's package id it would replace the Mindwtr you use and share its data. Build it as the separate **Mindwtr Dev** app instead:
+
+```bash
+bun mobile:android:dev     # phone on ADB or a running emulator
+bun mobile:ios:dev
+```
+
+That sets `APP_VARIANT=development`, which gives the build the name "Mindwtr Dev" and the ids `tech.dongdongbh.mindwtr.dev`, so both apps sit on the phone with their own data. The script runs `expo prebuild --clean` first because a native tree generated for one variant is not rebuilt by `expo run` on its own; run the same clean prebuild (without the variant) before the next store-id build. Afterwards, plain `bun mobile:start` is enough for TypeScript changes: open Mindwtr Dev, it connects to Metro and the "No apps connected" line goes away. Rebuild the dev app only after native changes (dependencies, config plugins, permissions, `app.json`).
+
+Both variants register the `mindwtr://` scheme, so Android asks once which app should open a link. On iOS the dev app shares the widget App Group and the CloudKit container with the store app; it uses CloudKit's Development environment, so iCloud data stays separate, but the two apps overwrite each other's widget payload.
 
 ### Android Emulator
 
@@ -301,20 +318,21 @@ Then open https://ui.perfetto.dev and correlate `MindwtrStartup` log phases with
 
 ## Data Storage
 
-Tasks are stored in AsyncStorage and synced via the shared @mindwtr/core package.
+Tasks are stored in SQLite via `@op-engineering/op-sqlite` and synced via the shared @mindwtr/core package. AsyncStorage remains only as the legacy-JSON migration source and a marker. See [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md).
 
 ## Project Structure
 
 ```
 apps/mobile/
 ├── app/                    # Expo Router pages
-│   ├── (tabs)/            # Tab navigation
-│   ├── _layout.tsx        # Root layout
-│   └── settings.tsx       # Settings page
+│   ├── (drawer)/           # Drawer navigation
+│   │   └── (tabs)/         # Tab navigation, includes settings.tsx
+│   ├── _layout.tsx         # Root layout
+│   └── capture-modal.tsx   # Quick-capture modal
 ├── components/            # React components
 ├── contexts/              # React contexts (theme, language)
 ├── lib/                   # Utilities
-│   ├── storage-adapter.ts # AsyncStorage integration
+│   ├── storage-adapter.ts # SQLite storage adapter
 │   └── storage-file.ts    # File operations for sync
 ├── global.css             # NativeWind entry CSS
 ├── tailwind.config.js     # Tailwind configuration
@@ -340,7 +358,7 @@ The mobile app uses NativeWind v4 for Tailwind CSS styling.
 ## Sync and Data
 
 ### Local Storage
-Data is stored in AsyncStorage and automatically synced with the shared Zustand store.
+Data is stored in SQLite and automatically synced with the shared Zustand store.
 
 ### File Sync
 Configure a sync folder in Settings to sync via:

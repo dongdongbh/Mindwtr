@@ -263,6 +263,17 @@ describe('InboxProcessingQuickPanel draft editing', () => {
         expect(getByText('+ New section…')).toBeInTheDocument();
     });
 
+    // #1155: filing a note as Reference has to offer the same containers the
+    // Someday path does, so it lands in its project in one step.
+    it('offers Area and Project controls before filing a Reference item', () => {
+        const { getByText } = render(
+            <QuickPanelHarness actionabilityChoice="reference" />,
+        );
+
+        expect(getByText('taskEdit.areaLabel')).toBeInTheDocument();
+        expect(getByText('taskEdit.projectLabel')).toBeInTheDocument();
+    });
+
     it('offers the same Area and Project controls before incubating an item', () => {
         const { getByText } = render(
             <QuickPanelHarness actionabilityChoice="incubate" />,
@@ -323,6 +334,18 @@ describe('InboxProcessingWizard draft editing', () => {
         expect(getByText('+ New section…')).toBeInTheDocument();
         fireEvent.click(getByRole('button', { name: 'process.someday' }));
         expect(handleConfirmSomeday).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers Area and Project controls before confirming Reference', () => {
+        const handleConfirmReference = vi.fn();
+        const { getByRole, getByText } = render(
+            <WizardHarness processingStep="reference" handleConfirmReference={handleConfirmReference} />,
+        );
+
+        expect(getByText('taskEdit.areaLabel')).toBeInTheDocument();
+        expect(getByText('taskEdit.projectLabel')).toBeInTheDocument();
+        fireEvent.click(getByRole('button', { name: /process\.next/ }));
+        expect(handleConfirmReference).toHaveBeenCalledTimes(1);
     });
 
     it('offers Area and Project controls before confirming Incubate', () => {

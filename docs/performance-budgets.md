@@ -19,6 +19,8 @@ This runs:
 
 The core suite generates stores with 1k, 10k, and 50k tasks, many projects, many sections, mixed statuses, due dates, start dates, tags, contexts, deleted records, and a project with many selected-project tasks.
 
+When `MINDWTR_PERF_TEST=1` (set automatically by `packages/core`'s `test:perf` script), the core suite also records every measured operation's label, dataset size, actual duration, and budget to `packages/core/.perf/measurements.json` (gitignored). CI's `performance` job prints this file as a table in the job summary and uploads it as the `core-perf-measurements` artifact, so a passing run's real timings are visible without re-running locally.
+
 ## Core Budgets
 
 Budgets are intentionally explicit and conservative. They should only change in PRs that explain the measured reason.

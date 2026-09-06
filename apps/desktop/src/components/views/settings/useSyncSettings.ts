@@ -1033,6 +1033,10 @@ export const useSyncSettings = ({
         const activationGeneration = syncConfigurationGeneration.current;
         const activationCredentialHandle = dropboxCredentialHandleRef.current;
         let activationCleanupDeferred: 'remote' | 'file' | null = null;
+        // Once the proven configuration is committed the switch has already
+        // landed, so a later non-success must not claim the previous settings
+        // are still active.
+        let committedNewSyncConfiguration = false;
         const resolveCapturedCredential = async () => {
             if (!activationCredentialHandle) return;
             await discardDropboxCredential(activationCredentialHandle, {
@@ -1043,7 +1047,7 @@ export const useSyncSettings = ({
             const message = deferred === 'busy'
                 ? resolveText(
                     'settings.syncRemoteBusy',
-                    'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+                    'Another Mindwtr device is holding this sync location for a moment. Sync will retry on its own.',
                 )
                 : resolveText(
                     'settings.syncRemoteCleanupDeferred',
@@ -1292,6 +1296,7 @@ export const useSyncSettings = ({
                     activationGeneration,
                 );
                 if (!committedCurrentConfiguration) return;
+                committedNewSyncConfiguration = true;
                 if (activationCleanupDeferred) {
                     if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
                     else showRemoteFenceFeedback('cleanup');
@@ -1378,6 +1383,23 @@ export const useSyncSettings = ({
                 if (isTauri) {
                     setSnapshots(await SyncService.listDataSnapshots());
                 }
+            } else if (
+                result.success
+                && (result.remoteWriteDeferred || result.skipped === 'pendingRemoteWriteBackoff')
+            ) {
+                // Healthy outcome: merged and saved locally, upload already
+                // scheduled. Right after a backend switch the fact that matters
+                // is that the switch landed, so keep B4's wording there, just
+                // not as an error.
+                showToast(committedNewSyncConfiguration
+                    ? resolveText(
+                        'settings.sync.incompleteAfterSwitch',
+                        'The new sync settings are active, but this sync did not finish. Mindwtr will retry on its own.',
+                    )
+                    : resolveText(
+                        'settings.sync.remoteWriteDeferred',
+                        'Your changes are saved on this device. Another device is writing to the sync location right now; Mindwtr will upload them on its own shortly.',
+                    ), 'info');
             } else {
                 if (result.error) {
                     void logError(new Error(result.error), { scope: 'sync', step: 'performResult' });
@@ -1387,7 +1409,12 @@ export const useSyncSettings = ({
                         'settings.syncEncryptionErrorBackendIncompatible',
                         'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
                     )
-                    : resolveText(
+                    : committedNewSyncConfiguration
+                      ? resolveText(
+                        'settings.sync.incompleteAfterSwitch',
+                        'The new sync settings are active, but this sync did not finish. Mindwtr will retry on its own.',
+                    )
+                      : resolveText(
                         'settings.sync.incomplete',
                         'Sync did not complete. Your previous sync settings are still active.',
                     );

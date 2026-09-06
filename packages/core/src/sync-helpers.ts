@@ -324,8 +324,15 @@ const isIdKeyed = (item: unknown): item is { id: string } => (
 // devices that added records concurrently hold the same set in different
 // orders forever; comparing positionally made every fingerprint differ, every
 // cycle upload, and the self-hosted server report a merge each time (#1136).
-// Position carries no meaning for these lists: ordering lives in explicit
-// order fields, and every reorder bumps the owner's updatedAt anyway.
+// Entities and attachments carry an explicit order field, so ignoring list
+// position here is free — the field is what's compared. `ChecklistItem`
+// (types.ts) has no order field of its own; its order is purely positional.
+// Sorting it out of the comparison is safe only because every checklist
+// reorder goes through `updateTask`, which bumps the owning task's
+// `rev`/`updatedAt` in the same write, so the fingerprint still changes even
+// though this comparison can no longer see the position change directly. A
+// hypothetical path that reordered checklist items without touching the
+// owning task would NOT sync — nothing here would notice.
 const normalizeForSyncComparison = (value: unknown): unknown => {
     if (Array.isArray(value)) {
         const items = value.map((item) => normalizeForSyncComparison(item));

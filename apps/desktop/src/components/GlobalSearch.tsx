@@ -20,7 +20,8 @@ import { shallow,
     isAreaFilterSelectionActive,
     resolveAreaFilterSelection,
     taskMatchesAreaFilterSelection,
-    projectMatchesAreaFilterSelection, tFallback, } from '@mindwtr/core';
+    projectMatchesAreaFilterSelection, tFallback,
+    type DerivedState, } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';
 import { getUrgencyColor } from './Task/TaskItemDisplay';
@@ -47,6 +48,15 @@ interface GlobalSearchProps {
 }
 
 export const resolveGlobalSearchTaskView = resolveTaskNavigationView;
+
+// Closed search renders nothing (see the isOpen guard below); reading
+// getDerivedState() unconditionally forced the full derived-state rebuild
+// (12ms at 5k tasks) on every task write for this invisible overlay
+// (PERF-01). Only allContexts/allTags are used while closed is skipped.
+const EMPTY_SEARCH_DERIVED: Pick<DerivedState, 'allContexts' | 'allTags'> = Object.freeze({
+    allContexts: [],
+    allTags: [],
+});
 
 export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: GlobalSearchProps) {
     const dialogTitleId = useId();
@@ -82,9 +92,10 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
     const inputRef = useRef<HTMLInputElement>(null);
     const resultsRef = useRef<HTMLDivElement>(null);
     const isOpenRef = useRef(false);
-    const { _allTasks, projects, areas, settings, updateSettings, setHighlightTask, getDerivedState } = useTaskStore(
+    const { _allTasks, _tasksById, projects, areas, settings, updateSettings, setHighlightTask, getDerivedState } = useTaskStore(
         (state) => ({
             _allTasks: state._allTasks,
+            _tasksById: state._tasksById,
             projects: state.projects,
             areas: state.areas,
             settings: state.settings,
@@ -94,12 +105,14 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
         }),
         shallow
     );
-    const { allContexts, allTags } = getDerivedState();
+    const { allContexts, allTags } = isOpen ? getDerivedState() : EMPTY_SEARCH_DERIVED;
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
     // Search results are SearchTaskResult rows, which deliberately carry no
-    // completedAt — the full task behind the row does (#991).
-    const taskById = useMemo(() => new Map(_allTasks.map((task) => [task.id, task])), [_allTasks]);
+    // completedAt — the full task behind the row does (#991). The store
+    // already maintains _tasksById over the same _allTasks array (PERF-03);
+    // no need to rebuild a fresh Map on every render.
+    const taskById = _tasksById;
     const activeAreaFilter = useMemo(
         () => resolveAreaFilterSelection(settings?.filters, areas),
         [settings?.filters, areas]

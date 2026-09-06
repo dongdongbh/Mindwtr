@@ -17,10 +17,17 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'artifact', 'cloudProvider', 'scheme', 'host', 'delivery', 'deduped',
     'platform', 'total', 'multiDay', 'allDay', 'spanning',
     'presenceDue', 'hasScope', 'check', 'skipped', 'publication',
-    // background-sync-registration (apps/mobile/lib/background-sync-task.ts)
+    // Mobile background sync registration checked (General, apps/mobile/lib/background-sync-task.ts)
     'decision', 'registered', 'storedInterval', 'interval', 'appState',
     // desktop-reminder-fired / desktop-notification-path (apps/desktop/src/lib/notification-service.tsx)
     'kind', 'entity', 'fireAt', 'path', 'error',
+    'deferred', 'ids',
+    // attachment-only-task-replace (store-settings.ts) / section-conversion-canonical (store-tasks.ts)
+    'count',
+    // android-http-connect-timeout (apps/mobile/hooks/root-layout/use-root-layout-startup.ts)
+    'connectTimeoutMs',
+    // fence-mutation-horizon (packages/core/src/sync-remote-fence.ts)
+    'horizonMs', 'remainingMs',
 ];
 
 describe('release diagnostics field names', () => {

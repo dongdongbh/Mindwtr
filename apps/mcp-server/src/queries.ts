@@ -23,6 +23,7 @@ import {
   type TimeEstimate as CoreTimeEstimate,
 } from '@mindwtr/core';
 import type { DbClient } from './db.js';
+import type { LinkAttachmentInput } from './link-attachments.js';
 import { NotFoundError } from './errors.js';
 import { MAX_TASK_LIST_LIMIT } from './input-validation.js';
 import type { TaskRecurrenceInput } from './input-validation.js';
@@ -104,6 +105,7 @@ export type AddTaskInput = {
   energyLevel?: CoreTaskEnergyLevel;
   assignedTo?: string;
   timeEstimate?: CoreTimeEstimate;
+  attachments?: LinkAttachmentInput[];
 } & Partial<TaskGeneratedCreateFields>;
 
 export type TaskRow = Task;
@@ -560,4 +562,5 @@ export type UpdateTaskInput = {
   energyLevel?: CoreTaskEnergyLevel | null;
   assignedTo?: string | null;
   timeEstimate?: CoreTimeEstimate | null;
+  attachments?: LinkAttachmentInput[] | null;
 } & NullableExceptBooleans<TaskGeneratedPatchFields>;

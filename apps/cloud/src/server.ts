@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { createHash } from 'crypto';
 import { existsSync, readFileSync, realpathSync, statSync } from 'fs';
 import { basename, join } from 'path';
 import {
@@ -188,7 +189,7 @@ const attachRequestId = (response: Response, requestId: string): void => {
 const emptyCorsResponse = (status: number): Response => {
     const headers = new Headers({
         'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match',
         'Access-Control-Allow-Methods': 'GET,HEAD,PUT,POST,PATCH,DELETE,OPTIONS',
     });
     return new Response(null, { status, headers });
@@ -398,6 +399,28 @@ type EntityRouteContext = {
     withWriteLock: ReturnType<typeof createWriteLockRunner>;
 };
 
+const buildEntityEtag = <T extends CloudEntity>(
+    route: EntityRouteDefinition<T>,
+    entity: T,
+): string => {
+    const responseBody = { [route.itemKey]: entity };
+    const digest = createHash('sha256').update(JSON.stringify(responseBody, null, 2)).digest('hex');
+    return `"mindwtr-entity-sha256-${digest}"`;
+};
+
+const entityJsonResponse = <T extends CloudEntity>(
+    route: EntityRouteDefinition<T>,
+    entity: T,
+): Response => jsonResponse(
+    { [route.itemKey]: entity },
+    { headers: { ETag: buildEntityEtag(route, entity) } },
+);
+
+const ifMatchAccepts = (headerValue: string, currentEtag: string): boolean => (
+    headerValue.trim() === '*'
+    || headerValue.split(',').some((candidate) => candidate.trim() === currentEtag)
+);
+
 type EntityBodyResult =
     | { ok: true; body: Record<string, unknown> }
     | { ok: false; response: Response };
@@ -486,7 +509,7 @@ const handleEntityRoute = async <T extends CloudEntity>(
         const data = dataResult;
         const entity = getEntityCollection(data, route).find((item) => item.id === entityId && !item.deletedAt);
         if (!entity) return errorResponse(`${route.label} not found`, 404);
-        return jsonResponse({ [route.itemKey]: entity });
+        return entityJsonResponse(route, entity);
     }
 
     if (req.method === 'PATCH') {
@@ -504,6 +527,10 @@ const handleEntityRoute = async <T extends CloudEntity>(
                 && (!item.deletedAt || route.canPatchDeletedEntity?.(bodyResult.body))
             ));
             if (idx < 0) return errorResponse(`${route.label} not found`, 404);
+            const ifMatch = req.headers.get('if-match');
+            if (ifMatch !== null && !ifMatchAccepts(ifMatch, buildEntityEtag(route, collection[idx]))) {
+                return errorResponse('Entity changed; refresh and retry', 412);
+            }
             const nowIso = new Date().toISOString();
             const updated = route.patchEntity(bodyResult.body, collection[idx], data, nowIso);
             if (isResponse(updated)) return updated;
@@ -515,7 +542,7 @@ const handleEntityRoute = async <T extends CloudEntity>(
                 assertStorageRoot: context.assertStorageRoot,
             });
             const entity = getEntityCollection(finalized, route).find((item) => item.id === entityId);
-            return jsonResponse({ [route.itemKey]: entity });
+            return entityJsonResponse(route, entity!);
         });
     }
 

@@ -2523,6 +2523,78 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
         ]);
     });
 
+    it('activates a sync folder whose blob has not arrived yet when this device holds no bytes', async () => {
+        // A fresh desktop joins a Syncthing folder that carries data.json but not
+        // attachments/ yet: the file backend finds no blob, tombstones nothing, and
+        // leaves the record keyed + missing. Refusing here strands the folder
+        // forever; the record stays downloadable for a later cycle instead.
+        const remoteTask = createTask('t-absent-blob', 'Blob not synced yet');
+        remoteTask.attachments = [fileAttachment('attachment-absent', 'Arrives later')];
+        const syncAttachments = vi.fn(async (data: AppData) => data);
+        const { harness, io, run } = createHarness({
+            backend: 'file',
+            local: createData(),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
+        // The key survives (localStatus is device-local and never written remotely)
+        // and nothing was tombstoned, so a later cycle can still download it.
+        expect(harness.remote?.tasks[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 'attachment-absent',
+                cloudKey: 'attachments/attachment-absent.txt',
+            }),
+        ]);
+        expect(harness.remote?.tasks[0]?.attachments?.[0]?.deletedAt).toBeUndefined();
+        expect(harness.warnings).toContainEqual(
+            expect.objectContaining({ message: 'Sync folder activation accepted attachments the folder does not hold yet' }),
+        );
+    });
+
+    it('still refuses a sync folder whose blob is absent when this device held bytes for the record', async () => {
+        const localTask = createTask('t-held-absent', 'Held here, absent there');
+        localTask.attachments = [{
+            id: 'attachment-held-absent',
+            kind: 'file',
+            title: 'Held locally',
+            uri: '/managed/held-absent.txt',
+            localStatus: 'available',
+            fileHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const remoteTask = cloneAppData(createData([localTask])).tasks[0]!;
+        remoteTask.attachments![0] = {
+            ...remoteTask.attachments![0]!,
+            uri: '',
+            cloudKey: 'attachments/attachment-held-absent.txt',
+            fileHash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            localStatus: 'missing',
+        };
+        const syncAttachments = vi.fn(async (data: AppData) => data);
+        const { io, run } = createHarness({
+            backend: 'file',
+            local: createData([localTask]),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            error: expect.stringContaining('Candidate attachment proof failed for attachment-held-absent'),
+        });
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
     it('refuses activation when the trial tombstones a record this device held bytes for', async () => {
         const localTask = createTask('t-held-bytes', 'Held bytes');
         localTask.attachments = [{
@@ -3049,6 +3121,71 @@ describe('local-only upload fast path', () => {
         expect(bundle.harness.remote!.tasks.find((task) => task.id === 't-purged')?.description)
             .toBeUndefined();
     });
+
+    it.each(['process-undefined', 'production', 'development'] as const)(
+        'runs the canonical-read backstop only in development (%s)',
+        async (environment) => {
+            let exerciseBackstop = false;
+            let fastPathArmed = false;
+            let documentReads = 0;
+            let writeFailure: unknown;
+            const afterBackstop = new Error('Reached the network check after the backstop');
+            const nonCanonical = rawLocal('Non-canonical local edit', 5, '2026-07-13T09:30:00.000Z');
+            const guardedDocument: AppData = {
+                ...nonCanonical,
+                get tasks() {
+                    documentReads += 1;
+                    if (environment !== 'development') {
+                        throw new Error('The backstop inspected the document outside development');
+                    }
+                    return nonCanonical.tasks;
+                },
+            };
+            const bundle = createHarness({
+                local: messyLocal('Local task'),
+                fastSyncScope: `scope-backstop-${environment}`,
+                policy: { preSyncAttachmentsBeforeFastCheck: true },
+                io: conditionalIo,
+                performSyncCycle: async (io) => {
+                    if (!exerciseBackstop) return performSyncCycle(io);
+                    fastPathArmed = io.skipEmptyRemoteMerge?.() === true;
+                    // Stop immediately after the backstop, before the real
+                    // upload's own serialization can touch the document.
+                    bundle.hooks.ensureNetworkStillAvailable = async () => { throw afterBackstop; };
+                    try {
+                        if (environment === 'process-undefined') {
+                            vi.stubGlobal('process', undefined);
+                        } else {
+                            vi.stubEnv('NODE_ENV', environment);
+                        }
+                        await io.writeRemote(guardedDocument);
+                    } catch (error) {
+                        writeFailure = error;
+                    } finally {
+                        vi.unstubAllGlobals();
+                        vi.unstubAllEnvs();
+                    }
+                    throw afterBackstop;
+                },
+            });
+            await settleThenEditLocally(bundle, 'Edited only here');
+            vi.mocked(bundle.io.writeRemote).mockClear();
+            exerciseBackstop = true;
+
+            await bundle.run();
+
+            expect(fastPathArmed).toBe(true);
+            expect(bundle.io.writeRemote).not.toHaveBeenCalled();
+            if (environment === 'development') {
+                expect(documentReads).toBeGreaterThan(0);
+                expect(writeFailure).toBeInstanceOf(Error);
+                expect((writeFailure as Error).message).toContain('Sync canonical-read invariant broken');
+            } else {
+                expect(documentReads).toBe(0);
+                expect(writeFailure).toBe(afterBackstop);
+            }
+        },
+    );
 
     it('reads the remote when the backend cannot make the write conditional', async () => {
         // Weak ETag, no ETag at all, legacy-plaintext WebDAV: the backend

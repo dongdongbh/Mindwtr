@@ -71,12 +71,8 @@ const sparseTask: Task = {
     // showFutureRecurrence is deliberately absent: its canonical form is `true` or
     // nothing, so a stored 0/NULL reads back absent (fromPresentBool).
     isFocusedToday: false, suppressMindwtrReminders: false,
-    // Nullable BY DESIGN (`T | null`, not just `T | undefined`): the write side collapses an
-    // absent value to SQLite NULL (`?? null`), so "omitted" can never round-trip back to
-    // `undefined` — only ever `null`. Set explicitly rather than asserting an impossible round
-    // trip.
-    completedAtBeforeProjectArchive: null,
-    isFocusedTodayBeforeProjectArchive: null,
+    // Project-archive nulls are canonicalized to absent on read because SQLite cannot
+    // distinguish a legacy explicit null from an omitted value (#1156).
 };
 
 const sparseProject: Project = {
@@ -88,8 +84,7 @@ const sparseProject: Project = {
 const sparseSection: Section = {
     id: 'section-sparse', projectId: 'project-sparse', title: 'Sparse section', order: 0,
     createdAt: ISO, updatedAt: ISO, isCollapsed: false,
-    // Nullable BY DESIGN — see sparseTask's comment above.
-    deletedAtBeforeProjectArchive: null,
+    // Legacy explicit null reads back as absent — see sparseTask's comment above.
 };
 
 const sparseArea: Area = {

@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { createTaskDraft, type Task, type TaskDraft } from '@mindwtr/core';
+import { createTaskDraft, DEFAULT_TASK_EDITOR_ORDER, type Task, type TaskDraft } from '@mindwtr/core';
 
-import { DEFAULT_TASK_EDITOR_ORDER } from './task-item-helpers';
 import { useTaskItemFieldLayout } from './useTaskItemFieldLayout';
 
 const baseTask: Task = {

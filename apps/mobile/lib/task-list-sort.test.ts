@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSettings } from '@mindwtr/core';
-import { resolveDoneTaskSortBy, resolveNonDoneTaskSortBy, resolveTaskListSortBy } from './task-list-sort';
+import { resolveTaskListSortBy } from './task-list-sort';
 
 const settingsWith = (timeEstimates: boolean) => ({ features: { timeEstimates } } as AppSettings);
 
@@ -37,13 +37,6 @@ describe('resolveTaskListSortBy', () => {
     })).toBe('default');
   });
 
-  it('provides explicit helpers for standalone Done and ordinary views', () => {
-    expect(resolveDoneTaskSortBy('completed', undefined, undefined)).toBe('completed');
-    expect(resolveDoneTaskSortBy('title', 'completed', undefined)).toBe('completed');
-    expect(resolveNonDoneTaskSortBy('completed', undefined)).toBe('default');
-    expect(resolveNonDoneTaskSortBy('title', undefined)).toBe('title');
-  });
-
   it('falls back to the default order while Time estimates is off (#1107)', () => {
     expect(resolveTaskListSortBy({
       globalSortBy: 'timeEstimate',
@@ -55,7 +48,6 @@ describe('resolveTaskListSortBy', () => {
       settings: settingsWith(false),
       statusFilter: 'all',
     })).toBe('default');
-    expect(resolveNonDoneTaskSortBy('timeEstimate', settingsWith(false))).toBe('default');
   });
 
   it('keeps the time-estimate order with the feature on or unset', () => {

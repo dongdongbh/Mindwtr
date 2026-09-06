@@ -1,4 +1,4 @@
-import type { Area, Project, Section, Task, TaskStatus } from '@mindwtr/core';
+import type { Area, Project, Section, Task, TaskStatus, TaskStore } from '@mindwtr/core';
 import { shallow, useTaskStore } from '@mindwtr/core';
 import { useUiStore } from '../../store/ui-store';
 
@@ -16,26 +16,25 @@ type UseTaskItemStoreStateParams = {
     hasQuickActionMenu?: boolean;
 };
 
-export const useTaskItemStoreState = ({ task, propProject, isEditing, hasQuickActionMenu = false }: UseTaskItemStoreStateParams) =>
-    useTaskStore(
-        (state) => {
-            const derived = state.getDerivedState();
-            const includePickers = isEditing || hasQuickActionMenu;
-            const includeQuickActionFocusData = hasQuickActionMenu;
-            const project = propProject ?? (task.projectId ? derived.projectMap.get(task.projectId) : undefined);
-            const mutationProject = task.projectId
-                ? state._projectsById.get(task.projectId)
-                    ?? state._allProjects.find((candidate) => candidate.id === task.projectId)
-                : undefined;
-            const section = task.sectionId ? state._sectionsById.get(task.sectionId) : undefined;
-            const projectArea = project?.areaId
-                ? state.areas.find((area) => area.id === project.areaId)
-                : undefined;
-            const taskArea = !task.projectId && task.areaId
-                ? state.areas.find((area) => area.id === task.areaId)
-                : undefined;
+export const selectTaskItemStoreState = ({ task, propProject, isEditing, hasQuickActionMenu = false }: UseTaskItemStoreStateParams) =>
+    (state: TaskStore) => {
+        const includePickers = isEditing || hasQuickActionMenu;
+        const includeQuickActionFocusData = hasQuickActionMenu;
+        const derived = includeQuickActionFocusData ? state.getDerivedState() : undefined;
+        const project = propProject ?? (task.projectId ? state.getDerivedState().projectMap.get(task.projectId) : undefined);
+        const mutationProject = task.projectId
+            ? state._projectsById.get(task.projectId)
+                ?? state._allProjects.find((candidate) => candidate.id === task.projectId)
+            : undefined;
+        const section = task.sectionId ? state._sectionsById.get(task.sectionId) : undefined;
+        const projectArea = project?.areaId
+            ? state.areas.find((area) => area.id === project.areaId)
+            : undefined;
+        const taskArea = !task.projectId && task.areaId
+            ? state.areas.find((area) => area.id === task.areaId)
+            : undefined;
 
-            return {
+        return {
             addTask: state.addTask,
             updateTask: state.updateTask,
             deleteTask: state.deleteTask,
@@ -49,7 +48,7 @@ export const useTaskItemStoreState = ({ task, propProject, isEditing, hasQuickAc
             projectArea,
             taskArea,
             settings: state.settings,
-            focusedCount: derived.focusedCount,
+            focusedCount: state.getFocusedCount(),
             promoteTaskToProject: state.promoteTaskToProject,
             convertTaskToSection: state.convertTaskToSection,
             resetTaskChecklist: state.resetTaskChecklist,
@@ -62,16 +61,15 @@ export const useTaskItemStoreState = ({ task, propProject, isEditing, hasQuickAc
             addSection: state.addSection,
             lockEditing: state.lockEditing,
             unlockEditing: state.unlockEditing,
-            projectMap: includeQuickActionFocusData ? derived.projectMap : EMPTY_PROJECT_MAP,
-            activeTasksByStatus: includeQuickActionFocusData ? derived.activeTasksByStatus : EMPTY_TASKS_BY_STATUS,
-            sequentialProjectIds: includeQuickActionFocusData ? derived.sequentialProjectIds : EMPTY_ID_SET,
-            sequentialWithinSectionProjectIds: includeQuickActionFocusData
-                ? derived.sequentialWithinSectionProjectIds
-                : EMPTY_ID_SET,
-            };
-        },
-        shallow
-    );
+            projectMap: derived?.projectMap ?? EMPTY_PROJECT_MAP,
+            activeTasksByStatus: derived?.activeTasksByStatus ?? EMPTY_TASKS_BY_STATUS,
+            sequentialProjectIds: derived?.sequentialProjectIds ?? EMPTY_ID_SET,
+            sequentialWithinSectionProjectIds: derived?.sequentialWithinSectionProjectIds ?? EMPTY_ID_SET,
+        };
+    };
+
+export const useTaskItemStoreState = (params: UseTaskItemStoreStateParams) =>
+    useTaskStore(selectTaskItemStoreState(params), shallow);
 
 export const useTaskItemUiState = (taskId: string) =>
     useUiStore(

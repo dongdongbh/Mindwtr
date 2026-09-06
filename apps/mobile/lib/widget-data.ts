@@ -5,11 +5,10 @@ import {
     type TaskSortBy,
     resolveTaskSortByForFeatures,
     resolveThemeColorScheme,
-    safeParseDate,
     safeParseDueDate,
     SUPPORTED_LANGUAGES,
     getTranslationsSync,
-    getSequentialFirstTaskIds,
+    computeTodayFocusTasks,
     isTaskActionable,
     isTaskInActiveProject,
     loadTranslations,
@@ -210,93 +209,6 @@ const resolveWidgetPalette = (
     };
 };
 
-// Shared by the widget's "Today" list and the Shortcuts snapshot's "focus"
-// list (#980) so both surfaces agree on what "today's focus" means: starred
-// tasks first, then next actions due/starting today or otherwise actionable,
-// respecting sequential-project gating. A single source of truth here avoids
-// the two surfaces silently drifting apart.
-function computeTodayFocusTasks(
-    activeTasks: AppData['tasks'],
-    projects: AppData['projects'],
-    widgetSort: TaskSortBy,
-    startOfToday: Date,
-    endOfToday: Date,
-): { starredTasks: AppData['tasks']; listSource: AppData['tasks'] } {
-    const sequentialProjectIds = new Set(
-        projects.filter((project) => project.isSequential && !project.deletedAt).map((project) => project.id)
-    );
-    const sequentialWithinSectionProjectIds = new Set(
-        projects
-            .filter((project) => project.isSequential && project.sequentialScope === 'section' && !project.deletedAt)
-            .map((project) => project.id)
-    );
-
-    const isPlannedForFuture = (task: AppData['tasks'][number]) => {
-        const start = safeParseDate(task.startTime);
-        return Boolean(start && start > endOfToday);
-    };
-    const isScheduleCandidate = (task: AppData['tasks'][number]) => {
-        const due = safeParseDueDate(task.dueDate);
-        const start = safeParseDate(task.startTime);
-        const startsToday = Boolean(
-            start
-            && start >= startOfToday
-            && start <= endOfToday
-        );
-        return Boolean(due && due <= endOfToday) || startsToday;
-    };
-
-    // Waiting tasks hold their chain slot (a waiting first step blocks the
-    // later ones); the future-start deferral below only applies to next
-    // tasks — a waiting step blocks by existing, whenever it starts.
-    const sequentialFirstTaskIds = getSequentialFirstTaskIds(
-        activeTasks.filter((task) => (
-            task.status === 'waiting'
-            || (task.status === 'next'
-                && (!isPlannedForFuture(task) || isScheduleCandidate(task)))
-        )),
-        sequentialProjectIds,
-        { sectionScopedProjectIds: sequentialWithinSectionProjectIds },
-    );
-    const isSequentialBlocked = (task: AppData['tasks'][number]) => {
-        if (!task.projectId) return false;
-        if (!sequentialProjectIds.has(task.projectId)) return false;
-        return !sequentialFirstTaskIds.has(task.id);
-    };
-
-    const scheduleTasks = activeTasks.filter((task) => {
-        if (task.status !== 'next') return false;
-        if (isSequentialBlocked(task)) return false;
-        return isScheduleCandidate(task);
-    });
-
-    const scheduleTaskIds = new Set(scheduleTasks.map((task) => task.id));
-    const nextTasks = activeTasks.filter((task) => {
-        if (task.status !== 'next') return false;
-        if (isPlannedForFuture(task)) return false;
-        if (isSequentialBlocked(task)) return false;
-        return !scheduleTaskIds.has(task.id);
-    });
-
-    // Starred tasks mirror core's focusedTasks (activeTasks already excludes
-    // done/reference/archived/deleted and inactive projects) and lead the list,
-    // so "current focused task" surfaces (lock widget, list head) show the task
-    // the user actually starred — including starred waiting/someday tasks,
-    // which keep their status by design.
-    const starredTasks = activeTasks.filter((task) => (
-        task.isFocusedToday === true
-        && (!isPlannedForFuture(task) || isScheduleCandidate(task))
-    ));
-    const starredTaskIds = new Set(starredTasks.map((task) => task.id));
-    const focusTasks = [...scheduleTasks, ...nextTasks].filter((task) => !starredTaskIds.has(task.id));
-    const listSource = [
-        ...sortTasksBy(starredTasks, widgetSort),
-        ...sortTasksBy(focusTasks, widgetSort),
-    ];
-
-    return { starredTasks, listSource };
-}
-
 export function buildWidgetPayload(
     data: AppData,
     language: Language,
@@ -323,13 +235,13 @@ export function buildWidgetPayload(
     });
 
     const widgetSort = resolveWidgetTaskSort(data);
-    const { starredTasks, listSource } = computeTodayFocusTasks(
+    const { starredTasks, focusTasks } = computeTodayFocusTasks({
         activeTasks,
         projects,
-        widgetSort,
-        startOfToday,
-        endOfToday,
-    );
+        sortBy: widgetSort,
+        now,
+    });
+    const listSource = [...starredTasks, ...focusTasks];
 
     const maxItems = Number.isFinite(options?.maxItems)
         ? Math.max(1, Math.floor(options?.maxItems as number))
@@ -393,8 +305,6 @@ export function buildShortcutsSnapshot(data: AppData): ShortcutsSnapshot {
     const projects = data.projects || [];
     const projectById = new Map(projects.map((project) => [project.id, project]));
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     const widgetSort = resolveWidgetTaskSort(data);
 
     const activeTasks = tasks.filter((task) => {
@@ -404,13 +314,13 @@ export function buildShortcutsSnapshot(data: AppData): ShortcutsSnapshot {
         return true;
     });
 
-    const { listSource: focusListSource } = computeTodayFocusTasks(
+    const { starredTasks, focusTasks } = computeTodayFocusTasks({
         activeTasks,
         projects,
-        widgetSort,
-        startOfToday,
-        endOfToday,
-    );
+        sortBy: widgetSort,
+        now,
+    });
+    const focusListSource = [...starredTasks, ...focusTasks];
 
     const tasksByStatus = (status: ShortcutsSnapshotListKey) => (
         sortTasksBy(activeTasks.filter((task) => task.status === status), widgetSort)

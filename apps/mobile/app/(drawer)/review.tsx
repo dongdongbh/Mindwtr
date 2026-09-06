@@ -27,7 +27,7 @@ import { SwipeableTaskItem, type TaskRowActions } from '@/components/swipeable-t
 import { TaskListBulkOrganizeModal } from '@/components/task-list/TaskListBulkOrganizeModal';
 import { TokenPickerModal } from '@/components/token-picker-modal';
 import { useTaskListSelection } from '@/components/use-task-list-selection';
-import { resolveNonDoneTaskSortBy } from '@/lib/task-list-sort';
+import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 
 export default function ReviewScreen() {
   const router = useRouter();

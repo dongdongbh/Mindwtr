@@ -37,6 +37,7 @@ export type CloudFailureContext = {
 };
 
 export const CLOUD_LOG_MESSAGES = [
+    'Capture webhook request accepted',
     'Failed to clone cloud app data cache entry',
     'Failed to start server',
     'MINDWTR_CLOUD_ALLOW_ANY_TOKEN is enabled. Prefer MINDWTR_CLOUD_AUTH_TOKENS for stronger access control.',
@@ -60,12 +61,16 @@ export const CLOUD_LOG_MESSAGES = [
 type CloudLogMessage = typeof CLOUD_LOG_MESSAGES[number];
 type CloudOperationalLogContext = Partial<Record<
     | 'allowedTokens'
+    | 'bodyKind'
+    | 'bytes'
     | 'count'
     | 'elapsedMs'
+    | 'hasAudio'
     | 'hint'
     | 'maxNamespaces'
     | 'method'
     | 'port'
+    | 'releaseCheck'
     | 'requestId'
     | 'route'
     | 'signal'
@@ -239,7 +244,7 @@ export function parsePagination(searchParams: URLSearchParams): { limit: number;
 
 const applyCorsHeaders = (headers: Headers): Headers => {
     headers.set('Access-Control-Allow-Origin', corsOrigin);
-    headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, If-Match');
     headers.set('Access-Control-Allow-Methods', 'GET,HEAD,PUT,POST,PATCH,DELETE,OPTIONS');
     headers.set('Access-Control-Expose-Headers', 'ETag, Last-Modified, Content-Length');
     return headers;

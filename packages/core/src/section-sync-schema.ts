@@ -79,9 +79,8 @@ export const sectionFromSqliteRow = (row: Record<string, unknown>): Section => {
         createdAt: String(row.createdAt ?? ''),
         updatedAt: String(row.updatedAt ?? ''),
         deletedAt: fromOptional(row.deletedAt as string | null),
-        // Nullable BY DESIGN (Section.deletedAtBeforeProjectArchive: string | null) — do not
-        // route through fromOptional, a stored `null` must stay `null`.
-        deletedAtBeforeProjectArchive: row.deletedAtBeforeProjectArchive as string | null | undefined,
+        // NULL reads as absent (see the task codec's project-archive fields, #1156).
+        deletedAtBeforeProjectArchive: fromOptional(row.deletedAtBeforeProjectArchive as string | null),
         projectArchivedAt: fromOptional(row.projectArchivedAt as string | null),
     };
 };

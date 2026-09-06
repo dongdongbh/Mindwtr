@@ -1,0 +1,30 @@
+<en-US>
+- Adds Reference to every task's status list.
+- Stops a phone syncing every few seconds after another device deleted attachments or a desktop wrote the data, and releases the sync lock after an interrupted sync.
+- Fails over from a dead IPv6 address to IPv4 in ten seconds and keeps background attachment uploads from stalling.
+- Week view opens on five days, widgets show the same next action as the app, and translations are corrected.
+</en-US>
+<de-DE>
+- Referenz steht in jeder Statusliste einer Aufgabe zur Verfügung.
+- Ein Telefon synchronisiert nicht mehr alle paar Sekunden, nachdem ein anderes Gerät Anhänge gelöscht oder ein Desktop Daten geschrieben hat; die Sperre wird nach einem Abbruch freigegeben.
+- Bei toter IPv6-Adresse wechselt der Sync nach zehn Sekunden zu IPv4; Anhang-Uploads im Hintergrund bleiben nicht mehr hängen.
+- Wochenansicht mit fünf Tagen, Widgets zeigen dieselbe nächste Aktion wie die App, Übersetzungen korrigiert.
+</de-DE>
+<es-ES>
+- Añade Referencia a la lista de estados de cada tarea.
+- El teléfono ya no sincroniza cada pocos segundos después de que otro dispositivo borre adjuntos o el escritorio escriba los datos, y libera el bloqueo tras una sincronización interrumpida.
+- Cambia a IPv4 en diez segundos si la dirección IPv6 no responde y las subidas de adjuntos en segundo plano ya no se bloquean.
+- La vista de semana abre con cinco días, los widgets siguen a la app y se corrigen traducciones.
+</es-ES>
+<fr-FR>
+- Ajoute Référence à la liste d’états de chaque tâche.
+- Le téléphone ne synchronise plus toutes les quelques secondes après qu’un autre appareil a supprimé des pièces jointes ou qu’un ordinateur a écrit les données ; le verrou est libéré après une interruption.
+- Bascule vers IPv4 en dix secondes si l’adresse IPv6 ne répond pas ; les envois de pièces jointes en arrière-plan ne bloquent plus.
+- Vue Semaine sur cinq jours, widgets alignés sur l’app, traductions corrigées.
+</fr-FR>
+<zh-CN>
+- 每个任务的状态列表都可选择“参考”。
+- 其他设备删除附件或桌面端写入数据后，手机不再每隔几秒重复同步；同步中断后会释放同步锁。
+- IPv6 地址无响应时十秒内改用 IPv4；后台附件上传不再卡住。
+- 周视图默认显示五天，小组件与应用内的下一步行动一致，并修正翻译。
+</zh-CN>

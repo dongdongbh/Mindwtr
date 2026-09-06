@@ -199,6 +199,57 @@ describe('DailyReviewGuideModal', () => {
         });
     });
 
+    const seedStep = (step: string, task: Partial<Task>) => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 6, 15, 10, 0, 0));
+        useTaskStore.setState({
+            _allTasks: Array.from({ length: 11 }, (_, index) => makeTask({
+                id: `${step}-${index + 1}`,
+                title: `${step} task ${index + 1}`,
+                ...task,
+            })),
+        });
+        window.localStorage.setItem(storageKey, JSON.stringify({
+            step,
+            startedAt: new Date(2026, 6, 15, 8, 0, 0).toISOString(),
+        }));
+    };
+
+    it.each([
+        { step: 'today', task: { dueDate: '2026-07-15' } },
+        { step: 'inbox', task: { status: 'inbox' as const } },
+        { step: 'waiting', task: { status: 'waiting' as const } },
+    ])('shows every eligible task in the $step step', ({ step, task }) => {
+        seedStep(step, task);
+
+        render(<DailyReviewGuideModal onClose={vi.fn()} />);
+
+        expect(screen.getAllByTestId(/^task-/)).toHaveLength(11);
+        expect(screen.getByTestId(`task-${step}-11`)).toBeInTheDocument();
+    });
+
+    it('shows every focus candidate in the focus step', () => {
+        seedStep('focus', { status: 'next' });
+
+        render(<DailyReviewGuideModal onClose={vi.fn()} />);
+
+        expect(screen.getByRole('heading', { level: 1, name: "Today's Focus" })).toBeInTheDocument();
+        expect(screen.getAllByRole('button', { name: 'Add to Focus' })).toHaveLength(11);
+        expect(screen.getByText('focus task 11')).toBeInTheDocument();
+    });
+
+    it.each([1, 10])('shows the configured focus limit of %i in the focus step header', (limit) => {
+        seedStep('focus', { status: 'next' });
+        useTaskStore.setState({
+            settings: { gtd: { dailyReview: { includeFocusStep: true }, focusTaskLimit: limit } },
+        });
+
+        render(<DailyReviewGuideModal onClose={vi.fn()} />);
+
+        const stepHeading = screen.getByRole('heading', { level: 3, name: "Today's Focus" });
+        expect(stepHeading.parentElement).toHaveTextContent(new RegExp(`0 / ${limit}$`));
+    });
+
     it('refreshes review buckets when the open review crosses local midnight', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date(2026, 6, 15, 23, 59, 59));

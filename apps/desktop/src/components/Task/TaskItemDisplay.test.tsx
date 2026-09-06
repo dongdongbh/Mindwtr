@@ -420,6 +420,45 @@ describe('TaskItemDisplay', () => {
         }
     });
 
+    // #1155: the row status menu listed Reference only for a task that already
+    // was one, so a task inside a project could not be filed as reference.
+    it('lets the row status menu send a task to Reference', () => {
+        const onStatusChange = vi.fn();
+        const { getByRole } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={{ ...baseTask, status: 'next' }}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView: vi.fn(),
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange,
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    readOnly={false}
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        const statusSelect = getByRole('combobox', { name: 'task.aria.status' }) as HTMLSelectElement;
+        expect([...statusSelect.options].map((option) => option.value)).toContain('reference');
+
+        fireEvent.change(statusSelect, { target: { value: 'reference' } });
+        expect(onStatusChange).toHaveBeenCalledWith('reference');
+    });
+
     it('shows the upcoming occurrence for an unscheduled recurring task without the calendar toggle', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date(2026, 6, 3, 12, 0, 0));

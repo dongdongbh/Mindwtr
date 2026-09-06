@@ -1,5 +1,8 @@
 import type { Attachment } from './types';
 
+// Re-verify remote attachment presence daily (#1001).
+export const ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
 /**
  * #1119 follow-up. When an attachment's remote blob is gone — deleted on the server, left
  * behind at a previous sync location, a lost upload — the only device that can repair it is
@@ -20,6 +23,31 @@ import type { Attachment } from './types';
 /** `true` = the remote holds it, `false` = the remote definitively does not, `null` = the
  *  probe could not tell. Only `false` is allowed to change anything. */
 export type AttachmentRemotePresence = boolean | null;
+
+/** The device-local "when did a full presence pass last complete against this scope" record
+ *  each platform's IO wrapper reads and writes; see `isAttachmentPresenceStampFresh` below. */
+export type AttachmentPresenceStamp = { scope: string; at: number };
+
+/**
+ * Is a stamped presence pass still current for `scope` at `nowMs`? `false` for every "don't
+ * know" case — no stamp, a stamp for a different scope (a stamp from a previous sync location
+ * must never vouch for a new one), a clock that moved backwards since the stamp was written,
+ * or a stamp older than `ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS` — so a caller using this
+ * to gate a daily reconciliation pass reconciles on every doubt rather than trusting a stale
+ * or mismatched record.
+ *
+ * A falsy `scope` also means doubt and always returns `false`: a caller with no scope has
+ * nothing to compare the stamp against.
+ */
+export const isAttachmentPresenceStampFresh = (
+    stamp: AttachmentPresenceStamp | null,
+    scope: string | null | undefined,
+    nowMs: number,
+): boolean => {
+    if (!scope || !stamp || stamp.scope !== scope) return false;
+    const elapsed = nowMs - stamp.at;
+    return elapsed >= 0 && elapsed < ATTACHMENT_PRESENCE_RECONCILE_INTERVAL_MS;
+};
 
 /**
  * The document-side half of "may a presence pass clear this attachment's cloud reference?".

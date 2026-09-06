@@ -1164,6 +1164,15 @@ export function useSyncSettingsTransportActions({
                     tone: conflictCount > 0 || warningDetails.length > 0 ? 'warning' : 'success',
                     durationMs: warningDetails.length > 0 || conflictCount > 0 ? 5200 : 3600,
                 });
+            } else if (
+                result.success
+                && (result.remoteWriteDeferred || result.skipped === 'pendingRemoteWriteBackoff')
+            ) {
+                showToast({
+                    title: tr('common.notice'),
+                    message: tr('settings.sync.remoteWriteDeferred'),
+                    tone: 'info',
+                });
             } else {
                 throw new Error(result.error || 'Unknown error');
             }

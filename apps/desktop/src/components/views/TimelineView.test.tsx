@@ -54,6 +54,9 @@ const projectBarDays = (projectId: string) => {
     };
 };
 const barFor = (taskId: string) => document.querySelector(`[data-testid="timeline-bar"][data-task-id="${taskId}"]`) as HTMLElement | null;
+const axisWidth = () => Number.parseFloat(
+    screen.getAllByTestId('timeline-axis-major')[0].parentElement?.style.width ?? '0',
+);
 // Group headings and bar titles in one pass, in the order they are laid out.
 const rowLabels = () => Array.from(
     document.querySelectorAll('[data-testid="timeline-group"], [data-testid="timeline-row-label"]'),
@@ -98,6 +101,39 @@ describe('TimelineView (#1111)', () => {
         expect(bar?.style.width).toBe('72px');
     });
 
+    it('contains a task span that crosses both ends of the bounded axis', () => {
+        setStore({
+            tasks: [makeTask({
+                id: 'crossing-span',
+                title: 'Long-running task',
+                startTime: iso(-1000),
+                dueDate: iso(1000),
+            })],
+        });
+        renderTimeline();
+
+        const bar = barFor('crossing-span');
+        const left = Number.parseFloat(bar?.style.left ?? '0');
+        const right = left + Number.parseFloat(bar?.style.width ?? '0');
+        expect(left).toBeGreaterThanOrEqual(0);
+        expect(right).toBeLessThanOrEqual(axisWidth());
+    });
+
+    it('exposes the horizontal track as a focusable named region and names the zoom group', () => {
+        setStore({
+            tasks: [makeTask({ id: 'span', title: 'Span task', startTime: iso(-2), dueDate: iso(3) })],
+        });
+        renderTimeline();
+
+        const track = screen.getByRole('region', { name: 'Timeline track' });
+        expect(track).toBe(screen.getByTestId('timeline-scroller'));
+        expect(track).toHaveAttribute('tabindex', '0');
+        track.focus();
+        expect(document.activeElement).toBe(track);
+
+        expect(screen.getByRole('group', { name: 'Timeline zoom' })).toBeInTheDocument();
+    });
+
     it('draws a compact mini-bar for a task dated on only one side', () => {
         setStore({
             tasks: [
@@ -109,6 +145,28 @@ describe('TimelineView (#1111)', () => {
         expect(barFor('start-only')?.dataset.variant).toBe('mini');
         expect(barFor('due-only')?.dataset.variant).toBe('mini');
         expect(barFor('start-only')?.style.width).toBe('12px');
+    });
+
+    it('contains compact task markers on the final day of the axis', () => {
+        window.localStorage.setItem('mindwtr:view:timeline:v1', JSON.stringify({ zoom: 'month' }));
+        setStore({
+            tasks: [
+                makeTask({ id: 'axis-start', title: 'Axis start', dueDate: iso(600) }),
+                makeTask({ id: 'axis-end', title: 'Axis end', dueDate: iso(1000) }),
+                makeTask({ id: 'axis-end-bar', title: 'Axis end bar', startTime: iso(1000), dueDate: iso(1000) }),
+            ],
+        });
+        renderTimeline();
+
+        const marker = barFor('axis-end');
+        const minimumBar = barFor('axis-end-bar');
+        expect(Number.parseFloat(marker?.style.width ?? '0')).toBe(12);
+        expect(Number.parseFloat(minimumBar?.style.width ?? '0')).toBe(10);
+        for (const compactBar of [marker, minimumBar]) {
+            const left = Number.parseFloat(compactBar?.style.left ?? '0');
+            const width = Number.parseFloat(compactBar?.style.width ?? '0');
+            expect(left + width).toBeLessThanOrEqual(axisWidth());
+        }
     });
 
     it('draws task bars thinner than the solid project bar and gridlines as real elements, not a gradient', () => {
@@ -417,6 +475,35 @@ describe('TimelineView (#1111)', () => {
         expect(screen.getByText('Nothing scheduled yet')).toBeTruthy();
     });
 
+    it('counts a project windowed entirely out instead of drawing an empty row for it', () => {
+        setStore({
+            projects: [{
+                id: 'gone',
+                title: 'Finished remodel',
+                status: 'active',
+                startDate: iso(-365),
+                dueDate: iso(-360),
+                createdAt: iso(-400),
+                updatedAt: iso(-400),
+            } as Project],
+            tasks: [
+                makeTask({ id: 'old', title: 'Old task', projectId: 'gone', dueDate: iso(-364) }),
+                makeTask({ id: 'visible', title: 'Visible task', dueDate: iso(150) }),
+            ],
+        });
+        renderTimeline();
+
+        expect(rowLabels()).not.toContain('Finished remodel');
+        expect(projectBarFor('gone')).toBeNull();
+        expect(barFor('old')).toBeNull();
+        expect(barFor('visible')).not.toBeNull();
+        // One omitted task plus the project itself.
+        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('2 more');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Earlier' }));
+        expect(rowLabels()).toContain('Finished remodel');
+    });
+
     it('keeps scheduled tasks recoverable when the bounded window omits them', () => {
         setStore({
             tasks: [
@@ -427,13 +514,13 @@ describe('TimelineView (#1111)', () => {
         renderTimeline();
 
         expect(screen.queryByText('Nothing scheduled yet')).toBeNull();
-        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('+2 tasks');
+        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('2 more');
         expect(bars()).toHaveLength(0);
 
         fireEvent.click(screen.getByRole('button', { name: 'Earlier' }));
         expect(barFor('early')).not.toBeNull();
         expect(barFor('late')).toBeNull();
-        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('+1 tasks');
+        expect(screen.getByTestId('timeline-omitted-notice')).toHaveTextContent('1 more');
 
         fireEvent.click(screen.getByRole('button', { name: 'Later' }));
         expect(barFor('early')).toBeNull();

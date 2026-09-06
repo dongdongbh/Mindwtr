@@ -1,3 +1,5 @@
+import { logInfo } from './logger';
+
 export const SYNC_REMOTE_MUTATION_FENCE_NAME = '.mindwtr-sync-fence-v1.json';
 
 /** Minimum verified lease lifetime immediately before a provider mutation.
@@ -137,6 +139,23 @@ const isAbandonedRecord = (record: SyncRemoteMutationFenceRecord, serverNowMs: n
     if (typeof record.renewedAt !== 'number') return false;
     const silentForMs = serverNowMs - record.renewedAt;
     return silentForMs > record.heartbeatMs * ABANDONED_AFTER_MISSED_HEARTBEATS + ABANDONED_JITTER_MARGIN_MS;
+};
+
+const getSafeAuthorityRemainingMs = (
+    record: SyncRemoteMutationFenceRecord,
+    serverNowMs: number,
+): number => {
+    if (
+        typeof record.heartbeatMs !== 'number'
+        || record.heartbeatMs <= 0
+        || typeof record.renewedAt !== 'number'
+    ) {
+        return record.expiresAt - serverNowMs;
+    }
+    const abandonmentDeadline = record.renewedAt
+        + record.heartbeatMs * ABANDONED_AFTER_MISSED_HEARTBEATS
+        + ABANDONED_JITTER_MARGIN_MS;
+    return Math.min(record.expiresAt, abandonmentDeadline) - serverNowMs;
 };
 
 const parseRecord = (bytes: Uint8Array): SyncRemoteMutationFenceRecord => {
@@ -299,11 +318,27 @@ export async function acquireSyncRemoteMutationFence(
 
     let currentVersion = acquiredVersion;
     let lastKnownRemainingMs = acquiredRemainingMs;
+    // The timer keeps the configured heartbeatMs cadence. Only the advertised
+    // interval grows, and never shrinks, so a later renewal cannot truncate an
+    // in-flight mutation horizon already promised to the caller.
+    let advertisedHeartbeatMs = heartbeatMs;
     const monotonicNow = (): number => (
         typeof performance !== 'undefined' && typeof performance.now === 'function'
             ? performance.now()
             : Date.now()
     );
+    const readAuthoritySnapshot = async (): Promise<{
+        snapshot: SyncRemoteMutationFenceSnapshot;
+        readAgeMs: number;
+    }> => {
+        const startedAtMs = monotonicNow();
+        const snapshot = await port.read();
+        const elapsedMs = monotonicNow() - startedAtMs;
+        return {
+            snapshot,
+            readAgeMs: Number.isFinite(elapsedMs) ? Math.ceil(Math.max(0, elapsedMs)) : 0,
+        };
+    };
     let remainingObservedAtMs = monotonicNow();
     let closed = false;
     let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
@@ -320,10 +355,11 @@ export async function acquireSyncRemoteMutationFence(
         snapshot: SyncRemoteMutationFenceSnapshot;
         record: SyncRemoteMutationFenceRecord;
         serverNowMs: number;
+        readAgeMs: number;
     }> => {
         if (closed) throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence is already released');
         if (lostError) throw lostError;
-        const snapshot = await port.read();
+        const { snapshot, readAgeMs } = await readAuthoritySnapshot();
         const serverNowMs = requireServerNow(snapshot);
         if (!snapshot.bytes || !snapshot.version) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence disappeared');
@@ -332,16 +368,17 @@ export async function acquireSyncRemoteMutationFence(
         if (record.leaseId !== leaseId || record.ownerId !== ownerId) {
             throw new SyncRemoteMutationFenceLostError();
         }
-        if (record.expiresAt <= serverNowMs) {
+        const expiryRemainingMs = record.expiresAt - serverNowMs - readAgeMs;
+        if (expiryRemainingMs <= 0) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence expired');
         }
         currentVersion = snapshot.version;
-        lastKnownRemainingMs = record.expiresAt - serverNowMs;
+        lastKnownRemainingMs = expiryRemainingMs;
         remainingObservedAtMs = monotonicNow();
-        return { snapshot, record, serverNowMs };
+        return { snapshot, record, serverNowMs, readAgeMs };
     };
 
-    const renewOwned = async (): Promise<void> => {
+    const renewOwned = async (): Promise<number> => {
         const { snapshot, serverNowMs } = await requireOwnedSnapshot();
         const replacement: SyncRemoteMutationFenceRecord = {
             schema: FENCE_SCHEMA,
@@ -349,7 +386,7 @@ export async function acquireSyncRemoteMutationFence(
             ownerId,
             purpose: options.purpose,
             expiresAt: serverNowMs + ttlMs,
-            heartbeatMs,
+            heartbeatMs: advertisedHeartbeatMs,
             renewedAt: serverNowMs,
         };
         try {
@@ -358,7 +395,7 @@ export async function acquireSyncRemoteMutationFence(
             if (port.isConflict(error)) throw new SyncRemoteMutationFenceLostError();
             throw error;
         }
-        const verified = await port.read();
+        const { snapshot: verified, readAgeMs: verificationReadAgeMs } = await readAuthoritySnapshot();
         const verifiedServerNowMs = requireServerNow(verified);
         if (!verified.bytes || !verified.version) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence disappeared after renewal');
@@ -372,14 +409,15 @@ export async function acquireSyncRemoteMutationFence(
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence was replaced during renewal');
         }
         if (
-            verifiedRecord.expiresAt <= verifiedServerNowMs
+            verifiedRecord.expiresAt - verifiedServerNowMs - verificationReadAgeMs <= 0
             || isImpossibleFutureExpiry(verifiedRecord.expiresAt, verifiedServerNowMs)
         ) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence is not live after renewal');
         }
         currentVersion = verified.version;
-        lastKnownRemainingMs = verifiedRecord.expiresAt - verifiedServerNowMs;
+        lastKnownRemainingMs = verifiedRecord.expiresAt - verifiedServerNowMs - verificationReadAgeMs;
         remainingObservedAtMs = monotonicNow();
+        return getSafeAuthorityRemainingMs(verifiedRecord, verifiedServerNowMs) - verificationReadAgeMs;
     };
 
     const scheduleHeartbeat = (): void => {
@@ -406,10 +444,34 @@ export async function acquireSyncRemoteMutationFence(
             if (!Number.isFinite(minRemainingMs) || minRemainingMs < 0 || minRemainingMs >= ttlMs) {
                 throw new Error('Remote sync mutation fence remaining-time requirement is invalid');
             }
-            const { record, serverNowMs } = await requireOwnedSnapshot();
-            if (record.expiresAt - serverNowMs <= minRemainingMs) await renewOwned();
+            const { record, serverNowMs, readAgeMs } = await requireOwnedSnapshot();
+            if (getSafeAuthorityRemainingMs(record, serverNowMs) - readAgeMs <= minRemainingMs) {
+                if (advertisedHeartbeatMs > 0) {
+                    advertisedHeartbeatMs = Math.max(
+                        advertisedHeartbeatMs,
+                        Math.ceil(minRemainingMs / ABANDONED_AFTER_MISSED_HEARTBEATS),
+                    );
+                }
+                const remainingMs = await renewOwned();
+                if (remainingMs <= minRemainingMs) {
+                    throw new SyncRemoteMutationFenceLostError(
+                        'Remote sync mutation fence cannot cover the requested mutation horizon',
+                    );
+                }
+                if (minRemainingMs > 0) {
+                    logInfo('Remote sync mutation fence renewed for mutation horizon', {
+                        scope: 'sync',
+                        category: 'sync',
+                        context: {
+                            releaseCheck: 'v1.2.8/fence-mutation-horizon',
+                            horizonMs: minRemainingMs,
+                            remainingMs,
+                        },
+                    });
+                }
+            }
         }),
-        renew: () => serialize(renewOwned),
+        renew: () => serialize(async () => { await renewOwned(); }),
         retryAfterMs: () => Math.max(0, Math.ceil(
             lastKnownRemainingMs - (monotonicNow() - remainingObservedAtMs),
         )),

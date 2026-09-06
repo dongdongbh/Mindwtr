@@ -273,6 +273,36 @@ describe('CalendarView', () => {
         }
     });
 
+    it('lets the week timeline use the whole window height on a tall monitor', async () => {
+        window.history.replaceState(null, '', '/?calendarView=week&calendarDate=2026-04-03');
+        const clientHeight = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(2000);
+        const observers: Array<() => void> = [];
+        vi.stubGlobal('ResizeObserver', class {
+            constructor(callback: () => void) { observers.push(callback); }
+            observe() {}
+            disconnect() {}
+        });
+
+        try {
+            render(
+                <main>
+                    <LanguageProvider>
+                        <CalendarView />
+                    </LanguageProvider>
+                </main>
+            );
+            await flushCalendarEffects();
+
+            const timedScroller = document.querySelector('[data-calendar-timed-drop-date]')?.parentElement?.parentElement;
+            // 2000px window minus the 18px reserve; the old 768px ceiling
+            // would leave the bottom half of the window empty.
+            expect(timedScroller).toHaveStyle({ height: '1982px' });
+        } finally {
+            clientHeight.mockRestore();
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('starts a restored schedule view from today instead of the first day of the month', async () => {
         window.history.replaceState(null, '', '/?calendarView=schedule&calendarMonth=2026-04');
         storeMocks.taskStoreState.tasks = [

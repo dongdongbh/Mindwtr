@@ -30,13 +30,13 @@
  */
 import { performance } from 'node:perf_hooks';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mergeAppDataWithStats, performSyncCycle } from './sync';
+import { mergeAppData, mergeAppDataWithStats, performSyncCycle } from './sync';
 import { parseSyncDocument, toRemoteSyncDocument } from './sync-document';
 import { purgeExpiredTombstones } from './sync-tombstones';
 import { validateMergedSyncData } from './sync-normalization';
 import { toStableSyncJson } from './sync-helpers';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
-import { TASK_SQLITE_COLUMNS, taskToSqliteRow } from './task-sync-schema';
+import { TASK_SQLITE_COLUMNS, TASK_SYNC_FIELD_SCHEMA, TASK_SYNC_SCHEMA_FIXTURE, taskToSqliteRow } from './task-sync-schema';
 import { mapSqliteTaskRow } from './sqlite-adapter';
 import { PROJECT_SQLITE_COLUMNS, projectFromSqliteRow, projectToSqliteRow } from './project-sync-schema';
 import { SECTION_SQLITE_COLUMNS, sectionFromSqliteRow, sectionToSqliteRow } from './section-sync-schema';
@@ -612,6 +612,64 @@ describe('canonical local reads contract', () => {
         const changed = results.filter((entry) => !entry.identical);
         expect(changed.map((entry) => entry.label)).toEqual([]);
     }, 120_000);
+
+    const persistTaskPatchAndRead = async (updates: Partial<Task>): Promise<AppData> => {
+        resetForTests();
+        useTaskStore.setState({
+            tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
+            isLoading: false, error: null,
+            _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
+            _tasksById: new Map(), _projectsById: new Map(), _sectionsById: new Map(),
+            _areasById: new Map(), _peopleById: new Map(),
+            lastDataChangeAt: 0,
+        });
+        let saved: AppData | undefined;
+        setStorageAdapter({
+            getData: async () => throughLocalStorage({ ...emptyData(), tasks: [task('field-task')] }),
+            saveData: async (data) => { saved = structuredClone(data); },
+        });
+        await useTaskStore.getState().fetchData({ silent: true });
+        await useTaskStore.getState().updateTask('field-task', updates);
+        await flushPendingSave();
+        if (!saved) throw new Error('The field update did not persist a snapshot');
+        return throughLocalStorage(saved);
+    };
+
+    it('reads showFutureRecurrence canonically after a store write without recurrence', async () => {
+        const readBack = await persistTaskPatchAndRead({ showFutureRecurrence: true });
+
+        expect(readBack.tasks[0].recurrence).toBeFalsy();
+        expect(readBack.tasks[0].showFutureRecurrence).toBeUndefined();
+        expect(remoteBytes(readBack)).toBe(remoteBytes(mergeAppData(readBack, emptyData())));
+    });
+
+    it('reads each synced task boolean or optional field canonically in isolation', async () => {
+        const fields = TASK_SYNC_FIELD_SCHEMA.filter((field) => (
+            field.sync === 'content'
+            && (field.nullability !== 'required' || field.cloudKit?.kind === 'boolean')
+        ));
+        // Scoped to `sync: 'content'` fields — the payload shape an ordinary
+        // caller (desktop editor, MCP) can set with a single field patch.
+        // `archive-metadata`/`revision-metadata`/`tombstone`/`order` fields
+        // are never set this way: archive fields flow through the
+        // archive/unarchive actions, purgedAt/deletedAt through tombstone
+        // compaction (tombstone-compaction.ts), rev/revBy are stamped by
+        // applyTaskUpdates itself — each has its own dedicated write path and
+        // its own coverage, so patching one in isolation here would assert a
+        // write shape that store-tasks.ts never actually produces.
+        for (const field of fields) {
+            expect(Object.hasOwn(TASK_SYNC_SCHEMA_FIXTURE, field.name), `${field.name}: fixture coverage`).toBe(true);
+            const fixtureValue = TASK_SYNC_SCHEMA_FIXTURE[field.name];
+            const values = field.cloudKit?.kind === 'boolean' ? [true, false] : [fixtureValue];
+            for (const value of values) {
+                // Start from a plain task for EACH field/value, never the
+                // exhaustive fixture whose recurrence can mask a boolean bug.
+                const readBack = await persistTaskPatchAndRead({ [field.name]: value });
+                expect(remoteBytes(readBack), `${field.name}=${JSON.stringify(value)}`)
+                    .toBe(remoteBytes(mergeAppData(readBack, emptyData())));
+            }
+        }
+    });
 
     // -----------------------------------------------------------------------
     // Part 2: every store write action, driven off the store's own action map

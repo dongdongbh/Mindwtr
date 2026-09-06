@@ -23,6 +23,7 @@ import {
 const DEDICATED_FIELD_NAMES = new Set([
   'title', 'status', 'priority', 'energyLevel', 'assignedTo', 'startTime', 'dueDate',
   'recurrence', 'tags', 'contexts', 'description', 'projectId', 'sectionId', 'timeEstimate',
+  'attachments',
 ]);
 
 describe('MCP task write-surface derivation (TASK_SYNC_FIELD_SCHEMA -> Zod tool schemas)', () => {
