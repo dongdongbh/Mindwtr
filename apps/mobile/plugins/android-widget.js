@@ -9,6 +9,7 @@ const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins'
 const MODULE_PACKAGE = 'tech.dongdongbh.mindwtr.androidwidget';
 const SERVICE_NAME = `${MODULE_PACKAGE}.TasksWidgetService`;
 const ACTIVITY_NAME = `${MODULE_PACKAGE}.QuickCaptureActivity`;
+const CONFIGURE_ACTIVITY_NAME = `${MODULE_PACKAGE}.WidgetConfigureActivity`;
 const WIDGET_UPDATE_ACTION = 'android.appwidget.action.APPWIDGET_UPDATE';
 const WIDGET_PROVIDER_META = 'android.appwidget.provider';
 const WIDGET_STRINGS_FILE_NAME = 'mindwtr_widget_strings.xml';
@@ -51,6 +52,8 @@ const buildWidgetKinds = (props) => [
     targetCellHeight: props.targetCellHeight,
     resizeMode: props.resizeMode,
     previewImage: props.previewImage,
+    // Picks the list on placement; `reconfigurable` adds the launcher's edit action (#1173).
+    configure: CONFIGURE_ACTIVITY_NAME,
   },
   {
     kind: 'QuickCapture',
@@ -89,7 +92,9 @@ const buildWidgetInfoXml = (kind) => `<?xml version="1.0" encoding="utf-8"?>
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/${kind.layout}"${kind.previewImage ? `
     android:previewImage="@drawable/${WIDGET_PREVIEW_FILE_NAME.replace(/\.png$/, '')}"` : ''}
-    android:resizeMode="${kind.resizeMode}"
+    android:resizeMode="${kind.resizeMode}"${kind.configure ? `
+    android:configure="${kind.configure}"
+    android:widgetFeatures="reconfigurable"` : ''}
     android:widgetCategory="home_screen|keyguard"
     android:description="@string/${kind.descriptionResource}" />
 `;
@@ -177,6 +182,24 @@ const ensureQuickCaptureActivity = (application) => {
   };
 };
 
+const ensureConfigureActivity = (application) => {
+  const activities = ensureArray(application, 'activity');
+  let activity = findByName(activities, CONFIGURE_ACTIVITY_NAME);
+  if (!activity) {
+    activity = { $: {} };
+    activities.push(activity);
+  }
+  // The launcher starts it through the system's configure flow; the
+  // APPWIDGET_CONFIGURE filter is the one entry it needs.
+  activity.$ = {
+    'android:name': CONFIGURE_ACTIVITY_NAME,
+    'android:exported': 'true',
+    'android:theme': `@style/${QUICK_CAPTURE_THEME}`,
+    'android:excludeFromRecents': 'true',
+  };
+  activity['intent-filter'] = [{ action: [{ $: { 'android:name': 'android.appwidget.action.APPWIDGET_CONFIGURE' } }] }];
+};
+
 const ensureWidgetComponents = (androidManifest, props) => {
   const application = androidManifest?.manifest?.application?.[0];
   if (!application) return androidManifest;
@@ -185,6 +208,7 @@ const ensureWidgetComponents = (androidManifest, props) => {
   }
   ensureListService(application);
   ensureQuickCaptureActivity(application);
+  ensureConfigureActivity(application);
   return androidManifest;
 };
 
@@ -223,6 +247,7 @@ module.exports = function withAndroidWidget(config, props = {}) {
 
 module.exports.__testables = {
   ACTIVITY_NAME,
+  CONFIGURE_ACTIVITY_NAME,
   SERVICE_NAME,
   buildWidgetInfoXml,
   buildWidgetKinds,

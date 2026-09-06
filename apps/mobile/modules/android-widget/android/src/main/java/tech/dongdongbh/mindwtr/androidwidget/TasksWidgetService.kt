@@ -13,11 +13,18 @@ import android.widget.RemoteViewsService
  * task rows with a priority dot and the project or area under the title.
  */
 class TasksWidgetService : RemoteViewsService() {
-  override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
-    TasksWidgetFactory(applicationContext, WidgetKind.fromName(intent.getStringExtra(WidgetRenderer.EXTRA_KIND)))
+  override fun onGetViewFactory(intent: Intent): RemoteViewsFactory = TasksWidgetFactory(
+    applicationContext,
+    WidgetKind.fromName(intent.getStringExtra(WidgetRenderer.EXTRA_KIND)),
+    intent.getIntExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, android.appwidget.AppWidgetManager.INVALID_APPWIDGET_ID),
+  )
 }
 
-class TasksWidgetFactory(private val context: Context, private val kind: WidgetKind) : RemoteViewsService.RemoteViewsFactory {
+class TasksWidgetFactory(
+  private val context: Context,
+  private val kind: WidgetKind,
+  private val appWidgetId: Int,
+) : RemoteViewsService.RemoteViewsFactory {
   /** One list row: a section header or a task. */
   sealed class Row {
     data class Header(val title: String, val detail: String?) : Row()
@@ -33,7 +40,7 @@ class TasksWidgetFactory(private val context: Context, private val kind: WidgetK
 
   private fun reload() {
     payload = WidgetPayloadStore.read(context)
-    rows = if (kind == WidgetKind.TASKS) buildRows(payload) else emptyList()
+    rows = if (kind == WidgetKind.TASKS) buildRows(payload.listFor(WidgetListStore.read(context, appWidgetId))) else emptyList()
   }
 
   override fun onDestroy() {}
@@ -101,10 +108,10 @@ class TasksWidgetFactory(private val context: Context, private val kind: WidgetK
   override fun hasStableIds(): Boolean = false
 
   companion object {
-    /** Sectioned rows when the payload carries sections, else the flat list (older payloads). */
-    fun buildRows(payload: WidgetPayload): List<Row> {
-      if (payload.sections.isEmpty()) return payload.items.map { Row.Task(it) }
-      return payload.sections.flatMap { section ->
+    /** Sectioned rows when the list carries sections, else the flat list. */
+    fun buildRows(list: WidgetPayload.ListPayload): List<Row> {
+      if (list.sections.isEmpty()) return list.items.map { Row.Task(it) }
+      return list.sections.flatMap { section ->
         listOf<Row>(Row.Header(section.title, section.detail)) + section.items.map { Row.Task(it) }
       }
     }

@@ -1,5 +1,5 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { getWaitingPerson, safeParseDueDate, shallow, tFallback, useTaskStore,
+import { getWaitingPerson, shallow, tFallback, useTaskStore,
     baseTextCollator,
 } from '@mindwtr/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
+import { compareWaitingTasks } from '@/lib/list-order';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { TaskEditModal } from '../task-edit-modal';
 import { getBulkMoveStatusOptions } from '../task-list/TaskListBulkBar';
@@ -58,16 +59,7 @@ export function WaitingView() {
   const waitingTasks = useMemo(() => {
     return visibleTasks
       .filter((task) => task.status === 'waiting')
-      .sort((a, b) => {
-        if (a.dueDate && !b.dueDate) return -1;
-        if (!a.dueDate && b.dueDate) return 1;
-        if (a.dueDate && b.dueDate) {
-          const aDue = safeParseDueDate(a.dueDate);
-          const bDue = safeParseDueDate(b.dueDate);
-          if (aDue && bDue) return aDue.getTime() - bDue.getTime();
-        }
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      });
+      .sort(compareWaitingTasks);
   }, [visibleTasks]);
   const waitingPeople = useMemo(() => {
     const people = new Map<string, string>();

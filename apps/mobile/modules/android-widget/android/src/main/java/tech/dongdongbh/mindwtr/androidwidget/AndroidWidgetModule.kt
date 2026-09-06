@@ -15,5 +15,9 @@ class AndroidWidgetModule : Module() {
     Function("updateWidgets") {
       appContext.reactContext?.let { WidgetRenderer.refreshAll(it) }
     }
+
+    Function("getWidgetListSelections") {
+      appContext.reactContext?.let { WidgetListStore.selections(it) } ?: emptyList<String>()
+    }
   }
 }

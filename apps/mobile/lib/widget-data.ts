@@ -24,6 +24,12 @@ import {
 } from '@mindwtr/core';
 import { THEME_PRESETS, type ThemePresetName } from '../constants/theme-presets';
 import { buildFocusTaskSections, DEFAULT_FOCUS_SORT_BY, deriveFocusTaskLists } from './focus-sections';
+import {
+    buildWidgetProjectOptions,
+    buildWidgetTaskList,
+    widgetListTitles,
+    type WidgetTaskListSection,
+} from './widget-lists';
 
 export const WIDGET_DATA_KEY = 'mindwtr-data';
 export const WIDGET_LANGUAGE_KEY = 'mindwtr-language';
@@ -98,6 +104,21 @@ export interface WidgetPalette {
     warning: WidgetColor;
 }
 
+// One list a placed Tasks widget can show (#1173); `focus` mirrors the
+// payload's top-level sections/items.
+export interface WidgetListPayload {
+    title: string;
+    dateLabel?: string;
+    sections?: WidgetTaskSection[];
+    items: WidgetTaskItem[];
+}
+
+export interface WidgetProjectOption {
+    id: string;
+    title: string;
+    identityColor: string | null;
+}
+
 export interface TasksWidgetPayload {
     headerTitle: string;
     // Today's date for the widget header band, localized ("Saturday, Sep 6").
@@ -111,6 +132,12 @@ export interface TasksWidgetPayload {
     // the screen, empty sections dropped, `maxItems` shared across sections.
     // `items` stays for the iOS widget and the QuickCapture kind.
     sections: WidgetTaskSection[];
+    // The lists placed widgets asked for (always `focus`), keyed by list id.
+    lists: Record<string, WidgetListPayload>;
+    // Titles of the fixed lists for the configuration screen.
+    listTitles: Record<string, string>;
+    // Projects the configuration screen offers.
+    projects: WidgetProjectOption[];
     emptyMessage: string;
     captureLabel: string;
     focusUri: string;
@@ -298,7 +325,7 @@ const resolveWidgetPalette = (
 export function buildWidgetPayload(
     data: AppData,
     language: Language,
-    options?: { systemColorScheme?: WidgetSystemColorScheme; maxItems?: number }
+    options?: { systemColorScheme?: WidgetSystemColorScheme; maxItems?: number; listIds?: readonly string[] }
 ): TasksWidgetPayload {
     void loadTranslations(language);
     const tr = getTranslationsSync(language);
@@ -393,15 +420,45 @@ export function buildWidgetPayload(
         subtitleParts.push(`+${hiddenTaskCount} ${tr['common.more'] ?? 'More'}`);
     }
 
+    const dateLabel = formatDateLabel(now, language, 'long');
+    const listContext = { data, activeTasks, focusLists: lists, sortBy: widgetSort, tr };
+    const capSections = (source: WidgetTaskListSection[]): WidgetTaskSection[] => {
+        let left = maxItems;
+        const out: WidgetTaskSection[] = [];
+        for (const section of source) {
+            if (left <= 0) break;
+            const sectionItems = section.items.slice(0, left).map(toItem);
+            left -= sectionItems.length;
+            out.push({ key: section.key, title: section.title, detail: null, items: sectionItems });
+        }
+        return out;
+    };
+    const listPayloads: Record<string, WidgetListPayload> = {
+        focus: { title: widgetListTitles(tr).focus, dateLabel, sections, items },
+    };
+    for (const listId of new Set(options?.listIds ?? [])) {
+        if (listId === 'focus') continue;
+        const list = buildWidgetTaskList(listId, listContext);
+        if (!list) continue;
+        listPayloads[listId] = {
+            title: list.title,
+            ...(list.sections ? { sections: capSections(list.sections) } : {}),
+            items: list.tasks.slice(0, maxItems).map(toItem),
+        };
+    }
+
     return {
         headerTitle: tr['agenda.todaysFocus'] ?? 'Today',
-        dateLabel: formatDateLabel(now, language, 'long'),
+        dateLabel,
         subtitle: subtitleParts.join(' · '),
         inboxLabel: tr['nav.inbox'] ?? 'Inbox',
         inboxCount,
         focusedCount: starredTasks.length,
         items,
         sections,
+        lists: listPayloads,
+        listTitles: widgetListTitles(tr),
+        projects: buildWidgetProjectOptions(data),
         emptyMessage: tr['agenda.allClear'] ?? 'All clear',
         captureLabel: tr['widget.capture'] ?? 'Quick capture',
         focusUri: WIDGET_FOCUS_URI,

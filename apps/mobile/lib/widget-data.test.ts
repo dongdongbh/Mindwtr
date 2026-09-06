@@ -71,6 +71,33 @@ describe('widget-data', () => {
         expect(payload.subtitle).toBe('Inbox: 1 · +2 More');
     });
 
+    it('builds the requested GTD lists and a sectioned project list in the screens\' orders (#1173)', () => {
+        const now = new Date().toISOString();
+        const data: AppData = {
+            ...baseData,
+            projects: [{ id: 'proj-1', title: 'Launch', status: 'active', color: '#8b5cf6', order: 0, tagIds: [], createdAt: now, updatedAt: now }],
+            sections: [{ id: 'sec-1', projectId: 'proj-1', title: 'Prep', order: 0, createdAt: now, updatedAt: now }],
+            tasks: [
+                { id: '1', title: 'In prep', status: 'next', projectId: 'proj-1', sectionId: 'sec-1', order: 1, tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '2', title: 'Loose', status: 'next', projectId: 'proj-1', order: 0, tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '3', title: 'Older wait', status: 'waiting', tags: [], contexts: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: now },
+                { id: '4', title: 'Newer wait', status: 'waiting', tags: [], contexts: [], createdAt: '2026-02-01T00:00:00.000Z', updatedAt: now },
+                { id: '5', title: 'Inbox item', status: 'inbox', tags: [], contexts: [], createdAt: now, updatedAt: now },
+            ],
+        };
+        const payload = buildWidgetPayload(data, 'en', { maxItems: 5, listIds: ['project:proj-1', 'waiting', 'inbox', 'project:nope'] });
+        expect(Object.keys(payload.lists)).toEqual(['focus', 'project:proj-1', 'waiting', 'inbox']);
+        expect(payload.lists['project:proj-1'].title).toBe('Launch');
+        expect(payload.lists['project:proj-1'].sections?.map((section) => [section.title, section.items.map((item) => item.title)])).toEqual([
+            ['Prep', ['In prep']],
+            ['No Section', ['Loose']],
+        ]);
+        expect(payload.lists.waiting.items.map((item) => item.title)).toEqual(['Newer wait', 'Older wait']);
+        expect(payload.lists.inbox.items.map((item) => item.title)).toEqual(['Inbox item']);
+        expect(payload.projects).toEqual([{ id: 'proj-1', title: 'Launch', identityColor: '#8b5cf6' }]);
+        expect(payload.lists.focus.sections).toBe(payload.sections);
+    });
+
     it('carries the Focus screen sections with the shared cap, priority colour and project or area (#1173)', () => {
         const now = new Date().toISOString();
         const today = new Date(); today.setHours(23, 0, 0, 0);

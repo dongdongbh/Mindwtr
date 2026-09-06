@@ -4,6 +4,7 @@ const plugin = require('./android-widget');
 
 const {
   ACTIVITY_NAME,
+  CONFIGURE_ACTIVITY_NAME,
   SERVICE_NAME,
   buildWidgetInfoXml,
   buildWidgetKinds,
@@ -43,6 +44,8 @@ describe('android-widget', () => {
     expect(xml).toContain('android:initialLayout="@layout/mindwtr_widget"');
     expect(xml).toContain('android:previewImage="@drawable/mindwtr_widget_preview"');
     expect(xml).toContain('android:updatePeriodMillis="0"');
+    expect(xml).toContain(`android:configure="${CONFIGURE_ACTIVITY_NAME}"`);
+    expect(xml).toContain('android:widgetFeatures="reconfigurable"');
     expect(buildWidgetStringsXml([tasks, quickCapture])).toContain('Inbox, focus, and quick capture');
 
     expect(quickCapture.kind).toBe('QuickCapture');
@@ -53,6 +56,7 @@ describe('android-widget', () => {
     expect(captureXml).toContain('android:resizeMode="none"');
     expect(captureXml).toContain('android:initialLayout="@layout/mindwtr_quick_capture_widget"');
     expect(captureXml).not.toContain('previewImage');
+    expect(captureXml).not.toContain('android:configure');
     expect(buildWidgetKinds(resolveProps({ label: 'Mindwtr Dev' })).map((kind) => kind.label)).toEqual(['Mindwtr Dev', 'Mindwtr Dev quick capture']);
   });
 
@@ -86,7 +90,9 @@ describe('android-widget', () => {
     expect(application.service).toEqual([{
       $: { 'android:name': SERVICE_NAME, 'android:permission': 'android.permission.BIND_REMOTEVIEWS', 'android:exported': 'false' },
     }]);
-    expect(application.activity).toHaveLength(1);
+    expect(application.activity).toHaveLength(2);
+    expect(application.activity[1].$).toMatchObject({ 'android:name': CONFIGURE_ACTIVITY_NAME, 'android:exported': 'true' });
+    expect(application.activity[1]['intent-filter'][0].action[0].$['android:name']).toBe('android.appwidget.action.APPWIDGET_CONFIGURE');
     expect(application.activity[0].$).toMatchObject({
       'android:name': ACTIVITY_NAME,
       'android:exported': 'false',

@@ -27,6 +27,10 @@ abstract class MindwtrWidgetProvider(private val kind: WidgetKind) : android.app
   }
 }
 
-class TasksWidgetProvider : MindwtrWidgetProvider(WidgetKind.TASKS)
+class TasksWidgetProvider : MindwtrWidgetProvider(WidgetKind.TASKS) {
+  override fun onDeleted(context: android.content.Context, appWidgetIds: IntArray) {
+    WidgetListStore.remove(context, appWidgetIds)
+  }
+}
 
 class QuickCaptureWidgetProvider : MindwtrWidgetProvider(WidgetKind.QUICK_CAPTURE)

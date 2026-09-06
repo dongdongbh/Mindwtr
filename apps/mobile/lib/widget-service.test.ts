@@ -11,6 +11,7 @@ const {
     mockIosWidgetReloadTimelines,
     mockIosWidgetSetItem,
     mockPlatform,
+    mockAndroidWidgetGetWidgetListSelections,
     mockAndroidWidgetIsSupported,
     mockAndroidWidgetSetPayload,
     mockAndroidWidgetUpdateWidgets,
@@ -24,6 +25,7 @@ const {
     mockPlatform: {
         OS: 'android',
     },
+    mockAndroidWidgetGetWidgetListSelections: vi.fn(() => [] as string[]),
     mockAndroidWidgetIsSupported: vi.fn(() => true),
     mockAndroidWidgetSetPayload: vi.fn(),
     mockAndroidWidgetUpdateWidgets: vi.fn(),
@@ -68,6 +70,7 @@ vi.mock('./widget-data', async (importOriginal) => {
 });
 
 vi.mock('../modules/android-widget', () => ({
+    getWidgetListSelections: mockAndroidWidgetGetWidgetListSelections,
     isSupported: mockAndroidWidgetIsSupported,
     setPayload: mockAndroidWidgetSetPayload,
     updateWidgets: mockAndroidWidgetUpdateWidgets,
@@ -117,6 +120,8 @@ describe('widget-service', () => {
         mockIosWidgetSetItem.mockReset();
         mockAndroidWidgetIsSupported.mockReset();
         mockAndroidWidgetIsSupported.mockReturnValue(true);
+        mockAndroidWidgetGetWidgetListSelections.mockReset();
+        mockAndroidWidgetGetWidgetListSelections.mockReturnValue([]);
         mockAndroidWidgetSetPayload.mockReset();
         mockAndroidWidgetUpdateWidgets.mockReset();
         mockUseTaskStoreGetState.mockReset();
@@ -172,6 +177,21 @@ describe('widget-service', () => {
             cancel: 'Cancel',
             added: 'Task added to Mindwtr.',
         });
+    });
+
+    it('builds only the lists placed widgets asked for, plus focus, and re-renders when the selection changes (#1173)', async () => {
+        const data = buildData(2);
+        data.tasks.push({ id: 'w1', title: 'Waiting on Sam', status: 'waiting', tags: [], contexts: [], createdAt: data.tasks[0].createdAt, updatedAt: data.tasks[0].updatedAt });
+        expect(await updateMobileWidgetFromData(data)).toBe(true);
+        expect(Object.keys(JSON.parse(mockAndroidWidgetSetPayload.mock.calls[0][0] as string).lists)).toEqual(['focus']);
+
+        mockAndroidWidgetGetWidgetListSelections.mockReturnValue(['waiting', 'project:missing']);
+        expect(await updateMobileWidgetFromData(data)).toBe(true);
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(2);
+        const payload = JSON.parse(mockAndroidWidgetSetPayload.mock.calls[1][0] as string);
+        expect(Object.keys(payload.lists)).toEqual(['focus', 'waiting']);
+        expect(payload.lists.waiting).toMatchObject({ title: 'Waiting For', items: [{ title: 'Waiting on Sam' }] });
+        expect(payload.listTitles).toMatchObject({ inbox: 'Inbox', next: 'Next Actions', someday: 'Someday/Maybe' });
     });
 
     it('localizes the capture dialog labels with the widget language', async () => {

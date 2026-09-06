@@ -81,6 +81,9 @@ function buildPayloadFromData(
     return buildWidgetPayload(data, language, {
         systemColorScheme: getSystemColorSchemeForWidget(),
         maxItems,
+        // Only the lists placed Android widgets asked for are built (#1173);
+        // folding them in here also puts them in the render fingerprint.
+        ...(Platform.OS === 'android' && AndroidWidget.isSupported() ? { listIds: AndroidWidget.getWidgetListSelections() } : {}),
     });
 }
 
@@ -107,6 +110,10 @@ async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, langua
         const payload: AndroidTasksWidgetPayload = {
             ...rendered,
             items: rendered.items.slice(0, ANDROID_WIDGET_MAX_ITEMS),
+            lists: Object.fromEntries(Object.entries(rendered.lists).map(([id, list]) => [id, {
+                ...list,
+                items: list.items.slice(0, ANDROID_WIDGET_MAX_ITEMS),
+            }])),
             quickCapture: buildAndroidQuickCaptureLabels(language),
         };
         AndroidWidget.setPayload(JSON.stringify(payload));

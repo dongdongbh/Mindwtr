@@ -26,6 +26,13 @@ class WidgetPayloadTest {
         {"key": "next", "title": "Next actions", "items": []},
         {"key": "upcoming", "title": "Upcoming", "items": [{"id": "b", "title": "Write report", "dueLabel": null, "dueEmphasis": false, "openUri": "mindwtr://open?task=b", "priorityColor": null, "contextLabel": null}]}
       ],
+      "lists": {
+        "focus": {"title": "Focus", "dateLabel": "Saturday, Sep 6", "sections": [{"key": "focus", "title": "Today's Focus", "items": [{"id": "a", "title": "Call the bank"}]}], "items": [{"id": "a", "title": "Call the bank"}]},
+        "waiting": {"title": "Waiting For", "items": [{"id": "w", "title": "Reply from Sam"}]},
+        "project:p1": {"title": "Launch", "sections": [{"key": "s1", "title": "Prep", "items": [{"id": "x", "title": "Book venue"}]}], "items": [{"id": "x", "title": "Book venue"}]}
+      },
+      "listTitles": {"focus": "Focus", "inbox": "Inbox", "next": "Next Actions", "waiting": "Waiting For", "someday": "Someday/Maybe", "projects": "Projects"},
+      "projects": [{"id": "p1", "title": "Launch", "identityColor": "#8b5cf6"}],
       "emptyMessage": "All clear",
       "focusUri": "mindwtr:///focus",
       "themeMode": "dark",
@@ -61,7 +68,7 @@ class WidgetPayloadTest {
     assertEquals(0xFF374151.toInt(), payload.palette!!.border)
     assertEquals(0xFFF59E0B.toInt(), payload.palette!!.warning)
     assertNull(payload.sections[1].items[0].contextLabel)
-    val rows = TasksWidgetFactory.buildRows(payload)
+    val rows = TasksWidgetFactory.buildRows(WidgetPayload.ListPayload("", null, payload.sections, payload.items))
     assertEquals(4, rows.size)
     assertTrue(rows[0] is TasksWidgetFactory.Row.Header && rows[1] is TasksWidgetFactory.Row.Task)
     assertEquals("Sat Sep 6", (rows[0] as TasksWidgetFactory.Row.Header).detail)
@@ -76,12 +83,25 @@ class WidgetPayloadTest {
 
   @Test
   fun flatItemsBackTheRowsWhenAPayloadCarriesNoSections() {
-    val payload = WidgetPayload.parse(JSONObject(sample).apply { remove("sections") }.toString())!!
+    val payload = WidgetPayload.parse(JSONObject(sample).apply { remove("sections"); remove("lists") }.toString())!!
 
-    val rows = TasksWidgetFactory.buildRows(payload)
+    val rows = TasksWidgetFactory.buildRows(payload.listFor("focus"))
 
     assertEquals(2, rows.size)
     assertTrue(rows.all { it is TasksWidgetFactory.Row.Task })
+  }
+
+  @Test
+  fun listsResolveToTheSelectionOrFallBackToFocus() {
+    val payload = WidgetPayload.parse(sample)!!
+
+    assertEquals(setOf("focus", "waiting", "project:p1"), payload.lists.keys)
+    assertEquals("Reply from Sam", payload.listFor("waiting").items[0].title)
+    assertEquals("Focus", payload.listFor("project:gone").title)
+    assertEquals("Prep", payload.listFor("project:p1").sections[0].title)
+    assertEquals(0xFF8B5CF6.toInt(), payload.projects[0].identityColor)
+    assertEquals("Projects", payload.listTitles["projects"])
+    assertEquals(2, TasksWidgetFactory.buildRows(payload.listFor("project:p1")).size)
   }
 
   @Test

@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 type AndroidWidgetModule = {
   setPayload(json: string): void;
   updateWidgets(): void;
+  getWidgetListSelections(): string[];
 };
 
 // Null in Expo Go and on every other platform; callers check isSupported().
@@ -23,4 +24,9 @@ export function setPayload(json: string): void {
 /** Redraw every placed home-screen widget from the stored payload. */
 export function updateWidgets(): void {
   nativeModule?.updateWidgets();
+}
+
+/** Distinct list ids the placed Tasks widgets are configured to show. */
+export function getWidgetListSelections(): string[] {
+  return nativeModule?.getWidgetListSelections() ?? [];
 }

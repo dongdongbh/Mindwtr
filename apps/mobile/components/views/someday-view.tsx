@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
+import { compareSomedayTasks } from '@/lib/list-order';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { TaskEditModal } from '../task-edit-modal';
@@ -57,9 +58,7 @@ export function SomedayView() {
 
   const somedayTasks = visibleTasks
     .filter((task) => task.status === 'someday')
-    .sort((a, b) => {
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
+    .sort(compareSomedayTasks);
   const deferredProjects = useMemo(
     () => selectDeferredProjects(projects, 'someday', resolvedAreaFilter, areaById),
     [projects, resolvedAreaFilter, areaById],

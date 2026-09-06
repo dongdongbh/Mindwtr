@@ -18,6 +18,9 @@ data class WidgetPayload(
   val inboxCount: Int,
   val items: List<Item>,
   val sections: List<Section>,
+  val lists: Map<String, ListPayload>,
+  val listTitles: Map<String, String>,
+  val projects: List<ProjectOption>,
   val emptyMessage: String,
   val focusUri: String,
   val themeMode: String,
@@ -39,6 +42,11 @@ data class WidgetPayload(
 
   /** A Focus screen section (#1173): title plus its rows, in screen order. */
   data class Section(val title: String, val detail: String?, val items: List<Item>)
+
+  /** One list a placed Tasks widget can show (#1173). */
+  data class ListPayload(val title: String, val dateLabel: String?, val sections: List<Section>, val items: List<Item>)
+
+  data class ProjectOption(val id: String, val title: String, val identityColor: Int?)
 
   data class Palette(
     val background: Int,
@@ -64,6 +72,10 @@ data class WidgetPayload(
 
   val subtitle: String get() = "$inboxLabel: $inboxCount"
 
+  /** The list a widget should draw: its selection when the payload has it, else the Focus list. */
+  fun listFor(listId: String): ListPayload =
+    lists[listId] ?: lists[WidgetListStore.DEFAULT_LIST] ?: ListPayload(headerTitle, dateLabel, sections, items)
+
   companion object {
     const val DEFAULT_FOCUS_URI = "mindwtr:///focus"
     const val MAX_ITEMS = 50
@@ -75,6 +87,9 @@ data class WidgetPayload(
       inboxCount = 0,
       items = emptyList(),
       sections = emptyList(),
+      lists = emptyMap(),
+      listTitles = emptyMap(),
+      projects = emptyList(),
       emptyMessage = "All clear",
       focusUri = DEFAULT_FOCUS_URI,
       themeMode = "system",
@@ -96,14 +111,28 @@ data class WidgetPayload(
       }
       val defaults = EMPTY
       val items = parseItems(root.optJSONArray("items"))
-      val sectionsJson = root.optJSONArray("sections")
-      val sections = ArrayList<Section>()
-      if (sectionsJson != null) {
-        for (index in 0 until sectionsJson.length()) {
-          val section = sectionsJson.optJSONObject(index) ?: continue
-          val sectionItems = parseItems(section.optJSONArray("items"))
-          if (sectionItems.isEmpty()) continue
-          sections.add(Section(section.stringOr("title", ""), section.optString("detail").trim().takeIf { it.isNotEmpty() && !section.isNull("detail") }, sectionItems))
+      val sections = parseSections(root.optJSONArray("sections"))
+      val lists = LinkedHashMap<String, ListPayload>()
+      root.optJSONObject("lists")?.let { listsJson ->
+        for (key in listsJson.keys()) {
+          val list = listsJson.optJSONObject(key) ?: continue
+          lists[key] = ListPayload(
+            title = list.stringOr("title", key),
+            dateLabel = list.optString("dateLabel").trim().takeIf { it.isNotEmpty() && !list.isNull("dateLabel") },
+            sections = parseSections(list.optJSONArray("sections")),
+            items = parseItems(list.optJSONArray("items")),
+          )
+        }
+      }
+      val listTitles = LinkedHashMap<String, String>()
+      root.optJSONObject("listTitles")?.let { titles -> for (key in titles.keys()) listTitles[key] = titles.optString(key) }
+      val projects = ArrayList<ProjectOption>()
+      root.optJSONArray("projects")?.let { list ->
+        for (index in 0 until list.length()) {
+          val project = list.optJSONObject(index) ?: continue
+          val id = project.optString("id").trim()
+          if (id.isEmpty()) continue
+          projects.add(ProjectOption(id, project.stringOr("title", id), parseHexColor(project.optString("identityColor"))))
         }
       }
       // Only the app's own routes may be launched from a tap.
@@ -123,12 +152,27 @@ data class WidgetPayload(
         inboxCount = maxOf(0, root.optInt("inboxCount", 0)),
         items = items,
         sections = sections,
+        lists = lists,
+        listTitles = listTitles,
+        projects = projects,
         emptyMessage = root.stringOr("emptyMessage", defaults.emptyMessage),
         focusUri = focusUri,
         themeMode = root.stringOr("themeMode", "system"),
         palette = parsePalette(root.optJSONObject("palette")),
         quickCapture = quickCapture,
       )
+    }
+
+    private fun parseSections(json: JSONArray?): List<Section> {
+      val sections = ArrayList<Section>()
+      if (json == null) return sections
+      for (index in 0 until json.length()) {
+        val section = json.optJSONObject(index) ?: continue
+        val sectionItems = parseItems(section.optJSONArray("items"))
+        if (sectionItems.isEmpty()) continue
+        sections.add(Section(section.stringOr("title", ""), section.optString("detail").trim().takeIf { it.isNotEmpty() && !section.isNull("detail") }, sectionItems))
+      }
+      return sections
     }
 
     private fun parseItems(json: JSONArray?): List<Item> {

@@ -68,11 +68,12 @@ object WidgetRenderer {
     payload: WidgetPayload,
     palette: WidgetPayload.Palette?,
   ) {
-    // Header band: the date, the Inbox chip and "+"; the sections carry the titles.
-    views.setTextViewText(R.id.mindwtr_widget_title, payload.dateLabel.ifEmpty { payload.headerTitle })
+    // Header band: the list's title (the date for Focus), the Inbox chip and "+".
+    val list = payload.listFor(WidgetListStore.read(context, appWidgetId))
+    views.setTextViewText(R.id.mindwtr_widget_title, list.dateLabel?.ifEmpty { null } ?: list.title)
     views.setTextViewText(R.id.mindwtr_widget_subtitle, "${payload.inboxLabel} ${payload.inboxCount}")
     views.setTextViewText(R.id.mindwtr_widget_empty, payload.emptyMessage)
-    views.setViewVisibility(R.id.mindwtr_widget_empty, if (payload.items.isEmpty()) View.VISIBLE else View.GONE)
+    views.setViewVisibility(R.id.mindwtr_widget_empty, if (list.items.isEmpty() && list.sections.isEmpty()) View.VISIBLE else View.GONE)
 
     val adapterIntent = Intent(context, TasksWidgetService::class.java).apply {
       putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
