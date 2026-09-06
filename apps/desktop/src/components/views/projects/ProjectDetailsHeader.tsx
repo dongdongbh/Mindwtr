@@ -159,8 +159,15 @@ export function ProjectDetailsHeader({
         action();
     };
 
+    // .project-details-header is a size container (index.css), which makes it a stacking
+    // context: the menu's z-40 only competes inside the header, and the sticky task toolbar
+    // rendered after it (z-20) paints over the open menu. Lift the whole header above the
+    // toolbar only while a popover is open, so the header still scrolls under the toolbar
+    // the rest of the time.
+    const popoverOpen = menuOpen || projectTypeHelpOpen;
+
     return (
-        <header className="project-details-header pb-3 border-b border-border/50">
+        <header className={`project-details-header pb-3 border-b border-border/50 ${popoverOpen ? 'relative z-30' : ''}`}>
             <div className="project-details-header__content flex items-center justify-between gap-3">
                 <div className="project-details-header__titleGroup flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 flex-1">
                     <span

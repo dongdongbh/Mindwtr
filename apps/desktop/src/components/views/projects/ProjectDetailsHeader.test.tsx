@@ -183,6 +183,38 @@ describe('ProjectDetailsHeader', () => {
         expect(onReactivate).toHaveBeenCalledTimes(1);
     });
 
+    // The header is a size container, so it is its own stacking context and the sticky task
+    // toolbar rendered after it would paint over an open menu (reported from a 1.2.8 build).
+    it('lifts the header above the sticky toolbar only while the menu is open', () => {
+        render(
+            <ProjectDetailsHeader
+                project={buildProject()}
+                projectColor="#2563eb"
+                isSequential={false}
+                editTitle="Launch site"
+                onEditTitleChange={vi.fn()}
+                onCommitTitle={vi.fn()}
+                onResetTitle={vi.fn()}
+                detailsExpanded={false}
+                onToggleDetails={vi.fn()}
+                onDuplicate={vi.fn()}
+                onArchive={vi.fn()}
+                onReactivate={vi.fn()}
+                onDelete={vi.fn()}
+                t={t}
+            />
+        );
+        const header = screen.getByDisplayValue('Launch site').closest('.project-details-header');
+        expect(header).not.toHaveClass('z-30');
+
+        openMenu();
+        expect(screen.getByRole('menu')).toBeInTheDocument();
+        expect(header).toHaveClass('relative', 'z-30');
+
+        fireEvent.keyDown(window, { key: 'Escape' });
+        expect(header).not.toHaveClass('z-30');
+    });
+
     it('uses a container-responsive header layout so actions cannot hide long project titles', () => {
         render(
             <ProjectDetailsHeader
