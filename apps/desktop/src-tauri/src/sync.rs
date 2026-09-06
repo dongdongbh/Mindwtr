@@ -9427,7 +9427,7 @@ mod tests {
 
         let request = request_receiver.recv().expect("captured request");
         assert!(
-            request.contains("Accept-Encoding: identity"),
+            request.to_ascii_lowercase().contains("accept-encoding: identity"),
             "WebDAV reads must ask for the bytes as stored; got: {request}"
         );
     }
