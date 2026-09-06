@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { CalendarDays, CalendarX, ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import {
     addCalendarMonths,
     formatCalendarInputDate,
@@ -21,7 +21,7 @@ import {
 
 import { cn } from '../../lib/utils';
 import { usePointerPress } from '../../hooks/usePointerPress';
-import { QuickAddTokenBadge, taskEditorLabelClassName } from '../Task/task-editor-label';
+import { QuickAddTokenBadge, TaskEditorFieldLabel } from '../Task/task-editor-label';
 import { normalizeDateInputValue } from '../Task/task-item-helpers';
 import { QUICK_DATE_LABELS } from '../QuickDateChips';
 
@@ -201,6 +201,8 @@ type DateFieldProps = {
     t: (key: string) => string;
     /** Rendered above the input. Omit when the host already labels the field. */
     label?: string;
+    /** Leading icon for the rendered label, per the shared editor vocabulary. */
+    labelIcon?: LucideIcon;
     labelToken?: string;
     dateAriaLabel: string;
     dateValue: string;
@@ -230,6 +232,7 @@ type DateFieldProps = {
 export function DateField({
     t,
     label,
+    labelIcon,
     labelToken,
     dateAriaLabel,
     dateValue,
@@ -413,10 +416,10 @@ export function DateField({
             }}
         >
             {label ? (
-                <label className={`${taskEditorLabelClassName} inline-flex items-center gap-1.5`}>
+                <TaskEditorFieldLabel icon={labelIcon}>
                     {label}
                     {labelToken && <QuickAddTokenBadge t={t} token={labelToken} />}
-                </label>
+                </TaskEditorFieldLabel>
             ) : null}
             <div className="flex w-full items-center gap-2">
                 <div className="relative min-w-0 flex-1">
@@ -485,8 +488,9 @@ export function DateField({
                         }}
                         className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                         aria-label={`${clearText} ${accessibleName}`}
+                        title={`${clearText} ${accessibleName}`}
                     >
-                        <X className="h-4 w-4" />
+                        <CalendarX className="h-4 w-4" aria-hidden="true" />
                     </button>
                 ) : (
                     <span aria-hidden="true" className="h-7 w-7 shrink-0" />

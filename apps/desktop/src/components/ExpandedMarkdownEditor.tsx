@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
-import { X } from 'lucide-react';
+import { Eye, Pencil, X } from 'lucide-react';
 
 import { cn } from '../lib/utils';
 import { MarkdownFormatToolbar } from './MarkdownFormatToolbar';
@@ -112,9 +112,13 @@ export function ExpandedMarkdownEditor({
                     <button
                         type="button"
                         onClick={() => setMode((prev) => (prev === 'edit' ? 'preview' : 'edit'))}
-                        className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40"
+                        aria-label={mode === 'edit' ? t('markdown.preview') : t('markdown.edit')}
+                        title={mode === 'edit' ? t('markdown.preview') : t('markdown.edit')}
+                        className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
                     >
-                        {mode === 'edit' ? t('markdown.preview') : t('markdown.edit')}
+                        {mode === 'edit'
+                            ? <Eye className="h-4 w-4" aria-hidden="true" />
+                            : <Pencil className="h-4 w-4" aria-hidden="true" />}
                     </button>
                     <button
                         ref={closeButtonRef}

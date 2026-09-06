@@ -1,10 +1,14 @@
-import { BookOpen, Edit3, Link2, Paperclip } from 'lucide-react';
+import { BookOpen, Link2, Paperclip, Pencil, Trash2 } from 'lucide-react';
 import { tFallback, type Attachment } from '@mindwtr/core';
 import { useBareFileReferenceCheck, useExternalFileReferenceCheck } from '../../../lib/attachment-reference';
 import { getAttachmentDisplayTitle } from '../../../lib/attachment-utils';
 import { isImageAttachment } from '../task-item-attachment-utils';
 import { AttachmentImage } from '../AttachmentImage';
-import { QUICK_ADD_FIELD_TOKENS, QuickAddTokenBadge, taskEditorLabelClassName } from '../task-editor-label';
+import { QUICK_ADD_FIELD_TOKENS, QuickAddTokenBadge, TaskEditorFieldLabel } from '../task-editor-label';
+
+// Secondary add actions share one bordered blue shape with the checklist's
+// "Add item" control so every way to grow a task reads the same.
+const taskEditorAddButtonClassName = 'inline-flex h-7 items-center gap-1.5 rounded-md border border-primary/30 px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10';
 
 type AttachmentsFieldProps = {
     t: (key: string) => string;
@@ -53,34 +57,34 @@ export function AttachmentsField({
     return (
         <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-                <label className={`${taskEditorLabelClassName} inline-flex items-center gap-1.5`}>
+                <TaskEditorFieldLabel icon={Paperclip}>
                     {t('attachments.title')}
                     <QuickAddTokenBadge t={t} token={QUICK_ADD_FIELD_TOKENS.link} />
-                </label>
+                </TaskEditorFieldLabel>
                 <div className="flex items-center gap-2">
                     <button
                         type="button"
                         onClick={addFileAttachment}
-                        className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors flex items-center gap-1"
+                        className={taskEditorAddButtonClassName}
                     >
-                        <Paperclip className="w-3 h-3" />
+                        <Paperclip className="w-3.5 h-3.5" aria-hidden="true" />
                         {t('attachments.addFile')}
                     </button>
                     <button
                         type="button"
                         onClick={addLinkAttachment}
-                        className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors flex items-center gap-1"
+                        className={taskEditorAddButtonClassName}
                     >
-                        <Link2 className="w-3 h-3" />
+                        <Link2 className="w-3.5 h-3.5" aria-hidden="true" />
                         {t('attachments.addLink')}
                     </button>
                     {showObsidianNoteAttachment && (
                         <button
                             type="button"
                             onClick={addObsidianNoteAttachment}
-                            className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors flex items-center gap-1"
+                            className={taskEditorAddButtonClassName}
                         >
-                            <BookOpen className="w-3 h-3" />
+                            <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
                             {t('attachments.attachObsidianNote')}
                         </button>
                     )}
@@ -130,23 +134,26 @@ export function AttachmentsField({
                                             >
                                                 {displayTitle}
                                             </button>
-                                            <div className="flex shrink-0 items-center gap-2">
+                                            <div className="flex shrink-0 items-center gap-1">
                                                 {canEditAsLink(attachment) && (
                                                     <button
                                                         type="button"
                                                         onClick={() => editLinkAttachment(attachment)}
-                                                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                                                        aria-label={t('common.edit')}
+                                                        title={t('common.edit')}
+                                                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                                     >
-                                                        <Edit3 className="h-3 w-3" />
-                                                        {t('common.edit')}
+                                                        <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
                                                     </button>
                                                 )}
                                                 <button
                                                     type="button"
                                                     onClick={() => removeAttachment(attachment.id)}
-                                                    className="text-muted-foreground hover:text-foreground"
+                                                    aria-label={t('attachments.remove')}
+                                                    title={t('attachments.remove')}
+                                                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                                 >
-                                                    {t('attachments.remove')}
+                                                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                                                 </button>
                                             </div>
                                         </div>
@@ -178,23 +185,26 @@ export function AttachmentsField({
                                         {displayTitle}
                                     </button>
                                 </div>
-                                <div className="flex shrink-0 items-center gap-2">
+                                <div className="flex shrink-0 items-center gap-1">
                                     {canEditAsLink(attachment) && (
                                         <button
                                             type="button"
                                             onClick={() => editLinkAttachment(attachment)}
-                                            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                                            aria-label={t('common.edit')}
+                                            title={t('common.edit')}
+                                            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                         >
-                                            <Edit3 className="h-3 w-3" />
-                                            {t('common.edit')}
+                                            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
                                         </button>
                                     )}
                                     <button
                                         type="button"
                                         onClick={() => removeAttachment(attachment.id)}
-                                        className="text-muted-foreground hover:text-foreground"
+                                        aria-label={t('attachments.remove')}
+                                        title={t('attachments.remove')}
+                                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                     >
-                                        {t('attachments.remove')}
+                                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                                     </button>
                                 </div>
                             </div>

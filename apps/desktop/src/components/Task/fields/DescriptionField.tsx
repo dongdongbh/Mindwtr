@@ -1,5 +1,5 @@
 import { type ClipboardEvent, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
-import { Loader2, Maximize2, Mic, Square } from 'lucide-react';
+import { AlignLeft, Eye, Loader2, Maximize2, Mic, Pencil, Square } from 'lucide-react';
 import { tFallback, type MarkdownSelection, type MarkdownToolbarActionId, type MarkdownToolbarResult } from '@mindwtr/core';
 
 import { cn } from '../../../lib/utils';
@@ -8,7 +8,7 @@ import { MarkdownFormatToolbar } from '../../MarkdownFormatToolbar';
 import { MarkdownReferenceAutocompleteMenu, useMarkdownReferenceAutocomplete } from '../../MarkdownReferenceAutocomplete';
 import { RichMarkdown } from '../../RichMarkdown';
 import { AutosizeTextarea } from '../../ui/AutosizeTextarea';
-import { QUICK_ADD_FIELD_TOKENS, QuickAddTokenBadge, taskEditorLabelClassName } from '../task-editor-label';
+import { QUICK_ADD_FIELD_TOKENS, QuickAddTokenBadge, TaskEditorFieldLabel } from '../task-editor-label';
 
 type DescriptionAudioState = 'idle' | 'recording' | 'transcribing';
 
@@ -89,14 +89,18 @@ export function DescriptionField({
     const descriptionAudioLabel = descriptionAudioState === 'recording'
         ? tFallback(t, 'taskEdit.descriptionAudioStop', 'Stop dictation')
         : tFallback(t, 'taskEdit.descriptionAudio', 'Dictate description');
+    // The toolbar toggle switches between editing and previewing the rendered
+    // markdown. The mode it offers next is announced by its label (Preview when
+    // editing, Edit when previewing); the button itself is icon-only.
+    const descriptionModeToggleLabel = showDescriptionPreview ? t('markdown.edit') : t('markdown.preview');
 
     return (
         <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-                <label className={`${taskEditorLabelClassName} inline-flex items-center gap-1.5`}>
+                <TaskEditorFieldLabel icon={AlignLeft}>
                     {t('taskEdit.descriptionLabel')}
                     <QuickAddTokenBadge t={t} token={QUICK_ADD_FIELD_TOKENS.note} />
-                </label>
+                </TaskEditorFieldLabel>
                 <div className="flex items-center gap-2">
                     <button
                         type="button"
@@ -120,9 +124,13 @@ export function DescriptionField({
                     <button
                         type="button"
                         onClick={onTogglePreview}
-                        className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors text-muted-foreground"
+                        aria-label={descriptionModeToggleLabel}
+                        title={descriptionModeToggleLabel}
+                        className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                     >
-                        {showDescriptionPreview ? t('markdown.edit') : t('markdown.preview')}
+                        {showDescriptionPreview
+                            ? <Pencil className="h-4 w-4" aria-hidden="true" />
+                            : <Eye className="h-4 w-4" aria-hidden="true" />}
                     </button>
                     <button
                         type="button"

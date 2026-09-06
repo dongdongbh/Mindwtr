@@ -1,6 +1,32 @@
+import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { formatI18nTemplate, tFallback } from '@mindwtr/core';
 
+import { cn } from '../../lib/utils';
+
 export const taskEditorLabelClassName = 'text-xs text-muted-foreground font-semibold';
+
+/**
+ * Sub-heading label shared by every desktop task-editor field. Renders an
+ * optional leading icon (muted like the label, sized to the text-xs heading)
+ * before the field's label text, which stays visible and is never hidden.
+ */
+export function TaskEditorFieldLabel({
+    icon: Icon,
+    className,
+    children,
+}: {
+    icon?: LucideIcon;
+    className?: string;
+    children: ReactNode;
+}) {
+    return (
+        <label className={cn(taskEditorLabelClassName, 'inline-flex items-center gap-1.5', className)}>
+            {Icon ? <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" /> : null}
+            {children}
+        </label>
+    );
+}
 
 // Quick-add tokens each editor field maps to, verified against parseQuickAdd
 // (packages/core/src/quick-add.ts). Fields whose token the parser does not
