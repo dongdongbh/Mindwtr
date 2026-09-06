@@ -4,6 +4,7 @@ Changes collected after `v1.2.8` and before the next version tag.
 
 ## Full Change List
 
+- Desktop: WebDAV sync no longer loops forever with "remote-write-conflict" when the server sits behind a compressing proxy (Nextcloud on Apache with mod_deflate, nginx gzip, Cloudflare). The desktop now asks the server for the stored bytes, so the ETag it reads is the one the server accepts on the next conditional write, the same way the mobile and web clients already did. The sync log's requeue line also names the server's rejection. Contributed by Kombustor. (#1170)
 - Android and iOS: the details line under a task (project, context, tag, dates, recurrence) no longer separates items with a "·". Spacing alone keeps them apart, so a wrapped details line can no longer start with a lone dot. (#1161)
 - Android: joining a File Sync folder (Syncthing, a mounted drive) no longer fails with "Candidate attachment proof failed … the file could not be fetched from the new sync location" when the folder does not yet hold one of the attachment files. The phone now keeps the attachment marked missing and picks the file up on a later sync once it arrives, the same way the desktop has since 1.2.8.
 - iOS: iCloud sync recovers after you clear Mindwtr's data in iCloud settings. The app used to remember that its iCloud zone existed and never created it again, so every sync failed with "zone was cleared by user" until you reinstalled. It now recreates the zone the first time iCloud reports it gone, reads it in full, and uploads this device's data again.

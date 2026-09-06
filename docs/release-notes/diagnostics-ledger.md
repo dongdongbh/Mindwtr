@@ -6,7 +6,7 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ## General (keep)
 
-- Sync trail: `Sync start`, `Sync step`, `Sync read check found no changes`, `Sync diagnostic complete` (core `sync-run.ts`, both apps).
+- Sync trail: `Sync start`, `Sync step`, `Sync read check found no changes`, `Sync diagnostic complete` (core `sync-run.ts`, both apps). `Sync cycle requeued` carries `reason` and, since #1170, `detail` = the transport's own message (for a WebDAV 412: `WEBDAV_REMOTE_WRITE_CONFLICT: WebDAV document changed before replacement (412)`), so a server rejecting its own ETag shows in one line.
 - `[sync-encryption]` state / remote-read / transition / error / activation (core + both apps).
 - `Mobile background sync started` / `finished` / `run took longer than a minute` (`apps/mobile/lib/background-sync-task.ts`, #1001).
 - `Mobile background sync registered` with interval (same file).

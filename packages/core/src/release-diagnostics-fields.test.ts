@@ -28,6 +28,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'connectTimeoutMs',
     // fence-mutation-horizon (packages/core/src/sync-remote-fence.ts)
     'horizonMs', 'remainingMs',
+    // Sync cycle requeued (General trail, #1170)
+    'reason', 'detail',
 ];
 
 describe('release diagnostics field names', () => {
