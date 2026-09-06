@@ -12,11 +12,16 @@ export type LocalSyncAbortReason = 'local-data-changed' | 'remote-write-conflict
 
 export class LocalSyncAbort extends Error {
     readonly reason: LocalSyncAbortReason;
+    /** Transport-provided context for the abort, e.g. the HTTP status a WebDAV
+     *  conditional write was rejected with. Surfaced in the requeue log so a
+     *  server rejecting its own ETags (mod_deflate ETag mutation) is visible. */
+    readonly detail: string | null;
 
-    constructor(reason: LocalSyncAbortReason = 'local-data-changed') {
+    constructor(reason: LocalSyncAbortReason = 'local-data-changed', detail?: string) {
         super('Local changes detected during sync');
         this.name = 'LocalSyncAbort';
         this.reason = reason;
+        this.detail = detail ?? null;
     }
 }
 

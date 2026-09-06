@@ -1545,7 +1545,9 @@ describe('runSharedSyncCycle', () => {
             remote: createData([createTask('t-remote', 'Remote task')]),
             io: {
                 writeRemote: vi.fn(async () => {
-                    throw new SyncRemoteWriteConflict();
+                    throw new SyncRemoteWriteConflict(
+                        'WEBDAV_REMOTE_WRITE_CONFLICT: WebDAV document changed before replacement (412)',
+                    );
                 }),
             },
         });
@@ -1558,9 +1560,14 @@ describe('runSharedSyncCycle', () => {
         expect(harness.diagnostics).toContain('requeued');
         // Desktop has no diagnostics sink: the requeue must also reach the plain
         // log with its reason, or a never-converging activation probe is invisible.
+        // The transport detail (e.g. the rejecting HTTP status) rides along so a
+        // server that breaks its own ETag chain shows up in one log line.
         expect(harness.infos).toContainEqual(expect.objectContaining({
             message: 'Sync cycle requeued',
-            extra: expect.objectContaining({ reason: 'remote-write-conflict' }),
+            extra: expect.objectContaining({
+                reason: 'remote-write-conflict',
+                detail: 'WEBDAV_REMOTE_WRITE_CONFLICT: WebDAV document changed before replacement (412)',
+            }),
         }));
     });
 
