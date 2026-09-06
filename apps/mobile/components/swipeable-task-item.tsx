@@ -489,9 +489,11 @@ function SwipeableTaskItemInner({
     const getLeftAction = (): { label: string; color: string; action: TaskStatus } => {
         if (task.status === 'done') {
             return { label: tFallback(t, 'archived.restoreToInbox', 'Restore'), color: statusColors.inbox.text, action: 'inbox' };
-        } else if (task.status === 'next') {
+        } else if (task.status === 'next' || task.status === 'waiting') {
+            // A Waiting For item completes when the other person delivers;
+            // the status menu still offers Next for the rarer re-take (#1164).
             return { label: tFallback(t, 'common.done', 'Done'), color: statusColors.done.text, action: 'done' };
-        } else if (task.status === 'waiting' || task.status === 'someday' || task.status === 'reference') {
+        } else if (task.status === 'someday' || task.status === 'reference') {
             return { label: tFallback(t, 'status.next', 'Next'), color: statusColors.next.text, action: 'next' };
         } else if (task.status === 'inbox') {
             return { label: tFallback(t, 'status.next', 'Next'), color: statusColors.next.text, action: 'next' };

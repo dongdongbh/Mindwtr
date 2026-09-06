@@ -1220,6 +1220,48 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(hasText(tree, 'Completed: May 12, 2026, 8:30 AM')).toBe(true);
   });
 
+  // #1164: Waiting For completes from the quick action; Someday still promotes to Next.
+  it.each([
+    ['waiting', 'Done action', 'done'],
+    ['someday', 'Next action', 'next'],
+  ] as const)('quick status action on a %s task is %s', (status, actionLabel, expectedStatus) => {
+    const onStatusChange = vi.fn();
+
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(
+        <SwipeableTaskItem
+          task={{
+            id: 'task-1',
+            title: 'Plan release',
+            status,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          } as any}
+          isDark={false}
+          tc={{
+            taskItemBg: '#111111',
+            border: '#222222',
+            text: '#ffffff',
+            secondaryText: '#999999',
+            tint: '#3b82f6',
+            warning: '#f59e0b',
+          } as any}
+          onPress={vi.fn()}
+          onStatusChange={onStatusChange}
+          onDelete={vi.fn()}
+        />
+      );
+    });
+
+    const action = tree.root.find((node) => node.props.accessibilityLabel === actionLabel && typeof node.props.onPress === 'function');
+    renderer.act(() => {
+      action.props.onPress();
+    });
+
+    expect(onStatusChange).toHaveBeenCalledWith(expectedStatus);
+  });
+
   it('announces the localized accessibility action menu and triggers status actions', () => {
     const onStatusChange = vi.fn();
 

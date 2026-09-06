@@ -379,45 +379,47 @@ describe('TaskItemDisplay', () => {
         expect(getByText('Daily · Repeat every 3 day(s)')).toBeInTheDocument();
     });
 
-    it('promotes waiting and someday tasks to Next from the quick action instead of completing them', () => {
-        for (const status of ['waiting', 'someday'] as const) {
-            const onStatusChange = vi.fn();
-            const { getByRole, queryByRole, unmount } = render(
-                <LanguageProvider>
-                    <TaskItemDisplay
-                        task={{ ...baseTask, status }}
-                        language="en"
-                        selectionMode={false}
-                        isViewOpen={false}
-                        actions={{
-                            onToggleView: vi.fn(),
-                            onEdit: vi.fn(),
-                            onDelete: vi.fn(),
-                            onDuplicate: vi.fn(),
-                            onStatusChange,
-                            openAttachment: vi.fn(),
-                        }}
-                        visibleAttachments={[]}
-                        recurrenceRule=""
-                        recurrenceStrategy="strict"
-                        prioritiesEnabled={false}
-                        timeEstimatesEnabled={false}
-                        isStagnant={false}
-                        showQuickDone
-                        readOnly={false}
-                        t={(key: string) => ({
-                            'status.next': 'Next',
-                            'status.done': 'Done',
-                        }[key] ?? key)}
-                    />
-                </LanguageProvider>
-            );
+    // #1164: Waiting For completes from the quick action; Someday still promotes.
+    it.each([
+        ['waiting', 'Done', 'done', 'Next'],
+        ['someday', 'Next', 'next', 'Done'],
+    ] as const)('quick action on a %s task offers %s', (status, buttonName, expectedStatus, absentButton) => {
+        const onStatusChange = vi.fn();
+        const { getByRole, queryByRole, unmount } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={{ ...baseTask, status }}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView: vi.fn(),
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange,
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone
+                    readOnly={false}
+                    t={(key: string) => ({
+                        'status.next': 'Next',
+                        'status.done': 'Done',
+                    }[key] ?? key)}
+                />
+            </LanguageProvider>
+        );
 
-            fireEvent.click(getByRole('button', { name: 'Next' }));
-            expect(onStatusChange).toHaveBeenCalledWith('next');
-            expect(queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
-            unmount();
-        }
+        fireEvent.click(getByRole('button', { name: buttonName }));
+        expect(onStatusChange).toHaveBeenCalledWith(expectedStatus);
+        expect(queryByRole('button', { name: absentButton })).not.toBeInTheDocument();
+        unmount();
     });
 
     // #1155: the row status menu listed Reference only for a task that already

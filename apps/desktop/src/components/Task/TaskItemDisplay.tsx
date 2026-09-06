@@ -616,9 +616,11 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const inlineLeftControls = !actionsOverlay && (showQuickDoneButton || dragHandle);
     const showActionTags = !actionsOverlay && !isViewOpen && task.tags.length > 0;
 
-    // Waiting/Someday tasks promote to Next instead of completing — the natural
+    // Someday tasks promote to Next instead of completing — the natural
     // transition when an item unblocks, matching the mobile swipe action.
-    const quickActionIsPromote = task.status === 'waiting' || task.status === 'someday';
+    // Waiting For completes: the other person delivered, so the item is done
+    // rather than back on your plate (#1164). The status menu still offers Next.
+    const quickActionIsPromote = task.status === 'someday';
     const canBackdateComplete = !quickActionIsPromote && Boolean(onRequestBackdatedComplete);
     const quickDoneButton = (
         <button
@@ -633,7 +635,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                 onRequestBackdatedComplete?.();
             } : undefined}
             title={quickActionIsPromote
-                ? tFallback(t, task.status === 'waiting' ? 'waiting.moveToNext' : 'someday.moveToNext', 'Move to Next')
+                ? tFallback(t, 'someday.moveToNext', 'Move to Next')
                 : canBackdateComplete
                     ? tFallback(t, 'task.completeBackdateHint', 'Right-click to complete with a different time')
                     : undefined}
