@@ -70,16 +70,18 @@ class TasksWidgetFactory(
   private fun taskRow(item: WidgetPayload.Item, palette: WidgetPayload.Palette?): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.mindwtr_widget_item)
     val mutedText = palette?.mutedText ?: context.getColor(R.color.mindwtr_widget_muted_text)
-    val pending = item.id.isNotEmpty() && CheckoffStore.isPending(context, item.id)
-    views.setTextViewText(R.id.mindwtr_widget_item_title, if (pending) struck(item.title) else item.title)
+    val struck = item.id.isNotEmpty() && CheckoffStore.isStruck(context, item.id)
+    views.setTextViewText(R.id.mindwtr_widget_item_title, if (struck) struck(item.title) else item.title)
     // Priority ring: the priority colour, grey when the task has none; filled
-    // only while a check-off waits for its undo window.
+    // while a check-off waits for its undo window or for the app to ingest it.
     views.setImageViewResource(
       R.id.mindwtr_widget_item_priority,
-      if (pending) R.drawable.mindwtr_widget_circle else R.drawable.mindwtr_widget_ring,
+      if (struck) R.drawable.mindwtr_widget_circle else R.drawable.mindwtr_widget_ring,
     )
     views.setInt(R.id.mindwtr_widget_item_priority, "setColorFilter", item.priorityColor ?: mutedText)
-    if (item.id.isNotEmpty()) {
+    // A committed row has no ring action left (the completion is queued); its
+    // tap falls through to the row and opens the task like any other.
+    if (item.id.isNotEmpty() && !CheckoffStore.isCommitted(context, item.id)) {
       views.setOnClickFillInIntent(R.id.mindwtr_widget_item_ring_target, Intent().setData(Uri.parse(WidgetTapActivity.checkoffUri(item.id))))
     }
     val contextLabel = item.contextLabel

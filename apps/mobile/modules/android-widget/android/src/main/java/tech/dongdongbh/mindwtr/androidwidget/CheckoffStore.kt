@@ -16,9 +16,17 @@ import android.os.SystemClock
  * the app completes it through the store when it next runs. The commit runs
  * from a main-thread Handler (~3 s), an inexact alarm (~15 s) if the process
  * died first, and a sweep on every widget update.
+ *
+ * A committed task stays struck through (`committed` set) until the app has
+ * ingested it and republished a payload without it; the commit itself never
+ * redraws the widget. Redrawing a collection widget from a background Handler
+ * broke the app-side collection cache on Android 16 (ColorOS): every later
+ * update was silently dropped until the process restarted, which read as
+ * "I cannot undo and cannot check any other task".
  */
 object CheckoffStore {
   const val PREFS_NAME = "mindwtr_widget_checkoff"
+  const val COMMITTED_PREFS_NAME = "mindwtr_widget_checkoff_committed"
   const val UNDO_WINDOW_MS = 3_000L
   const val ACTION_SWEEP = "tech.dongdongbh.mindwtr.androidwidget.CHECKOFF_SWEEP"
   private const val HANDLER_DELAY_MS = 3_200L
@@ -35,8 +43,31 @@ object CheckoffStore {
 
   fun isPending(context: Context, taskId: String): Boolean = pending(context).containsKey(taskId)
 
-  /** Marks or, when already pending, un-marks (undo). Returns true when now pending. */
+  fun committed(context: Context): Set<String> =
+    context.getSharedPreferences(COMMITTED_PREFS_NAME, Context.MODE_PRIVATE).all.keys
+
+  fun isCommitted(context: Context, taskId: String): Boolean = committed(context).contains(taskId)
+
+  /** Struck through on the widget: waiting for its undo window, or queued and not yet ingested. */
+  fun isStruck(context: Context, taskId: String): Boolean = isPending(context, taskId) || isCommitted(context, taskId)
+
+  /**
+   * Forgets committed ids the payload no longer lists: the app ingested them (or
+   * the task went away). Called on every render so the set cannot grow forever.
+   */
+  fun prune(context: Context, presentTaskIds: Set<String>) {
+    val current = committed(context)
+    val keep = pruned(current, presentTaskIds)
+    if (keep.size == current.size) return
+    writeCommitted(context, keep)
+  }
+
+  fun pruned(committed: Set<String>, presentTaskIds: Set<String>): Set<String> =
+    committed.filterTo(HashSet()) { it in presentTaskIds }
+
+  /** Marks or, when already pending, un-marks (undo). Returns true when now pending. A committed task is left alone. */
   fun toggle(context: Context, taskId: String, now: Long = System.currentTimeMillis()): Boolean {
+    if (isCommitted(context, taskId)) return true
     val next = toggled(pending(context), taskId, now)
     write(context, next)
     val nowPending = next.containsKey(taskId)
@@ -50,11 +81,14 @@ object CheckoffStore {
     val due = expired(current, now, UNDO_WINDOW_MS)
     if (due.isEmpty()) return false
     val remaining = current.toMutableMap()
+    val done = committed(context).toMutableSet()
     for (taskId in due) {
       PendingCaptureWriter.writeCompletion(context.filesDir, taskId)
       remaining.remove(taskId)
+      done.add(taskId)
     }
     write(context, remaining)
+    writeCommitted(context, done)
     if (remaining.isNotEmpty()) scheduleCommit(context)
     return true
   }
@@ -65,6 +99,12 @@ object CheckoffStore {
   fun expired(pending: Map<String, Long>, now: Long, windowMs: Long): List<String> =
     pending.filter { (_, tappedAt) -> now - tappedAt >= windowMs }.keys.sorted()
 
+  private fun writeCommitted(context: Context, committed: Set<String>) {
+    val editor = context.getSharedPreferences(COMMITTED_PREFS_NAME, Context.MODE_PRIVATE).edit().clear()
+    for (taskId in committed) editor.putBoolean(taskId, true)
+    editor.commit()
+  }
+
   private fun write(context: Context, pending: Map<String, Long>) {
     val editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear()
     for ((taskId, tappedAt) in pending) editor.putLong(taskId, tappedAt)
@@ -74,7 +114,9 @@ object CheckoffStore {
   private fun scheduleCommit(context: Context) {
     val app = context.applicationContext
     handler.removeCallbacksAndMessages(null)
-    handler.postDelayed({ if (sweep(app)) WidgetRenderer.refreshAll(app) }, HANDLER_DELAY_MS)
+    // Sweep only: the row is already struck through, and a redraw from here
+    // (background process, no activity) is what broke later updates.
+    handler.postDelayed({ sweep(app) }, HANDLER_DELAY_MS)
     val alarm = app.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
     val intent = Intent(app, TasksWidgetProvider::class.java).setAction(ACTION_SWEEP)
     val pendingIntent = PendingIntent.getBroadcast(

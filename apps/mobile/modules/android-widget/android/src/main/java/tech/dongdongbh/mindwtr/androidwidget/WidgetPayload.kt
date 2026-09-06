@@ -74,6 +74,19 @@ data class WidgetPayload(
 
   val subtitle: String get() = "$inboxLabel: $inboxCount"
 
+  /** Every task id the payload can draw, across the flat list, the sections and every named list. */
+  fun allTaskIds(): Set<String> {
+    val ids = HashSet<String>()
+    items.forEach { ids.add(it.id) }
+    sections.forEach { section -> section.items.forEach { ids.add(it.id) } }
+    lists.values.forEach { list ->
+      list.items.forEach { ids.add(it.id) }
+      list.sections.forEach { section -> section.items.forEach { ids.add(it.id) } }
+    }
+    ids.remove("")
+    return ids
+  }
+
   /** The list a widget should draw: its selection when the payload has it, else the Focus list. */
   fun listFor(listId: String): ListPayload =
     lists[listId] ?: lists[WidgetListStore.DEFAULT_LIST] ?: ListPayload(headerTitle, dateLabel, sections, items)

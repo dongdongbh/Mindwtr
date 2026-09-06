@@ -15,6 +15,13 @@ class CheckoffStoreTest {
   }
 
   @Test
+  fun committedIdsSurviveOnlyWhileThePayloadStillListsThem() {
+    val committed = setOf("queued", "ingested")
+    assertEquals(setOf("queued"), CheckoffStore.pruned(committed, setOf("queued", "other")))
+    assertEquals(emptySet<String>(), CheckoffStore.pruned(committed, emptySet()))
+  }
+
+  @Test
   fun onlyEntriesOlderThanTheWindowExpire() {
     val pending = mapOf("old" to 0L, "fresh" to 2_500L, "edge" to 1_000L)
 

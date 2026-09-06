@@ -30,6 +30,8 @@ object WidgetRenderer {
     // Commit check-offs whose undo window elapsed while nothing else ran.
     if (kind == WidgetKind.TASKS) CheckoffStore.sweep(context)
     val payload = WidgetPayloadStore.read(context)
+    // A committed check-off stays struck until the app republishes without it.
+    if (kind == WidgetKind.TASKS) CheckoffStore.prune(context, payload.allTaskIds())
     for (id in ids) {
       manager.updateAppWidget(id, buildViews(context, id, kind, payload))
     }

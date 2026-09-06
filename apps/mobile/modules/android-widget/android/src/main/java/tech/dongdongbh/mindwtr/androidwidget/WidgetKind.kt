@@ -35,7 +35,7 @@ class TasksWidgetProvider : MindwtrWidgetProvider(WidgetKind.TASKS) {
   // The check-off fallback alarm lands here when the Handler died with the process.
   override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
     if (intent.action == CheckoffStore.ACTION_SWEEP) {
-      if (CheckoffStore.sweep(context)) WidgetRenderer.refreshAll(context)
+      CheckoffStore.sweep(context)
       return
     }
     super.onReceive(context, intent)
