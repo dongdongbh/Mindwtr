@@ -48,6 +48,7 @@ const translate = vi.hoisted(() => (key: string) => ({
     'markdown.preview': 'Preview',
     'project.notes': 'Project notes',
     'projects.archive': 'Archive',
+    'projects.complete': 'Complete',
     'projects.areaLabel': 'Area',
     'projects.addSection': 'Add Section',
     'projects.deleteSectionConfirm': 'Are you sure you want to delete this section?',

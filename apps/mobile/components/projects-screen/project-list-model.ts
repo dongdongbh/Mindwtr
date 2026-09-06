@@ -111,7 +111,7 @@ export function buildProjectListRows({
     rows.push({
       type: 'section-toggle',
       key: 'archived-projects',
-      title: t('status.archived'),
+      title: t('projects.completed'),
       expanded: showArchivedProjects,
       sectionKind: 'archived',
     });

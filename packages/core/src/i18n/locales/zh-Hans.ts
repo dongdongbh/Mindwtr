@@ -706,6 +706,7 @@ export const zhHans: Record<string, string> = {
         'projects.deferredSection': '将来 / 等待',
         'projects.duplicate': '复制',
         'projects.complete': '完成',
+        'projects.completed': '已完成',
         'projects.archive': '归档',
         'projects.reactivate': '重新激活',
         'projects.archivedTaskInspectionHint': '双击查看此任务。重新激活项目后才能编辑。',

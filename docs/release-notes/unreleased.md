@@ -4,6 +4,7 @@ Changes collected after `v1.2.8` and before the next version tag.
 
 ## Full Change List
 
+- Desktop and mobile: the project action that closes a project is now called **Complete** instead of Archive, and the finished projects at the bottom of the Projects list sit under a **Completed** heading. Nothing changed underneath: a completed project still finishes its remaining tasks, still appears under Projects in the Archived view, and **Reactivate** still brings it back. (#1165)
 - Desktop: quick-mode inbox processing now lets you list more than one next action when turning an item into a project, with the same "Add another action" rows the guided mode already had. Each extra row becomes its own task in the new project. (#1167)
 - Desktop: Timeline project rows now show the area color for a project that was never recolored, matching the task bars under it. Every project stores a placeholder grey until you pick a color, and the Timeline group dot and bar read that grey as a chosen color, so projects looked grey while their tasks were purple.
 - Desktop: the project header's "..." menu (Details, Duplicate, Archive, Delete) no longer renders underneath the sticky task toolbar on engines that treat the header's container-query box as its own layer. The header is now lifted above the toolbar only while that menu or the project-type help bubble is open.

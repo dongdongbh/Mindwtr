@@ -637,6 +637,7 @@ export const frOverrides: Record<string, string> = {
         'projects.deferredSection': 'Un jour / En attente',
         'projects.duplicate': 'Doublon',
         'projects.complete': 'Terminer',
+        'projects.completed': 'Terminés',
         'projects.archive': 'Archiver',
         'projects.reactivate': 'Réactiver',
         'projects.completeConfirm': 'Marquer ce projet comme terminé et terminer toutes ses tâches ?',

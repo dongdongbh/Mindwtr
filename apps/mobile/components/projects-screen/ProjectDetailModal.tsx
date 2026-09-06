@@ -1774,7 +1774,7 @@ export function ProjectDetailModal({
                                     <ProjectOptionRow
                                         description={isArchivedProject ? undefined : projectActionsHelpText}
                                         icon={isArchivedProject ? 'refresh-outline' : 'archive-outline'}
-                                        label={isArchivedProject ? t('projects.reactivate') : t('projects.archive')}
+                                        label={isArchivedProject ? t('projects.reactivate') : t('projects.complete')}
                                         onPress={() => {
                                             setProjectActionsVisible(false);
                                             if (isArchivedProject) {

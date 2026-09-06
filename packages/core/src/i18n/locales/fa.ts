@@ -707,6 +707,7 @@ export const faOverrides: Record<string, string> = {
         'projects.deferredSection': 'یک روزی / در انتظار',
         'projects.duplicate': 'تکرار',
         'projects.complete': 'تکمیل',
+        'projects.completed': 'تکمیل‌شده',
         'projects.archive': 'بایگانی',
         'projects.reactivate': 'فعال‌سازی مجدد',
         'projects.archivedTaskInspectionHint': 'برای بررسی این کار دو بار ضربه بزنید. برای ویرایش، پروژه را دوباره فعال کنید.',

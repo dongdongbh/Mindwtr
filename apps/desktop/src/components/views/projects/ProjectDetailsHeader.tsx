@@ -1,6 +1,6 @@
 import { format } from 'date-fns';
 import { safeParseDate, tFallback, type Project } from '@mindwtr/core';
-import { Archive as ArchiveIcon, Calendar, CalendarClock, CalendarRange, Check, Copy, FolderOpenDot, HelpCircle, Info, ListOrdered, Loader2, MoreHorizontal, RotateCcw, Signal, Trash2 } from 'lucide-react';
+import { Calendar, CalendarClock, CalendarRange, Check, CheckCircle, Copy, FolderOpenDot, HelpCircle, Info, ListOrdered, Loader2, MoreHorizontal, RotateCcw, Signal, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 type ProjectProgress = {
@@ -306,8 +306,8 @@ export function ProjectDetailsHeader({
                                         onClick={() => runMenuAction(onArchive)}
                                         className={MENU_ITEM_CLASS}
                                     >
-                                        <ArchiveIcon className="w-4 h-4" />
-                                        {t('projects.archive')}
+                                        <CheckCircle className="w-4 h-4" />
+                                        {t('projects.complete')}
                                     </button>
                                 )}
                                 <div className="my-1 border-t border-border/60" role="separator" />

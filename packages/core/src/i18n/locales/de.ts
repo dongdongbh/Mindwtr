@@ -574,6 +574,7 @@ export const deOverrides: Record<string, string> = {
         'projects.deferredSection': 'Irgendwann/Warten',
         'projects.duplicate': 'Duplizieren',
         'projects.complete': 'Vervollständigen',
+        'projects.completed': 'Abgeschlossen',
         'projects.archive': 'Archiv',
         'projects.reactivate': 'Reaktivieren',
         'projects.completeConfirm': 'Dieses Projekt als abgeschlossen und alle seine Aufgaben als erledigt markieren?',

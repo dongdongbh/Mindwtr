@@ -691,6 +691,7 @@ export const esOverrides: Record<string, string> = {
 'projects.deferredSection': "Algún día/Tal vez o En espera",
 'projects.duplicate': "Duplicar",
 'projects.complete': "Completar",
+'projects.completed': "Completados",
 'projects.archive': "Archivar",
 'projects.reactivate': "Reactivar",
 'projects.archivedTaskInspectionHint': "Toca dos veces para inspeccionar esta tarea. Reactiva el proyecto para editarla.",

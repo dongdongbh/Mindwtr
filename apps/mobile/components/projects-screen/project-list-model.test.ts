@@ -38,6 +38,7 @@ describe('buildProjectListRows', () => {
     'projects.deferredSection': 'Someday / Waiting',
     'projects.noArea': 'No Area',
     'status.archived': 'Archived',
+    'projects.completed': 'Completed',
   }[key] ?? key);
 
   it('keeps deferred and archived projects out of the active area list by default', () => {

@@ -8,6 +8,7 @@ import { ProjectDetailsHeader } from './ProjectDetailsHeader';
 const translations: Record<string, string> = {
     'common.delete': 'Delete',
     'projects.archive': 'Archive',
+    'projects.complete': 'Complete',
     'projects.details': 'Details',
     'projects.duplicate': 'Duplicate',
     'projects.noActiveTasks': 'No active tasks',
@@ -139,7 +140,7 @@ describe('ProjectDetailsHeader', () => {
         expect(onDuplicate).toHaveBeenCalledTimes(1);
 
         openMenu();
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Complete' }));
         expect(onArchive).toHaveBeenCalledTimes(1);
 
         openMenu();
@@ -177,7 +178,7 @@ describe('ProjectDetailsHeader', () => {
         );
 
         openMenu();
-        expect(screen.queryByRole('menuitem', { name: 'Archive' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('menuitem', { name: 'Complete' })).not.toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
         fireEvent.click(screen.getByRole('menuitem', { name: 'Reactivate' }));
         expect(onReactivate).toHaveBeenCalledTimes(1);

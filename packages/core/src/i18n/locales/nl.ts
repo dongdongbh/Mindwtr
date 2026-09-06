@@ -16,6 +16,8 @@ export const nlOverrides: Record<string, string> = {
         'nav.board': 'Bordweergave',
         'nav.projects': 'Projecten',
         'projects.sequentialScope': 'Sequentieel bereik',
+        'projects.complete': 'Voltooien',
+        'projects.completed': 'Voltooid',
         'projects.sequentialAcrossSections': 'Over secties heen',
         'projects.sequentialWithinSections': 'Binnen secties',
         'projects.taskMovedTo': 'Verplaatst naar {{name}}',

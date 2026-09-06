@@ -707,6 +707,7 @@ export const svOverrides: Record<string, string> = {
         'projects.deferredSection': 'Någon gång / Väntar',
         'projects.duplicate': 'Duplicera',
         'projects.complete': 'Slutför',
+        'projects.completed': 'Slutförda',
         'projects.archive': 'Arkivera',
         'projects.reactivate': 'Återaktivera',
         'projects.archivedTaskInspectionHint': 'Dubbeltryck för att granska uppgiften. Återaktivera projektet för att redigera den.',

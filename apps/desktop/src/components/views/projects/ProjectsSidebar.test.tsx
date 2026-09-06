@@ -29,6 +29,7 @@ const translations: Record<string, string> = {
     'projects.tagFilter': 'Tag filter',
     'projects.title': 'Projects',
     'status.archived': 'Archived',
+    'projects.completed': 'Completed',
     'status.waiting': 'Waiting',
 };
 
@@ -480,7 +481,7 @@ describe('ProjectsSidebar', () => {
 
         const deferredToggle = screen.getByRole('button', { name: 'Deferred projects' });
         const deferredSection = deferredToggle.parentElement;
-        const archivedToggle = screen.getByRole('button', { name: 'Archived' });
+        const archivedToggle = screen.getByRole('button', { name: 'Completed' });
         const archivedSection = archivedToggle.parentElement;
 
         expect(deferredSection).not.toBeNull();

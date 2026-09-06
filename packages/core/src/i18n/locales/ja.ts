@@ -735,6 +735,7 @@ export const jaOverrides: Record<string, string> = {
         'projects.deferredSection': 'いつか・たぶん／連絡待ち',
         'projects.duplicate': '複製',
         'projects.complete': '完了にする',
+        'projects.completed': '完了',
         'projects.archive': 'アーカイブ',
         'projects.reactivate': '再開する',
         'projects.archivedTaskInspectionHint': 'ダブルタップでこのタスクを確認できます。編集するにはプロジェクトを再開してください。',

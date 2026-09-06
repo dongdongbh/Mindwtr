@@ -706,6 +706,7 @@ export const zhHant: Record<string, string> = {
         'projects.deferredSection': '將來 / 等待',
         'projects.duplicate': '複製',
         'projects.complete': '完成',
+        'projects.completed': '已完成',
         'projects.archive': '歸檔',
         'projects.reactivate': '重新激活',
         'projects.archivedTaskInspectionHint': '點兩下檢視此任務。重新激活專案後才能編輯。',
