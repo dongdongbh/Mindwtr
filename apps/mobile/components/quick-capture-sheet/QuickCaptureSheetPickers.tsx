@@ -405,10 +405,10 @@ export function QuickCaptureSheetPickers({
               onPress={() => onSelectPriority(null)}
               style={[styles.pickerRow, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}
               accessibilityRole="button"
-              accessibilityLabel={t('common.clear')}
+              accessibilityLabel={t('common.none')}
             >
               <PriorityFlag priority={null} color={tc.text} />
-              <Text style={[styles.pickerRowText, { color: tc.text }]}>{t('common.clear')}</Text>
+              <Text style={[styles.pickerRowText, { color: tc.text }]}>{t('common.none')}</Text>
             </Pressable>
             {priorityOptions.map((option) => (
               <Pressable

@@ -448,14 +448,7 @@ export function QuickCaptureSheetBody({
                       accessibilityRole="button"
                       accessibilityLabel={`${t('task.aria.dueTime')}: ${dueTimeLabel}`}
                     >
-                      <Clock size={16} color={tc.text} />
-                      <CompactText
-                        style={[styles.optionText, { color: tc.text }]}
-                        numberOfLines={2}
-                        ellipsizeMode="tail"
-                      >
-                        {dueTimeLabel}
-                      </CompactText>
+                      <Clock size={16} color={tc.text} aria-hidden accessible={false} pointerEvents="none" />
                     </TouchableOpacity>
                   )}
 
