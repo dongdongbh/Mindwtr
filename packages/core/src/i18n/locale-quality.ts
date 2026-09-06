@@ -50,7 +50,42 @@ export const allowedEnglishMirrorTerms = [
 
 export const allowedEnglishMirrorKeysByLocale: Record<string, readonly string[]> = {
     de: [
+        // German shares these labels with English identically: loanwords and
+        // internationalisms already standard in German UI copy ("Status", "Details",
+        // "Version", "System", "Port", "Standard", "Optional", "Parallel", "Routine",
+        // "Pause", "Passphrase", "Backend"), color names spelled the same, the "Name"
+        // field label, and brand/technology terms kept in Latin ("E-Ink", "Sepia",
+        // "Screenshot", "Agenda").
         'keybindings.style.standard',
+        'bulk.organizeStatus',
+        'common.pause',
+        'context.energy.routine',
+        'list.details',
+        'projects.colorCyan',
+        'projects.colorIndigo',
+        'projects.colorOrange',
+        'projects.colorPink',
+        'projects.parallel',
+        'projects.statusLabel',
+        'quickAdd.pastedImageTitle',
+        'settings.calendarMobile.optional',
+        'settings.calendarName',
+        'settings.dropboxStatus',
+        'settings.eink',
+        'settings.emailCapturePort',
+        'settings.externalCalendarName',
+        'settings.gtdMobile.standard',
+        'settings.localApiPort',
+        'settings.projectFlowParallel',
+        'settings.sepia',
+        'settings.syncEncryptionPassphrase',
+        'settings.syncHistoryBackend',
+        'settings.syncHistoryDetails',
+        'settings.system',
+        'settings.version',
+        'tab.agenda',
+        'taskEdit.details',
+        'taskEdit.statusLabel',
     ],
     it: [
         'keybindings.style.standard',

@@ -169,7 +169,7 @@ export const LOCALES = {
         mode: 'overrides',
         native: 'Deutsch',
         nonLatin: false,
-        translatedKeyFloor: 1468,
+        translatedKeyFloor: 2474,
     },
     ru: {
         loadSync: () => require('./locales/ru') as typeof import('./locales/ru'),

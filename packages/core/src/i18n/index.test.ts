@@ -34,7 +34,6 @@ describe('getLocaleCoverageTier', () => {
     it('calls a locale with a low key floor partial', () => {
         // nl is the worst of them (~26% of en at time of writing).
         expect(getLocaleCoverageTier('nl')).toBe('partial');
-        expect(getLocaleCoverageTier('de')).toBe('partial');
     });
 
     it('treats English and unknown codes as full', () => {
@@ -47,6 +46,8 @@ describe('getLocaleCoverageTier', () => {
         // vi sits just under 'all' but far above the ceiling; if this ever flips,
         // a floor moved and the label follows it automatically.
         expect(getLocaleCoverageTier('vi')).toBe('full');
+        // de reached full key parity via override translations without an 'all' commitment.
+        expect(getLocaleCoverageTier('de')).toBe('full');
     });
 });
 
