@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Modal, Pressable, StyleSheet } from 'react-native';
-import { MoreHorizontal } from 'lucide-react-native';
+import { MoreHorizontal, Save, X } from 'lucide-react-native';
 
 import { AppPressable } from '../app-pressable';
 
@@ -10,6 +10,7 @@ import { useThemeColors } from '../../hooks/use-theme-colors';
 
 type TaskEditHeaderProps = {
   onDone: () => void;
+  onClose: () => void;
   onShare: () => void;
   onDuplicate: () => void;
   onPromoteToProject?: () => void;
@@ -23,6 +24,7 @@ type TaskEditHeaderProps = {
 
 export function TaskEditHeader({
   onDone,
+  onClose,
   onShare,
   onDuplicate,
   onPromoteToProject,
@@ -39,23 +41,36 @@ export function TaskEditHeader({
   const [menuVisible, setMenuVisible] = useState(false);
   const createProjectFromTaskLabel = t('task.createProjectFromTask');
   const moreLabel = t('common.more');
+  const closeLabel = t('common.close');
   // "Save", not "Done": the button commits the draft, and "Done" reads as the
   // task status one line below it.
-  const doneLabel = readOnly ? t('common.close') : t('common.save');
+  const doneLabel = readOnly ? closeLabel : t('common.save');
 
   return (
     <>
       <View style={[styles.header, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
         <View style={[styles.headerSide, styles.headerLeft]}>
-          {!readOnly ? <TouchableOpacity
-            style={[styles.headerActionTouchable, styles.headerActionLeft]}
-            onPress={() => setMenuVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel={moreLabel}
-            accessibilityState={{ expanded: menuVisible }}
-          >
-            <MoreHorizontal size={24} strokeWidth={2.25} color={tc.tint} accessible={false} />
-          </TouchableOpacity> : null}
+          {!readOnly ? (
+            <View style={styles.headerLeftActions}>
+              <TouchableOpacity
+                style={styles.closeAction}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel={closeLabel}
+              >
+                <X size={22} strokeWidth={2.25} color={tc.tint} accessible={false} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerActionTouchable}
+                onPress={() => setMenuVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel={moreLabel}
+                accessibilityState={{ expanded: menuVisible }}
+              >
+                <MoreHorizontal size={24} strokeWidth={2.25} color={tc.tint} accessible={false} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
         <View style={[styles.headerSide, styles.headerRight]}>
           <TouchableOpacity
@@ -64,7 +79,11 @@ export function TaskEditHeader({
             accessibilityRole="button"
             accessibilityLabel={doneLabel}
           >
-            <Text style={[styles.headerBtn, { color: tc.tint }]}>{doneLabel}</Text>
+            {readOnly ? (
+              <X size={22} strokeWidth={2.25} color={tc.tint} accessible={false} />
+            ) : (
+              <Save size={22} strokeWidth={2.25} color={tc.tint} accessible={false} />
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -81,7 +100,7 @@ export function TaskEditHeader({
               style={styles.menuBackdrop}
               onPress={() => setMenuVisible(false)}
               accessibilityRole="button"
-              accessibilityLabel={t('common.close')}
+              accessibilityLabel={closeLabel}
             />
             <View
               style={[styles.menuCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
@@ -177,26 +196,31 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     minHeight: 60,
   },
-  headerBtn: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
   headerSide: {
     minWidth: 72,
   },
   headerLeft: {
     alignItems: 'flex-start',
   },
+  headerLeftActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1,
+  },
+  closeAction: {
+    minHeight: 44,
+    minWidth: 44,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
   headerRight: {
     alignItems: 'flex-end',
   },
   headerActionTouchable: {
-    minWidth: 72,
+    minWidth: 44,
     minHeight: 44,
+    alignItems: 'center',
     justifyContent: 'center',
-  },
-  headerActionLeft: {
-    alignItems: 'flex-start',
   },
   headerActionRight: {
     alignItems: 'flex-end',
