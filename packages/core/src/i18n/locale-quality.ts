@@ -52,6 +52,20 @@ export const allowedEnglishMirrorKeysByLocale: Record<string, readonly string[]>
     de: [
         'keybindings.style.standard',
     ],
+    es: [
+        // Spanish writes these exactly as English: words that are the same in both
+        // languages (Color, General, Audio, Error, Ideas, Sepia) or proper/product
+        // names kept in Latin (E-Ink, the Parakeet speech provider label).
+        'projects.color',
+        'settings.general',
+        'settings.eink',
+        'settings.sepia',
+        'settings.captureDefaultAudio',
+        'common.error',
+        'someday.ideas',
+        'settings.syncMobile.error',
+        'settings.speechProviderParakeet',
+    ],
     it: [
         'keybindings.style.standard',
     ],

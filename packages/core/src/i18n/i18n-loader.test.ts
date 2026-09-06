@@ -39,7 +39,7 @@ describe('i18n-loader sync fallback', () => {
         const zhHant = await loadTranslations('zh-Hant');
 
         expect(en['common.notice']).toBe('Notice');
-        expect(es['common.notice']).toBe('Notice');
+        expect(es['common.notice']).toBe('Aviso');
         expect(zhHans['common.notice']).toBe('提示');
         expect(zhHant['common.notice']).toBe('提示');
     });
