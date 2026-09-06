@@ -343,7 +343,12 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
                     return normalizeRemoteWriteResult('webdav', result);
                 } catch (error) {
                     if (isWebdavRemoteWriteConflictError(error)) {
-                        throw new SyncRemoteWriteConflict();
+                        // The native error message carries the rejecting HTTP
+                        // status ("… before replacement (412)"); keep it so the
+                        // requeue log can show why the server refused the write.
+                        throw new SyncRemoteWriteConflict(
+                            error instanceof Error ? error.message : String(error),
+                        );
                     }
                     throw error;
                 }

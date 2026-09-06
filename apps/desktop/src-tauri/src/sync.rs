@@ -3329,6 +3329,7 @@ fn webdav_fetch_optional_bytes(
     let response = client
         .get(target)
         .basic_auth(username, Some(password))
+        .header("Accept-Encoding", "identity")
         .send()
         .map_err(|error| format_reqwest_send_error("WebDAV request failed", &error))?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -3368,6 +3369,7 @@ fn webdav_get_json_blocking(
         client
             .get(target)
             .basic_auth(&username, Some(&password))
+            .header("Accept-Encoding", "identity")
             .send()
             .map_err(|e| format_reqwest_send_error("WebDAV request failed", &e))
     };
@@ -3551,6 +3553,7 @@ fn webdav_put_json_blocking(
         let request = client
             .put(url.clone())
             .basic_auth(&username, Some(&password))
+            .header("Accept-Encoding", "identity")
             .header("Content-Type", content_type)
             .body(payload.clone());
         let request = match &write_condition {
@@ -9389,6 +9392,44 @@ mod tests {
         assert!(error.contains("500 Internal Server Error"), "unexpected error: {error}");
         assert!(error.contains("backend unavailable"), "unexpected error: {error}");
         failed_server.join().expect("500 server");
+    }
+
+    #[test]
+    fn webdav_reads_ask_for_the_bytes_as_stored_with_identity_encoding() {
+        // A compressing proxy in front of the server (nginx, Apache mod_deflate,
+        // Cloudflare) otherwise serves data.json with a mutated ETag (weak `W/…`
+        // or mod_deflate's `-gzip` suffix) while the conditional write is checked
+        // against the stored one — every overwrite then 412s forever. Same trap
+        // as the TS client's `Accept-Encoding: identity` (#1056).
+        use std::io::{Read, Write};
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind WebDAV test server");
+        let address = listener.local_addr().expect("server address");
+        let (request_sender, request_receiver) = mpsc::channel::<String>();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept WebDAV request");
+            let mut buffer = [0u8; 4096];
+            let read = stream.read(&mut buffer).unwrap_or(0);
+            let _ = request_sender.send(String::from_utf8_lossy(&buffer[..read]).to_string());
+            let body = "{\"tasks\":[]}";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nETag: \"v1\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len(),
+            );
+            stream.write_all(response.as_bytes()).expect("write WebDAV response");
+        });
+
+        let client = blocking_http_client(None).expect("client");
+        let url = format!("http://{address}/data.json");
+        webdav_fetch_optional_bytes(&client, &url, "user", "pass").expect("identity fetch");
+        server.join().expect("server thread");
+
+        let request = request_receiver.recv().expect("captured request");
+        assert!(
+            request.contains("Accept-Encoding: identity"),
+            "WebDAV reads must ask for the bytes as stored; got: {request}"
+        );
     }
 
     #[test]

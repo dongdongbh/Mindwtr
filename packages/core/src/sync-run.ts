@@ -1051,7 +1051,7 @@ class SharedSyncRunMachine {
             if (error instanceof SyncRemoteWriteConflict) {
                 // Another device wrote between readRemote and writeRemote; retry next cycle.
                 this.requestFollowUp();
-                throw new LocalSyncAbort('remote-write-conflict');
+                throw new LocalSyncAbort('remote-write-conflict', error.message);
             }
             throw error;
         }
@@ -1857,6 +1857,7 @@ class SharedSyncRunMachine {
                 backend: this.backend,
                 step: this.state.step ?? '-',
                 reason: error.reason,
+                detail: error.detail ?? '-',
                 activationProbe: String(this.options.activationProbe === true),
             });
             this.notifier.onDiagnostic?.({
