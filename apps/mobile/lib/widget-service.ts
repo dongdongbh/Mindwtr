@@ -24,6 +24,7 @@ import {
     type TasksWidgetPayload,
     WIDGET_LANGUAGE_KEY,
 } from './widget-data';
+import { WIDGET_FIXED_LIST_IDS } from './widget-lists';
 import { logError, logInfo, logWarn } from './app-log';
 import { getLocalDayKey } from '@/hooks/use-local-day-key';
 import { getSystemColorSchemeForWidget } from './system-color-scheme';
@@ -73,6 +74,17 @@ async function resolvePayloadLanguage(data: AppData): Promise<Language> {
     return resolveWidgetLanguage(languageValue, data.settings?.language);
 }
 
+// Which lists the Android payload carries. The widget's own header chooser
+// switches lists with no app running, so it can only show a list the payload
+// already holds: once any Tasks widget is placed, all five GTD lists ride
+// along and switching between them is instant. A project list is still built
+// only when a widget asks for it, so picking one shows its name and fills in
+// on the next publish (#1173).
+function androidWidgetListIds(): string[] {
+    const selections = AndroidWidget.getWidgetListSelections();
+    return selections.length === 0 ? [] : [...WIDGET_FIXED_LIST_IDS, ...selections];
+}
+
 function buildPayloadFromData(
     data: AppData,
     language: Language,
@@ -83,7 +95,7 @@ function buildPayloadFromData(
         maxItems,
         // Only the lists placed Android widgets asked for are built (#1173);
         // folding them in here also puts them in the render fingerprint.
-        ...(Platform.OS === 'android' && AndroidWidget.isSupported() ? { listIds: AndroidWidget.getWidgetListSelections() } : {}),
+        ...(Platform.OS === 'android' && AndroidWidget.isSupported() ? { listIds: androidWidgetListIds() } : {}),
     });
 }
 

@@ -87,9 +87,23 @@ data class WidgetPayload(
     return ids
   }
 
-  /** The list a widget should draw: its selection when the payload has it, else the Focus list. */
+  /** A list the chooser offers, named even before the app has built its rows. */
+  fun titleFor(listId: String): String? =
+    lists[listId]?.title
+      ?: listTitles[listId]
+      ?: projects.firstOrNull { listId == WidgetListStore.PROJECT_PREFIX + it.id }?.title
+
+  /**
+   * The list a widget should draw. A selection the app has not published yet
+   * (a project just picked in the chooser) draws under its own name and empty,
+   * never as the Focus rows wearing another list's title; an id we cannot name
+   * at all falls back to Focus.
+   */
   fun listFor(listId: String): ListPayload =
-    lists[listId] ?: lists[WidgetListStore.DEFAULT_LIST] ?: ListPayload(headerTitle, dateLabel, sections, items)
+    lists[listId]
+      ?: (if (listId == WidgetListStore.DEFAULT_LIST) null else titleFor(listId)?.let { ListPayload(it, null, emptyList(), emptyList()) })
+      ?: lists[WidgetListStore.DEFAULT_LIST]
+      ?: ListPayload(headerTitle, dateLabel, sections, items)
 
   companion object {
     const val DEFAULT_FOCUS_URI = "mindwtr:///focus"

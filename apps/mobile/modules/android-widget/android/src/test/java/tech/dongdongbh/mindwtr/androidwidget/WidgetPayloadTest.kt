@@ -107,6 +107,21 @@ class WidgetPayloadTest {
   }
 
   @Test
+  fun aListPickedButNotPublishedYetKeepsItsOwnNameAndStaysEmpty() {
+    val payload = WidgetPayload.parse(sample)!!
+
+    // The chooser can name every list; the app builds the rows on its next
+    // publish. Until then the widget must not show the Focus rows under the
+    // picked list's title.
+    val pending = payload.listFor("inbox")
+    assertEquals("Inbox", pending.title)
+    assertTrue(pending.items.isEmpty())
+    assertTrue(pending.sections.isEmpty())
+    assertEquals("Inbox", payload.titleFor("inbox"))
+    assertNull(payload.titleFor("project:gone"))
+  }
+
+  @Test
   fun systemThemeLeavesColorsToTheLauncherResources() {
     val payload = WidgetPayload.parse(JSONObject(sample).put("themeMode", "system").toString())
 

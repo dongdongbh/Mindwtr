@@ -14,23 +14,37 @@ import androidx.appcompat.app.AppCompatActivity
 
 /**
  * Picks which list a Tasks widget shows (#1173): the fixed GTD lists, then
- * one project. Runs on placement (`android:configure`) and again from the
- * launcher's edit action (`reconfigurable`). OK stores the choice for this
- * widget id and redraws it; Cancel on first placement cancels the placement.
+ * one project. Runs on placement (`android:configure`), from the launcher's
+ * edit action (`reconfigurable`), and as a dropdown sheet when the widget's
+ * own header title is tapped. OK stores the choice for this widget id and
+ * redraws it; Cancel on first placement cancels the placement.
  */
 class WidgetConfigureActivity : AppCompatActivity() {
   private var appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+  // Opened from the widget's header title: a top-anchored sheet, tap = pick.
+  private var dropdown = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setResult(Activity.RESULT_CANCELED)
     appWidgetId = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
       ?: AppWidgetManager.INVALID_APPWIDGET_ID
-    if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+    // Exported for the launcher's configure flow, so trust nothing in the
+    // intent: the id must name a widget already bound to one of this app's
+    // providers (the launcher binds before it starts the configure activity).
+    val info = AppWidgetManager.getInstance(this)?.getAppWidgetInfo(appWidgetId)
+    if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID || info?.provider?.packageName != packageName) {
       finish()
       return
     }
+    dropdown = intent?.getBooleanExtra(EXTRA_DROPDOWN, false) == true
     setContentView(R.layout.mindwtr_widget_configure)
+    if (dropdown) {
+      window.setGravity(android.view.Gravity.TOP)
+      window.attributes = window.attributes.apply { y = dp(56) }
+      findViewById<View>(R.id.mindwtr_widget_configure_buttons).visibility = View.GONE
+      findViewById<View>(R.id.mindwtr_widget_configure_title).visibility = View.GONE
+    }
     val payload = WidgetPayloadStore.read(this)
     val palette = payload.palette?.takeUnless { payload.usesSystemColors }
     val current = WidgetListStore.read(this, appWidgetId)
@@ -56,11 +70,16 @@ class WidgetConfigureActivity : AppCompatActivity() {
         tag = id
         setTextColor(textColor)
         textSize = 15f
-        minHeight = dp(44)
+        minHeight = dp(if (dropdown) 40 else 44)
         isChecked = id == current
+        if (dropdown) setOnClickListener { save(group) }
+        // The project's identity dot leads the name, as it does in the app's
+        // own lists, so the dots line up in a column instead of trailing each
+        // title at a different x.
         identityById[id]?.let { color ->
           val dot = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color); setSize(dp(10), dp(10)) }
-          setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, dot, null)
+          setCompoundDrawablesRelativeWithIntrinsicBounds(dot, null, null, null)
+          compoundDrawablePadding = dp(10)
         }
       })
     }
@@ -101,4 +120,8 @@ class WidgetConfigureActivity : AppCompatActivity() {
   }
 
   private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+  companion object {
+    const val EXTRA_DROPDOWN = "tech.dongdongbh.mindwtr.androidwidget.dropdown"
+  }
 }

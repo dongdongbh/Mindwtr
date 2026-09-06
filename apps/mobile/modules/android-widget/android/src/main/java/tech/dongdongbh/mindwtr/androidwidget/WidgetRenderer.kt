@@ -16,6 +16,10 @@ object WidgetRenderer {
   private const val REQUEST_FOCUS = 4611
   private const val REQUEST_CAPTURE = 4612
   private const val REQUEST_ROW = 4613
+  // Every widget needs its own chooser PendingIntent (extras alone do not make
+  // two of them differ), so the request code carries the widget id, offset far
+  // enough that it can never land on one of the fixed codes above.
+  private const val REQUEST_CHOOSER_BASE = 1 shl 20
 
   fun refreshAll(context: Context) {
     val manager = AppWidgetManager.getInstance(context) ?: return
@@ -73,12 +77,22 @@ object WidgetRenderer {
     palette: WidgetPayload.Palette?,
   ) {
     // Header: Focus shows the date plus the Inbox chip; any other list shows its
-    // full title with a small count, so the header never reads as two lists.
+    // full title with a small count, so the header never reads as two lists. A
+    // list picked in the chooser that the app has not published yet has no rows
+    // to count, so it shows its bare title until the next publish.
     val listId = WidgetListStore.read(context, appWidgetId)
     val list = payload.listFor(listId)
-    val isFocus = listId == WidgetListStore.DEFAULT_LIST || payload.lists[listId] == null
+    val isFocus = listId == WidgetListStore.DEFAULT_LIST || payload.titleFor(listId) == null
+    val counted = payload.lists[listId] != null
     val rowCount = if (list.sections.isEmpty()) list.items.size else list.sections.sumOf { it.items.size }
-    views.setTextViewText(R.id.mindwtr_widget_title, if (isFocus) list.dateLabel?.ifEmpty { null } ?: list.title else "${list.title} · $rowCount")
+    views.setTextViewText(
+      R.id.mindwtr_widget_title,
+      when {
+        isFocus -> list.dateLabel?.ifEmpty { null } ?: list.title
+        counted -> "${list.title} · $rowCount"
+        else -> list.title
+      },
+    )
     views.setTextViewText(R.id.mindwtr_widget_subtitle, "${payload.inboxLabel} ${payload.inboxCount}")
     views.setViewVisibility(R.id.mindwtr_widget_subtitle, if (isFocus) View.VISIBLE else View.GONE)
     views.setTextViewText(R.id.mindwtr_widget_empty, payload.emptyMessage)
@@ -94,8 +108,16 @@ object WidgetRenderer {
 
     val focusIntent = appIntent(context, payload.focusUri)
     val focus = PendingIntent.getActivity(context, REQUEST_FOCUS, focusIntent, immutableFlags())
-    views.setOnClickPendingIntent(R.id.mindwtr_widget_header, focus)
     views.setOnClickPendingIntent(R.id.mindwtr_widget_empty, focus)
+    // Header title + chevron = this widget's list chooser (Todoist style).
+    val chooser = Intent(context, WidgetConfigureActivity::class.java)
+      .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+      .putExtra(WidgetConfigureActivity.EXTRA_DROPDOWN, true)
+      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    views.setOnClickPendingIntent(
+      R.id.mindwtr_widget_title_target,
+      PendingIntent.getActivity(context, REQUEST_CHOOSER_BASE + appWidgetId, chooser, immutableFlags()),
+    )
     // Collection rows deliver clicks through a fill-in intent, which the
     // platform can only merge into a mutable template. The template fixes the
     // component (the invisible WidgetTapActivity) and leaves the data unset,

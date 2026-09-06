@@ -12,4 +12,10 @@
     <color name="mindwtr_widget_warning">#D97706</color>
     <color name="mindwtr_widget_header_wash">#1F2563EB</color>
     <color name="mindwtr_widget_on_accent">#FFFFFF</color>
+    <!-- The header's chooser chevron. It rides on the title as a compound
+         drawable and RemoteViews refuses setCompoundDrawableTintList, so this
+         is the one header colour the payload palette cannot repaint: it has to
+         read on the light and the dark surface alike, hence one mid grey with
+         no values-night twin. -->
+    <color name="mindwtr_widget_chevron_tint">#8A94A6</color>
 </resources>

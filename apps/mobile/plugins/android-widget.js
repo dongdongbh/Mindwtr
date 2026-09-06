@@ -95,7 +95,7 @@ const buildWidgetInfoXml = (kind) => `<?xml version="1.0" encoding="utf-8"?>
     android:previewImage="@drawable/${WIDGET_PREVIEW_FILE_NAME.replace(/\.png$/, '')}"` : ''}
     android:resizeMode="${kind.resizeMode}"${kind.configure ? `
     android:configure="${kind.configure}"
-    android:widgetFeatures="reconfigurable"` : ''}
+    android:widgetFeatures="reconfigurable|configuration_optional"` : ''}
     android:widgetCategory="home_screen|keyguard"
     android:description="@string/${kind.descriptionResource}" />
 `;
@@ -191,12 +191,17 @@ const ensureConfigureActivity = (application) => {
     activities.push(activity);
   }
   // The launcher starts it through the system's configure flow; the
-  // APPWIDGET_CONFIGURE filter is the one entry it needs.
+  // APPWIDGET_CONFIGURE filter is the one entry it needs. No task affinity so
+  // the widget header's own chooser (started with FLAG_ACTIVITY_NEW_TASK) gets
+  // a task of its own and closing it returns to the launcher instead of
+  // surfacing whatever screen the app was left on; the launcher's own
+  // startActivityForResult ignores affinity and still gets its result.
   activity.$ = {
     'android:name': CONFIGURE_ACTIVITY_NAME,
     'android:exported': 'true',
     'android:theme': `@style/${QUICK_CAPTURE_THEME}`,
     'android:excludeFromRecents': 'true',
+    'android:taskAffinity': '',
   };
   activity['intent-filter'] = [{ action: [{ $: { 'android:name': 'android.appwidget.action.APPWIDGET_CONFIGURE' } }] }];
 };

@@ -179,9 +179,10 @@ describe('widget-service', () => {
         });
     });
 
-    it('builds only the lists placed widgets asked for, plus focus, and re-renders when the selection changes (#1173)', async () => {
+    it('carries every GTD list once a widget is placed so the header chooser switches without the app (#1173)', async () => {
         const data = buildData(2);
         data.tasks.push({ id: 'w1', title: 'Waiting on Sam', status: 'waiting', tags: [], contexts: [], createdAt: data.tasks[0].createdAt, updatedAt: data.tasks[0].updatedAt });
+        // No widget placed: nothing beyond the Focus list is worth building.
         expect(await updateMobileWidgetFromData(data)).toBe(true);
         expect(Object.keys(JSON.parse(mockAndroidWidgetSetPayload.mock.calls[0][0] as string).lists)).toEqual(['focus']);
 
@@ -189,7 +190,7 @@ describe('widget-service', () => {
         expect(await updateMobileWidgetFromData(data)).toBe(true);
         expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(2);
         const payload = JSON.parse(mockAndroidWidgetSetPayload.mock.calls[1][0] as string);
-        expect(Object.keys(payload.lists)).toEqual(['focus', 'waiting']);
+        expect(Object.keys(payload.lists)).toEqual(['focus', 'inbox', 'next', 'waiting', 'someday']);
         expect(payload.lists.waiting).toMatchObject({ title: 'Waiting For', items: [{ title: 'Waiting on Sam' }] });
         expect(payload.listTitles).toMatchObject({ inbox: 'Inbox', next: 'Next Actions', someday: 'Someday/Maybe' });
     });

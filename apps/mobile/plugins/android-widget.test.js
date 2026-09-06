@@ -46,7 +46,10 @@ describe('android-widget', () => {
     expect(xml).toContain('android:previewImage="@drawable/mindwtr_widget_preview"');
     expect(xml).toContain('android:updatePeriodMillis="0"');
     expect(xml).toContain(`android:configure="${CONFIGURE_ACTIVITY_NAME}"`);
-    expect(xml).toContain('android:widgetFeatures="reconfigurable"');
+    // reconfigurable = the launcher's edit action on a placed widget;
+    // configuration_optional = placement skips the picker and lands on the
+    // default list, because the widget's own header opens the chooser (#1173).
+    expect(xml).toContain('android:widgetFeatures="reconfigurable|configuration_optional"');
     expect(buildWidgetStringsXml([tasks, quickCapture])).toContain('Inbox, focus, and quick capture');
 
     expect(quickCapture.kind).toBe('QuickCapture');
@@ -93,7 +96,9 @@ describe('android-widget', () => {
     }]);
     expect(application.activity).toHaveLength(3);
     expect(application.activity[2].$).toMatchObject({ 'android:name': TAP_ACTIVITY_NAME, 'android:exported': 'false', 'android:theme': '@android:style/Theme.NoDisplay' });
-    expect(application.activity[1].$).toMatchObject({ 'android:name': CONFIGURE_ACTIVITY_NAME, 'android:exported': 'true' });
+    // No affinity: the widget header's chooser runs in its own task, so closing
+    // it goes back to the launcher rather than to the app's last screen (#1173).
+    expect(application.activity[1].$).toMatchObject({ 'android:name': CONFIGURE_ACTIVITY_NAME, 'android:exported': 'true', 'android:taskAffinity': '' });
     expect(application.activity[1]['intent-filter'][0].action[0].$['android:name']).toBe('android.appwidget.action.APPWIDGET_CONFIGURE');
     expect(application.activity[0].$).toMatchObject({
       'android:name': ACTIVITY_NAME,
