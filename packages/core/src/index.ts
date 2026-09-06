@@ -138,6 +138,7 @@ export * from './performance-log';
 export * from './log-breadcrumbs';
 export * from './pomodoro';
 export * from './color-constants';
+export * from './task-accent-color';
 export * from './analytics-heartbeat';
 export * from './dropbox-sync-utils';
 export * from './dropbox';

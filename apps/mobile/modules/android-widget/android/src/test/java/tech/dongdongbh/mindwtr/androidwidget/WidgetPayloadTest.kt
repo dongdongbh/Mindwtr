@@ -12,6 +12,7 @@ class WidgetPayloadTest {
   private val sample = """
     {
       "headerTitle": "Today's Focus",
+      "dateLabel": "Saturday, Sep 6",
       "subtitle": "Inbox: 3 · +2 More",
       "inboxLabel": "Inbox",
       "inboxCount": 3,
@@ -21,14 +22,14 @@ class WidgetPayloadTest {
         {"id": "c", "title": "   ", "statusLabel": "Next", "dueLabel": null, "dueEmphasis": false}
       ],
       "sections": [
-        {"key": "focus", "title": "Today's Focus", "items": [{"id": "a", "title": "Call the bank", "dueLabel": "Today", "dueEmphasis": true, "openUri": "mindwtr://open?task=a", "priorityColor": "#dc2626", "contextLabel": "Finance"}]},
+        {"key": "focus", "title": "Today's Focus", "detail": "Sat Sep 6", "items": [{"id": "a", "title": "Call the bank", "dueLabel": "Today", "dueEmphasis": true, "dueTone": "today", "openUri": "mindwtr://open?task=a", "priorityColor": "#dc2626", "contextLabel": "Finance", "identityColor": "#8b5cf6"}]},
         {"key": "next", "title": "Next actions", "items": []},
         {"key": "upcoming", "title": "Upcoming", "items": [{"id": "b", "title": "Write report", "dueLabel": null, "dueEmphasis": false, "openUri": "mindwtr://open?task=b", "priorityColor": null, "contextLabel": null}]}
       ],
       "emptyMessage": "All clear",
       "focusUri": "mindwtr:///focus",
       "themeMode": "dark",
-      "palette": {"background": "#111827", "card": "#1F2937", "text": "#F9FAFB", "mutedText": "#CBD5E1", "accent": "#2563EB", "onAccent": "#FFFFFF"},
+      "palette": {"background": "#111827", "card": "#1F2937", "text": "#F9FAFB", "mutedText": "#CBD5E1", "accent": "#2563EB", "onAccent": "#FFFFFF", "border": "#374151", "warning": "#F59E0B"},
       "quickCapture": {"title": "Quick capture", "placeholder": "Add task to inbox...", "save": "Save", "cancel": "Cancel", "added": "Task added to Mindwtr."}
     }
   """.trimIndent()
@@ -52,10 +53,18 @@ class WidgetPayloadTest {
     assertEquals("Today's Focus", payload.sections[0].title)
     assertEquals(0xFFDC2626.toInt(), payload.sections[0].items[0].priorityColor)
     assertEquals("Finance", payload.sections[0].items[0].contextLabel)
+    assertEquals("Sat Sep 6", payload.sections[0].detail)
+    assertEquals(0xFF8B5CF6.toInt(), payload.sections[0].items[0].identityColor)
+    assertEquals(WidgetPayload.DueTone.TODAY, payload.sections[0].items[0].dueTone)
+    assertEquals(WidgetPayload.DueTone.NORMAL, payload.sections[1].items[0].dueTone)
+    assertEquals("Saturday, Sep 6", payload.dateLabel)
+    assertEquals(0xFF374151.toInt(), payload.palette!!.border)
+    assertEquals(0xFFF59E0B.toInt(), payload.palette!!.warning)
     assertNull(payload.sections[1].items[0].contextLabel)
     val rows = TasksWidgetFactory.buildRows(payload)
     assertEquals(4, rows.size)
     assertTrue(rows[0] is TasksWidgetFactory.Row.Header && rows[1] is TasksWidgetFactory.Row.Task)
+    assertEquals("Sat Sep 6", (rows[0] as TasksWidgetFactory.Row.Header).detail)
     assertTrue(rows[2] is TasksWidgetFactory.Row.Header && rows[3] is TasksWidgetFactory.Row.Task)
     assertNull("a non-app openUri must never reach a PendingIntent", payload.items[1].openUri)
     assertEquals(0xFF111827.toInt(), payload.palette!!.background)

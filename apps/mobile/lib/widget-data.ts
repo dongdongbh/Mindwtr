@@ -1,5 +1,6 @@
 import {
     computeTodayFocusTasks,
+    getTaskAccentColor,
     getUpcomingDeferredTasks,
     resolveFeatureFlags,
     shouldShowTaskForStart,
@@ -65,11 +66,20 @@ export interface WidgetTaskItem {
     priorityColor: string | null;
     // Project title, else area name, else null.
     contextLabel: string | null;
+    // The task's identity colour (core getTaskAccentColor: chosen project
+    // colour, else area colour); null when neither is set.
+    identityColor: string | null;
+    // How the due label should read: overdue (warning), today (accent), normal.
+    dueTone: WidgetDueTone;
 }
+
+export type WidgetDueTone = 'overdue' | 'today' | 'normal';
 
 export interface WidgetTaskSection {
     key: string;
     title: string;
+    // Secondary part next to the title (the short date for Today); null otherwise.
+    detail: string | null;
     items: WidgetTaskItem[];
 }
 
@@ -85,10 +95,13 @@ export interface WidgetPalette {
     mutedText: WidgetColor;
     accent: WidgetColor;
     onAccent: WidgetColor;
+    warning: WidgetColor;
 }
 
 export interface TasksWidgetPayload {
     headerTitle: string;
+    // Today's date for the widget header band, localized ("Saturday, Sep 6").
+    dateLabel: string;
     subtitle: string;
     inboxLabel: string;
     inboxCount: number;
@@ -187,24 +200,37 @@ const computeDueLabel = (
     language: string,
     startOfToday: Date,
     endOfToday: Date,
-): Pick<WidgetTaskItem, 'dueLabel' | 'dueEmphasis'> => {
+): Pick<WidgetTaskItem, 'dueLabel' | 'dueEmphasis' | 'dueTone'> => {
     const due = safeParseDueDate(dueDate);
-    if (!due) return { dueLabel: null, dueEmphasis: false };
+    if (!due) return { dueLabel: null, dueEmphasis: false, dueTone: 'normal' };
     if (due < startOfToday) {
-        return { dueLabel: formatNumericDate(due, language), dueEmphasis: true };
+        return { dueLabel: formatNumericDate(due, language), dueEmphasis: true, dueTone: 'overdue' };
     }
     if (due <= endOfToday) {
-        return { dueLabel: tr['quickDate.today'] ?? 'Today', dueEmphasis: true };
+        return { dueLabel: tr['quickDate.today'] ?? 'Today', dueEmphasis: true, dueTone: 'today' };
     }
     const dueDayStart = new Date(due.getFullYear(), due.getMonth(), due.getDate());
     const daysAhead = Math.round((dueDayStart.getTime() - startOfToday.getTime()) / DAY_MS);
     if (daysAhead === 1) {
-        return { dueLabel: tr['quickDate.tomorrow'] ?? 'Tomorrow', dueEmphasis: false };
+        return { dueLabel: tr['quickDate.tomorrow'] ?? 'Tomorrow', dueEmphasis: false, dueTone: 'normal' };
     }
     if (daysAhead <= 6) {
-        return { dueLabel: formatShortWeekday(due, language), dueEmphasis: false };
+        return { dueLabel: formatShortWeekday(due, language), dueEmphasis: false, dueTone: 'normal' };
     }
-    return { dueLabel: formatNumericDate(due, language), dueEmphasis: false };
+    return { dueLabel: formatNumericDate(due, language), dueEmphasis: false, dueTone: 'normal' };
+};
+
+const FALLBACK_LONG_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const FALLBACK_SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// "Saturday, Sep 6" for the header band; "Sat Sep 6" for a section detail.
+const formatDateLabel = (date: Date, language: string, weekday: 'long' | 'short'): string => {
+    try {
+        return new Intl.DateTimeFormat(language, { weekday, month: 'short', day: 'numeric' }).format(date);
+    } catch {
+        const day = weekday === 'long' ? FALLBACK_LONG_WEEKDAYS[date.getDay()] : FALLBACK_SHORT_WEEKDAYS[date.getDay()];
+        return `${day}, ${FALLBACK_SHORT_MONTHS[date.getMonth()]} ${date.getDate()}`;
+    }
 };
 
 const resolveWidgetTaskSort = (data: AppData): TaskSortBy => {
@@ -235,6 +261,7 @@ const resolveWidgetPalette = (
             mutedText: preset.secondaryText,
             accent: preset.tint,
             onAccent: preset.onTint,
+            warning: preset.warning,
         };
     }
 
@@ -252,6 +279,7 @@ const resolveWidgetPalette = (
             mutedText: '#CBD5E1',
             accent: '#2563EB',
             onAccent: '#FFFFFF',
+            warning: '#F59E0B',
         };
     }
 
@@ -263,6 +291,7 @@ const resolveWidgetPalette = (
         mutedText: '#475569',
         accent: '#2563EB',
         onAccent: '#FFFFFF',
+        warning: '#D97706',
     };
 };
 
@@ -317,6 +346,7 @@ export function buildWidgetPayload(
             openUri: `mindwtr://open?task=${encodeURIComponent(task.id)}`,
             priorityColor: prioritiesEnabled && task.priority ? TASK_PRIORITY_COLORS[task.priority] ?? null : null,
             contextLabel: project?.title ?? area?.name ?? null,
+            identityColor: getTaskAccentColor(task, projectById, areaById) ?? null,
         };
     };
     const items = listSource.slice(0, maxItems).map(toItem);
@@ -349,7 +379,12 @@ export function buildWidgetPayload(
         if (section.items.length === 0) continue;
         const sectionItems = section.items.slice(0, remaining).map(toItem);
         remaining -= sectionItems.length;
-        sections.push({ key: section.key, title: section.title, items: sectionItems });
+        sections.push({
+            key: section.key,
+            title: section.title,
+            detail: section.key === 'schedule' ? formatDateLabel(now, language, 'short') : null,
+            items: sectionItems,
+        });
     }
 
     const inboxCount = activeTasks.filter((task) => task.status === 'inbox').length;
@@ -360,6 +395,7 @@ export function buildWidgetPayload(
 
     return {
         headerTitle: tr['agenda.todaysFocus'] ?? 'Today',
+        dateLabel: formatDateLabel(now, language, 'long'),
         subtitle: subtitleParts.join(' · '),
         inboxLabel: tr['nav.inbox'] ?? 'Inbox',
         inboxCount,

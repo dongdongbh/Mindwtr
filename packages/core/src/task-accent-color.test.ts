@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PROJECT_COLOR, type Area, type Project, type Task } from '@mindwtr/core';
+import { DEFAULT_PROJECT_COLOR } from './color-constants';
+import type { Area, Project, Task } from './types';
 import { getAccentTint, getProjectAccentColor, getTaskAccentColor } from './task-accent-color';
 
 const task = (overrides: Partial<Task>): Task => ({

@@ -13,6 +13,7 @@ import org.json.JSONObject
  */
 data class WidgetPayload(
   val headerTitle: String,
+  val dateLabel: String,
   val inboxLabel: String,
   val inboxCount: Int,
   val items: List<Item>,
@@ -30,10 +31,14 @@ data class WidgetPayload(
     val openUri: String?,
     val priorityColor: Int?,
     val contextLabel: String?,
+    val identityColor: Int?,
+    val dueTone: DueTone,
   )
 
+  enum class DueTone { OVERDUE, TODAY, NORMAL }
+
   /** A Focus screen section (#1173): title plus its rows, in screen order. */
-  data class Section(val title: String, val items: List<Item>)
+  data class Section(val title: String, val detail: String?, val items: List<Item>)
 
   data class Palette(
     val background: Int,
@@ -42,6 +47,8 @@ data class WidgetPayload(
     val mutedText: Int,
     val accent: Int,
     val onAccent: Int,
+    val border: Int,
+    val warning: Int,
   )
 
   data class QuickCaptureLabels(
@@ -63,6 +70,7 @@ data class WidgetPayload(
 
     val EMPTY = WidgetPayload(
       headerTitle = "Today's Focus",
+      dateLabel = "",
       inboxLabel = "Inbox",
       inboxCount = 0,
       items = emptyList(),
@@ -95,7 +103,7 @@ data class WidgetPayload(
           val section = sectionsJson.optJSONObject(index) ?: continue
           val sectionItems = parseItems(section.optJSONArray("items"))
           if (sectionItems.isEmpty()) continue
-          sections.add(Section(section.stringOr("title", ""), sectionItems))
+          sections.add(Section(section.stringOr("title", ""), section.optString("detail").trim().takeIf { it.isNotEmpty() && !section.isNull("detail") }, sectionItems))
         }
       }
       // Only the app's own routes may be launched from a tap.
@@ -110,6 +118,7 @@ data class WidgetPayload(
       )
       return WidgetPayload(
         headerTitle = root.stringOr("headerTitle", defaults.headerTitle),
+        dateLabel = root.stringOr("dateLabel", defaults.dateLabel),
         inboxLabel = root.stringOr("inboxLabel", defaults.inboxLabel),
         inboxCount = maxOf(0, root.optInt("inboxCount", 0)),
         items = items,
@@ -137,6 +146,12 @@ data class WidgetPayload(
             openUri = appUriOrNull(item.optString("openUri")),
             priorityColor = parseHexColor(item.optString("priorityColor")),
             contextLabel = item.optString("contextLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("contextLabel") },
+            identityColor = parseHexColor(item.optString("identityColor")),
+            dueTone = when (item.optString("dueTone")) {
+              "overdue" -> DueTone.OVERDUE
+              "today" -> DueTone.TODAY
+              else -> if (item.optBoolean("dueEmphasis", false)) DueTone.TODAY else DueTone.NORMAL
+            },
           ),
         )
       }
@@ -154,6 +169,8 @@ data class WidgetPayload(
         mutedText = parseHexColor(json.optString("mutedText")) ?: text,
         accent = parseHexColor(json.optString("accent")) ?: text,
         onAccent = parseHexColor(json.optString("onAccent")) ?: background,
+        border = parseHexColor(json.optString("border")) ?: (parseHexColor(json.optString("mutedText")) ?: text),
+        warning = parseHexColor(json.optString("warning")) ?: (parseHexColor(json.optString("accent")) ?: text),
       )
     }
 

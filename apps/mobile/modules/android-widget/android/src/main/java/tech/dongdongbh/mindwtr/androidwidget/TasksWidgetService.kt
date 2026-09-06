@@ -2,11 +2,7 @@ package tech.dongdongbh.mindwtr.androidwidget
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Typeface
 import android.net.Uri
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.StyleSpan
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
@@ -24,7 +20,7 @@ class TasksWidgetService : RemoteViewsService() {
 class TasksWidgetFactory(private val context: Context, private val kind: WidgetKind) : RemoteViewsService.RemoteViewsFactory {
   /** One list row: a section header or a task. */
   sealed class Row {
-    data class Header(val title: String) : Row()
+    data class Header(val title: String, val detail: String?) : Row()
     data class Task(val item: WidgetPayload.Item) : Row()
   }
 
@@ -49,7 +45,13 @@ class TasksWidgetFactory(private val context: Context, private val kind: WidgetK
     return when (val row = rows[position]) {
       is Row.Header -> RemoteViews(context.packageName, R.layout.mindwtr_widget_section).apply {
         setTextViewText(R.id.mindwtr_widget_section_title, row.title)
-        palette?.let { setTextColor(R.id.mindwtr_widget_section_title, it.mutedText) }
+        setViewVisibility(R.id.mindwtr_widget_section_detail, if (row.detail == null) View.GONE else View.VISIBLE)
+        if (row.detail != null) setTextViewText(R.id.mindwtr_widget_section_detail, row.detail)
+        palette?.let {
+          setTextColor(R.id.mindwtr_widget_section_title, it.text)
+          setTextColor(R.id.mindwtr_widget_section_detail, it.mutedText)
+          setInt(R.id.mindwtr_widget_section_divider, "setBackgroundColor", it.border)
+        }
       }
       is Row.Task -> taskRow(row.item, palette)
     }
@@ -57,22 +59,32 @@ class TasksWidgetFactory(private val context: Context, private val kind: WidgetK
 
   private fun taskRow(item: WidgetPayload.Item, palette: WidgetPayload.Palette?): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.mindwtr_widget_item)
+    val mutedText = palette?.mutedText ?: context.getColor(R.color.mindwtr_widget_muted_text)
     views.setTextViewText(R.id.mindwtr_widget_item_title, item.title)
-    val dot = item.priorityColor
-    views.setViewVisibility(R.id.mindwtr_widget_item_priority, if (dot == null) View.GONE else View.VISIBLE)
-    if (dot != null) views.setInt(R.id.mindwtr_widget_item_priority, "setColorFilter", dot)
+    // Priority ring: the priority colour, grey when the task has none; never filled.
+    views.setInt(R.id.mindwtr_widget_item_priority, "setColorFilter", item.priorityColor ?: mutedText)
     val contextLabel = item.contextLabel
-    views.setViewVisibility(R.id.mindwtr_widget_item_context, if (contextLabel == null) View.GONE else View.VISIBLE)
-    if (contextLabel != null) views.setTextViewText(R.id.mindwtr_widget_item_context, contextLabel)
+    views.setViewVisibility(R.id.mindwtr_widget_item_context_row, if (contextLabel == null) View.GONE else View.VISIBLE)
+    if (contextLabel != null) {
+      views.setTextViewText(R.id.mindwtr_widget_item_context, contextLabel)
+      views.setViewVisibility(R.id.mindwtr_widget_item_identity, if (item.identityColor == null) View.GONE else View.VISIBLE)
+      item.identityColor?.let { views.setInt(R.id.mindwtr_widget_item_identity, "setColorFilter", it) }
+    }
     val dueLabel = item.dueLabel
     views.setViewVisibility(R.id.mindwtr_widget_item_due, if (dueLabel == null) View.GONE else View.VISIBLE)
-    if (dueLabel != null) views.setTextViewText(R.id.mindwtr_widget_item_due, styledDueLabel(dueLabel, item.dueEmphasis))
+    if (dueLabel != null) {
+      views.setTextViewText(R.id.mindwtr_widget_item_due, dueLabel)
+      val dueColor = when (item.dueTone) {
+        WidgetPayload.DueTone.TODAY -> palette?.accent ?: context.getColor(R.color.mindwtr_widget_accent)
+        WidgetPayload.DueTone.OVERDUE -> palette?.warning ?: context.getColor(R.color.mindwtr_widget_warning)
+        WidgetPayload.DueTone.NORMAL -> mutedText
+      }
+      views.setTextColor(R.id.mindwtr_widget_item_due, dueColor)
+    }
     if (palette != null) {
       views.setTextColor(R.id.mindwtr_widget_item_title, palette.text)
       views.setTextColor(R.id.mindwtr_widget_item_context, palette.mutedText)
-      views.setTextColor(R.id.mindwtr_widget_item_due, if (item.dueEmphasis) palette.accent else palette.mutedText)
-    } else if (item.dueEmphasis) {
-      views.setTextColor(R.id.mindwtr_widget_item_due, context.getColor(R.color.mindwtr_widget_accent))
+      views.setInt(R.id.mindwtr_widget_item_divider, "setBackgroundColor", palette.border)
     }
     // Merged into the renderer's row template, which fixes component + action
     // and leaves the data to this row: the task's own open link, else Focus.
@@ -88,19 +100,12 @@ class TasksWidgetFactory(private val context: Context, private val kind: WidgetK
 
   override fun hasStableIds(): Boolean = false
 
-  private fun styledDueLabel(label: String, emphasis: Boolean): CharSequence {
-    if (!emphasis) return label
-    return SpannableString(label).apply {
-      setSpan(StyleSpan(Typeface.BOLD), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-    }
-  }
-
   companion object {
     /** Sectioned rows when the payload carries sections, else the flat list (older payloads). */
     fun buildRows(payload: WidgetPayload): List<Row> {
       if (payload.sections.isEmpty()) return payload.items.map { Row.Task(it) }
       return payload.sections.flatMap { section ->
-        listOf<Row>(Row.Header(section.title)) + section.items.map { Row.Task(it) }
+        listOf<Row>(Row.Header(section.title, section.detail)) + section.items.map { Row.Task(it) }
       }
     }
   }

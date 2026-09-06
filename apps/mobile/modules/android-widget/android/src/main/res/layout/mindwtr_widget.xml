@@ -1,86 +1,95 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Tasks kind: accent header band (date, Inbox chip, "+"), then the Focus
+     sections list. Colours default to the day/night resources and are
+     overridden at render time from the payload palette (WidgetRenderer). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/mindwtr_widget_root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/mindwtr_widget_background"
-    android:orientation="vertical"
-    android:padding="12dp">
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/mindwtr_widget_surface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="fitXY"
+        android:src="@drawable/mindwtr_widget_surface" />
 
     <LinearLayout
-        android:id="@+id/mindwtr_widget_header"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
-
-            <TextView
-                android:id="@+id/mindwtr_widget_title"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:singleLine="true"
-                android:textColor="@color/mindwtr_widget_text"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/mindwtr_widget_subtitle"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:ellipsize="end"
-                android:singleLine="true"
-                android:textColor="@color/mindwtr_widget_muted_text"
-                android:textSize="10sp" />
-        </LinearLayout>
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
         <FrameLayout
-            android:id="@+id/mindwtr_widget_capture"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_marginStart="8dp">
+            android:id="@+id/mindwtr_widget_header"
+            android:layout_width="match_parent"
+            android:layout_height="44dp">
 
             <ImageView
-                android:id="@+id/mindwtr_widget_capture_background"
+                android:id="@+id/mindwtr_widget_band"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:importantForAccessibility="no"
-                android:src="@drawable/mindwtr_widget_circle" />
+                android:scaleType="fitXY"
+                android:src="@drawable/mindwtr_widget_band" />
 
-            <TextView
-                android:id="@+id/mindwtr_widget_capture_label"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:gravity="center"
-                android:includeFontPadding="false"
-                android:text="+"
-                android:textColor="@color/mindwtr_widget_on_accent"
-                android:textSize="20sp" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="14dp"
+                android:paddingEnd="6dp">
+
+                <TextView
+                    android:id="@+id/mindwtr_widget_title"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/mindwtr_widget_on_accent"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/mindwtr_widget_subtitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:singleLine="true"
+                    android:textColor="#CCFFFFFF"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/mindwtr_widget_capture"
+                    android:layout_width="40dp"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:text="+"
+                    android:textColor="@color/mindwtr_widget_on_accent"
+                    android:textSize="24sp" />
+            </LinearLayout>
         </FrameLayout>
+
+        <ListView
+            android:id="@+id/mindwtr_widget_list"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:divider="@null"
+            android:dividerHeight="0dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:scrollbars="none" />
+
+        <TextView
+            android:id="@+id/mindwtr_widget_empty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="14dp"
+            android:textColor="@color/mindwtr_widget_muted_text"
+            android:textSize="13sp" />
     </LinearLayout>
-
-    <ListView
-        android:id="@+id/mindwtr_widget_list"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="4dp"
-        android:layout_weight="1"
-        android:divider="@null"
-        android:dividerHeight="0dp"
-        android:scrollbars="none" />
-
-    <TextView
-        android:id="@+id/mindwtr_widget_empty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="7dp"
-        android:textColor="@color/mindwtr_widget_muted_text"
-        android:textSize="11sp" />
-</LinearLayout>
+</FrameLayout>

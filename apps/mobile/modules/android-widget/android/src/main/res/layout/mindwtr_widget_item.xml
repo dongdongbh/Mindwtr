@@ -3,52 +3,83 @@
     android:id="@+id/mindwtr_widget_item"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
-    android:paddingTop="3dp"
-    android:paddingBottom="3dp">
-
-    <ImageView
-        android:id="@+id/mindwtr_widget_item_priority"
-        android:layout_width="6dp"
-        android:layout_height="6dp"
-        android:layout_marginEnd="6dp"
-        android:importantForAccessibility="no"
-        android:src="@drawable/mindwtr_widget_circle"
-        android:visibility="gone" />
+    android:orientation="vertical">
 
     <LinearLayout
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:gravity="center_vertical"
+        android:minHeight="40dp"
+        android:orientation="horizontal"
+        android:paddingTop="5dp"
+        android:paddingBottom="5dp">
+
+        <ImageView
+            android:id="@+id/mindwtr_widget_item_priority"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_marginEnd="12dp"
+            android:importantForAccessibility="no"
+            android:src="@drawable/mindwtr_widget_ring" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/mindwtr_widget_item_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="@color/mindwtr_widget_text"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:id="@+id/mindwtr_widget_item_context_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/mindwtr_widget_item_identity"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:layout_marginEnd="5dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/mindwtr_widget_circle" />
+
+                <TextView
+                    android:id="@+id/mindwtr_widget_item_context"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/mindwtr_widget_muted_text"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
 
         <TextView
-            android:id="@+id/mindwtr_widget_item_title"
-            android:layout_width="match_parent"
+            android:id="@+id/mindwtr_widget_item_due"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:singleLine="true"
-            android:textColor="@color/mindwtr_widget_text"
-            android:textSize="13sp" />
-
-        <TextView
-            android:id="@+id/mindwtr_widget_item_context"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
+            android:layout_marginStart="8dp"
             android:singleLine="true"
             android:textColor="@color/mindwtr_widget_muted_text"
             android:textSize="12sp"
-            android:visibility="gone" />
+            android:textStyle="bold" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/mindwtr_widget_item_due"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="6dp"
-        android:singleLine="true"
-        android:textColor="@color/mindwtr_widget_muted_text"
-        android:textSize="12sp" />
+    <FrameLayout
+        android:id="@+id/mindwtr_widget_item_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginStart="30dp"
+        android:background="@color/mindwtr_widget_border" />
 </LinearLayout>

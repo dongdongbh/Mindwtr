@@ -46,16 +46,16 @@ object WidgetRenderer {
       R.id.mindwtr_widget_capture,
       PendingIntent.getActivity(context, REQUEST_CAPTURE, captureIntent, immutableFlags()),
     )
-    palette?.let {
-      views.setInt(R.id.mindwtr_widget_capture_background, "setColorFilter", it.accent)
-      views.setTextColor(R.id.mindwtr_widget_capture_label, it.onAccent)
-    }
 
     when (kind) {
       WidgetKind.TASKS -> bindTasks(context, views, appWidgetId, payload, palette)
       WidgetKind.QUICK_CAPTURE -> {
         views.setTextViewText(R.id.mindwtr_widget_title, payload.quickCapture.title)
-        palette?.let { views.setTextColor(R.id.mindwtr_widget_title, it.text) }
+        palette?.let {
+          views.setInt(R.id.mindwtr_widget_capture_background, "setColorFilter", it.accent)
+          views.setTextColor(R.id.mindwtr_widget_capture_label, it.onAccent)
+          views.setTextColor(R.id.mindwtr_widget_title, it.text)
+        }
       }
     }
     return views
@@ -68,8 +68,9 @@ object WidgetRenderer {
     payload: WidgetPayload,
     palette: WidgetPayload.Palette?,
   ) {
-    views.setTextViewText(R.id.mindwtr_widget_title, payload.headerTitle)
-    views.setTextViewText(R.id.mindwtr_widget_subtitle, payload.subtitle)
+    // Header band: the date, the Inbox chip and "+"; the sections carry the titles.
+    views.setTextViewText(R.id.mindwtr_widget_title, payload.dateLabel.ifEmpty { payload.headerTitle })
+    views.setTextViewText(R.id.mindwtr_widget_subtitle, "${payload.inboxLabel} ${payload.inboxCount}")
     views.setTextViewText(R.id.mindwtr_widget_empty, payload.emptyMessage)
     views.setViewVisibility(R.id.mindwtr_widget_empty, if (payload.items.isEmpty()) View.VISIBLE else View.GONE)
 
@@ -99,12 +100,16 @@ object WidgetRenderer {
     )
 
     palette?.let {
-      views.setInt(R.id.mindwtr_widget_root, "setBackgroundColor", it.background)
-      views.setTextColor(R.id.mindwtr_widget_title, it.text)
-      views.setTextColor(R.id.mindwtr_widget_subtitle, it.mutedText)
+      views.setInt(R.id.mindwtr_widget_surface, "setColorFilter", it.background)
+      views.setInt(R.id.mindwtr_widget_band, "setColorFilter", it.accent)
+      views.setTextColor(R.id.mindwtr_widget_title, it.onAccent)
+      views.setTextColor(R.id.mindwtr_widget_subtitle, withAlpha(it.onAccent, 0xCC))
+      views.setTextColor(R.id.mindwtr_widget_capture, it.onAccent)
       views.setTextColor(R.id.mindwtr_widget_empty, it.mutedText)
     }
   }
+
+  fun withAlpha(color: Int, alpha: Int): Int = (color and 0x00FFFFFF) or (alpha shl 24)
 
   private fun immutableFlags(): Int = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 

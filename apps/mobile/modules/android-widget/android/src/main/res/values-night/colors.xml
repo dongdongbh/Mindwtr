@@ -6,5 +6,7 @@
     <color name="mindwtr_widget_text">#F9FAFB</color>
     <color name="mindwtr_widget_muted_text">#CBD5E1</color>
     <color name="mindwtr_widget_accent">#2563EB</color>
+    <color name="mindwtr_widget_border">#374151</color>
+    <color name="mindwtr_widget_warning">#F59E0B</color>
     <color name="mindwtr_widget_on_accent">#FFFFFF</color>
 </resources>

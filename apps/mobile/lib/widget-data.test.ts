@@ -77,7 +77,7 @@ describe('widget-data', () => {
         const data: AppData = {
             ...baseData,
             areas: [{ id: 'area-1', name: 'Home', order: 0, createdAt: now, updatedAt: now }],
-            projects: [{ id: 'proj-1', title: 'Launch', status: 'active', color: '#94a3b8', order: 0, tagIds: [], createdAt: now, updatedAt: now }],
+            projects: [{ id: 'proj-1', title: 'Launch', status: 'active', color: '#8b5cf6', order: 0, tagIds: [], createdAt: now, updatedAt: now }],
             settings: { features: { priorities: true } } as AppData['settings'],
             tasks: [
                 { id: '1', title: 'Starred', status: 'next', isFocusedToday: true, priority: 'urgent', projectId: 'proj-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
@@ -95,6 +95,12 @@ describe('widget-data', () => {
         const [starred] = payload.sections[0].items;
         expect(starred.priorityColor).toBe('#dc2626');
         expect(starred.contextLabel).toBe('Launch');
+        expect(starred.identityColor).toBe('#8b5cf6');
+        expect(payload.sections[1].items[0]).toMatchObject({ dueTone: 'today', dueEmphasis: true, identityColor: null });
+        expect(payload.sections[1].detail).toMatch(/\d/);
+        expect(payload.sections[2].detail).toBeNull();
+        expect(payload.dateLabel).toMatch(/\d/);
+        expect(payload.palette.warning).toMatch(/^#/);
         expect(payload.sections[1].items[0].contextLabel).toBe('Home');
         expect(payload.sections[2].items[0]).toMatchObject({ priorityColor: null, contextLabel: null });
         // Priorities off: the colour is gated with the feature.
