@@ -1,10 +1,8 @@
-import type { ReactElement } from 'react';
-import type { AppData } from '@mindwtr/core';
+import { type AppData, loadTranslations } from '@mindwtr/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildWidgetPayload } from './widget-data';
 import { resetMobileWidgetRenderCache, updateMobileWidgetFromData, updateMobileWidgetFromStore } from './widget-service';
-import { setExpoGoProbeForTests } from './expo-go';
 
 const {
     mockAsyncStorageGetItem,
@@ -13,7 +11,9 @@ const {
     mockIosWidgetReloadTimelines,
     mockIosWidgetSetItem,
     mockPlatform,
-    mockRequestWidgetUpdate,
+    mockAndroidWidgetIsSupported,
+    mockAndroidWidgetSetPayload,
+    mockAndroidWidgetUpdateWidgets,
     mockUseTaskStoreGetState,
 } = vi.hoisted(() => ({
     mockAsyncStorageGetItem: vi.fn(),
@@ -24,7 +24,9 @@ const {
     mockPlatform: {
         OS: 'android',
     },
-    mockRequestWidgetUpdate: vi.fn(),
+    mockAndroidWidgetIsSupported: vi.fn(() => true),
+    mockAndroidWidgetSetPayload: vi.fn(),
+    mockAndroidWidgetUpdateWidgets: vi.fn(),
     mockUseTaskStoreGetState: vi.fn(),
 }));
 
@@ -65,10 +67,10 @@ vi.mock('./widget-data', async (importOriginal) => {
     };
 });
 
-vi.mock('react-native-android-widget', () => ({
-    FlexWidget: 'FlexWidget',
-    TextWidget: 'TextWidget',
-    requestWidgetUpdate: mockRequestWidgetUpdate,
+vi.mock('../modules/android-widget', () => ({
+    isSupported: mockAndroidWidgetIsSupported,
+    setPayload: mockAndroidWidgetSetPayload,
+    updateWidgets: mockAndroidWidgetUpdateWidgets,
 }));
 
 vi.mock('react-native-widgetkit', () => ({
@@ -81,16 +83,6 @@ vi.mock('react-native-widgetkit', () => ({
 vi.mock('./system-color-scheme', () => ({
     getSystemColorSchemeForWidget: mockGetSystemColorSchemeForWidget,
 }));
-
-type WidgetElement = ReactElement<{
-    children?: WidgetElement | WidgetElement[];
-    text?: string;
-}>;
-
-const asWidgetChildren = (children: WidgetElement['props']['children']): WidgetElement[] => {
-    if (!children) return [];
-    return Array.isArray(children) ? children : [children];
-};
 
 const buildData = (taskCount = 5): AppData => {
     const now = new Date().toISOString();
@@ -112,15 +104,6 @@ const buildData = (taskCount = 5): AppData => {
     };
 };
 
-const countRenderedTaskRows = (tree: WidgetElement): number => {
-    const [content] = asWidgetChildren(tree.props.children);
-    const contentChildren = content ? asWidgetChildren(content.props.children) : [];
-    return contentChildren.filter((child) => {
-        const text = child.props.text;
-        return typeof text === 'string' && text.startsWith('• ');
-    }).length;
-};
-
 describe('widget-service', () => {
     beforeEach(() => {
         mockPlatform.OS = 'android';
@@ -132,7 +115,10 @@ describe('widget-service', () => {
         mockGetSystemColorSchemeForWidget.mockReturnValue('light');
         mockIosWidgetReloadTimelines.mockReset();
         mockIosWidgetSetItem.mockReset();
-        mockRequestWidgetUpdate.mockReset();
+        mockAndroidWidgetIsSupported.mockReset();
+        mockAndroidWidgetIsSupported.mockReturnValue(true);
+        mockAndroidWidgetSetPayload.mockReset();
+        mockAndroidWidgetUpdateWidgets.mockReset();
         mockUseTaskStoreGetState.mockReset();
         // app-log's isLoggingEnabled reads useTaskStore.getState().settings on
         // every log call; give it a safe default even in tests that never call
@@ -142,139 +128,61 @@ describe('widget-service', () => {
         resetMobileWidgetRenderCache();
     });
 
-    it('never calls the Android widget bridge inside Expo Go, where the package cannot be linked', async () => {
-        setExpoGoProbeForTests(() => true);
-        try {
-            await updateMobileWidgetFromData(buildData(3));
-            expect(mockRequestWidgetUpdate).not.toHaveBeenCalled();
-        } finally {
-            setExpoGoProbeForTests(null);
-        }
+    it('never calls the native module when it is not linked (Expo Go)', async () => {
+        mockAndroidWidgetIsSupported.mockReturnValue(false);
+
+        expect(await updateMobileWidgetFromData(buildData(3))).toBe(false);
+
+        expect(mockAndroidWidgetSetPayload).not.toHaveBeenCalled();
+        expect(mockAndroidWidgetUpdateWidgets).not.toHaveBeenCalled();
     });
 
     it('skips the native render when nothing any widget shows changed (#766)', async () => {
         const data = buildData(3);
         expect(await updateMobileWidgetFromData(data)).toBe(true);
-        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(1);
 
         expect(await updateMobileWidgetFromData({ ...data, tasks: data.tasks.map((task) => ({ ...task })) })).toBe(true);
-        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(1);
 
         const changed = {
             ...data,
             tasks: data.tasks.map((task, index) => (index === 0 ? { ...task, title: 'Renamed' } : task)),
         };
         expect(await updateMobileWidgetFromData(changed)).toBe(true);
-        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(2);
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(2);
     });
 
-    it('uses Android widget height to render more rows during app-driven updates', async () => {
-        let renderedTree: WidgetElement | null = null;
-        mockRequestWidgetUpdate.mockImplementation(async ({ renderWidget }) => {
-            renderedTree = await renderWidget({
-                widgetName: 'TasksWidget',
-                widgetId: 1,
-                height: 320,
-                width: 250,
-                screenInfo: {
-                    screenHeightDp: 800,
-                    screenWidthDp: 400,
-                    density: 2,
-                    densityDpi: 320,
-                },
-            });
+    it('publishes one Android payload with the shared shape, the capture dialog labels and a scrolling item slice, then refreshes', async () => {
+        expect(await updateMobileWidgetFromData(buildData(30))).toBe(true);
+
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(1);
+        expect(mockAndroidWidgetUpdateWidgets).toHaveBeenCalledTimes(1);
+        const payload = JSON.parse(mockAndroidWidgetSetPayload.mock.calls[0][0] as string);
+        expect(payload.items).toHaveLength(20);
+        expect(payload.items[0]).toMatchObject({ title: 'Focused 1', dueLabel: null, dueEmphasis: false });
+        expect(payload.inboxLabel).toBe('Inbox');
+        expect(payload.inboxCount).toBe(0);
+        expect(payload.focusUri).toBe('mindwtr:///focus');
+        expect(payload.palette.background).toMatch(/^#/);
+        expect(payload.quickCapture).toEqual({
+            title: 'Quick capture',
+            placeholder: 'Add task to inbox...',
+            save: 'Save',
+            cancel: 'Cancel',
+            added: 'Task added to Mindwtr.',
         });
-
-        const didUpdate = await updateMobileWidgetFromData(buildData());
-
-        expect(didUpdate).toBe(true);
-        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
-        expect(renderedTree).not.toBeNull();
-        if (!renderedTree) {
-            throw new Error('Expected Android widget render tree');
-        }
-        expect(countRenderedTaskRows(renderedTree)).toBe(5);
     });
 
-    it('fills more of a default-height Android widget before falling back to +N more', async () => {
-        let renderedTree: WidgetElement | null = null;
-        mockRequestWidgetUpdate.mockImplementation(async ({ renderWidget }) => {
-            renderedTree = await renderWidget({
-                widgetName: 'TasksWidget',
-                widgetId: 1,
-                height: 180,
-                width: 250,
-                screenInfo: {
-                    screenHeightDp: 800,
-                    screenWidthDp: 400,
-                    density: 2,
-                    densityDpi: 320,
-                },
-            });
-        });
+    it('localizes the capture dialog labels with the widget language', async () => {
+        await loadTranslations('de');
+        mockAsyncStorageGetItem.mockImplementation(async (key: string) => (key === 'mindwtr-language' ? 'de' : null));
 
-        const didUpdate = await updateMobileWidgetFromData(buildData(6));
+        expect(await updateMobileWidgetFromData(buildData(1))).toBe(true);
 
-        expect(didUpdate).toBe(true);
-        expect(renderedTree).not.toBeNull();
-        if (!renderedTree) {
-            throw new Error('Expected Android widget render tree');
-        }
-        expect(countRenderedTaskRows(renderedTree)).toBe(5);
-    });
-
-    it('uses a compact Android widget layout for narrow 2x3 widgets', async () => {
-        let renderedTree: WidgetElement | null = null;
-        mockRequestWidgetUpdate.mockImplementation(async ({ renderWidget }) => {
-            renderedTree = await renderWidget({
-                widgetName: 'TasksWidget',
-                widgetId: 1,
-                height: 180,
-                width: 180,
-                screenInfo: {
-                    screenHeightDp: 800,
-                    screenWidthDp: 400,
-                    density: 2,
-                    densityDpi: 320,
-                },
-            });
-        });
-
-        const didUpdate = await updateMobileWidgetFromData(buildData(6));
-
-        expect(didUpdate).toBe(true);
-        expect(renderedTree).not.toBeNull();
-        if (!renderedTree) {
-            throw new Error('Expected Android widget render tree');
-        }
-        expect(countRenderedTaskRows(renderedTree)).toBe(4);
-    });
-
-    it('renders fewer rows for the shorter default 2x2 Android widget size', async () => {
-        let renderedTree: WidgetElement | null = null;
-        mockRequestWidgetUpdate.mockImplementation(async ({ renderWidget }) => {
-            renderedTree = await renderWidget({
-                widgetName: 'TasksWidget',
-                widgetId: 1,
-                height: 120,
-                width: 180,
-                screenInfo: {
-                    screenHeightDp: 800,
-                    screenWidthDp: 400,
-                    density: 2,
-                    densityDpi: 320,
-                },
-            });
-        });
-
-        const didUpdate = await updateMobileWidgetFromData(buildData(6));
-
-        expect(didUpdate).toBe(true);
-        expect(renderedTree).not.toBeNull();
-        if (!renderedTree) {
-            throw new Error('Expected Android widget render tree');
-        }
-        expect(countRenderedTaskRows(renderedTree)).toBe(2);
+        const payload = JSON.parse(mockAndroidWidgetSetPayload.mock.calls[0][0] as string);
+        expect(payload.quickCapture.cancel).toBe('Abbrechen');
+        expect(payload.quickCapture.save).toBe('Speichern');
     });
 
     it('writes family-specific iOS payloads with per-size item budgets', async () => {
@@ -284,7 +192,7 @@ describe('widget-service', () => {
         const didUpdate = await updateMobileWidgetFromData(buildData(30));
 
         expect(didUpdate).toBe(true);
-        expect(mockRequestWidgetUpdate).not.toHaveBeenCalled();
+        expect(mockAndroidWidgetSetPayload).not.toHaveBeenCalled();
         expect(mockIosWidgetSetItem).toHaveBeenCalledTimes(6);
         const payloadByKey = new Map(
             mockIosWidgetSetItem.mock.calls.map(([key, value]) => [key, JSON.parse(value as string)])
@@ -386,13 +294,13 @@ describe('widget-service', () => {
 
         expect(await updateMobileWidgetFromStore()).toBe(true);
         expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(1);
-        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(1);
 
         // Repeated call, nothing changed: gate 0 must skip the payload build
         // entirely, before the JSON fingerprint gate even runs.
         expect(await updateMobileWidgetFromStore()).toBe(true);
         expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(1);
-        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(1);
 
         // lastDataChangeAt moves and the content actually differs: gate 0 lets
         // the rebuild through, and gate 1 (the JSON fingerprint) sees new
@@ -408,7 +316,7 @@ describe('widget-service', () => {
         });
         expect(await updateMobileWidgetFromStore()).toBe(true);
         expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(2);
-        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(2);
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(2);
     });
 
     it('skips the native render when a persisted fingerprint from a prior (cold) module instance matches (#766 follow-up)', async () => {
@@ -417,7 +325,7 @@ describe('widget-service', () => {
         // First render, from a "cold" instance: persists its fingerprint to
         // AsyncStorage as updateMobileWidgetFromData does after every render.
         await updateMobileWidgetFromData(data);
-        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(1);
         const [, persistedFingerprint] = mockAsyncStorageSetItem.mock.calls.find(
             ([key]) => key === 'mindwtr-widget-render-fingerprint',
         ) as [string, string];
@@ -426,13 +334,13 @@ describe('widget-service', () => {
         // Simulate a fresh headless instance: module-scope render cache reset,
         // and AsyncStorage now serving the fingerprint persisted above.
         resetMobileWidgetRenderCache();
-        mockRequestWidgetUpdate.mockClear();
+        mockAndroidWidgetSetPayload.mockClear();
         mockAsyncStorageGetItem.mockImplementation(async (key: string) => (
             key === 'mindwtr-widget-render-fingerprint' ? persistedFingerprint : null
         ));
 
         expect(await updateMobileWidgetFromData(data)).toBe(true);
-        expect(mockRequestWidgetUpdate).not.toHaveBeenCalled();
+        expect(mockAndroidWidgetSetPayload).not.toHaveBeenCalled();
     });
 
     it('retries the native render after a failed render, even with unchanged inputs (correction #1, blocking)', async () => {
@@ -450,7 +358,7 @@ describe('widget-service', () => {
             lastDataChangeAt: 1,
         };
         mockUseTaskStoreGetState.mockReturnValue(storeState);
-        mockRequestWidgetUpdate.mockRejectedValue(new Error('widget host busy'));
+        mockAndroidWidgetSetPayload.mockImplementation(() => { throw new Error('widget host busy'); });
 
         expect(await updateMobileWidgetFromStore()).toBe(false);
         expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(1);
@@ -458,8 +366,7 @@ describe('widget-service', () => {
         // Retry with unchanged inputs (the immediate + 800ms pair callers
         // use): gate 0 must not have cached the failed render, so the
         // payload is built and the native call attempted again.
-        mockRequestWidgetUpdate.mockReset();
-        mockRequestWidgetUpdate.mockResolvedValue(undefined);
+        mockAndroidWidgetSetPayload.mockReset();
         expect(await updateMobileWidgetFromStore()).toBe(true);
         expect(vi.mocked(buildWidgetPayload)).toHaveBeenCalledTimes(2);
     }, 10_000);
@@ -494,7 +401,7 @@ describe('widget-service', () => {
         const data = buildData(3);
 
         await updateMobileWidgetFromData(data);
-        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(1);
         const [, persistedFingerprint] = mockAsyncStorageSetItem.mock.calls.find(
             ([key]) => key === 'mindwtr-widget-render-fingerprint',
         ) as [string, string];
@@ -508,12 +415,12 @@ describe('widget-service', () => {
         expect(staleVersionFingerprint).not.toBe(persistedFingerprint);
 
         resetMobileWidgetRenderCache();
-        mockRequestWidgetUpdate.mockClear();
+        mockAndroidWidgetSetPayload.mockClear();
         mockAsyncStorageGetItem.mockImplementation(async (key: string) => (
             key === 'mindwtr-widget-render-fingerprint' ? staleVersionFingerprint : null
         ));
 
         expect(await updateMobileWidgetFromData(data)).toBe(true);
-        expect(mockRequestWidgetUpdate).toHaveBeenCalledTimes(1);
+        expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(1);
     });
 });

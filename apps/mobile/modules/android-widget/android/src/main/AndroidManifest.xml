@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The receiver, list service and QuickCaptureActivity are registered in the
+         app manifest by plugins/android-widget.js, which also owns the
+         appwidget-provider XML, the launcher label and the dialog theme. -->
+    <application />
+</manifest>

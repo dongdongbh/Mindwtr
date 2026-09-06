@@ -2,11 +2,12 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { type AppData, type Language, useTaskStore } from '@mindwtr/core';
-import { requestWidgetUpdate, type WidgetInfo } from 'react-native-android-widget';
 import * as ReactNativeWidgetKit from 'react-native-widgetkit';
 
-import { buildTasksWidgetTree } from '../components/TasksWidget';
+import * as AndroidWidget from '../modules/android-widget';
 import {
+    type AndroidTasksWidgetPayload,
+    buildAndroidQuickCaptureLabels,
     buildShortcutsSnapshot,
     buildWidgetPayload,
     IOS_SHORTCUTS_SNAPSHOT_KEY,
@@ -24,13 +25,8 @@ import {
     WIDGET_LANGUAGE_KEY,
 } from './widget-data';
 import { logError, logInfo, logWarn } from './app-log';
-import { isExpoGo } from './expo-go';
 import { getLocalDayKey } from '@/hooks/use-local-day-key';
 import { getSystemColorSchemeForWidget } from './system-color-scheme';
-import {
-    getAdaptiveAndroidWidgetTaskLimit,
-    getAndroidWidgetLayoutMode,
-} from './widget-layout';
 
 export function isAndroidWidgetSupported(): boolean {
     return Platform.OS === 'android';
@@ -88,51 +84,38 @@ function buildPayloadFromData(
     });
 }
 
-let expoGoWidgetSkipLogged = false;
+// The native widget's task list scrolls (RemoteViewsService), so the payload
+// carries a fixed slice instead of a per-widget-height budget.
+const ANDROID_WIDGET_MAX_ITEMS = 20;
+const ANDROID_WIDGET_RELEASE_CHECK = 'v1.2.9/android-native-widget';
+let androidWidgetUnavailableLogged = false;
 
-async function updateAndroidWidgetsFromData(data: AppData, language: Language): Promise<boolean> {
+// `rendered` is the fingerprint build below (up to WIDGET_FINGERPRINT_MAX_ITEMS
+// items), reused so a render costs one payload build, not two.
+async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, language: Language): Promise<boolean> {
     if (Platform.OS !== 'android') return false;
-    // Expo Go does not bundle react-native-android-widget; the bridge call below would
-    // fail (twice, then log an error) on every data change. Say so once, then stay quiet.
-    if (isExpoGo()) {
-        if (!expoGoWidgetSkipLogged) {
-            expoGoWidgetSkipLogged = true;
-            void logInfo('[RNWidget] Android widgets are unavailable in Expo Go; skipping updates', { scope: 'widget' });
+    // Expo Go does not link modules/android-widget. Say so once, then stay quiet.
+    if (!AndroidWidget.isSupported()) {
+        if (!androidWidgetUnavailableLogged) {
+            androidWidgetUnavailableLogged = true;
+            void logInfo('Android widget module unavailable in this build; skipping updates', { scope: 'widget' });
         }
         return false;
     }
 
     try {
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-            try {
-                await requestWidgetUpdate({
-                    widgetName: 'TasksWidget',
-                    renderWidget: (widgetInfo) => buildTasksWidgetTree(
-                        buildPayloadFromData(
-                            data,
-                            language,
-                            getAdaptiveAndroidWidgetTaskLimit(widgetInfo.height, widgetInfo.width),
-                        ),
-                        { layoutMode: getAndroidWidgetLayoutMode(widgetInfo.width) },
-                    ),
-                });
-                return true;
-            } catch (error) {
-                if (attempt < 1) {
-                    await new Promise((resolve) => setTimeout(resolve, 300));
-                    continue;
-                }
-                if (__DEV__) {
-                    void logWarn('[RNWidget] Failed to update Android widget', {
-                        scope: 'widget',
-                        extra: { error: error instanceof Error ? error.message : String(error) },
-                    });
-                }
-                void logError(error, { scope: 'widget', extra: { platform: 'android', attempt: String(attempt + 1) } });
-                return false;
-            }
-        }
-        return false;
+        const payload: AndroidTasksWidgetPayload = {
+            ...rendered,
+            items: rendered.items.slice(0, ANDROID_WIDGET_MAX_ITEMS),
+            quickCapture: buildAndroidQuickCaptureLabels(language),
+        };
+        AndroidWidget.setPayload(JSON.stringify(payload));
+        AndroidWidget.updateWidgets();
+        void logInfo('Android widget payload published', {
+            scope: 'widget',
+            extra: { releaseCheck: ANDROID_WIDGET_RELEASE_CHECK, items: String(payload.items.length) },
+        });
+        return true;
     } catch (error) {
         if (__DEV__) {
             void logWarn('[RNWidget] Failed to update Android widget', {
@@ -140,7 +123,7 @@ async function updateAndroidWidgetsFromData(data: AppData, language: Language): 
                 extra: { error: error instanceof Error ? error.message : String(error) },
             });
         }
-        void logError(error, { scope: 'widget', extra: { platform: 'android', attempt: 'setup' } });
+        void logError(error, { scope: 'widget', extra: { platform: 'android' } });
         return false;
     }
 }
@@ -235,8 +218,8 @@ async function updateIosShortcutsSnapshotFromData(snapshot: ShortcutsSnapshot): 
 // (Android RemoteViews / iOS timeline reload) costs seconds on mid-range
 // devices while the payload build costs milliseconds (#766). Remember what was
 // last rendered and skip the native update when nothing any widget shows
-// changed. System events for new/resized widgets render through
-// widget-task-handler directly, so they never depend on this path.
+// changed. Newly placed or resized Android widgets draw from the last stored
+// payload natively, so they never depend on this path.
 const WIDGET_FINGERPRINT_MAX_ITEMS = 50;
 // Folded into the fingerprint (not just the storage key) so an app upgrade
 // that changes what a render writes without changing the payload data still
@@ -301,13 +284,12 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
     // Gate 1: the widget's own payload fingerprint, exactly as before #980 --
     // this is the #766 skip and must not fire on changes the widget doesn't
     // show.
-    const widgetFingerprint = `${WIDGET_RENDER_APP_VERSION}:${language}:${JSON.stringify(
-        buildPayloadFromData(data, language, WIDGET_FINGERPRINT_MAX_ITEMS),
-    )}`;
+    const fingerprintPayload = buildPayloadFromData(data, language, WIDGET_FINGERPRINT_MAX_ITEMS);
+    const widgetFingerprint = `${WIDGET_RENDER_APP_VERSION}:${language}:${JSON.stringify(fingerprintPayload)}`;
     let widgetUpdated = true;
     if (widgetFingerprint !== lastRenderedWidgetFingerprint) {
         widgetUpdated = Platform.OS === 'android'
-            ? await updateAndroidWidgetsFromData(data, language)
+            ? await updateAndroidWidgetsFromData(fingerprintPayload, language)
             : await updateIosWidgetPayloadsFromData(data, language);
         if (widgetUpdated) {
             lastRenderedWidgetFingerprint = widgetFingerprint;

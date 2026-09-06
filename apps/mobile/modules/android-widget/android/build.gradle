@@ -1,0 +1,27 @@
+apply plugin: 'com.android.library'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+
+android {
+  namespace "tech.dongdongbh.mindwtr.androidwidget"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // QuickCaptureActivity is an AppCompat DayNight dialog; same artifact the app already ships.
+  implementation 'androidx.appcompat:appcompat:1.7.0'
+  testImplementation 'junit:junit:4.13.2'
+  // android.jar's org.json is a stub on the JVM; the real one runs the payload and writer tests.
+  testImplementation 'org.json:json:20240303'
+}

@@ -11,7 +11,6 @@ startupProfiler?.markStartupPhase?.('js.index.metro_runtime_require:loaded');
 
 require('./lib/background-sync-task');
 require('./lib/context-automation-headless-task');
-const skipWidgetHandlerInit = process.env.EXPO_PUBLIC_SKIP_WIDGET_HANDLER_INIT === '1';
 
 const installKeepAwakeActivationGuard = () => {
   try {
@@ -59,34 +58,6 @@ const installKeepAwakeActivationGuard = () => {
 
 installKeepAwakeActivationGuard();
 
-const loadWidgetHandler = () => {
-  startupProfiler?.markStartupPhase?.('js.index.widget_handler_require:start');
-  try {
-    require('./widget-task-handler');
-    startupProfiler?.markStartupPhase?.('js.index.widget_handler_loaded');
-  } catch (error) {
-    const details = error instanceof Error ? (error.stack || error.message) : String(error);
-    startupProfiler?.markStartupPhase?.('js.index.widget_handler_failed');
-    console.error(`[MindwtrStartup] phase=js.index.widget_handler_failed_error details=${details}`);
-  }
-};
-
-const scheduleWidgetHandlerLoad = () => {
-  if (typeof setImmediate === 'function') {
-    setImmediate(loadWidgetHandler);
-    return;
-  }
-  if (typeof setTimeout === 'function') {
-    setTimeout(loadWidgetHandler, 0);
-    return;
-  }
-  if (typeof queueMicrotask === 'function') {
-    queueMicrotask(loadWidgetHandler);
-    return;
-  }
-  Promise.resolve().then(loadWidgetHandler);
-};
-
 const loadExpoRouterEntry = () => {
   startupProfiler?.markStartupPhase?.('js.index.router_qualified_entry_require:start');
   const { App } = require('expo-router/build/qualified-entry');
@@ -100,13 +71,6 @@ const loadExpoRouterEntry = () => {
   renderRootComponent(App);
   startupProfiler?.markStartupPhase?.('js.index.router_render_root_component:loaded');
 };
-
-if (skipWidgetHandlerInit) {
-  startupProfiler?.markStartupPhase?.('js.index.widget_handler_skipped');
-} else {
-  startupProfiler?.markStartupPhase?.('js.index.widget_handler_deferred_scheduled');
-  scheduleWidgetHandlerLoad();
-}
 
 startupProfiler?.markStartupPhase?.('js.index.expo_router_entry_require:start');
 try {

@@ -49,16 +49,10 @@ const DEV_VARIANT_NAME_SUFFIX = ' Dev';
 const withDevVariant = (base: ExpoConfig): ExpoConfig => {
   if (!isDevVariant) return base;
   const plugins = (base.plugins ?? []).map((entry) => {
-    if (!Array.isArray(entry) || entry[0] !== './plugins/react-native-android-widget') return entry;
-    const props = (entry[1] ?? {}) as { widgets?: Array<{ label?: string }> };
-    return [entry[0], {
-      ...props,
-      // The launcher's widget picker lists both apps; label the dev one.
-      widgets: (props.widgets ?? []).map((widget) => ({
-        ...widget,
-        label: `${widget.label ?? base.name}${DEV_VARIANT_NAME_SUFFIX}`,
-      })),
-    }] as typeof entry;
+    if (!Array.isArray(entry) || entry[0] !== './plugins/android-widget') return entry;
+    const props = (entry[1] ?? {}) as { label?: string };
+    // The launcher's widget picker lists both apps; label the dev one.
+    return [entry[0], { ...props, label: `${props.label ?? base.name}${DEV_VARIANT_NAME_SUFFIX}` }] as typeof entry;
   });
   return {
     ...base,

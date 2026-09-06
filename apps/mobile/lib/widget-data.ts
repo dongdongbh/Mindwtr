@@ -14,7 +14,6 @@ import {
     loadTranslations,
     sortTasksBy,
 } from '@mindwtr/core';
-import type { ColorProp } from 'react-native-android-widget';
 import { THEME_PRESETS, type ThemePresetName } from '../constants/theme-presets';
 
 export const WIDGET_DATA_KEY = 'mindwtr-data';
@@ -52,14 +51,18 @@ export interface WidgetTaskItem {
     dueEmphasis: boolean;
 }
 
+// Hex only: the Android provider (modules/android-widget WidgetPayload.kt) and
+// the iOS widget parse these themselves.
+export type WidgetColor = `#${string}`;
+
 export interface WidgetPalette {
-    background: ColorProp;
-    card: ColorProp;
-    border: ColorProp;
-    text: ColorProp;
-    mutedText: ColorProp;
-    accent: ColorProp;
-    onAccent: ColorProp;
+    background: WidgetColor;
+    card: WidgetColor;
+    border: WidgetColor;
+    text: WidgetColor;
+    mutedText: WidgetColor;
+    accent: WidgetColor;
+    onAccent: WidgetColor;
 }
 
 export interface TasksWidgetPayload {
@@ -75,6 +78,32 @@ export interface TasksWidgetPayload {
     quickCaptureUri: string;
     themeMode?: string;
     palette: WidgetPalette;
+}
+
+// Labels for the native Android quick-capture dialog (#1169). Localized here
+// so the Kotlin side (modules/android-widget) carries no string tables.
+export interface AndroidQuickCaptureLabels {
+    title: string;
+    placeholder: string;
+    save: string;
+    cancel: string;
+    added: string;
+}
+
+export interface AndroidTasksWidgetPayload extends TasksWidgetPayload {
+    quickCapture: AndroidQuickCaptureLabels;
+}
+
+export function buildAndroidQuickCaptureLabels(language: Language): AndroidQuickCaptureLabels {
+    void loadTranslations(language);
+    const tr = getTranslationsSync(language);
+    return {
+        title: tr['widget.capture'] ?? 'Quick capture',
+        placeholder: tr['inbox.addPlaceholder'] ?? 'Add task to inbox...',
+        save: tr['common.save'] ?? 'Save',
+        cancel: tr['common.cancel'] ?? 'Cancel',
+        added: tr['obsidian.bringIntoMindwtrSuccess'] ?? 'Task added to Mindwtr.',
+    };
 }
 
 export type ShortcutsSnapshotListKey = 'inbox' | 'focus' | 'next' | 'waiting' | 'someday';

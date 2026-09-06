@@ -298,6 +298,7 @@ jobs:
             :app:compileDebugJavaWithJavac \
             :attachment-file-installer:assembleDebug \
             :sync-file-lock:assembleDebug \
+            :android-widget:assembleDebug \
             --no-daemon \
             -PreactNativeArchitectures=arm64-v8a
 
@@ -338,7 +339,7 @@ jobs:
 
       - name: Run Android native recovery tests
         working-directory: apps/mobile/android
-        run: ./gradlew :attachment-file-installer:testDebugUnitTest :sync-file-lock:testDebugUnitTest --no-daemon
+        run: ./gradlew :attachment-file-installer:testDebugUnitTest :sync-file-lock:testDebugUnitTest :android-widget:testDebugUnitTest --no-daemon
 
   ios-native:
     if: needs.changes.outputs.ios == 'true'

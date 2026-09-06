@@ -9,8 +9,8 @@ const loadConfig = async (): Promise<ExpoConfig> => {
 };
 
 const widgetLabels = (config: ExpoConfig): string[] => (config.plugins ?? [])
-  .filter((entry): entry is [string, { widgets: Array<{ label: string }> }] => Array.isArray(entry) && entry[0] === './plugins/react-native-android-widget')
-  .flatMap(([, props]) => props.widgets.map((widget) => widget.label));
+  .filter((entry): entry is [string, { label: string }] => Array.isArray(entry) && entry[0] === './plugins/android-widget')
+  .map(([, props]) => props.label);
 
 describe('app.config APP_VARIANT', () => {
   afterEach(() => {
