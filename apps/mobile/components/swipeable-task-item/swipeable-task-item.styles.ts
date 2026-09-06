@@ -69,7 +69,8 @@ export const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         alignItems: 'center',
-        gap: 4,
+        columnGap: 10,
+        rowGap: 4,
         marginTop: 2,
     },
     inlineMetaItem: {
@@ -87,11 +88,6 @@ export const styles = StyleSheet.create({
         fontWeight: '500',
         lineHeight: 16,
         minWidth: 0,
-    },
-    metaSeparator: {
-        fontSize: 12,
-        fontWeight: '600',
-        marginHorizontal: 2,
     },
     contextText: {
         color: '#3B82F6',

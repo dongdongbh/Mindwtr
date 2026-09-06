@@ -201,14 +201,9 @@ export function SwipeableTaskItemContent({
     const metaParts: ReactNode[] = [];
     const canNavigateMeta = !selectionMode;
 
-    const addMetaPart = (node: ReactNode, key: string) => {
-        if (metaParts.length > 0) {
-            metaParts.push(
-                <Text key={`sep-${key}`} style={[styles.metaSeparator, { color: tc.secondaryText }]}>
-                    ·
-                </Text>
-            );
-        }
+    // Items are separated by the row's gap alone. A "·" between them used to be
+    // its own node, so a wrapped line could start with a lone dot (#1161).
+    const addMetaPart = (node: ReactNode, _key: string) => {
         metaParts.push(node);
     };
 

@@ -4,6 +4,7 @@ Changes collected after `v1.2.8` and before the next version tag.
 
 ## Full Change List
 
+- Android and iOS: the details line under a task (project, context, tag, dates, recurrence) no longer separates items with a "·". Spacing alone keeps them apart, so a wrapped details line can no longer start with a lone dot. (#1161)
 - Android: joining a File Sync folder (Syncthing, a mounted drive) no longer fails with "Candidate attachment proof failed … the file could not be fetched from the new sync location" when the folder does not yet hold one of the attachment files. The phone now keeps the attachment marked missing and picks the file up on a later sync once it arrives, the same way the desktop has since 1.2.8.
 - iOS: iCloud sync recovers after you clear Mindwtr's data in iCloud settings. The app used to remember that its iCloud zone existed and never created it again, so every sync failed with "zone was cleared by user" until you reinstalled. It now recreates the zone the first time iCloud reports it gone, reads it in full, and uploads this device's data again.
 - Linux (deb, rpm, AUR): pinning Mindwtr to KDE Plasma's Task Manager no longer produces a second Mindwtr entry when the app runs. The hidden desktop entry added for KWin's alt-tab icon also declared a window class, so Plasma matched the running window to the hidden entry instead of the pinned one. (#1168)
