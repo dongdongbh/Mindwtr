@@ -2263,7 +2263,7 @@ export const esOverrides: Record<string, string> = {
 'starter.quickCapture.check3': "Pon fecha solo a lo que tenga un plazo real",
 'starter.focus.title': "Marca con estrella hasta 3 tareas para el foco de hoy",
 'starter.focus.desc': "Elige las pocas cosas que de verdad harás hoy.",
-'starter.focus.check1': "Abrir Foco",
+'starter.focus.check1': "Abrir Enfoque",
 'starter.focus.check2': "Usa la estrella para elegir tus tareas principales",
 'starter.focus.check3': "Aplaza una tarea para ocultarla hasta que la necesites",
 'starter.simplify.title': "Haz Mindwtr a tu medida: oculta lo que no uses",
