@@ -6,6 +6,7 @@ const {
   ACTIVITY_NAME,
   CONFIGURE_ACTIVITY_NAME,
   SERVICE_NAME,
+  TAP_ACTIVITY_NAME,
   buildWidgetInfoXml,
   buildWidgetKinds,
   buildWidgetStringsXml,
@@ -90,7 +91,8 @@ describe('android-widget', () => {
     expect(application.service).toEqual([{
       $: { 'android:name': SERVICE_NAME, 'android:permission': 'android.permission.BIND_REMOTEVIEWS', 'android:exported': 'false' },
     }]);
-    expect(application.activity).toHaveLength(2);
+    expect(application.activity).toHaveLength(3);
+    expect(application.activity[2].$).toMatchObject({ 'android:name': TAP_ACTIVITY_NAME, 'android:exported': 'false', 'android:theme': '@android:style/Theme.NoDisplay' });
     expect(application.activity[1].$).toMatchObject({ 'android:name': CONFIGURE_ACTIVITY_NAME, 'android:exported': 'true' });
     expect(application.activity[1]['intent-filter'][0].action[0].$['android:name']).toBe('android.appwidget.action.APPWIDGET_CONFIGURE');
     expect(application.activity[0].$).toMatchObject({

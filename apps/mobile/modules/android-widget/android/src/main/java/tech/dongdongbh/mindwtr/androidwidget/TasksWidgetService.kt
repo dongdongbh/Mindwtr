@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.view.View
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.StrikethroughSpan
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 
@@ -67,9 +70,18 @@ class TasksWidgetFactory(
   private fun taskRow(item: WidgetPayload.Item, palette: WidgetPayload.Palette?): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.mindwtr_widget_item)
     val mutedText = palette?.mutedText ?: context.getColor(R.color.mindwtr_widget_muted_text)
-    views.setTextViewText(R.id.mindwtr_widget_item_title, item.title)
-    // Priority ring: the priority colour, grey when the task has none; never filled.
+    val pending = item.id.isNotEmpty() && CheckoffStore.isPending(context, item.id)
+    views.setTextViewText(R.id.mindwtr_widget_item_title, if (pending) struck(item.title) else item.title)
+    // Priority ring: the priority colour, grey when the task has none; filled
+    // only while a check-off waits for its undo window.
+    views.setImageViewResource(
+      R.id.mindwtr_widget_item_priority,
+      if (pending) R.drawable.mindwtr_widget_circle else R.drawable.mindwtr_widget_ring,
+    )
     views.setInt(R.id.mindwtr_widget_item_priority, "setColorFilter", item.priorityColor ?: mutedText)
+    if (item.id.isNotEmpty()) {
+      views.setOnClickFillInIntent(R.id.mindwtr_widget_item_ring_target, Intent().setData(Uri.parse(WidgetTapActivity.checkoffUri(item.id))))
+    }
     val contextLabel = item.contextLabel
     views.setViewVisibility(R.id.mindwtr_widget_item_context_row, if (contextLabel == null) View.GONE else View.VISIBLE)
     if (contextLabel != null) {
@@ -97,6 +109,10 @@ class TasksWidgetFactory(
     // and leaves the data to this row: the task's own open link, else Focus.
     views.setOnClickFillInIntent(R.id.mindwtr_widget_item, Intent().setData(Uri.parse(item.openUri ?: payload.focusUri)))
     return views
+  }
+
+  private fun struck(title: String): CharSequence = SpannableString(title).apply {
+    setSpan(StrikethroughSpan(), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
   }
 
   override fun getLoadingView(): RemoteViews? = null

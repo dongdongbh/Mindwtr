@@ -27,6 +27,8 @@ object WidgetRenderer {
   }
 
   fun render(context: Context, manager: AppWidgetManager, ids: IntArray, kind: WidgetKind) {
+    // Commit check-offs whose undo window elapsed while nothing else ran.
+    if (kind == WidgetKind.TASKS) CheckoffStore.sweep(context)
     val payload = WidgetPayloadStore.read(context)
     for (id in ids) {
       manager.updateAppWidget(id, buildViews(context, id, kind, payload))
@@ -94,10 +96,10 @@ object WidgetRenderer {
     views.setOnClickPendingIntent(R.id.mindwtr_widget_empty, focus)
     // Collection rows deliver clicks through a fill-in intent, which the
     // platform can only merge into a mutable template. The template fixes the
-    // component and action and leaves the data unset, so a row's fill-in can
-    // add exactly one thing: its own `mindwtr:` URI (validated in WidgetPayload),
-    // which MainActivity's deep-link handler already treats as untrusted.
-    val rowTemplate = appIntent(context, null)
+    // component (the invisible WidgetTapActivity) and leaves the data unset,
+    // so a row's fill-in can add exactly one thing: the task's open link or its
+    // check-off URI, both validated before anything acts on them.
+    val rowTemplate = Intent(context, WidgetTapActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     val mutable = PendingIntent.FLAG_UPDATE_CURRENT or
       (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
     views.setPendingIntentTemplate(

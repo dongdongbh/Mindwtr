@@ -24,8 +24,11 @@ import { deleteAsync, documentDirectory, getInfoAsync, readAsStringAsync, readDi
 export const PENDING_CAPTURES_DIRECTORY = 'pending-captures';
 export const ANDROID_QUICK_CAPTURE_SOURCE = 'android-quick-capture';
 const ANDROID_QUICK_CAPTURE_RELEASE_CHECK = 'v1.2.9/android-quick-capture-dialog';
+const ANDROID_WIDGET_CHECKOFF_RELEASE_CHECK = 'v1.2.9/android-widget-checkoff';
 
+// A new task to add (the iOS Shortcut and the Android dialog; `kind` absent).
 export type PendingCapture = {
+    kind?: 'capture';
     id: string;
     title: string;
     note?: string;
@@ -37,6 +40,18 @@ export type PendingCapture = {
     // Which native writer queued the item; absent for the iOS Shortcut.
     source?: string;
 };
+
+// A check-off from the Android widget ring (#1173 phase 2): the task is
+// completed through the normal store path when the app next runs.
+export type PendingCompletion = {
+    kind: 'complete';
+    id: string;
+    taskId: string;
+    completedAt?: string;
+    source?: string;
+};
+
+export type PendingQueueItem = PendingCapture | PendingCompletion;
 
 const trimOrUndefined = (value: unknown): string | undefined => {
     if (typeof value !== 'string') return undefined;
@@ -65,7 +80,7 @@ function sanitizeStructuredDateInput(raw: unknown): string | undefined {
     return `${year}-${month}-${day}`;
 }
 
-export function parsePendingCapture(raw: string): PendingCapture | null {
+export function parsePendingCapture(raw: string): PendingQueueItem | null {
     let parsed: unknown;
     try {
         parsed = JSON.parse(raw);
@@ -76,8 +91,17 @@ export function parsePendingCapture(raw: string): PendingCapture | null {
 
     const record = parsed as Record<string, unknown>;
     const id = trimOrUndefined(record.id);
+    if (!id) return null;
+    if (record.kind === 'complete') {
+        const taskId = trimOrUndefined(record.taskId);
+        if (!taskId) return null;
+        const completedAt = trimOrUndefined(record.completedAt);
+        const source = trimOrUndefined(record.source);
+        return { kind: 'complete', id, taskId, ...(completedAt ? { completedAt } : {}), ...(source ? { source } : {}) };
+    }
+    if (record.kind !== undefined && record.kind !== 'capture') return null;
     const title = trimOrUndefined(record.title);
-    if (!id || !title) return null;
+    if (!title) return null;
 
     const note = trimOrUndefined(record.note);
     const project = trimOrUndefined(record.project);
@@ -134,6 +158,8 @@ export function buildPendingCaptureTaskProps(capture: PendingCapture, projects: 
 
 type IngestDeps = {
     addTask: (title: string, initialProps?: Partial<Task>) => Promise<unknown>;
+    // Completes a widget check-off the way the task list's status change does.
+    updateTask: (id: string, updates: Partial<Task>) => Promise<unknown>;
     addProject: (title: string, color: string, initialProps?: Partial<Project>) => Promise<Project | null>;
     projects: Project[];
     areas: Area[];
@@ -156,7 +182,7 @@ const isFailedResult = (result: unknown): boolean => (
 // same precedence as a surface's own picker beating a typed `+Project`.
 async function assembleCaptureTask(
     capture: PendingCapture,
-    { addProject, projects, areas, tasks, people, settings }: Omit<IngestDeps, 'addTask'>,
+    { addProject, projects, areas, tasks, people, settings }: Omit<IngestDeps, 'addTask' | 'updateTask'>,
 ): Promise<{ title: string; props: Partial<Task> } | null> {
     try {
         // Relative dates (`/due:friday`, "tomorrow") resolve against the moment
@@ -212,7 +238,26 @@ async function assembleCaptureTask(
     }
 }
 
-export async function ingestPendingCaptures({ addTask, addProject, projects, areas, tasks, people, settings }: IngestDeps): Promise<number> {
+// At-least-once: a task already done, deleted or unknown is a no-op and the
+// file still goes away. The success line is the phase-2 release check.
+async function applyPendingCompletion(
+    completion: PendingCompletion,
+    { updateTask, tasks }: Pick<IngestDeps, 'updateTask' | 'tasks'>,
+): Promise<boolean> {
+    const task = tasks.find((candidate) => candidate.id === completion.taskId);
+    const outcome = !task || task.deletedAt ? 'missing' : task.status === 'done' ? 'already-done' : 'completed';
+    if (outcome === 'completed') {
+        const result = await updateTask(completion.taskId, { status: 'done' });
+        if (isFailedResult(result)) return false;
+    }
+    void logInfo('Widget check-off ingested', {
+        scope: 'capture',
+        extra: { releaseCheck: ANDROID_WIDGET_CHECKOFF_RELEASE_CHECK, outcome },
+    });
+    return true;
+}
+
+export async function ingestPendingCaptures({ addTask, updateTask, addProject, projects, areas, tasks, people, settings }: IngestDeps): Promise<number> {
     if (!documentDirectory) return 0;
     const dir = `${documentDirectory}${PENDING_CAPTURES_DIRECTORY}`;
 
@@ -229,7 +274,7 @@ export async function ingestPendingCaptures({ addTask, addProject, projects, are
     let ingested = 0;
     for (const name of names.filter((entry) => entry.endsWith('.json')).sort()) {
         const fileUri = `${dir}/${name}`;
-        let capture: PendingCapture | null = null;
+        let capture: PendingQueueItem | null = null;
         try {
             capture = parsePendingCapture(await readAsStringAsync(fileUri));
         } catch (error) {
@@ -243,6 +288,13 @@ export async function ingestPendingCaptures({ addTask, addProject, projects, are
             // re-log on every foreground.
             void logWarn('Discarding malformed pending capture', { scope: 'shortcuts', extra: { name } });
             await deleteAsync(fileUri, { idempotent: true }).catch(() => undefined);
+            continue;
+        }
+
+        if (capture.kind === 'complete') {
+            if (!(await applyPendingCompletion(capture, { updateTask, tasks }))) continue;
+            await deleteAsync(fileUri, { idempotent: true }).catch(() => undefined);
+            ingested += 1;
             continue;
         }
 

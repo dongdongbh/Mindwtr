@@ -31,6 +31,15 @@ class TasksWidgetProvider : MindwtrWidgetProvider(WidgetKind.TASKS) {
   override fun onDeleted(context: android.content.Context, appWidgetIds: IntArray) {
     WidgetListStore.remove(context, appWidgetIds)
   }
+
+  // The check-off fallback alarm lands here when the Handler died with the process.
+  override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+    if (intent.action == CheckoffStore.ACTION_SWEEP) {
+      if (CheckoffStore.sweep(context)) WidgetRenderer.refreshAll(context)
+      return
+    }
+    super.onReceive(context, intent)
+  }
 }
 
 class QuickCaptureWidgetProvider : MindwtrWidgetProvider(WidgetKind.QUICK_CAPTURE)

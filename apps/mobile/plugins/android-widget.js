@@ -10,6 +10,7 @@ const MODULE_PACKAGE = 'tech.dongdongbh.mindwtr.androidwidget';
 const SERVICE_NAME = `${MODULE_PACKAGE}.TasksWidgetService`;
 const ACTIVITY_NAME = `${MODULE_PACKAGE}.QuickCaptureActivity`;
 const CONFIGURE_ACTIVITY_NAME = `${MODULE_PACKAGE}.WidgetConfigureActivity`;
+const TAP_ACTIVITY_NAME = `${MODULE_PACKAGE}.WidgetTapActivity`;
 const WIDGET_UPDATE_ACTION = 'android.appwidget.action.APPWIDGET_UPDATE';
 const WIDGET_PROVIDER_META = 'android.appwidget.provider';
 const WIDGET_STRINGS_FILE_NAME = 'mindwtr_widget_strings.xml';
@@ -200,6 +201,25 @@ const ensureConfigureActivity = (application) => {
   activity['intent-filter'] = [{ action: [{ $: { 'android:name': 'android.appwidget.action.APPWIDGET_CONFIGURE' } }] }];
 };
 
+// Invisible trampoline behind the widget rows' PendingIntent template: opens
+// the tapped task or toggles a check-off, then finishes. Never exported.
+const ensureTapActivity = (application) => {
+  const activities = ensureArray(application, 'activity');
+  let activity = findByName(activities, TAP_ACTIVITY_NAME);
+  if (!activity) {
+    activity = { $: {} };
+    activities.push(activity);
+  }
+  activity.$ = {
+    'android:name': TAP_ACTIVITY_NAME,
+    'android:exported': 'false',
+    'android:theme': '@android:style/Theme.NoDisplay',
+    'android:excludeFromRecents': 'true',
+    'android:noHistory': 'true',
+    'android:taskAffinity': '',
+  };
+};
+
 const ensureWidgetComponents = (androidManifest, props) => {
   const application = androidManifest?.manifest?.application?.[0];
   if (!application) return androidManifest;
@@ -209,6 +229,7 @@ const ensureWidgetComponents = (androidManifest, props) => {
   ensureListService(application);
   ensureQuickCaptureActivity(application);
   ensureConfigureActivity(application);
+  ensureTapActivity(application);
   return androidManifest;
 };
 
@@ -249,6 +270,7 @@ module.exports.__testables = {
   ACTIVITY_NAME,
   CONFIGURE_ACTIVITY_NAME,
   SERVICE_NAME,
+  TAP_ACTIVITY_NAME,
   buildWidgetInfoXml,
   buildWidgetKinds,
   buildWidgetStringsXml,

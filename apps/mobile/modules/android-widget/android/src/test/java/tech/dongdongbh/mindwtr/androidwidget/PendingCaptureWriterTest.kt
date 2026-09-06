@@ -31,6 +31,21 @@ class PendingCaptureWriterTest {
   }
 
   @Test
+  fun writesACompletionItemInTheCompleteKindSchema() {
+    val filesDir = tempFilesDir()
+
+    val written = PendingCaptureWriter.writeCompletion(filesDir, "task-9", Date(0))
+
+    val json = JSONObject(written.readText())
+    assertEquals("complete", json.getString("kind"))
+    assertEquals("task-9", json.getString("taskId"))
+    assertEquals("1970-01-01T00:00:00.000Z", json.getString("completedAt"))
+    assertEquals("android-widget", json.getString("source"))
+    assertEquals(written.name.removeSuffix(".json"), json.getString("id"))
+    assertTrue(!json.has("title"))
+  }
+
+  @Test
   fun leavesNoTempFileBehindAndUsesUniqueNames() {
     val filesDir = tempFilesDir()
 

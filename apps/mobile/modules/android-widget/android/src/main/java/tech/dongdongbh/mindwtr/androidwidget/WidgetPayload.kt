@@ -28,6 +28,7 @@ data class WidgetPayload(
   val quickCapture: QuickCaptureLabels,
 ) {
   data class Item(
+    val id: String,
     val title: String,
     val dueLabel: String?,
     val dueEmphasis: Boolean,
@@ -185,6 +186,7 @@ data class WidgetPayload(
         if (title.isEmpty()) continue
         items.add(
           Item(
+            id = item.optString("id").trim(),
             title = title,
             dueLabel = item.optString("dueLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("dueLabel") },
             dueEmphasis = item.optBoolean("dueEmphasis", false),

@@ -51,6 +51,7 @@ class WidgetPayloadTest {
     assertEquals("Inbox: 3", payload.subtitle)
     assertEquals(2, payload.items.size)
     assertEquals("Call the bank", payload.items[0].title)
+    assertEquals("a", payload.items[0].id)
     assertEquals("Today", payload.items[0].dueLabel)
     assertTrue(payload.items[0].dueEmphasis)
     assertNull(payload.items[1].dueLabel)

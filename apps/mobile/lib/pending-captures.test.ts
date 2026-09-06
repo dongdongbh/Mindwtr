@@ -18,7 +18,10 @@ const appLogMocks = vi.hoisted(() => ({
 }));
 vi.mock('./app-log', () => appLogMocks);
 
-import { buildPendingCaptureTaskProps, ingestPendingCaptures, parsePendingCapture } from './pending-captures';
+import { buildPendingCaptureTaskProps, ingestPendingCaptures, parsePendingCapture, type PendingCapture } from './pending-captures';
+
+// The capture-shaped tests read capture fields; narrow once here.
+const parseCapture = (raw: string) => parsePendingCapture(raw) as PendingCapture | null;
 
 const project = (props: Partial<Project>): Project => ({
     id: 'p1',
@@ -46,6 +49,14 @@ describe('parsePendingCapture', () => {
         });
     });
 
+    it('parses a widget check-off and rejects one without a task id or with an unknown kind', () => {
+        expect(parsePendingCapture(JSON.stringify({ kind: 'complete', id: 'c1', taskId: 't1', completedAt: '2026-09-06T10:00:00.000Z', source: 'android-widget' })))
+            .toEqual({ kind: 'complete', id: 'c1', taskId: 't1', completedAt: '2026-09-06T10:00:00.000Z', source: 'android-widget' });
+        expect(parsePendingCapture(JSON.stringify({ kind: 'complete', id: 'c1' }))).toBeNull();
+        expect(parsePendingCapture(JSON.stringify({ kind: 'archive', id: 'c1', title: 'x' }))).toBeNull();
+        expect(parseCapture(JSON.stringify({ kind: 'capture', id: 'c1', title: 'Still a capture' }))?.title).toBe('Still a capture');
+    });
+
     it('rejects payloads without id or title', () => {
         expect(parsePendingCapture(JSON.stringify({ title: 'No id' }))).toBeNull();
         expect(parsePendingCapture(JSON.stringify({ id: 'x', title: '   ' }))).toBeNull();
@@ -54,7 +65,7 @@ describe('parsePendingCapture', () => {
     });
 
     it('accepts a valid ISO due/start date and collapses it to a date-only string', () => {
-        const capture = parsePendingCapture(JSON.stringify({
+        const capture = parseCapture(JSON.stringify({
             id: 'a',
             title: 'Renew passport',
             dueDate: '2026-08-14',
@@ -67,7 +78,7 @@ describe('parsePendingCapture', () => {
     });
 
     it('ignores invalid due/start date junk without failing the capture', () => {
-        const capture = parsePendingCapture(JSON.stringify({
+        const capture = parseCapture(JSON.stringify({
             id: 'a',
             title: 'Renew passport',
             dueDate: 'not-a-date',
@@ -112,6 +123,7 @@ describe('buildPendingCaptureTaskProps', () => {
 
 describe('ingestPendingCaptures', () => {
     let addProject: ReturnType<typeof vi.fn>;
+    const updateTask = vi.fn(async (_id: string, _updates: Partial<Task>) => ({ success: true }));
     const emptySettings = {} as AppData['settings'];
 
     const oneFile = (name: string, body: Record<string, unknown>) => {
@@ -140,7 +152,7 @@ describe('ingestPendingCaptures', () => {
         }));
         const addTask = vi.fn(async () => ({ id: 'task-1' }));
 
-        const ingested = await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
+        const ingested = await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
 
         expect(ingested).toBe(2);
         expect(addTask).toHaveBeenNthCalledWith(1, 'First', { status: 'inbox', tags: ['#home'] });
@@ -157,7 +169,7 @@ describe('ingestPendingCaptures', () => {
         ));
         const addTask = addTaskMock();
 
-        expect(await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings })).toBe(2);
+        expect(await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings })).toBe(2);
 
         expect(addTask).toHaveBeenNthCalledWith(1, 'From the dialog', { status: 'inbox' });
         expect(appLogMocks.logInfo).toHaveBeenCalledTimes(1);
@@ -167,12 +179,32 @@ describe('ingestPendingCaptures', () => {
         });
     });
 
+    it('completes a checked-off task through updateTask and treats done or missing tasks as a no-op that still clears the file', async () => {
+        const item = (taskId: string) => JSON.stringify({ kind: 'complete', id: `c-${taskId}`, taskId, source: 'android-widget' });
+        fileSystemMocks.readDirectoryAsync.mockResolvedValue(['a.json', 'b.json', 'c.json']);
+        fileSystemMocks.readAsStringAsync.mockImplementation(async (uri: string) => item(uri.includes('a.json') ? 'open' : uri.includes('b.json') ? 'done' : 'gone'));
+        const tasks = [
+            { id: 'open', title: 'Open', status: 'next' } as Task,
+            { id: 'done', title: 'Done', status: 'done' } as Task,
+        ];
+        const addTask = addTaskMock();
+
+        expect(await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks, people: [], settings: emptySettings })).toBe(3);
+
+        expect(updateTask).toHaveBeenCalledTimes(1);
+        expect(updateTask).toHaveBeenCalledWith('open', { status: 'done' });
+        expect(addTask).not.toHaveBeenCalled();
+        expect(fileSystemMocks.deleteAsync).toHaveBeenCalledTimes(3);
+        const outcomes = (appLogMocks.logInfo.mock.calls as unknown as [string, { extra: { outcome: string } }][]).map(([, context]) => context.extra.outcome);
+        expect(outcomes).toEqual(['completed', 'already-done', 'missing']);
+    });
+
     it('keeps the file when the store write reports failure', async () => {
         fileSystemMocks.readDirectoryAsync.mockResolvedValue(['a.json']);
         fileSystemMocks.readAsStringAsync.mockResolvedValue(JSON.stringify({ id: 'a', title: 'Keep me' }));
         const addTask = vi.fn(async () => ({ success: false }));
 
-        const ingested = await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
+        const ingested = await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
 
         expect(ingested).toBe(0);
         expect(fileSystemMocks.deleteAsync).not.toHaveBeenCalled();
@@ -183,7 +215,7 @@ describe('ingestPendingCaptures', () => {
         fileSystemMocks.readAsStringAsync.mockResolvedValue('{broken');
         const addTask = vi.fn();
 
-        const ingested = await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
+        const ingested = await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
 
         expect(ingested).toBe(0);
         expect(addTask).not.toHaveBeenCalled();
@@ -194,7 +226,7 @@ describe('ingestPendingCaptures', () => {
         fileSystemMocks.getInfoAsync.mockResolvedValue({ exists: false });
         const addTask = vi.fn();
 
-        expect(await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings })).toBe(0);
+        expect(await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings })).toBe(0);
         expect(fileSystemMocks.readDirectoryAsync).not.toHaveBeenCalled();
         expect(addTask).not.toHaveBeenCalled();
     });
@@ -204,7 +236,7 @@ describe('ingestPendingCaptures', () => {
         const addTask = addTaskMock();
         const settings = { quickAddAutoClean: true } as AppData['settings'];
 
-        const ingested = await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings });
+        const ingested = await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings });
 
         expect(ingested).toBe(1);
         expect(addTask).toHaveBeenCalledTimes(1);
@@ -219,7 +251,7 @@ describe('ingestPendingCaptures', () => {
         oneFile('a.json', { id: 'a', title: 'Buy milk /due:2026-07-24 @errands #personal' });
         const addTask = addTaskMock();
 
-        const ingested = await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
+        const ingested = await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
 
         expect(ingested).toBe(1);
         const [title, props] = addTask.mock.calls[0] as [string, Partial<Task>];
@@ -236,7 +268,7 @@ describe('ingestPendingCaptures', () => {
         const addTask = addTaskMock();
         const people = [{ id: 'person-1', name: 'Jim Smith' } as Person];
 
-        await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people, settings: emptySettings });
+        await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people, settings: emptySettings });
 
         const [title, props] = addTask.mock.calls[0] as [string, Partial<Task>];
         // Without the people list the parser takes only the first word, so this
@@ -250,7 +282,7 @@ describe('ingestPendingCaptures', () => {
         oneFile('a.json', { id: 'a', title: 'Buy milk +Errands' });
         const addTask = addTaskMock();
 
-        await ingestPendingCaptures({ addTask, addProject, projects: [active], areas: [], tasks: [], people: [], settings: emptySettings });
+        await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [active], areas: [], tasks: [], people: [], settings: emptySettings });
 
         expect(addProject).not.toHaveBeenCalled();
         const [, props] = addTask.mock.calls[0] as [string, Partial<Task>];
@@ -261,7 +293,7 @@ describe('ingestPendingCaptures', () => {
         oneFile('a.json', { id: 'a', title: 'Buy milk +NewProject' });
         const addTask = addTaskMock();
 
-        await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
+        await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
 
         expect(addProject).toHaveBeenCalledTimes(1);
         expect(addProject.mock.calls[0][0]).toBe('NewProject');
@@ -274,7 +306,7 @@ describe('ingestPendingCaptures', () => {
         oneFile('a.json', { id: 'a', title: 'Buy milk +UnknownProject', project: 'Errands' });
         const addTask = addTaskMock();
 
-        await ingestPendingCaptures({ addTask, addProject, projects: [active], areas: [], tasks: [], people: [], settings: emptySettings });
+        await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [active], areas: [], tasks: [], people: [], settings: emptySettings });
 
         expect(addProject).not.toHaveBeenCalled();
         const [, props] = addTask.mock.calls[0] as [string, Partial<Task>];
@@ -285,7 +317,7 @@ describe('ingestPendingCaptures', () => {
         oneFile('a.json', { id: 'a', title: 'Buy milk /due:2026-07-24', dueDate: '2026-08-14', startDate: '2026-08-01' });
         const addTask = addTaskMock();
 
-        await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
+        await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
 
         const [, props] = addTask.mock.calls[0] as [string, Partial<Task>];
         expect(props.dueDate).toBe('2026-08-14');
@@ -296,7 +328,7 @@ describe('ingestPendingCaptures', () => {
         oneFile('a.json', { id: 'a', title: 'Buy milk #urgent', tags: 'work,urgent' });
         const addTask = addTaskMock();
 
-        await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
+        await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
 
         const [, props] = addTask.mock.calls[0] as [string, Partial<Task>];
         expect(props.tags).toEqual(expect.arrayContaining(['#urgent', '#work']));
@@ -309,7 +341,7 @@ describe('ingestPendingCaptures', () => {
         oneFile('a.json', { id: 'a', title: 'Buy milk /due:friday', createdAt: '2026-07-13T12:00:00' });
         const addTask = addTaskMock();
 
-        await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
+        await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
 
         const [, props] = addTask.mock.calls[0] as [string, Partial<Task>];
         expect(props.dueDate).toBe('2026-07-17');
@@ -319,7 +351,7 @@ describe('ingestPendingCaptures', () => {
         oneFile('a.json', { id: 'a', title: 'Buy milk /due:2026-04-31' });
         const addTask = addTaskMock();
 
-        const ingested = await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
+        const ingested = await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
 
         expect(ingested).toBe(1);
         expect(addTask).toHaveBeenCalledWith('Buy milk /due:2026-04-31', { status: 'inbox' });
@@ -336,7 +368,7 @@ describe('ingestPendingCaptures', () => {
         addProject.mockRejectedValue(new Error('store unavailable'));
         const addTask = addTaskMock();
 
-        const ingested = await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
+        const ingested = await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings });
 
         expect(ingested).toBe(2);
         expect(addTask).toHaveBeenNthCalledWith(1, 'Buy milk +NewProject', { status: 'inbox' });
@@ -359,7 +391,7 @@ describe('ingestPendingCaptures', () => {
         }) as AppData['settings'];
         const addTask = addTaskMock();
 
-        const ingested = await ingestPendingCaptures({ addTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: poisonedSettings });
+        const ingested = await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: poisonedSettings });
 
         expect(ingested).toBe(2);
         expect(addTask).toHaveBeenNthCalledWith(1, 'First', { status: 'inbox' });

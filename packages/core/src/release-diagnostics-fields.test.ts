@@ -30,8 +30,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'horizonMs', 'remainingMs',
     // Sync cycle requeued (General trail, #1170)
     'reason', 'detail',
-    // android-native-widget (apps/mobile/lib/widget-service.ts)
-    'items',
+    // android-native-widget (apps/mobile/lib/widget-service.ts) / android-widget-checkoff (pending-captures.ts)
+    'items', 'outcome',
 ];
 
 describe('release diagnostics field names', () => {

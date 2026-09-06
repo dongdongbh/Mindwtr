@@ -20,6 +20,7 @@ import org.json.JSONObject
 object PendingCaptureWriter {
   const val DIRECTORY = "pending-captures"
   const val SOURCE = "android-quick-capture"
+  const val CHECKOFF_SOURCE = "android-widget"
   const val MAX_TITLE_LENGTH = 2000
 
   /** Returns the queued file, or null when the trimmed title is empty. */
@@ -28,10 +29,6 @@ object PendingCaptureWriter {
     val title = rawTitle.trim().take(MAX_TITLE_LENGTH).trim()
     if (title.isEmpty()) return null
 
-    val directory = File(filesDir, DIRECTORY)
-    if (!directory.isDirectory && !directory.mkdirs()) {
-      throw IOException("Could not create ${directory.absolutePath}")
-    }
     val id = UUID.randomUUID().toString()
     val json = JSONObject()
       .put("id", id)
@@ -39,7 +36,28 @@ object PendingCaptureWriter {
       .put("createdAt", isoTimestamp(now))
       .put("source", SOURCE)
       .toString()
+    return publish(filesDir, id, json)
+  }
 
+  /** A widget check-off: `{ kind: "complete", taskId }`, applied through the store when the app next runs. */
+  @Throws(IOException::class)
+  fun writeCompletion(filesDir: File, taskId: String, now: Date = Date()): File {
+    val id = UUID.randomUUID().toString()
+    val json = JSONObject()
+      .put("id", id)
+      .put("kind", "complete")
+      .put("taskId", taskId)
+      .put("completedAt", isoTimestamp(now))
+      .put("source", CHECKOFF_SOURCE)
+      .toString()
+    return publish(filesDir, id, json)
+  }
+
+  private fun publish(filesDir: File, id: String, json: String): File {
+    val directory = File(filesDir, DIRECTORY)
+    if (!directory.isDirectory && !directory.mkdirs()) {
+      throw IOException("Could not create ${directory.absolutePath}")
+    }
     // Ingest only picks up `*.json`, so a half-written `.tmp` is never read.
     val temp = File(directory, "$id.tmp")
     val target = File(directory, "$id.json")
