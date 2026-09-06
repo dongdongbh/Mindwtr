@@ -71,6 +71,37 @@ describe('widget-data', () => {
         expect(payload.subtitle).toBe('Inbox: 1 · +2 More');
     });
 
+    it('carries the Focus screen sections with the shared cap, priority colour and project or area (#1173)', () => {
+        const now = new Date().toISOString();
+        const today = new Date(); today.setHours(23, 0, 0, 0);
+        const data: AppData = {
+            ...baseData,
+            areas: [{ id: 'area-1', name: 'Home', order: 0, createdAt: now, updatedAt: now }],
+            projects: [{ id: 'proj-1', title: 'Launch', status: 'active', color: '#94a3b8', order: 0, tagIds: [], createdAt: now, updatedAt: now }],
+            settings: { features: { priorities: true } } as AppData['settings'],
+            tasks: [
+                { id: '1', title: 'Starred', status: 'next', isFocusedToday: true, priority: 'urgent', projectId: 'proj-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '2', title: 'Due today', status: 'next', dueDate: today.toISOString(), areaId: 'area-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '3', title: 'Alpha next', status: 'next', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '4', title: 'Beta next', status: 'next', tags: [], contexts: [], createdAt: now, updatedAt: now },
+            ],
+        };
+        const payload = buildWidgetPayload(data, 'en', { maxItems: 3 });
+        expect(payload.sections.map((section) => [section.key, section.title, section.items.map((item) => item.title)])).toEqual([
+            ['focus', "Today's Focus", ['Starred']],
+            ['schedule', 'Today', ['Due today']],
+            ['next', 'Next Actions', ['Alpha next']],
+        ]);
+        const [starred] = payload.sections[0].items;
+        expect(starred.priorityColor).toBe('#dc2626');
+        expect(starred.contextLabel).toBe('Launch');
+        expect(payload.sections[1].items[0].contextLabel).toBe('Home');
+        expect(payload.sections[2].items[0]).toMatchObject({ priorityColor: null, contextLabel: null });
+        // Priorities off: the colour is gated with the feature.
+        const gated = buildWidgetPayload({ ...data, settings: { features: { priorities: false } } as AppData['settings'] }, 'en', { maxItems: 3 });
+        expect(gated.sections[0].items[0].priorityColor).toBeNull();
+    });
+
     it('honors maxItems option for larger widgets', () => {
         const now = new Date().toISOString();
         const data: AppData = {

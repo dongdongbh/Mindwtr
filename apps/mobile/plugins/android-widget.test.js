@@ -37,6 +37,9 @@ describe('android-widget', () => {
     expect(xml).toContain('android:targetCellWidth="3"');
     expect(xml).toContain('android:targetCellHeight="2"');
     expect(xml).toContain('android:resizeMode="horizontal|vertical"');
+    // keyguard lets the OS list the widget in its lock-screen picker where it
+    // offers one (Android 15+ tablets first); home_screen keeps the launcher.
+    expect(xml).toContain('android:widgetCategory="home_screen|keyguard"');
     expect(xml).toContain('android:initialLayout="@layout/mindwtr_widget"');
     expect(xml).toContain('android:previewImage="@drawable/mindwtr_widget_preview"');
     expect(xml).toContain('android:updatePeriodMillis="0"');
@@ -57,6 +60,9 @@ describe('android-widget', () => {
     const xml = buildWidgetStylesXml();
     expect(xml).toContain('parent="Theme.AppCompat.DayNight.Dialog"');
     expect(xml).toContain('<item name="windowNoTitle">true</item>');
+    // The dialog draws its own rounded surface in the app palette; the window itself stays clear.
+    expect(xml).toContain('<item name="android:windowBackground">@android:color/transparent</item>');
+    expect(xml).toContain('<item name="android:backgroundDimEnabled">true</item>');
   });
 
   it('registers the receiver, list service and capture activity with explicit boundaries, idempotently', () => {

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/mindwtr_widget_section_title"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingTop="8dp"
+    android:paddingBottom="2dp"
+    android:singleLine="true"
+    android:ellipsize="end"
+    android:textColor="@color/mindwtr_widget_muted_text"
+    android:textSize="12sp"
+    android:textStyle="bold" />

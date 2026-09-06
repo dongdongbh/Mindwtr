@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.androidwidget
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -15,16 +16,28 @@ data class WidgetPayload(
   val inboxLabel: String,
   val inboxCount: Int,
   val items: List<Item>,
+  val sections: List<Section>,
   val emptyMessage: String,
   val focusUri: String,
   val themeMode: String,
   val palette: Palette?,
   val quickCapture: QuickCaptureLabels,
 ) {
-  data class Item(val title: String, val dueLabel: String?, val dueEmphasis: Boolean, val openUri: String?)
+  data class Item(
+    val title: String,
+    val dueLabel: String?,
+    val dueEmphasis: Boolean,
+    val openUri: String?,
+    val priorityColor: Int?,
+    val contextLabel: String?,
+  )
+
+  /** A Focus screen section (#1173): title plus its rows, in screen order. */
+  data class Section(val title: String, val items: List<Item>)
 
   data class Palette(
     val background: Int,
+    val card: Int,
     val text: Int,
     val mutedText: Int,
     val accent: Int,
@@ -53,6 +66,7 @@ data class WidgetPayload(
       inboxLabel = "Inbox",
       inboxCount = 0,
       items = emptyList(),
+      sections = emptyList(),
       emptyMessage = "All clear",
       focusUri = DEFAULT_FOCUS_URI,
       themeMode = "system",
@@ -73,20 +87,19 @@ data class WidgetPayload(
         return null
       }
       val defaults = EMPTY
-      val itemsJson = root.optJSONArray("items")
-      val items = ArrayList<Item>()
-      if (itemsJson != null) {
-        for (index in 0 until minOf(itemsJson.length(), MAX_ITEMS)) {
-          val item = itemsJson.optJSONObject(index) ?: continue
-          val title = item.optString("title").trim()
-          if (title.isEmpty()) continue
-          val dueLabel = item.optString("dueLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("dueLabel") }
-          items.add(Item(title, dueLabel, item.optBoolean("dueEmphasis", false), appUriOrNull(item.optString("openUri"))))
+      val items = parseItems(root.optJSONArray("items"))
+      val sectionsJson = root.optJSONArray("sections")
+      val sections = ArrayList<Section>()
+      if (sectionsJson != null) {
+        for (index in 0 until sectionsJson.length()) {
+          val section = sectionsJson.optJSONObject(index) ?: continue
+          val sectionItems = parseItems(section.optJSONArray("items"))
+          if (sectionItems.isEmpty()) continue
+          sections.add(Section(section.stringOr("title", ""), sectionItems))
         }
       }
       // Only the app's own routes may be launched from a tap.
       val focusUri = appUriOrNull(root.optString("focusUri")) ?: DEFAULT_FOCUS_URI
-      // `sections` (#1173 Focus kind) is tolerated and ignored until a kind reads it.
       val labels = root.optJSONObject("quickCapture")
       val quickCapture = QuickCaptureLabels(
         title = labels.stringOr("title", defaults.quickCapture.title),
@@ -100,6 +113,7 @@ data class WidgetPayload(
         inboxLabel = root.stringOr("inboxLabel", defaults.inboxLabel),
         inboxCount = maxOf(0, root.optInt("inboxCount", 0)),
         items = items,
+        sections = sections,
         emptyMessage = root.stringOr("emptyMessage", defaults.emptyMessage),
         focusUri = focusUri,
         themeMode = root.stringOr("themeMode", "system"),
@@ -108,12 +122,34 @@ data class WidgetPayload(
       )
     }
 
+    private fun parseItems(json: JSONArray?): List<Item> {
+      val items = ArrayList<Item>()
+      if (json == null) return items
+      for (index in 0 until minOf(json.length(), MAX_ITEMS)) {
+        val item = json.optJSONObject(index) ?: continue
+        val title = item.optString("title").trim()
+        if (title.isEmpty()) continue
+        items.add(
+          Item(
+            title = title,
+            dueLabel = item.optString("dueLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("dueLabel") },
+            dueEmphasis = item.optBoolean("dueEmphasis", false),
+            openUri = appUriOrNull(item.optString("openUri")),
+            priorityColor = parseHexColor(item.optString("priorityColor")),
+            contextLabel = item.optString("contextLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("contextLabel") },
+          ),
+        )
+      }
+      return items
+    }
+
     private fun parsePalette(json: JSONObject?): Palette? {
       if (json == null) return null
       val background = parseHexColor(json.optString("background")) ?: return null
       val text = parseHexColor(json.optString("text")) ?: return null
       return Palette(
         background = background,
+        card = parseHexColor(json.optString("card")) ?: background,
         text = text,
         mutedText = parseHexColor(json.optString("mutedText")) ?: text,
         accent = parseHexColor(json.optString("accent")) ?: text,
