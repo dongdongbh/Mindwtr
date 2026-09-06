@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { ChevronDown, ChevronRight } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 
 const isFabricEnabled = Boolean((globalThis as { nativeFabricUIManager?: unknown }).nativeFabricUIManager);
@@ -46,7 +47,9 @@ export function CollapsibleSection({
                 accessibilityLabel={title}
                 accessibilityState={{ expanded }}
             >
-                <Text style={[styles.chevron, { color: tc.secondaryText }]}>{expanded ? '▾' : '▸'}</Text>
+                {expanded
+                    ? <ChevronDown size={16} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
+                    : <ChevronRight size={16} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />}
                 <Text style={[styles.title, { color: tc.text }]}>{title}</Text>
                 {badge > 0 && (
                     <View style={[styles.badge, { backgroundColor: tc.tint }]}>
@@ -69,11 +72,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: 12,
         gap: 8,
-    },
-    chevron: {
-        fontSize: 12,
-        width: 16,
-        textAlign: 'center',
     },
     title: {
         flex: 1,

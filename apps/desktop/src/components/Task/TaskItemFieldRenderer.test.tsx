@@ -915,12 +915,19 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         );
 
         expect(queryByRole('combobox', { name: 'Task status' })).toBeNull();
-        expect(getByRole('group', { name: 'Task status' })).toBeInTheDocument();
+        const statusGroup = getByRole('group', { name: 'Task status' });
+        expect(statusGroup).toBeInTheDocument();
         const selectedStatus = getByRole('button', { name: 'Inbox' });
         expect(selectedStatus).toHaveAttribute('aria-pressed', 'true');
         // The active status pill wears its own status color, not the generic primary.
         expect(selectedStatus).toHaveClass('border-[hsl(var(--status-inbox))]', 'text-[hsl(var(--status-inbox))]');
         expect(getByRole('button', { name: 'Archived' })).toBeInTheDocument();
+        // Every status pill leads with its fixed glyph and keeps its text label.
+        const statusGlyphCount = statusGroup.querySelectorAll(
+            '.lucide-circle-dot, .lucide-arrow-right, .lucide-hourglass, .lucide-calendar-days, .lucide-book-open, .lucide-check, .lucide-archive'
+        );
+        expect(statusGlyphCount).toHaveLength(7);
+        expect(getByRole('button', { name: 'Next' }).querySelector('.lucide-arrow-right')).not.toBeNull();
 
         fireEvent.click(getByRole('button', { name: 'Waiting' }));
 
@@ -992,10 +999,21 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         );
 
         expect(queryByRole('combobox', { name: 'Priority' })).toBeNull();
-        expect(getByRole('group', { name: 'Priority' })).toBeInTheDocument();
+        const priorityGroup = getByRole('group', { name: 'Priority' });
+        expect(priorityGroup).toBeInTheDocument();
         const selectedPriority = getByRole('button', { name: 'Low' });
         expect(selectedPriority).toHaveAttribute('aria-pressed', 'true');
         expect(selectedPriority).toHaveClass('bg-primary', 'text-primary-foreground');
+        // The four non-empty pills carry the canonical decorative flag; None carries none.
+        expect(priorityGroup.querySelectorAll('[data-priority-flag]')).toHaveLength(4);
+        expect(priorityGroup.querySelector('[data-priority-flag="low"]')).toHaveAttribute('stroke', '#3b82f6');
+        expect(priorityGroup.querySelector('[data-priority-flag="urgent"]')).toHaveAttribute('stroke', '#dc2626');
+        const nonePriorityButton = getByRole('button', { name: 'None' });
+        expect(nonePriorityButton.querySelector('[data-priority-flag]')).toBeNull();
+        // None is an icon-only pill: CircleSlash replaces the visible text while
+        // `label` (kept as aria-label) preserves the accessible name.
+        expect(nonePriorityButton.querySelector('.lucide-circle-slash')).not.toBeNull();
+        expect(nonePriorityButton).not.toHaveTextContent('None');
 
         fireEvent.click(getByRole('button', { name: 'None' }));
 
@@ -1013,10 +1031,15 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         );
 
         expect(queryByRole('combobox', { name: 'Energy Level' })).toBeNull();
-        expect(getByRole('group', { name: 'Energy Level' })).toBeInTheDocument();
+        const energyGroup = getByRole('group', { name: 'Energy Level' });
+        expect(energyGroup).toBeInTheDocument();
         const selectedEnergyLevel = getByRole('button', { name: 'Medium energy' });
         expect(selectedEnergyLevel).toHaveAttribute('aria-pressed', 'true');
         expect(selectedEnergyLevel).toHaveClass('bg-primary', 'text-primary-foreground');
+        // Each non-empty energy chip leads with its battery glyph and keeps text.
+        expect(energyGroup.querySelectorAll('.lucide-battery-low, .lucide-battery-medium, .lucide-battery-full')).toHaveLength(3);
+        expect(getByRole('button', { name: 'Low energy' }).querySelector('.lucide-battery-low')).not.toBeNull();
+        expect(getByRole('button', { name: 'High energy' }).querySelector('.lucide-battery-full')).not.toBeNull();
 
         fireEvent.click(getByRole('button', { name: 'High energy' }));
 

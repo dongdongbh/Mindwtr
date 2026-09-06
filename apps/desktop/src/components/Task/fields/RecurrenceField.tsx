@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Repeat } from 'lucide-react';
 import {
     parseRRuleString,
     RECURRENCE_INTERVAL_MAX,
@@ -13,7 +14,7 @@ import { cn } from '../../../lib/utils';
 import { DateField } from '../../ui/DateField';
 import { WeekdaySelector } from '../TaskForm/WeekdaySelector';
 import type { MonthlyRecurrenceInfo } from '../TaskItemFieldRenderer';
-import { taskEditorLabelClassName } from '../task-editor-label';
+import { TaskEditorFieldLabel } from '../task-editor-label';
 import { formatRecurrenceSummary } from './recurrence-summary';
 
 type RecurrenceFieldProps = {
@@ -90,7 +91,7 @@ export function RecurrenceField({
 
     return (
         <div className="flex flex-col gap-1 w-full">
-            <label className={taskEditorLabelClassName}>{t('taskEdit.recurrenceLabel')}</label>
+            <TaskEditorFieldLabel icon={Repeat}>{t('taskEdit.recurrenceLabel')}</TaskEditorFieldLabel>
             {editRecurrence && (
                 <button
                     type="button"

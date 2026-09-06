@@ -4,6 +4,7 @@ import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { styles } from '../inbox-processing-modal.styles';
 import { formatTimeEstimateChipLabel } from '../time-estimate-filter-utils';
 import { InboxSuggestionList } from './InboxSuggestionList';
+import { PriorityFlag } from '@/components/priority-flag';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import type { TaskPriority, TaskEnergyLevel, TimeEstimate } from '@mindwtr/core';
 
@@ -69,12 +70,16 @@ export function InboxOrganizationSection({
                   style={[
                     styles.priorityChip,
                     {
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 6,
                       borderColor: isSelected ? tc.tint : tc.border,
                       backgroundColor: isSelected ? tc.tint : tc.filterBg,
                     },
                   ]}
                   onPress={() => setSelectedPriority(isSelected ? undefined : priority)}
                 >
+                  <PriorityFlag priority={priority} />
                   <Text style={[styles.priorityChipText, { color: isSelected ? tc.onTint : tc.text }]}>
                     {t(`priority.${priority}`)}
                   </Text>

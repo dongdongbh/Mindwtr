@@ -1,6 +1,6 @@
 import React from 'react';
 import { FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { act, create } from 'react-test-renderer';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ToastViewport } from '@/contexts/toast-context';
@@ -60,6 +60,7 @@ describe('Quick capture modal composition', () => {
       tree = create(
         <QuickCaptureSheetBody
           addAnother={false}
+          selectedPriority={null}
           areaLabel="No Area"
           contextLabel="Contexts"
           dueDate={null}
@@ -251,6 +252,7 @@ describe('Quick capture modal composition', () => {
         tree = create(
           <QuickCaptureSheetBody
             addAnother={false}
+            selectedPriority={null}
             areaLabel="No Area"
             contextLabel="Contexts"
             dueDate={null}
@@ -334,6 +336,7 @@ describe('Quick capture modal composition', () => {
         tree = create(
           <QuickCaptureSheetBody
             addAnother={false}
+            selectedPriority={null}
             areaLabel="No Area"
             contextLabel="Contexts"
             dueDate={null}
@@ -552,6 +555,7 @@ describe('Quick capture modal composition', () => {
       tree = create(
         <QuickCaptureSheetBody
           addAnother={false}
+          selectedPriority={null}
           areaLabel="Work"
           contextLabel="@computer"
           dueDate={new Date('2026-06-04T12:00:00.000Z')}
@@ -622,6 +626,7 @@ describe('Quick capture modal composition', () => {
       tree = create(
         <QuickCaptureSheetBody
           addAnother={false}
+          selectedPriority={null}
           areaLabel="Work"
           contextLabel="@computer"
           dueDate={null}
@@ -699,6 +704,7 @@ describe('Quick capture modal composition', () => {
       tree = create(
         <QuickCaptureSheetBody
           addAnother={false}
+          selectedPriority={null}
           areaLabel="No Area"
           contextLabel="@computer"
           dueDate={null}
@@ -761,6 +767,7 @@ describe('Quick capture modal composition', () => {
       tree = create(
         <QuickCaptureSheetBody
           addAnother={false}
+          selectedPriority={null}
           areaLabel="No Area"
           contextLabel="Very Long Context Label"
           dueDate={null}
@@ -836,6 +843,7 @@ describe('Quick capture modal composition', () => {
         tree = create(
           <QuickCaptureSheetBody
             addAnother={false}
+            selectedPriority={null}
             areaLabel="No Area"
             contextLabel="Contexts"
             dueDate={null}
@@ -909,6 +917,7 @@ describe('Quick capture modal composition', () => {
       tree = create(
         <QuickCaptureSheetBody
           addAnother
+          selectedPriority={null}
           areaLabel="No Area"
           contextLabel="Contexts"
           dueDate={null}
@@ -979,6 +988,7 @@ describe('Quick capture modal composition', () => {
       tree = create(
         <QuickCaptureSheetBody
           addAnother={false}
+          selectedPriority={null}
           areaLabel="No Area"
           contextLabel="Contexts"
           dueDate={null}
@@ -1045,6 +1055,7 @@ describe('Quick capture modal composition', () => {
         tree = create(
           <QuickCaptureSheetBody
             addAnother={false}
+            selectedPriority={null}
             areaLabel="No Area"
             contextLabel="Contexts"
             dueDate={null}
@@ -1115,6 +1126,7 @@ describe('Quick capture modal composition', () => {
         tree = create(
           <QuickCaptureSheetBody
             addAnother={false}
+            selectedPriority={null}
             areaLabel="No Area"
             contextLabel="Contexts"
             dueDate={null}
@@ -1191,6 +1203,7 @@ describe('Quick capture modal composition', () => {
         tree = create(
           <QuickCaptureSheetBody
             addAnother={false}
+            selectedPriority={null}
             areaLabel="No Area"
             contextLabel="Contexts"
             dueDate={null}
@@ -1250,5 +1263,135 @@ describe('Quick capture modal composition', () => {
     expect(expanded).toHaveLength(1);
     expect(expanded[0].props.value).toBe('Bring the signed form');
     expect(expanded[0].props.multiline).toBe(true);
+  });
+
+  it('carries the canonical priority flag on overlay rows and tints the trigger flag when set', () => {
+    // Overlay rows: the four non-empty rows carry ramp-tinted flags; Clear's flag is uncolored.
+    let pickerTree!: ReactTestRenderer;
+    act(() => {
+      pickerTree = create(
+        <QuickCaptureSheetPickers
+          filteredAreas={[]}
+          contextInputRef={{ current: null }}
+          contextOptionsLoading={false}
+          contextQuery=""
+          contextTags={[]}
+          dueDate={null}
+          filteredContexts={[]}
+          filteredProjects={[]}
+          hasAddableContextTokens={false}
+          hasExactProjectMatch={false}
+          onAddContextFromQuery={vi.fn()}
+          onClearContexts={vi.fn()}
+          onCloseAreaPicker={vi.fn()}
+          onCloseContextPicker={vi.fn()}
+          onClosePriorityPicker={vi.fn()}
+          onCloseProjectPicker={vi.fn()}
+          onContextQueryChange={vi.fn()}
+          onDueDateChange={vi.fn()}
+          onDueTimeChange={vi.fn()}
+          onProjectQueryChange={vi.fn()}
+          onRemoveContext={vi.fn()}
+          onSelectArea={vi.fn()}
+          onSelectContext={vi.fn()}
+          onSelectPriority={vi.fn()}
+          onSelectProject={vi.fn()}
+          onStartTimeChange={vi.fn()}
+          onSubmitContextQuery={vi.fn()}
+          onSubmitProjectQuery={vi.fn()}
+          pendingStartDate={null}
+          prioritiesEnabled
+          priorityOptions={['low', 'medium', 'high', 'urgent']}
+          projectQuery=""
+          selectedAreaId={null}
+          selectedPriority={null}
+          showAreaPicker={false}
+          showContextPicker={false}
+          showDatePicker={false}
+          showDueTimePicker={false}
+          showPriorityPicker
+          showProjectPicker={false}
+          startPickerMode={null}
+          startTime={null}
+          t={(key) => key}
+          tc={tc}
+        />
+      );
+    });
+
+    const flagColor = (priority: string) =>
+      pickerTree.root.findByProps({ testID: `priority-flag-${priority}` }).props.color;
+    expect(flagColor('low')).toBe('#3b82f6');
+    expect(flagColor('medium')).toBe('#ca8a04');
+    expect(flagColor('high')).toBe('#f97316');
+    expect(flagColor('urgent')).toBe('#dc2626');
+    const clearFlag = pickerTree.root.findByProps({ testID: 'priority-flag-clear' });
+    // Clear's flag is uncolored: it rides the row's theme color, not the ramp.
+    expect(clearFlag.props.color).toBe(tc.text);
+
+    // Trigger: the expanded priority chip tints its flag only once a priority is set.
+    const renderTrigger = (selectedPriority: 'medium' | null) => {
+      let tree!: ReactTestRenderer;
+      act(() => {
+        tree = create(
+          <QuickCaptureSheetBody
+            addAnother={false}
+            selectedPriority={selectedPriority}
+            areaLabel="No Area"
+            contextLabel="Contexts"
+            dueDate={null}
+            dueLabel="Due Date"
+            dueTimeLabel="Change time"
+            handleClose={vi.fn()}
+            handleSave={vi.fn()}
+            insetsBottom={0}
+            inputRef={{ current: null }}
+            noteValue=""
+            onNoteChange={vi.fn()}
+            onOpenAreaPicker={vi.fn()}
+            onOpenContextPicker={vi.fn()}
+            onOpenDueDatePicker={vi.fn()}
+            onOpenDueTimePicker={vi.fn()}
+            onOpenPriorityPicker={vi.fn()}
+            onOpenProjectPicker={vi.fn()}
+            onQuickDueDateSelect={vi.fn()}
+            onResetArea={vi.fn()}
+            onResetContexts={vi.fn()}
+            onResetDueDate={vi.fn()}
+            onResetDueTime={vi.fn()}
+            onResetPriority={vi.fn()}
+            onResetProject={vi.fn()}
+            onToggleOptions={vi.fn()}
+            onToggleAddAnother={vi.fn()}
+            onToggleRecording={vi.fn()}
+            onValueChange={vi.fn()}
+            optionsExpanded
+            prioritiesEnabled
+            priorityLabel="Medium"
+            projectLabel="Project"
+            recording={false}
+            recordingBusy={false}
+            recordingReady={false}
+            saving={false}
+            sheetMaxHeight={500}
+            showDueTime={false}
+            t={(key) => key}
+            tc={tc}
+            value="Capture me"
+            visible
+          />
+        );
+      });
+      return tree;
+    };
+
+    const triggerFlag = (selectedPriority: 'medium' | null) => {
+      const chip = renderTrigger(selectedPriority).root
+        .findByProps({ accessibilityLabel: 'taskEdit.priorityLabel: Medium' });
+      return chip.findAll((node) => typeof node.props?.size === 'number');
+    };
+    expect(triggerFlag('medium').map((node) => node.props.color)).toContain('#ca8a04');
+    expect(triggerFlag(null).map((node) => node.props.color)).toContain(tc.text);
+    expect(triggerFlag(null).map((node) => node.props.color)).not.toContain('#ca8a04');
   });
 });

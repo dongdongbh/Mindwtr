@@ -16,11 +16,13 @@ import {
     type ScrollViewProps,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Type } from 'lucide-react-native';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { parseRRuleString, tFallback, type Attachment, type Task, type TaskEditorFieldId, type TaskEditorSectionId, type TimeEstimate, type ViewSectionDefinition } from '@mindwtr/core';
 import type { TaskDraft } from '@mindwtr/core/task-draft';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CollapsibleSection } from './CollapsibleSection';
+import { FieldHeading } from './FieldHeading';
 import type { CopilotPart } from './use-task-edit-copilot';
 import { SomedaySectionPicker } from '../someday-section-picker';
 
@@ -374,9 +376,13 @@ function TaskEditFormTabComponent({
                 >
                         <View style={styles.formGroup}>
                             <View style={styles.labelRow}>
-                                <Text style={[styles.label, { color: tc.secondaryText, marginBottom: 0 }]}>
-                                    {t('taskEdit.titleLabel')}
-                                </Text>
+                                <FieldHeading
+                                    icon={Type}
+                                    label={t('taskEdit.titleLabel')}
+                                    iconColor={tc.secondaryText}
+                                    labelStyle={[styles.label, { color: tc.secondaryText, marginBottom: 0 }]}
+                                    rowStyle={{ marginBottom: 0 }}
+                                />
                                 <TouchableOpacity
                                     accessibilityLabel={taskEditorLayoutHelpLabel}
                                     accessibilityRole="button"

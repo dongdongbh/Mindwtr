@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type DragEvent, type FormEvent, type ReactNode } from 'react';
-import { Check, ChevronDown, ChevronRight, HelpCircle, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Folder, HelpCircle, Layers, MapPin, Trash2 } from 'lucide-react';
 import {
     filterProjectsBySelectedArea,
     resolveAutoTextDirection,
@@ -21,7 +21,12 @@ import { SectionSelector } from '../ui/SectionSelector';
 import { SomedaySectionSelector } from '../ui/SomedaySectionSelector';
 import { TaskInput, type TaskInputAcceptedSuggestion } from './TaskInput';
 import { cn } from '../../lib/utils';
-import { QUICK_ADD_FIELD_TOKENS, QuickAddTokenBadge, taskEditorLabelClassName } from './task-editor-label';
+import {
+    QUICK_ADD_FIELD_TOKENS,
+    QuickAddTokenBadge,
+    taskEditorLabelClassName,
+    TaskEditorFieldLabel,
+} from './task-editor-label';
 import { findAttachmentsSection } from './task-item-helpers';
 import { FocusStarIcon } from '../FocusStarIcon';
 import { TaskEditorAiMenu, TaskEditorAiPanels } from './TaskEditorAiPanels';
@@ -364,10 +369,10 @@ export function TaskItemEditor({
                         if (fieldId === 'area') {
                             return (
                                 <div key={fieldId} className="flex flex-col gap-1 flex-1 min-w-0">
-                                    <label className={`${taskEditorLabelClassName} inline-flex items-center gap-1.5`}>
+                                    <TaskEditorFieldLabel icon={MapPin}>
                                         {t('taskEdit.areaLabel')}
                                         <QuickAddTokenBadge t={t} token={QUICK_ADD_FIELD_TOKENS.area} />
-                                    </label>
+                                    </TaskEditorFieldLabel>
                                     <AreaSelector
                                         areas={sortedAreas}
                                         value={editAreaId}
@@ -386,10 +391,10 @@ export function TaskItemEditor({
                         if (fieldId === 'project') {
                             return (
                                 <div key={fieldId} className="flex flex-col gap-1 flex-1 min-w-0">
-                                    <label className={`${taskEditorLabelClassName} inline-flex items-center gap-1.5`}>
+                                    <TaskEditorFieldLabel icon={Folder}>
                                         {t('projects.title')}
                                         <QuickAddTokenBadge t={t} token={QUICK_ADD_FIELD_TOKENS.project} />
-                                    </label>
+                                    </TaskEditorFieldLabel>
                                     <ProjectSelector
                                         projects={filteredProjects}
                                         allProjects={sortedProjects}
@@ -410,7 +415,7 @@ export function TaskItemEditor({
                         if (fieldId === 'section') {
                             return (
                                 <div key={fieldId} className="flex flex-col gap-1 flex-1 min-w-0">
-                                    <label className={taskEditorLabelClassName}>{t('taskEdit.sectionLabel')}</label>
+                                    <TaskEditorFieldLabel icon={Layers}>{t('taskEdit.sectionLabel')}</TaskEditorFieldLabel>
                                     <SectionSelector
                                         sections={sections}
                                         value={editSectionId}
@@ -473,7 +478,7 @@ export function TaskItemEditor({
                                     </span>
                                 )}
                             </span>
-                            {schedulingOpen ? <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" /> : <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />}
+                            {schedulingOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                         </button>
                         {schedulingOpen && (
                             <div className="mt-3 space-y-3">
@@ -500,7 +505,7 @@ export function TaskItemEditor({
                                     </span>
                                 )}
                             </span>
-                            {organizationOpen ? <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" /> : <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />}
+                            {organizationOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                         </button>
                         {organizationOpen && (
                             <div className="mt-3 space-y-3">
@@ -527,7 +532,7 @@ export function TaskItemEditor({
                                     </span>
                                 )}
                             </span>
-                            {detailsOpen ? <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" /> : <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />}
+                            {detailsOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                         </button>
                         {detailsOpen && (
                             <div className="mt-3 space-y-3">

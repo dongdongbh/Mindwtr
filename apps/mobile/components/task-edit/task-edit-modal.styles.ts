@@ -317,13 +317,18 @@ export const styles = StyleSheet.create({
         fontWeight: '300',
     },
     addChecklistBtn: {
-        paddingVertical: 12,
+        marginTop: 6,
+        paddingVertical: 9,
+        borderRadius: 8,
+        borderWidth: 1,
+        flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
+        gap: 5,
     },
     addChecklistText: {
-        color: '#007AFF',
-        fontSize: 15,
-        fontWeight: '500',
+        fontSize: 12,
+        fontWeight: '700',
     },
     aiRow: {
         flexDirection: 'row',

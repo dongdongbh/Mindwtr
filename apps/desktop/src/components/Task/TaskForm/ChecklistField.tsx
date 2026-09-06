@@ -14,7 +14,7 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Check, GripVertical, Plus, Trash2 } from 'lucide-react';
+import { Check, GripVertical, ListChecks, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
     applyMarkdownKeyboardShortcut,
@@ -28,7 +28,7 @@ import {
     type Task,
 } from '@mindwtr/core';
 import { cn } from '../../../lib/utils';
-import { taskEditorLabelClassName } from '../task-editor-label';
+import { TaskEditorFieldLabel } from '../task-editor-label';
 import {
     captureScrollSnapshot,
     focusElementWithoutScroll,
@@ -365,7 +365,7 @@ export function ChecklistField({
                 }
             }}
         >
-            <label className={taskEditorLabelClassName}>{t('taskEdit.checklist')}</label>
+            <TaskEditorFieldLabel icon={ListChecks}>{t('taskEdit.checklist')}</TaskEditorFieldLabel>
             <div className="space-y-2 pr-3">
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleChecklistDragEnd}>
                     <SortableContext items={checklistItems.map((item) => item.id)} strategy={verticalListSortingStrategy}>
@@ -562,9 +562,9 @@ export function ChecklistField({
                             focusChecklistIndex(nextList.length - 1, event.currentTarget);
                         }
                     }}
-                    className="flex items-center gap-1 text-xs font-medium text-info hover:text-info/80"
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-primary/30 px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
                 >
-                    <Plus className="w-3 h-3" />
+                    <Plus className="w-3.5 h-3.5" aria-hidden="true" />
                     {t('taskEdit.addItem')}
                 </button>
                 {(checklistDraft || []).length > 0 && (

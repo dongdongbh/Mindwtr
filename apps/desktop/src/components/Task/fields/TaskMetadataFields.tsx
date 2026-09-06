@@ -1,4 +1,25 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import {
+    Archive,
+    ArrowRight,
+    AtSign,
+    BatteryCharging,
+    BatteryFull,
+    BatteryLow,
+    BatteryMedium,
+    BookOpen,
+    CalendarDays,
+    Check,
+    CircleDot,
+    CircleSlash,
+    Flag,
+    Hourglass,
+    ListTodo,
+    Tag,
+    Timer,
+    User,
+    type LucideIcon,
+} from 'lucide-react';
 import {
     createCustomTimeEstimate,
     formatTimeEstimateLabel,
@@ -14,22 +35,48 @@ import {
 
 import { cn } from '../../../lib/utils';
 import { STATUS_PILL_ACTIVE_CLASSES } from '../../../lib/status-colors';
+import { PriorityFlag } from '../PriorityFlag';
 import {
     QUICK_ADD_FIELD_TOKENS,
     QuickAddTokenBadge,
-    taskEditorLabelClassName,
+    TaskEditorFieldLabel,
 } from '../task-editor-label';
 
 type PillOption<TValue extends string> = {
     value: TValue;
     label: string;
     onContextMenu?: () => void;
+    /** Decorative node (priority dot) rendered before the label. */
+    leading?: ReactNode;
+    /** When set, the pill renders only this node instead of the visible label.
+     *  The accessible name still comes from `label` (kept as aria-label), e.g.
+     *  the icon-only priority "None" control. */
+    iconOnly?: ReactNode;
     /** Overrides the selected look for this option (status pills wear their
      *  Board status color instead of the generic primary). */
     activeClassName?: string;
 };
 
 const selectedPillClassName = 'border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90';
+
+// Choice-chip icons added in front of each option's label (never replacing it,
+// except for the icon-only None pill above). Statuses and energy levels map to
+// a fixed lucide glyph so options stay scannable without text length alone.
+const STATUS_OPTION_ICONS: Record<TaskStatus, LucideIcon> = {
+    inbox: CircleDot,
+    next: ArrowRight,
+    waiting: Hourglass,
+    someday: CalendarDays,
+    reference: BookOpen,
+    done: Check,
+    archived: Archive,
+};
+
+const ENERGY_OPTION_ICONS: Record<TaskEnergyLevel, LucideIcon> = {
+    low: BatteryLow,
+    medium: BatteryMedium,
+    high: BatteryFull,
+};
 
 const simplePrefixedTokenPattern = /^[@#][^\s,]+$/u;
 const customTimeEstimateOptionValue = '__custom';
@@ -169,6 +216,7 @@ function PillOptionField<TValue extends string>({
     t,
     ariaLabel,
     label,
+    labelIcon,
     labelToken,
     options,
     value,
@@ -178,6 +226,7 @@ function PillOptionField<TValue extends string>({
     t: (key: string) => string;
     ariaLabel: string;
     label: string;
+    labelIcon?: LucideIcon;
     labelToken?: string;
     options: Array<PillOption<TValue>>;
     value: TValue;
@@ -213,10 +262,10 @@ function PillOptionField<TValue extends string>({
 
     return (
         <div className="flex flex-col gap-1">
-            <label className={`${taskEditorLabelClassName} inline-flex items-center gap-1.5`}>
+            <TaskEditorFieldLabel icon={labelIcon}>
                 {label}
                 {labelToken && <QuickAddTokenBadge t={t} token={labelToken} />}
-            </label>
+            </TaskEditorFieldLabel>
             <div role="group" aria-label={ariaLabel} className="flex flex-wrap gap-1.5">
                 {options.map((option, index) => {
                     const isActive = value === option.value;
@@ -229,6 +278,7 @@ function PillOptionField<TValue extends string>({
                             type="button"
                             aria-label={option.label}
                             aria-pressed={isActive}
+                            title={option.iconOnly ? option.label : undefined}
                             onKeyDown={(event) => handleOptionKeyDown(event, index)}
                             onClick={() => onChange(option.value)}
                             onContextMenu={option.onContextMenu ? (event) => {
@@ -237,13 +287,19 @@ function PillOptionField<TValue extends string>({
                                 option.onContextMenu?.();
                             } : undefined}
                             className={cn(
-                                'inline-flex min-h-7 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40',
+                                'inline-flex min-h-7 items-center justify-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40',
+                                option.iconOnly && 'px-2',
                                 isActive
                                     ? option.activeClassName ?? activeClassName ?? selectedPillClassName
                                     : 'border-border bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'
                             )}
                         >
-                            {option.label}
+                            {option.iconOnly ?? (
+                                <>
+                                    {option.leading}
+                                    {option.label}
+                                </>
+                            )}
                         </button>
                     );
                 })}
@@ -256,6 +312,7 @@ function ToggleTokenField({
     t,
     ariaLabel,
     label,
+    labelIcon,
     labelToken,
     options,
     suggestions = options,
@@ -266,6 +323,7 @@ function ToggleTokenField({
     t: (key: string) => string;
     ariaLabel: string;
     label: string;
+    labelIcon?: LucideIcon;
     labelToken?: string;
     options: string[];
     suggestions?: string[];
@@ -335,10 +393,10 @@ function ToggleTokenField({
 
     return (
         <div className="flex flex-col gap-1 w-full">
-            <label className={`${taskEditorLabelClassName} inline-flex items-center gap-1.5`}>
+            <TaskEditorFieldLabel icon={labelIcon}>
                 {label}
                 {labelToken && <QuickAddTokenBadge t={t} token={labelToken} />}
-            </label>
+            </TaskEditorFieldLabel>
             <div className="relative">
                 <input
                     ref={inputRef}
@@ -402,6 +460,7 @@ function AutocompleteTextField({
     ariaLabel,
     createLabel,
     label,
+    labelIcon,
     labelToken,
     onCreate,
     options,
@@ -413,6 +472,7 @@ function AutocompleteTextField({
     ariaLabel: string;
     createLabel?: string;
     label: string;
+    labelIcon?: LucideIcon;
     labelToken?: string;
     onCreate?: (value: string) => void | Promise<void>;
     options: string[];
@@ -488,10 +548,10 @@ function AutocompleteTextField({
 
     return (
         <div className="flex flex-col gap-1">
-            <label className={`${taskEditorLabelClassName} inline-flex items-center gap-1.5`}>
+            <TaskEditorFieldLabel icon={labelIcon}>
                 {label}
                 {labelToken && <QuickAddTokenBadge t={t} token={labelToken} />}
-            </label>
+            </TaskEditorFieldLabel>
             <div className="relative">
                 <input
                     ref={inputRef}
@@ -572,25 +632,31 @@ export function StatusField({
     onChange: (value: TaskStatus) => void;
     onRequestBackdatedComplete?: () => void;
 }) {
-    const baseOptions: Array<PillOption<TaskStatus>> = [
+    const baseOptions: Array<{ value: TaskStatus; label: string }> = [
         { value: 'inbox', label: t('status.inbox') },
         { value: 'next', label: t('status.next') },
         { value: 'waiting', label: t('status.waiting') },
         { value: 'someday', label: t('status.someday') },
         { value: 'reference', label: t('status.reference') },
-        { value: 'done', label: t('status.done'), onContextMenu: onRequestBackdatedComplete },
+        { value: 'done', label: t('status.done') },
         { value: 'archived', label: t('status.archived') },
     ];
-    const options = baseOptions.map((option) => ({
-        ...option,
-        activeClassName: `${STATUS_PILL_ACTIVE_CLASSES[option.value]} shadow-sm hover:brightness-110`,
-    }));
+    const options: Array<PillOption<TaskStatus>> = baseOptions.map((option) => {
+        const StatusIcon = STATUS_OPTION_ICONS[option.value];
+        return {
+            ...option,
+            leading: <StatusIcon aria-hidden="true" className="h-3 w-3 shrink-0" />,
+            onContextMenu: option.value === 'done' ? onRequestBackdatedComplete : undefined,
+            activeClassName: `${STATUS_PILL_ACTIVE_CLASSES[option.value]} shadow-sm hover:brightness-110`,
+        };
+    });
 
     return (
         <PillOptionField
             t={t}
             ariaLabel={t('task.aria.status')}
             label={t('taskEdit.statusLabel')}
+            labelIcon={ListTodo}
             options={options}
             value={value}
             onChange={onChange}
@@ -608,11 +674,15 @@ export function PriorityField({
     onChange: (value: TaskPriority | '') => void;
 }) {
     const options: Array<PillOption<TaskPriority | ''>> = [
-        { value: '', label: t('common.none') },
-        { value: 'low', label: t('priority.low') },
-        { value: 'medium', label: t('priority.medium') },
-        { value: 'high', label: t('priority.high') },
-        { value: 'urgent', label: t('priority.urgent') },
+        {
+            value: '',
+            label: t('common.none'),
+            iconOnly: <CircleSlash aria-hidden="true" className="h-3.5 w-3.5" />,
+        },
+        { value: 'low', label: t('priority.low'), leading: <PriorityFlag priority="low" /> },
+        { value: 'medium', label: t('priority.medium'), leading: <PriorityFlag priority="medium" /> },
+        { value: 'high', label: t('priority.high'), leading: <PriorityFlag priority="high" /> },
+        { value: 'urgent', label: t('priority.urgent'), leading: <PriorityFlag priority="urgent" /> },
     ];
 
     return (
@@ -620,6 +690,7 @@ export function PriorityField({
             t={t}
             ariaLabel={t('taskEdit.priorityLabel')}
             label={t('taskEdit.priorityLabel')}
+            labelIcon={Flag}
             labelToken={QUICK_ADD_FIELD_TOKENS.priority}
             options={options}
             value={value}
@@ -638,10 +709,15 @@ export function EnergyLevelField({
     onChange: (value: NonNullable<TaskEnergyLevel> | '') => void;
 }) {
     const options: Array<PillOption<NonNullable<TaskEnergyLevel> | ''>> = [
-        { value: '', label: t('common.none') },
-        { value: 'low', label: t('energyLevel.low') },
-        { value: 'medium', label: t('energyLevel.medium') },
-        { value: 'high', label: t('energyLevel.high') },
+        { value: '', label: t('common.none'), iconOnly: <CircleSlash aria-hidden="true" className="h-3.5 w-3.5" /> },
+        ...(Object.keys(ENERGY_OPTION_ICONS) as TaskEnergyLevel[]).map((energyLevel) => {
+            const EnergyIcon = ENERGY_OPTION_ICONS[energyLevel];
+            return {
+                value: energyLevel,
+                label: t(`energyLevel.${energyLevel}`),
+                leading: <EnergyIcon aria-hidden="true" className="h-3 w-3 shrink-0" />,
+            };
+        }),
     ];
 
     return (
@@ -649,6 +725,7 @@ export function EnergyLevelField({
             t={t}
             ariaLabel={t('taskEdit.energyLevel')}
             label={t('taskEdit.energyLevel')}
+            labelIcon={BatteryCharging}
             labelToken={QUICK_ADD_FIELD_TOKENS.energyLevel}
             options={options}
             value={value}
@@ -676,6 +753,7 @@ export function AssignedToField({
             ariaLabel={t('taskEdit.assignedTo')}
             createLabel={tFallback(t, 'people.new', 'New Person')}
             label={t('taskEdit.assignedTo')}
+            labelIcon={User}
             labelToken={QUICK_ADD_FIELD_TOKENS.assignedTo}
             onCreate={onCreatePerson}
             options={options}
@@ -732,7 +810,7 @@ export function TimeEstimateField({
 
     return (
         <div className="flex flex-col gap-1 w-full">
-            <label className={taskEditorLabelClassName}>{t('taskEdit.timeEstimateLabel')}</label>
+            <TaskEditorFieldLabel icon={Hourglass}>{t('taskEdit.timeEstimateLabel')}</TaskEditorFieldLabel>
             <select
                 value={selectValue}
                 aria-label={t('task.aria.timeEstimate')}
@@ -803,6 +881,7 @@ export function ContextsField({
             t={t}
             ariaLabel={t('task.aria.contexts')}
             label={t('taskEdit.contextsLabel')}
+            labelIcon={AtSign}
             labelToken={QUICK_ADD_FIELD_TOKENS.contexts}
             options={options}
             suggestions={suggestions}
@@ -831,6 +910,7 @@ export function TagsField({
             t={t}
             ariaLabel={t('task.aria.tags')}
             label={t('taskEdit.tagsLabel')}
+            labelIcon={Tag}
             labelToken={QUICK_ADD_FIELD_TOKENS.tags}
             options={options}
             suggestions={suggestions}
@@ -852,7 +932,7 @@ export function TimeSpentField({
 }) {
     return (
         <div className="flex flex-col gap-1 w-full">
-            <label className={taskEditorLabelClassName}>{t('taskEdit.timeSpentLabel')}</label>
+            <TaskEditorFieldLabel icon={Timer}>{t('taskEdit.timeSpentLabel')}</TaskEditorFieldLabel>
             <input
                 type="number"
                 min={0}

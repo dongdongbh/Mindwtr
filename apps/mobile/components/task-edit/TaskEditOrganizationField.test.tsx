@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { type ComponentProps } from 'react';
 import { Text, TextInput } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
@@ -53,6 +53,10 @@ const t = (key: string) => ({
     'task.completeBackdateHintMobile': 'Long-press to complete with a different time',
     'people.new': 'New Person',
     'common.clear': 'Clear',
+    'common.none': 'None',
+    'taskEdit.energyLevel': 'Energy Level',
+    'energyLevel.low': 'Low',
+    'energyLevel.high': 'High',
 }[key] ?? key);
 
 const baseProps = {
@@ -248,5 +252,95 @@ describe('TaskEditOrganizationField', () => {
         });
 
         expect(setDraftField).toHaveBeenCalledWith('assignedTo', 'Morgan');
+    });
+
+    it('renders the canonical priority flag beside each non-empty priority chip, but not None', () => {
+        // baseProps is a deliberate partial fixture; the full renderer contract is
+        // irrelevant to the priority chips under test here.
+        const props = {
+            ...baseProps,
+            fieldId: 'priority' as const,
+            priorityOptions: ['low', 'medium', 'high', 'urgent'],
+        } as unknown as ComponentProps<typeof TaskEditOrganizationField>;
+        let tree!: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(<TaskEditOrganizationField {...props} />);
+        });
+
+        const flag = (priority: string) => tree.root.findByProps({ testID: `priority-flag-${priority}` });
+        expect(flag('low').props.color).toBe('#3b82f6');
+        expect(flag('medium').props.color).toBe('#ca8a04');
+        expect(flag('high').props.color).toBe('#f97316');
+        expect(flag('urgent').props.color).toBe('#dc2626');
+        // All flags render at 12pt.
+        for (const priority of ['low', 'medium', 'high', 'urgent']) {
+            expect(flag(priority).props.size).toBe(12);
+        }
+    });
+
+    it('renders the priority None chip as an icon-only labelled button', () => {
+        const setDraftField = vi.fn();
+        const props = {
+            ...baseProps,
+            fieldId: 'priority' as const,
+            priorityOptions: ['low', 'high'],
+            setDraftField,
+        } as unknown as ComponentProps<typeof TaskEditOrganizationField>;
+        let tree!: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(<TaskEditOrganizationField {...props} />);
+        });
+
+        const noneChip = tree.root.findByProps({ accessibilityLabel: 'None' });
+        expect(noneChip.props.accessibilityRole).toBe('button');
+        // Icon-only: the previous "None" text is gone but the label survives.
+        expect(noneChip.findAllByType(Text)).toHaveLength(0);
+        expect(noneChip.findAll((node) => node.props?.size === 16).length).toBeGreaterThan(0);
+
+        act(() => {
+            noneChip.props.onPress();
+        });
+        expect(setDraftField).toHaveBeenCalledWith('priority', '');
+    });
+
+    it('pairs a decorative icon with each status chip label', () => {
+        const props = {
+            ...baseProps,
+            fieldId: 'status' as const,
+            editedTask: { status: 'next' },
+            availableStatusOptions: ['next', 'done'],
+        } as unknown as ComponentProps<typeof TaskEditOrganizationField>;
+        let tree!: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(<TaskEditOrganizationField {...props} />);
+        });
+
+        const chip = (label: string) => tree.root.findByProps({ accessibilityLabel: label });
+        // Every status chip carries a 14px leading icon and keeps its text label.
+        expect(chip('Status: Next').findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
+        expect(chip('Status: Done').findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
+        expect(chip('Status: Done').findAllByType(Text).some((node) => node.props.children === 'Done')).toBe(true);
+    });
+
+    it('pairs a battery icon with each energy level chip label', () => {
+        const props = {
+            ...baseProps,
+            fieldId: 'energyLevel' as const,
+            editedTask: { energyLevel: 'low' },
+            energyLevelOptions: ['low', 'high'],
+        } as unknown as ComponentProps<typeof TaskEditOrganizationField>;
+        let tree!: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(<TaskEditOrganizationField {...props} />);
+        });
+
+        const chipWithText = (label: string) => tree.root.findAll((node) => (
+            typeof node.props?.onPress === 'function'
+            && node.findAllByType(Text).some((textNode) => textNode.props.children === label)
+        ))[0];
+
+        // Energy level chips keep readable text labels and gain a 14px leading icon.
+        expect(chipWithText('Low')?.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
+        expect(chipWithText('High')?.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
     });
 });

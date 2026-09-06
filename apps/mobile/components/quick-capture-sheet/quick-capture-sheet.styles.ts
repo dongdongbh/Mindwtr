@@ -364,6 +364,9 @@ export const styles = StyleSheet.create({
   pickerRow: {
     paddingHorizontal: 12,
     paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   pickerRowText: {
     fontSize: 14,

@@ -18,9 +18,18 @@ import {
     type RecurrenceStrategy,
     type Task,
 } from '@mindwtr/core';
+import {
+    Calendar,
+    CalendarClock,
+    CalendarDays,
+    CalendarX,
+    Clock,
+    Repeat,
+} from 'lucide-react-native';
 
 import { QuickDateChips } from '../QuickDateChips';
 import { CompactText } from '@/components/compact-text';
+import { FieldHeading } from './FieldHeading';
 import { buildRecurrenceValue } from './recurrence-utils';
 import type {
     ShowDatePickerMode,
@@ -386,7 +395,12 @@ export function TaskEditScheduleField({
         case 'recurrence':
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.recurrenceLabel')}</Text>
+                    <FieldHeading
+                        icon={Repeat}
+                        label={t('taskEdit.recurrenceLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View style={styles.statusContainer}>
                         {recurrenceOptions.map((option) => (
                             <TouchableOpacity
@@ -723,7 +737,12 @@ export function TaskEditScheduleField({
             const timeOnly = hasTime && parsed ? safeFormatDate(parsed, 'HH:mm') : '';
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.startDateLabel')}</Text>
+                    <FieldHeading
+                        icon={Calendar}
+                        label={t('taskEdit.startDateLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View>
                         <View style={styles.dateRow}>
                             <TouchableOpacity
@@ -736,10 +755,12 @@ export function TaskEditScheduleField({
                                 <TouchableOpacity
                                     style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => openDatePicker('start-time')}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={hasTime && timeOnly
+                                        ? `${t('task.aria.startTime')}: ${timeOnly}`
+                                        : tFallback(t, 'calendar.changeTime', 'Add time')}
                                 >
-                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>
-                                        {hasTime && timeOnly ? timeOnly : (tFallback(t, 'calendar.changeTime', 'Add time'))}
-                                    </Text>
+                                    <Clock size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
                             )}
                             {!!draft.startTime && hasTime && (
@@ -760,8 +781,10 @@ export function TaskEditScheduleField({
                                         setDraftField('startTime', '');
                                         setDraftField('relativeStartOffset', undefined);
                                     }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={t('common.clear')}
                                 >
-                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
+                                    <CalendarX size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -778,7 +801,7 @@ export function TaskEditScheduleField({
                                 { label: t('taskEdit.startModeAbsolute'), active: !draft.relativeStartOffset, onPress: () => setDraftField('relativeStartOffset', undefined) },
                                 { label: t('taskEdit.startModeRelative'), active: Boolean(draft.relativeStartOffset), onPress: () => applyRelativeStartOffset(relativeAmount, relativeUnit) },
                             ];
-                            const unitOptions: Array<{ value: NonNullable<Task['relativeStartOffset']>['unit']; label: string }> = dueDateHasTime
+                            const unitOptions: { value: NonNullable<Task['relativeStartOffset']>['unit']; label: string }[] = dueDateHasTime
                                 ? [
                                     { value: 'minute', label: t('taskEdit.relativeStartMinutesShort') },
                                     { value: 'hour', label: t('taskEdit.relativeStartHoursShort') },
@@ -864,11 +887,20 @@ export function TaskEditScheduleField({
                             accessibilityRole="button"
                             accessibilityLabel={`${t('taskEdit.dueDateLabel')}: ${notSetLabel}`}
                         >
-                            <CompactText
-                                style={[styles.compactFieldLabel, { color: tc.secondaryText }]}
-                            >
-                                {t('taskEdit.dueDateLabel')}
-                            </CompactText>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+                                <CalendarDays
+                                    size={14}
+                                    color={tc.secondaryText}
+                                    aria-hidden
+                                    accessible={false}
+                                    pointerEvents="none"
+                                />
+                                <CompactText
+                                    style={[styles.compactFieldLabel, { color: tc.secondaryText }]}
+                                >
+                                    {t('taskEdit.dueDateLabel')}
+                                </CompactText>
+                            </View>
                             <CompactText
                                 style={[styles.compactFieldValue, { color: tc.tint }]}
                                 numberOfLines={2}
@@ -885,7 +917,12 @@ export function TaskEditScheduleField({
             }
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.dueDateLabel')}</Text>
+                    <FieldHeading
+                        icon={CalendarDays}
+                        label={t('taskEdit.dueDateLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View>
                         <View style={styles.dateRow}>
                             <TouchableOpacity
@@ -898,10 +935,12 @@ export function TaskEditScheduleField({
                                 <TouchableOpacity
                                     style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => openDatePicker('due-time')}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={hasTime && timeOnly
+                                        ? `${t('task.aria.dueTime')}: ${timeOnly}`
+                                        : tFallback(t, 'calendar.changeTime', 'Add time')}
                                 >
-                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>
-                                        {hasTime && timeOnly ? timeOnly : (tFallback(t, 'calendar.changeTime', 'Add time'))}
-                                    </Text>
+                                    <Clock size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
                             )}
                             {!!draft.dueDate && hasTime && (
@@ -916,8 +955,10 @@ export function TaskEditScheduleField({
                                 <TouchableOpacity
                                     style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => updateDueDate(undefined)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={t('common.clear')}
                                 >
-                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
+                                    <CalendarX size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -935,7 +976,12 @@ export function TaskEditScheduleField({
             const hasTime = hasTimeComponent(draft.reviewAt);
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.reviewDateLabel')}</Text>
+                    <FieldHeading
+                        icon={CalendarClock}
+                        label={t('taskEdit.reviewDateLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View>
                         <View style={styles.dateRow}>
                             <TouchableOpacity
@@ -956,8 +1002,10 @@ export function TaskEditScheduleField({
                                 <TouchableOpacity
                                     style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => setDraftField('reviewAt', '')}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={t('common.clear')}
                                 >
-                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
+                                    <CalendarX size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
                             )}
                         </View>

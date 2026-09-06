@@ -2,6 +2,7 @@ import { Filter } from 'lucide-react';
 import { tFallback } from '@mindwtr/core';
 import { cn } from '../../../lib/utils';
 import type { TaskPriority, TimeEstimate } from '@mindwtr/core';
+import { PriorityFlag } from '../../Task/PriorityFlag';
 
 interface ListFiltersPanelProps {
     t: (key: string) => string;
@@ -112,6 +113,7 @@ export function ListFiltersPanel({
                                                 : "bg-muted hover:bg-muted/80 text-muted-foreground",
                                         )}
                                     >
+                                        <PriorityFlag priority={priority} />
                                         {t(`priority.${priority}`)}
                                     </button>
                                 );

@@ -167,78 +167,18 @@ vi.mock('@expo/vector-icons', () => {
 
 vi.mock('lucide-react-native', () => {
   const Icon = (props: any) => React.createElement('Icon', props, props.children);
-  // Keep this as a plain module object. A catch-all proxy also exposes `then`,
-  // which makes the mock look promise-like and can stall ESM imports in Vitest.
-  const iconNames = [
-    'AlertTriangle',
-    'Archive',
-    'ArrowLeft',
-    'ArrowDown',
-    'ArrowRight',
-    'ArrowRightCircle',
-    'ArrowUp',
-    'AtSign',
-    'Bell',
-    'BookOpen',
-    'BookmarkPlus',
-    'Calendar',
-    'CalendarClock',
-    'CalendarDays',
-    'Check',
-    'CheckCircle',
-    'CheckCircle2',
-    'CheckSquare',
-    'ChevronDown',
-    'ChevronUp',
-    'ChevronRight',
-    'Circle',
-    'ClipboardCheck',
-    'Clock',
-    'Clock3',
-    'Cloud',
-    'Database',
-    'Flag',
-    'Folder',
-    'Hourglass',
-    'GripVertical',
-    'Inbox',
-    'Info',
-    'Layers',
-    'LayoutGrid',
-    'LayoutList',
-    'Lightbulb',
-    'List',
-    'ListChecks',
-    'ListOrdered',
-    'ListTodo',
-    'Menu',
-    'Mic',
-    'Monitor',
-    'MoreHorizontal',
-    'MoveVertical',
-    'PauseCircle',
-    'Play',
-    'Plus',
-    'RefreshCw',
-    'RotateCcw',
-    'Search',
-    'Settings',
-    'Settings2',
-    'SlidersHorizontal',
-    'Sparkles',
-    'Square',
-    'Star',
-    'Tag',
-    'Target',
-    'Timer',
-    'Trash2',
-    'UserRound',
-    'X',
-  ] as const;
-  const exports = Object.fromEntries(iconNames.map((name) => [name, Icon])) as Record<string, unknown>;
-  return {
-    __esModule: true,
-    ...exports,
-    default: exports,
-  };
+  // Any icon name resolves to the stub, so a new lucide import never needs a
+  // hand-maintained allowlist here. The `then` and symbol guards keep the
+  // module from looking promise-like, which stalls ESM imports in Vitest.
+  const exports: Record<string, unknown> = { __esModule: true };
+  const mod: Record<string, unknown> = new Proxy(exports, {
+    get: (target, prop) => {
+      if (prop in target) return target[prop as string];
+      if (typeof prop === 'symbol' || prop === 'then') return undefined;
+      return Icon;
+    },
+    has: (target, prop) => prop in target || (typeof prop !== 'symbol' && prop !== 'then'),
+  });
+  exports.default = mod;
+  return mod;
 });

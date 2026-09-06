@@ -213,6 +213,8 @@ describe('TaskInput autocomplete', () => {
         for (const name of ['/link:<url>', '/energy:<level>', '/priority:<level>', '/area:<name>', '/reference', '/archived', '/*']) {
             expect(getByRole('option', { name })).toBeInTheDocument();
         }
+        // Only /priority:<level> suggestions carry the decorative flag.
+        expect(document.querySelectorAll('[data-priority-flag]')).toHaveLength(0);
     });
 
     it('suggests the valid energy levels after /energy: and inserts the canonical token', async () => {
@@ -249,6 +251,19 @@ describe('TaskInput autocomplete', () => {
             '/priority:high',
             '/priority:urgent',
         ]);
+
+        // Each level suggestion carries the canonical decorative flag; other
+        // command suggestions keep their plain label markup.
+        const priorityFlagColors = {
+            low: '#3b82f6',
+            medium: '#ca8a04',
+            high: '#f97316',
+            urgent: '#dc2626',
+        } as const;
+        for (const [level, color] of Object.entries(priorityFlagColors)) {
+            expect(getByRole('option', { name: `/priority:${level}` }).querySelector(`[data-priority-flag="${level}"]`))
+                .toHaveAttribute('stroke', color);
+        }
 
         fireEvent.keyDown(input, { key: 'ArrowDown' });
         fireEvent.keyDown(input, { key: 'Enter' });
@@ -366,7 +381,7 @@ describe('TaskInput autocomplete', () => {
 
         expect(getAllByRole('option').map((option) => option.textContent)).toEqual([
             'Launch',
-            '✨ Create Project "La"',
+            'Create Project "La"',
         ]);
         fireEvent.keyDown(input, { key: 'Tab' });
 

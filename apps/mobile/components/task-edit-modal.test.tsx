@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Modal, Text } from 'react-native';
+import { Alert, Modal } from 'react-native';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import renderer, { act } from 'react-test-renderer';
 
@@ -875,10 +875,11 @@ describe('TaskEditModal', () => {
       projectField = renderer.create(formTab.props.renderField('project'));
     });
 
-    const clearProjectButton = projectField!.root.findAll((node) => (
+    const clearProjectButton = projectField!.root.find((node) => (
       typeof node.props.onPress === 'function'
-      && node.findAllByType(Text).some((textNode) => textNode.props.children === 'common.clear')
-    ))[0];
+      && node.props.accessibilityRole === 'button'
+      && node.props.accessibilityLabel === 'common.clear'
+    ));
     act(() => {
       clearProjectButton.props.onPress();
     });
@@ -932,10 +933,11 @@ describe('TaskEditModal', () => {
       projectField = renderer.create(formTab.props.renderField('project'));
     });
 
-    const clearProjectButton = projectField!.root.findAll((node) => (
+    const clearProjectButton = projectField!.root.find((node) => (
       typeof node.props.onPress === 'function'
-      && node.findAllByType(Text).some((textNode) => textNode.props.children === 'common.clear')
-    ))[0];
+      && node.props.accessibilityRole === 'button'
+      && node.props.accessibilityLabel === 'common.clear'
+    ));
     act(() => {
       clearProjectButton.props.onPress();
     });

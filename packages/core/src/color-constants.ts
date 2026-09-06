@@ -1,3 +1,4 @@
+import type { TaskPriority } from './types';
 export const DEFAULT_PROJECT_COLOR = '#94a3b8';
 export const DEFAULT_AREA_COLOR = DEFAULT_PROJECT_COLOR;
 /**
@@ -20,3 +21,15 @@ export const AREA_PRESET_COLORS = [
     '#f43f5e',
     '#64748b',
 ] as const;
+
+/**
+ * Priority heat ramp: a fixed ramp, not theme tokens, so a priority reads the
+ * same in every theme — the same call project/area accent colors already make
+ * with arbitrary user hex.
+ */
+export const TASK_PRIORITY_COLORS: Readonly<Record<TaskPriority, string>> = {
+    urgent: '#dc2626',
+    high: '#f97316',
+    medium: '#ca8a04',
+    low: '#3b82f6',
+};

@@ -3,7 +3,7 @@ import type { RefObject } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Switch, TextInput, TouchableOpacity, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { AtSign, CalendarDays, ChevronDown, ChevronUp, Clock, FileText, Flag, Folder, Layers, Mic, SlidersHorizontal, Square, X } from 'lucide-react-native';
-import { formatQuickAddHelp, tFallback } from '@mindwtr/core';
+import { formatQuickAddHelp, tFallback, TASK_PRIORITY_COLORS, type TaskPriority } from '@mindwtr/core';
 import { ToastViewport } from '@/contexts/toast-context';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CompactText, CompactTextInput } from '@/components/compact-text';
@@ -84,6 +84,7 @@ interface QuickCaptureSheetBodyProps {
   preview?: React.ReactNode;
   prioritiesEnabled: boolean;
   priorityLabel: string;
+  selectedPriority: TaskPriority | null;
   projectLabel: string;
   projectSelected?: boolean;
   recording: boolean;
@@ -145,6 +146,7 @@ export function QuickCaptureSheetBody({
   preview,
   prioritiesEnabled,
   priorityLabel,
+  selectedPriority,
   projectLabel,
   projectSelected = false,
   recording,
@@ -446,14 +448,7 @@ export function QuickCaptureSheetBody({
                       accessibilityRole="button"
                       accessibilityLabel={`${t('task.aria.dueTime')}: ${dueTimeLabel}`}
                     >
-                      <Clock size={16} color={tc.text} />
-                      <CompactText
-                        style={[styles.optionText, { color: tc.text }]}
-                        numberOfLines={2}
-                        ellipsizeMode="tail"
-                      >
-                        {dueTimeLabel}
-                      </CompactText>
+                      <Clock size={16} color={tc.text} aria-hidden accessible={false} pointerEvents="none" />
                     </TouchableOpacity>
                   )}
 
@@ -516,7 +511,7 @@ export function QuickCaptureSheetBody({
                       accessibilityRole="button"
                       accessibilityLabel={`${t('taskEdit.priorityLabel')}: ${priorityLabel}`}
                     >
-                      <Flag size={16} color={tc.text} />
+                      <Flag size={16} color={selectedPriority ? TASK_PRIORITY_COLORS[selectedPriority] : tc.text} />
                       <CompactText
                         style={[styles.optionText, { color: tc.text }]}
                         numberOfLines={2}

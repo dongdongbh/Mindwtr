@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Animated, StyleSheet } from 'react-native';
+import { Eye, Pencil } from 'lucide-react-native';
 
 import { useLanguage } from '../../contexts/language-context';
 import { useThemeColors } from '../../hooks/use-theme-colors';
@@ -50,9 +51,12 @@ export function TaskEditTabs({ editTab, onTabPress, scrollX, containerWidth }: T
           onPress={() => onTabPress('task')}
           activeOpacity={0.85}
         >
-          <Text style={[styles.modeTabText, { color: editTab === 'task' ? tc.onTint : tc.text }]}>
-            {t('markdown.edit')}
-          </Text>
+          <View style={styles.modeTabLabel}>
+            {editTab === 'task' ? <Pencil size={16} color={tc.onTint} accessible={false} /> : <Pencil size={16} color={tc.text} accessible={false} />}
+            <Text style={[styles.modeTabText, { color: editTab === 'task' ? tc.onTint : tc.text }]}>
+              {t('markdown.edit')}
+            </Text>
+          </View>
         </TouchableOpacity>
         <TouchableOpacity
           accessibilityRole="tab"
@@ -61,9 +65,12 @@ export function TaskEditTabs({ editTab, onTabPress, scrollX, containerWidth }: T
           onPress={() => onTabPress('view')}
           activeOpacity={0.85}
         >
-          <Text style={[styles.modeTabText, { color: editTab === 'view' ? tc.onTint : tc.text }]}>
-            {t('markdown.preview')}
-          </Text>
+          <View style={styles.modeTabLabel}>
+            <Eye size={16} color={editTab === 'view' ? tc.onTint : tc.text} accessible={false} />
+            <Text style={[styles.modeTabText, { color: editTab === 'view' ? tc.onTint : tc.text }]}>
+              {t('markdown.preview')}
+            </Text>
+          </View>
         </TouchableOpacity>
       </View>
     </View>
@@ -90,6 +97,11 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     alignItems: 'center',
+  },
+  modeTabLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   modeTabIndicator: {
     position: 'absolute',

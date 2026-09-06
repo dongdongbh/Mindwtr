@@ -1,3 +1,4 @@
+import { Calendar, CalendarClock, CalendarDays, Navigation, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import {
     applyMarkdownKeyboardShortcut,
@@ -44,7 +45,7 @@ import { DateField } from '../ui/DateField';
 import { AttachmentsField } from './TaskForm/AttachmentsField';
 import { ChecklistField } from './TaskForm/ChecklistField';
 import { normalizeDateInputValue } from './task-item-helpers';
-import { QUICK_ADD_FIELD_TOKENS, taskEditorLabelClassName } from './task-editor-label';
+import { QUICK_ADD_FIELD_TOKENS, TaskEditorFieldLabel } from './task-editor-label';
 import { DescriptionField } from './fields/DescriptionField';
 import { RecurrenceField } from './fields/RecurrenceField';
 import {
@@ -671,6 +672,7 @@ export function TaskItemFieldRenderer({
         : '';
     const renderDateField = ({
         label,
+        labelIcon,
         labelToken,
         dateAriaLabel,
         dateValue,
@@ -683,6 +685,7 @@ export function TaskItemFieldRenderer({
         warning,
     }: {
         label: string;
+        labelIcon?: LucideIcon;
         labelToken?: string;
         dateAriaLabel: string;
         dateValue: string;
@@ -698,6 +701,7 @@ export function TaskItemFieldRenderer({
             <DateField
                 t={t}
                 label={label}
+                labelIcon={labelIcon}
                 labelToken={labelToken}
                 dateAriaLabel={dateAriaLabel}
                 dateValue={dateValue}
@@ -820,6 +824,7 @@ export function TaskItemFieldRenderer({
                     <>
                         {renderDateField({
                             label: t('taskEdit.startDateLabel'),
+                            labelIcon: Calendar,
                             labelToken: QUICK_ADD_FIELD_TOKENS.startTime,
                             dateAriaLabel: t('task.aria.startDate'),
                             dateValue,
@@ -923,6 +928,7 @@ export function TaskItemFieldRenderer({
                     <>
                         {renderDateField({
                             label: t('taskEdit.dueDateLabel'),
+                            labelIcon: CalendarDays,
                             labelToken: QUICK_ADD_FIELD_TOKENS.dueDate,
                             dateAriaLabel: t('task.aria.dueDate'),
                             dateValue,
@@ -1044,6 +1050,7 @@ export function TaskItemFieldRenderer({
                 };
                 return renderDateField({
                     label: t('taskEdit.reviewDateLabel'),
+                    labelIcon: CalendarClock,
                     labelToken: QUICK_ADD_FIELD_TOKENS.reviewAt,
                     dateAriaLabel: t('task.aria.reviewDate'),
                     dateValue,
@@ -1143,7 +1150,7 @@ export function TaskItemFieldRenderer({
         case 'location':
             return (
                 <div className="flex flex-col gap-1">
-                    <label className={taskEditorLabelClassName}>{t('taskEdit.locationLabel')}</label>
+                    <TaskEditorFieldLabel icon={Navigation}>{t('taskEdit.locationLabel')}</TaskEditorFieldLabel>
                     <input
                         type="text"
                         aria-label={t('task.aria.location')}

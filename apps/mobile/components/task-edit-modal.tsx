@@ -988,6 +988,7 @@ function TaskEditModalInner({
                 >
                     <TaskEditHeader
                         onDone={readOnly ? onClose : handleDone}
+                        onClose={readOnly ? onClose : handleAttemptClose}
                         onShare={handleShare}
                         onDuplicate={handleDuplicateTask}
                         onPromoteToProject={handlePromoteTaskToProject}

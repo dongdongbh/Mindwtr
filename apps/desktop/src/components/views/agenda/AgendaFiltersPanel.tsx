@@ -5,6 +5,7 @@ import { Filter, Save, X } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
 import { VIEW_FILTER_INPUT } from '../list/list-toolbar';
+import { PriorityFlag } from '../../Task/PriorityFlag';
 
 export type AgendaProjectFilterOption = {
     id: string;
@@ -419,6 +420,7 @@ export function AgendaFiltersPanel({
                                                     : 'bg-muted text-muted-foreground hover:bg-muted/80',
                                             )}
                                         >
+                                            <PriorityFlag priority={priority} />
                                             {t(`priority.${priority}`)}
                                         </button>
                                     );

@@ -11,6 +11,7 @@ import {
 import { X } from 'lucide-react-native';
 
 import { CompactText } from '@/components/compact-text';
+import { PriorityFlag } from '@/components/priority-flag';
 import { ThemedAlertHost } from '@/components/themed-alert';
 import type { TaskFilterSelections } from '@/hooks/use-task-filter-selections';
 
@@ -41,6 +42,8 @@ export type FilterChipVariant = 'advanced' | 'excluded';
 
 type FilterChipProps = {
   label: string;
+  /** Decorative node (priority dot) rendered before the label. */
+  leading?: React.ReactNode;
   selected: boolean;
   themeColors: TaskFilterSheetColors;
   onPress?: () => void;
@@ -63,6 +66,7 @@ export function FilterChip({
   variant,
   removeLabel,
   excludedLabel,
+  leading,
 }: FilterChipProps) {
   const isAdvanced = variant === 'advanced';
   const isExcluded = variant === 'excluded';
@@ -87,7 +91,7 @@ export function FilterChip({
   );
 
   if (!onPress) {
-    return <View style={chipStyle}>{chipText}</View>;
+    return <View style={chipStyle}>{leading}{chipText}</View>;
   }
 
   if (isAdvanced) {
@@ -115,6 +119,7 @@ export function FilterChip({
       onPress={onPress}
       style={chipStyle}
     >
+      {leading}
       {chipText}
     </TouchableOpacity>
   );
@@ -341,6 +346,7 @@ export function TaskFilterSheet({
                     <FilterChip
                       key={`priority:${priority}`}
                       label={t(`priority.${priority}`)}
+                      leading={<PriorityFlag priority={priority} />}
                       selected={selections.priorities.includes(priority)}
                       themeColors={themeColors}
                       onPress={() => selections.togglePriority(priority)}

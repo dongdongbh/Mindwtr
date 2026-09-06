@@ -8,9 +8,34 @@ import {
     timeEstimateToMinutes,
     translateWithFallback,
 } from '@mindwtr/core';
+import {
+    Archive,
+    ArrowRight,
+    BatteryCharging,
+    BatteryFull,
+    BatteryLow,
+    BatteryMedium,
+    BookOpen,
+    CalendarDays,
+    Check,
+    CircleDot,
+    CircleSlash,
+    Flag,
+    Folder,
+    Hourglass,
+    Layers,
+    ListTodo,
+    MapPin,
+    Timer,
+    User,
+    X,
+    type LucideIcon,
+} from 'lucide-react-native';
 
-import type { TaskEditFieldRendererProps } from './TaskEditFieldRenderer.types';
+import { PriorityFlag } from '@/components/priority-flag';
 import { CompactText } from '@/components/compact-text';
+import { FieldHeading } from './FieldHeading';
+import type { TaskEditFieldRendererProps } from './TaskEditFieldRenderer.types';
 
 type OrganizationFieldId =
     | 'status'
@@ -21,6 +46,27 @@ type OrganizationFieldId =
     | 'energyLevel'
     | 'assignedTo'
     | 'timeEstimate';
+
+// Status chips pair each offered status with a leading glyph so the row scans
+// faster. The icon is decorative: the text label stays the accessible name.
+const STATUS_ICON_BY_STATUS: Record<string, LucideIcon> = {
+    next: ArrowRight,
+    waiting: Hourglass,
+    someday: CalendarDays,
+    reference: BookOpen,
+    done: Check,
+    archived: Archive,
+};
+
+const getStatusIcon = (status: string): LucideIcon => STATUS_ICON_BY_STATUS[status] ?? CircleDot;
+
+const ENERGY_ICON_BY_LEVEL: Record<string, LucideIcon> = {
+    low: BatteryLow,
+    medium: BatteryMedium,
+    high: BatteryFull,
+};
+
+const getEnergyIcon = (level: string): LucideIcon => ENERGY_ICON_BY_LEVEL[level] ?? BatteryMedium;
 
 type TaskEditOrganizationFieldProps = TaskEditFieldRendererProps & {
     fieldId: OrganizationFieldId;
@@ -107,28 +153,48 @@ export function TaskEditOrganizationField({
         const key = `status.${status}` as const;
         return translateWithFallback(t, key, status);
     };
-    const renderCompactPicker = (label: string, value: string, onPress: () => void) => (
-        <View style={styles.formGroup}>
-            <TouchableOpacity
-                style={[styles.compactFieldRow, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-                onPress={onPress}
-                accessibilityRole="button"
-                accessibilityLabel={`${label}: ${value}`}
-            >
-                <CompactText
-                    style={[styles.compactFieldLabel, { color: tc.secondaryText }]}
+    const renderCompactPicker = (label: string, value: string, onPress: () => void, icon?: LucideIcon) => {
+        const RowIcon = icon;
+        return (
+            <View style={styles.formGroup}>
+                <TouchableOpacity
+                    style={[styles.compactFieldRow, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+                    onPress={onPress}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${label}: ${value}`}
                 >
-                    {label}
-                </CompactText>
-                <CompactText
-                    style={[styles.compactFieldValue, { color: tc.tint }]}
-                    numberOfLines={2}
-                >
-                    {value}
-                </CompactText>
-            </TouchableOpacity>
-        </View>
-    );
+                    {RowIcon ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+                            <RowIcon
+                                size={14}
+                                color={tc.secondaryText}
+                                aria-hidden
+                                accessible={false}
+                                pointerEvents="none"
+                            />
+                            <CompactText
+                                style={[styles.compactFieldLabel, { color: tc.secondaryText }]}
+                            >
+                                {label}
+                            </CompactText>
+                        </View>
+                    ) : (
+                        <CompactText
+                            style={[styles.compactFieldLabel, { color: tc.secondaryText }]}
+                        >
+                            {label}
+                        </CompactText>
+                    )}
+                    <CompactText
+                        style={[styles.compactFieldValue, { color: tc.tint }]}
+                        numberOfLines={2}
+                    >
+                        {value}
+                    </CompactText>
+                </TouchableOpacity>
+            </View>
+        );
+    };
     const assignedToDraft = draft.assignedTo.trim();
     const assignedToCreateLabel = translateWithFallback(t, 'people.new', 'New Person');
     const canCreateAssignedToPerson = assignedToDraft.length > 0
@@ -138,32 +204,54 @@ export function TaskEditOrganizationField({
         case 'status':
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.statusLabel')}</Text>
+                    <FieldHeading
+                        icon={ListTodo}
+                        label={t('taskEdit.statusLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View style={styles.statusContainerCompact}>
-                        {availableStatusOptions.map((status) => (
-                            <TouchableOpacity
-                                key={status}
-                                style={[styles.statusChipCompact, ...getStatusChipStyle(draft.status === status)]}
-                                onPress={() => requestStatusChange(status)}
-                                onLongPress={status === 'done' ? requestBackdatedCompletion : undefined}
-                                accessibilityRole="button"
-                                accessibilityState={{ selected: draft.status === status }}
-                                accessibilityLabel={`${t('taskEdit.statusLabel')}: ${getStatusLabel(status)}`}
-                                accessibilityHint={status === 'done'
-                                    ? translateWithFallback(t, 'task.completeBackdateHintMobile', 'Long-press to complete with a different time')
-                                    : undefined}
-                            >
-                                <Text
-                                    style={getStatusTextStyle(draft.status === status, true)}
-                                    numberOfLines={1}
-                                    ellipsizeMode="tail"
-                                    adjustsFontSizeToFit
-                                    minimumFontScale={0.8}
+                        {availableStatusOptions.map((status) => {
+                            const StatusIcon = getStatusIcon(status);
+                            const active = draft.status === status;
+                            const statusColor = active ? tc.onTint : tc.secondaryText;
+                            return (
+                                <TouchableOpacity
+                                    key={status}
+                                    style={[styles.statusChipCompact, {
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 6,
+                                    }, ...getStatusChipStyle(active)]}
+                                    onPress={() => requestStatusChange(status)}
+                                    onLongPress={status === 'done' ? requestBackdatedCompletion : undefined}
+                                    accessibilityRole="button"
+                                    accessibilityState={{ selected: active }}
+                                    accessibilityLabel={`${t('taskEdit.statusLabel')}: ${getStatusLabel(status)}`}
+                                    accessibilityHint={status === 'done'
+                                        ? translateWithFallback(t, 'task.completeBackdateHintMobile', 'Long-press to complete with a different time')
+                                        : undefined}
                                 >
-                                    {getStatusLabel(status)}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
+                                    <StatusIcon
+                                        size={14}
+                                        color={statusColor}
+                                        aria-hidden
+                                        accessible={false}
+                                        pointerEvents="none"
+                                    />
+                                    <Text
+                                        style={[...getStatusTextStyle(active, true), { width: undefined, flexShrink: 1 }]}
+                                        numberOfLines={1}
+                                        ellipsizeMode="tail"
+                                        adjustsFontSizeToFit
+                                        minimumFontScale={0.8}
+                                    >
+                                        {getStatusLabel(status)}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
                     </View>
                 </View>
             );
@@ -173,12 +261,18 @@ export function TaskEditOrganizationField({
                 return renderCompactPicker(
                     t('taskEdit.projectLabel'),
                     t('taskEdit.noProjectOption'),
-                    () => setShowProjectPicker(true)
+                    () => setShowProjectPicker(true),
+                    Folder
                 );
             }
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.projectLabel')}</Text>
+                    <FieldHeading
+                        icon={Folder}
+                        label={t('taskEdit.projectLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View style={styles.dateRow}>
                         <TouchableOpacity
                             style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
@@ -199,8 +293,10 @@ export function TaskEditOrganizationField({
                                     setDraftField('sectionId', '');
                                     setDraftField('areaId', areaId);
                                 }}
+                                accessibilityRole="button"
+                                accessibilityLabel={t('common.clear')}
                             >
-                                <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
+                                <X size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                             </TouchableOpacity>
                         )}
                     </View>
@@ -213,7 +309,12 @@ export function TaskEditOrganizationField({
             const section = projectSections.find((item) => item.id === draft.sectionId);
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.sectionLabel')}</Text>
+                    <FieldHeading
+                        icon={Layers}
+                        label={t('taskEdit.sectionLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View style={styles.dateRow}>
                         <TouchableOpacity
                             style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
@@ -227,8 +328,10 @@ export function TaskEditOrganizationField({
                             <TouchableOpacity
                                 style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                 onPress={() => setDraftField('sectionId', '')}
+                                accessibilityRole="button"
+                                accessibilityLabel={t('common.clear')}
                             >
-                                <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
+                                <X size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                             </TouchableOpacity>
                         )}
                     </View>
@@ -242,12 +345,18 @@ export function TaskEditOrganizationField({
                 return renderCompactPicker(
                     t('taskEdit.areaLabel'),
                     t('taskEdit.noAreaOption'),
-                    () => setShowAreaPicker(true)
+                    () => setShowAreaPicker(true),
+                    MapPin
                 );
             }
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.areaLabel')}</Text>
+                    <FieldHeading
+                        icon={MapPin}
+                        label={t('taskEdit.areaLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View style={styles.dateRow}>
                         <TouchableOpacity
                             style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
@@ -261,8 +370,10 @@ export function TaskEditOrganizationField({
                             <TouchableOpacity
                                 style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                 onPress={() => setDraftField('areaId', '')}
+                                accessibilityRole="button"
+                                accessibilityLabel={t('common.clear')}
                             >
-                                <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
+                                <X size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                             </TouchableOpacity>
                         )}
                     </View>
@@ -273,22 +384,38 @@ export function TaskEditOrganizationField({
             if (!prioritiesEnabled) return null;
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.priorityLabel')}</Text>
+                    <FieldHeading
+                        icon={Flag}
+                        label={t('taskEdit.priorityLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View style={styles.statusContainer}>
                         <TouchableOpacity
-                            style={getStatusChipStyle(!draft.priority)}
+                            style={[...getStatusChipStyle(!draft.priority), {
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                            }]}
                             onPress={() => setDraftField('priority', '')}
+                            accessibilityRole="button"
+                            accessibilityLabel={t('common.none')}
                         >
-                            <Text style={getStatusTextStyle(!draft.priority)}>
-                                {t('common.none')}
-                            </Text>
+                            <CircleSlash
+                                size={16}
+                                color={!draft.priority ? tc.onTint : tc.secondaryText}
+                                aria-hidden
+                                accessible={false}
+                                pointerEvents="none"
+                            />
                         </TouchableOpacity>
                         {priorityOptions.map((priority) => (
                             <TouchableOpacity
                                 key={priority}
-                                style={getStatusChipStyle(draft.priority === priority)}
+                                style={[getStatusChipStyle(draft.priority === priority), { flexDirection: 'row', alignItems: 'center', gap: 6 }]}
                                 onPress={() => setDraftField('priority', priority)}
                             >
+                                <PriorityFlag priority={priority} />
                                 <Text style={getStatusTextStyle(draft.priority === priority)}>
                                     {t(`priority.${priority}`)}
                                 </Text>
@@ -300,34 +427,69 @@ export function TaskEditOrganizationField({
         case 'energyLevel':
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.energyLevel')}</Text>
+                    <FieldHeading
+                        icon={BatteryCharging}
+                        label={t('taskEdit.energyLevel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View style={styles.statusContainer}>
                         <TouchableOpacity
-                            style={getStatusChipStyle(!draft.energyLevel)}
+                            style={[...getStatusChipStyle(!draft.energyLevel), {
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                            }]}
                             onPress={() => setDraftField('energyLevel', '')}
+                            accessibilityRole="button"
+                            accessibilityLabel={t('common.none')}
                         >
-                            <Text style={getStatusTextStyle(!draft.energyLevel)}>
-                                {t('common.none')}
-                            </Text>
+                            <CircleSlash
+                                size={16}
+                                color={!draft.energyLevel ? tc.onTint : tc.secondaryText}
+                                aria-hidden
+                                accessible={false}
+                                pointerEvents="none"
+                            />
                         </TouchableOpacity>
-                        {energyLevelOptions.map((energyLevel) => (
-                            <TouchableOpacity
-                                key={energyLevel}
-                                style={getStatusChipStyle(draft.energyLevel === energyLevel)}
-                                onPress={() => setDraftField('energyLevel', energyLevel)}
-                            >
-                                <Text style={getStatusTextStyle(draft.energyLevel === energyLevel)}>
-                                    {t(`energyLevel.${energyLevel}`)}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
+                        {energyLevelOptions.map((energyLevel) => {
+                            const EnergyIcon = getEnergyIcon(energyLevel);
+                            const active = draft.energyLevel === energyLevel;
+                            return (
+                                <TouchableOpacity
+                                    key={energyLevel}
+                                    style={[...getStatusChipStyle(active), {
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                    }]}
+                                    onPress={() => setDraftField('energyLevel', energyLevel)}
+                                >
+                                    <EnergyIcon
+                                        size={14}
+                                        color={active ? tc.onTint : tc.secondaryText}
+                                        aria-hidden
+                                        accessible={false}
+                                        pointerEvents="none"
+                                    />
+                                    <Text style={getStatusTextStyle(active)}>
+                                        {t(`energyLevel.${energyLevel}`)}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
                     </View>
                 </View>
             );
         case 'assignedTo':
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.assignedTo')}</Text>
+                    <FieldHeading
+                        icon={User}
+                        label={t('taskEdit.assignedTo')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <TextInput
                         style={[styles.input, inputStyle]}
                         value={draft.assignedTo}
@@ -376,21 +538,39 @@ export function TaskEditOrganizationField({
             const customTimeEstimateLabel = translateWithFallback(t, 'recurrence.custom', 'Custom…');
             return (
                 <View style={styles.formGroup}>
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.timeEstimateLabel')}</Text>
+                    <FieldHeading
+                        icon={Hourglass}
+                        label={t('taskEdit.timeEstimateLabel')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
                     <View style={styles.statusContainer}>
                         {timeEstimateOptions.map((option) => (
                             <TouchableOpacity
                                 key={option.value || 'none'}
-                                style={getStatusChipStyle(
-                                    draft.timeEstimate === option.value || (!option.value && !draft.timeEstimate)
-                                )}
+                                style={option.value
+                                    ? getStatusChipStyle(draft.timeEstimate === option.value)
+                                    : [...getStatusChipStyle(!draft.timeEstimate), {
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                    }]}
                                 onPress={() => setDraftField('timeEstimate', option.value)}
+                                accessibilityLabel={option.value ? undefined : t('common.none')}
                             >
-                                <Text style={getStatusTextStyle(
-                                    draft.timeEstimate === option.value || (!option.value && !draft.timeEstimate)
-                                )}>
-                                    {option.label}
-                                </Text>
+                                {option.value ? (
+                                    <Text style={getStatusTextStyle(draft.timeEstimate === option.value)}>
+                                        {option.label}
+                                    </Text>
+                                ) : (
+                                    <CircleSlash
+                                        size={16}
+                                        color={!draft.timeEstimate ? tc.onTint : tc.secondaryText}
+                                        aria-hidden
+                                        accessible={false}
+                                        pointerEvents="none"
+                                    />
+                                )}
                             </TouchableOpacity>
                         ))}
                         <TouchableOpacity
@@ -431,9 +611,13 @@ export function TaskEditOrganizationField({
                     )}
                     {timeSpentEnabled && (
                         <>
-                            <Text style={[styles.label, { color: tc.secondaryText, marginTop: 12 }]}>
-                                {translateWithFallback(t, 'taskEdit.timeSpentLabel', 'Time Spent')}
-                            </Text>
+                            <FieldHeading
+                                icon={Timer}
+                                label={translateWithFallback(t, 'taskEdit.timeSpentLabel', 'Time Spent')}
+                                iconColor={tc.secondaryText}
+                                labelStyle={[styles.label, { color: tc.secondaryText }]}
+                                rowStyle={{ marginTop: 12 }}
+                            />
                             <TextInput
                                 style={[styles.input, inputStyle]}
                                 value={typeof draft.timeSpentMinutes === 'number' ? String(draft.timeSpentMinutes) : ''}

@@ -1196,6 +1196,7 @@ export function QuickCaptureSheet({
         preview={previewEntries.length > 0 ? <QuickAddPreview entries={previewEntries} tc={tc} /> : null}
         prioritiesEnabled={prioritiesEnabled}
         priorityLabel={priorityLabel}
+        selectedPriority={priority}
         projectLabel={projectLabel}
         projectSelected={Boolean(selectedProject)}
         recording={Boolean(recording)}

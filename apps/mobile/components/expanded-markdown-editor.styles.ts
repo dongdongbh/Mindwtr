@@ -33,16 +33,11 @@ export const expandedMarkdownEditorStyles = StyleSheet.create({
         right: 16,
         top: 11,
         bottom: 11,
-        minWidth: 64,
-        paddingHorizontal: 10,
+        width: 40,
         borderRadius: 8,
         borderWidth: 1,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    modeButtonText: {
-        fontSize: 11,
-        fontWeight: '600',
     },
     body: {
         flex: 1,
