@@ -4,6 +4,7 @@ Changes collected after `v1.2.8` and before the next version tag.
 
 ## Full Change List
 
+- Self-hosted: a voice note posted to the capture webhook now arrives with its audio attachment on your devices. The server stored the file one folder too deep, so the task synced but the audio showed as missing. The `client` label a sender includes is no longer written into the description as a "Captured with …" line. (#1148)
 - Desktop and mobile: the task editor and the filter and inbox-processing panels now use the same set of vector icons on every platform, with a matching colour for each priority level on the task row strip, the priority flag and the Android widget. On the phone the editor header shows an X to close, alongside Save, and a task's priority can also be set from the right-click menu on the desktop. Contributed by Kombustor. (#1172)
 - Android and iOS: with "Show task age" on and the Focus screen's details toggle off, the age line under each task now hides with the rest of the details instead of staying visible on its own.
 - Android: both widgets can also be placed on the lock screen on devices where Android offers lock-screen widgets (tablets on Android 15 and later first, phones as their Android version adds it). Tapping a task or the capture button asks to unlock first.

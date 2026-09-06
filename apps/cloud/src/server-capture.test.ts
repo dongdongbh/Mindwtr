@@ -7,6 +7,7 @@ import type { AppData, Attachment, Task } from '@mindwtr/core';
 import { startCloudServer } from './server';
 import {
     buildCaptureTaskText,
+    captureAudioStoragePath,
     handleCaptureRequest,
     parseRecordedAtMs,
     readDeclaredPartContentType,
@@ -156,7 +157,7 @@ describe('POST /v1/capture', () => {
         expect(payload.task.status).toBe('inbox');
         expect(payload.task.title).toBe('Book the dentist');
         expect(payload.task.description).toBe(
-            'Book the dentist\nAsk about the crown that came loose\n\nCaptured with ring',
+            'Book the dentist\nAsk about the crown that came loose',
         );
         expect(payload.task.rev).toBe(1);
         expect(payload.task.revBy).toBe('cloud');
@@ -172,7 +173,7 @@ describe('POST /v1/capture', () => {
         expect(attachment.fileHash).toBe(createHash('sha256').update(AUDIO_BYTES).digest('hex'));
         expect(attachment.createdAt).toBe(payload.task.createdAt);
 
-        const download = await fetch(`${harness.url}/v1/attachments/${attachment.cloudKey}`, { headers: AUTH });
+        const download = await fetch(`${harness.url}/v1/${attachment.cloudKey}`, { headers: AUTH });
         expect(download.status).toBe(200);
         const downloaded = new Uint8Array(await download.arrayBuffer());
         expect([...downloaded]).toEqual([...AUDIO_BYTES]);
@@ -455,7 +456,7 @@ describe('POST /v1/capture', () => {
         expect(merged.some((item) => item.id === 'phone-only-task')).toBe(true);
 
         // The bytes are still downloadable after the merge, so the phone can fetch them.
-        const download = await fetch(`${harness.url}/v1/attachments/${attachment.cloudKey}`, { headers: AUTH });
+        const download = await fetch(`${harness.url}/v1/${attachment.cloudKey}`, { headers: AUTH });
         expect(download.status).toBe(200);
         expect(new Uint8Array(await download.arrayBuffer()).byteLength).toBe(AUDIO_BYTES.byteLength);
     });
@@ -519,10 +520,8 @@ describe('POST /v1/capture', () => {
             expect(assertCalls).toBeGreaterThan(4);
             expect(publishedAudioFilesAtFailure).toHaveLength(1);
 
-            // cloudKey already carries an "attachments/" prefix (buildCloudKey), so the
-            // real file lands a level deeper than this directory - walk recursively and
-            // check no audio file bytes were left behind anywhere under it, rather than
-            // assuming the directory tree itself is empty (an empty parent dir is fine).
+            // Walk recursively so a file left anywhere under the attachments root is
+            // caught, not only one directly inside it (an empty parent dir is fine).
             const remainingAudioFiles = existsSync(attachmentsDir)
                 ? (readdirSync(attachmentsDir, { recursive: true }) as string[]).filter((name) => name.endsWith('.m4a'))
                 : [];
@@ -566,16 +565,17 @@ describe('capture field helpers', () => {
 
     test('buildCaptureTaskText takes the first non-empty line and keeps the rest as description', () => {
         const createdAt = '2026-09-03T12:34:56.000Z';
-        expect(buildCaptureTaskText('  \n\n  Fix the gate  \nIt sticks in the rain', '', createdAt)).toEqual({
+        expect(buildCaptureTaskText('  \n\n  Fix the gate  \nIt sticks in the rain', createdAt)).toEqual({
             title: 'Fix the gate',
             description: 'Fix the gate  \nIt sticks in the rain',
         });
-        expect(buildCaptureTaskText('Single line', '', createdAt)).toEqual({ title: 'Single line' });
-        expect(buildCaptureTaskText('Single line', 'ring', createdAt)).toEqual({
-            title: 'Single line',
-            description: 'Captured with ring',
-        });
-        expect(buildCaptureTaskText('', '', createdAt)).toEqual({ title: 'Voice capture 2026-09-03T12:34:56Z' });
+        expect(buildCaptureTaskText('Single line', createdAt)).toEqual({ title: 'Single line' });
+        expect(buildCaptureTaskText('', createdAt)).toEqual({ title: 'Voice capture 2026-09-03T12:34:56Z' });
+    });
+
+    test('captureAudioStoragePath strips the attachments/ prefix the apps add back in the URL (#1148)', () => {
+        expect(captureAudioStoragePath('attachments/abc.m4a')).toBe('abc.m4a');
+        expect(captureAudioStoragePath('abc.m4a')).toBe('abc.m4a');
     });
 
     test('readDeclaredPartContentType finds the named part and ignores a lookalike filename', () => {
@@ -596,7 +596,7 @@ describe('capture field helpers', () => {
 
     test('buildCaptureTaskText cuts a long spoken line to the task title limit', () => {
         const spoken = 'a'.repeat(900);
-        const built = buildCaptureTaskText(spoken, '', '2026-09-03T12:34:56.000Z');
+        const built = buildCaptureTaskText(spoken, '2026-09-03T12:34:56.000Z');
         expect(built.title).toHaveLength(500);
         expect(built.description).toBe(spoken);
     });

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import {
+    ATTACHMENTS_DIR_NAME,
     buildCloudKey,
     generateUUID,
     type AppData,
@@ -48,7 +49,6 @@ const AUDIO_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
 const RECORDED_AT_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 const MAX_ATTACHMENT_TITLE_LENGTH = 120;
-const MAX_CLIENT_LENGTH = 64;
 
 const normalizeContentType = (value: string | null): string => (
     value?.split(';', 1)[0]?.trim().toLowerCase() || ''
@@ -102,7 +102,6 @@ export type CaptureAudio = {
 
 export type CapturePayload = {
     transcription: string;
-    client: string;
     recordedAtMs: number | null;
     audio: CaptureAudio | null;
 };
@@ -125,7 +124,7 @@ export function parseCaptureBody(
 ): CapturePayload | Response {
     if (contentType === 'application/json') {
         const text = new TextDecoder().decode(bytes).trim();
-        if (!text) return { transcription: '', client: '', recordedAtMs: null, audio: null };
+        if (!text) return { transcription: '', recordedAtMs: null, audio: null };
         let parsed: unknown;
         try {
             parsed = JSON.parse(text);
@@ -138,14 +137,12 @@ export function parseCaptureBody(
         const record = parsed as Record<string, unknown>;
         return {
             transcription: firstString(record.transcription, record.text, record.title),
-            client: typeof record.client === 'string' ? record.client : '',
             recordedAtMs: parseRecordedAtMs(record.recordedAt),
             audio: null,
         };
     }
     return {
         transcription: new TextDecoder().decode(bytes),
-        client: '',
         recordedAtMs: null,
         audio: null,
     };
@@ -221,7 +218,6 @@ async function parseCaptureMultipart(
     };
     return {
         transcription: firstString(readField('transcription'), readField('text'), readField('title')),
-        client: readField('client'),
         recordedAtMs: parseRecordedAtMs(readField('recordedAt')),
         audio: audio && audio.bytes.byteLength > 0 ? audio : null,
     };
@@ -232,7 +228,6 @@ async function parseCaptureMultipart(
  *  must stay the words that were said. */
 export function buildCaptureTaskText(
     transcription: string,
-    client: string,
     createdAt: string,
 ): { title: string; description?: string } {
     const body = transcription.replace(/\r\n?/g, '\n').trim();
@@ -240,12 +235,10 @@ export function buildCaptureTaskText(
     const title = firstNonEmptyLine
         ? firstNonEmptyLine.slice(0, MAX_TASK_TITLE_LENGTH)
         : `Voice capture ${createdAt.replace(/\.\d{3}Z$/, 'Z')}`;
-    const parts: string[] = [];
-    if (body && body !== title) parts.push(body);
-    const sanitizedClient = sanitizeSingleLine(client, MAX_CLIENT_LENGTH);
-    if (sanitizedClient) parts.push(`Captured with ${sanitizedClient}`);
-    const description = parts.join('\n\n');
-    return description ? { title, description } : { title };
+    // The sender's `client` label is accepted and ignored: a "Captured with ring"
+    // line under every voice note is clutter, and the audio attachment already
+    // says where the task came from (#1148).
+    return body && body !== title ? { title, description: body } : { title };
 }
 
 /** The attachment record the apps expect to find in the synced document: the
@@ -335,7 +328,7 @@ export async function handleCaptureRequest(
     const nowMs = Date.now();
     const nowIso = new Date(nowMs).toISOString();
     const createdAt = resolveCaptureCreatedAt(payload.recordedAtMs, nowMs);
-    const { title, description } = buildCaptureTaskText(payload.transcription, payload.client, createdAt);
+    const { title, description } = buildCaptureTaskText(payload.transcription, createdAt);
     const audio = payload.audio;
     const attachment = audio ? buildCaptureAttachment(audio, title, createdAt, nowIso) : null;
 
@@ -398,11 +391,20 @@ export async function handleCaptureRequest(
  *  the removal itself are swallowed - the original error is what the caller rethrows. */
 function removeOrphanedCaptureAudio(cloudKey: string, options: CaptureRequestOptions): void {
     try {
-        const resolved = resolveAttachmentPath(options.dataDir, options.key, cloudKey, { create: false });
+        const resolved = resolveAttachmentPath(options.dataDir, options.key, captureAudioStoragePath(cloudKey), { create: false });
         if (resolved) durablyRemoveFile(resolved.filePath);
     } catch {
         // best effort only
     }
+}
+
+/** The apps fetch an attachment at `<base>/v1/<cloudKey>`, and cloudKey already
+ *  starts with `attachments/`, so the /v1/attachments/:path handler stores and
+ *  serves the bytes at the key WITHOUT that prefix. Storing under the full key
+ *  put the audio one directory too deep, where no app ever looked (#1148). */
+export function captureAudioStoragePath(cloudKey: string): string {
+    const prefix = `${ATTACHMENTS_DIR_NAME}/`;
+    return cloudKey.startsWith(prefix) ? cloudKey.slice(prefix.length) : cloudKey;
 }
 
 /** Publishes the audio bytes through the same durable path PUT
@@ -413,7 +415,7 @@ function storeCaptureAudio(
     options: CaptureRequestOptions,
 ): Response | null {
     options.assertStorageRoot();
-    const resolved = resolveAttachmentPath(options.dataDir, options.key, cloudKey, { create: true });
+    const resolved = resolveAttachmentPath(options.dataDir, options.key, captureAudioStoragePath(cloudKey), { create: true });
     if (!resolved) return errorResponse('Failed to store attachment', 500);
     let prepared: PreparedFilePublication | null;
     try {
