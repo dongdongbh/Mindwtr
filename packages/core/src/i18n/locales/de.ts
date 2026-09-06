@@ -573,7 +573,7 @@ export const deOverrides: Record<string, string> = {
         'projects.noTags': 'Keine Schlagwörter',
         'projects.deferredSection': 'Irgendwann/Warten',
         'projects.duplicate': 'Duplizieren',
-        'projects.complete': 'Vervollständigen',
+        'projects.complete': 'Abschließen',
         'projects.completed': 'Abgeschlossen',
         'projects.archive': 'Archiv',
         'projects.reactivate': 'Reaktivieren',
