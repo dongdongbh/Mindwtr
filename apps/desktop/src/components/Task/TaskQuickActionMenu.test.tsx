@@ -3,8 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { useState, type ComponentProps } from 'react';
 import type { Task } from '@mindwtr/core';
-
+import { reportError } from '../../lib/report-error';
 import { TaskQuickActionMenu } from './TaskQuickActionMenu';
+
+vi.mock('../../lib/report-error', () => ({
+    reportError: vi.fn(),
+}));
 
 const now = '2026-02-01T00:00:00.000Z';
 
@@ -39,8 +43,13 @@ const t = (key: string) => ({
     'task.aria.reviewTime': 'Review time',
     'task.aria.startTime': 'Start time',
     'taskEdit.areaLabel': 'Area',
+    'priority.low': 'Low',
+    'priority.medium': 'Medium',
+    'priority.high': 'High',
+    'priority.urgent': 'Urgent',
     'taskEdit.contextsLabel': 'Contexts',
     'taskEdit.dueDateLabel': 'Due Date',
+    'taskEdit.priorityLabel': 'Priority',
     'taskEdit.moreOptions': 'More options',
     'taskEdit.noAreaOption': 'No Area',
     'taskEdit.noProjectOption': 'No Project',
@@ -60,6 +69,7 @@ const createMenuProps = (overrides: Partial<ComponentProps<typeof TaskQuickActio
     areas: [],
     projects: [],
     readOnly: false,
+    prioritiesEnabled: true,
     onClose: vi.fn(),
     onDuplicate: vi.fn(),
     onDelete: vi.fn(),
@@ -755,5 +765,74 @@ describe('TaskQuickActionMenu', () => {
 
         expect(onToggle).not.toHaveBeenCalled();
         expect(props.onClose).not.toHaveBeenCalled();
+    });
+
+    describe('priority panel', () => {
+        it('persists a chosen priority with its dot and closes the menu once', async () => {
+            const user = userEvent.setup();
+            const props = renderClosableMenu({ task: { ...task, priority: 'medium' } });
+            await user.click(screen.getByRole('menuitem', { name: 'Priority…' }));
+
+            const dialog = screen.getByRole('dialog', { name: 'Priority' });
+            // Exactly the four non-empty choices carry the canonical flag; Clear carries none.
+            expect(document.querySelectorAll('[data-priority-flag]')).toHaveLength(4);
+            const lowFlag = dialog.querySelector('[data-priority-flag="low"]');
+            expect(lowFlag).toHaveAttribute('stroke', '#3b82f6');
+            expect(within(dialog).getByRole('button', { name: 'Medium' })).toHaveAttribute('aria-pressed', 'true');
+
+            await user.click(within(dialog).getByRole('button', { name: 'High' }));
+
+            await waitFor(() => expect(props.onClose).toHaveBeenCalledTimes(1));
+            expect(props.onUpdateTask).toHaveBeenCalledTimes(1);
+            expect(props.onUpdateTask).toHaveBeenCalledWith({ priority: 'high' });
+        });
+
+        it('clears the priority through undefined', async () => {
+            const user = userEvent.setup();
+            const props = renderClosableMenu({ task: { ...task, priority: 'urgent' } });
+            await user.click(screen.getByRole('menuitem', { name: 'Priority…' }));
+
+            const dialog = screen.getByRole('dialog', { name: 'Priority' });
+            await user.click(within(dialog).getByRole('button', { name: 'Clear' }));
+
+            await waitFor(() => expect(props.onClose).toHaveBeenCalledTimes(1));
+            expect(props.onUpdateTask).toHaveBeenCalledTimes(1);
+            expect(props.onUpdateTask).toHaveBeenCalledWith({ priority: undefined });
+        });
+
+        it('hides the priority action when priorities are disabled', () => {
+            renderMenu({ prioritiesEnabled: false });
+
+            expect(screen.queryByRole('menuitem', { name: 'Priority…' })).not.toBeInTheDocument();
+        });
+
+        it('hides the priority action for read-only tasks', () => {
+            renderMenu({ readOnly: true });
+
+            expect(screen.queryByRole('menuitem', { name: 'Priority…' })).not.toBeInTheDocument();
+        });
+
+        it('keeps the panel open for retry after a failed update', async () => {
+            const user = userEvent.setup();
+            const onUpdateTask = vi.fn()
+                .mockResolvedValueOnce({ success: false, error: 'sync offline' })
+                .mockResolvedValueOnce({ success: true });
+            const props = renderClosableMenu({ task: { ...task, priority: 'medium' }, onUpdateTask });
+            await user.click(screen.getByRole('menuitem', { name: 'Priority…' }));
+
+            const dialog = screen.getByRole('dialog', { name: 'Priority' });
+            await user.click(within(dialog).getByRole('button', { name: 'High' }));
+
+            expect(onUpdateTask).toHaveBeenCalledWith({ priority: 'high' });
+            expect(props.onClose).not.toHaveBeenCalled();
+            expect(reportError).toHaveBeenCalledTimes(1);
+
+            // The panel stays mounted, the pending state clears, and a retry succeeds.
+            await user.click(within(dialog).getByRole('button', { name: 'High' }));
+
+            await waitFor(() => expect(props.onClose).toHaveBeenCalledTimes(1));
+            expect(onUpdateTask).toHaveBeenCalledTimes(2);
+            expect(reportError).toHaveBeenCalledTimes(1);
+        });
     });
 });

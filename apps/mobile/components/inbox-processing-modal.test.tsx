@@ -1741,6 +1741,8 @@ describe('InboxProcessingModal', () => {
       throw new Error('Priority button not found');
     }
 
+    // The chip carries the canonical decorative flag beside its label.
+    expect(priorityButton.findByProps({ testID: 'priority-flag-high' }).props.color).toBe('#f97316');
     act(() => {
       priorityButton.props.onPress();
     });

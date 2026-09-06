@@ -6,6 +6,7 @@ import type { TaskMetadataFilterVisibility } from '@mindwtr/core';
 
 vi.mock('lucide-react-native', () => ({
   X: () => null,
+  Flag: (props: Record<string, unknown>) => React.createElement('Flag', props),
 }));
 
 import { TaskFilterSheet, type TaskFilterSheetOptions } from './task-filter-sheet';
@@ -210,6 +211,13 @@ describe('TaskFilterSheet', () => {
 
     expect(hasText('Priority')).toBe(true);
     expect(hasText('Urgent priority')).toBe(true);
+    // Each priority chip carries the canonical decorative flag.
+    const flagColor = (priority: string) =>
+      tree!.root.findByProps({ testID: `priority-flag-${priority}` }).props.color;
+    expect(flagColor('low')).toBe('#3b82f6');
+    expect(flagColor('medium')).toBe('#ca8a04');
+    expect(flagColor('high')).toBe('#f97316');
+    expect(flagColor('urgent')).toBe('#dc2626');
     expect(hasText('Energy level')).toBe(true);
     expect(hasText('Low energy')).toBe(true);
     expect(hasText('Time estimate')).toBe(true);
@@ -246,5 +254,24 @@ describe('TaskFilterSheet', () => {
     });
     expect(handle.current.tokens).toEqual([]);
     expect(hasText('Clear')).toBe(false);
+  });
+
+  it('renders no priority flag on non-priority chips', () => {
+    renderSheet({
+      options: {
+        timeEstimates: ['30min'],
+        visibility: { energyLevel: true, location: true, priority: true, timeEstimate: true },
+      },
+    });
+
+    // Energy and time chips stay flag-free: exactly the four priority flags render.
+    // Count host instances only — the lucide mock also surfaces a wrapper match.
+    const hostFlags = (priority: string) => tree!.root
+      .findAllByProps({ testID: `priority-flag-${priority}` })
+      .filter((node) => typeof node.type === 'string');
+    expect(hostFlags('low')).toHaveLength(1);
+    expect(hostFlags('medium')).toHaveLength(1);
+    expect(hostFlags('high')).toHaveLength(1);
+    expect(hostFlags('urgent')).toHaveLength(1);
   });
 });

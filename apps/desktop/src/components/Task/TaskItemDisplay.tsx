@@ -1,6 +1,6 @@
 import { AlertTriangle, Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repeat, Check, Clock, Timer, Link2, Paperclip, RotateCcw, Copy, MapPin, History, Hourglass, Play, Zap, MoreHorizontal } from 'lucide-react';
 import type { Area, Attachment, Project, RangeSelectionOptions, Section, Task, TaskStatus, RecurrenceRule, RecurrenceStrategy, Language } from '@mindwtr/core';
-import { DEFAULT_AREA_COLOR, formatRecurrenceLabel, formatTimeEstimateLabel, formatTimeSpentLabel, getChecklistProgress, getContextColor, getInlineMarkdownPreview, getRecurringTaskPreviewDate, getTaskAgeLabel, getTaskDateCoherenceIssues, getTaskStaleness, getTaskUrgency, hasTimeComponent, isTaskActionable, isTaskFinished, safeFormatDate, resolveTaskTextDirection, tFallback } from '@mindwtr/core';
+import { DEFAULT_AREA_COLOR, TASK_PRIORITY_COLORS, formatRecurrenceLabel, formatTimeEstimateLabel, formatTimeSpentLabel, getChecklistProgress, getContextColor, getInlineMarkdownPreview, getRecurringTaskPreviewDate, getTaskAgeLabel, getTaskDateCoherenceIssues, getTaskStaleness, getTaskUrgency, hasTimeComponent, isTaskActionable, isTaskFinished, safeFormatDate, resolveTaskTextDirection, tFallback } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
 import { STATUS_PILL_CLASSES } from '../../lib/status-colors';
 import { useBareFileReferenceCheck } from '../../lib/attachment-reference';
@@ -12,7 +12,6 @@ import { InlineMarkdown } from '../Markdown';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { isImageAttachment } from './task-item-attachment-utils';
-import { TASK_PRIORITY_STRIP_COLORS } from './task-item-helpers';
 import { AttachmentImage } from './AttachmentImage';
 import { FocusStarIcon } from '../FocusStarIcon';
 
@@ -670,7 +669,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     aria-hidden="true"
                     data-priority-strip={task.priority}
                     className="pointer-events-none absolute inset-y-0 -start-1.5 w-[3px] rounded-full"
-                    style={{ backgroundColor: TASK_PRIORITY_STRIP_COLORS[task.priority] }}
+                    style={{ backgroundColor: TASK_PRIORITY_COLORS[task.priority] }}
                 />
             )}
             {overlayDragHandle && (

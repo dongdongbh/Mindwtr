@@ -9,8 +9,9 @@ import {
     translateWithFallback,
 } from '@mindwtr/core';
 
-import type { TaskEditFieldRendererProps } from './TaskEditFieldRenderer.types';
+import { PriorityFlag } from '@/components/priority-flag';
 import { CompactText } from '@/components/compact-text';
+import type { TaskEditFieldRendererProps } from './TaskEditFieldRenderer.types';
 
 type OrganizationFieldId =
     | 'status'
@@ -286,9 +287,10 @@ export function TaskEditOrganizationField({
                         {priorityOptions.map((priority) => (
                             <TouchableOpacity
                                 key={priority}
-                                style={getStatusChipStyle(draft.priority === priority)}
+                                style={[getStatusChipStyle(draft.priority === priority), { flexDirection: 'row', alignItems: 'center', gap: 6 }]}
                                 onPress={() => setDraftField('priority', priority)}
                             >
+                                <PriorityFlag priority={priority} />
                                 <Text style={getStatusTextStyle(draft.priority === priority)}>
                                     {t(`priority.${priority}`)}
                                 </Text>

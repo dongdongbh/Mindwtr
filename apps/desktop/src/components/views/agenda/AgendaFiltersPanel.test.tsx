@@ -116,6 +116,8 @@ describe('AgendaFiltersPanel', () => {
         })} />);
 
         expect(screen.getByText('Urgent priority')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Urgent priority' }).querySelector('[data-priority-flag="urgent"]'))
+            .toHaveAttribute('stroke', '#dc2626');
         expect(screen.getByText('High energy')).toBeInTheDocument();
         expect(screen.getByLabelText('Location')).toBeInTheDocument();
         expect(screen.getByText('Time estimate')).toBeInTheDocument();

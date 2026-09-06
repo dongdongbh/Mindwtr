@@ -1,12 +1,13 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEventHandler, KeyboardEventHandler, RefObject } from 'react';
-import { resolveFeatureFlags, useTaskStore, type Area, type Project } from '@mindwtr/core';
+import { resolveFeatureFlags, useTaskStore, type Area, type Project, type TaskPriority } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
 import {
     compareAutocompleteLabels,
     matchesAutocompleteQuery,
     normalizeAutocompleteTokens,
 } from './token-autocomplete';
+import { PriorityFlag } from './PriorityFlag';
 
 type TriggerType = 'project' | 'context' | 'tag' | 'area' | 'person' | 'command';
 type SlashCommand =
@@ -43,7 +44,7 @@ type Option =
     | { kind: 'tag'; label: string; value: string }
     | { kind: 'area'; label: string; value: string; id: string }
     | { kind: 'person'; label: string; value: string }
-    | { kind: 'command'; label: string; value: string; command: SlashCommand; requiresArgument: boolean };
+    | { kind: 'command'; label: string; value: string; command: SlashCommand; requiresArgument: boolean; priority?: TaskPriority };
 
 // WebKit does not scroll an input to a caret set via setSelectionRange, so we
 // measure the caret's pixel offset and adjust scrollLeft ourselves (LTR only).
@@ -127,7 +128,7 @@ const SLASH_COMMANDS: Array<{
 // The parser only accepts these exact tokens for /energy: — suggest them so
 // a partial token like "l" never ends up in the task title.
 const ENERGY_LEVEL_VALUES = ['low', 'medium', 'high'];
-const PRIORITY_VALUES = ['low', 'medium', 'high', 'urgent'];
+const PRIORITY_VALUES: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 
 function getSlashCommandOptions(query: string, prioritiesEnabled: boolean): Option[] {
     const separatorIndex = query.indexOf(':');
@@ -155,6 +156,7 @@ function getSlashCommandOptions(query: string, prioritiesEnabled: boolean): Opti
                 value: level,
                 command: 'priority' as const,
                 requiresArgument: true,
+                priority: level,
             }));
     }
 
@@ -671,7 +673,10 @@ export function TaskInput({
                                     : 'hover:bg-muted/50'
                             )}
                         >
-                            {option.kind === 'create' ? `✨ ${option.label}` : option.label}
+                            {option.kind === 'create' ? `✨ ${option.label}`
+                                : option.kind === 'command' && option.priority
+                                    ? <span className="inline-flex items-center gap-1.5"><PriorityFlag priority={option.priority} />{option.label}</span>
+                                    : option.label}
                         </button>
                     ))}
                 </div>

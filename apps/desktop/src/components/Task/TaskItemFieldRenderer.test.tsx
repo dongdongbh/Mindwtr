@@ -992,10 +992,16 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         );
 
         expect(queryByRole('combobox', { name: 'Priority' })).toBeNull();
-        expect(getByRole('group', { name: 'Priority' })).toBeInTheDocument();
+        const priorityGroup = getByRole('group', { name: 'Priority' });
+        expect(priorityGroup).toBeInTheDocument();
         const selectedPriority = getByRole('button', { name: 'Low' });
         expect(selectedPriority).toHaveAttribute('aria-pressed', 'true');
         expect(selectedPriority).toHaveClass('bg-primary', 'text-primary-foreground');
+        // The four non-empty pills carry the canonical decorative flag; None carries none.
+        expect(priorityGroup.querySelectorAll('[data-priority-flag]')).toHaveLength(4);
+        expect(priorityGroup.querySelector('[data-priority-flag="low"]')).toHaveAttribute('stroke', '#3b82f6');
+        expect(priorityGroup.querySelector('[data-priority-flag="urgent"]')).toHaveAttribute('stroke', '#dc2626');
+        expect(getByRole('button', { name: 'None' }).querySelector('[data-priority-flag]')).toBeNull();
 
         fireEvent.click(getByRole('button', { name: 'None' }));
 

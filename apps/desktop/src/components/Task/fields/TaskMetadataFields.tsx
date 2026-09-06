@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import {
     createCustomTimeEstimate,
     formatTimeEstimateLabel,
@@ -14,6 +14,7 @@ import {
 
 import { cn } from '../../../lib/utils';
 import { STATUS_PILL_ACTIVE_CLASSES } from '../../../lib/status-colors';
+import { PriorityFlag } from '../PriorityFlag';
 import {
     QUICK_ADD_FIELD_TOKENS,
     QuickAddTokenBadge,
@@ -24,6 +25,8 @@ type PillOption<TValue extends string> = {
     value: TValue;
     label: string;
     onContextMenu?: () => void;
+    /** Decorative node (priority dot) rendered before the label. */
+    leading?: ReactNode;
     /** Overrides the selected look for this option (status pills wear their
      *  Board status color instead of the generic primary). */
     activeClassName?: string;
@@ -243,6 +246,7 @@ function PillOptionField<TValue extends string>({
                                     : 'border-border bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'
                             )}
                         >
+                            {option.leading}
                             {option.label}
                         </button>
                     );
@@ -609,10 +613,10 @@ export function PriorityField({
 }) {
     const options: Array<PillOption<TaskPriority | ''>> = [
         { value: '', label: t('common.none') },
-        { value: 'low', label: t('priority.low') },
-        { value: 'medium', label: t('priority.medium') },
-        { value: 'high', label: t('priority.high') },
-        { value: 'urgent', label: t('priority.urgent') },
+        { value: 'low', label: t('priority.low'), leading: <PriorityFlag priority="low" /> },
+        { value: 'medium', label: t('priority.medium'), leading: <PriorityFlag priority="medium" /> },
+        { value: 'high', label: t('priority.high'), leading: <PriorityFlag priority="high" /> },
+        { value: 'urgent', label: t('priority.urgent'), leading: <PriorityFlag priority="urgent" /> },
     ];
 
     return (

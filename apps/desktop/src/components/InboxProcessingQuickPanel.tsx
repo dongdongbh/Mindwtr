@@ -26,6 +26,7 @@ import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
 import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
+import { PriorityFlag } from './Task/PriorityFlag';
 
 type QuickActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference' | 'incubate';
 type QuickTwoMinuteChoice = 'yes' | 'no';
@@ -829,6 +830,7 @@ export function InboxProcessingQuickPanel({
                                                         : 'bg-muted/40 border-border hover:bg-muted/70'
                                                 )}
                                             >
+                                                <PriorityFlag priority={priority} />
                                                 {t(`priority.${priority}`)}
                                             </button>
                                         );

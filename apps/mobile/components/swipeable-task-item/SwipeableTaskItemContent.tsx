@@ -18,24 +18,15 @@ import {
     safeParseDate,
     safeParseDueDate,
     tFallback,
+    TASK_PRIORITY_COLORS,
 } from '@mindwtr/core';
-import type { Area, Language, Project, ProjectSequenceTaskCue, Section, Task, TaskPriority } from '@mindwtr/core';
+import type { Area, Language, Project, ProjectSequenceTaskCue, Section, Task } from '@mindwtr/core';
 import type { ThemeColors } from '../../hooks/use-theme-colors';
 import { AppPressable } from '../app-pressable';
 import { FocusStarIcon } from '../FocusStarIcon';
 import { MarkdownInlineText } from '../markdown-text';
 import { styles } from './swipeable-task-item.styles';
 import { CompactText } from '@/components/compact-text';
-
-// Leading-edge strip on a task row: a fixed "heat ramp", not theme tokens, so a
-// priority reads the same in every theme. The caller nulls `task.priority` when
-// the priorities feature is off, the same way it does for time estimates.
-const PRIORITY_STRIP_COLORS: Record<TaskPriority, string> = {
-    urgent: '#dc2626',
-    high: '#f97316',
-    medium: '#ca8a04',
-    low: '#3b82f6',
-};
 
 interface SwipeableTaskItemContentProps {
     accessibilityActions: { label: string; name: string }[];
@@ -503,7 +494,7 @@ export function SwipeableTaskItemContent({
         >
             {task.priority && (
                 <View
-                    style={[styles.priorityStrip, { backgroundColor: PRIORITY_STRIP_COLORS[task.priority] }]}
+                    style={[styles.priorityStrip, { backgroundColor: TASK_PRIORITY_COLORS[task.priority] }]}
                     testID="task-priority-strip"
                     pointerEvents="none"
                 />

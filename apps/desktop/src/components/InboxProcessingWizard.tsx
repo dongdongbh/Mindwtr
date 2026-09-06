@@ -28,6 +28,7 @@ import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
 import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
+import { PriorityFlag } from './Task/PriorityFlag';
 
 export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'reference' | 'someday' | 'project' | 'delegate';
 
@@ -996,6 +997,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                                     : 'bg-muted hover:bg-muted/80'
                                             )}
                                         >
+                                            <PriorityFlag priority={priority} />
                                             {t(`priority.${priority}`)}
                                         </button>
                                     );

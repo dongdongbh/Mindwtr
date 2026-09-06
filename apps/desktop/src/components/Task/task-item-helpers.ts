@@ -1,7 +1,6 @@
 import {
     Task,
     TaskEditorFieldId,
-    type TaskPriority,
     type TaskEditorSectionId,
     type RecurrenceRule,
     type RecurrenceStrategy,
@@ -10,16 +9,6 @@ import {
 import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 
 export { getRecurrenceRRuleValue };
-
-// Leading-edge strip on a task row: a fixed "heat ramp", not theme tokens, so a
-// priority reads the same in all eight themes — the same call project/area
-// accent colors already make with arbitrary user hex.
-export const TASK_PRIORITY_STRIP_COLORS: Record<TaskPriority, string> = {
-    urgent: '#dc2626',
-    high: '#f97316',
-    medium: '#ca8a04',
-    low: '#3b82f6',
-};
 
 // Attachments can be reassigned (Settings -> GTD -> Task Editor Layout) to any
 // of the three collapsible sections. A dropped file needs to know which one

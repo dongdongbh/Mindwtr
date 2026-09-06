@@ -9,7 +9,7 @@ import {
     type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, Calendar, CalendarClock, ChevronRight, Copy, Folder, FolderPlus, MapPin, Pencil, Rows3, Tag, Trash2 } from 'lucide-react';
+import { BookOpen, Calendar, CalendarClock, Check, ChevronRight, Copy, Flag, Folder, FolderPlus, MapPin, Pencil, Rows3, Tag, Trash2 } from 'lucide-react';
 import {
     getAdvancedReviewDate,
     isDueForReview,
@@ -19,6 +19,7 @@ import {
     type Project,
     type StoreActionResult,
     type Task,
+    type TaskPriority,
     type TaskStatus,
 } from '@mindwtr/core';
 import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
@@ -31,13 +32,14 @@ import { AreaSelector } from '../ui/AreaSelector';
 import { ProjectSelector } from '../ui/ProjectSelector';
 import { normalizeDateInputValue } from './task-item-helpers';
 import { ContextsField } from './fields/TaskMetadataFields';
+import { PriorityFlag } from './PriorityFlag';
 import { DateField } from '../ui/DateField';
 
 const VIEWPORT_MARGIN_PX = 8;
 const PANEL_GAP_PX = 8;
 const MENU_WIDTH_PX = 224;
 
-type QuickPanelId = 'startTime' | 'dueDate' | 'reviewAt' | 'project' | 'area' | 'contexts' | null;
+type QuickPanelId = 'startTime' | 'dueDate' | 'reviewAt' | 'project' | 'area' | 'contexts' | 'priority' | null;
 
 export interface TaskQuickActionMenuProps {
     task: Task;
@@ -51,6 +53,7 @@ export interface TaskQuickActionMenuProps {
     areas: Area[];
     projects: Project[];
     readOnly: boolean;
+    prioritiesEnabled: boolean;
     focusAction?: {
         isFocused: boolean;
         canToggle: boolean;
@@ -146,6 +149,7 @@ export function TaskQuickActionMenu({
     areas,
     projects,
     readOnly,
+    prioritiesEnabled,
     focusAction,
     onClose,
     onRename,
@@ -168,6 +172,7 @@ export function TaskQuickActionMenu({
     const projectButtonRef = useRef<HTMLButtonElement | null>(null);
     const areaButtonRef = useRef<HTMLButtonElement | null>(null);
     const contextsButtonRef = useRef<HTMLButtonElement | null>(null);
+    const priorityButtonRef = useRef<HTMLButtonElement | null>(null);
     const [activePanel, setActivePanel] = useState<QuickPanelId>(null);
     const [panelPosition, setPanelPosition] = useState<{ left: number; top: number } | null>(null);
     const [menuSize, setMenuSize] = useState({ width: MENU_WIDTH_PX, height: 1 });
@@ -193,6 +198,15 @@ export function TaskQuickActionMenu({
     const projectLabel = tFallback(t, 'taskEdit.projectLabel', 'Project');
     const areaLabel = tFallback(t, 'taskEdit.areaLabel', 'Area');
     const contextsLabel = tFallback(t, 'taskEdit.contextsLabel', 'Contexts');
+    const priorityLabel = tFallback(t, 'taskEdit.priorityLabel', 'Priority');
+    const clearPriorityLabel = tFallback(t, 'common.clear', 'Clear');
+    const priorityChoices: Array<{ value: TaskPriority | ''; label: string }> = [
+        { value: '', label: clearPriorityLabel },
+        { value: 'low', label: tFallback(t, 'priority.low', 'Low') },
+        { value: 'medium', label: tFallback(t, 'priority.medium', 'Medium') },
+        { value: 'high', label: tFallback(t, 'priority.high', 'High') },
+        { value: 'urgent', label: tFallback(t, 'priority.urgent', 'Urgent') },
+    ];
     const noProjectLabel = tFallback(t, 'taskEdit.noProjectOption', 'No Project');
     const searchProjectsLabel = tFallback(t, 'projects.search', 'Search projects');
     const noAreaLabel = tFallback(t, 'taskEdit.noAreaOption', 'No Area');
@@ -301,7 +315,9 @@ export function TaskQuickActionMenu({
                             ? projectButtonRef.current
                             : panelId === 'area'
                                 ? areaButtonRef.current
-                                : contextsButtonRef.current
+                                : panelId === 'priority'
+                                    ? priorityButtonRef.current
+                                    : contextsButtonRef.current
         );
         const closeActivePanel = () => {
             if (!activePanel) return;
@@ -429,7 +445,9 @@ export function TaskQuickActionMenu({
                         ? projectButtonRef.current
                         : activePanel === 'area'
                             ? areaButtonRef.current
-                            : contextsButtonRef.current;
+                            : activePanel === 'priority'
+                                ? priorityButtonRef.current
+                                : contextsButtonRef.current;
         const panel = panelRef.current;
         if (!anchor || !panel) return;
         const anchorRect = anchor.getBoundingClientRect();
@@ -491,6 +509,8 @@ export function TaskQuickActionMenu({
             setProjectDraft(task.projectId || '');
         } else if (panelId === 'area') {
             setAreaDraft(task.areaId || '');
+        } else if (panelId === 'priority') {
+            // The priority panel applies immediately from task state; no draft to reset.
         } else {
             setContextsDraft(task.contexts?.join(', ') || '');
         }
@@ -628,6 +648,21 @@ export function TaskQuickActionMenu({
             onClose();
         } catch (error) {
             reportError('Failed to update task contexts from quick actions', error);
+        } finally {
+            setSavingPanel(null);
+        }
+    };
+
+    const handlePrioritySave = async (nextPriority: TaskPriority | '') => {
+        setSavingPanel('priority');
+        try {
+            const result = await onUpdateTask({ priority: nextPriority || undefined });
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to update task priority');
+            }
+            onClose();
+        } catch (error) {
+            reportError('Failed to update task priority from quick actions', error);
         } finally {
             setSavingPanel(null);
         }
@@ -815,6 +850,14 @@ export function TaskQuickActionMenu({
                     onClick: () => openPanel('contexts'),
                     showChevron: true,
                 })}
+                {!readOnly && prioritiesEnabled && renderMenuAction({
+                    ref: priorityButtonRef,
+                    icon: <Flag className="h-4 w-4" />,
+                    label: `${priorityLabel}…`,
+                    active: activePanel === 'priority',
+                    onClick: () => openPanel('priority'),
+                    showChevron: true,
+                })}
                 {!readOnly && task.status !== 'reference' && renderMenuAction({
                     icon: <BookOpen className="h-4 w-4" />,
                     label: convertToReferenceLabel,
@@ -876,12 +919,14 @@ export function TaskQuickActionMenu({
                             : activePanel === 'dueDate'
                                 ? dueLabel
                                 : activePanel === 'reviewAt'
-                                ? reviewLabel
-                                : activePanel === 'project'
-                                    ? projectLabel
-                                    : activePanel === 'area'
-                                        ? areaLabel
-                                        : contextsLabel
+                                    ? reviewLabel
+                                    : activePanel === 'project'
+                                        ? projectLabel
+                                        : activePanel === 'area'
+                                            ? areaLabel
+                                            : activePanel === 'priority'
+                                                ? priorityLabel
+                                                : contextsLabel
                     }
                     className="fixed z-50 w-[min(30rem,calc(100vw-1rem))] rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"
                     style={{
@@ -1136,6 +1181,31 @@ export function TaskQuickActionMenu({
                                     {saveLabel}
                                 </Button>
                             </div>
+                        </div>
+                    ) : activePanel === 'priority' ? (
+                        <div className="space-y-1">
+                            {priorityChoices.map(({ value, label }) => {
+                                const isSelected = (task.priority || '') === value;
+                                return (
+                                    <button
+                                        key={value || 'none'}
+                                        type="button"
+                                        aria-pressed={isSelected}
+                                        disabled={savingPanel === 'priority'}
+                                        onClick={() => { void handlePrioritySave(value); }}
+                                        className={cn(
+                                            'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors focus:outline-none focus:bg-muted focus-visible:ring-2 focus-visible:ring-primary/40',
+                                            isSelected
+                                                ? 'bg-muted text-foreground'
+                                                : 'text-foreground hover:bg-muted/60'
+                                        )}
+                                    >
+                                        {value ? <PriorityFlag priority={value} /> : null}
+                                        <span className="flex-1 truncate">{label}</span>
+                                        {isSelected ? <Check className="h-4 w-4 shrink-0 text-muted-foreground" /> : null}
+                                    </button>
+                                );
+                            })}
                         </div>
                     ) : (
                         <div className="space-y-3">

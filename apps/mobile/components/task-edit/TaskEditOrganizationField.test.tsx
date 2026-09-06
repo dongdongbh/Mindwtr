@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { type ComponentProps } from 'react';
 import { Text, TextInput } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
@@ -248,5 +248,29 @@ describe('TaskEditOrganizationField', () => {
         });
 
         expect(setDraftField).toHaveBeenCalledWith('assignedTo', 'Morgan');
+    });
+
+    it('renders the canonical priority flag beside each non-empty priority chip, but not None', () => {
+        // baseProps is a deliberate partial fixture; the full renderer contract is
+        // irrelevant to the priority chips under test here.
+        const props = {
+            ...baseProps,
+            fieldId: 'priority' as const,
+            priorityOptions: ['low', 'medium', 'high', 'urgent'],
+        } as unknown as ComponentProps<typeof TaskEditOrganizationField>;
+        let tree!: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(<TaskEditOrganizationField {...props} />);
+        });
+
+        const flag = (priority: string) => tree.root.findByProps({ testID: `priority-flag-${priority}` });
+        expect(flag('low').props.color).toBe('#3b82f6');
+        expect(flag('medium').props.color).toBe('#ca8a04');
+        expect(flag('high').props.color).toBe('#f97316');
+        expect(flag('urgent').props.color).toBe('#dc2626');
+        // All flags render at 12pt.
+        for (const priority of ['low', 'medium', 'high', 'urgent']) {
+            expect(flag(priority).props.size).toBe(12);
+        }
     });
 });

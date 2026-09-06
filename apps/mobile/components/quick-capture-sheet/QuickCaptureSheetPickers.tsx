@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, FlatList, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import type { Area, Project, TaskPriority } from '@mindwtr/core';
+import { PriorityFlag } from '@/components/priority-flag';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { styles } from './quick-capture-sheet.styles';
 
@@ -402,10 +403,11 @@ export function QuickCaptureSheetPickers({
             <Text style={[styles.pickerTitle, { color: tc.text }]} accessibilityRole="header">{t('taskEdit.priorityLabel')}</Text>
             <Pressable
               onPress={() => onSelectPriority(null)}
-              style={styles.pickerRow}
+              style={[styles.pickerRow, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}
               accessibilityRole="button"
               accessibilityLabel={t('common.clear')}
             >
+              <PriorityFlag priority={null} color={tc.text} />
               <Text style={[styles.pickerRowText, { color: tc.text }]}>{t('common.clear')}</Text>
             </Pressable>
             {priorityOptions.map((option) => (
@@ -414,12 +416,14 @@ export function QuickCaptureSheetPickers({
                 onPress={() => onSelectPriority(option)}
                 style={[
                   styles.pickerRow,
+                  { flexDirection: 'row', alignItems: 'center', gap: 8 },
                   selectedPriority === option ? { backgroundColor: tc.filterBg, borderRadius: 8 } : null,
                 ]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: selectedPriority === option }}
                 accessibilityLabel={t(`priority.${option}`)}
               >
+                <PriorityFlag priority={option} />
                 <Text style={[styles.pickerRowText, { color: tc.text }]}>
                   {selectedPriority === option ? `✓ ${t(`priority.${option}`)}` : t(`priority.${option}`)}
                 </Text>

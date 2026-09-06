@@ -262,6 +262,8 @@ describe('InboxProcessingQuickPanel draft editing', () => {
 
         fireEvent.click(getByRole('button', { name: 'priority.high' }));
         expect(getByRole('button', { name: 'priority.high' })).toHaveClass('bg-primary');
+        expect(getByRole('button', { name: 'priority.high' }).querySelector('[data-priority-flag="high"]'))
+            .toHaveAttribute('stroke', '#f97316');
 
         fireEvent.click(getByRole('button', { name: 'priority.high' }));
         expect(getByRole('button', { name: 'priority.high' })).not.toHaveClass('bg-primary');
