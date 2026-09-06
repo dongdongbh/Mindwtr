@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PROJECT_COLOR, type Area, type Project, type Task } from '@mindwtr/core';
-import { getProjectAccentColor, getTaskAccentColor } from './task-accent-color';
+import { getAccentTint, getProjectAccentColor, getTaskAccentColor } from './task-accent-color';
 
 const task = (overrides: Partial<Task>): Task => ({
     id: 't1',
@@ -75,5 +75,18 @@ describe('getProjectAccentColor', () => {
         const [, areas] = maps([], [area({ color: DEFAULT_PROJECT_COLOR })]);
         expect(getProjectAccentColor(project({ areaId: 'a1' }), areas)).toBeUndefined();
         expect(getProjectAccentColor(project({}), areas)).toBeUndefined();
+    });
+});
+
+describe('getAccentTint', () => {
+    it('adds an alpha byte to a six-digit hex accent', () => {
+        expect(getAccentTint('#3b82f6')).toBe('#3b82f638');
+        expect(getAccentTint('#3B82F6', 0.5)).toBe('#3B82F680');
+    });
+
+    it('leaves non-hex or missing accents to the themed fallback', () => {
+        expect(getAccentTint(undefined)).toBeUndefined();
+        expect(getAccentTint('hsl(var(--primary))')).toBeUndefined();
+        expect(getAccentTint('#fff')).toBeUndefined();
     });
 });

@@ -35,3 +35,14 @@ export function getTaskAccentColor(
     const areaId = project?.areaId ?? task.areaId;
     return chosenColor(areaId ? areaById.get(areaId)?.color : undefined);
 }
+
+/**
+ * A light wash of the accent for a calendar block background, macOS Calendar
+ * style: the block keeps the theme's text color and a solid bar of the accent
+ * on its left edge, so any user-picked hue stays readable. Undefined when the
+ * accent is not a plain six-digit hex color the caller can tint.
+ */
+export function getAccentTint(accent: string | undefined, alpha = 0.22): string | undefined {
+    if (!accent || !/^#[0-9a-f]{6}$/i.test(accent)) return undefined;
+    return `${accent}${Math.round(alpha * 255).toString(16).padStart(2, '0')}`;
+}

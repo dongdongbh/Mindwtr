@@ -18,6 +18,7 @@ import {
 
 import { ErrorBoundary } from '../ErrorBoundary';
 import { cn } from '../../lib/utils';
+import { getAccentTint } from '../../lib/task-accent-color';
 import { reportError } from '../../lib/report-error';
 import { showUndoToast } from '../../lib/undo-registry';
 import {
@@ -900,6 +901,12 @@ export function CalendarView() {
                                                 const projectedLabel = projected
                                                     ? getProjectedRecurrenceDisplayLabel(item.task, resolveText('calendar.projectedRecurrence', 'Projected'))
                                                     : '';
+                                                // Timed blocks read like macOS Calendar: a wash of the task's
+                                                // identity color behind theme-colored text, with the color
+                                                // itself as the left bar. A task without a project or area
+                                                // color gets the same shape in the primary color.
+                                                const accent = projected ? undefined : getTaskAccentColor(item.task);
+                                                const tint = getAccentTint(accent);
                                                 return (
                                                     <button
                                                         key={item.id}
@@ -913,10 +920,12 @@ export function CalendarView() {
                                                             "absolute z-10 overflow-hidden rounded px-2 py-1 text-left text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40",
                                                             projected
                                                                 ? "border border-dashed border-primary/50 bg-primary/10 text-primary"
-                                                                : "bg-primary text-primary-foreground hover:bg-primary/90",
+                                                                : tint
+                                                                    ? "border-l-[4px] text-foreground hover:opacity-80"
+                                                                    : "border-l-[4px] border-primary bg-primary/15 text-foreground hover:bg-primary/25",
                                                             taskMenuRingClass(item.task.id)
                                                         )}
-                                                        style={commonStyle}
+                                                        style={tint ? { ...commonStyle, backgroundColor: tint, borderLeftColor: accent } : commonStyle}
                                                         title={projected ? `${item.title} ${timeLabel} (${projectedLabel})` : `${item.title} ${timeLabel}`}
                                                         onDragStart={(event) => handleCalendarTaskDragStart(event, item.task, 'scheduled')}
                                                         onClick={(event) => {
@@ -930,7 +939,7 @@ export function CalendarView() {
                                                         }}
                                                     >
                                                         <div className="truncate font-semibold">{item.title}</div>
-                                                        <div className="truncate opacity-90">
+                                                        <div className={cn("truncate", projected ? "opacity-90" : "text-muted-foreground")}>
                                                             {projected ? `${timeLabel} · ${projectedLabel}` : timeLabel}
                                                         </div>
                                                     </button>
