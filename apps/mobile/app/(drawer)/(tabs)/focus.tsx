@@ -34,18 +34,14 @@ import {
   buildFocusTaskGroups,
   getProjectDeadlineBoostLabel,
   removeAdvancedFilterCriteriaChip,
-  sortFocusNextActions,
   shouldShowTaskForStart,
-  getFocusSequentialFirstTaskIds,
   generateUUID,
-  getProjectDeadlineBoosts,
   markSavedFilterDeleted,
   getFocusStarBlockedText,
   normalizeFocusTaskLimit,
   resolveFeatureFlags,
   resolveTaskPerspectiveForFeatures,
   sortTasksBySavedPreference,
-  sortTasksByFocusOrder,
   translateWithFallback,
   useTaskStore,
   getAdvancedReviewDate,
@@ -62,7 +58,6 @@ import {
   type FocusGroupBy,
   type SavedFilter,
   type SortField,
-  type ProjectDeadlineBoost,
 } from '@mindwtr/core';
 import { SwipeableTaskItem, type TaskRowActions } from '@/components/swipeable-task-item';
 import { settleStoreAction } from '@/components/store-action-result';
@@ -74,6 +69,7 @@ import { useTheme } from '../../../contexts/theme-context';
 import { useLanguage } from '../../../contexts/language-context';
 import { useToast } from '../../../contexts/toast-context';
 import { addHardwareBackPressListener } from '@/lib/hardware-back';
+import { buildFocusTaskSections, DEFAULT_FOCUS_SORT_BY, deriveFocusTaskLists } from '@/lib/focus-sections';
 import { TaskEditModal } from '@/components/task-edit-modal';
 import type { TaskEditTab } from '@/components/task-edit/use-task-edit-state';
 import { useFutureStartRevealTick, useLocalDayKey } from '@/hooks/use-local-day-key';
@@ -81,7 +77,6 @@ import { PomodoroPanel } from '@/components/pomodoro-panel';
 import {
   getFocusTokenOptions,
   NO_PROJECT_FILTER_ID,
-  splitFocusedTasks,
 } from '@/lib/focus-screen-utils';
 import { FilterChip, TaskFilterSheet } from '@/components/task-filter-sheet';
 import { resolveTimeEstimateFilterOptions } from '@/components/time-estimate-filter-utils';
@@ -102,7 +97,6 @@ import {
 
 const FOCUS_GROUP_BY_OPTIONS: FocusGroupBy[] = ['none', 'context', 'project', 'area', 'energy', 'priority', 'person', 'tag'];
 const FOCUS_SORT_OPTIONS: SortField[] = ['default', 'due', 'start', 'priority', 'created', 'created-desc'];
-const DEFAULT_FOCUS_SORT_BY: SortField = 'default';
 
 function resolveTaskRouteTab(value?: string | string[]): TaskEditTab {
   const routeValue = Array.isArray(value) ? value[0] : value;
@@ -828,93 +822,20 @@ export default function FocusScreen() {
 
   const { focusedTasks, schedule, nextActions, upcoming, reviewDue, projectDeadlineBoosts } = useMemo(() => {
     void localDayKey;
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-    const { otherTasks: nonFocusedTasks } = splitFocusedTasks(filteredActiveTasks);
-    const { otherTasks: nonFocusedScheduleTasks } = splitFocusedTasks(scheduleCandidates);
-    const allFocusedTasks = focusedPool;
-    const sequentialFirstTaskIds = getFocusSequentialFirstTaskIds(baseActiveTasks, sequentialProjectIds, {
-      now,
-      sectionScopedProjectIds: sequentialWithinSectionProjectIds,
+    return deriveFocusTaskLists({
+      now: new Date(),
+      focusedPool,
+      filteredActiveTasks,
+      scheduleCandidates,
+      upcomingCandidates,
+      baseActiveTasks,
+      projects,
+      sequentialProjectIds,
+      sequentialWithinSectionProjectIds,
+      sortBy: effectiveFocusSortBy,
+      prioritiesEnabled,
+      sortBySavedPerspective,
     });
-
-    const isSequentialBlocked = (task: Task) => {
-      if (!task.projectId) return false;
-      if (!sequentialProjectIds.has(task.projectId)) return false;
-      return !sequentialFirstTaskIds.has(task.id);
-    };
-
-    const scheduleItems = nonFocusedScheduleTasks.filter((task) => {
-      if (task.status !== 'next') return false;
-      if (isSequentialBlocked(task)) return false;
-      const due = safeParseDueDate(task.dueDate);
-      const start = safeParseDate(task.startTime);
-      const startsToday = Boolean(
-        start
-        && start >= startOfToday
-        && start <= endOfToday
-      );
-      return Boolean(due && due <= endOfToday) || startsToday;
-    });
-
-    const scheduleIds = new Set(scheduleItems.map((task) => task.id));
-    const reviewDueItems = nonFocusedTasks
-      .filter((task) => !scheduleIds.has(task.id) && isDueForReview(task.reviewAt, now))
-      .sort((a, b) => {
-        const aReview = safeParseDate(a.reviewAt)?.getTime() ?? Number.POSITIVE_INFINITY;
-        const bReview = safeParseDate(b.reviewAt)?.getTime() ?? Number.POSITIVE_INFINITY;
-        if (aReview !== bReview) return aReview - bReview;
-        return a.title.localeCompare(b.title);
-      });
-    const reviewDueIds = new Set(reviewDueItems.map((task) => task.id));
-
-    const nextItems = nonFocusedTasks.filter((task) => {
-      if (reviewDueIds.has(task.id)) return false;
-      if (task.status !== 'next') return false;
-      if (isSequentialBlocked(task)) return false;
-      return !scheduleIds.has(task.id);
-    });
-    const nextProjectDeadlineBoosts = effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY
-      ? getProjectDeadlineBoosts(nextItems, projects, { now })
-      : new Map<string, ProjectDeadlineBoost>();
-
-    // Mirrors desktop's scheduleSortTime (AgendaView.tsx): the earlier of due
-    // and start, so a 09:00 start sorts ahead of a 17:00 due date.
-    const scheduleSortTime = (task: Task) => {
-      const due = safeParseDueDate(task.dueDate)?.getTime();
-      const start = safeParseDate(task.startTime)?.getTime();
-      if (typeof due === 'number' && typeof start === 'number') return Math.min(due, start);
-      if (typeof due === 'number') return due;
-      if (typeof start === 'number') return start;
-      return Number.POSITIVE_INFINITY;
-    };
-    const sortedScheduleItems = [...scheduleItems].sort((a, b) => {
-      const timeDiff = scheduleSortTime(a) - scheduleSortTime(b);
-      if (timeDiff !== 0) return timeDiff;
-      return a.title.localeCompare(b.title);
-    });
-
-    return {
-      // Default sort honours the manual Today's Focus order (focusOrder); an
-      // explicit non-default sort wins and hides the reorder affordance.
-      focusedTasks: effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY
-        ? sortTasksByFocusOrder(allFocusedTasks)
-        : sortBySavedPerspective(allFocusedTasks),
-      schedule: effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY ? sortedScheduleItems : sortBySavedPerspective(scheduleItems),
-      nextActions: effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY
-        ? sortFocusNextActions(nextItems, {
-          now,
-          prioritizeByPriority: prioritiesEnabled,
-          projectDeadlineBoosts: nextProjectDeadlineBoosts,
-        })
-        : sortBySavedPerspective(nextItems),
-      reviewDue: effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY ? reviewDueItems : sortBySavedPerspective(reviewDueItems),
-      // The forecast keeps reveal-date order even under a custom sort — the
-      // date a task appears is the only ordering that means anything here.
-      upcoming: upcomingCandidates.filter((task) => !isSequentialBlocked(task)),
-      projectDeadlineBoosts: nextProjectDeadlineBoosts,
-    };
   }, [
     baseActiveTasks,
     effectiveFocusSortBy,
@@ -1103,67 +1024,34 @@ export default function FocusScreen() {
           ...buildTaskItems(group.tasks, true),
         ]);
     };
-    const nextSections: FocusSection[] = [];
+    // Same buckets, order and titles as the widget (lib/focus-sections.ts).
+    const nextSections: FocusSection[] = buildFocusTaskSections(
+      { focusedTasks, schedule, reviewDue, nextActions, upcoming },
+      t,
+    ).map((section) => ({
+      title: section.title,
+      data: section.key === 'next'
+        ? buildGroupedNextItems()
+        : (expandedSections[section.key] ? buildTaskItems(section.items) : []),
+      totalCount: section.items.length,
+      expanded: expandedSections[section.key],
+      type: section.key,
+    }));
 
-    if (focusedTasks.length > 0) {
-      nextSections.push({
-        title: t('agenda.todaysFocus') ?? "Today's Focus",
-        data: expandedSections.focus ? buildTaskItems(focusedTasks) : [],
-        totalCount: focusedTasks.length,
-        expanded: expandedSections.focus,
-        type: 'focus',
-      });
-    }
-
-    nextSections.push(
-      {
-        title: t('focus.schedule') ?? 'Today',
-        data: expandedSections.schedule ? buildTaskItems(schedule) : [],
-        totalCount: schedule.length,
-        expanded: expandedSections.schedule,
-        type: 'schedule',
-      },
-      {
-        title: t('agenda.reviewDue') ?? 'Review Due',
-        data: expandedSections.reviewDue ? buildTaskItems(reviewDue) : [],
-        totalCount: reviewDue.length,
-        expanded: expandedSections.reviewDue,
-        type: 'reviewDue',
-      },
-      {
-        title: t('focus.nextActions') ?? t('list.next'),
-        data: buildGroupedNextItems(),
-        totalCount: nextActions.length,
-        expanded: expandedSections.next,
-        type: 'next',
-      },
-      ...(upcoming.length > 0 ? [{
-        title: t('agenda.upcoming') ?? 'Upcoming',
-        data: expandedSections.upcoming ? buildTaskItems(upcoming) : [],
-        totalCount: upcoming.length,
-        expanded: expandedSections.upcoming,
-        type: 'upcoming' as const,
-      }] : []),
-      {
-        title: t('agenda.reviewDueProjects') ?? 'Projects to review',
-        data: expandedSections.reviewProjects ? buildProjectItems(reviewDueProjects) : [],
-        totalCount: reviewDueProjects.length,
-        expanded: expandedSections.reviewProjects,
-        type: 'reviewProjects',
-      }
-    );
+    nextSections.push({
+      title: t('agenda.reviewDueProjects') ?? 'Projects to review',
+      data: expandedSections.reviewProjects ? buildProjectItems(reviewDueProjects) : [],
+      totalCount: reviewDueProjects.length,
+      expanded: expandedSections.reviewProjects,
+      type: 'reviewProjects',
+    });
 
     return nextSections;
   }, [
     areas,
     effectiveFocusGroupBy,
-    expandedSections.focus,
-    expandedSections.next,
+    expandedSections,
     focusViewStateHydrated,
-    expandedSections.reviewDue,
-    expandedSections.reviewProjects,
-    expandedSections.schedule,
-    expandedSections.upcoming,
     focusedTasks,
     nextActions,
     upcoming,

@@ -1,5 +1,8 @@
 import {
     computeTodayFocusTasks,
+    getUpcomingDeferredTasks,
+    resolveFeatureFlags,
+    shouldShowTaskForStart,
     getTranslationsSync,
     getTranslator,
     isTaskActionable,
@@ -14,9 +17,12 @@ import {
     type AppData,
     type AppTheme,
     type Language,
+    type Task,
     type TaskSortBy,
 } from '@mindwtr/core';
 import { THEME_PRESETS, type ThemePresetName } from '../constants/theme-presets';
+import { buildFocusTaskSections, DEFAULT_FOCUS_SORT_BY, deriveFocusTaskLists } from './focus-sections';
+import { PRIORITY_STRIP_COLORS } from './priority-colors';
 
 export const WIDGET_DATA_KEY = 'mindwtr-data';
 export const WIDGET_LANGUAGE_KEY = 'mindwtr-language';
@@ -54,6 +60,17 @@ export interface WidgetTaskItem {
     // Deep link that opens this task (the app routes mindwtr://open?task=<id>);
     // the Android widget rows use it, iOS may ignore it.
     openUri: string;
+    // Priority heat-ramp hex (lib/priority-colors.ts); null when the task has
+    // none or the Priorities feature is off.
+    priorityColor: string | null;
+    // Project title, else area name, else null.
+    contextLabel: string | null;
+}
+
+export interface WidgetTaskSection {
+    key: string;
+    title: string;
+    items: WidgetTaskItem[];
 }
 
 // Hex only: the Android provider (modules/android-widget WidgetPayload.kt) and
@@ -77,6 +94,10 @@ export interface TasksWidgetPayload {
     inboxCount: number;
     focusedCount: number;
     items: WidgetTaskItem[];
+    // The Focus screen's sections (#1173): same buckets, order and titles as
+    // the screen, empty sections dropped, `maxItems` shared across sections.
+    // `items` stays for the iOS widget and the QuickCapture kind.
+    sections: WidgetTaskSection[];
     emptyMessage: string;
     captureLabel: string;
     focusUri: string;
@@ -283,14 +304,53 @@ export function buildWidgetPayload(
         ? Math.max(1, Math.floor(options?.maxItems as number))
         : 3;
 
-    const items = listSource.slice(0, maxItems).map((task) => ({
-        id: task.id,
-        title: task.title,
-        statusLabel: tr[`status.${task.status}`] || task.status,
-        ...computeDueLabel(task.dueDate, tr, language, startOfToday, endOfToday),
-        openUri: `mindwtr://open?task=${encodeURIComponent(task.id)}`,
-    }));
+    const areaById = new Map((data.areas || []).map((area) => [area.id, area]));
+    const prioritiesEnabled = resolveFeatureFlags(data.settings).priorities;
+    const toItem = (task: Task): WidgetTaskItem => {
+        const project = task.projectId ? projectById.get(task.projectId) : undefined;
+        const area = task.areaId ? areaById.get(task.areaId) : undefined;
+        return {
+            id: task.id,
+            title: task.title,
+            statusLabel: tr[`status.${task.status}`] || task.status,
+            ...computeDueLabel(task.dueDate, tr, language, startOfToday, endOfToday),
+            openUri: `mindwtr://open?task=${encodeURIComponent(task.id)}`,
+            priorityColor: prioritiesEnabled && task.priority ? PRIORITY_STRIP_COLORS[task.priority] ?? null : null,
+            contextLabel: project?.title ?? area?.name ?? null,
+        };
+    };
+    const items = listSource.slice(0, maxItems).map(toItem);
     const hiddenTaskCount = Math.max(listSource.length - items.length, 0);
+
+    // The Focus screen's own pools, minus its user filters and area filter
+    // (the widget has neither), through the shared derivation (#1173).
+    const sequentialProjects = projects.filter((project) => project.isSequential && !project.deletedAt);
+    const lists = deriveFocusTaskLists({
+        now,
+        focusedPool: tasks.filter((task) => !task.deletedAt && isTaskActionable(task) && task.isFocusedToday === true),
+        filteredActiveTasks: activeTasks.filter((task) => shouldShowTaskForStart(task, { now, granularity: 'time' })),
+        scheduleCandidates: activeTasks.filter((task) => shouldShowTaskForStart(task, { now })),
+        upcomingCandidates: getUpcomingDeferredTasks(activeTasks.filter((task) => !task.isFocusedToday), { now })
+            .map((entry) => entry.task),
+        baseActiveTasks: activeTasks,
+        projects,
+        sequentialProjectIds: new Set(sequentialProjects.map((project) => project.id)),
+        sequentialWithinSectionProjectIds: new Set(
+            sequentialProjects.filter((project) => project.sequentialScope === 'section').map((project) => project.id),
+        ),
+        sortBy: DEFAULT_FOCUS_SORT_BY,
+        prioritiesEnabled,
+        sortBySavedPerspective: (list) => list,
+    });
+    let remaining = maxItems;
+    const sections: WidgetTaskSection[] = [];
+    for (const section of buildFocusTaskSections(lists, (key) => tr[key])) {
+        if (remaining <= 0) break;
+        if (section.items.length === 0) continue;
+        const sectionItems = section.items.slice(0, remaining).map(toItem);
+        remaining -= sectionItems.length;
+        sections.push({ key: section.key, title: section.title, items: sectionItems });
+    }
 
     const inboxCount = activeTasks.filter((task) => task.status === 'inbox').length;
     const subtitleParts = [`${tr['nav.inbox'] ?? 'Inbox'}: ${inboxCount}`];
@@ -305,6 +365,7 @@ export function buildWidgetPayload(
         inboxCount,
         focusedCount: starredTasks.length,
         items,
+        sections,
         emptyMessage: tr['agenda.allClear'] ?? 'All clear',
         captureLabel: tr['widget.capture'] ?? 'Quick capture',
         focusUri: WIDGET_FOCUS_URI,
