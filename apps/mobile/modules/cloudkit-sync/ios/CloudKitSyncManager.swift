@@ -215,6 +215,12 @@ final class CloudKitSyncManager {
         }
     }
 
+    /// Forget the cached zone setup so the next ensureZone call recreates the
+    /// zone. Called after CloudKit reports the zone deleted or missing.
+    func invalidateZone() {
+        zoneTask = nil
+    }
+
     // MARK: - Subscription Management
 
     func ensureSubscription() async throws {

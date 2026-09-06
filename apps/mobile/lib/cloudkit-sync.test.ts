@@ -11,7 +11,7 @@ import {
     readRemoteCloudKit,
     writeRemoteCloudKit,
 } from './cloudkit-sync';
-import { CLOUDKIT_CHANGE_TOKEN_KEY } from './sync-constants';
+import { CLOUDKIT_CHANGE_TOKEN_KEY, CLOUDKIT_ZONE_CREATED_KEY } from './sync-constants';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const swiftMapperSource = readFileSync(
@@ -280,6 +280,7 @@ describe('cloudkit-sync change token and purge invariants', () => {
         });
         cloudKitSync.deleteRecords.mockReset();
         cloudKitSync.deleteRecords.mockResolvedValue(true);
+        cloudKitSync.ensureZone.mockClear();
         cloudKitSync.fetchAllRecords.mockReset();
         cloudKitSync.fetchAllRecords.mockResolvedValue([]);
         cloudKitSync.fetchChanges.mockReset();
@@ -297,6 +298,39 @@ describe('cloudkit-sync change token and purge invariants', () => {
         // Advancing past a conflicted save would skip those records forever.
         expect(storage.get(CLOUDKIT_CHANGE_TOKEN_KEY)).toBe('token-1');
         expect(cloudKitSync.fetchChanges).not.toHaveBeenCalled();
+    });
+
+    it('recreates a deleted zone on read and reads it in full instead of reusing the stale token', async () => {
+        storage.set(CLOUDKIT_CHANGE_TOKEN_KEY, 'token-1');
+        storage.set(CLOUDKIT_ZONE_CREATED_KEY, '1');
+        cloudKitSync.fetchChanges
+            .mockRejectedValueOnce(Object.assign(new Error('zone gone'), { code: 'ERR_CLOUDKIT_ZONE_GONE' }))
+            .mockResolvedValueOnce({ records: {}, deletedIDs: {}, changeToken: 'token-fresh' });
+
+        const remote = await readRemoteCloudKit();
+
+        expect(cloudKitSync.ensureZone).toHaveBeenCalledTimes(1);
+        expect(cloudKitSync.fetchAllRecords).toHaveBeenCalled();
+        expect(remote).not.toBeNull();
+        // The old token belonged to the deleted zone; the trailing fetch supplies the new one.
+        expect(cloudKitSync.fetchChanges).toHaveBeenLastCalledWith(null);
+        expect(storage.get(CLOUDKIT_CHANGE_TOKEN_KEY)).toBe('token-fresh');
+        expect(storage.get(CLOUDKIT_ZONE_CREATED_KEY)).toBe('1');
+    });
+
+    it('recreates a deleted zone on write and retries the save once', async () => {
+        storage.set(CLOUDKIT_CHANGE_TOKEN_KEY, 'token-1');
+        storage.set(CLOUDKIT_ZONE_CREATED_KEY, '1');
+        cloudKitSync.saveRecords
+            .mockRejectedValueOnce(Object.assign(new Error('zone gone'), { code: 'ERR_CLOUDKIT_ZONE_GONE' }))
+            .mockResolvedValue([]);
+        cloudKitSync.fetchChanges.mockResolvedValue({ records: {}, deletedIDs: {}, changeToken: 'token-2' });
+
+        await writeRemoteCloudKit(makeAppData());
+
+        expect(cloudKitSync.ensureZone).toHaveBeenCalledTimes(1);
+        expect(cloudKitSync.saveRecords.mock.calls.length).toBeGreaterThanOrEqual(2);
+        expect(storage.get(CLOUDKIT_CHANGE_TOKEN_KEY)).toBe('token-2');
     });
 
     it('advances the change token after a clean save', async () => {

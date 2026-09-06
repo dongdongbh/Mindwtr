@@ -17,6 +17,7 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ### Added
 
+- **`v1.2.9/cloudkit-zone-recreated`** — `apps/mobile/lib/cloudkit-sync.ts`, in `recreateCloudKitZone`, after the native module reported `ERR_CLOUDKIT_ZONE_GONE` (CloudKit `userDeletedZone` or `zoneNotFound`) and `ensureZone` succeeded again. Message: `CloudKit zone was deleted or cleared; recreated it and reset the change token`. Fields: `releaseCheck`. A tester who cleared Mindwtr's iCloud data must see this line once, followed by a normal `CloudKit write complete`; before the fix every cycle failed with "zone was cleared by user" forever. (feedback 5d1163be)
 - **`v1.2.9/system-capture-return`** — `apps/mobile/app/capture-modal.tsx`, in `finishCapture`, only when the route carries `origin=system` (set by `+native-intent.ts` for the widget, Quick Settings tile, app shortcut and capture notification) and `returnToPreviousApp` sent the Android activity to the back. Message: `Quick capture opened from a system entry point returned to the previous screen`. Fields: `releaseCheck`. A tester's log must show this line once per widget capture that ended on the home screen; a capture from the in-app + button never logs it. (#1169)
 
 ## v1.2.8 (add before tagging, trim in the release after)

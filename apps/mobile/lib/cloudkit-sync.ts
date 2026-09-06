@@ -89,6 +89,16 @@ export const isCloudKitAttachmentNotFoundError = (
     || getCloudKitErrorCode(error) === CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE
 );
 
+/** The native module reports this when the record zone is gone: the user
+ *  cleared Mindwtr's data in iCloud settings, or the zone never existed for
+ *  this account. The zone-created flag then lies, so every read and write
+ *  keeps failing until the zone is created again. */
+export const CLOUDKIT_ZONE_GONE_CODE = 'ERR_CLOUDKIT_ZONE_GONE';
+
+export const isCloudKitZoneGoneError = (error: unknown): boolean => (
+    getCloudKitErrorCode(error) === CLOUDKIT_ZONE_GONE_CODE
+);
+
 export type CloudKitAttachmentMetadata = {
     recordName?: string;
     attachmentId: string;
@@ -124,7 +134,7 @@ const throwIfAborted = (signal: AbortSignal | undefined, fallbackMessage: string
 const isAbortLikeError = (error: unknown, signal?: AbortSignal): boolean =>
     Boolean(signal?.aborted) || (error instanceof Error && error.name === 'AbortError');
 
-const runCloudKitOperation = async <T>(
+const runNativeOperation = async <T>(
     operation: () => Promise<T>,
     signal: AbortSignal | undefined,
     fallbackMessage: string,
@@ -139,6 +149,38 @@ const runCloudKitOperation = async <T>(
             .then(resolve, reject)
             .finally(() => signal.removeEventListener('abort', onAbort));
     });
+};
+
+/** Create the zone again after CloudKit reported it gone, and drop the two
+ *  local facts that were only true for the old zone: the created flag and the
+ *  change token. The next full fetch sees an empty zone and the normal merge
+ *  and write refill it from this device's data. */
+const recreateCloudKitZone = async (signal: AbortSignal | undefined): Promise<void> => {
+    await AsyncStorage.removeItem(CLOUDKIT_CHANGE_TOKEN_KEY);
+    await AsyncStorage.removeItem(CLOUDKIT_ZONE_CREATED_KEY);
+    await runNativeOperation(() => CloudKitSync!.ensureZone(), signal, 'CloudKit setup cancelled');
+    await AsyncStorage.setItem(CLOUDKIT_ZONE_CREATED_KEY, '1');
+    void logWarn('CloudKit zone was deleted or cleared; recreated it and reset the change token', {
+        scope: 'cloudkit',
+        extra: { releaseCheck: 'v1.2.9/cloudkit-zone-recreated' },
+    });
+};
+
+/** Every native call goes through here. A zone-gone failure recreates the
+ *  zone and retries the call once; a second failure surfaces as usual. */
+const runCloudKitOperation = async <T>(
+    operation: () => Promise<T>,
+    signal: AbortSignal | undefined,
+    fallbackMessage: string,
+    recoverZone = true,
+): Promise<T> => {
+    try {
+        return await runNativeOperation(operation, signal, fallbackMessage);
+    } catch (error) {
+        if (!recoverZone || !isCloudKitZoneGoneError(error)) throw error;
+        await recreateCloudKitZone(signal);
+        return runNativeOperation(operation, signal, fallbackMessage);
+    }
 };
 
 // MARK: - Module availability
@@ -200,11 +242,22 @@ export const readRemoteCloudKit = async (options: CloudKitOperationOptions = {})
 
         // Try incremental fetch first
         if (changeToken) {
-            const result: ChangeResult = await runCloudKitOperation(
-                () => CloudKitSync!.fetchChanges(changeToken),
-                options.signal,
-                'CloudKit read cancelled',
-            );
+            let result: ChangeResult;
+            try {
+                result = await runCloudKitOperation(
+                    () => CloudKitSync!.fetchChanges(changeToken),
+                    options.signal,
+                    'CloudKit read cancelled',
+                    false,
+                );
+            } catch (error) {
+                if (!isCloudKitZoneGoneError(error)) throw error;
+                // Retrying the incremental fetch would hand the stale token to a
+                // brand-new zone; read the (empty) zone in full instead so the
+                // merge and write that follow refill it from local data.
+                await recreateCloudKitZone(options.signal);
+                return await fullFetch(options);
+            }
 
             if (result.tokenExpired) {
                 void logInfo('CloudKit change token expired; doing full fetch', {

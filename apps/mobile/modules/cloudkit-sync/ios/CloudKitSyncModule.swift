@@ -12,6 +12,20 @@ private final class CloudKitAttachmentNotFoundException: Exception {
     }
 }
 
+/// The record zone no longer exists on the server: the user cleared Mindwtr's
+/// iCloud data in Settings, or the zone was never created for this account.
+/// Every read and write fails with it until the zone is recreated, so the JS
+/// layer recreates the zone and resets its change token when it sees this code.
+private final class CloudKitZoneGoneException: Exception {
+    override var reason: String {
+        "CloudKit zone was deleted or cleared and must be recreated"
+    }
+
+    override var code: String {
+        "ERR_CLOUDKIT_ZONE_GONE"
+    }
+}
+
 public class CloudKitSyncModule: Module {
 
     private static let remoteChangeNotification = Notification.Name("tech.dongdongbh.mindwtr.cloudkit.remoteChange")
@@ -172,8 +186,29 @@ public class CloudKitSyncModule: Module {
         do {
             return try await operation()
         } catch {
+            if Self.isZoneGone(error) {
+                manager.invalidateZone()
+                throw CloudKitZoneGoneException().causedBy(error)
+            }
             throw Self.annotatingRetryAfter(error)
         }
+    }
+
+    /// userDeletedZone: the user removed the app's data from iCloud settings.
+    /// zoneNotFound: the zone does not exist for this account. Both mean the
+    /// zone must be created again before anything else can succeed. A partial
+    /// failure reports the reason on the per-item errors.
+    private static func isZoneGone(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == CKError.errorDomain
+            && (nsError.code == CKError.Code.userDeletedZone.rawValue
+                || nsError.code == CKError.Code.zoneNotFound.rawValue) {
+            return true
+        }
+        if let partial = nsError.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Error] {
+            return partial.values.contains { isZoneGone($0) }
+        }
+        return false
     }
 
     static func annotatingRetryAfter(_ error: Error) -> Error {
