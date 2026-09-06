@@ -31,7 +31,8 @@
                 android:layout_height="match_parent"
                 android:importantForAccessibility="no"
                 android:scaleType="fitXY"
-                android:src="@drawable/mindwtr_widget_band" />
+                android:src="@drawable/mindwtr_widget_band"
+                android:visibility="gone" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -48,7 +49,7 @@
                     android:layout_weight="1"
                     android:ellipsize="end"
                     android:singleLine="true"
-                    android:textColor="@color/mindwtr_widget_on_accent"
+                    android:textColor="@color/mindwtr_widget_accent"
                     android:textSize="15sp"
                     android:textStyle="bold" />
 
@@ -58,7 +59,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="8dp"
                     android:singleLine="true"
-                    android:textColor="#CCFFFFFF"
+                    android:textColor="@color/mindwtr_widget_muted_text"
                     android:textSize="12sp" />
 
                 <TextView
@@ -68,10 +69,18 @@
                     android:gravity="center"
                     android:includeFontPadding="false"
                     android:text="+"
-                    android:textColor="@color/mindwtr_widget_on_accent"
+                    android:textColor="@color/mindwtr_widget_accent"
                     android:textSize="24sp" />
             </LinearLayout>
         </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/mindwtr_widget_header_divider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginStart="14dp"
+            android:layout_marginEnd="14dp"
+            android:background="@color/mindwtr_widget_border" />
 
         <ListView
             android:id="@+id/mindwtr_widget_list"

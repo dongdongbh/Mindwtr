@@ -2,6 +2,7 @@ import {
     computeTodayFocusTasks,
     getTaskAccentColor,
     getUpcomingDeferredTasks,
+    hasTimeComponent,
     resolveFeatureFlags,
     shouldShowTaskForStart,
     getTranslationsSync,
@@ -247,6 +248,16 @@ const computeDueLabel = (
     return { dueLabel: formatNumericDate(due, language), dueEmphasis: false, dueTone: 'normal' };
 };
 
+// A due TIME for a row inside a dated section (Todoist shows "17:00", not the
+// date, under a "Today" header); null when the due date carries no time.
+const formatDueTime = (date: Date, language: string): string => {
+    try {
+        return new Intl.DateTimeFormat(language, { hour: 'numeric', minute: '2-digit' }).format(date);
+    } catch {
+        return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+    }
+};
+
 const FALLBACK_LONG_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const FALLBACK_SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -433,6 +444,22 @@ export function buildWidgetPayload(
         }
         return out;
     };
+    // In a dated section the row's date is the header's date: hide it, show the
+    // due time when there is one, keep an overdue date (it says the task slipped).
+    const dropSameDayDue = (item: WidgetTaskItem, task: Task): WidgetTaskItem => {
+        if (item.dueTone === 'overdue' || !item.dueLabel) return item;
+        const due = safeParseDueDate(task.dueDate);
+        if (!due || due < startOfToday || due > endOfToday) return item;
+        return { ...item, dueLabel: hasTimeComponent(task.dueDate) ? formatDueTime(due, language) : null };
+    };
+    for (const section of sections) {
+        if (section.key !== 'schedule') continue;
+        const byId = new Map(lists.schedule.map((task) => [task.id, task]));
+        section.items = section.items.map((item) => {
+            const task = byId.get(item.id);
+            return task ? dropSameDayDue(item, task) : item;
+        });
+    }
     const listPayloads: Record<string, WidgetListPayload> = {
         focus: { title: widgetListTitles(tr).focus, dateLabel, sections, items },
     };

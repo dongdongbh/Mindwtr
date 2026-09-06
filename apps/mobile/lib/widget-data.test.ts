@@ -101,6 +101,7 @@ describe('widget-data', () => {
     it('carries the Focus screen sections with the shared cap, priority colour and project or area (#1173)', () => {
         const now = new Date().toISOString();
         const today = new Date(); today.setHours(23, 0, 0, 0);
+        const todayDay = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
         const data: AppData = {
             ...baseData,
             areas: [{ id: 'area-1', name: 'Home', order: 0, createdAt: now, updatedAt: now }],
@@ -109,29 +110,38 @@ describe('widget-data', () => {
             tasks: [
                 { id: '1', title: 'Starred', status: 'next', isFocusedToday: true, priority: 'urgent', projectId: 'proj-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
                 { id: '2', title: 'Due today', status: 'next', dueDate: today.toISOString(), areaId: 'area-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '6', title: 'Due today all day', status: 'next', dueDate: todayDay, tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '7', title: 'Slipped', status: 'next', dueDate: '2020-01-01', tags: [], contexts: [], createdAt: now, updatedAt: now },
                 { id: '3', title: 'Alpha next', status: 'next', tags: [], contexts: [], createdAt: now, updatedAt: now },
                 { id: '4', title: 'Beta next', status: 'next', tags: [], contexts: [], createdAt: now, updatedAt: now },
             ],
         };
-        const payload = buildWidgetPayload(data, 'en', { maxItems: 3 });
+        const payload = buildWidgetPayload(data, 'en', { maxItems: 5 });
         expect(payload.sections.map((section) => [section.key, section.title, section.items.map((item) => item.title)])).toEqual([
             ['focus', "Today's Focus", ['Starred']],
-            ['schedule', 'Today', ['Due today']],
+            ['schedule', 'Today', ['Slipped', 'Due today', 'Due today all day']],
             ['next', 'Next Actions', ['Alpha next']],
         ]);
+        const scheduleByTitle = new Map(payload.sections[1].items.map((item) => [item.title, item]));
+        expect(scheduleByTitle.get('Slipped')).toMatchObject({ dueTone: 'overdue', dueLabel: '1/1' });
+        expect(scheduleByTitle.get('Due today all day')?.dueLabel).toBeNull();
+        expect(payload.items.find((item) => item.title === 'Due today all day')?.dueLabel).toBe('Today');
         const [starred] = payload.sections[0].items;
         expect(starred.priorityColor).toBe('#dc2626');
         expect(starred.contextLabel).toBe('Launch');
         expect(starred.identityColor).toBe('#8b5cf6');
-        expect(payload.sections[1].items[0]).toMatchObject({ dueTone: 'today', dueEmphasis: true, identityColor: null });
+        // Under the dated Today header the row's own date is redundant; a due time shows instead.
+        expect(scheduleByTitle.get('Due today')).toMatchObject({ dueTone: 'today', dueEmphasis: true, identityColor: null });
+        expect(scheduleByTitle.get('Due today')?.dueLabel).toMatch(/\d/);
+        expect(scheduleByTitle.get('Due today')?.dueLabel).not.toBe('Today');
         expect(payload.sections[1].detail).toMatch(/\d/);
         expect(payload.sections[2].detail).toBeNull();
         expect(payload.dateLabel).toMatch(/\d/);
         expect(payload.palette.warning).toMatch(/^#/);
-        expect(payload.sections[1].items[0].contextLabel).toBe('Home');
+        expect(scheduleByTitle.get('Due today')?.contextLabel).toBe('Home');
         expect(payload.sections[2].items[0]).toMatchObject({ priorityColor: null, contextLabel: null });
         // Priorities off: the colour is gated with the feature.
-        const gated = buildWidgetPayload({ ...data, settings: { features: { priorities: false } } as AppData['settings'] }, 'en', { maxItems: 3 });
+        const gated = buildWidgetPayload({ ...data, settings: { features: { priorities: false } } as AppData['settings'] }, 'en', { maxItems: 5 });
         expect(gated.sections[0].items[0].priorityColor).toBeNull();
     });
 

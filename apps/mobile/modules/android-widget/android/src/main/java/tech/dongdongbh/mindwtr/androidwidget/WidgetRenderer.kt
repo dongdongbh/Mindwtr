@@ -100,12 +100,14 @@ object WidgetRenderer {
       PendingIntent.getActivity(context, REQUEST_ROW, rowTemplate, mutable),
     )
 
+    // The header shares the body surface (dd: a solid accent band contrasted
+    // too hard); the accent sits only on the date and the "+".
     palette?.let {
       views.setInt(R.id.mindwtr_widget_surface, "setColorFilter", it.background)
-      views.setInt(R.id.mindwtr_widget_band, "setColorFilter", it.accent)
-      views.setTextColor(R.id.mindwtr_widget_title, it.onAccent)
-      views.setTextColor(R.id.mindwtr_widget_subtitle, withAlpha(it.onAccent, 0xCC))
-      views.setTextColor(R.id.mindwtr_widget_capture, it.onAccent)
+      views.setTextColor(R.id.mindwtr_widget_title, it.accent)
+      views.setTextColor(R.id.mindwtr_widget_subtitle, it.mutedText)
+      views.setTextColor(R.id.mindwtr_widget_capture, it.accent)
+      views.setInt(R.id.mindwtr_widget_header_divider, "setBackgroundColor", it.border)
       views.setTextColor(R.id.mindwtr_widget_empty, it.mutedText)
     }
   }
