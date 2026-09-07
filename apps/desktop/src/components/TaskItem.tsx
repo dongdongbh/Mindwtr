@@ -280,13 +280,17 @@ export const TaskItem = memo(function TaskItem({
     };
     const getLiveMutableTask = useCallback((
         expectedTaskId: string,
-        options?: { allowCompleted?: boolean },
+        // `allowReadOnly`: the Done list renders its rows read-only so nothing edits
+        // inline, yet the completion timestamp stays clickable there on purpose
+        // (TaskItemDisplay keeps it on read-only done rows). Refusing read-only
+        // owners here made that prompt's Save a silent no-op.
+        options?: { allowCompleted?: boolean; allowReadOnly?: boolean },
     ): Task | null => {
         const owner = mutationOwnerRef.current;
         if (
             owner.taskId !== expectedTaskId
             || owner.interactionDisabled
-            || owner.readOnly
+            || (owner.readOnly && !options?.allowReadOnly)
         ) {
             return null;
         }
@@ -1069,7 +1073,7 @@ export const TaskItem = memo(function TaskItem({
     const applyCompletedAtPrompt = useCallback((value: string, timeSpentMinutes?: number) => {
         const mode = completedAtPrompt;
         const expectedTaskId = task.id;
-        if (!mode || !getLiveMutableTask(expectedTaskId, { allowCompleted: mode === 'edit' })) return;
+        if (!mode || !getLiveMutableTask(expectedTaskId, { allowCompleted: mode === 'edit', allowReadOnly: mode === 'edit' })) return;
         setCompletedAtPrompt(null);
         const parsed = new Date(value);
         if (Number.isNaN(parsed.getTime())) return;
@@ -1114,7 +1118,7 @@ export const TaskItem = memo(function TaskItem({
                 .catch((error) => reportError('Failed to complete task', error));
             return;
         }
-        if (!getLiveMutableTask(expectedTaskId, { allowCompleted: true })) return;
+        if (!getLiveMutableTask(expectedTaskId, { allowCompleted: true, allowReadOnly: true })) return;
         void updateTask(expectedTaskId, { completedAt })
             .then((result) => {
                 if (!result.success) {

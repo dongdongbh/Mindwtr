@@ -582,6 +582,51 @@ describe('TaskItem', () => {
         expect(within(dialog).queryByLabelText('Time Spent')).toBeNull();
     });
 
+    it('saves an edited completion time on a read-only done row (the Done list), not just opens the prompt', async () => {
+        const doneTask: Task = {
+            ...mockTask,
+            id: 'read-only-completed-at-edit-task',
+            status: 'done',
+            completedAt: new Date('2026-07-01T10:00:00.000Z').toISOString(),
+        };
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                tasks: [doneTask],
+                _allTasks: [doneTask],
+                _tasksById: new Map([[doneTask.id, doneTask]]),
+                projects: [],
+                _allProjects: [],
+                _projectsById: new Map(),
+                sections: [],
+                _allSections: [],
+                _sectionsById: new Map(),
+                areas: [],
+                _allAreas: [],
+                _areasById: new Map(),
+            }));
+        });
+        const { getByRole } = render(
+            <LanguageProvider>
+                <TaskItem task={doneTask} readOnly />
+            </LanguageProvider>
+        );
+
+        fireEvent.click(getByRole('button', { name: 'Edit completion time' }));
+        const dialog = getByRole('dialog', { name: 'Completion time' });
+        fireEvent.change(within(dialog).getByLabelText('Time'), { target: { value: '09:15' } });
+        await act(async () => {
+            fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+        });
+
+        await waitFor(() => {
+            const updatedTask = useTaskStore.getState()._tasksById.get(doneTask.id);
+            const completedAt = new Date(updatedTask?.completedAt ?? '');
+            expect(completedAt.getHours()).toBe(9);
+            expect(completedAt.getMinutes()).toBe(15);
+        });
+    });
+
     it("stars even an unclarified inbox task for Today's Focus from the editor header", async () => {
         const editableTask: Task = {
             ...mockTask,
