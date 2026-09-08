@@ -133,7 +133,7 @@ describe('App', () => {
         });
     });
 
-    it('opens the manual onboarding flow and seeds data from Start fresh', async () => {
+    it('opens the manual onboarding flow and seeds data from Start using Mindwtr', async () => {
         const { getByRole, queryByRole } = renderWithProviders(<App />);
 
         act(() => {
@@ -141,7 +141,7 @@ describe('App', () => {
         });
 
         expect(getByRole('dialog', { name: /welcome to mindwtr/i })).toBeInTheDocument();
-        fireEvent.click(getByRole('button', { name: /start fresh/i }));
+        fireEvent.click(getByRole('button', { name: /^start using mindwtr/i }));
 
         await waitFor(() => {
             expect(queryByRole('dialog', { name: /welcome to mindwtr/i })).not.toBeInTheDocument();

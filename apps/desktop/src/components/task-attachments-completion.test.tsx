@@ -97,10 +97,12 @@ describe('task attachments survive completion (#836)', () => {
         await waitFor(() => expect(getByDisplayValue('Repro Task')).toBeInTheDocument());
 
         // Open the collapsed Details section, then add a link attachment (buffer-only until save)
-        const detailsToggle = getAllByRole('button', { name: /details/i })[0];
+        // The contextual Help: Details button is a separate control.
+        const detailsToggle = getByRole('button', { name: /^details\b/i, expanded: false });
         await act(async () => {
             fireEvent.click(detailsToggle);
         });
+        expect(detailsToggle).toHaveAttribute('aria-expanded', 'true');
         const addLink = await waitFor(() => getAllByRole('button', { name: /add link/i })[0]);
         await act(async () => {
             fireEvent.click(addLink);
