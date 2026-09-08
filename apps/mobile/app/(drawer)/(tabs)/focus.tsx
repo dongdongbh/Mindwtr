@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
 import { ContextualHelp } from '@/components/ContextualHelp';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -224,6 +225,7 @@ const serializeFocusViewState = (expandedSections: FocusExpandedSections, showDe
 });
 
 export default function FocusScreen() {
+  const onStartupLayout = useStartupScreenReady('focus');
   const { taskId, openToken, taskTab } = useLocalSearchParams<{ taskId?: string; openToken?: string; taskTab?: string }>();
   const insets = useSafeAreaInsets();
   const { tasks, projects, sections: projectSections, areas, settings, updateTask, deleteTask, reorderFocusedTasks, updateSettings, highlightTaskId, setHighlightTask } = useTaskStore((state) => ({
@@ -1520,7 +1522,7 @@ export default function FocusScreen() {
   const listBottomPadding = FOCUS_LIST_BOTTOM_CLEARANCE + Math.max(0, insets.bottom);
 
   return (
-    <View style={[styles.container, { backgroundColor: tc.bg }]}>
+    <View onLayout={onStartupLayout} style={[styles.container, { backgroundColor: tc.bg }]}>
       {focusReorderMode ? (
         <View style={styles.reorderContainer}>
           <View style={[styles.reorderHeader, { borderBottomColor: tc.border }]}>

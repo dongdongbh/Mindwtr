@@ -1,4 +1,5 @@
 const STARTUP_TAG = 'MindwtrStartup';
+const monotonicNow = (): number => globalThis.performance?.now?.() ?? Date.now();
 
 const isStartupProfilingEnabled = (): boolean => {
     const g = globalThis as Record<string, unknown>;
@@ -41,11 +42,11 @@ export const measureCoreStartupPhase = async <T>(
     if (!isStartupProfilingEnabled()) {
         return await work();
     }
-    const startMs = Date.now();
+    const startMs = monotonicNow();
     markCoreStartupPhase(`${phase}:start`);
     try {
         return await work();
     } finally {
-        markCoreStartupPhase(`${phase}:end`, { durationMs: Date.now() - startMs });
+        markCoreStartupPhase(`${phase}:end`, { durationMs: Math.round(monotonicNow() - startMs) });
     }
 };

@@ -1,4 +1,5 @@
 import '../polyfills';
+import { StartupReadinessContext } from '../hooks/use-startup-screen-ready';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import * as Application from 'expo-application';
@@ -447,7 +448,7 @@ function RootLayoutContentInner() {
     openSyncSettings,
     showToast,
   });
-  const { dataReady } = useRootLayoutStartup({
+  const { dataReady, canonicalDataReady } = useRootLayoutStartup({
     analyticsHeartbeatUrl,
     analyticsHeartbeatChannel,
     appVersion: analyticsAppVersion,
@@ -458,6 +459,7 @@ function RootLayoutContentInner() {
   });
   const isShellReady = themeReady && languageReady;
   const isFirstPaintReady = isShellReady && (dataReady || Boolean(storageInitError));
+  const startupReadiness = useMemo(() => ({ canonicalDataReady, pathname }), [canonicalDataReady, pathname]);
 
   useRootLayoutNotificationOpenHandler({
     appReady: isFirstPaintReady,
@@ -999,7 +1001,6 @@ function RootLayoutContentInner() {
   useEffect(() => {
     if (!isFirstPaintReady) return;
     markStartupPhase('js.shell_ready');
-    markStartupPhase('js.app_ready');
     if (typeof SplashScreen?.hideAsync === 'function') {
       SplashScreen.hideAsync()
         .then(() => {
@@ -1119,6 +1120,7 @@ function RootLayoutContentInner() {
     >
       <NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
           <MobileAppLockGate enabled={mobileAppLockEnabled}>
+          <StartupReadinessContext.Provider value={startupReadiness}>
             <PersistenceFailureBanner />
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false, animation: 'none' }} />
@@ -1194,6 +1196,7 @@ function RootLayoutContentInner() {
             onAction={handleUpdateReminderAction}
             onDismiss={dismissUpdateReminder}
           />
+          </StartupReadinessContext.Provider>
         </MobileAppLockGate>
         <StatusBar
           barStyle={isDark ? 'light-content' : 'dark-content'}

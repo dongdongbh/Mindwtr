@@ -92,6 +92,9 @@ jobs:
       - name: Large-store performance budgets
         run: bun run test:perf
 
+      - name: Benchmark harness regression tests
+        run: bun run test:perf-tools
+
       - name: Perf budget summary
         if: always()
         run: node scripts/ci/write-perf-summary.js packages/core/.perf/measurements.json

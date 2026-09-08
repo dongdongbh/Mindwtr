@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, Text, TextInput, TouchableOpacity, FlatList, Dimensions, Platform } from 'react-native';
 import type { GettingStartedAction } from '@/components/GettingStartedActions';
@@ -62,6 +63,7 @@ function resolveTaskRouteTab(value?: string | string[]): TaskEditTab {
 }
 
 export default function ProjectsScreen() {
+  const onStartupLayout = useStartupScreenReady('projects');
   const {
     projects,
     allProjects,
@@ -799,7 +801,7 @@ export default function ProjectsScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={[styles.container, { backgroundColor: tc.bg }]}>
+      <View onLayout={onStartupLayout} style={[styles.container, { backgroundColor: tc.bg }]}>
       <View style={[styles.inputContainer, { borderBottomColor: tc.border }]}>
         <View style={styles.addProjectRow}>
           <CompactTextInput

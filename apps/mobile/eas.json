@@ -4,6 +4,18 @@
         "appVersionSource": "local"
     },
     "build": {
+        "benchmark": {
+            "developmentClient": false,
+            "distribution": "internal",
+            "android": { "buildType": "apk" },
+            "env": {
+                "APP_VARIANT": "benchmark",
+                "NODE_ENV": "production",
+                "EXPO_PUBLIC_STARTUP_PROFILING": "1",
+                "ANDROID_PROFILEABLE": "1",
+                "ANALYTICS_HEARTBEAT_DISABLED": "1"
+            }
+        },
         "development": {
             "developmentClient": true,
             "distribution": "internal",

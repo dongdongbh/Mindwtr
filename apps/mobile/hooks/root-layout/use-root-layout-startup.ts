@@ -77,6 +77,7 @@ export function useRootLayoutStartup({
     storageInitError,
 }: UseRootLayoutStartupParams) {
     const [dataReady, setDataReady] = useState(false);
+    const [canonicalDataReady, setCanonicalDataReady] = useState(false);
     const retryLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const widgetRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const storageWarningShown = useRef(false);
@@ -131,6 +132,9 @@ export function useRootLayoutStartup({
                 if (cancelled) return;
                 const loadedStore = useTaskStore.getState();
                 setDataReady(true);
+                // A backup snapshot/error screen is not successful canonical hydration.
+                setCanonicalDataReady(!loadedStore.error);
+                if (!loadedStore.error) markStartupPhase('js.local_data_ready');
                 markStartupPhase('js.store.fetch_data.applied');
                 if (!startupContextLogged.current) {
                     startupContextLogged.current = true;
@@ -253,5 +257,5 @@ export function useRootLayoutStartup({
         };
     }, [analyticsHeartbeatUrl, analyticsHeartbeatChannel, appVersion, isExpoGo, isFossBuild, requestSync, storageInitError]);
 
-    return { dataReady };
+    return { dataReady, canonicalDataReady };
 }

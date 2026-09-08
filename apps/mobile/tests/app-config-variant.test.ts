@@ -37,6 +37,7 @@ describe('app.config APP_VARIANT', () => {
   });
 
   it.each([
+    ['benchmark', '', false],
     ['', '', false],
     ['development', '', true],
     ['development', 'false', false],
@@ -50,5 +51,16 @@ describe('app.config APP_VARIANT', () => {
     expect(config.extra?.watchEnabled).toBe(enabled);
     expect(config.ios?.infoPlist?.MindwtrWatchEnabled).toBe(enabled);
     expect(config.plugins).toContainEqual(['./plugins/ios-watch', { enabled }]);
+  });
+
+  it('isolates the Android benchmark identity and disables heartbeat traffic', async () => {
+    vi.stubEnv('APP_VARIANT', 'benchmark');
+    const config = await loadConfig();
+    expect(config.name).toBe('Mindwtr Benchmark');
+    expect(config.android?.package).toBe('tech.dongdongbh.mindwtr.benchmark');
+    expect(config.scheme).toBe('mindwtr-benchmark');
+    expect(config.platforms).toEqual(['android']);
+    expect(config.extra?.analyticsHeartbeatUrl).toBe('');
+    expect(widgetLabels(config)).toEqual(['Mindwtr Benchmark']);
   });
 });

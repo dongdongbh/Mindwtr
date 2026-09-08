@@ -1,4 +1,5 @@
 import React from 'react';
+import { markDesktopStartup } from './lib/startup-profiler';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import { QuickAddWindowApp } from './QuickAddWindowApp.tsx';
@@ -193,8 +194,10 @@ async function signalUiReady() {
 }
 
 async function bootstrap() {
+    markDesktopStartup('bootstrap');
     installFileDropNavigationGuard();
     await initStorage();
+    markDesktopStartup('storage_adapter_ready');
     setupGlobalErrorLogging();
     if (!isQuickAddWindow) {
         await restoreFullscreenState();
@@ -231,6 +234,7 @@ async function bootstrap() {
     );
 
     if (!isQuickAddWindow) {
+        requestAnimationFrame(() => markDesktopStartup('shell_ready'));
         void signalUiReady();
         void sendDesktopDailyHeartbeat().catch((error) => {
             void logWarn('Desktop analytics heartbeat failed', {
