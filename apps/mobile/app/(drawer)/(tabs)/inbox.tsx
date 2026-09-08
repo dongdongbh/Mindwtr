@@ -15,7 +15,6 @@ import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 import { CompactText } from '@/components/compact-text';
 import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
 import { useQuickCapture } from '../../../contexts/quick-capture-context';
-import { ContextualHelp } from '@/components/ContextualHelp';
 import { dismissMobileHint } from '@/lib/onboarding-hints';
 
 export default function InboxScreen() {
@@ -83,9 +82,6 @@ export default function InboxScreen() {
   // something to clarify, otherwise the promoted Mind Sweep entry point.
   const primaryActionRow = (
     <>
-    {hasInboxTasks && !showProcessing && <View style={{ paddingHorizontal: 16 }}>
-      <ContextualHelp topic="inbox-project" t={t} tc={tc} />
-    </View>}
     <View style={styles.actionRow}>
       {hasInboxTasks ? (
         <TouchableOpacity

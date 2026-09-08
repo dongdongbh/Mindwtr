@@ -1,5 +1,4 @@
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
-import { ContextualHelp } from '@/components/ContextualHelp';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
@@ -1602,7 +1601,6 @@ export default function FocusScreen() {
             )}
           >
           <View style={styles.header}>
-            <ContextualHelp topic="focus" t={t} tc={tc} />
             {pomodoroEnabled && (
               <PomodoroPanel
                 tasks={pomodoroTasks}

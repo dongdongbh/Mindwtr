@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { ChevronDown, ChevronRight, ExternalLink, X } from 'lucide-react-native';
+import { HelpCircle, ExternalLink, X } from 'lucide-react-native';
 import { getOnboardingGuideUrl, ONBOARDING_TOPIC_COPY, type OnboardingTopic } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { dismissMobileHint, isMobileHintDismissed } from '@/lib/onboarding-hints';
@@ -12,7 +12,8 @@ type Props = {
     tc: Pick<ThemeColors, 'secondaryText' | 'filterBg' | 'tint' | 'danger'>;
 };
 
-export function ContextualHelp({ topic, autoReveal = true, t, tc }: Props) {
+/** Editor help is opt-in; only an explicit onboarding surface may auto-reveal it. */
+export function ContextualHelp({ topic, autoReveal = false, t, tc }: Props) {
     return <TopicHelp key={topic} topic={topic} autoReveal={autoReveal} t={t} tc={tc} />;
 }
 
@@ -42,9 +43,9 @@ function TopicHelp({ topic, autoReveal, t, tc }: Props) {
                         interacted.current = true;
                         if (expanded) close(); else setExpanded(true);
                     }}
-                    style={({ pressed }) => [styles.control, styles.heading, { backgroundColor: pressed ? tc.filterBg : undefined }]}>
-                    {expanded ? <ChevronDown size={16} color={tc.secondaryText} /> : <ChevronRight size={16} color={tc.secondaryText} />}
-                    <Text style={[styles.label, { color: tc.secondaryText }]}>{label}</Text>
+                    style={({ pressed }) => [styles.control, expanded && styles.heading, { backgroundColor: pressed ? tc.filterBg : undefined }]}>
+                    <HelpCircle size={16} color={tc.secondaryText} />
+                    {expanded && <Text style={[styles.label, { color: tc.secondaryText }]}>{label}</Text>}
                 </Pressable>
                 {expanded && <Pressable accessibilityRole="button" accessibilityLabel={t('common.dismiss')}
                     onPress={close} style={styles.control}>

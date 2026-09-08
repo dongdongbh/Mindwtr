@@ -98,6 +98,13 @@ const setAgendaTasks = (tasks: Task[]) => useTaskStore.setState({
 });
 
 describe('AgendaView', () => {
+    it('keeps contextual guidance and help controls off the main Focus page', () => {
+        const { queryByRole, getByText } = renderAgenda();
+        expect(getByText('Focused task')).toBeInTheDocument();
+        expect(queryByRole('complementary', { name: 'Help: Focus' })).not.toBeInTheDocument();
+        expect(queryByRole('button', { name: 'Help: Focus' })).not.toBeInTheDocument();
+    });
+
     beforeEach(() => {
         window.localStorage.removeItem(focusViewStateStorageKey);
         useTaskStore.setState({

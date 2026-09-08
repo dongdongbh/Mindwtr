@@ -324,6 +324,18 @@ function flattenStyle(style: unknown): Record<string, unknown> {
 }
 
 describe('FocusScreen', () => {
+  it('keeps contextual guidance and help controls off the main Focus page', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<FocusScreen />); });
+    expect(tree.root.findAllByType(SwipeableTaskItem).length).toBeGreaterThan(0);
+    expect(tree.root.findAll((node) =>
+      typeof node.props.accessibilityLabel === 'string'
+      && /^(Help:|onboarding.help:)/.test(node.props.accessibilityLabel)
+    )).toHaveLength(0);
+    expect(tree.root.findAllByType(Text).some((node) => node.props.children === 'onboarding.focusHint')).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('renders starred tasks in a dedicated Today\'s Focus section', () => {
     storeState.tasks = [
       makeTask('plain-next', { title: 'Plain next' }),

@@ -5,7 +5,6 @@ import {
     dismissDesktopOnboardingHint,
 } from '../../lib/desktop-onboarding-events';
 import { InboxProcessingQuickPanel } from '../InboxProcessingQuickPanel';
-import { ContextualHelp } from '../ContextualHelp';
 import { InboxProcessingWizard } from '../InboxProcessingWizard';
 import { MindSweepLauncher, MindSweepTrigger } from '../MindSweepModal';
 import { useInboxProcessingController } from './inbox/useInboxProcessingController';
@@ -71,8 +70,6 @@ export function InboxProcessor({
 
     return (
         <>
-            {showStartButton && <ContextualHelp topic="inbox-project" t={t} />}
-
             {showStartButton && (
                 <div className="flex flex-wrap items-stretch gap-2">
                     <button

@@ -1,12 +1,12 @@
 import { useId, useState } from 'react';
-import { ChevronDown, ChevronRight, ExternalLink, X } from 'lucide-react';
+import { HelpCircle, ExternalLink, X } from 'lucide-react';
 import { getOnboardingGuideUrl, ONBOARDING_TOPIC_COPY, type OnboardingTopic } from '@mindwtr/core';
 import { dismissDesktopOnboardingHint, isDesktopOnboardingHintDismissed } from '../lib/desktop-onboarding-events';
 
 type Props = { topic: OnboardingTopic; t: (key: string) => string; autoReveal?: boolean };
 
-/** Dismissal collapses the hint, but help remains available in its original context. */
-export function ContextualHelp({ topic, t, autoReveal = true }: Props) {
+/** Editor help is opt-in; only an explicit onboarding surface may auto-reveal it. */
+export function ContextualHelp({ topic, t, autoReveal = false }: Props) {
     return <TopicHelp key={topic} topic={topic} t={t} autoReveal={autoReveal} />;
 }
 
@@ -23,10 +23,10 @@ function TopicHelp({ topic, t, autoReveal }: Props) {
     return (
         <aside className="py-1" aria-label={label}>
             <div className="flex items-center justify-between gap-2">
-                <button type="button" className={controlClass} aria-expanded={expanded} aria-controls={id}
+                <button type="button" className={controlClass} aria-label={label} title={label} aria-expanded={expanded} aria-controls={expanded ? id : undefined}
                     onClick={() => expanded ? close() : setExpanded(true)}>
-                    {expanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
-                    {label}
+                    <HelpCircle size={16} aria-hidden="true" />
+                    {expanded && label}
                 </button>
                 {expanded && <button type="button" className={controlClass} aria-label={t('common.dismiss')} onClick={close}>
                     <X size={16} aria-hidden="true" />
