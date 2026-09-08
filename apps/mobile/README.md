@@ -252,37 +252,41 @@ Use the SDK you installed in the "Building APK Locally" section.
 
 ## Android Startup Profiling
 
-Use this workflow to get repeatable startup numbers and phase-level logs.
+Use a separate, profileable **release** build, never an Expo development client for timing baselines.
 
 ### 1. Build a release app with startup markers enabled
 
 ```bash
 cd apps/mobile
-EXPO_PUBLIC_STARTUP_PROFILING=1 npx expo run:android --variant release
+export APP_VARIANT=benchmark EXPO_PUBLIC_STARTUP_PROFILING=1 ANDROID_PROFILEABLE=1
+bunx expo prebuild --platform android --no-install
+bunx expo run:android --variant release
 ```
 
-This enables JS startup markers (`[MindwtrStartup] ...`) while keeping normal builds quiet.
-If native Android files already exist, run `npx expo prebuild --clean --platform android` first so config plugins re-apply startup tracing patches.
+Use an isolated checkout when generating native projects. This installs `Mindwtr Benchmark`
+(`tech.dongdongbh.mindwtr.benchmark`) beside the store app with separate Android storage.
+The EAS equivalent is `eas build --platform android --profile benchmark`. The benchmark
+variant is Android-only; do not use it for iOS, where extension App Groups are shared.
+Seed synthetic data through the normal import UI, dismiss onboarding, leave Focus/Inbox/Projects
+open, and keep sync off. Never import personal data or configure a real sync account.
 
 ### 2. Run repeatable startup benchmark loops
 
 From repo root:
 
 ```bash
-bash apps/mobile/scripts/android_startup_benchmark.sh
+export DATASET_ID=mixed-v1-1000 DEVICE_LABEL=lab-phone NETWORK=offline
+RUNS=30 MODE=cold bun run mobile:startup:bench
 ```
 
 Useful variants:
 
 ```bash
-# 15 cold starts
-RUNS=15 MODE=cold bash apps/mobile/scripts/android_startup_benchmark.sh
+# Foreground resume (HOME then launch, not a warm Activity recreation)
+RUNS=30 MODE=hot bun run mobile:startup:bench
 
-# warm starts (process already cached)
-RUNS=15 MODE=warm bash apps/mobile/scripts/android_startup_benchmark.sh
-
-# custom package/activity
-PACKAGE=tech.dongdongbh.mindwtr ACTIVITY=.MainActivity bash apps/mobile/scripts/android_startup_benchmark.sh
+# Tail comparisons need more observations, on the same quiet device
+RUNS=100 MODE=cold WAIT_MS=8000 bun run mobile:startup:bench
 ```
 
 Outputs are written to:
@@ -292,7 +296,10 @@ apps/mobile/build/startup-benchmark/<timestamp>-<mode>/
 ```
 
 Key files:
-- `summary.txt`: median/p95/min/max for `ThisTime`/`TotalTime` and startup phase durations.
+
+- `report.json`: valid-only metric summaries, invalid count, build/device/dataset identity; use this for comparisons.
+- `metadata.json`: actual installed APK fingerprint and declared fixture/network/device identity.
+- `summary.txt`: raw diagnostic summaries, including invalid runs; not a baseline.
 - `am_start_results.csv`: per-run launch times from `am start -W` plus `launch_state`/`sample_quality`.
 - `phase_durations.tsv`: per-phase `durationMs` extracted from startup markers.
 - `js_since_start.tsv`: per-phase `sinceJsStartMs` from JS startup markers.
@@ -300,10 +307,23 @@ Key files:
 - `run-*-am-start.txt`: raw `am start -W` output per run (use this for missing/timeout samples).
 
 Notes:
-- On recent Android versions, `ThisTime` may be omitted; treat `TotalTime` + startup phase markers as primary.
-- Runs with `sample_quality` like `missing_total_time_wait_timeout` should be treated as unstable samples, not baseline medians.
-- If `LaunchState` is `UNKNOWN (0)` and `TotalTime` is missing, rely on `js.splash_hidden`/`js.app_ready` summaries from `js_since_start.tsv`.
-- If `sample_quality` includes `log_quota_dropped`, Android dropped process logs (`LOG_FLOWCTRL`), so missing JS markers are likely a logging artifact. Trust `TotalTime`, and re-run with fewer noisy tags if you need full marker chains.
+
+- Cold readiness requires `js.interactive_ready`; hot resume requires `js.resume_ready`.
+  Splash hiding is not proof that canonical data or a screen is ready.
+- `MODE=warm` presses BACK to finish the Activity. Modern launchers may background it
+  instead; only an observed `LaunchState: WARM` qualifies. A HOT/UNKNOWN result fails,
+  rather than silently mixing startup types. Use native Macrobenchmark for controlled
+  Activity-recreation experiments when this shell method cannot produce warm starts.
+- Crashes, missing metrics/readiness, unexpected launch states, or dropped logs fail the
+  command. Investigate failures; do not remove slow or failed runs to improve a median.
+- `WAIT_MS` is the bounded post-launch marker window (minimum 1000 ms). Increase it for
+  slow devices; use the same window for A/B comparisons. It is not part of the metric.
+- The script never clears global logcat or app data. Driving a non-benchmark package
+  requires explicit `ALLOW_EXISTING_APP=1`; the recommended workflow never needs it.
+- Set `ANDROID_SERIAL` when multiple devices are attached. `BUILD_REVISION` is a declared
+  source revision; `artifactHash` fingerprints the installed APK(s) independently.
+- See [Performance baselines](../../docs/performance-baselines.md) for exact clock
+  semantics, fixture generation, comparisons, and the native-device profiling checklist.
 
 ### 3. Capture Perfetto trace for deep root-cause
 

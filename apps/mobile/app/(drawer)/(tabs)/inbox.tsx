@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Brain, ListChecks } from 'lucide-react-native';
@@ -18,6 +19,7 @@ import { useQuickCapture } from '../../../contexts/quick-capture-context';
 import { dismissMobileHint } from '@/lib/onboarding-hints';
 
 export default function InboxScreen() {
+  const onStartupLayout = useStartupScreenReady('inbox');
   const settings = useTaskStore((state) => state.settings);
   const { t } = useLanguage();
   const tc = useThemeColors();
@@ -122,7 +124,7 @@ export default function InboxScreen() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: tc.bg }]}>
+    <View onLayout={onStartupLayout} style={[styles.container, { backgroundColor: tc.bg }]}>
       <TaskList
         statusFilter="inbox"
         title={t('inbox.title')}

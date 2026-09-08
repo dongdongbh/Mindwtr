@@ -43,6 +43,7 @@ const promptTestControlsEnabled = process.env.PROMPT_TEST_CONTROLS_ENABLED === '
 // store app (both are literal strings in Swift and entitlements); a dev build
 // hits CloudKit's Development environment anyway, only widget payloads collide.
 const isDevVariant = (process.env.APP_VARIANT ?? '').trim() === 'development';
+const isBenchmarkVariant = (process.env.APP_VARIANT ?? '').trim() === 'benchmark';
 // RC workflows and development/preview profiles opt in. Stable is off by default.
 const watchEnabledValue = (process.env.MINDWTR_WATCH_ENABLED ?? '').trim().toLowerCase();
 const watchEnabled = watchEnabledValue === '1' || watchEnabledValue === 'true'
@@ -50,19 +51,23 @@ const watchEnabled = watchEnabledValue === '1' || watchEnabledValue === 'true'
 const DEV_VARIANT_ID_SUFFIX = '.dev';
 const DEV_VARIANT_NAME_SUFFIX = ' Dev';
 
-const withDevVariant = (base: ExpoConfig): ExpoConfig => {
-  if (!isDevVariant) return base;
+const withAppVariant = (base: ExpoConfig): ExpoConfig => {
+  if (!isDevVariant && !isBenchmarkVariant) return base;
+  // Benchmark builds are Android-only: iOS extensions still share the store App Group.
+  const idSuffix = isBenchmarkVariant ? '.benchmark' : DEV_VARIANT_ID_SUFFIX;
+  const nameSuffix = isBenchmarkVariant ? ' Benchmark' : DEV_VARIANT_NAME_SUFFIX;
   const plugins = (base.plugins ?? []).map((entry) => {
     if (!Array.isArray(entry) || entry[0] !== './plugins/android-widget') return entry;
     const props = (entry[1] ?? {}) as { label?: string };
-    // The launcher's widget picker lists both apps; label the dev one.
-    return [entry[0], { ...props, label: `${props.label ?? base.name}${DEV_VARIANT_NAME_SUFFIX}` }] as typeof entry;
+    // The launcher's widget picker lists both apps; label the non-store one.
+    return [entry[0], { ...props, label: `${props.label ?? base.name}${nameSuffix}` }] as typeof entry;
   });
   return {
     ...base,
-    name: `${base.name}${DEV_VARIANT_NAME_SUFFIX}`,
-    android: { ...base.android, package: `${base.android?.package}${DEV_VARIANT_ID_SUFFIX}` },
-    ios: { ...base.ios, bundleIdentifier: `${base.ios?.bundleIdentifier}${DEV_VARIANT_ID_SUFFIX}` },
+    name: `${base.name}${nameSuffix}`,
+    ...(isBenchmarkVariant ? { platforms: ['android' as const], scheme: 'mindwtr-benchmark' } : {}),
+    android: { ...base.android, package: `${base.android?.package}${idSuffix}` },
+    ios: { ...base.ios, bundleIdentifier: `${base.ios?.bundleIdentifier}${idSuffix}` },
     plugins,
   };
 };
@@ -72,7 +77,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const extra = {
     ...(base.extra ?? {}),
     isFossBuild,
-    analyticsHeartbeatUrl,
+    analyticsHeartbeatUrl: isBenchmarkVariant ? '' : analyticsHeartbeatUrl,
     analyticsHeartbeatChannel,
     analyticsReleaseVersion,
     feedbackEndpointUrl,
@@ -82,7 +87,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     watchEnabled,
   };
 
-  return withDevVariant({
+  return withAppVariant({
     ...base,
     extra,
     ios: {

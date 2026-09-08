@@ -153,10 +153,11 @@ vi.mock('@/lib/cloudkit-sync', () => ({
 
 type HarnessProps = {
   onReadyChange: (ready: boolean) => void;
+  onCanonicalChange?: (ready: boolean) => void;
 };
 
-function TestHarness({ onReadyChange }: HarnessProps) {
-  const { dataReady } = useRootLayoutStartup({
+function TestHarness({ onReadyChange, onCanonicalChange }: HarnessProps) {
+  const { dataReady, canonicalDataReady } = useRootLayoutStartup({
     analyticsHeartbeatUrl: '',
     appVersion: '0.8.3',
     isExpoGo: false,
@@ -168,6 +169,7 @@ function TestHarness({ onReadyChange }: HarnessProps) {
   useEffect(() => {
     onReadyChange(dataReady);
   }, [dataReady, onReadyChange]);
+  useEffect(() => { onCanonicalChange?.(canonicalDataReady); }, [canonicalDataReady, onCanonicalChange]);
 
   return null;
 }
@@ -226,6 +228,7 @@ describe('useRootLayoutStartup', () => {
   it('applies the backup snapshot before the canonical fetch finishes', async () => {
     const fetchDeferred = createDeferred<void>();
     const readyStates: boolean[] = [];
+    const canonicalStates: boolean[] = [];
     let tree!: ReactTestRenderer;
 
     fetchData.mockImplementation(async () => {
@@ -248,7 +251,7 @@ describe('useRootLayoutStartup', () => {
     });
 
     await act(async () => {
-      tree = create(<TestHarness onReadyChange={(ready) => readyStates.push(ready)} />);
+      tree = create(<TestHarness onReadyChange={(ready) => readyStates.push(ready)} onCanonicalChange={(ready) => canonicalStates.push(ready)} />);
       await flushMicrotasks();
     });
 
@@ -257,6 +260,8 @@ describe('useRootLayoutStartup', () => {
     expect(storeHolder.state.tasks).toHaveLength(1);
     expect(storeHolder.state._allTasks).toHaveLength(1);
     expect(readyStates.at(-1)).toBe(true);
+    expect(canonicalStates.at(-1)).toBe(false);
+    expect(markStartupPhase).not.toHaveBeenCalledWith('js.local_data_ready');
     expect(requestSync).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -265,6 +270,8 @@ describe('useRootLayoutStartup', () => {
     });
 
     expect(requestSync).toHaveBeenCalledWith(0);
+    expect(canonicalStates.at(-1)).toBe(true);
+    expect(markStartupPhase).toHaveBeenCalledWith('js.local_data_ready');
 
     act(() => {
       tree.unmount();
@@ -313,5 +320,18 @@ describe('useRootLayoutStartup', () => {
     act(() => {
       tree.unmount();
     });
+  });
+
+  it('never marks a terminal storage error as canonical readiness', async () => {
+    fetchData.mockImplementation(async () => { storeHolder.state.error = 'Storage unavailable'; });
+    const canonicalStates: boolean[] = [];
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(<TestHarness onReadyChange={() => undefined} onCanonicalChange={(ready) => canonicalStates.push(ready)} />);
+      await flushMicrotasks();
+    });
+    expect(canonicalStates).not.toContain(true);
+    expect(markStartupPhase).not.toHaveBeenCalledWith('js.local_data_ready');
+    act(() => tree.unmount());
   });
 });

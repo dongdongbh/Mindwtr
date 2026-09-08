@@ -18,7 +18,20 @@ test("CI executes the production-path large-store performance budgets", () => {
   expect(mobileSuite).toContain("<TaskList");
   expect(mobileSuite).toContain("<ProjectDetailModal");
   expect(workflow).toContain("name: Performance Budgets");
-  expect(workflow.match(/run: bun run test:perf/g)).toHaveLength(1);
+  expect(workflow.match(/run: bun run test:perf(?=\s|$)/g)).toHaveLength(1);
   expect(workflow).not.toContain("bun run --filter @mindwtr/core test:perf");
   expect(workflow).not.toContain("scripts/audit-performance.ts");
+});
+
+test("production baselines are scheduled release-UI reports, not noisy PR timing gates", () => {
+  const workflow = readFileSync(".github/workflows/performance-baselines.yml", "utf8");
+  expect(workflow).toContain("schedule:");
+  expect(workflow).toContain("workflow_dispatch:");
+  expect(workflow).not.toContain("pull_request:");
+  expect(workflow).toContain("VITE_STARTUP_PROFILING: '1'");
+  expect(workflow).toContain("RUNS: '30'");
+  expect(workflow).toContain("run: bun run desktop:web:build");
+  expect(workflow).toContain("run: bun run perf:web");
+  expect(workflow).toContain("if: always()");
+  expect(workflow).not.toContain("continue-on-error: true");
 });

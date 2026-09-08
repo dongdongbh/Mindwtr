@@ -2,6 +2,10 @@
 
 Mindwtr uses generated large-store tests to catch performance regressions before users hit them. The suite collects no user telemetry.
 
+For production startup/capture baselines, readiness instrumentation, and native profiling,
+see [Performance baselines](performance-baselines.md). These complement—not replace—the
+fast algorithm/render budget gates below.
+
 ## Command
 
 Run the current budget suite from the repository root:

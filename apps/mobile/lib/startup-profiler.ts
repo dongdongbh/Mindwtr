@@ -1,9 +1,10 @@
 import { Platform } from 'react-native';
 
 const STARTUP_TAG = 'MindwtrStartup';
-const moduleLoadedAtMs = Date.now();
+export const startupNow = (): number => globalThis.performance?.now?.() ?? Date.now();
+const moduleLoadedAtMs = startupNow();
 const profilingEnv = String(process.env.EXPO_PUBLIC_STARTUP_PROFILING || '').trim().toLowerCase();
-const startupProfilingEnabled = Platform.OS === 'android' && (profilingEnv === '1' || profilingEnv === 'true');
+const startupProfilingEnabled = (Platform.OS === 'android' || Platform.OS === 'ios') && (profilingEnv === '1' || profilingEnv === 'true');
 if (startupProfilingEnabled) {
   (globalThis as Record<string, unknown>).__MINDWTR_STARTUP_PROFILING__ = true;
 }
@@ -30,11 +31,12 @@ const logStartupLine = (line: string): void => {
 };
 
 export const isStartupProfilingEnabled = (): boolean => startupProfilingEnabled;
+export const startupElapsedMs = (): number => Math.round(startupNow() - moduleLoadedAtMs);
 
 export const markStartupPhase = (phase: string, extra?: Record<string, unknown>): void => {
   if (!startupProfilingEnabled) return;
   const nowMs = Date.now();
-  const sinceJsStartMs = nowMs - moduleLoadedAtMs;
+  const sinceJsStartMs = startupElapsedMs();
   const extraPayload = serializeExtra(extra);
   logStartupLine(`[${STARTUP_TAG}] phase=${phase} wallMs=${nowMs} sinceJsStartMs=${sinceJsStartMs}${extraPayload}`);
 };
@@ -46,12 +48,12 @@ export const measureStartupPhase = async <T>(
   if (!startupProfilingEnabled) {
     return await work();
   }
-  const startMs = Date.now();
+  const startMs = startupNow();
   markStartupPhase(`${phase}:start`);
   try {
     return await work();
   } finally {
-    markStartupPhase(`${phase}:end`, { durationMs: Date.now() - startMs });
+    markStartupPhase(`${phase}:end`, { durationMs: Math.round(startupNow() - startMs) });
   }
 };
 

@@ -1,4 +1,6 @@
 import { useEffect, useState, useRef, useTransition, useCallback, useMemo, Suspense, lazy } from 'react';
+import { StartupReadyProbe } from './components/StartupReadyProbe';
+import { markDesktopStartup } from './lib/startup-profiler';
 import { Layout } from './components/Layout';
 import { ListView } from './components/views/ListView';
 import { CalendarView } from './components/views/CalendarView';
@@ -334,6 +336,7 @@ function App() {
     const [externalSyncChange, setExternalSyncChange] = useState<ExternalSyncChange | null>(null);
     const [resolvingExternalSync, setResolvingExternalSync] = useState(false);
     const [hasHydratedSettings, setHasHydratedSettings] = useState(false);
+    const [startupDataReady, setStartupDataReady] = useState(false);
     // App tests seed the store directly and deliberately skip the native startup
     // hydration effect; in the app, only the completed fetch opens this gate.
     const viewSettingsHydrated = hasHydratedSettings
@@ -753,6 +756,10 @@ function App() {
                 ).catch(() => undefined);
             })
             .then(() => {
+                if (!cancelled && !useTaskStore.getState().error) {
+                    markDesktopStartup('local_data_ready');
+                    setStartupDataReady(true);
+                }
                 if (!disposed && isTauriRuntime()) {
                     void migratePortableAttachments();
                     stopCalendarPush = startDesktopCalendarPushSync();
@@ -1629,7 +1636,10 @@ function App() {
                         {isLoading ? (
                             <LoadingFallback view={activeView} />
                         ) : (
-                            renderView()
+                            <>
+                                {renderView()}
+                                <StartupReadyProbe ready={startupDataReady} />
+                            </>
                         )}
                     </Suspense>
                     <GlobalSearch
