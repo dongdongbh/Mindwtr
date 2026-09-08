@@ -4459,7 +4459,38 @@ describe('TaskStore', () => {
         expect(projectSections[0].deletedAtBeforeProjectArchive).toBeUndefined();
         expect(projectSections[0].projectArchivedAt).toBeUndefined();
     });
+    it('reactivates an archived project when moving a project task back to next', async () => {
+        const { addProject, addTask, updateProject, moveTask } = useTaskStore.getState();
+        const project = await addProject('Reopen on Task Move', '#123456');
+        expect(project).not.toBeNull();
+        if (!project) return;
 
+        const first = await addTask('Task to Reopen', {
+            status: 'next',
+            projectId: project.id,
+        });
+        const second = await addTask('Task to Keep Done', {
+            status: 'next',
+            projectId: project.id,
+        });
+
+        expect(first.success).toBe(true);
+        expect(second.success).toBe(true);
+        if (!first.id || !second.id) return;
+
+        await updateProject(project.id, { status: 'archived' });
+
+        expect(useTaskStore.getState()._projectsById.get(project.id)?.status).toBe('archived');
+        expect(useTaskStore.getState()._tasksById.get(first.id)?.status).toBe('done');
+        expect(useTaskStore.getState()._tasksById.get(second.id)?.status).toBe('done');
+
+        await moveTask(first.id, 'next');
+
+        const state = useTaskStore.getState();
+        expect(state._projectsById.get(project.id)?.status).toBe('active');
+        expect(state._tasksById.get(first.id)?.status).toBe('next');
+        expect(state._tasksById.get(second.id)?.status).toBe('done');
+    });
     it('does not rewrite a project-archived task that moved before unarchive', async () => {
         const { addProject, addTask, updateProject, updateTask } = useTaskStore.getState();
         const sourceProject = await addProject('Source Project', '#123456');

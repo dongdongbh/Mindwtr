@@ -32,6 +32,7 @@ import {
     normalizeCancellationTimestamp,
     normalizeTaskLifecycleFields,
 } from './task-status';
+import { normalizeProjectLifecycleFields } from './project-status';
 import { beginNotifyProfile, endNotifyProfile, type NotifyProfile } from './store-notify-profiler';
 import { generateUUID as uuidv4 } from './uuid';
 import { normalizeRecurrenceForLoad } from './recurrence';
@@ -591,6 +592,32 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, flushPe
                     { ...preparedUpdates.updates, ...revisionPatch },
                     now
                 );
+                const projectToReactivate =
+                    oldTask.projectId
+                    && oldTask.status === 'done'
+                    && updatedTask.status === 'next'
+                        ? state._allProjects.find(
+                            (project) =>
+                                project.id === oldTask.projectId
+                                && project.status === 'archived'
+                                && oldTask.projectArchivedAt !== undefined
+                        )
+                        : undefined;
+
+                const updatedProject = projectToReactivate
+                    ? normalizeProjectLifecycleFields({
+                        ...projectToReactivate,
+                        status: 'active',
+                        cancelledAt: undefined,
+                        updatedAt: now,
+                        rev: nextRevision(projectToReactivate.rev),
+                        revBy: deviceState.deviceId,
+                    })
+                    : undefined;
+
+                const updatedAllProjects = updatedProject
+                    ? replaceEntityInArray(state._allProjects, updatedProject.id, updatedProject)
+                    : state._allProjects;
                 const stampedNextRecurringTask = stampNewRecurringFollowUp(
                     nextRecurringTask,
                     deviceState.deviceId,
@@ -613,11 +640,13 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, flushPe
                     : updatedAllTasksBase;
                 snapshot = buildSaveSnapshot(state, {
                     tasks: updatedAllTasks,
+                    projects: updatedAllProjects,
                     ...(deviceState.updated ? { settings: deviceState.settings } : {}),
                 });
                 setProducerMs = Date.now() - producerStartedAt;
                 return {
                     _allTasks: updatedAllTasks,
+                    _allProjects: updatedAllProjects,
                     lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                     ...(deviceState.updated ? { settings: deviceState.settings } : {}),
                 };
