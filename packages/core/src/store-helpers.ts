@@ -509,6 +509,52 @@ const hasTaskProjectArchiveMetadata = (task: Task): boolean => (
     || task.isFocusedTodayBeforeProjectArchive !== undefined
 );
 
+export const findTaskProjectReactivationTarget = (
+    task: Task,
+    updates: Partial<Task>,
+    projects: readonly Project[],
+): Project | undefined => {
+    if (!hasOwnField(updates, 'status')) return undefined;
+    const requestedStatus = updates.status;
+    if (!requestedStatus || !isTaskActionable(requestedStatus)) return undefined;
+
+    const finalDeletedAt = hasOwnField(updates, 'deletedAt') ? updates.deletedAt : task.deletedAt;
+    const finalPurgedAt = hasOwnField(updates, 'purgedAt') ? updates.purgedAt : task.purgedAt;
+    if (finalDeletedAt || finalPurgedAt) return undefined;
+
+    const finalProjectId = hasOwnField(updates, 'projectId')
+        ? (typeof updates.projectId === 'string' && updates.projectId.trim()
+            ? updates.projectId.trim()
+            : undefined)
+        : task.projectId;
+    if (!finalProjectId) return undefined;
+
+    return projects.find((project) => (
+        project.id === finalProjectId
+        && project.status === 'archived'
+        && !project.deletedAt
+        && !project.purgedAt
+    ));
+};
+
+const retireTaskProjectArchiveMetadata = (
+    task: Task,
+    retiredAt: string,
+    deviceId?: string,
+): Task => {
+    if (!hasTaskProjectArchiveMetadata(task)) return task;
+    return {
+        ...task,
+        statusBeforeProjectArchive: undefined,
+        completedAtBeforeProjectArchive: undefined,
+        isFocusedTodayBeforeProjectArchive: undefined,
+        projectArchivedAt: undefined,
+        updatedAt: retiredAt,
+        rev: nextRevision(task.rev),
+        revBy: deviceId,
+    };
+};
+
 export const clearDeletedTaskProjectArchiveMetadata = (task: Task): Task => {
     if (!task.deletedAt || !hasTaskProjectArchiveMetadata(task)) return task;
     return {
@@ -547,15 +593,20 @@ export const isTaskSectionProjectArchiveReference = (
     return isTaskFinished(task) || task.status === 'reference';
 };
 
-export const restoreSectionFromProjectArchive = (section: Section, restoredAt: string, deviceId?: string): Section => {
+export const isRestorableProjectArchiveSection = (section: Section): boolean => {
     const archivedAt = section.projectArchivedAt;
-    const shouldRestore =
+    return (
         Boolean(archivedAt) &&
         section.updatedAt === archivedAt &&
         section.deletedAt === archivedAt &&
         // `== null`: a live section archived by an older client carries `null`, a
         // current one absent, and SQLite reads both back as absent (#1156).
-        section.deletedAtBeforeProjectArchive == null;
+        section.deletedAtBeforeProjectArchive == null
+    );
+};
+
+export const restoreSectionFromProjectArchive = (section: Section, restoredAt: string, deviceId?: string): Section => {
+    const shouldRestore = isRestorableProjectArchiveSection(section);
 
     if (!shouldRestore) {
         return section;
@@ -569,6 +620,61 @@ export const restoreSectionFromProjectArchive = (section: Section, restoredAt: s
         updatedAt: restoredAt,
         rev: nextRevision(section.rev),
         revBy: deviceId,
+    };
+};
+
+export const applyTaskProjectReactivationTransition = (
+    requests: readonly { task: Task; updates: Partial<Task> }[],
+    tasks: Task[],
+    projects: Project[],
+    sections: Section[],
+    now: string,
+    deviceId?: string,
+): { tasks: Task[]; projects: Project[]; sections: Section[]; reactivatedProjectIds: string[] } => {
+    const targetByProjectId = new Map<string, Project>();
+    const reopenedTaskIds = new Set<string>();
+    for (const request of requests) {
+        const target = findTaskProjectReactivationTarget(request.task, request.updates, projects);
+        if (!target) continue;
+        targetByProjectId.set(target.id, target);
+        reopenedTaskIds.add(request.task.id);
+    }
+
+    const reactivatedProjectIds = Array.from(targetByProjectId.keys());
+    if (reactivatedProjectIds.length === 0) {
+        return { tasks, projects, sections, reactivatedProjectIds };
+    }
+
+    const reactivatedProjectIdSet = new Set(reactivatedProjectIds);
+    const nextTasks = mapChanged(tasks, (task) => (
+        task.projectId
+        && reactivatedProjectIdSet.has(task.projectId)
+        && !reopenedTaskIds.has(task.id)
+            ? retireTaskProjectArchiveMetadata(task, now, deviceId)
+            : task
+    ));
+    const nextProjects = mapChanged(projects, (project) => {
+        if (!reactivatedProjectIdSet.has(project.id)) return project;
+        const projectUpdates = normalizeProjectUpdate(project, { status: 'active' });
+        return normalizeProjectLifecycleFields({
+            ...project,
+            ...projectUpdates,
+            updatedAt: now,
+            rev: nextRevision(project.rev),
+            revBy: deviceId,
+        });
+    });
+    const nextSections = mapChanged(sections, (section) => (
+        reactivatedProjectIdSet.has(section.projectId)
+            ? restoreSectionFromProjectArchive(section, now, deviceId)
+            : section
+    ));
+
+    return {
+        tasks: nextTasks,
+        projects: nextProjects,
+        sections: nextSections,
+        reactivatedProjectIds,
     };
 };
 
@@ -620,7 +726,7 @@ export const applyProjectLifecycleTransition = (
                     ? cancelTaskForProjectArchive(task, cancelledAt!, deviceId, now)
                     : task;
             }
-            return !isTaskFinished(task)
+            return !isTaskFinished(task) && task.status !== 'reference'
                 ? completeTaskForProjectArchive(task, now, deviceId)
                 : task;
         });

@@ -1,5 +1,6 @@
 import {
     filterNotDeleted,
+    isTaskSectionProjectArchiveReference,
     normalizeCancellationTimestamp,
     normalizeRecurrenceForLoad,
     normalizeRelativeStartOffset,
@@ -264,10 +265,18 @@ export function validateAppData(
                 if (!projectId) {
                     return { ok: false, error: `Invalid data: live task ${String(taskRecord.id)} must include projectId when sectionId is present` };
                 }
-                if (!activeSectionIds.has(sectionId)) {
+                const section = sectionsById.get(sectionId);
+                const project = projectsById.get(projectId);
+                if (
+                    !activeSectionIds.has(sectionId)
+                    && !isTaskSectionProjectArchiveReference(
+                        taskRecord as unknown as Task,
+                        section as unknown as Section | undefined,
+                        project as unknown as Project | undefined,
+                    )
+                ) {
                     return { ok: false, error: `Invalid data: live task ${String(taskRecord.id)} references missing or deleted section ${sectionId}` };
                 }
-                const section = sectionsById.get(sectionId);
                 const sectionProjectId = typeof section?.projectId === 'string' ? section.projectId : '';
                 if (sectionProjectId !== projectId) {
                     return { ok: false, error: `Invalid data: live task ${String(taskRecord.id)} section ${sectionId} belongs to project ${sectionProjectId}` };

@@ -568,6 +568,66 @@ describe('cloud server utils', () => {
         expect(invalidProjectArea.ok).toBe(false);
     });
 
+    test('accepts only project-archive-owned deleted section references', () => {
+        const iso = '2026-01-01T00:00:00.000Z';
+        const archivedAt = '2026-09-08T10:00:00.000Z';
+        const project = {
+            id: 'p1',
+            title: 'Archived project',
+            status: 'archived',
+            color: '#000000',
+            order: 0,
+            tagIds: [],
+            createdAt: iso,
+            updatedAt: archivedAt,
+        };
+        const archiveOwnedSection = {
+            id: 's1',
+            projectId: project.id,
+            title: 'Archived section',
+            createdAt: iso,
+            updatedAt: archivedAt,
+            deletedAt: archivedAt,
+            projectArchivedAt: archivedAt,
+        };
+        const archiveOwnedTask = {
+            id: 't1',
+            title: 'Archived child',
+            status: 'done',
+            projectId: project.id,
+            sectionId: archiveOwnedSection.id,
+            statusBeforeProjectArchive: 'next',
+            projectArchivedAt: archivedAt,
+            createdAt: iso,
+            updatedAt: archivedAt,
+        };
+
+        expect(validateAppData({
+            tasks: [archiveOwnedTask],
+            projects: [project],
+            sections: [archiveOwnedSection],
+            areas: [],
+        }).ok).toBe(true);
+
+        const ordinaryDeletedSection = {
+            ...archiveOwnedSection,
+            projectArchivedAt: undefined,
+        };
+        expect(validateAppData({
+            tasks: [archiveOwnedTask],
+            projects: [project],
+            sections: [ordinaryDeletedSection],
+            areas: [],
+        }).ok).toBe(false);
+
+        expect(validateAppData({
+            tasks: [{ ...archiveOwnedTask, status: 'next' }],
+            projects: [project],
+            sections: [archiveOwnedSection],
+            areas: [],
+        }).ok).toBe(false);
+    });
+
     test('accepts only core task statuses', () => {
         expect(asStatus('reference')).toBe('reference');
         expect(asStatus('todo')).toBeNull();
@@ -3863,6 +3923,196 @@ describe('cloud server api', () => {
         expect((await resumed.json()).project.cancelledAt).toBeUndefined();
         expect((await getTask(remaining.id)).status).toBe('waiting');
         expect((await getTask(done.id)).status).toBe('done');
+    });
+
+    test('reopening an archived-project task durably reactivates its parent and retires sibling restore markers', async () => {
+        const headers = { ...authHeaders, 'content-type': 'application/json' };
+        const cancelledAt = '2026-09-07T08:00:00.000Z';
+        const projectResponse = await fetch(`${baseUrl}/v1/projects`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ title: 'Archived project' }),
+        });
+        expect(projectResponse.status).toBe(201);
+        const projectId = (await projectResponse.json()).project.id as string;
+        const sectionResponse = await fetch(`${baseUrl}/v1/sections`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ projectId, title: 'Archived section' }),
+        });
+        expect(sectionResponse.status).toBe(201);
+        const sectionId = (await sectionResponse.json()).section.id as string;
+        const createTask = async (title: string, props: Partial<Task>): Promise<Task> => {
+            const response = await fetch(`${baseUrl}/v1/tasks`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ title, props: { projectId, ...props } }),
+            });
+            expect(response.status).toBe(201);
+            return (await response.json()).task as Task;
+        };
+        const taskToReopen = await createTask('Reopen this task', {
+            status: 'next',
+            sectionId,
+            isFocusedToday: true,
+        });
+        const sibling = await createTask('Keep this sibling done', {
+            status: 'waiting',
+            sectionId,
+            description: 'Preserve this note',
+        });
+        const alreadyDone = await createTask('Already done', { status: 'done' });
+        const independentlyCancelled = await createTask('Independently cancelled', { cancelledAt });
+        const reference = await createTask('Reference sibling', { status: 'reference' });
+
+        const archiveResponse = await fetch(`${baseUrl}/v1/projects/${projectId}`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ status: 'archived' }),
+        });
+        const archiveResponseBody = await archiveResponse.json() as { error?: string };
+        expect({ status: archiveResponse.status, error: archiveResponseBody.error }).toEqual({ status: 200, error: undefined });
+
+        const readStoredData = async (): Promise<AppData> => {
+            const response = await fetch(`${baseUrl}/v1/data`, { headers: authHeaders });
+            expect(response.status).toBe(200);
+            return await response.json() as AppData;
+        };
+        const archivedData = await readStoredData();
+        const archivedTasks = new Map(archivedData.tasks.map((task) => [task.id, task]));
+        const archivedSibling = archivedTasks.get(sibling.id)!;
+        const archivedSection = archivedData.sections.find((section) => section.id === sectionId)!;
+        expect(archivedTasks.get(taskToReopen.id)?.status).toBe('done');
+        expect(archivedSibling.status).toBe('done');
+        expect(archivedSibling.statusBeforeProjectArchive).toBe('waiting');
+        expect(archivedSibling.description).toBe('Preserve this note');
+        expect(archivedSection.deletedAt).toBeTruthy();
+        expect(archivedSection.projectArchivedAt).toBe(archivedSection.deletedAt);
+
+        const reopenResponse = await fetch(`${baseUrl}/v1/tasks/${taskToReopen.id}`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ status: 'next' }),
+        });
+        expect(reopenResponse.status).toBe(200);
+        const reopened = (await reopenResponse.json()).task as Task;
+        expect(reopened.status).toBe('next');
+        expect(reopened.projectId).toBe(projectId);
+        expect(reopened.sectionId).toBe(sectionId);
+        expect(reopened.completedAt).toBeUndefined();
+        expect(reopened.statusBeforeProjectArchive).toBeUndefined();
+        expect(reopened.projectArchivedAt).toBeUndefined();
+
+        const firstCycle = await readStoredData();
+        const firstCycleProject = firstCycle.projects.find((project) => project.id === projectId);
+        expect(firstCycleProject?.status).toBe('active');
+        expect(firstCycleProject?.revBy).toBe('cloud');
+        expect(firstCycle.sections.find((section) => section.id === sectionId)?.revBy).toBe('cloud');
+        expect(firstCycle.sections.find((section) => section.id === sectionId)?.deletedAt).toBeUndefined();
+        expect(firstCycle.sections.find((section) => section.id === sectionId)?.projectArchivedAt).toBeUndefined();
+
+        const firstCycleTasks = new Map(firstCycle.tasks.map((task) => [task.id, task]));
+        expect(firstCycleTasks.get(sibling.id)?.status).toBe('done');
+        expect(firstCycleTasks.get(sibling.id)?.completedAt).toBe(archivedSibling.completedAt);
+        expect(firstCycleTasks.get(sibling.id)?.description).toBe('Preserve this note');
+        expect(firstCycleTasks.get(sibling.id)?.rev).toBe((archivedSibling.rev ?? 0) + 1);
+        expect(firstCycleTasks.get(sibling.id)?.revBy).toBe('cloud');
+        expect(firstCycleTasks.get(sibling.id)?.statusBeforeProjectArchive).toBeUndefined();
+        expect(firstCycleTasks.get(sibling.id)?.projectArchivedAt).toBeUndefined();
+        expect(firstCycleTasks.get(alreadyDone.id)).toEqual(archivedTasks.get(alreadyDone.id));
+        expect(firstCycleTasks.get(independentlyCancelled.id)).toEqual(archivedTasks.get(independentlyCancelled.id));
+        expect(firstCycleTasks.get(reference.id)).toEqual(archivedTasks.get(reference.id));
+
+        const secondArchiveResponse = await fetch(`${baseUrl}/v1/projects/${projectId}`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ status: 'archived' }),
+        });
+        expect(secondArchiveResponse.status).toBe(200);
+        const secondReopenResponse = await fetch(`${baseUrl}/v1/tasks/${taskToReopen.id}`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ status: 'next' }),
+        });
+        expect(secondReopenResponse.status).toBe(200);
+
+        const secondCycle = await readStoredData();
+        const secondCycleTasks = new Map(secondCycle.tasks.map((task) => [task.id, task]));
+        expect(secondCycle.projects.find((project) => project.id === projectId)?.status).toBe('active');
+        expect(secondCycle.sections.find((section) => section.id === sectionId)?.deletedAt).toBeUndefined();
+        expect(secondCycleTasks.get(taskToReopen.id)?.status).toBe('next');
+        expect(secondCycleTasks.get(sibling.id)?.status).toBe('done');
+        expect(secondCycleTasks.get(sibling.id)?.completedAt).toBe(archivedSibling.completedAt);
+        expect(secondCycleTasks.get(sibling.id)?.description).toBe('Preserve this note');
+        expect(secondCycleTasks.get(sibling.id)?.rev).toBe((archivedSibling.rev ?? 0) + 1);
+        expect(secondCycleTasks.get(sibling.id)?.revBy).toBe('cloud');
+    });
+
+    test('task status PATCH reactivates only its final archived project assignment', async () => {
+        const headers = { ...authHeaders, 'content-type': 'application/json' };
+        const createProjectWithSection = async (title: string) => {
+            const projectResponse = await fetch(`${baseUrl}/v1/projects`, {
+                method: 'POST', headers, body: JSON.stringify({ title }),
+            });
+            expect(projectResponse.status).toBe(201);
+            const project = (await projectResponse.json()).project;
+            const sectionResponse = await fetch(`${baseUrl}/v1/sections`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ projectId: project.id, title: `${title} section` }),
+            });
+            expect(sectionResponse.status).toBe(201);
+            return { project, section: (await sectionResponse.json()).section };
+        };
+        const source = await createProjectWithSection('Source project');
+        const destination = await createProjectWithSection('Destination project');
+        const taskResponse = await fetch(`${baseUrl}/v1/tasks`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                title: 'Move while reopening',
+                props: { status: 'next', projectId: source.project.id, sectionId: source.section.id },
+            }),
+        });
+        expect(taskResponse.status).toBe(201);
+        const task = (await taskResponse.json()).task as Task;
+
+        for (const projectId of [source.project.id, destination.project.id]) {
+            const response = await fetch(`${baseUrl}/v1/projects/${projectId}`, {
+                method: 'PATCH', headers, body: JSON.stringify({ status: 'archived' }),
+            });
+            expect(response.status).toBe(200);
+        }
+
+        const notesOnlyResponse = await fetch(`${baseUrl}/v1/tasks/${task.id}`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ description: 'Keep the source archived' }),
+        });
+        expect(notesOnlyResponse.status).toBe(200);
+        expect((await notesOnlyResponse.json()).task.status).toBe('done');
+
+        const reopenResponse = await fetch(`${baseUrl}/v1/tasks/${task.id}`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({
+                status: 'waiting',
+                projectId: destination.project.id,
+                sectionId: destination.section.id,
+            }),
+        });
+        expect(reopenResponse.status).toBe(200);
+        const reopened = (await reopenResponse.json()).task as Task;
+        expect(reopened.status).toBe('waiting');
+        expect(reopened.projectId).toBe(destination.project.id);
+        expect(reopened.sectionId).toBe(destination.section.id);
+        expect(reopened.description).toBe('Keep the source archived');
+
+        const stored = await (await fetch(`${baseUrl}/v1/data`, { headers: authHeaders })).json() as AppData;
+        expect(stored.projects.find((project) => project.id === source.project.id)?.status).toBe('archived');
+        expect(stored.projects.find((project) => project.id === destination.project.id)?.status).toBe('active');
+        expect(stored.sections.find((section) => section.id === source.section.id)?.deletedAt).toBeTruthy();
+        expect(stored.sections.find((section) => section.id === destination.section.id)?.deletedAt).toBeUndefined();
     });
 
     test('bumps revision when completing and archiving a task', async () => {

@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { existsSync, readFileSync, realpathSync, statSync } from 'fs';
 import { basename, join } from 'path';
 import {
+    applyTaskProjectReactivationTransition,
     applyTaskUpdates,
     applyProjectLifecycleTransition,
     areSyncPayloadsEqual,
@@ -380,6 +381,12 @@ type CloudEntity = {
 };
 type EntityCollectionKey = 'tasks' | 'projects' | 'sections' | 'areas';
 type EntityItemKey = 'task' | 'project' | 'section' | 'area';
+type WrappedEntityPatchResult<T extends CloudEntity> = {
+    kind: 'entity-patch';
+    entity: T;
+    afterDurableWrite?: () => void;
+};
+type EntityPatchResult<T extends CloudEntity> = T | WrappedEntityPatchResult<T>;
 
 type EntityRouteDefinition<T extends CloudEntity> = {
     path: string;
@@ -395,7 +402,12 @@ type EntityRouteDefinition<T extends CloudEntity> = {
     listItems: (data: AppData, url: URL) => T[] | Response;
     createEntity: (body: Record<string, unknown>, data: AppData, nowIso: string) => T | Response;
     canPatchDeletedEntity?: (body: Record<string, unknown>) => boolean;
-    patchEntity: (body: Record<string, unknown>, existing: T, data: AppData, nowIso: string) => T | Response;
+    patchEntity: (
+        body: Record<string, unknown>,
+        existing: T,
+        data: AppData,
+        nowIso: string,
+    ) => EntityPatchResult<T> | Response;
 };
 
 type EntityRouteContext = {
@@ -434,6 +446,11 @@ type EntityBodyResult =
     | { ok: false; response: Response };
 
 const isResponse = (value: unknown): value is Response => value instanceof Response;
+const isWrappedEntityPatchResult = <T extends CloudEntity>(
+    value: unknown,
+): value is WrappedEntityPatchResult<T> => (
+    isRecord(value) && value.kind === 'entity-patch' && isRecord(value.entity)
+);
 
 const readEntityObjectBody = async (
     req: Request,
@@ -540,8 +557,10 @@ const handleEntityRoute = async <T extends CloudEntity>(
                 return errorResponse('Entity changed; refresh and retry', 412);
             }
             const nowIso = new Date().toISOString();
-            const updated = route.patchEntity(bodyResult.body, collection[idx], data, nowIso);
-            if (isResponse(updated)) return updated;
+            const patchResult = route.patchEntity(bodyResult.body, collection[idx], data, nowIso);
+            if (isResponse(patchResult)) return patchResult;
+            const wrappedPatchResult = isWrappedEntityPatchResult<T>(patchResult);
+            const updated = wrappedPatchResult ? patchResult.entity : patchResult as T;
             collection[idx] = updated;
             const finalized = finalizeCloudDataForWrite(data, nowIso, route.finalizeOptions);
             if ('error' in finalized) return finalized.error;
@@ -549,6 +568,7 @@ const handleEntityRoute = async <T extends CloudEntity>(
             writeCloudData(context.filePath, finalized, {
                 assertStorageRoot: context.assertStorageRoot,
             });
+            if (wrappedPatchResult) patchResult.afterDurableWrite?.();
             const entity = getEntityCollection(finalized, route).find((item) => item.id === entityId);
             return entityJsonResponse(route, entity!);
         });
@@ -709,7 +729,7 @@ const ENTITY_ROUTES: Array<EntityRouteDefinition<any>> = [
             }
             return task;
         },
-        patchEntity: (bodyRecord, existing: Task, data, nowIso): Task | Response => {
+        patchEntity: (bodyRecord, existing: Task, data, nowIso): EntityPatchResult<Task> | Response => {
             const validatedPatch = validateEntityProps('task', 'patch', bodyRecord);
             if (!validatedPatch.ok) {
                 return errorResponse(validatedPatch.error, 400);
@@ -759,7 +779,28 @@ const ENTITY_ROUTES: Array<EntityRouteDefinition<any>> = [
                 nowIso,
             );
             if (nextRecurringTask) data.tasks.push(stampRecurringFollowUp(nextRecurringTask, existing, data.tasks));
-            return updatedTask;
+            const transition = applyTaskProjectReactivationTransition(
+                [{ task: existing, updates: normalizedUpdates }],
+                data.tasks.map((task) => task.id === existing.id ? updatedTask : task),
+                data.projects,
+                data.sections,
+                nowIso,
+                CLOUD_API_REV_BY,
+            );
+            data.tasks = transition.tasks;
+            data.projects = transition.projects;
+            data.sections = transition.sections;
+            return {
+                kind: 'entity-patch',
+                entity: updatedTask,
+                afterDurableWrite: transition.reactivatedProjectIds.length > 0
+                    ? () => logInfo('Cloud task reopened archived project', {
+                        releaseCheck: 'v1.3.0/reopen-project-task',
+                        outcome: 'reactivated',
+                        count: transition.reactivatedProjectIds.length,
+                    })
+                    : undefined,
+            };
         },
     },
     {

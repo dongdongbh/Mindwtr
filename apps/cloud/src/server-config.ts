@@ -41,6 +41,7 @@ export const CLOUD_LOG_MESSAGES = [
     'Capture token created',
     'Capture webhook request accepted',
     'Cloud task Focus write policy applied',
+    'Cloud task reopened archived project',
     'Failed to clone cloud app data cache entry',
     'Failed to start server',
     'MINDWTR_CLOUD_ALLOW_ANY_TOKEN is enabled. Prefer MINDWTR_CLOUD_AUTH_TOKENS for stronger access control.',
