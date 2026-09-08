@@ -249,6 +249,19 @@ export type SyncRunAttachmentHelpers = {
     /** Candidate transports must prove attachment bytes before activation. */
     activationProbe: boolean;
     /**
+     * True only after the first transfer call in the same guarded activation
+     * trial. Transports may preserve already-proven remote presence within
+     * that trial; this must never be carried across separate activations.
+     */
+    activationContinuation?: boolean;
+    /**
+     * Signal that this pass stopped only because its bounded transfer batch was
+     * full while another eligible upload or download remained. Core uses this
+     * during activation to continue the same trial snapshot; rate limits,
+     * backoff and ordinary transfer failures must not call it.
+     */
+    onTransferBatchDeferred?: () => void;
+    /**
      * Which attachment phase this call is running (#1057's check-on-touch content
      * change detection is phase-sensitive — see `contentChangePhase` on
      * `AttachmentTransferLifecycleOptions`). `'prepare'` for the pre-merge pass

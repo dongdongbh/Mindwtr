@@ -1971,8 +1971,10 @@ class MobileSyncRun {
         const baseSyncUrl = getBaseSyncUrl(webdavConfig.url);
         return syncWebdavAttachments(data, webdavConfig, baseSyncUrl, this.requestAbortController.signal, {
           activationProbe: helpers.activationProbe,
+          activationContinuation: helpers.activationContinuation,
           phase: helpers.phase,
           assertRemoteMutationFenceHeld: helpers.assertRemoteMutationFenceHeld,
+          onTransferBatchDeferred: helpers.onTransferBatchDeferred,
           ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
         });
       },

@@ -93,6 +93,16 @@ destination. A key left over from another backend does not satisfy that check.
 An incoming owner deletion keeps normal merge semantics and is excluded from
 attachment proof rather than being re-uploaded.
 
+WebDAV adapters retain their per-call transfer limits during activation. When a
+limit defers a transfer, they explicitly notify the shared machine, which can
+continue on the same trial snapshot only while attachment proof makes progress.
+The initial attachment count bounds the number of batches. A stalled batch,
+local edit, or lost remote fence stops activation; batch completion never
+authorizes publication of a partially proven document. Later calls retain the
+same trial's remote-presence proof rather than rechecking earlier uploads; a
+separate activation always starts with fresh presence reconciliation. Ordinary
+sync calls keep their existing per-run limits. (#1186)
+
 Settings commit the candidate only after the probe succeeds. Desktop disables
 the current backend while it writes and verifies the candidate transport, then
 reactivates the candidate. A failed write restores and verifies the prior

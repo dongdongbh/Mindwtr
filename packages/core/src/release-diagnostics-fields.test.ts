@@ -24,6 +24,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // desktop-reminder-fired / desktop-notification-path (apps/desktop/src/lib/notification-service.tsx)
     'kind', 'entity', 'fireAt', 'path', 'error',
     'deferred', 'ids',
+    // webdav-activation-batches (core activation coordinator)
+    'batches',
     // attachment-only-task-replace (store-settings.ts) / section-conversion-canonical (store-tasks.ts)
     'count',
     // android-http-connect-timeout (apps/mobile/hooks/root-layout/use-root-layout-startup.ts)

@@ -585,10 +585,12 @@ export async function syncWebdavAttachments(
     // from its id and its bytes never change, so the presence pass below can only ever
     // discover a server-side deletion — worth proving daily, not hourly (audit F3). An
     // activation probe is different: it has to prove the candidate backend holds every object
-    // right now (#1119), so it always reconciles and never writes the stamp (the stamp names
-    // the committed configuration, not the candidate one).
+    // right now (#1119). Later batches in the same guarded trial already proved earlier
+    // uploads, so do not re-HEAD those objects. A new activation still reconciles and
+    // never writes the stamp (the stamp names the committed configuration).
     const reconcilePresence = helpers?.activationProbe === true
-        || isAttachmentPresenceReconciliationDue(deps.presenceScope);
+        ? helpers.activationContinuation !== true
+        : isAttachmentPresenceReconciliationDue(deps.presenceScope);
     deps.logSyncInfo('WebDAV attachment sync start', {
         count: String(attachmentsById.size),
         presence: reconcilePresence ? 'reconcile' : 'skipped',
@@ -723,6 +725,7 @@ export async function syncWebdavAttachments(
                 });
                 uploadLimitLogged = true;
             }
+            helpers?.onTransferBatchDeferred?.();
             return false;
         }
         uploadCount += 1;
@@ -738,6 +741,7 @@ export async function syncWebdavAttachments(
                 });
                 downloadLimitLogged = true;
             }
+            helpers?.onTransferBatchDeferred?.();
             return false;
         }
         downloadCount += 1;

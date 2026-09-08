@@ -754,6 +754,66 @@ describe('mobile sync-service runtime', () => {
     });
   });
 
+  it('forwards WebDAV batch deferrals through candidate activation without publishing a partial document (#1186)', async () => {
+    const stamp = '2026-09-08T00:00:00.000Z';
+    const localData: AppData = {
+      ...emptyData,
+      tasks: [{
+        id: 'batch-owner', title: 'Task', status: 'inbox', tags: [], contexts: [], createdAt: stamp, updatedAt: stamp,
+        attachments: Array.from({ length: 11 }, (_, index) => ({
+          id: `batch-${index}`, kind: 'file', title: 'photo.jpg',
+          uri: `file://document/attachments/batch-${index}.jpg`, localStatus: 'available',
+          createdAt: stamp, updatedAt: stamp,
+        })),
+      }],
+    };
+    storageMocks.getData.mockResolvedValue(localData);
+    coreMocks.getInMemoryAppDataSnapshot.mockReturnValue(localData);
+    coreMocks.webdavGetJson.mockResolvedValue(null);
+    const uploaded: string[] = [];
+    attachmentSyncMocks.syncWebdavAttachments.mockImplementation(async (
+      data: AppData, _config: unknown, _base: unknown, _signal: unknown,
+      options: { activationProbe?: boolean; activationContinuation?: boolean; onTransferBatchDeferred?: () => void },
+    ) => {
+      expect(options.activationProbe).toBe(true);
+      expect(options.activationContinuation === true).toBe(uploaded.length > 0);
+      expect(options.onTransferBatchDeferred).toEqual(expect.any(Function));
+      expect(coreMocks.webdavPutJson).not.toHaveBeenCalled();
+      let count = 0;
+      return {
+        ...data,
+        tasks: data.tasks.map((task) => ({
+          ...task,
+          attachments: task.attachments?.map((attachment) => {
+            if (attachment.cloudKey) return attachment;
+            if (count >= 10) {
+              options.onTransferBatchDeferred?.();
+              return attachment;
+            }
+            count += 1;
+            uploaded.push(attachment.id);
+            return { ...attachment, cloudKey: `attachments/${attachment.id}.jpg`, localStatus: 'available' as const };
+          }),
+        })),
+      };
+    });
+    const result = await syncServiceModule.performMobileSync(undefined, {
+      activationProbe: true, manual: true,
+      configOverride: { backend: 'webdav', webdav: {
+        url: 'https://candidate.example.com/data.json', username: 'candidate', password: 'secret', allowInsecureHttp: false,
+      } },
+    });
+    expect(result).toMatchObject({ success: true });
+    expect(attachmentSyncMocks.syncWebdavAttachments).toHaveBeenCalledTimes(2);
+    expect(uploaded).toHaveLength(11);
+    expect(new Set(uploaded).size).toBe(11);
+    expect(coreMocks.webdavPutJson).toHaveBeenCalledTimes(1);
+    const published = coreMocks.webdavPutJson.mock.calls[0][1] as AppData;
+    expect(published.tasks[0].attachments).toHaveLength(11);
+    expect(published.tasks[0].attachments?.every((attachment) => Boolean(attachment.cloudKey) && !attachment.deletedAt)).toBe(true);
+    expect(localData.tasks[0].attachments?.every((attachment) => !attachment.cloudKey)).toBe(true);
+  });
+
   it('probes a candidate transport despite stale global no-key state', async () => {
     asyncStorageMocks.getItem.mockImplementation(async (key: string) => (
       key === SYNC_ENCRYPTION_STATE_KEY

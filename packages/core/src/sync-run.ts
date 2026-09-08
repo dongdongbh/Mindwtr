@@ -364,6 +364,7 @@ const prepareActivationAttachmentSnapshot = (
 const prepareActivationFallbackRetry = (
     data: AppData,
     localFallbacks: ReadonlyMap<string, Attachment>,
+    consumedFallbackIds: Set<string> = new Set<string>(),
 ): { data: AppData; count: number } => {
     if (localFallbacks.size === 0) return { data, count: 0 };
     const retryData = cloneAppData(data);
@@ -372,6 +373,7 @@ const prepareActivationFallbackRetry = (
         if (owner.deletedAt) continue;
         for (const attachment of owner.attachments ?? []) {
             if (attachment.kind !== 'file' || !attachment.deletedAt) continue;
+            if (consumedFallbackIds.has(attachment.id)) continue;
             const fallback = localFallbacks.get(attachment.id);
             if (!fallback) continue;
             // The adapter exposes both remote 404 and local-read failure as an
@@ -379,6 +381,7 @@ const prepareActivationFallbackRetry = (
             // give the adapter one bounded upload attempt; final proof below
             // rejects any tombstone that survives this retry.
             Object.assign(attachment, fallback);
+            consumedFallbackIds.add(attachment.id);
             count += 1;
         }
     }
@@ -418,6 +421,78 @@ const describeUnprovenAttachment = (
     return `Candidate attachment proof failed for ${attachment.id} ("${name}"${where}): ${reason}`;
 };
 
+type ActivationAttachmentProof = 'proven' | 'deferred' | 'unproven';
+
+const classifyActivationAttachmentProof = (
+    ownerDeleted: boolean,
+    attachment: Attachment,
+    metadataOnlyIds: ReadonlySet<string>,
+    noLocalBytesIds: ReadonlySet<string>,
+    backend: SyncBackend,
+): ActivationAttachmentProof => {
+    // Adapters expose a terminal remote 404 and a local-read failure as the
+    // same untyped tombstone. Without local bytes there is nothing to misread,
+    // so the tombstone is the convergent remote outcome (#1119). A local-copy
+    // tombstone stays unproven and gets at most one exact fallback below.
+    if (ownerDeleted || Boolean(attachment.deletedAt)) {
+        return noLocalBytesIds.has(attachment.id) ? 'proven' : 'unproven';
+    }
+    // A metadata-only record with no bytes anywhere converges to this shape on
+    // an established device too; accepting it cannot strand a recoverable blob.
+    if (
+        metadataOnlyIds.has(attachment.id)
+        && !attachment.cloudKey
+        && attachment.localStatus === 'missing'
+        && attachment.pendingContentUpload !== true
+    ) {
+        return 'proven';
+    }
+    if (
+        backend === 'file'
+        && noLocalBytesIds.has(attachment.id)
+        && attachment.cloudKey
+        && attachment.localStatus === 'missing'
+        && attachment.pendingContentUpload !== true
+    ) {
+        return 'deferred';
+    }
+    return attachment.cloudKey
+        && attachment.localStatus === 'available'
+        && attachment.pendingContentUpload !== true
+        ? 'proven'
+        : 'unproven';
+};
+
+/** Count only states the final activation assertion accepts as proved. This is
+ * intentionally insensitive to unrelated attachment metadata churn. */
+const countActivationAttachmentProofs = (
+    data: AppData,
+    expectedIds: ReadonlySet<string>,
+    metadataOnlyIds: ReadonlySet<string>,
+    noLocalBytesIds: ReadonlySet<string>,
+    backend: SyncBackend,
+): number => {
+    const proven = new Set<string>();
+    for (const owner of [...data.tasks, ...data.projects]) {
+        for (const attachment of owner.attachments ?? []) {
+            if (
+                attachment.kind === 'file'
+                && expectedIds.has(attachment.id)
+                && classifyActivationAttachmentProof(
+                    Boolean(owner.deletedAt),
+                    attachment,
+                    metadataOnlyIds,
+                    noLocalBytesIds,
+                    backend,
+                ) === 'proven'
+            ) {
+                proven.add(attachment.id);
+            }
+        }
+    }
+    return proven.size;
+};
+
 const assertActivationAttachmentsProven = (
     data: AppData,
     expectedIds: ReadonlySet<string>,
@@ -435,32 +510,19 @@ const assertActivationAttachmentsProven = (
     for (const [ownerType, owner] of owners) {
         for (const attachment of owner.attachments ?? []) {
             if (attachment.kind !== 'file') continue;
-            if (owner.deletedAt || attachment.deletedAt) {
-                if (expectedIds.has(attachment.id)) {
-                    // Adapters expose a terminal remote 404 and a local-read failure
-                    // as the same untyped tombstone. Without local bytes there is
-                    // nothing to misread, so the tombstone can only be the remote
-                    // outcome every established device converges to (#1119). With
-                    // local bytes involved it stays a refusal (the exact-copy retry
-                    // above already had its one attempt).
-                    if (!noLocalBytesIds.has(attachment.id)) {
-                        throw new Error(describeUnprovenAttachment(ownerType, owner, attachment, backend, originalCloudKeys.get(attachment.id)));
-                    }
-                    resolved.add(attachment.id);
-                }
+            // Pre-existing tombstones were never part of the live activation
+            // snapshot and must not become a new activation refusal.
+            if ((owner.deletedAt || attachment.deletedAt) && !expectedIds.has(attachment.id)) {
                 continue;
             }
-            // Metadata-only record that the trial could not turn into bytes either:
-            // nothing this device does can prove it, and the switch cannot strand it
-            // further. sanitizeAppDataForRemote tombstones exactly this shape at every
-            // write, so activation reaches the same outcome an established device
-            // would instead of refusing forever.
-            if (
-                metadataOnlyIds.has(attachment.id)
-                && !attachment.cloudKey
-                && attachment.localStatus === 'missing'
-                && attachment.pendingContentUpload !== true
-            ) {
+            const proof = classifyActivationAttachmentProof(
+                Boolean(owner.deletedAt),
+                attachment,
+                metadataOnlyIds,
+                noLocalBytesIds,
+                backend,
+            );
+            if (proof === 'proven') {
                 if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
                 continue;
             }
@@ -470,25 +532,12 @@ const assertActivationAttachmentsProven = (
             // the key, leave the record missing for a later cycle to download,
             // instead of refusing the folder forever (a fresh desktop joining a
             // folder whose attachments/ had not arrived, 2026-09-04 feedback).
-            if (
-                backend === 'file'
-                && noLocalBytesIds.has(attachment.id)
-                && attachment.cloudKey
-                && attachment.localStatus === 'missing'
-                && attachment.pendingContentUpload !== true
-            ) {
+            if (proof === 'deferred') {
                 deferred.push(attachment.id);
                 if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
                 continue;
             }
-            if (
-                !attachment.cloudKey
-                || attachment.localStatus !== 'available'
-                || attachment.pendingContentUpload === true
-            ) {
-                throw new Error(describeUnprovenAttachment(ownerType, owner, attachment, backend, originalCloudKeys.get(attachment.id)));
-            }
-            if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
+            throw new Error(describeUnprovenAttachment(ownerType, owner, attachment, backend, originalCloudKeys.get(attachment.id)));
         }
     }
     // An expected attachment that vanished without a tombstone is a silent drop
@@ -733,7 +782,11 @@ class SharedSyncRunMachine {
         this.hooks.requestFollowUp();
     }
 
-    private attachmentHelpers(phase: SyncRunAttachmentPhase) {
+    private attachmentHelpers(
+        phase: SyncRunAttachmentPhase,
+        onTransferBatchDeferred?: () => void,
+        activationContinuation = false,
+    ) {
         return {
             ensureLocalSnapshotFresh: () => this.ensureLocalSnapshotFresh(),
             // Acquire-on-first-use, not acquire-on-entry. Every attachment
@@ -746,6 +799,8 @@ class SharedSyncRunMachine {
                 this.acquireAndAssertRemoteMutationFence(minRemainingMs)
             ),
             activationProbe: this.options.activationProbe === true,
+            ...(activationContinuation ? { activationContinuation: true } : {}),
+            onTransferBatchDeferred,
             phase,
         };
     }
@@ -1435,34 +1490,91 @@ class SharedSyncRunMachine {
             if (!io.syncAttachments) {
                 throw new Error('Candidate backend cannot prove attachments');
             }
+            const syncAttachments = io.syncAttachments;
             this.setStep('attachments_finalize');
             await this.yieldToUi();
             if (isRemoteSyncBackend(this.backend)) {
                 await this.ensureNetwork();
             }
             await this.ensureRemoteMutationFence();
-            let result = await io.syncAttachments(
-                activationSnapshot.data,
-                this.attachmentHelpers('post-merge'),
+            let provenData = activationSnapshot.data;
+            let result: AppData | boolean | null | undefined;
+            let transferCalls = 0;
+            let usedBatchContinuation = false;
+            let fallbackRetries = 0;
+            const consumedFallbackIds = new Set<string>();
+            const countProofs = (candidate: AppData) => countActivationAttachmentProofs(
+                candidate,
+                activationSnapshot.expectedIds,
+                activationSnapshot.metadataOnlyIds,
+                activationSnapshot.noLocalBytesIds,
+                this.backend,
             );
-            await this.assertRemoteMutationFenceHeld();
-            let provenData = result && typeof result === 'object'
-                ? result
-                : activationSnapshot.data;
-            this.ensureLocalSnapshotFresh();
-            const fallbackRetry = prepareActivationFallbackRetry(
-                provenData,
-                activationSnapshot.localFallbacks,
-            );
-            if (fallbackRetry.count > 0) {
-                result = await io.syncAttachments(
-                    fallbackRetry.data,
-                    this.attachmentHelpers('post-merge'),
+            const runTransferPass = async (candidate: AppData) => {
+                const activationContinuation = transferCalls > 0;
+                // The first pass follows the activation phase's yield/network
+                // checks above. Every later primary or exact-fallback pass gets
+                // the same cooperative and connectivity boundary.
+                if (transferCalls > 0) {
+                    await this.yieldToUi();
+                    if (isRemoteSyncBackend(this.backend)) {
+                        await this.ensureNetwork();
+                    }
+                    // An edit or lost lease during the cooperative/network gap
+                    // must abort before admitting another transfer pass.
+                    this.ensureLocalSnapshotFresh();
+                    await this.assertRemoteMutationFenceHeld();
+                }
+                let transferBatchDeferred = false;
+                result = await syncAttachments(
+                    candidate,
+                    this.attachmentHelpers('post-merge', () => {
+                        transferBatchDeferred = true;
+                    }, activationContinuation),
                 );
+                transferCalls += 1;
                 await this.assertRemoteMutationFenceHeld();
-                provenData = result && typeof result === 'object'
+                const nextData = result && typeof result === 'object'
                     ? result
-                    : fallbackRetry.data;
+                    : candidate;
+                this.ensureLocalSnapshotFresh();
+                return { data: nextData, deferred: transferBatchDeferred };
+            };
+
+            // A primary pass can discover candidate 404s before producing any
+            // positive proof. Apply each newly failed exact local fallback once
+            // inside that round, then measure their combined proof progress.
+            for (let primaryRounds = 0; primaryRounds < activationSnapshot.count; primaryRounds += 1) {
+                const provenBeforeRound = countProofs(provenData);
+                const primary = await runTransferPass(provenData);
+                provenData = primary.data;
+
+                const fallbackRetry = prepareActivationFallbackRetry(
+                    provenData,
+                    activationSnapshot.localFallbacks,
+                    consumedFallbackIds,
+                );
+                fallbackRetries += fallbackRetry.count;
+                if (fallbackRetry.count > 0) {
+                    provenData = fallbackRetry.data;
+                    let fallbackProven = countProofs(provenData);
+                    // The restored set is fixed for this round. Each continued
+                    // pass must prove another member, so this count is a finite
+                    // ceiling; cap-skipped files stay in the evolving snapshot.
+                    for (let fallbackBatches = 0; fallbackBatches < fallbackRetry.count; fallbackBatches += 1) {
+                        const fallback = await runTransferPass(provenData);
+                        provenData = fallback.data;
+                        const nextFallbackProven = countProofs(provenData);
+                        const madeFallbackProgress = nextFallbackProven > fallbackProven;
+                        fallbackProven = nextFallbackProven;
+                        if (!fallback.deferred || !madeFallbackProgress) break;
+                        usedBatchContinuation = true;
+                    }
+                }
+
+                const madeRoundProgress = countProofs(provenData) > provenBeforeRound;
+                if (!primary.deferred || !madeRoundProgress) break;
+                usedBatchContinuation = true;
             }
             const deferredIds = assertActivationAttachmentsProven(
                 provenData,
@@ -1472,6 +1584,17 @@ class SharedSyncRunMachine {
                 this.backend,
                 activationSnapshot.originalCloudKeys,
             );
+            if (usedBatchContinuation) {
+                this.notifier.logInfo(
+                    'Sync activation proved attachments across transfer batches',
+                    {
+                        releaseCheck: 'v1.3.0/webdav-activation-batches',
+                        backend: this.backend,
+                        total: String(activationSnapshot.count),
+                        batches: String(transferCalls),
+                    },
+                );
+            }
             if (deferredIds.length > 0) {
                 this.notifier.logWarningExtra(
                     'Sync folder activation accepted attachments the folder does not hold yet',
@@ -1489,7 +1612,7 @@ class SharedSyncRunMachine {
                 data: provenData,
                 extra: {
                     mutated: String(result === true || Boolean(result && typeof result === 'object')),
-                    fallbackRetries: String(fallbackRetry.count),
+                    fallbackRetries: String(fallbackRetries),
                 },
             });
             return provenData;

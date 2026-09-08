@@ -6,6 +6,7 @@ import type {
     SyncRunNotifier,
     SyncRunPlatformHooks,
     SyncRunPolicy,
+    SyncRunAttachmentHelpers,
     SyncRunStorage,
     SyncRunStoreBridge,
     SyncStatusUpdates,
@@ -661,6 +662,384 @@ describe('runSharedSyncCycle', () => {
         }), expect.any(Function));
         expect(harness.persisted.tasks[0]?.attachments?.[0]?.cloudKey).toBe('cloudkit:a');
         expect(storage.persistLocal).not.toHaveBeenCalled();
+    });
+
+    it('continues a capped activation transfer until all 11 local attachments are proved (#1186)', async () => {
+        const localTask = createTask('t-capped-activation', 'Capped activation');
+        localTask.attachments = Array.from({ length: 11 }, (_, index) => ({
+            id: `attachment-capped-${index}`,
+            kind: 'file' as const,
+            title: `Attachment ${index}`,
+            uri: `/local/attachment-${index}.txt`,
+            localStatus: 'available' as const,
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }));
+        const continuationFlags: Array<boolean | undefined> = [];
+        const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+            continuationFlags.push(helpers.activationContinuation);
+            let transferred = 0;
+            for (const attachment of data.tasks[0]?.attachments ?? []) {
+                if (attachment.cloudKey) continue;
+                if (transferred >= 10) {
+                    helpers.onTransferBatchDeferred?.();
+                    continue;
+                }
+                attachment.cloudKey = `attachments/${attachment.id}.txt`;
+                attachment.localStatus = 'available';
+                transferred += 1;
+            }
+            return data;
+        });
+        const { harness, io, run } = createHarness({
+            local: createData([localTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: true });
+        expect(syncAttachments).toHaveBeenCalledTimes(2);
+        expect(continuationFlags).toEqual([undefined, true]);
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
+        expect(harness.remote?.tasks[0]?.attachments).toHaveLength(11);
+        expect(harness.remote?.tasks[0]?.attachments?.every((attachment) => attachment.cloudKey)).toBe(true);
+    });
+
+    it('proves 100 mixed task and project attachments before the single activation document write (#1186)', async () => {
+        const makeAttachments = (count: number, prefix: string) => Array.from({ length: count }, (_, index) => ({
+            id: `${prefix}-${index}`,
+            kind: 'file' as const,
+            title: `${prefix} ${index}`,
+            uri: `/local/${prefix}-${index}.txt`,
+            localStatus: 'available' as const,
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }));
+        const task = createTask('t-hundred-attachments', 'Task attachments');
+        task.attachments = makeAttachments(60, 'task-attachment');
+        const local = createData([task]);
+        local.projects = [{
+            id: 'p-hundred-attachments',
+            title: 'Project attachments',
+            status: 'active',
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            attachments: makeAttachments(40, 'project-attachment'),
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        } satisfies Project];
+        const continuationFlags: Array<boolean | undefined> = [];
+        const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+            continuationFlags.push(helpers.activationContinuation);
+            const pending = [...data.tasks, ...data.projects]
+                .flatMap((owner) => owner.attachments ?? [])
+                .filter((attachment) => (
+                    attachment.kind === 'file'
+                    && !attachment.deletedAt
+                    && (!attachment.cloudKey || attachment.localStatus !== 'available')
+                ));
+            for (const attachment of pending.slice(0, 10)) {
+                attachment.cloudKey = `attachments/${attachment.id}.txt`;
+                attachment.localStatus = 'available';
+            }
+            if (pending.length > 10) helpers.onTransferBatchDeferred?.();
+            return data;
+        });
+        const { harness, io, run } = createHarness({
+            local,
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: true });
+        expect(syncAttachments).toHaveBeenCalledTimes(10);
+        expect(continuationFlags[0]).toBeUndefined();
+        expect(continuationFlags.slice(1).every((flag) => flag === true)).toBe(true);
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
+        const written = vi.mocked(io.writeRemote).mock.calls[0]?.[0];
+        const writtenAttachments = [...(written?.tasks ?? []), ...(written?.projects ?? [])]
+            .flatMap((owner) => owner.attachments ?? []);
+        expect(writtenAttachments).toHaveLength(100);
+        expect(writtenAttachments.every((attachment) => attachment.cloudKey)).toBe(true);
+        expect(harness.infos).toContainEqual({
+            message: 'Sync activation proved attachments across transfer batches',
+            extra: {
+                releaseCheck: 'v1.3.0/webdav-activation-batches',
+                backend: 'cloud',
+                total: '100',
+                batches: '10',
+            },
+        });
+    });
+
+    it('does not continue when a cap signal is accompanied only by metadata churn (#1186)', async () => {
+        const task = createTask('t-no-proof-progress', 'No proof progress');
+        task.attachments = Array.from({ length: 11 }, (_, index) => ({
+            id: `attachment-no-progress-${index}`,
+            kind: 'file' as const,
+            title: `Attachment ${index}`,
+            uri: `/local/no-progress-${index}.txt`,
+            localStatus: 'available' as const,
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }));
+        const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            if (attachment) attachment.updatedAt = '2026-07-02T00:00:00.000Z';
+            helpers.onTransferBatchDeferred?.();
+            return data;
+        });
+        const { harness, io, run } = createHarness({
+            local: createData([task]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: false });
+        expect(syncAttachments).toHaveBeenCalledTimes(1);
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(harness.infos.some((entry) => (
+            entry.extra?.releaseCheck === 'v1.3.0/webdav-activation-batches'
+        ))).toBe(false);
+    });
+
+    it('keeps ordinary non-activation attachment finalization single-pass (#1186)', async () => {
+        const task = createTask('t-established-sync', 'Established sync');
+        task.attachments = [{
+            id: 'attachment-established-sync',
+            kind: 'file',
+            title: 'Established attachment',
+            uri: '/local/established.txt',
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+            expect(helpers.activationProbe).toBe(false);
+            expect(helpers.activationContinuation).toBeUndefined();
+            expect(helpers.onTransferBatchDeferred).toBeUndefined();
+            const attachment = data.tasks[0]?.attachments?.[0];
+            if (attachment) {
+                attachment.cloudKey = 'attachments/established.txt';
+                attachment.localStatus = 'available';
+            }
+            return data;
+        });
+        const { run } = createHarness({
+            local: createData([task]),
+            io: { syncAttachments },
+            hooks: { shouldRunAttachmentPhase: vi.fn(async () => false) },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: true });
+        expect(syncAttachments).toHaveBeenCalledTimes(1);
+    });
+
+    it('requeues without another batch or document write when local data changes after a capped pass (#1186)', async () => {
+        const task = createTask('t-batch-local-edit', 'Batch local edit');
+        task.attachments = Array.from({ length: 11 }, (_, index) => ({
+            id: `attachment-local-edit-${index}`,
+            kind: 'file' as const,
+            title: `Attachment ${index}`,
+            uri: `/local/edit-${index}.txt`,
+            localStatus: 'available' as const,
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }));
+        const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+            for (const attachment of (data.tasks[0]?.attachments ?? []).slice(0, 10)) {
+                attachment.cloudKey = `attachments/${attachment.id}.txt`;
+                attachment.localStatus = 'available';
+            }
+            helpers.onTransferBatchDeferred?.();
+            return data;
+        });
+        const bundle = createHarness({
+            local: createData([task]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+        let editedDuringBatchYield = false;
+        bundle.notifier.yieldToUi = vi.fn(async () => {
+            if (syncAttachments.mock.calls.length !== 1 || editedDuringBatchYield) return;
+            editedDuringBatchYield = true;
+            bundle.harness.lastDataChangeAt += 1;
+        });
+
+        const result = await bundle.run();
+
+        expect(result).toMatchObject({ success: true, skipped: 'requeued' });
+        expect(bundle.io.syncAttachments).toHaveBeenCalledTimes(1);
+        expect(bundle.io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('fails closed before another batch or document write when the mutation fence is lost (#1186)', async () => {
+        const task = createTask('t-batch-fence-loss', 'Batch fence loss');
+        task.attachments = Array.from({ length: 11 }, (_, index) => ({
+            id: `attachment-fence-loss-${index}`,
+            kind: 'file' as const,
+            title: `Attachment ${index}`,
+            uri: `/local/fence-${index}.txt`,
+            localStatus: 'available' as const,
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }));
+        const lease = createFenceLease({
+            assertHeld: vi.fn(async () => {
+                if (vi.mocked(lease.assertHeld).mock.calls.length >= 2) {
+                    throw new SyncRemoteMutationFenceLostError();
+                }
+            }),
+        });
+        const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+            for (const attachment of (data.tasks[0]?.attachments ?? []).slice(0, 10)) {
+                attachment.cloudKey = `attachments/${attachment.id}.txt`;
+                attachment.localStatus = 'available';
+            }
+            helpers.onTransferBatchDeferred?.();
+            return data;
+        });
+        const { io, run } = createHarness({
+            local: createData([task]),
+            activationProbe: true,
+            io: {
+                acquireRemoteMutationFence: vi.fn(async () => lease),
+                syncAttachments,
+            },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: false });
+        expect(syncAttachments).toHaveBeenCalledTimes(1);
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('drains capped candidate downloads while giving each exact local fallback one attempt (#1186)', async () => {
+        const hash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        const localTask = createTask('t-capped-fallbacks', 'Capped fallbacks');
+        localTask.attachments = Array.from({ length: 25 }, (_, index) => ({
+            id: `attachment-fallback-${index}`,
+            kind: 'file' as const,
+            title: `Attachment ${index}`,
+            uri: `/managed/fallback-${index}.txt`,
+            cloudKey: `cloudkit:previous-${index}`,
+            fileHash: hash,
+            contentRev: 1,
+            localStatus: 'available' as const,
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }));
+        const remoteTask = cloneAppData(createData([localTask])).tasks[0]!;
+        for (const attachment of remoteTask.attachments ?? []) {
+            attachment.uri = '';
+            attachment.cloudKey = `attachments/candidate-${attachment.id}.txt`;
+            attachment.localStatus = 'missing';
+        }
+        const fallbackAttempts = new Map<string, number>();
+        const continuationFlags: Array<boolean | undefined> = [];
+        const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+            continuationFlags.push(helpers.activationContinuation);
+            const attachments = data.tasks[0]?.attachments ?? [];
+            const fallbacks = attachments.filter((attachment) => (
+                !attachment.deletedAt
+                && attachment.pendingContentUpload === true
+                && !attachment.cloudKey
+            ));
+            if (fallbacks.length > 0) {
+                for (const attachment of fallbacks.slice(0, 10)) {
+                    fallbackAttempts.set(attachment.id, (fallbackAttempts.get(attachment.id) ?? 0) + 1);
+                    attachment.cloudKey = `attachments/recovered-${attachment.id}.txt`;
+                    attachment.localStatus = 'available';
+                    attachment.pendingContentUpload = undefined;
+                }
+                if (fallbacks.length > 10) helpers.onTransferBatchDeferred?.();
+                return data;
+            }
+            const downloads = attachments.filter((attachment) => (
+                !attachment.deletedAt
+                && attachment.localStatus === 'missing'
+                && Boolean(attachment.cloudKey)
+            ));
+            for (const attachment of downloads.slice(0, 10)) {
+                attachment.cloudKey = undefined;
+                attachment.fileHash = undefined;
+                attachment.localStatus = 'missing';
+                attachment.deletedAt = '2026-07-02T00:00:00.000Z';
+                attachment.updatedAt = '2026-07-02T00:00:00.000Z';
+            }
+            if (downloads.length > 10) helpers.onTransferBatchDeferred?.();
+            return data;
+        });
+        const { io, run } = createHarness({
+            local: createData([localTask]),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: true });
+        expect(syncAttachments).toHaveBeenCalledTimes(6);
+        expect(continuationFlags[0]).toBeUndefined();
+        expect(continuationFlags.slice(1).every((flag) => flag === true)).toBe(true);
+        expect(fallbackAttempts.size).toBe(25);
+        expect([...fallbackAttempts.values()].every((attempts) => attempts === 1)).toBe(true);
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
+        const written = vi.mocked(io.writeRemote).mock.calls[0]?.[0];
+        expect(written?.tasks[0]?.attachments?.every((attachment) => (
+            attachment.cloudKey?.startsWith('attachments/recovered-')
+        ))).toBe(true);
+    });
+
+    it('ignores pre-existing attachment tombstones outside the live activation proof set', async () => {
+        const task = createTask('t-existing-tombstone', 'Existing tombstone');
+        task.attachments = [{
+            id: 'attachment-live-next-to-tombstone',
+            kind: 'file',
+            title: 'Live',
+            uri: '/local/live.txt',
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }, {
+            id: 'attachment-pre-existing-tombstone',
+            kind: 'file',
+            title: 'Deleted earlier',
+            uri: '',
+            localStatus: 'missing',
+            deletedAt: '2026-07-02T00:00:00.000Z',
+            createdAt: STAMP,
+            updatedAt: '2026-07-02T00:00:00.000Z',
+        }];
+        const syncAttachments = vi.fn(async (data: AppData) => {
+            const live = data.tasks[0]?.attachments?.find((attachment) => attachment.id === 'attachment-live-next-to-tombstone');
+            if (live) {
+                live.cloudKey = 'attachments/live.txt';
+                live.localStatus = 'available';
+            }
+            return data;
+        });
+        const { io, run } = createHarness({
+            local: createData([task]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: true });
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
     });
 
     it('uploads an exact local fallback when the candidate attachment blob returns 404', async () => {

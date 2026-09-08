@@ -1197,9 +1197,9 @@ describe('attachment sync', () => {
       );
     });
 
-    it.each([429, 503])(
-      '(b4) keeps the proof unstamped and stops later transfers after a HEAD %s',
-      async (status) => {
+    it.each([[429, false], [503, false], [429, true], [503, true]] as const)(
+      '(b4) keeps the proof unstamped and stops later transfers after a HEAD %s (activation=%s)',
+      async (status, activationProbe) => {
         const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
         const appLog = await import('./app-log');
         const core = await import('@mindwtr/core');
@@ -1220,8 +1220,12 @@ describe('attachment sync', () => {
           Object.assign(new Error(`WebDAV HEAD failed (${status})`), { status }),
         );
 
-        await attachmentSync.syncWebdavAttachments(appData, WEBDAV_CONFIG, WEBDAV_BASE);
+        const onTransferBatchDeferred = vi.fn();
+        await attachmentSync.syncWebdavAttachments(appData, WEBDAV_CONFIG, WEBDAV_BASE, undefined, {
+          activationProbe, onTransferBatchDeferred,
+        });
 
+        expect(onTransferBatchDeferred).not.toHaveBeenCalled();
         expect(core.webdavMakeDirectory).not.toHaveBeenCalled();
         expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
         expect(fileSystemMock.uploadAsync).not.toHaveBeenCalled();
@@ -2060,6 +2064,74 @@ describe('attachment sync', () => {
       message: 'File attachment sync cancelled',
     });
     expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
+  });
+
+  it.each([[false, 11], [true, 11], [true, 100]] as const)('reports capped WebDAV upload batches without reuploading completed files (activation=%s, files=%s)', async (activationProbe, attachmentCount) => {
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => { now += 1_000; return now; });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3, modificationTime: 1 });
+    fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
+    const core = await import('@mindwtr/core');
+    vi.mocked(core.webdavPutFileVersioned).mockResolvedValue(undefined);
+    vi.mocked(core.webdavFileExists).mockResolvedValue(true);
+    const appData: AppData = {
+      tasks: Array.from({ length: attachmentCount }, (_, index) => ({
+        id: `batch-task-${index}`, title: 'Task', status: 'inbox',
+        tags: [], contexts: [], createdAt: '2026-09-08T00:00:00.000Z', updatedAt: '2026-09-08T00:00:00.000Z',
+        attachments: [{
+          id: `batch-file-${index}`, kind: 'file', title: 'photo.jpg',
+          uri: `file://document/attachments/batch-file-${index}.jpg`, localStatus: 'available',
+          createdAt: '2026-09-08T00:00:00.000Z', updatedAt: '2026-09-08T00:00:00.000Z',
+        }],
+      })),
+      projects: [], sections: [], areas: [], settings: {},
+    };
+    const onTransferBatchDeferred = vi.fn();
+    const options = { activationProbe, phase: 'post-merge' as const, onTransferBatchDeferred };
+    const config = { url: 'https://example.com/data.json', username: 'u', password: 'p' };
+    const first = syncResult(await attachmentSync.syncWebdavAttachments(appData, config, 'https://example.com', undefined, options), appData).data;
+    expect(first.tasks.filter((task) => task.attachments?.[0]?.cloudKey)).toHaveLength(10);
+    expect(core.webdavPutFileVersioned).toHaveBeenCalledTimes(10);
+    expect(onTransferBatchDeferred).toHaveBeenCalled();
+    if (activationProbe) {
+      let completed = first;
+      for (let batch = 1; batch < Math.ceil(attachmentCount / 10); batch += 1) {
+        onTransferBatchDeferred.mockClear();
+        completed = syncResult(await attachmentSync.syncWebdavAttachments(completed, config, 'https://example.com', undefined,
+          { ...options, activationContinuation: true }), completed).data;
+      }
+      expect(completed.tasks.filter((task) => task.attachments?.[0]?.cloudKey)).toHaveLength(attachmentCount);
+      expect(core.webdavPutFileVersioned).toHaveBeenCalledTimes(attachmentCount);
+      expect(core.webdavHeadFile).toHaveBeenCalledTimes(attachmentCount);
+      expect(core.webdavFileExists).not.toHaveBeenCalled();
+      expect(onTransferBatchDeferred).not.toHaveBeenCalled();
+      expect(appData.tasks.every((task) => !task.attachments?.[0]?.cloudKey)).toBe(true);
+      await attachmentSync.syncWebdavAttachments(completed, config, 'https://example.com', undefined, options);
+      expect(core.webdavFileExists).toHaveBeenCalledTimes(attachmentCount);
+    }
+  });
+
+  it('reports an activation download batch limit without declaring the remaining file available', async () => {
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => { now += 1_000; return now; });
+    const bytes = new Uint8Array([1, 2, 3]);
+    mockMissingTargetWithDownloadStage(bytes);
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
+    const core = await import('@mindwtr/core');
+    vi.mocked(core.webdavGetFile).mockResolvedValue(bytes.buffer);
+    const data = singleAttachmentData({ id: 'download-template' });
+    data.tasks[0].attachments = Array.from({ length: 11 }, (_, index) => ({
+      ...data.tasks[0].attachments![0], id: `download-batch-${index}`, uri: '',
+      cloudKey: `attachments/download-batch-${index}.txt`,
+    }));
+    const onTransferBatchDeferred = vi.fn();
+    const result = syncResult(await attachmentSync.syncWebdavAttachments(data,
+      { url: 'https://example.com/data.json', username: 'u', password: 'p' }, 'https://example.com', undefined,
+      { activationProbe: true, onTransferBatchDeferred }), data).data;
+    expect(core.webdavGetFile).toHaveBeenCalledTimes(10);
+    expect(result.tasks[0].attachments?.filter((attachment) => attachment.localStatus === 'available')).toHaveLength(10);
+    expect(result.tasks[0].attachments?.[10]).toMatchObject({ localStatus: 'missing', uri: '' });
+    expect(onTransferBatchDeferred).toHaveBeenCalled();
   });
 
   it('passes abort signals through WebDAV attachment transfers', async () => {

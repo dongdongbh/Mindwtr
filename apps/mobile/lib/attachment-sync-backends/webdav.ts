@@ -81,10 +81,12 @@ export const syncWebdavAttachments = async (
   signal?: AbortSignal,
   options: {
     activationProbe?: boolean;
+    activationContinuation?: boolean;
     phase?: 'prepare' | 'post-merge';
     /** #1056: seal bytes before upload / open them after download. Null = encryption off. */
     material?: SyncKeyMaterial | null;
     assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
+    onTransferBatchDeferred?: () => void;
   } = {}
 ): Promise<AppData | false> => {
   assertAttachmentSyncNotAborted(signal);
@@ -149,9 +151,11 @@ export const syncWebdavAttachments = async (
   // from its id and its bytes never change, so the presence pass below can only ever
   // discover a server-side deletion — worth proving daily, not hourly (audit F3). An
   // activation probe is different: it has to prove the candidate backend holds every object
-  // right now, so it always reconciles and never writes the stamp (the stamp names the
-  // committed configuration, not the candidate one).
-  const reconcilePresence = options.activationProbe || await isAttachmentPresenceReconciliationDue();
+  // right now. Later batches in that same guarded trial retain the earlier proof,
+  // avoiding repeated HEADs. A separate activation always reconciles and never stamps.
+  const reconcilePresence = options.activationProbe
+    ? options.activationContinuation !== true
+    : await isAttachmentPresenceReconciliationDue();
   logAttachmentInfo('WebDAV attachment sync start', {
     count: String(attachmentsById.size),
     presence: reconcilePresence ? 'reconcile' : 'skipped',
@@ -260,6 +264,7 @@ export const syncWebdavAttachments = async (
         });
         uploadLimitLogged = true;
       }
+      options.onTransferBatchDeferred?.();
       return false;
     }
     uploadCount += 1;
@@ -275,6 +280,7 @@ export const syncWebdavAttachments = async (
         });
         downloadLimitLogged = true;
       }
+      options.onTransferBatchDeferred?.();
       return false;
     }
     downloadCount += 1;
@@ -293,13 +299,11 @@ export const syncWebdavAttachments = async (
       || isSyncRemoteMutationFenceError(error)
       || isWebdavRemoteWriteConflictError(error)
     ),
-    policy: options.activationProbe
-      ? undefined
-      : {
-          shouldSkip: () => abortedByRateLimit,
-          shouldUpload,
-          shouldDownload,
-        },
+    policy: {
+      shouldSkip: () => abortedByRateLimit,
+      shouldUpload,
+      shouldDownload,
+    },
     onUpload: async (attachment, localPath) => {
       try {
         await ensureRemoteAttachmentsDir();
