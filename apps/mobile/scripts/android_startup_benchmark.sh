@@ -316,7 +316,7 @@ for run in $(seq 1 "$RUNS"); do
     sleep 1
   fi
   # Use the device clock and leave other apps' diagnostic buffers intact.
-  logcat_since="$("$ADB_BIN" shell date '+%m-%d %H:%M:%S.000' | tr -d '\r')"
+  logcat_since="$("$ADB_BIN" shell "date '+%m-%d %H:%M:%S.000'" | tr -d '\r')"
 
   start_output="$("$ADB_BIN" shell am start -W -n "$COMPONENT" 2>&1 || true)"
   printf "%s\n" "$start_output" > "$am_start_file"
