@@ -42,6 +42,7 @@ import {
   normalizeFocusTaskLimit,
   resolveFeatureFlags,
   resolveTaskPerspectiveForFeatures,
+  splitTodayTasksByStartTime,
   sortTasksBySavedPreference,
   translateWithFallback,
   useTaskStore,
@@ -888,6 +889,11 @@ export default function FocusScreen() {
     }
     return byTaskId;
   }, [futureStartTick, schedule, tc.secondaryText]);
+  const scheduleByStartTime = useMemo(() => {
+    void localDayKey;
+    void futureStartTick;
+    return splitTodayTasksByStartTime(schedule, new Date());
+  }, [futureStartTick, localDayKey, schedule]);
   const reviewDueProjects = useMemo(() => {
     void localDayKey;
     const now = new Date();
@@ -1018,6 +1024,24 @@ export default function FocusScreen() {
     const buildProjectItems = (items: Project[]): FocusListItem[] => (
       items.map((project) => ({ type: 'project' as const, project }))
     );
+    const buildScheduleItems = (): FocusListItem[] => {
+      if (!expandedSections.schedule) return [];
+      return [
+        ...buildTaskItems(scheduleByStartTime.ready),
+        ...(scheduleByStartTime.laterToday.length > 0
+          ? [
+            {
+              type: 'groupHeader' as const,
+              id: 'focus:schedule:later-today',
+              title: resolveText('agenda.laterToday', 'Later today'),
+              count: scheduleByStartTime.laterToday.length,
+              muted: true,
+            },
+            ...buildTaskItems(scheduleByStartTime.laterToday, true),
+          ]
+          : []),
+      ];
+    };
     const buildGroupedNextItems = (): FocusListItem[] => {
       if (!expandedSections.next) return [];
       if (effectiveFocusGroupBy === 'none') {
@@ -1052,6 +1076,8 @@ export default function FocusScreen() {
       title: section.title,
       data: section.key === 'next'
         ? buildGroupedNextItems()
+        : section.key === 'schedule'
+          ? buildScheduleItems()
         : (expandedSections[section.key] ? buildTaskItems(section.items) : []),
       totalCount: section.items.length,
       expanded: expandedSections[section.key],
@@ -1080,6 +1106,7 @@ export default function FocusScreen() {
     reviewDue,
     reviewDueProjects,
     schedule,
+    scheduleByStartTime,
     t,
     themePreset,
   ]);

@@ -1383,6 +1383,7 @@ export const frOverrides: Record<string, string> = {
         'agenda.reviewDue': 'Revue due',
         'agenda.reviewDueProjects': 'Projets à revoir',
         'agenda.upcoming': 'À venir',
+        'agenda.laterToday': 'Plus tard aujourd’hui',
         'agenda.allClear': 'Tout est traité !',
         'agenda.noTasks': 'Rien à traiter pour l’instant. Ajoutez une étoile ou une date d’échéance à une tâche pour la voir ici.',
         'agenda.emptyStart': 'Pas encore de tâches. Notez ce que vous avez en tête dans la Boîte de réception et triez plus tard.',

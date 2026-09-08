@@ -1495,6 +1495,7 @@ export const zhHans: Record<string, string> = {
         'agenda.reviewDue': '待回顾',
         'agenda.reviewDueProjects': '待回顾项目',
         'agenda.upcoming': '即将到来',
+        'agenda.laterToday': '今天稍后',
         'agenda.allClear': '全部完成！',
         'agenda.noTasks': '目前没有需要专注的任务。给任务加星或设置截止日期,就会显示在这里。',
         'agenda.emptyStart': '还没有任务。先把想到的事情加进收集箱,之后再整理。',

@@ -589,6 +589,27 @@ export function shouldShowTaskForStart(
 }
 
 /**
+ * Split already-selected Today rows for display without changing eligibility.
+ * Date-only starts remain in the main list; later timed starts get a subgroup.
+ */
+export function splitTodayTasksByStartTime<T extends Pick<Task, 'startTime'>>(
+    tasks: readonly T[],
+    now: Date = new Date(),
+): { ready: T[]; laterToday: T[] } {
+    // Presentation only: callers supply eligible Today rows. Preserve their
+    // membership, order and identity; never reinterpret a date-only start.
+    const ready: T[] = [];
+    const laterToday: T[] = [];
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    for (const task of tasks) {
+        const start = hasTimeComponent(task.startTime) ? safeParseDate(task.startTime) : null;
+        if (start && start > now && start <= endOfToday) laterToday.push(task);
+        else ready.push(task);
+    }
+    return { ready, laterToday };
+}
+
+/**
  * The earliest upcoming timed start today among the given tasks, as an epoch
  * timestamp — the moment a view filtering with shouldShowTaskForStart next
  * needs to re-render to reveal a task (#995). Starts beyond today are the

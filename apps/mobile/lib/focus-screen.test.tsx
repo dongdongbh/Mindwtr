@@ -188,6 +188,7 @@ vi.mock('../contexts/language-context', () => {
     ({
         'common.all': 'All',
         'agenda.todaysFocus': "Today's Focus",
+        'agenda.laterToday': 'Later today',
         'focus.schedule': 'Today',
         'focus.nextActions': 'Next Actions',
         'agenda.upcoming': 'Upcoming',
@@ -1372,9 +1373,111 @@ describe('FocusScreen', () => {
       .filter(Boolean) ?? [];
 
     expect(idsIn('Today')).toEqual(['later-today-next']);
+    expect(sections.find((section) => section.title === 'Today')?.data.map((item) => item.type))
+      .toEqual(['groupHeader', 'task']);
     expect(idsIn('Next Actions')).toEqual([]);
     expect(idsIn('Upcoming')).toEqual([]);
     vi.useRealTimers();
+  });
+
+  it('renders ready Today rows before a nested Later today group', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 3, 5, 12, 0, 0, 0));
+    storeState.tasks = [
+      makeTask('later-today', {
+        title: 'Later today',
+        startTime: new Date(2026, 3, 5, 17, 0, 0, 0).toISOString(),
+      }),
+      makeTask('date-only', { title: 'Date only', startTime: '2026-04-05' }),
+      makeTask('already-started', {
+        title: 'Already started',
+        startTime: new Date(2026, 3, 5, 9, 0, 0, 0).toISOString(),
+      }),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    const today = (tree.root.findByType(SectionList).props.sections as {
+      title: string;
+      totalCount: number;
+      data: { type: string; id?: string; title?: string; task?: Task }[];
+    }[]).find((section) => section.title === 'Today');
+
+    expect(today?.totalCount).toBe(3);
+    expect(today?.data.map((item) => (
+      item.type === 'task' ? item.task?.id : `${item.type}:${item.title}`
+    ))).toEqual([
+      'date-only',
+      'already-started',
+      'groupHeader:Later today',
+      'later-today',
+    ]);
+    expect(tree.root.findByProps({ accessibilityLabel: 'Later today 1' }).props.accessibilityRole)
+      .toBe('header');
+  });
+
+  it('omits the Later today group when Today has only ready rows', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 3, 5, 12, 0, 0, 0));
+    storeState.tasks = [
+      makeTask('date-only', { startTime: '2026-04-05' }),
+      makeTask('already-started', {
+        startTime: new Date(2026, 3, 5, 9, 0, 0, 0).toISOString(),
+      }),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    const today = (tree.root.findByType(SectionList).props.sections as {
+      title: string;
+      data: { type: string; task?: Task }[];
+    }[]).find((section) => section.title === 'Today');
+    expect(today?.data.map((item) => item.task?.id)).toEqual(['date-only', 'already-started']);
+    expect(() => tree.root.findByProps({ accessibilityLabel: 'Later today 1' })).toThrow();
+  });
+
+  it('does not leave an empty Later today group after filters hide its rows', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 3, 5, 12, 0, 0, 0));
+    storeState.settings = {
+      appearance: {},
+      features: {},
+      savedFilters: [{
+        id: 'filter-desk',
+        name: 'Desk',
+        view: 'focus',
+        criteria: { contexts: ['@desk'] },
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+      }],
+    } as any;
+    storeState.tasks = [
+      makeTask('desk-ready', { startTime: '2026-04-05', contexts: ['@desk'] }),
+      makeTask('phone-later', {
+        startTime: new Date(2026, 3, 5, 17, 0, 0, 0).toISOString(),
+        contexts: ['@phone'],
+      }),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+    expect(tree.root.findByProps({ accessibilityLabel: 'Later today 1' })).toBeTruthy();
+
+    act(() => {
+      findButtonByText(tree, 'Desk').props.onPress();
+    });
+
+    expect(tree.root.findAllByType(SwipeableTaskItem).map((node) => node.props.task.id))
+      .toEqual(['desk-ready']);
+    expect(() => tree.root.findByProps({ accessibilityLabel: 'Later today 1' })).toThrow();
   });
 
   it('shows the pending footer on a Today row until its start time arrives, star enabled', () => {
@@ -1398,12 +1501,16 @@ describe('FocusScreen', () => {
     // pick up Upcoming's disabled-for-deferred gating.
     expect(findRow()?.props.focusToggleDisabledLabel).toBeUndefined();
     expect(findRow()?.props.footerContent).toBeTruthy();
+    expect(tree.root.findByProps({ accessibilityLabel: 'Later today 1' })).toBeTruthy();
 
     act(() => {
-      vi.advanceTimersByTime(5 * 60 * 60 * 1000 + 1000); // past 17:00
+      vi.advanceTimersByTime(5 * 60 * 60 * 1000 + 50);
     });
 
     expect(findRow()?.props.footerContent).toBeUndefined();
+    expect(() => tree.root.findByProps({ accessibilityLabel: 'Later today 1' })).toThrow();
+    expect(tree.root.findAllByType(SwipeableTaskItem)
+      .filter((node) => node.props.task.id === 'later-today-next')).toHaveLength(1);
     vi.useRealTimers();
   });
 

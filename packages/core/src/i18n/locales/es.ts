@@ -1571,6 +1571,7 @@ export const esOverrides: Record<string, string> = {
 'agenda.reviewDue': "Revisión pendiente",
 'agenda.reviewDueProjects': "Proyectos para revisar",
 'agenda.upcoming': "Próximas",
+'agenda.laterToday': "Más tarde hoy",
 'agenda.allClear': "¡Todo limpio!",
 'agenda.noTasks': "Nada en qué enfocarse ahora. Marca una tarea con una estrella o ponle una fecha de vencimiento y aparecerá aquí.",
 'agenda.emptyStart': "Aún no hay tareas. Añade lo que tengas en mente a la Bandeja de entrada y organízalo después.",

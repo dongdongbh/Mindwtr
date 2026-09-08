@@ -1595,6 +1595,7 @@ export const svOverrides: Record<string, string> = {
         'agenda.reviewDue': 'Granskning förfaller',
         'agenda.reviewDueProjects': 'Projekt att granska',
         'agenda.upcoming': 'Kommande',
+        'agenda.laterToday': 'Senare idag',
         'agenda.allClear': 'Allt klart!',
         'agenda.noTasks': 'Inget att fokusera på just nu. Stjärnmärk en uppgift eller ge den ett förfallodatum så visas den här.',
         'agenda.emptyStart': 'Inga uppgifter än. Lägg till allt du tänker på i Inkorgen och sortera ut det senare.',

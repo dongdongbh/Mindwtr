@@ -716,10 +716,48 @@ describe('AgendaView', () => {
 
         const { getByRole, getByText, queryByRole } = renderAgenda();
 
-        expect(getByRole('heading', { name: /today/i })).toBeInTheDocument();
+        expect(getByRole('heading', { name: /^today\s*\(1\)$/i })).toBeInTheDocument();
+        expect(getByRole('heading', { name: /^later today$/i })).toBeInTheDocument();
         expect(document.getElementById('agenda-section-schedule')).toContainElement(getByText('Later today next task'));
         expect(queryByRole('heading', { name: /next actions/i })).not.toBeInTheDocument();
         expect(document.getElementById('agenda-section-upcoming')).toBeNull();
+    });
+
+    it('renders ready Today rows before the nested Later today group', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 1, 28, 12, 0, 0, 0));
+        const readyToday = makeAgendaTask('ready-today', 'Ready today task', {
+            dueDate: '2026-02-28',
+        });
+        const laterToday = makeAgendaTask('later-today', 'Later today task', {
+            dueDate: '2026-02-27',
+            startTime: new Date(2026, 1, 28, 17, 0, 0, 0).toISOString(),
+        });
+        setAgendaTasks([laterToday, readyToday]);
+
+        const { getByRole, getByText } = renderAgenda();
+
+        const readyRow = getByText('Ready today task');
+        const laterHeading = getByRole('heading', { name: /^later today$/i });
+        const laterRow = getByText('Later today task');
+        expect(readyRow.compareDocumentPosition(laterHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(laterHeading.compareDocumentPosition(laterRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(getByRole('heading', { name: /^today\s*\(2\)$/i })).toBeInTheDocument();
+    });
+
+    it('does not render Later today when Today contains only ready and date-only rows', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 1, 28, 12, 0, 0, 0));
+        const tasks = [
+            makeAgendaTask('due-today', 'Due today task', { dueDate: '2026-02-28' }),
+            makeAgendaTask('date-only-start', 'Date-only start task', { startTime: '2026-02-28' }),
+        ];
+        setAgendaTasks(tasks);
+
+        const { getByRole, queryByRole } = renderAgenda();
+
+        expect(getByRole('heading', { name: /^today\s*\(2\)$/i })).toBeInTheDocument();
+        expect(queryByRole('heading', { name: /^later today$/i })).not.toBeInTheDocument();
     });
 
     it('shows the appears-at time on a pending Today row until its start time arrives, star enabled', () => {
@@ -747,10 +785,11 @@ describe('AgendaView', () => {
             highlightTaskId: null,
         });
 
-        const { getByText, getByLabelText, queryByText } = renderAgenda();
+        const { getAllByText, getByRole, getByText, getByLabelText, queryByRole, queryByText } = renderAgenda();
 
         const scheduleSection = document.getElementById('agenda-section-schedule');
         expect(scheduleSection).not.toBeNull();
+        expect(getByRole('heading', { name: /^later today$/i })).toBeInTheDocument();
         const appearsAtLabel = safeFormatDate(new Date(2026, 1, 28, 17, 0, 0, 0), 'p');
         expect(scheduleSection).toContainElement(getByText(appearsAtLabel));
         // Planning the 17:00 task for today is legitimate, so the star must not
@@ -760,10 +799,12 @@ describe('AgendaView', () => {
         expect(star).toBeEnabled();
 
         act(() => {
-            vi.advanceTimersByTime(5 * 60 * 60 * 1000 + 1000); // past 17:00
+            vi.advanceTimersByTime(5 * 60 * 60 * 1000 + 50); // scheduled reveal at 17:00
         });
 
         expect(queryByText(appearsAtLabel)).not.toBeInTheDocument();
+        expect(queryByRole('heading', { name: /^later today$/i })).not.toBeInTheDocument();
+        expect(getAllByText('Later today next task')).toHaveLength(1);
     });
 
     it('keeps a task due today with a start on another day in Upcoming only, not Today', () => {

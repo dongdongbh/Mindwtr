@@ -14,7 +14,7 @@ import {
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, applyFilter, buildAdvancedFilterCriteriaChips, compareProjectsByOrder, removeAdvancedFilterCriteriaChip, formatFocusTaskLimitText,
-    getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, getFocusSequentialFirstTaskIds, getProjectDeadlineBoosts, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, SAVED_FILTER_NO_PROJECT_ID, getUpcomingDeferredTasks, shouldShowTaskForStart, sortFocusNextActions, sortTasksByFocusOrder, sortTasksBySavedPreference, translateWithFallback, tFallback } from '@mindwtr/core';
+    getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, getFocusSequentialFirstTaskIds, getProjectDeadlineBoosts, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, SAVED_FILTER_NO_PROJECT_ID, getUpcomingDeferredTasks, shouldShowTaskForStart, sortFocusNextActions, sortTasksByFocusOrder, sortTasksBySavedPreference, splitTodayTasksByStartTime, translateWithFallback, tFallback } from '@mindwtr/core';
 import type { MultiValueFilterMatchMode, ProjectDeadlineBoost, SavedFilter, SortField, Task, TaskEnergyLevel } from '@mindwtr/core';
 import { useTaskFilterSelections } from '@mindwtr/core/task-filter-selections';
 import { useLanguage } from '../../contexts/language-context';
@@ -852,6 +852,11 @@ export function AgendaView() {
     const nextActionGroups = useMemo(() => (
         groupTasks(effectiveNextGroupBy, { tasks: sections.nextActions, areas, projectMap, t, theme: settings?.theme })
     ), [areas, effectiveNextGroupBy, projectMap, sections.nextActions, settings?.theme, t]);
+    const todayTaskGroups = useMemo(() => {
+        void futureStartTick;
+        void localDayKey;
+        return splitTodayTasksByStartTime(sections.schedule, new Date());
+    }, [futureStartTick, localDayKey, sections.schedule]);
     const setCollapsedGroups = useCallback<SetFocusCollapsedGroups>((updater) => {
         setPersistedViewState((current) => ({
             ...current,
@@ -1249,13 +1254,29 @@ export function AgendaView() {
                         onToggle={() => toggleSection('schedule')}
                         controlsId="agenda-section-schedule"
                     >
-                        <AgendaTaskList
-                            tasks={sections.schedule}
-                            buildFocusToggle={buildFocusToggle}
-                            getAppearsAtLabel={getScheduleAppearsAtLabel}
-                            showListDetails={showListDetails}
-                            highlightTaskId={highlightTaskId}
-                        />
+                        {todayTaskGroups.ready.length > 0 && (
+                            <AgendaTaskList
+                                tasks={todayTaskGroups.ready}
+                                buildFocusToggle={buildFocusToggle}
+                                getAppearsAtLabel={getScheduleAppearsAtLabel}
+                                showListDetails={showListDetails}
+                                highlightTaskId={highlightTaskId}
+                            />
+                        )}
+                        {todayTaskGroups.laterToday.length > 0 && (
+                            <div className={cn(todayTaskGroups.ready.length > 0 && 'mt-4 border-t border-border/40 pt-3')}>
+                                <h4 className="mb-2 px-1 text-sm font-semibold text-muted-foreground">
+                                    {resolveText('agenda.laterToday', 'Later today')}
+                                </h4>
+                                <AgendaTaskList
+                                    tasks={todayTaskGroups.laterToday}
+                                    buildFocusToggle={buildFocusToggle}
+                                    getAppearsAtLabel={getScheduleAppearsAtLabel}
+                                    showListDetails={showListDetails}
+                                    highlightTaskId={highlightTaskId}
+                                />
+                            </div>
+                        )}
                     </AgendaCollapsibleSection>
                 )}
 
