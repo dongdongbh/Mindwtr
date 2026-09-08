@@ -743,7 +743,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
             {/* Tags */}
             <ManageSection
                 settingsKey="manageTags"
-                title={resolveText('contexts.tags', 'Tags')}
+                title={resolveText('tags.title', 'Tags')}
                 count={allTags.length}
             >
                 {allTags.length === 0 && (

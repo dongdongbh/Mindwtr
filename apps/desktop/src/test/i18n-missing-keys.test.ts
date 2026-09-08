@@ -64,7 +64,6 @@ const KNOWN_MISSING_KEYS = new Set([
     'calendar.expandPlanningPanel',
     'common.clearSearch',
     'common.saving',
-    'contexts.tags',
     'nav.obsidian',
     'obsidian.addTask',
     'obsidian.addTaskAction',
