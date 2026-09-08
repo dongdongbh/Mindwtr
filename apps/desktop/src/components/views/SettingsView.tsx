@@ -202,6 +202,25 @@ type SettingsViewProps = {
 export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboarding }: SettingsViewProps = {}) {
   const perf = usePerformanceMonitor("SettingsView");
   const [page, setPage] = useState<SettingsPage>(initialPage ?? "main");
+  // Defer section-specific IO, not hook ownership: once visited, keep state
+  // alive so navigating away and back cannot reload over an unfinished draft.
+  const [visitedPages, setVisitedPages] = useState(() => new Set<SettingsPage>([initialPage ?? "main"]));
+  useEffect(() => {
+    setVisitedPages((visited) => visited.has(page) ? visited : new Set([...visited, page]));
+  }, [page]);
+  const hasVisited = (target: SettingsPage) => page === target || visitedPages.has(target);
+  const integrationsLoadEnabled = hasVisited("integrations");
+  const syncLoadEnabled = hasVisited("sync") || hasVisited("data");
+  const advancedLoadEnabled = hasVisited("advanced");
+  useEffect(() => {
+    markSettingsOpenTrace("settings-resource-activation", {
+      releaseCheck: "v1.3.0/settings-lazy-resources",
+      page,
+      integrationsLoadEnabled,
+      syncLoadEnabled,
+      advancedLoadEnabled,
+    });
+  }, [page, integrationsLoadEnabled, syncLoadEnabled, advancedLoadEnabled]);
   const [dismissedOnboardingHintPages, setDismissedOnboardingHintPages] = useState<
     Set<SettingsOnboardingHintPage>
   >(() => {
@@ -320,7 +339,7 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
     setRevealSetting({ ...result });
   }, []);
 
-  const advancedPageProps = useSettingsAdvancedPage({ isTauri, showSaved, t });
+  const advancedPageProps = useSettingsAdvancedPage({ loadEnabled: advancedLoadEnabled, isTauri, showSaved, t });
 
   const requestSettingsConfirmation = useCallback(
     ({ title, message }: { title: string; message: string }) =>
@@ -526,6 +545,7 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   );
 
   const { syncPageProps, dataTransferProps } = useSyncSettings({
+    loadEnabled: syncLoadEnabled,
     appVersion: aboutPageProps.appVersion,
     isTauri,
     showSaved,
@@ -545,6 +565,7 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
     dataTransferProps,
   });
   const obsidianPageProps = useObsidianSettings({
+    loadEnabled: integrationsLoadEnabled,
     isTauri,
     showSaved,
     selectVaultFolderTitle: selectObsidianVaultTitle,
@@ -559,6 +580,7 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   });
   // Keep integrations state at SettingsView scope so the page does not remount and flicker on parent rerenders.
   const calendarPageProps = useCalendarSettings({
+    loadEnabled: integrationsLoadEnabled,
     showSaved,
     settings,
     updateSettings,

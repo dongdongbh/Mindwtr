@@ -436,6 +436,43 @@ describe('task-utils', () => {
     });
 
     describe('sortFocusNextActions', () => {
+        it('keeps invalid dates, priority and tie breakers stable without stale date keys', () => {
+            const tasks = [
+                { id: 'future', dueDate: '2027-01-01', priority: 'urgent' },
+                { id: 'invalid', dueDate: 'invalid', priority: 'low' },
+                { id: 'urgent-b', priority: 'urgent', title: 'Same' },
+                { id: 'urgent-a', priority: 'urgent', title: 'Same' },
+                { id: 'started', priority: 'urgent', startTime: '2026-01-01' },
+                { id: 'due', dueDate: '2026-01-02', priority: 'low' },
+            ].map(task => ({ title: task.id, status: 'next', contexts: [], tags: [],
+                createdAt: '2026-01-01', updatedAt: '2026-01-01', ...task } as Task));
+            const options = { now: new Date('2026-01-01'), prioritizeByPriority: true };
+            expect(sortFocusNextActions(tasks, options).map(task => task.id))
+                .toEqual(['due', 'started', 'urgent-a', 'urgent-b', 'invalid', 'future']);
+            tasks[0].dueDate = '2025-12-31';
+            expect(sortFocusNextActions(tasks, options)[0]).toBe(tasks[0]);
+            expect(sortFocusNextActions([], options)).toEqual([]);
+        });
+
+        it('reads due dates only once per task while preserving references and input order', () => {
+            let dueReads = 0;
+            const tasks = Array.from({ length: 256 }, (_, index) => ({
+                id: `task-${index}`, title: `Task ${index}`, status: 'next',
+                get dueDate() {
+                    dueReads += 1;
+                    return `2026-01-${String(1 + (index * 17) % 28).padStart(2, '0')}T09:00:00.000Z`;
+                },
+                contexts: [], tags: [],
+                createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+            } as Task));
+            const original = tasks.slice();
+            const sorted = sortFocusNextActions(tasks, { now: new Date('2026-01-01T00:00:00.000Z') });
+            expect(dueReads).toBeLessThanOrEqual(tasks.length);
+            expect(tasks).toEqual(original);
+            expect(new Set(sorted)).toEqual(new Set(tasks));
+            expect(sorted).not.toBe(tasks);
+        });
+
         it('puts due-soon tasks ahead of undated tasks and sinks far-future due tasks', () => {
             const sorted = sortFocusNextActions([
                 {

@@ -1,12 +1,13 @@
 import { chromium, expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { cpus, platform, release } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fixture } from './fixture.mjs';
 import { summarize } from './report.mjs';
+import { startPreview } from './preview-server.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const runs = Number(process.env.RUNS ?? 30);
@@ -31,23 +32,13 @@ const artifactHash = hash.digest('hex');
 const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 const dirty = Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim());
 const url = `http://127.0.0.1:${port}`;
-// Own this child only. --strictPort prevents accidentally measuring someone else's server.
-const server = spawn(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-  cwd: join(root, 'apps/desktop'), stdio: ['ignore', 'pipe', 'pipe'],
-});
+// strictPort prevents accidentally measuring someone else's server.
+let server;
 let browser;
 let failed = false;
 try {
-  await new Promise((resolveReady, reject) => {
-    const timer = setTimeout(() => reject(new Error('Preview startup timeout')), 20000);
-    server.once('error', (error) => { clearTimeout(timer); reject(error); });
-    server.once('exit', (code) => { clearTimeout(timer); reject(new Error(`Preview exited: ${code}`)); });
-    server.stderr.on('data', (data) => appendFileSync(join(output, 'server.log'), data));
-    server.stdout.on('data', (data) => {
-      appendFileSync(join(output, 'server.log'), data);
-      if (data.toString().includes(url)) { clearTimeout(timer); resolveReady(); }
-    });
-  });
+  server = await startPreview(join(root, 'apps/desktop'), port);
+  appendFileSync(join(output, 'server.log'), `Preview listening: ${server.url}\n`);
   browser = await chromium.launch();
   for (const size of sizes) {
     const seed = fixture(size);
@@ -87,13 +78,43 @@ try {
         const captureVisibleMs = performance.now() - captureStart;
         await page.waitForFunction((title) => JSON.parse(localStorage.getItem('mindwtr-data') ?? '{}').tasks?.some((task) => task.title === title), title);
         const capturePersistedMs = performance.now() - captureStart;
+        // Assert real production virtualization, including after scrolling; a
+        // jsdom mount alone cannot establish that the browser window is bounded.
+        const taskList = page.getByRole('list', { name: 'Task list', exact: true });
+        const mountedRowsBefore = await taskList.locator('[data-task-id]').count();
+        let mountedRowsAfter = mountedRowsBefore;
+        let scrollAutomationMs = null;
+        if (size >= 1000) {
+          await expect(page.getByTestId('virtualized-task-list')).toBeVisible();
+          const firstIds = await taskList.locator('[data-task-id]').evaluateAll((rows) => rows.map((row) => row.dataset.taskId));
+          const scrollStart = performance.now();
+          // Capture scrolls to the newly added bottom row; traverse back to
+          // the top (or the bottom when a future UI leaves capture at the top).
+          await taskList.evaluate((list) => { list.scrollTop = list.scrollTop > list.clientHeight ? 0 : list.scrollHeight; });
+          await expect.poll(() => taskList.locator('[data-task-id]').evaluateAll((rows) => rows.map((row) => row.dataset.taskId))).not.toEqual(firstIds);
+          await taskList.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          scrollAutomationMs = performance.now() - scrollStart;
+          mountedRowsAfter = await taskList.locator('[data-task-id]').count();
+          if (!mountedRowsBefore || !mountedRowsAfter || Math.max(mountedRowsBefore, mountedRowsAfter) > 100) {
+            throw new Error(`Unbounded or blank virtual list: ${mountedRowsBefore}/${mountedRowsAfter} rows`);
+          }
+        }
+        const settingsStart = performance.now();
+        await page.getByRole('button', { name: 'Settings', exact: true }).click();
+        await expect(page.locator('[data-settings-key="appearance"]')).toBeVisible();
+        const settingsOpenMs = performance.now() - settingsStart;
+        const integrationsStart = performance.now();
+        await page.getByRole('button', { name: 'Integrations', exact: true }).click();
+        await expect(page.locator('[data-settings-key="calendar"]')).toBeVisible();
+        const integrationsOpenMs = performance.now() - integrationsStart;
         if (errors.length) throw new Error(errors.join('; '));
-        if (run) samples.push({ run, quality: 'ok', marks, navigationMs, captureVisibleMs, capturePersistedMs });
+        if (run) samples.push({ run, quality: 'ok', marks, navigationMs, captureVisibleMs, capturePersistedMs,
+          scrollAutomationMs, mountedRowsBefore, mountedRowsAfter, settingsOpenMs, integrationsOpenMs });
       } catch (error) {
         failed = true;
         if (run) samples.push({ run, quality: 'invalid', error: String(error) });
-        else throw new Error(`Warm-up failed for ${seed.id}: ${error}`);
         await page.screenshot({ path: join(output, `${size}-${run}-failure.png`) }).catch(() => undefined);
+        if (!run) throw new Error(`Warm-up failed for ${seed.id}: ${error}`);
       } finally { await context.close(); }
     }
     const valid = samples.filter((sample) => sample.quality === 'ok');
@@ -102,7 +123,7 @@ try {
       metadata: { platform: 'desktop-web', runtime: `chromium-${browser.version()}`, device: process.env.DEVICE_LABEL ?? `local-${cpus()[0]?.model}-${cpus().length}cpu`,
         deviceModel: cpus()[0]?.model, cpuCount: cpus().length,
         os: `${platform()}-${release()}`, buildType: 'production', dataset: seed.id, network: 'loopback-external-blocked',
-        scenario: 'fresh-context-focus-then-inbox-capture-v1', revision, dirty, artifactHash, capturedAt: new Date().toISOString() },
+        scenario: 'fresh-context-focus-inbox-capture-scroll-settings-v2', revision, dirty, artifactHash, capturedAt: new Date().toISOString() },
       sampleCount: samples.length, invalidSamples: samples.length - valid.length,
       metrics: Object.fromEntries([
         ['webInteractive', valid.map((sample) => sample.marks.interactive_ready)],
@@ -110,7 +131,10 @@ try {
         ['navigationAutomation', valid.map((sample) => sample.navigationMs)],
         ['captureVisibleAutomation', valid.map((sample) => sample.captureVisibleMs)],
         ['capturePersistedAutomation', valid.map((sample) => sample.capturePersistedMs)],
-      ].map(([name, values]) => [name, summarize(values)])),
+        ['scrollAutomation', valid.map((sample) => sample.scrollAutomationMs).filter(Number.isFinite)],
+        ['settingsOpenAutomation', valid.map((sample) => sample.settingsOpenMs)],
+        ['integrationsOpenAutomation', valid.map((sample) => sample.integrationsOpenMs)],
+      ].filter(([, values]) => values.length > 0).map(([name, values]) => [name, summarize(values)])),
       warnings: ['Browser production UI, not native Tauri launch or SQLite durability.', ...(runs < 100 ? ['Fewer than 100 runs: do not gate on p95.'] : [])],
     };
     writeFileSync(join(output, `${size}-samples.json`), `${JSON.stringify(samples, null, 2)}\n`);
@@ -122,7 +146,7 @@ try {
   }
 } finally {
   await browser?.close();
-  server.kill('SIGTERM');
+  await server?.close();
 }
 console.log(`Performance reports: ${output}`);
 if (failed) process.exitCode = 1;

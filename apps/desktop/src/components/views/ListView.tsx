@@ -661,6 +661,16 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                 : `task:${row.group.id}:${row.task.id}`;
         },
     });
+    // Virtualizer scrolling rerenders this component. A fresh callback on each
+    // frame retriggers the highlight effect, snapping back to a captured task
+    // and restarting its expiry timer while the user tries to scroll away.
+    const scrollToVirtualIndex = useCallback((index: number, align: 'auto' | 'center') => {
+        const taskId = visibleTasks[index]?.id;
+        const virtualIndex = isListGrouping && taskId
+            ? firstGroupedRowIndexByTaskId.get(taskId) ?? index
+            : index;
+        rowVirtualizer.scrollToIndex(virtualIndex, { align });
+    }, [visibleTasks, isListGrouping, firstGroupedRowIndexByTaskId, rowVirtualizer]);
     const {
         contextPromptMode,
         contextPromptOpen,
@@ -703,13 +713,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         isProcessing,
         registerTaskListScope,
         restoreTask,
-        scrollToVirtualIndex: (index, align) => {
-            const taskId = visibleTasks[index]?.id;
-            const virtualIndex = isListGrouping && taskId
-                ? firstGroupedRowIndexByTaskId.get(taskId) ?? index
-                : index;
-            rowVirtualizer.scrollToIndex(virtualIndex, { align });
-        },
+        scrollToVirtualIndex,
         selectionResetKey: [
             statusFilter,
             prioritiesEnabled ? '1' : '0',

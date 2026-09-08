@@ -24,6 +24,7 @@ import type { SettingsLabels } from './labels';
 import type { SettingsAdvancedPageProps } from './SettingsAdvancedPage';
 
 type UseSettingsAdvancedPageOptions = {
+    loadEnabled?: boolean;
     isTauri: boolean;
     showSaved: () => void;
     t: Pick<SettingsLabels, 'localApiPortInvalid' | 'networkProxyInvalid'>;
@@ -34,6 +35,7 @@ type UseSettingsAdvancedPageOptions = {
  * members already named as props so SettingsView can spread them.
  */
 export function useSettingsAdvancedPage({
+    loadEnabled = true,
     isTauri,
     showSaved,
     t,
@@ -74,7 +76,7 @@ export function useSettingsAdvancedPage({
     }, []);
 
     useEffect(() => {
-        if (!isTauri) return;
+        if (!loadEnabled || !isTauri) return;
         let cancelled = false;
         getDesktopRenderingConfig()
             .then((config) => {
@@ -86,10 +88,10 @@ export function useSettingsAdvancedPage({
         return () => {
             cancelled = true;
         };
-    }, [isTauri]);
+    }, [loadEnabled, isTauri]);
 
     useEffect(() => {
-        if (!isTauri) return;
+        if (!loadEnabled || !isTauri) return;
         let cancelled = false;
         getLocalApiServerStatus()
             .then((status) => {
@@ -103,7 +105,7 @@ export function useSettingsAdvancedPage({
         return () => {
             cancelled = true;
         };
-    }, [applyLocalApiStatus, isTauri]);
+    }, [loadEnabled, applyLocalApiStatus, isTauri]);
 
     const onDesktopRenderingToggle = useCallback(async (disableHardwareAcceleration: boolean) => {
         if (!isTauri || desktopRenderingBusy) return;

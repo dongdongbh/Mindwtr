@@ -121,6 +121,7 @@
     "mobile:startup:bench": "bash apps/mobile/scripts/android_startup_benchmark.sh",
     "test:perf-tools": "bun test scripts/performance",
     "perf:web": "node scripts/performance/web-startup.mjs",
+    "perf:storage": "bun scripts/performance/storage-sync.ts",
     "perf:compare": "node scripts/performance/compare.mjs",
     "test:e2e": "playwright test",
     "i18n:check": "bun run scripts/i18n-locale-parity.ts --check",

@@ -8,6 +8,7 @@ import { useObsidianStore } from '../../../store/obsidian-store';
 import { useUiStore } from '../../../store/ui-store';
 
 type UseObsidianSettingsOptions = {
+    loadEnabled?: boolean;
     isTauri: boolean;
     showSaved: () => void;
     selectVaultFolderTitle: string;
@@ -28,6 +29,7 @@ const toErrorMessage = (error: unknown, fallback: string): string => {
 };
 
 export const useObsidianSettings = ({
+    loadEnabled = true,
     isTauri,
     showSaved,
     selectVaultFolderTitle,
@@ -54,8 +56,9 @@ export const useObsidianSettings = ({
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
+        if (!loadEnabled) return;
         void refreshConfig();
-    }, [refreshConfig]);
+    }, [loadEnabled, refreshConfig]);
 
     useEffect(() => {
         setVaultPath(config.vaultPath ?? '');

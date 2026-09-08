@@ -21,6 +21,23 @@ vi.mock('../../../lib/external-calendar-service', () => ({
 import { useCalendarSettings } from './useCalendarSettings';
 
 describe('useCalendarSettings feedback localization', () => {
+    it('defers calendar IO until enabled and retains the editor on rerender', async () => {
+        const { result, rerender } = renderHook(({ loadEnabled }) => useCalendarSettings({
+            loadEnabled,
+            settings: {},
+            updateSettings: vi.fn(async () => undefined),
+            showSaved: vi.fn(),
+            supportsSystemCalendar: false,
+        }), { initialProps: { loadEnabled: false } });
+        expect(calendarMocks.getCalendars).not.toHaveBeenCalled();
+        rerender({ loadEnabled: true });
+        await waitFor(() => expect(calendarMocks.getCalendars).toHaveBeenCalledTimes(1));
+        act(() => result.current.onCalendarUrlChange('https://example.com/draft.ics'));
+        rerender({ loadEnabled: true });
+        expect(calendarMocks.getCalendars).toHaveBeenCalledTimes(1);
+        expect(result.current.newCalendarUrl).toBe('https://example.com/draft.ics');
+    });
+
     beforeEach(() => {
         vi.clearAllMocks();
         languageMocks.t.mockImplementation((key: string) => (

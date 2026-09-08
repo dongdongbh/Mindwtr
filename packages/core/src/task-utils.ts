@@ -181,11 +181,10 @@ type SortTasksBySavedPreferenceOptions = {
 };
 
 function getFocusNextActionBucket(
-    task: Pick<Task, 'dueDate'>,
+    dueMs: number,
     nowMs: number,
     dueSoonWindowMs: number,
 ): number {
-    const dueMs = safeDueTime(task.dueDate, Number.NaN);
     if (!Number.isFinite(dueMs)) return 1;
     if (dueMs <= nowMs + dueSoonWindowMs) return 0;
     return 2;
@@ -1257,15 +1256,25 @@ export function sortFocusNextActions(tasks: Task[], options: SortFocusNextAction
     const projectDeadlineBoosts = options.projectDeadlineBoosts
         ?? (options.projects ? getProjectDeadlineBoosts(tasks, options.projects, { now: options.now }) : new Map());
 
-    return [...tasks].sort((a, b) => {
-        const bucketA = getFocusNextActionBucket(a, nowMs, dueSoonWindowMs);
-        const bucketB = getFocusNextActionBucket(b, nowMs, dueSoonWindowMs);
+    // Date parsing belongs to the O(n) preparation, not the O(n log n)
+    // comparator. Keep keys local so edits and the moving due-soon window
+    // always take effect, and return the original task references.
+    return sortByPrecomputedKey(tasks, (task) => {
+        const due = safeDueTime(task.dueDate, Number.POSITIVE_INFINITY);
+        return {
+            task,
+            due,
+            bucket: getFocusNextActionBucket(due, nowMs, dueSoonWindowMs),
+            start: safeTime(task.startTime, Number.POSITIVE_INFINITY),
+            created: safeTime(task.createdAt, 0),
+        };
+    }, (keyA, keyB) => {
+        const { task: a, bucket: bucketA } = keyA;
+        const { task: b, bucket: bucketB } = keyB;
         if (bucketA !== bucketB) return bucketA - bucketB;
 
         if (bucketA !== 1) {
-            const dueA = safeDueTime(a.dueDate, Number.POSITIVE_INFINITY);
-            const dueB = safeDueTime(b.dueDate, Number.POSITIVE_INFINITY);
-            if (dueA !== dueB) return dueA - dueB;
+            if (keyA.due !== keyB.due) return keyA.due - keyB.due;
         }
 
         if (bucketA === 1) {
@@ -1284,11 +1293,9 @@ export function sortFocusNextActions(tasks: Task[], options: SortFocusNextAction
             if (priorityDiff !== 0) return priorityDiff;
         }
 
-        const startA = safeTime(a.startTime, Number.POSITIVE_INFINITY);
-        const startB = safeTime(b.startTime, Number.POSITIVE_INFINITY);
-        if (startA !== startB) return startA - startB;
+        if (keyA.start !== keyB.start) return keyA.start - keyB.start;
 
-        const createdDiff = safeTime(a.createdAt, 0) - safeTime(b.createdAt, 0);
+        const createdDiff = keyA.created - keyB.created;
         if (createdDiff !== 0) return createdDiff;
 
         const titleDiff = textCollator.compare(a.title, b.title);

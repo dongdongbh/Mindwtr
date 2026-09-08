@@ -13,6 +13,8 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // settings-lazy-resources (desktop SettingsView)
+    'page', 'integrationsLoadEnabled', 'syncLoadEnabled', 'advancedLoadEnabled',
     // startup-readiness (mobile and desktop)
     'route', 'elapsedMs', 'moduleElapsedMs',
     'releaseCheck', 'backend', 'statusPublished', 'lastSyncAt', 'lastSyncStatus',

@@ -11,6 +11,7 @@ const calendarHookTracker = {
 const aiHookTracker = {
     enabled: [] as boolean[],
 };
+const resourceTracker = { sync: false, calendar: false, obsidian: false, advanced: false };
 let calendarHookUseEffect: typeof import('react').useEffect | null = null;
 
 vi.mock('../../hooks/usePerformanceMonitor', () => ({
@@ -122,18 +123,32 @@ vi.mock('./settings/useAiSettings', () => ({
 }));
 
 vi.mock('./settings/useSyncSettings', () => ({
-    useSyncSettings: () => ({
-        syncPageProps: { syncError: null },
-        dataTransferProps: { transferAction: null },
-    }),
+    useSyncSettings: ({ loadEnabled }: { loadEnabled?: boolean }) => {
+        resourceTracker.sync = loadEnabled ?? true;
+        return {
+            syncPageProps: { syncError: null },
+            dataTransferProps: { transferAction: null },
+        };
+    },
 }));
 
 vi.mock('./settings/useObsidianSettings', () => ({
-    useObsidianSettings: () => ({ obsidianEnabled: false }),
+    useObsidianSettings: ({ loadEnabled }: { loadEnabled?: boolean }) => {
+        resourceTracker.obsidian = loadEnabled ?? true;
+        return { obsidianEnabled: false };
+    },
+}));
+
+vi.mock('./settings/useSettingsAdvancedPage', () => ({
+    useSettingsAdvancedPage: ({ loadEnabled }: { loadEnabled?: boolean }) => {
+        resourceTracker.advanced = loadEnabled ?? true;
+        return {};
+    },
 }));
 
 vi.mock('./settings/useCalendarSettings', () => ({
-    useCalendarSettings: () => {
+    useCalendarSettings: ({ loadEnabled }: { loadEnabled?: boolean }) => {
+        resourceTracker.calendar = loadEnabled ?? true;
         if (!calendarHookUseEffect) {
             throw new Error('calendar hook useEffect not initialized');
         }
@@ -153,6 +168,29 @@ import { SettingsView } from './SettingsView';
 import { isDesktopOnboardingHintDismissed } from '../../lib/desktop-onboarding-events';
 
 describe('SettingsView', () => {
+    it('loads only visited resource groups and keeps them active across navigation', async () => {
+        const { getByRole } = render(
+            <LanguageProvider>
+                <KeybindingProvider currentView="settings" onNavigate={() => undefined}>
+                    <SettingsView />
+                </KeybindingProvider>
+            </LanguageProvider>
+        );
+        expect(resourceTracker).toEqual({ sync: false, calendar: false, obsidian: false, advanced: false });
+        fireEvent.click(getByRole('button', { name: 'integrations' }));
+        expect(resourceTracker).toEqual({ sync: false, calendar: true, obsidian: true, advanced: false });
+        fireEvent.click(getByRole('button', { name: 'main' }));
+        expect(resourceTracker.calendar).toBe(true);
+        fireEvent.click(getByRole('button', { name: 'data' }));
+        expect(resourceTracker.sync).toBe(true);
+        expect(resourceTracker.advanced).toBe(false);
+        fireEvent.click(getByRole('button', { name: 'advanced' }));
+        expect(resourceTracker.advanced).toBe(true);
+        fireEvent.click(getByRole('button', { name: 'main' }));
+        expect(resourceTracker).toEqual({ sync: true, calendar: true, obsidian: true, advanced: true });
+        await act(async () => {});
+    });
+
     beforeEach(async () => {
         window.localStorage.clear();
         calendarHookTracker.mounts = 0;

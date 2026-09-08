@@ -33,13 +33,14 @@ import {
 } from '../../../lib/system-calendar';
 
 type UseCalendarSettingsOptions = {
+    loadEnabled?: boolean;
     showSaved: () => void;
     settings: AppData['settings'] | undefined;
     updateSettings: (updates: Partial<AppData['settings']>) => Promise<void>;
     supportsSystemCalendar: boolean;
 };
 
-export function useCalendarSettings({ showSaved, settings, updateSettings, supportsSystemCalendar }: UseCalendarSettingsOptions) {
+export function useCalendarSettings({ loadEnabled = true, showSaved, settings, updateSettings, supportsSystemCalendar }: UseCalendarSettingsOptions) {
     const { t } = useLanguage();
     const resolveFeedback = useCallback((key: string, fallback: string) => (
         resolveSettingsFeedback(t, key, fallback)
@@ -63,6 +64,7 @@ export function useCalendarSettings({ showSaved, settings, updateSettings, suppo
     const [calendarPushLoading, setCalendarPushLoading] = useState(false);
 
     useEffect(() => {
+        if (!loadEnabled) return;
         let cancelled = false;
         ExternalCalendarService.getCalendars()
             .then(async (stored) => {
@@ -80,7 +82,7 @@ export function useCalendarSettings({ showSaved, settings, updateSettings, suppo
         return () => {
             cancelled = true;
         };
-    }, [loadFailedMessage, settings?.externalCalendars]);
+    }, [loadEnabled, loadFailedMessage, settings?.externalCalendars]);
 
     const refreshSystemCalendarPermission = useCallback(async () => {
         if (!supportsSystemCalendar) {
@@ -92,6 +94,7 @@ export function useCalendarSettings({ showSaved, settings, updateSettings, suppo
     }, [supportsSystemCalendar]);
 
     useEffect(() => {
+        if (!loadEnabled) return;
         void refreshSystemCalendarPermission();
         const onFocus = () => {
             void refreshSystemCalendarPermission();
@@ -102,7 +105,7 @@ export function useCalendarSettings({ showSaved, settings, updateSettings, suppo
             window.removeEventListener('focus', onFocus);
             document.removeEventListener('visibilitychange', onFocus);
         };
-    }, [refreshSystemCalendarPermission]);
+    }, [loadEnabled, refreshSystemCalendarPermission]);
 
     const refreshCalendarPushTargets = useCallback(async () => {
         if (!supportsSystemCalendar) {
@@ -118,6 +121,7 @@ export function useCalendarSettings({ showSaved, settings, updateSettings, suppo
     }, [loadFailedMessage, supportsSystemCalendar]);
 
     useEffect(() => {
+        if (!loadEnabled) return;
         if (!supportsSystemCalendar) {
             setCalendarPushEnabledState(false);
             setCalendarPushTargetCalendarIdState(null);
@@ -144,7 +148,7 @@ export function useCalendarSettings({ showSaved, settings, updateSettings, suppo
         return () => {
             cancelled = true;
         };
-    }, [loadFailedMessage, supportsSystemCalendar, refreshCalendarPushTargets]);
+    }, [loadEnabled, loadFailedMessage, supportsSystemCalendar, refreshCalendarPushTargets]);
 
     const persistCalendars = useCallback(async (next: ExternalCalendarSubscription[]) => {
         setCalendarError(null);

@@ -47,7 +47,13 @@ No personal browser profile, desktop database, or sync server is used.
 
 Reports in `build/performance-web/<timestamp>/` retain raw samples, invalid runs, source
 revision/dirty state, built-artifact hash, browser version, OS, device alias, and fixture ID.
-They measure initial Focus readiness and subsequent Inbox navigation/capture. Capture
+They measure initial Focus readiness, Inbox navigation/capture/scroll, and first-open
+General Settings and Integrations. The `fresh-context-focus-inbox-capture-scroll-settings-v2`
+scenario is deliberately incompatible with the earlier capture-only baseline. At 1k/10k
+tasks the runner requires real virtualization, a changed visible row window after scrolling
+away from the newly captured task, and at most 100 mounted task rows before/after scrolling.
+It checks bounded rendering and successful scroll response, **not** sustained frame rate.
+Capture
 must appear in the real list and then in the web adapter's saved localStorage document.
 Interaction measurements include automation dispatch/polling overhead and are named
 accordingly. This is **production browser UI**, not native Tauri startup, SQLite fsync,
@@ -59,6 +65,43 @@ Use `RUNS=3 SIZES=0,1000` only for a harness smoke check, never a regression ver
 on manual dispatch, uploading 90-day artifacts and a job summary. Hosted hardware varies:
 these runs are reporting-only. Harness failures still fail the job. Existing PR budget
 gates remain unchanged, with added benchmark-tool regression tests.
+
+## Storage and sync processing
+
+```bash
+RUNS=10 SIZES=1000,10000,50000 bun run perf:storage
+```
+
+This creates **new synthetic databases only** under `build/performance-storage/`, never
+opens a personal database, and uses the production `SqliteAdapter` and `mergeAppData`.
+Override `STORAGE_OUT_DIR` with a disk-backed directory for local experiments; do not use
+`/tmp` or another RAM filesystem. Databases remain beside the reports for inspection.
+
+One warm-up precedes measured runs of canonical hydration, unchanged full-snapshot save,
+JSON serialization/parsing, unchanged and one-task sync merges, one-task full-snapshot save,
+and targeted task save. Integrity assertions require zero entity/settings rewrites for
+unchanged saves, exactly one entity rewrite for a single edit, and committed readback from
+a separate connection. WAL with FULL synchronous acknowledgement remains enabled. Initial
+population is reported separately as a single descriptive observation.
+
+These measure warm-cache disk-backed Bun SQLite and sync CPU, **not** the Tauri/RN bridge,
+physical cold-cache reads, cloud RTT, encryption, attachment transfer, or end-to-end sync.
+The weekly/manual workflow runs them sequentially after browser measurements and uploads
+JSON reports only. Timing is reporting-only on hosted hardware; integrity failures fail CI.
+
+## Audit coverage and next measurements
+
+| Area | Automated evidence | Still needs native profiling |
+|---|---|---|
+| Data loading | Canonical readiness; SQLite hydrate | Cold disk/migration and RN/Tauri bridge time |
+| List rendering | Desktop/mobile render budgets; real browser mounted-row/scroll assertions | Sustained frame pacing, allocations and memory while scrolling |
+| Task changes | Production store mutation/bulk budgets; visible and persisted capture; targeted/snapshot SQL writes | Input-to-frame response and save latency under background contention |
+| Settings | First-open General/Integrations browser timings; deferred-resource/draft-retention tests | Native config/keyring latency and platform-specific sections |
+| Sync | Fingerprint, JSON and full-merge CPU measurements; existing sync phase diagnostics | Controlled network RTT, encryption, attachment IO, contention and peak memory |
+
+Do not infer a fast full sync from a fast fingerprint. Likewise, virtualizing rows does
+not eliminate full-store derivation or merge costs. Prioritize observed long phases,
+preserving revision arbitration, tombstones, pending edits and durable-save guarantees.
 
 ## Android device baseline
 

@@ -130,6 +130,7 @@ const formatClockSkew = (ms: number): string => {
 };
 
 type UseSyncSettingsOptions = {
+    loadEnabled?: boolean;
     appVersion: string;
     isTauri: boolean;
     showSaved: () => void;
@@ -139,6 +140,7 @@ type UseSyncSettingsOptions = {
 };
 
 export const useSyncSettings = ({
+    loadEnabled = true,
     appVersion,
     isTauri,
     showSaved,
@@ -333,6 +335,7 @@ export const useSyncSettings = ({
     }, [formatImportDiagnosticText, toErrorMessage]);
 
     useEffect(() => {
+        if (!loadEnabled) return;
         markSettingsOpenTrace('sync-settings-effect');
         const unsubscribe = SyncService.subscribeSyncStatus(setSyncStatus);
         const loadSnapshots = async () => {
@@ -403,9 +406,10 @@ export const useSyncSettings = ({
             void logError(error, { scope: 'sync', step: 'loadSnapshots' });
         });
         return unsubscribe;
-    }, [isTauri, resolveText]);
+    }, [loadEnabled, isTauri, resolveText]);
 
     useEffect(() => {
+        if (!loadEnabled) return;
         let cancelled = false;
         const loadDropboxConnection = async () => {
             if (dropboxCredentialHandle) {
@@ -446,7 +450,7 @@ export const useSyncSettings = ({
         return () => {
             cancelled = true;
         };
-    }, [cloudProvider, dropboxAppKey, dropboxCredentialHandle, syncBackend]);
+    }, [loadEnabled, cloudProvider, dropboxAppKey, dropboxCredentialHandle, syncBackend]);
 
     useEffect(() => {
         const unsubscribe = SyncService.subscribePendingDropboxCredentialHandleForSession((credentialHandle) => {
@@ -485,6 +489,7 @@ export const useSyncSettings = ({
     // for every other backend. It reads the saved config (not the typed URL), so
     // it must not re-run per keystroke — handleSaveCloud refreshes it instead.
     useEffect(() => {
+        if (!loadEnabled) return;
         if (
             syncBackend !== 'cloud'
             || cloudProvider !== 'selfhosted'
@@ -508,7 +513,7 @@ export const useSyncSettings = ({
         return () => {
             cancelled = true;
         };
-    }, [cloudProvider, persistedCloudProvider, persistedSyncBackend, syncBackend, calendarFeedReloadToken]);
+    }, [loadEnabled, cloudProvider, persistedCloudProvider, persistedSyncBackend, syncBackend, calendarFeedReloadToken]);
 
     const handleCalendarFeedAction = useCallback(async (action: 'rotate' | 'revoke') => {
         setCalendarFeedBusy(true);

@@ -126,6 +126,27 @@ const NO_TARGET: TargetInputs = {
 };
 
 describe('useSyncSettings cloud token validation', () => {
+    it('defers configuration and snapshot IO without disabling credential recovery', async () => {
+        const snapshot = vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot')
+            .mockResolvedValue(dropboxConfigurationSnapshot('off'));
+        const recovery = vi.spyOn(SyncService, 'retryPendingDropboxCredentialFinalizationForSession')
+            .mockResolvedValue(undefined);
+        const { rerender } = renderHook(({ loadEnabled }) => useSyncSettings({
+            loadEnabled,
+            appVersion: '1.0.0', isTauri: true, showSaved: vi.fn(),
+            selectSyncFolderTitle: 'Select folder', lastSyncNeverLabel: 'Never',
+            requestConfirmation: vi.fn().mockResolvedValue(true),
+        }), { initialProps: { loadEnabled: false } });
+        expect(snapshot).not.toHaveBeenCalled();
+        expect(SyncService.listDataSnapshots).not.toHaveBeenCalled();
+        expect(SyncService.getDropboxAppKey).not.toHaveBeenCalled();
+        expect(recovery).toHaveBeenCalledTimes(1);
+        rerender({ loadEnabled: true });
+        await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(1));
+        expect(SyncService.listDataSnapshots).toHaveBeenCalledTimes(1);
+        rerender({ loadEnabled: true });
+        expect(snapshot).toHaveBeenCalledTimes(1);
+    });
 
     it('seeds the backend control from the last-known selection before the persisted snapshot resolves', async () => {
         // The persisted snapshot is read through the serialized restore queue and

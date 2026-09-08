@@ -12,6 +12,18 @@ import { selectToolbarOption } from '../../test/toolbar-select';
 import { expectScrolledEndGap } from '../../test/list-end-gap';
 
 const reportErrorMock = vi.hoisted(() => vi.fn());
+const selectionInputs = vi.hoisted(() => ({ scrollCallbacks: [] as unknown[] }));
+
+vi.mock('./list/useListSelection', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./list/useListSelection')>();
+  return {
+    ...actual,
+    useListSelection: (options: Parameters<typeof actual.useListSelection>[0]) => {
+      selectionInputs.scrollCallbacks.push(options.scrollToVirtualIndex);
+      return actual.useListSelection(options);
+    },
+  };
+});
 
 vi.mock('../../lib/report-error', () => ({
   reportError: reportErrorMock,
@@ -58,7 +70,25 @@ const renderListView = (statusFilter: 'inbox' | 'next' | 'waiting' | 'someday' |
   );
 
 describe('ListView', () => {
+  it('keeps the reveal scroll callback stable across non-data rerenders', () => {
+    const tasks = Array.from({ length: 200 }, (_, index) => makeTask(String(index)));
+    useTaskStore.setState({ _allTasks: tasks, tasks, lastDataChangeAt: 1 });
+    const screen = (title: string) => (
+      <LanguageProvider>
+        <KeybindingProvider currentView="next" onNavigate={() => {}}>
+          <ListView title={title} statusFilter="next" />
+        </KeybindingProvider>
+      </LanguageProvider>
+    );
+    const view = render(screen('Next'));
+    const before = selectionInputs.scrollCallbacks[selectionInputs.scrollCallbacks.length - 1];
+    expect(before).toBeTypeOf('function');
+    view.rerender(screen('Next actions'));
+    expect(selectionInputs.scrollCallbacks[selectionInputs.scrollCallbacks.length - 1]).toBe(before);
+  });
+
   beforeEach(() => {
+    selectionInputs.scrollCallbacks = [];
     reportErrorMock.mockReset();
     window.localStorage.removeItem(referenceViewStateStorageKey);
     window.localStorage.removeItem('mindwtr:view:list:next:v1');

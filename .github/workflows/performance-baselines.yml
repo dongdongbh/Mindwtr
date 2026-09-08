@@ -33,11 +33,18 @@ jobs:
       - run: bun run desktop:web:build
       - name: Measure sequential production UI runs (reporting, not a hosted timing gate)
         run: bun run perf:web
+      - name: Measure disk-backed SQLite and sync CPU (reporting with integrity assertions)
+        env:
+          RUNS: '10'
+          STORAGE_OUT_DIR: build/performance-storage/ci
+        run: bun run perf:storage
       - name: Retain measurements and failures
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: production-browser-performance-${{ github.sha }}
-          path: build/performance-web/ci
+          path: |
+            build/performance-web/ci
+            build/performance-storage/ci/*-report.json
           retention-days: 90
           if-no-files-found: warn
