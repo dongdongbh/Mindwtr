@@ -13,6 +13,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  android-benchmark-compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      APP_VARIANT: benchmark
+      EXPO_PUBLIC_STARTUP_PROFILING: '1'
+      ANDROID_PROFILEABLE: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: bash scripts/ci/setup-android-sdk.sh
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - working-directory: apps/mobile
+        run: bunx expo prebuild --platform android --no-install
+      - name: Compile runner only (physical-device measurements remain local)
+        working-directory: apps/mobile/android
+        run: ./gradlew -I ../benchmark/include.gradle :macrobenchmark:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=2
+
   production-browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -31,6 +60,7 @@ jobs:
       - run: bun run test:perf-tools
       - run: bunx playwright install --with-deps chromium
       - run: bun run desktop:web:build
+      - run: bun run test:settings-browser
       - name: Measure sequential production UI runs (reporting, not a hosted timing gate)
         run: bun run perf:web
       - name: Measure disk-backed SQLite and sync CPU (reporting with integrity assertions)
@@ -38,6 +68,12 @@ jobs:
           RUNS: '10'
           STORAGE_OUT_DIR: build/performance-storage/ci
         run: bun run perf:storage
+      - name: Exercise restarted SQLite peers and lost sync acknowledgements
+        env:
+          ROUNDS: '100'
+          SIZE: '1000'
+          RELIABILITY_OUT_DIR: build/reliability/ci
+        run: bun run test:reliability
       - name: Retain measurements and failures
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -46,5 +82,7 @@ jobs:
           path: |
             build/performance-web/ci
             build/performance-storage/ci/*-report.json
+            build/reliability/ci/**/report.json
+            build/settings-discoverability
           retention-days: 90
           if-no-files-found: warn

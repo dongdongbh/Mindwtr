@@ -1,0 +1,12 @@
+// Opt-in init script, never included by a store/release build.
+// ./gradlew -I ../benchmark/include.gradle :macrobenchmark:assembleRelease
+gradle.settingsEvaluated { settings ->
+    // Init scripts also run for React Native's included plugin builds.
+    if (gradle.parent != null) return
+    def appBuild = new File(settings.settingsDir, 'app/build.gradle')
+    if (!appBuild.exists() || !appBuild.text.contains("applicationId 'tech.dongdongbh.mindwtr.benchmark'")) {
+        throw new GradleException('Macrobenchmark requires the separate APP_VARIANT=benchmark native project')
+    }
+    settings.include ':macrobenchmark'
+    settings.project(':macrobenchmark').projectDir = new File(settings.settingsDir, '../benchmark')
+}

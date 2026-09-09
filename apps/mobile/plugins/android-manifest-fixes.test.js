@@ -11,9 +11,17 @@ const {
     ensureContextAutomationReceiver,
     removeContextIntentFilters,
     setProfileable,
+    mergeToolsRemove,
 } = plugin.__testables;
 
 describe('android-manifest-fixes', () => {
+  it('keeps manifest remove directives idempotent across repeated prebuilds', () => {
+    const attribute = 'android:screenOrientation';
+    expect(mergeToolsRemove(undefined, attribute)).toBe(attribute);
+    expect(mergeToolsRemove(`${attribute}, ${attribute}`, attribute)).toBe(attribute);
+    expect(mergeToolsRemove(['android:theme', attribute], attribute)).toBe(`android:theme,${attribute}`);
+    expect(mergeToolsRemove(mergeToolsRemove('android:theme', attribute), attribute)).toBe(`android:theme,${attribute}`);
+  });
   it('moves context automation custom actions from MainActivity to a receiver', () => {
     const mainActivity = {
       $: { 'android:name': '.MainActivity' },

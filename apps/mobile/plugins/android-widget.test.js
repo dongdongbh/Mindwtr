@@ -60,7 +60,11 @@ describe('android-widget', () => {
     expect(previews[1]).not.toContain('mindwtr_widget_section_title');
     expect(previews[2]).toContain('android:text="Quick capture"');
     expect(previews[2]).not.toContain('Plan the week');
-    for (const preview of previews) expect(preview).not.toContain('<ListView');
+    for (const preview of previews) {
+      expect(preview).not.toContain('<ListView');
+      const ids = [...preview.matchAll(/android:id="@\+id\/([^"]+)"/g)].map((match) => match[1]);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
   });
 
   it('carries the previous widget sizing and preview over from app.json', () => {

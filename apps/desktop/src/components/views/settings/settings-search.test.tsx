@@ -87,7 +87,7 @@ import { SettingsView } from '../SettingsView';
 // The sidebar's small-screen page <select> also exposes `option` roles, so
 // results are always queried inside the results listbox.
 function resultOptions(): HTMLElement[] {
-    const list = document.getElementById('settings-search-results');
+    const list = document.querySelector<HTMLElement>('[role="listbox"]');
     return list ? within(list).queryAllByRole('option') : [];
 }
 

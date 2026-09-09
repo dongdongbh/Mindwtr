@@ -89,6 +89,42 @@ physical cold-cache reads, cloud RTT, encryption, attachment transfer, or end-to
 The weekly/manual workflow runs them sequentially after browser measurements and uploads
 JSON reports only. Timing is reporting-only on hosted hardware; integrity failures fail CI.
 
+## Restart recovery and sync endurance
+
+```bash
+bun run test:perf-tools
+ROUNDS=100 SIZE=1000 bun run test:reliability
+```
+
+The runner creates a unique directory under `build/reliability` and retains synthetic
+SQLite databases, a synthetic file remote and a JSON report. It never accepts an existing
+database or contacts a sync account. `RELIABILITY_OUT_DIR` must be on disk.
+
+Three child-process cases exercise the production SQLite snapshot writer: SIGKILL before
+COMMIT, an injected write error before COMMIT, and SIGKILL after successful save acknowledgement.
+Fresh connections check SQLite integrity, complete-batch rollback or persistence, and unique
+task IDs. A separate stale-snapshot test checks that a newer writer's acknowledged edit survives.
+The injected error represents the adapter's error path; it does **not** simulate actual disk
+exhaustion. Process termination is not evidence of hardware power-loss durability.
+
+Three peers then edit offline and exchange data through `performSyncCycle`, rotating order
+each round. SQLite connections reopen between cycles. One remote write per round succeeds
+but loses its acknowledgement; retries must settle, preserve all edits, retain a tombstone
+against a stale live peer, and converge across every entity field without duplicate IDs.
+Virtual time advances past backoff without changing the production retry policy. This is
+deterministic interleaving, not concurrent cloud writes or native background scheduling.
+
+Reports retain per-cycle SQLite read/write, remote file read/parse, serialize/write and total
+durations. `cycleProcessingMs` is the residual (merge, validation, bookkeeping and harness
+overhead), **not pure merge CPU**. These are local-file phase measurements, not WebDAV/Dropbox
+RTT, encryption, attachment transfer or native bridge measurements. The weekly/manual workflow
+runs 100 rounds with 1,000 tasks and retains reports even on failure. Timings remain descriptive;
+correctness assertions fail CI. The short two-round case runs with `test:perf-tools`.
+
+Still separate release checks: native capture queue replay after termination, interrupted
+attachment transfers, old-version database upgrades, backup restore, real disk-full behavior,
+and multi-device tests against each supported backend. Do not mark these covered by this runner.
+
 ## Audit coverage and next measurements
 
 | Area | Automated evidence | Still needs native profiling |
@@ -127,6 +163,79 @@ Unknown/mismatched classification, crashes, missing readiness, malformed/missing
 or log loss invalidate the report and return nonzero. A fixed post-launch window must
 be long enough for the device; an invalid run is a finding, not an outlier to discard.
 
+### Native interaction runner
+
+`apps/mobile/benchmark` is an opt-in AndroidX Macrobenchmark test module, not shipped in
+normal builds. Generate the **Benchmark** native project using the mobile README's profiling
+recipe, then build from `apps/mobile/android`:
+
+```bash
+APP_VARIANT=benchmark EXPO_PUBLIC_STARTUP_PROFILING=1 ANDROID_PROFILEABLE=1 \
+  ./gradlew -I ../benchmark/include.gradle :app:assembleRelease :macrobenchmark:assembleRelease \
+  -PreactNativeArchitectures=arm64-v8a
+```
+
+Set `ANDROID_HOME` and `ANDROID_SDK_ROOT` to the installed SDK. The init script refuses a
+non-Benchmark application ID and ignores included Gradle plugin builds. Install only the
+generated `app-release.apk` and `macrobenchmark-release.apk` on the explicitly selected device.
+The runner does not install, reset, import or erase data. Confirm English UI, the synthetic
+fixture, disabled sync and an idle unlocked phone before running:
+
+```bash
+ANDROID_SERIAL=<device> ADB_BIN=<absolute-adb-path> \
+SYNTHETIC_DATA_CONFIRMED=1 DATASET_ID=<fixture-id> DEVICE_LABEL=lab-phone NETWORK=online \
+EXPECTED_APK_SHA256=<sha256-of-built-app-release.apk> \
+SCENARIO=inboxScroll METRIC_MODE=timing RUNS=10 bun run perf:android-interactions
+```
+
+Scenarios: `coldStartup` (native TTID/TTFD), `inboxScroll`, `settingsNavigation`, and
+`captureSave` (frame metrics). Run one scenario at a time. The target package is fixed to
+`tech.dongdongbh.mindwtr.benchmark`; the actual installed APK hash must match the supplied
+build hash. Non-debuggable/profileable checks and AndroidX device-quality checks are not
+suppressed. Compilation uses partial compilation after three warm-up iterations, with
+baseline-profile installation disabled to make that condition explicit and repeatable.
+
+Run capture last: warm-ups and measurements intentionally leave synthetic tasks in Inbox.
+Restore the fixture through the normal import workflow before comparable capture reruns.
+UI Automator fills the title directly; this is not a physical keyboard typing-latency test.
+Capture traces include runner-process `benchmark.capture.open`, `.enterTitle`, and `.save`
+sections for phase attribution. They include automation waits and are **not** app-only
+input-to-visible or durable-save-ack latency metrics.
+Scrolling selects Default order and requires a changed nonempty window of synthetic rows.
+Capture selects Newest order in setup and requires its new row; it does not assume that a
+new task is visible under the user's previous sort. Startup notification notices must clear
+before interaction measurement, since they can intercept list gestures.
+
+`build/performance-android` retains native JSON, Perfetto traces, instrumentation failures,
+installed APK identity, fixture/condition labels and thermal state. `METRIC_MODE=timing`
+(default) collects only startup/frame metrics. Use a **separate invocation** with
+`METRIC_MODE=memory` to collect the last anonymous/file-backed RSS samples during each
+iteration. Those counters are neither allocation peaks nor additive PSS totals. Missing
+samples fail validation; they are never substituted with zero. The test-only module opts into AndroidX's
+experimental [MemoryUsageMetric](https://developer.android.com/reference/kotlin/androidx/benchmark/macro/MemoryUsageMetric)
+API; normal app dependencies are unchanged. The post-run
+process diagnostic may say the process has stopped and is not used as a memory measurement.
+ART heap and GPU counters are deliberately excluded from the aggregated benchmark. In the
+pinned AndroidX 1.4.1 source (`MetricResultExtensions.kt`, `mergeToSingleMetricResults`),
+an iteration missing any scalar counter loses **all** scalar results, including frame count.
+ART heap samples depend on GC, so short interactions produced incomplete scalar reports
+even when every frame-timing array was present. Isolating timing and collecting only RSS
+for the memory experiment avoids that coupling without relaxing the sample-count guard.
+If ART/GPU counters are needed, inspect the retained traces and report their availability
+separately. Do not compare the old mixed/max-memory reports with the new separate/last-RSS
+reports. Metadata schema 2 records the metric mode; the test APK hash identifies the runner.
+
+For retention investigation, run `SCENARIO=inboxScroll METRIC_MODE=memory RUNS=15` (with
+the same safety/identity variables above), then repeat with a longer session if RSS has not
+stabilized. Each iteration scrolls, waits for UI idle, and revisits the initial row in setup.
+Keep the per-iteration sequence: a high-water mark alone cannot establish a leak. Longer
+idle recovery should be measured separately while the same process is still alive, not by
+the post-instrumentation process diagnostic.
+Frame timings are not input-to-display latency.
+Use `RUNS=1` to verify the harness only. Collect longer quiet-device runs and repeated A/A
+and A/B sessions before drawing regression conclusions. Native JSON is not accepted by
+`perf:compare`; do not mix its frame percentiles with per-run latency percentiles.
+
 ## Compare like-for-like
 
 ```bash
@@ -154,7 +263,7 @@ changes repeat interleaved A/B runs; investigate distributions and traces, not b
    stalls, frames, memory and I/O; use a compatible Hermes/JS profiler for JS attribution.
    `reportFullyDrawn()` makes application readiness available to platform measurements.
    For stable automated TTID/TTFD/frame metrics, provision a dedicated device and an
-   Android Macrobenchmark instrumentation runner. This change does not install that runner.
+   Android Macrobenchmark instrumentation runner, described above.
 3. iOS/macOS: use Instruments App Launch/Time Profiler, animation hitches and allocations
    on release builds. Use XCTest launch metrics for repeatable Apple launch experiments.
    JS/WebView markers supplement those tools; native Apple signposts and XCTest automation

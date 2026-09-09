@@ -1,4 +1,4 @@
-import { type ComponentType, useEffect, useState, useMemo } from 'react';
+import { type ComponentType, useEffect, useState, useMemo, useId } from 'react';
 import { Search } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
@@ -42,6 +42,7 @@ export function SettingsSidebar({
 }: SettingsSidebarProps) {
     const [search, setSearch] = useState('');
     const [activeIndex, setActiveIndex] = useState(0);
+    const resultsId = useId();
     const isSearching = search.trim().length > 0;
     const matches = useMemo(
         () => (isSearching ? matchSettingsSearchResults(searchResults, search) : []),
@@ -51,6 +52,10 @@ export function SettingsSidebar({
     useEffect(() => {
         setActiveIndex(0);
     }, [search]);
+
+    useEffect(() => {
+        if (isSearching) document.getElementById(`${resultsId}-${activeIndex}`)?.scrollIntoView?.({ block: 'nearest' });
+    }, [activeIndex, isSearching, resultsId]);
 
     const pick = (result: SettingsSearchResult | undefined) => {
         if (!result) return;
@@ -85,7 +90,7 @@ export function SettingsSidebar({
             </div>
             <select
                 value={activeId}
-                onChange={(event) => onSelect(event.target.value)}
+                onChange={(event) => { onSelect(event.target.value); setSearch(''); }}
                 aria-label={title}
                 className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 lg:hidden"
             >
@@ -93,8 +98,8 @@ export function SettingsSidebar({
                     <option key={item.id} value={item.id}>{item.label}</option>
                 ))}
             </select>
-            <div className="relative hidden lg:block">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+            <div className="relative">
+                <Search aria-hidden="true" className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
                 <input
                     type="text"
                     value={search}
@@ -104,28 +109,31 @@ export function SettingsSidebar({
                     aria-label={searchPlaceholder ?? 'Search settings\u2026'}
                     role="combobox"
                     aria-expanded={isSearching}
-                    aria-controls="settings-search-results"
+                    aria-controls={isSearching ? resultsId : undefined}
+                    aria-activedescendant={isSearching && matches[activeIndex] ? `${resultsId}-${activeIndex}` : undefined}
                     aria-autocomplete="list"
-                    className="w-full h-8 pl-8 pr-3 text-xs bg-card border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    className="w-full h-11 lg:h-8 pl-8 pr-3 text-sm lg:text-xs bg-card border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
             </div>
             {isSearching ? (
                 <ul
-                    id="settings-search-results"
+                    id={resultsId}
                     role="listbox"
                     aria-label={searchPlaceholder ?? 'Search settings\u2026'}
-                    className="hidden space-y-0.5 lg:block"
+                    className="space-y-0.5 max-h-[40vh] overflow-y-auto lg:max-h-none"
                 >
                     {matches.map((result, index) => (
-                        <li key={`${result.pageId}:${result.key}`}>
+                        <li key={`${result.pageId}:${result.key}`} role="presentation">
                             <button
                                 type="button"
                                 role="option"
+                                id={`${resultsId}-${index}`}
+                                tabIndex={-1}
                                 aria-selected={index === activeIndex}
                                 onMouseEnter={() => setActiveIndex(index)}
                                 onClick={() => pick(result)}
                                 className={cn(
-                                    'w-full rounded-lg px-3 py-2 text-left transition-colors',
+                                    'w-full min-h-11 lg:min-h-0 rounded-lg px-3 py-2 text-left transition-colors',
                                     index === activeIndex ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted/60',
                                 )}
                             >

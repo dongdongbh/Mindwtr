@@ -158,6 +158,11 @@ const setProfileable = (application, enabled = androidProfileableEnabled) => {
     }
 };
 
+const mergeToolsRemove = (existing, attribute) => [...new Set(
+  [...(Array.isArray(existing) ? existing : [existing ?? '']), attribute]
+    .flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean),
+)].join(',');
+
 module.exports = function withAndroidManifestFixes(config) {
   const withBackupRuleFiles = withDangerousMod(config, [
     'android',
@@ -226,14 +231,7 @@ module.exports = function withAndroidManifestFixes(config) {
       if (activity.$ && activity.$['android:name'] === MLKIT_ACTIVITY) {
         // Remove forced orientation for large screens.
         delete activity.$['android:screenOrientation'];
-        const existingRemove = activity.$['tools:remove'];
-        if (existingRemove) {
-          activity.$['tools:remove'] = Array.isArray(existingRemove)
-            ? [...existingRemove, 'android:screenOrientation']
-            : `${existingRemove},android:screenOrientation`;
-        } else {
-          activity.$['tools:remove'] = 'android:screenOrientation';
-        }
+        activity.$['tools:remove'] = mergeToolsRemove(activity.$['tools:remove'], 'android:screenOrientation');
         didUpdateMlkit = true;
       }
     });
@@ -309,6 +307,7 @@ module.exports = function withAndroidManifestFixes(config) {
 };
 
 module.exports.__testables = {
+  mergeToolsRemove,
     BACKUP_RULES_XML,
     DATA_EXTRACTION_RULES_XML,
     buildContextIntentFilter,
