@@ -57,6 +57,9 @@ import {
 import { LIST_END_GAP } from "./list/list-toolbar";
 import { SettingsUpdateModal } from "./settings/SettingsUpdateModal";
 import { SettingsSidebar } from "./settings/SettingsSidebar";
+// The default page travels with this already-lazy route. A second lazy
+// boundary here delays the first useful Settings content after the shell loads.
+import { SettingsMainPage } from "./settings/SettingsMainPage";
 import { useAiSettings } from "./settings/useAiSettings";
 import { useCalendarSettings } from "./settings/useCalendarSettings";
 import { useObsidianSettings } from "./settings/useObsidianSettings";
@@ -92,13 +95,6 @@ export type SettingsOnboardingHintPage = DesktopOnboardingHandoffPage;
 
 const FEEDBACK_ENDPOINT_URL = String(import.meta.env.VITE_FEEDBACK_ENDPOINT_URL || '').trim();
 
-const SettingsMainPage = lazy(
-  wrapSettingsOpenImport("page-chunk:main", () =>
-    import("./settings/SettingsMainPage").then((m) => ({
-      default: m.SettingsMainPage,
-    })),
-  ),
-);
 const SettingsGtdPage = lazy(
   wrapSettingsOpenImport("page-chunk:gtd", () =>
     import("./settings/SettingsGtdPage").then((m) => ({
@@ -400,7 +396,9 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   useLayoutEffect(() => {
     markSettingsOpenTrace("settings-view-layout-effect", {
       page,
-      releaseCheck: "v1.3.0/settings-page-transition",
+      releaseCheck: page === "main"
+        ? "v1.3.0/settings-default-coload"
+        : "v1.3.0/settings-page-transition",
     });
   }, [page]);
 

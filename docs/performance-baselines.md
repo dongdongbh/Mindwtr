@@ -115,6 +115,8 @@ physical cold-cache reads, cloud RTT, encryption, attachment transfer, or end-to
 The weekly/manual workflow runs them sequentially after browser measurements and uploads
 JSON reports only. Timing is reporting-only on hosted hardware; integrity failures fail CI.
 
+Measured follow-up: [full-merge allocation and Android capture](performance-merge-allocation-2026-09.md).
+
 ## Restart recovery and sync endurance
 
 ```bash
@@ -240,13 +242,24 @@ connection. The restored 120 ms initial focus behavior is unchanged.
 Rebuild/install the runner APK if it predates `CaptureKeyboardReadinessTest`. A missing
 test, failed instrumentation, missing/malformed report, wrong APK/fixture, incomplete or
 duplicate samples, or hidden keyboard blocks measurement and returns nonzero. There is
-no skip switch. Metadata schema 3 records the preflight status; its log and native report
+no skip switch. Metadata schema 4 records the preflight status; its log and native report
 (plus failure screenshots when available) are retained separately under
 `readiness-instrumentation.txt` and `readiness/`. Preflight time is not a capture timing
 sample. It exercises the app before the existing compilation warm-ups, so keep this
 protocol constant between comparison builds. Battery/thermal snapshots for the measured
 run are taken after preflight. Schema 2 capture reports have no automatic readiness proof;
 do not treat them as equivalent without separately matched correctness evidence.
+
+For every scenario and metric mode, the host also resolves and hashes both installed
+APKs again after measurement and artifact collection. Metadata `finalBuildIdentity`
+must pass before the report can pass. Changed/missing packages or a failed final device
+check invalidate the run, even when instrumentation reports success; collected native
+JSON/traces remain available. Post-run diagnostic failures also produce terminal failed
+metadata. Schema 3 lacks this end-of-run identity proof. These are boundary checks, not
+continuous install monitoring: keep the device dedicated/idle, and never install or
+change data during a run even if the APK bytes are identical.
+
+Measured example: [mobile Settings and scrolling](performance-mobile-navigation-2026-09.md).
 
 Run `captureSave` last: warm-ups and measurements intentionally leave synthetic tasks in Inbox.
 Restore the fixture through the normal import workflow before comparable capture reruns.

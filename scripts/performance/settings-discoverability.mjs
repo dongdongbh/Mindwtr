@@ -21,11 +21,36 @@ try {
       localStorage.setItem('mindwtr:desktop:first-run-onboarding:v1', 'dismissed');
     }, JSON.stringify(data));
     const page = await context.newPage();
+    let releaseSettings;
+    let settingsRequested = false;
+    const settingsReady = new Promise(resolve => { releaseSettings = resolve; });
+    await context.route('**/assets/SettingsView-*.js', async route => {
+      settingsRequested = true;
+      await settingsReady;
+      await route.continue();
+    });
     try {
       await page.goto(server.url);
       await expect(page.locator('[data-sidebar-item][data-view="agenda"]')).toHaveAttribute('aria-current', 'page');
       await expect(page.getByText('Help: Focus', { exact: true })).toHaveCount(0);
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await expect.poll(() => settingsRequested).toBe(true);
+      // Retain the current screen while the real Settings route is unavailable,
+      // including a first click before its background preload has completed.
+      await expect(page.getByRole('heading', { name: 'Focus', exact: true })).toBeVisible();
+      await page.screenshot({ path: join(output, `${width}-${theme}-route-pending.png`) });
+      // A later navigation wins over a still-pending Settings transition.
+      await page.locator('[data-sidebar-item][data-view="inbox"]').click();
+      const captureInput = page.getByPlaceholder(/add task/i);
+      await expect(captureInput).toBeVisible();
+      const settingsResponse = page.waitForResponse(response => /\/SettingsView-[^/]+\.js$/.test(response.url()));
+      releaseSettings();
+      await (await settingsResponse).finished();
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await expect(page.locator('[data-sidebar-item][data-view="inbox"]')).toHaveAttribute('aria-current', 'page');
+      await expect(captureInput).toBeVisible();
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await expect(page.locator('[data-settings-key="appearance"]')).toBeVisible();
       const input = page.getByRole('combobox', { name: /Search settings/i });
       await expect(input).toBeVisible();
       await input.fill('theme');
@@ -70,6 +95,6 @@ try {
     } catch (error) {
       await page.screenshot({ path: join(output, `${width}-${theme}-failure.png`) });
       throw error;
-    } finally { await context.close(); }
+    } finally { releaseSettings(); await context.close(); }
   }
 } finally { await browser?.close(); await server.close(); }

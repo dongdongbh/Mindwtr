@@ -22,17 +22,20 @@ assert(/^[a-f0-9]{64}$/i.test(process.env.EXPECTED_APK_SHA256 ?? ''), 'EXPECTED_
 const adbBin = process.env.ADB_BIN ?? 'adb';
 const deviceArgs = ['-s', process.env.ANDROID_SERIAL];
 const adb = (...args) => execFileSync(adbBin, [...deviceArgs, ...args], { encoding: 'utf8', timeout: 30000 }).trim();
+const installedApk = (packageName) => {
+  const paths = adb('shell', 'pm', 'path', packageName).split(/\r?\n/).map(line => line.replace(/^package:/, ''));
+  assert.equal(paths.length, 1, 'Use a single locally built APK, not a split installation');
+  assert(/^\/[a-zA-Z0-9_./=+~-]+\.apk$/.test(paths[0]), 'Unexpected APK path');
+  const hash = adb('shell', 'sha256sum', paths[0]).split(/\s/)[0];
+  assert(/^[a-f0-9]{64}$/i.test(hash), 'Missing or invalid installed APK hash');
+  return hash.toLowerCase();
+};
 assert.equal(adb('get-state'), 'device');
 const packageInfo = adb('shell', 'dumpsys', 'package', target);
 assert(packageInfo.includes('versionName=') && !packageInfo.includes('DEBUGGABLE'), 'Install a non-debuggable Benchmark release APK');
-const paths = adb('shell', 'pm', 'path', target).split(/\r?\n/).map(line => line.replace(/^package:/, ''));
-assert.equal(paths.length, 1, 'Use the single locally built APK, not a split installation');
-assert(/^\/[a-zA-Z0-9_./=+~-]+\.apk$/.test(paths[0]), 'Unexpected APK path');
-const apkHash = adb('shell', 'sha256sum', paths[0]).split(/\s/)[0];
+const apkHash = installedApk(target);
 assert.equal(apkHash.toLowerCase(), process.env.EXPECTED_APK_SHA256.toLowerCase(), 'Installed APK is stale or different');
-const testPath = adb('shell', 'pm', 'path', testPackage).replace(/^package:/, '');
-assert(/^\/[a-zA-Z0-9_./=+~-]+\.apk$/.test(testPath), 'Install the single Macrobenchmark runner APK');
-const testApkHash = adb('shell', 'sha256sum', testPath).split(/\s/)[0];
+const testApkHash = installedApk(testPackage);
 const root = resolve(import.meta.dirname, '../..');
 const output = resolve(process.env.OUT_DIR ?? join(root, 'build/performance-android'));
 mkdirSync(output, { recursive: true });
@@ -40,7 +43,7 @@ const directory = mkdtempSync(join(output, `${scenario}-`));
 const remoteRoot = `/sdcard/Android/media/${testPackage}/run-${Date.now()}-${basename(directory)}`;
 const remoteOutput = `${remoteRoot}/measurement`;
 const metadata = {
-  schemaVersion: 3, scenario, metricMode, requestedRuns: runs, dataset: process.env.DATASET_ID,
+  schemaVersion: 4, scenario, metricMode, requestedRuns: runs, dataset: process.env.DATASET_ID,
   device: process.env.DEVICE_LABEL, deviceModel: adb('shell', 'getprop', 'ro.product.model'),
   os: adb('shell', 'getprop', 'ro.build.fingerprint'), network: process.env.NETWORK,
   apkHash, testApkHash, buildType: 'release-profileable', runtime: 'android-macrobenchmark-1.4.1',
@@ -88,8 +91,8 @@ if (scenario.startsWith('capture')) {
       assert(Number.isInteger(sample.iteration) && sample.keyboardVisible === true && expected.delete(`${sample.iteration}:${sample.kind}`),
         'Invalid or duplicate keyboard-readiness sample');
     }
-    assert.equal(adb('shell', 'sha256sum', paths[0]).split(/\s/)[0], apkHash, 'Target APK changed during readiness');
-    assert.equal(adb('shell', 'sha256sum', testPath).split(/\s/)[0], testApkHash, 'Runner APK changed during readiness');
+    assert.equal(installedApk(target), apkHash, 'Target APK changed during readiness');
+    assert.equal(installedApk(testPackage), testApkHash, 'Runner APK changed during readiness');
     metadata.readiness.status = 'passed';
   } catch (error) {
     metadata.readiness.status = 'failed';
@@ -141,9 +144,26 @@ try {
     }
   }
 } catch (error) { collectionError = String(error); }
-writeFileSync(join(directory, 'process-after.txt'), adb('shell', 'dumpsys', 'meminfo', target));
-writeFileSync(join(directory, 'thermal-after.txt'), adb('shell', 'dumpsys', 'thermalservice'));
-metadata.status = !result.error && result.status === 0 && /OK \(1 test\)/.test(log) && !collectionError ? 'passed' : 'failed';
+// A successful native report alone cannot establish build identity: another
+// build/install can replace either package after the initial check. Resolve the
+// currently installed paths again and retain collected evidence even on failure.
+metadata.finalBuildIdentity = { status: 'checking' };
+try {
+  metadata.finalBuildIdentity.apkHash = installedApk(target);
+  metadata.finalBuildIdentity.testApkHash = installedApk(testPackage);
+  assert.equal(metadata.finalBuildIdentity.apkHash, apkHash, 'Target APK changed during measurement');
+  assert.equal(metadata.finalBuildIdentity.testApkHash, testApkHash, 'Runner APK changed during measurement');
+  metadata.finalBuildIdentity.status = 'passed';
+} catch (error) {
+  metadata.finalBuildIdentity.status = 'failed';
+  metadata.finalBuildIdentity.error = String(error);
+}
+try {
+  writeFileSync(join(directory, 'process-after.txt'), adb('shell', 'dumpsys', 'meminfo', target));
+  writeFileSync(join(directory, 'thermal-after.txt'), adb('shell', 'dumpsys', 'thermalservice'));
+} catch (error) { metadata.diagnosticsError = String(error); }
+metadata.status = !result.error && result.status === 0 && /OK \(1 test\)/.test(log) && !collectionError
+  && metadata.finalBuildIdentity.status === 'passed' && !metadata.diagnosticsError ? 'passed' : 'failed';
 metadata.collectionError = collectionError;
 metadata.runnerError = result.error?.message;
 saveMetadata();
@@ -151,5 +171,7 @@ console.log(`Android interaction artifacts: ${directory}`);
 if (metadata.status !== 'passed') {
   console.error(log);
   if (collectionError) console.error(collectionError);
+  if (metadata.finalBuildIdentity.error) console.error(metadata.finalBuildIdentity.error);
+  if (metadata.diagnosticsError) console.error(metadata.diagnosticsError);
   process.exitCode = 1;
 }

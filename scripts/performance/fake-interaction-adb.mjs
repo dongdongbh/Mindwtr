@@ -5,13 +5,24 @@ import { join } from 'node:path';
 const args = process.argv.slice(4); // node script -s serial <command>
 appendFileSync(process.env.FAKE_ADB_LOG, `${args.join(' ')}\n`);
 const command = args.join(' ');
+const measured = readFileSync(process.env.FAKE_ADB_LOG, 'utf8').includes('MindwtrBenchmark#');
+const measurementChange = measured ? process.env.FAKE_MEASUREMENT_CHANGE : '';
+if (measurementChange === 'disconnected'
+  && (command.startsWith('shell pm path ') || command.startsWith('shell dumpsys '))) process.exit(1);
 if (command === 'get-state') console.log('device');
 else if (command.startsWith('shell dumpsys package ')) console.log(`versionName=1.3.0 flags=[HAS_CODE ${process.env.FAKE_DEBUGGABLE ? 'DEBUGGABLE' : ''}]`);
-else if (command.startsWith('shell pm path ')) console.log('package:/data/app/synthetic/base.apk');
+else if (command.startsWith('shell pm path ')) {
+  const label = command.endsWith('tech.dongdongbh.mindwtr.benchmark') ? 'target' : 'runner';
+  if (measurementChange === `missing-${label}`) process.exit(1);
+  const prefix = measurementChange === 'same-build-new-path' ? 'reinstalled-' : '';
+  console.log(`package:/data/app/${prefix}${label}/base.apk`);
+}
 else if (command.startsWith('shell sha256sum ')) {
   const hashReads = readFileSync(process.env.FAKE_ADB_LOG, 'utf8').split('\n').filter(line => line.startsWith('shell sha256sum ')).length;
   const changed = (process.env.FAKE_READINESS === 'target-changed' && hashReads === 3)
-    || (process.env.FAKE_READINESS === 'runner-changed' && hashReads === 4);
+    || (process.env.FAKE_READINESS === 'runner-changed' && hashReads === 4)
+    || (measurementChange === 'target' && command.includes('/target/'))
+    || (measurementChange === 'runner' && command.includes('/runner/'));
   console.log(`${(process.env.FAKE_STALE || changed ? 'b' : 'a').repeat(64)}  /data/app/synthetic/base.apk`);
 }
 else if (command.startsWith('shell getprop ')) console.log('synthetic-device');

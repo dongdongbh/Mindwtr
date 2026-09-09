@@ -1079,6 +1079,17 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
         return hadExplicitAttachments ? [] : undefined;
     };
 
+    let unchangedAttachmentCopiesSkipped = 0;
+    const withMergedAttachments = <T extends Task | Project>(winner: T, attachments: Attachment[] | undefined): T => {
+        // In the common no-attachment case there is no patch to apply. Keep
+        // the normalized winner instead of copying its full optional schema.
+        // Actual attachment merges and downstream repairs still run normally.
+        if (winner.attachments === attachments) {
+            unchangedAttachmentCopiesSkipped += 1;
+            return winner;
+        }
+        return { ...winner, attachments };
+    };
     const tasksResult = mergeEntitiesWithStats(
         localNormalized.tasks,
         incomingNormalized.tasks,
@@ -1101,7 +1112,7 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
                 preserveTaskCancellationFromStrippedPeer(
                     localTask,
                     incomingTask,
-                    { ...winnerWithForwardCompatibleViewSections, attachments },
+                    withMergedAttachments(winnerWithForwardCompatibleViewSections, attachments),
                 ),
             );
         },
@@ -1123,7 +1134,7 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
             return preserveProjectCancellationFromStrippedPeer(
                 localProject,
                 incomingProject,
-                { ...winner, attachments },
+                withMergedAttachments(winner, attachments),
             );
         },
         normalizeProjectForContentComparison,
@@ -1168,6 +1179,15 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
         settings: mergeSettingsForSync(localNormalized.settings, incomingNormalized.settings),
     }, nowIso);
     data.sections = compactSectionsForPurgedProjects(data.sections, data.projects);
+    if (unchangedAttachmentCopiesSkipped > 0) {
+        logInfo('Sync merge skipped unchanged attachment copies', {
+            scope: 'sync',
+            context: {
+                releaseCheck: 'v1.3.0/sync-attachment-copy-elision',
+                count: unchangedAttachmentCopiesSkipped,
+            },
+        });
+    }
 
     return {
         data,

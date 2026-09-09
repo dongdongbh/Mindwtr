@@ -15,6 +15,47 @@ const parseLoggedContext = (value: unknown): Record<string, unknown> => {
 
 describe('Sync Logic', () => {
     describe('mergeAppData', () => {
+        it('retains normalized task and project winners when attachment merging changes nothing', () => {
+            const options = { nowIso: '2026-09-08T12:00:00.000Z' };
+            const seed = mockAppData(
+                [createMockTask('stable-task', '2026-07-19T12:00:00.000Z')],
+                [createMockProject('stable-project', '2026-07-19T12:00:00.000Z')],
+            );
+            const canonical = mergeAppData(seed, seed, options);
+            const peer = structuredClone(canonical);
+            for (const entity of [...canonical.tasks, ...canonical.projects, ...peer.tasks, ...peer.projects]) {
+                Object.freeze(entity);
+            }
+            const result = mergeAppDataWithStats(canonical, peer, options);
+            expect(result.data).toEqual(canonical);
+            expect(result.stats.tasks.conflicts).toBe(0);
+            expect(result.stats.projects.conflicts).toBe(0);
+            expect([canonical.tasks[0], peer.tasks[0]]).toContain(result.data.tasks[0]);
+            expect([canonical.projects[0], peer.projects[0]]).toContain(result.data.projects[0]);
+            const repeated = mergeAppData(result.data, peer, options);
+            expect(repeated).toEqual(result.data);
+            expect([result.data.tasks[0], peer.tasks[0]]).toContain(repeated.tasks[0]);
+        });
+
+        it('logs avoided attachment copies without claiming one-sided entities were reused', () => {
+            const logs: LogPayload[] = [];
+            setLogger((payload) => logs.push(payload));
+            try {
+                const seed = mockAppData([createMockTask('one', '2026-07-19T12:00:00.000Z')]);
+                mergeAppData(seed, mockAppData());
+                expect(logs.some((entry) => entry.message === 'Sync merge skipped unchanged attachment copies')).toBe(false);
+                mergeAppData(seed, structuredClone(seed));
+                const lines = logs.filter((entry) => entry.message === 'Sync merge skipped unchanged attachment copies');
+                expect(lines).toHaveLength(1);
+                expect(lines[0].context).toEqual({
+                    releaseCheck: 'v1.3.0/sync-attachment-copy-elision',
+                    count: 1,
+                });
+            } finally {
+                setLogger(consoleLogger);
+            }
+        });
+
         it('converges when an old-client project lacks taskSortBy', () => {
             const newClientProject = {
                 ...createMockProject('project-sort', '2026-07-19T12:00:00.000Z'),
@@ -2235,6 +2276,9 @@ describe('Sync Logic', () => {
         });
 
         it('does not use Date.now for entity clamping after normalizing the merge clock', () => {
+            // Vitest timestamps captured console output with Date.now. Keep
+            // diagnostic reporting out of this merge-clock-only assertion.
+            const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
             const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-01-01T00:00:00.000Z').getTime());
             try {
                 const local = mockAppData([
@@ -2251,6 +2295,7 @@ describe('Sync Logic', () => {
                 expect(nowSpy).not.toHaveBeenCalled();
             } finally {
                 nowSpy.mockRestore();
+                infoSpy.mockRestore();
             }
         });
 

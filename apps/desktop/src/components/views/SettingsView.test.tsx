@@ -108,6 +108,14 @@ vi.mock('./settings/SettingsSyncPage', () => ({
     SettingsSyncPage: () => <div>sync-page</div>,
 }));
 
+vi.mock('./settings/SettingsDataPage', () => ({
+    SettingsDataPage: () => <div>data-page</div>,
+}));
+
+vi.mock('./settings/SettingsAdvancedPage', () => ({
+    SettingsAdvancedPage: () => <div>advanced-page</div>,
+}));
+
 vi.mock('./settings/SettingsAboutPage', () => ({
     SettingsAboutPage: () => <div>about-page</div>,
 }));
@@ -172,8 +180,23 @@ import { SettingsView } from './SettingsView';
 import { isDesktopOnboardingHintDismissed } from '../../lib/desktop-onboarding-events';
 
 describe('SettingsView', () => {
+    it('renders General with the Settings route without another loading boundary', () => {
+        const { getByText } = render(
+            <LanguageProvider>
+                <KeybindingProvider currentView="settings" onNavigate={() => undefined}>
+                    <SettingsView />
+                </KeybindingProvider>
+            </LanguageProvider>
+        );
+
+        // No async wait: once the route is available, its default content must
+        // be present in the initial commit rather than suspend on another chunk.
+        expect(getByText('main-page')).toBeVisible();
+        expect(resourceTracker).toEqual({ sync: false, calendar: false, obsidian: false, advanced: false });
+    });
+
     it('loads only visited resource groups and keeps them active across navigation', async () => {
-        const { getByRole } = render(
+        const { getByRole, findByText } = render(
             <LanguageProvider>
                 <KeybindingProvider currentView="settings" onNavigate={() => undefined}>
                     <SettingsView />
@@ -182,13 +205,16 @@ describe('SettingsView', () => {
         );
         expect(resourceTracker).toEqual({ sync: false, calendar: false, obsidian: false, advanced: false });
         fireEvent.click(getByRole('button', { name: 'integrations' }));
+        await findByText('integrations-page');
         expect(resourceTracker).toEqual({ sync: false, calendar: true, obsidian: true, advanced: false });
         fireEvent.click(getByRole('button', { name: 'main' }));
         expect(resourceTracker.calendar).toBe(true);
         fireEvent.click(getByRole('button', { name: 'data' }));
+        await findByText('data-page');
         expect(resourceTracker.sync).toBe(true);
         expect(resourceTracker.advanced).toBe(false);
         fireEvent.click(getByRole('button', { name: 'advanced' }));
+        await findByText('advanced-page');
         expect(resourceTracker.advanced).toBe(true);
         fireEvent.click(getByRole('button', { name: 'main' }));
         expect(resourceTracker).toEqual({ sync: true, calendar: true, obsidian: true, advanced: true });
