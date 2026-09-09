@@ -243,21 +243,62 @@ describe('useQuickCaptureAudio', () => {
     },
   } as const;
 
+  const unconfiguredSettings = {
+    ai: {
+      speechToText: {
+        enabled: false,
+        provider: 'whisper',
+        model: 'whisper-tiny.en',
+        offlineModelPath: '',
+      },
+    },
+    gtd: { saveAudioAttachments: true },
+  } as const;
+
   function Harness({
+    autoRecord = false,
     getSession = () => activeSubmissionSession,
     submissionKey = 1,
   }: {
+    autoRecord?: boolean;
     getSession?: () => CaptureSessionId | null;
     submissionKey?: number;
   }) {
     latest = useQuickCaptureAudio({
       addTask,
+      autoRecord,
       buildTaskProps,
       getActiveSubmissionSession: getSession,
       handleClose,
       onError,
       onWarn,
       settings,
+      submissionCoordinator,
+      submissionKey,
+      t: (key: string) => key,
+      onSubmissionBusyChange,
+      updateSpeechSettings,
+      visible: true,
+    });
+    return null;
+  }
+
+  function UnconfiguredHarness({
+    autoRecord = false,
+    submissionKey = 1,
+  }: {
+    autoRecord?: boolean;
+    submissionKey?: number;
+  }) {
+    latest = useQuickCaptureAudio({
+      addTask,
+      autoRecord,
+      buildTaskProps,
+      getActiveSubmissionSession: () => activeSubmissionSession,
+      handleClose,
+      onError,
+      onWarn,
+      settings: unconfiguredSettings,
       submissionCoordinator,
       submissionKey,
       t: (key: string) => key,
@@ -352,37 +393,7 @@ describe('useQuickCaptureAudio', () => {
     // Reporter scenario (#886): STT was never enabled/configured. The voice button must
     // surface a translated notice pointing at Settings and keep the sheet open, instead of
     // showing a recording indicator and then silently aborting.
-    const unconfiguredSettings = {
-      ai: {
-        speechToText: {
-          enabled: false,
-          provider: 'whisper',
-          model: 'whisper-tiny.en',
-          offlineModelPath: '',
-        },
-      },
-      gtd: { saveAudioAttachments: true },
-    } as const;
     storeMocks.state.settings = unconfiguredSettings;
-
-    function UnconfiguredHarness() {
-      latest = useQuickCaptureAudio({
-        addTask,
-        buildTaskProps,
-        getActiveSubmissionSession: () => activeSubmissionSession,
-        handleClose,
-        onError,
-        onWarn,
-        settings: unconfiguredSettings,
-        submissionCoordinator,
-        submissionKey: 1,
-        t: (key: string) => key,
-        onSubmissionBusyChange,
-        updateSpeechSettings,
-        visible: true,
-      });
-      return null;
-    }
 
     await act(async () => {
       create(<UnconfiguredHarness />);
@@ -397,10 +408,146 @@ describe('useQuickCaptureAudio', () => {
     expect(toastMock.showToast).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'quickAdd.speechNotConfigured' })
     );
+    expect(toastMock.showToast).toHaveBeenCalledTimes(1);
     expect(audioMocks.requestRecordingPermissionsAsync).not.toHaveBeenCalled();
     expect(audioMocks.AudioRecorder).not.toHaveBeenCalled();
     expect(latest?.recording).toBeNull();
     expect(handleClose).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-start unconfigured audio after the preferred input resolves to text', async () => {
+    vi.useFakeTimers();
+    storeMocks.state.settings = unconfiguredSettings;
+    let tree: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        tree = create(<UnconfiguredHarness autoRecord={false} />);
+        await vi.advanceTimersByTimeAsync(500);
+        await flushPromises();
+      });
+
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+      expect(audioMocks.requestRecordingPermissionsAsync).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => tree?.unmount());
+      vi.useRealTimers();
+    }
+  });
+
+  it('attempts unconfigured automatic audio only once per visible capture', async () => {
+    vi.useFakeTimers();
+    storeMocks.state.settings = unconfiguredSettings;
+    const modelLookup = deferred<{
+      exists: boolean;
+      path: string;
+      uri: string;
+      size: number;
+    }>();
+    speechMocks.ensureWhisperModelPathForConfigAsync.mockReturnValue(modelLookup.promise);
+    let tree: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        tree = create(<UnconfiguredHarness autoRecord />);
+        await flushPromises();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(151);
+        await flushPromises();
+      });
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+
+      await act(async () => {
+        modelLookup.resolve({
+          exists: false,
+          path: '',
+          uri: '',
+          size: 0,
+        });
+        await flushPromises();
+      });
+      expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+      expect(appLogMock.logInfo).toHaveBeenCalledTimes(1);
+      expect(appLogMock.logInfo).toHaveBeenCalledWith(
+        'Quick capture audio automatic start attempted',
+        {
+          scope: 'capture',
+          extra: { releaseCheck: 'v1.3.0/capture-audio-auto-start-once' },
+        }
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(151);
+        await flushPromises();
+      });
+
+      // The preferred Audio input requests one automatic start for this open
+      // capture. A configuration warning must not re-arm the same request.
+      expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+      expect(audioMocks.requestRecordingPermissionsAsync).not.toHaveBeenCalled();
+
+      await act(async () => {
+        tree?.update(<UnconfiguredHarness autoRecord submissionKey={1} />);
+        await vi.advanceTimersByTimeAsync(500);
+        await flushPromises();
+      });
+      expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+      expect(appLogMock.logInfo).toHaveBeenCalledTimes(1);
+
+      // The one-shot guard belongs only to automatic scheduling. A user can
+      // still retry manually after configuring speech or dismissing a warning.
+      await act(async () => {
+        await latest?.startRecording();
+        await flushPromises();
+      });
+      expect(toastMock.showToast).toHaveBeenCalledTimes(2);
+      expect(appLogMock.logInfo).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        tree?.update(<UnconfiguredHarness autoRecord submissionKey={2} />);
+        await flushPromises();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(151);
+        await flushPromises();
+      });
+      expect(toastMock.showToast).toHaveBeenCalledTimes(3);
+      expect(appLogMock.logInfo).toHaveBeenCalledTimes(2);
+    } finally {
+      await act(async () => tree?.unmount());
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not auto-restart a configured recording after it saves', async () => {
+    vi.useFakeTimers();
+    let tree: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        tree = create(<Harness autoRecord />);
+        await flushPromises();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(151);
+        await flushPromises();
+      });
+      expect(speechMocks.startWhisperRealtimeCapture).toHaveBeenCalledTimes(1);
+      expect(latest?.recording).not.toBeNull();
+      expect(appLogMock.logInfo).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await latest?.stopRecording({ saveTask: true });
+        await flushPromises();
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(speechMocks.startWhisperRealtimeCapture).toHaveBeenCalledTimes(1);
+      expect(handleClose).toHaveBeenCalledTimes(1);
+      expect(appLogMock.logInfo).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => tree?.unmount());
+      vi.useRealTimers();
+    }
   });
 
   it('keeps deferred start A from recording or clearing busy after capture B opens', async () => {

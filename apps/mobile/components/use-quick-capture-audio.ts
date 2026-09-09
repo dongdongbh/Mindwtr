@@ -23,6 +23,7 @@ import {
   useTaskStore,
 } from '@mindwtr/core';
 import { loadAIKey } from '../lib/ai-config';
+import { logInfo } from '../lib/app-log';
 import { persistAttachmentLocally } from '../lib/attachment-sync';
 import { getAttachmentsDir } from '../lib/attachment-sync-utils';
 import { showInvalidDateCommandToast } from '../lib/quick-add-toast';
@@ -197,6 +198,7 @@ export function useQuickCaptureAudio({
   const [recordingReady, setRecordingReady] = useState(false);
   const recordingStartOwnerRef = useRef<{ id: number; session: CaptureSessionId } | null>(null);
   const recordingStartSequenceRef = useRef(0);
+  const automaticStartAttemptedRef = useRef(false);
   const activeRecordingRef = useRef<RecordingState | null>(null);
   const safeDeleteFileRef = useRef<(file: File, reason: string) => void>(() => undefined);
 
@@ -1052,14 +1054,24 @@ export function useQuickCaptureAudio({
   ]);
 
   useEffect(() => {
-    if (visible && autoRecord && !recording && !recordingBusy) {
-      const handle = setTimeout(() => {
-        void startRecording();
-      }, 150);
-      return () => clearTimeout(handle);
+    automaticStartAttemptedRef.current = false;
+  }, [submissionKey, visible]);
+
+  useEffect(() => {
+    if (!visible || !autoRecord || recording || recordingBusy || automaticStartAttemptedRef.current) {
+      return undefined;
     }
-    return undefined;
-  }, [autoRecord, recording, recordingBusy, startRecording, visible]);
+    const handle = setTimeout(() => {
+      if (automaticStartAttemptedRef.current) return;
+      automaticStartAttemptedRef.current = true;
+      void logInfo('Quick capture audio automatic start attempted', {
+        scope: 'capture',
+        extra: { releaseCheck: 'v1.3.0/capture-audio-auto-start-once' },
+      });
+      void startRecording();
+    }, 150);
+    return () => clearTimeout(handle);
+  }, [autoRecord, recording, recordingBusy, startRecording, submissionKey, visible]);
 
   return {
     recording,
