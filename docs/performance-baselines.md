@@ -115,6 +115,8 @@ physical cold-cache reads, cloud RTT, encryption, attachment transfer, or end-to
 The weekly/manual workflow runs them sequentially after browser measurements and uploads
 JSON reports only. Timing is reporting-only on hosted hardware; integrity failures fail CI.
 
+Measured follow-up: [full-merge allocation and Android capture](performance-merge-allocation-2026-09.md).
+
 ## Restart recovery and sync endurance
 
 ```bash
