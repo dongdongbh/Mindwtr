@@ -7,6 +7,7 @@ import {
     MIGRATION_VERSION,
     type LoadContext,
 } from './store-load-migrations';
+import { applyProjectLifecycleTransition } from './store-helpers';
 import type { AppData, AppSettings, Area, Person, Project, Section, Task } from './types';
 
 const NOW_ISO = '2026-04-10T12:00:00.000Z';
@@ -120,6 +121,77 @@ describe('runLoadMigrations', () => {
         expect(applied).toEqual(['archive-descendants-of-archived-projects']);
         expect(result.tasks[0].status).toBe('done');
         expect(result.sections[0].deletedAt).toBeTruthy();
+    });
+
+    it('archive-descendants-of-archived-projects: preserves a reference through archive, load, and reactivation', () => {
+        const createdAt = '2026-04-01T00:00:00.000Z';
+        const archivedAt = '2026-04-09T00:00:00.000Z';
+        const reactivatedAt = '2026-04-11T00:00:00.000Z';
+        const project = {
+            id: 'p1', title: 'P', status: 'active', color: '#000', order: 0, tagIds: [],
+            createdAt, updatedAt: createdAt, rev: 1, revBy: 'device-a',
+        } as Project;
+        const section = {
+            id: 's1', projectId: 'p1', title: 'S', order: 0,
+            createdAt, updatedAt: createdAt, rev: 1, revBy: 'device-a',
+        } as Section;
+        const reference = {
+            id: 'reference', title: 'R', status: 'reference', tags: [], contexts: [],
+            projectId: 'p1', sectionId: 's1', createdAt, updatedAt: createdAt,
+            rev: 7, revBy: 'device-a',
+        } as Task;
+        const actionable = {
+            id: 'actionable', title: 'A', status: 'next', tags: [], contexts: [],
+            projectId: 'p1', sectionId: 's1', createdAt, updatedAt: createdAt,
+            rev: 3, revBy: 'device-a',
+        } as Task;
+        const archived = applyProjectLifecycleTransition(
+            project,
+            { status: 'archived' },
+            [reference, actionable],
+            [section],
+            archivedAt,
+            'device-a',
+        );
+        const archivedData = settledData({
+            projects: [{ ...project, ...archived.projectUpdates, updatedAt: archivedAt }],
+            tasks: archived.tasks,
+            sections: archived.sections,
+        });
+        const archivedReference = archivedData.tasks.find((task) => task.id === reference.id)!;
+        const logs: LogPayload[] = [];
+        setLogger((payload) => logs.push(payload));
+        try {
+            const firstLoad = runLoadMigrations(archivedData, ctxFor(archivedData));
+            expect(firstLoad.applied).toEqual([]);
+            expect(firstLoad.data.tasks.find((task) => task.id === reference.id)).toEqual(archivedReference);
+
+            const secondLoad = runLoadMigrations(firstLoad.data, ctxFor(firstLoad.data));
+            expect(secondLoad.applied).toEqual([]);
+            expect(secondLoad.data).toBe(firstLoad.data);
+
+            const reactivated = applyProjectLifecycleTransition(
+                firstLoad.data.projects[0],
+                { status: 'active' },
+                firstLoad.data.tasks,
+                firstLoad.data.sections,
+                reactivatedAt,
+                'device-a',
+            );
+            expect(reactivated.tasks.find((task) => task.id === reference.id)).toEqual(archivedReference);
+            expect(reactivated.tasks.find((task) => task.id === actionable.id)).toMatchObject({
+                status: 'next',
+                completedAt: undefined,
+                projectArchivedAt: undefined,
+            });
+            expect(logs.filter((log) => log.context?.releaseCheck === 'v1.3.0/archive-reference-preserved'))
+                .toEqual([
+                    expect.objectContaining({ level: 'info', context: expect.objectContaining({ count: 1 }) }),
+                    expect.objectContaining({ level: 'info', context: expect.objectContaining({ count: 1 }) }),
+                ]);
+        } finally {
+            setLogger(consoleLogger);
+        }
     });
 
     it('repair-dangling-entity-references: clears task references that no longer resolve', () => {

@@ -1,5 +1,5 @@
 import { safeParseDate } from './date';
-import { logWarn } from './logger';
+import { logInfo, logWarn } from './logger';
 import { markCoreStartupPhase } from './startup-profiler';
 import { dedupeLiveAreasByName } from './area-utils';
 import { normalizePeopleForLoad } from './people';
@@ -540,6 +540,7 @@ const archiveDescendantsOfArchivedProjectsMigration: LoadMigration = {
         if (archivedProjectsById.size === 0) return null;
         const deviceId = data.settings.deviceId;
         let changed = false;
+        let preservedReferenceCount = 0;
         const tasks = data.tasks.map((task) => {
             if (task.deletedAt || !task.projectId) return task;
             const project = archivedProjectsById.get(task.projectId);
@@ -550,9 +551,23 @@ const archiveDescendantsOfArchivedProjectsMigration: LoadMigration = {
                 return cancelTaskForProjectArchive(task, project.cancelledAt!, deviceId, ctx.nowIso);
             }
             if (isTaskFinished(task)) return task;
+            if (task.status === 'reference') {
+                preservedReferenceCount += 1;
+                return task;
+            }
             changed = true;
             return completeTaskForProjectArchive(task, ctx.nowIso, deviceId);
         });
+        if (preservedReferenceCount > 0) {
+            logInfo('Archived project reference preserved during load migration', {
+                scope: 'store',
+                category: 'storage',
+                context: {
+                    releaseCheck: 'v1.3.0/archive-reference-preserved',
+                    count: preservedReferenceCount,
+                },
+            });
+        }
         const sections = data.sections.map((section) => {
             if (section.deletedAt) return section;
             if (!archivedProjectsById.has(section.projectId)) return section;
