@@ -29,4 +29,10 @@ describe('performance reports', () => {
     const candidate = report([...Array(90).fill(100), ...Array(10).fill(200)]);
     expect(compareReports(baseline, candidate).regressions.map((r) => r.statistic)).toEqual(['p95Ms']);
   });
+  it('never gates CPU-sampled runs, even against another sampled run', () => {
+    const normal = report(Array(30).fill(100));
+    const sampled = { ...normal, metadata: { ...metadata, profiling: 'chromium-cpu-1000us' } };
+    expect(compareReports(normal, sampled).comparable).toBe(false);
+    expect(compareReports(sampled, sampled).comparable).toBe(false);
+  });
 });

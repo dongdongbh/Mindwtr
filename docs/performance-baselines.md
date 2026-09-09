@@ -66,6 +66,30 @@ on manual dispatch, uploading 90-day artifacts and a job summary. Hosted hardwar
 these runs are reporting-only. Harness failures still fail the job. Existing PR budget
 gates remain unchanged, with added benchmark-tool regression tests.
 
+### Desktop CPU attribution
+
+Use a separate diagnostic run when navigation or Settings timings need explanation:
+
+```bash
+# Optional local source maps for resolving minified profile frames; do not publish them.
+VITE_STARTUP_PROFILING=1 bun --cwd apps/desktop x vite build --sourcemap hidden
+CPU_PROFILE=1 DEVICE_LABEL=lab-linux RUNS=3 SIZES=1000,10000 bun run perf:web
+```
+
+Each measured iteration retains separate Chromium `.cpuprofile` files for Inbox
+navigation, first-open General Settings, and Integrations, alongside the usual
+fixture/build metadata and raw samples. Open the profiles in Chrome DevTools;
+retain the matching `dist` and source maps locally before rebuilding. Sampling is
+1,000 microseconds using the [DevTools CPU profiler](https://chromedevtools.github.io/devtools-protocol/tot/Profiler/).
+Idle samples and automation waits are not application CPU. These profiles do not
+attribute native Tauri/keyring/SQLite work or GPU/compositor time.
+
+`CPU_PROFILE` defaults off: normal baselines never open a profiling session.
+Sampled runs carry `profiling: chromium-cpu-1000us`; the comparison tool rejects
+them, even against other sampled runs. Use profiles to choose a change, then
+measure its benefit with fresh **unprofiled** repeated runs. Failed UI actions
+still attempt to retain their profile, clean up the session, and fail the run.
+
 ## Storage and sync processing
 
 ```bash
