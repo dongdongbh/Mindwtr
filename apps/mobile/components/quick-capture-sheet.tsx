@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
   Platform,
@@ -261,9 +261,6 @@ export function QuickCaptureSheet({
   const contextOptionsLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contextOptionsRequestRef = useRef(0);
   const initialFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const modalShownRef = useRef(false);
-  const modalVisibleRef = useRef(visible);
-  const initialFocusPendingRef = useRef(false);
   const focusTaskLimit = normalizeFocusTaskLimit(settings?.gtd?.focusTaskLimit);
   const canFocusNewTask = focusNewTask || canStarNewCapture({ focusedCount: getFocusedCount(), focusTaskLimit });
   const focusNewTaskDisabledReason = formatFocusTaskLimitText(
@@ -288,27 +285,10 @@ export function QuickCaptureSheet({
   }, []);
 
   const clearInitialFocusTimer = useCallback(() => {
-    initialFocusPendingRef.current = false;
     if (!initialFocusTimerRef.current) return;
     clearTimeout(initialFocusTimerRef.current);
     initialFocusTimerRef.current = null;
   }, []);
-
-  useLayoutEffect(() => {
-    modalVisibleRef.current = visible;
-    if (!visible) modalShownRef.current = false;
-    return () => { modalVisibleRef.current = false; };
-  }, [visible]);
-
-  const handleModalShow = useCallback(() => {
-    // Ignore a queued native event after hide/unmount; it must not mark the
-    // next modal window as ready before that window has actually appeared.
-    if (!modalVisibleRef.current) return;
-    modalShownRef.current = true;
-    if (Platform.OS !== 'android' || !initialFocusPendingRef.current) return;
-    clearInitialFocusTimer();
-    inputRef.current?.focus();
-  }, [clearInitialFocusTimer]);
 
   const {
     clearAndroidOptionsExpand,
@@ -519,20 +499,12 @@ export function QuickCaptureSheet({
     });
     if (autoRecord) return;
     clearInitialFocusTimer();
-    if (Platform.OS === 'android') {
-      // The non-animated Android modal can accept focus as soon as its native
-      // window is shown. A fixed delay adds latency and can race slow mounts.
-      // A new capture request can also arrive while that window is already open.
-      initialFocusPendingRef.current = true;
-      if (modalShownRef.current) handleModalShow();
-      return clearInitialFocusTimer;
-    }
     initialFocusTimerRef.current = setTimeout(() => {
       initialFocusTimerRef.current = null;
       inputRef.current?.focus();
     }, 120);
     return clearInitialFocusTimer;
-  }, [autoRecord, clearInitialFocusTimer, handleModalShow, openRequestId, resetDraftState, visible]);
+  }, [autoRecord, clearInitialFocusTimer, openRequestId, resetDraftState, visible]);
 
   useEffect(() => {
     if (prioritiesEnabled) return;
@@ -1159,7 +1131,6 @@ export function QuickCaptureSheet({
   return (
     <>
       <QuickCaptureSheetBody
-        onModalShow={handleModalShow}
         addAnother={addAnother}
         areaLabel={areaLabel}
         contextLabel={contextLabel}

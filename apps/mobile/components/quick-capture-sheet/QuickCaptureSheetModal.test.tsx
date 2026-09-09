@@ -241,7 +241,6 @@ describe('Quick capture modal composition', () => {
     const originalPlatformOs = Platform.OS;
     const handleClose = vi.fn();
     const handleRequestClose = vi.fn();
-    const onModalShow = vi.fn();
 
     Object.defineProperty(Platform, 'OS', {
       configurable: true,
@@ -262,7 +261,6 @@ describe('Quick capture modal composition', () => {
             contentAccessibilityHidden
             handleClose={handleClose}
             handleRequestClose={handleRequestClose}
-            onModalShow={onModalShow}
             handleSave={vi.fn()}
             insetsBottom={0}
             inputRef={{ current: null }}
@@ -313,7 +311,6 @@ describe('Quick capture modal composition', () => {
     expect(modal.props.animationType).toBe('none');
     expect(modal.props.hardwareAccelerated).toBe(true);
     expect(modal.props.onRequestClose).toBe(handleRequestClose);
-    expect(modal.props.onShow).toBe(onModalShow);
     const keyboardAvoiding = tree.root.findByType(KeyboardAvoidingView);
     expect(keyboardAvoiding.props.behavior).toBeUndefined();
     expect(keyboardAvoiding.props.accessibilityElementsHidden).toBe(true);

@@ -1,7 +1,8 @@
 # Android quick-capture focus experiment
 
-Status: measured focus/frame improvement on one device; not release-ready until
-the first-open keyboard visibility observation is resolved.
+Status: **unsafe optimization withdrawn; working focus timing restored**. The
+rebuilt recovery passes 20 cold/warm keyboard checks. Retain the new native
+correctness gate; do not claim the rejected candidate's timing gains.
 
 ## Evidence and scope
 
@@ -11,8 +12,8 @@ different over-budget frames. The focus mount command takes 7.74 ms wall time,
 including 4.38 ms Running and 3.23 ms Sleeping. Some work is native window/IME IPC,
 so this is not evidence of a JavaScript-only bottleneck.
 
-The existing initial-focus path also waits a fixed 120 ms. The candidate uses the
-Android modal's `onShow` event instead. It does not change iOS's animated-sheet
+The existing initial-focus path waits a fixed 120 ms. The rejected candidate used
+the Android modal's `onShow` event instead. It did not change iOS's animated-sheet
 timing, the Add another save path, task writes, or the keyboard inset calculation.
 Initial focus must remain cancelled after close, More, hiding, unmounting, and
 auto-record capture. Repeated native events must not refocus the title.
@@ -119,22 +120,133 @@ On the candidate, title text entry (`12345`), More expansion, project-picker
 opening, cancellation with Back, closing, and reopening were exercised without
 saving. More blurred the title and exposed the options. The Inbox remained 221.
 The phone was returned to Home and only the benchmark package was force-stopped.
-The candidate APK remains installed in the isolated benchmark package.
+The control APK was restored in the isolated benchmark package after the
+keyboard-readiness comparison below.
 
 **Do not ship on these timings alone:** the first manual candidate open after
 reinstallation showed a focused title and cursor but no keyboard. A screenshot
 (`capture-focus-manual-open.png`) and input-method dump (`mInputShown=false`,
 `mImeWindowVis=0`) confirmed the observation. Subsequent candidate reopening and
 a fresh candidate reinstall/launch showed `mInputShown=true`, as did the control
-reinstall/launch. This is an unresolved observation, not a proven candidate
-regression or proof of reliable keyboard presentation.
+reinstall/launch. This initially intermittent observation was subsequently
+reproduced by the cold-launch correctness gate below.
 
 The current benchmark asserts input focus, not keyboard visibility. Before merge,
-add an explicit visible-IME readiness check and cover first capture after cold
-launch as well as warm reopening, then repeat both builds. Do not replace focus
+run the separate visible-IME readiness check described below against both builds.
+It covers first capture after cold launch as well as warm reopening. Do not replace focus
 with an extra tap that conceals the original behavior. Date-picker and audio/
 auto-record device acceptance were not completed in this pass; unit coverage is
 not a substitute for those checks. No microphone recording was made.
+
+### Keyboard readiness correctness gate
+
+`CaptureKeyboardReadinessTest#coldAndWarmCapture` runs in the existing isolated
+native test APK. It is separate from Macrobenchmark timing: its polling and
+correctness checks are not latency measurements. Each cycle force-stops only the
+benchmark app, opens capture once after cold launch and once after closing it,
+and requires a focused title plus an on-screen input-method window. It also
+requires no keyboard before each open, preventing a stale visible-window result
+from passing the test, and checks that cancellation leaves the Inbox unchanged.
+
+The window predicate uses Android's
+[UiAutomation interactive-window API](https://developer.android.com/reference/android/app/UiAutomation#getWindows()),
+not a particular keyboard's package, text labels, or inferred screen-height
+change. The instrumentation service's original flags are restored afterward.
+The test does not tap the title, type, save, or change keyboard settings.
+
+Build/install only `:macrobenchmark:assembleRelease` using the baseline recipe.
+After confirming the phone is idle, the fixture is synthetic, and sync is off,
+invoke the test on the explicit device (substitute the installed control or
+candidate hash and a fresh output directory):
+
+```bash
+adb -s <serial> shell am instrument -w -r \
+  -e class tech.dongdongbh.mindwtr.macrobenchmark.CaptureKeyboardReadinessTest#coldAndWarmCapture \
+  -e syntheticDataConfirmed true \
+  -e datasetId mixed-v1-1000-cbfcca2e13cf76a5-plus21captures \
+  -e expectedApkSha256 <installed-apk-sha256> \
+  -e iterations 10 \
+  -e additionalTestOutputDir /sdcard/Android/media/tech.dongdongbh.mindwtr.macrobenchmark/<unique-run> \
+  tech.dongdongbh.mindwtr.macrobenchmark/androidx.test.runner.AndroidJUnitRunner
+```
+
+The test verifies the actual installed target APK hash and rejects debuggable
+targets before driving UI. Retain `keyboard-readiness.json` (20 successful
+samples for 10 cycles), instrumentation output, runner APK hash, and any failure
+screenshot/hierarchy. A nonempty JSON alone is not success: require test output
+`OK (1 test)`, status `passed`, and the full requested cold/warm sample count.
+If another app interrupts the test, no screenshot or hierarchy of it is saved.
+
+### Keyboard readiness results: September 9, 2026
+
+The runner APK used for all three runs had SHA-256
+`b1f4a0c82b82fda7242c79755e1918aa45ffafe1b914c40386f4106d912b8112`.
+The test verified each installed target APK against its expected hash. The
+fixture and device were unchanged from the timing comparison.
+
+| Order | Build / local artifact directory | Result |
+| --- | --- | --- |
+| 1 | Candidate / `keyboard-candidate-20260909-1` | Failed first cold capture, 0 completed samples |
+| 2 | Control / `keyboard-control-20260909-1` | Passed 10 cold + 10 warm captures, `OK (1 test)` |
+| 3 | Candidate / `keyboard-candidate-20260909-2` | Failed first cold capture again, 0 completed samples |
+
+Artifacts and matching `.log` files are under
+`/home/dd/.cache/mindwtr-performance-tmp/`. Both failures report
+`Focused title has no visible keyboard: cold-0`; the screenshots show the capture
+sheet with no keyboard and Android reports `mInputShown=false`, `mImeWindowVis=0`.
+The repeat requested only one cold/warm cycle and reproduced the same failure in
+12.7 seconds. The control completed all 20 checks in 105.6 seconds. The focused
+field assertion alone would have passed in both failed runs.
+
+This establishes a regression in the candidate under the matched test conditions.
+Keep commit `072f4de31` off main without the restoration below. A replacement must pass the same
+unweakened cold/warm keyboard gate before timing comparisons are accepted. Retain
+this test even if the focus experiment is withdrawn.
+
+No production-app data, keyboard settings, or permissions were changed. The
+control build was restored to the benchmark package; the phone was returned to
+Home. Date-picker/audio acceptance remains deferred because this candidate failed
+the earlier readiness gate.
+
+### Diagnosis and recovery
+
+A third immediate-focus run (`keyboard-candidate-diagnosis.log`) reproduced the
+failure. The scoped Android input-method log (`keyboard-candidate-ime.log`) records
+the show request failing at `PHASE_CLIENT_VIEW_SERVED`, followed by
+`Ignoring showSoftInput() ... is not served`. The focus request reaches the input
+before Android is ready to serve its input connection. Modal `onShow` is therefore
+not a sufficient keyboard-readiness signal in this path.
+
+A bounded follow-up moved focus to the next animation frame and added cancellation
+tests. Those tests were red before the change, then all 65 targeted tests passed.
+However, its release APK (`capture-modal-frame.apk`, SHA-256
+`f5ebf130613f8ea461973c19e9a0ef70396039d105afd808ccf756cd3f0dc6a7`) failed the
+unchanged device gate at `cold-1`, after one successful cold/warm pair. Evidence is
+in `keyboard-frame-20260909-1/` and its matching `.log`. A frame delay is also not
+a reliable readiness signal, so that variant was discarded rather than tuning
+additional delays or weakening the test.
+
+The final fix removes the modal-show/frame machinery and restores the previously
+working 120 ms initial-focus path. Native modal props and iOS behavior return to
+the control implementation. Unit regressions cover Android/iOS timing and
+cancellation before the delay fires (close, More, auto-record transition, hide,
+and unmount). The native cold/warm test remains as the end-to-end regression gate.
+
+Validation of the restored source:
+
+- 60 targeted capture/modal/keyboard tests passed; mobile typecheck passed.
+- Scoped ESLint completed with zero errors and two existing warnings.
+- A fresh release build passed. `capture-focus-restored.apk` is byte-for-byte
+  identical to the original control (SHA-256 `653cbcb2...887b846` above).
+- `keyboard-restored-20260909-1/keyboard-readiness.json` reports `passed`, exactly
+  10 cold and 10 warm captures; instrumentation reports `OK (1 test)` in 108.8 s.
+- Final Inbox count remains 221. The phone was returned to Home with only the
+  benchmark package force-stopped. Personal app data was untouched.
+
+The regression is removed by withdrawing the unsafe optimization, not by claiming
+the input-connection race is universally solved with a timer. Any future attempt
+to reduce that delay needs a reliable native readiness mechanism and must pass
+this gate before its performance results count.
 
 ## Prepared local artifacts
 
@@ -145,7 +257,7 @@ Both APKs are under `/home/dd/.cache/mindwtr-performance-tmp/`:
 - Candidate: `capture-modal-ready-final.apk`, SHA-256
   `628fbc3eef0e29fae9de5a46e949f8c7d17215ba8aa8fb2ef2d4065c0922e687`.
 
-Both release builds and the mobile typecheck passed. The 57 focused
-capture/save/modal/keyboard tests pass, including a late `onShow` after hide
-followed by reopening. These checks establish
-build and lifecycle behavior, not a device-level latency or jank improvement.
+The original release builds and unit checks passed but did not catch the native
+keyboard regression. The recovery build and its separate device results above
+are the current acceptance evidence; historical performance results remain only
+for comparison with rejected experiments.
