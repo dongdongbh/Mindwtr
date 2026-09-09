@@ -343,6 +343,86 @@ describe('QuickCaptureSheet save handling', () => {
     expect(body.props.saveButtonTextColor).toBe('#ffffff');
   });
 
+  it('focuses Android capture when the modal is ready without a timer or duplicate focus', async () => {
+    vi.useFakeTimers();
+    await withPlatform('android', async () => {
+      let tree!: ReturnType<typeof create>;
+      const onClose = vi.fn();
+      await act(async () => {
+        tree = create(<QuickCaptureSheet visible openRequestId={1} onClose={onClose} />);
+      });
+      const body = () => tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+      const focus = vi.fn();
+      body().props.inputRef.current = { focus, blur: vi.fn() };
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(focus).not.toHaveBeenCalled();
+      act(() => { body().props.onModalShow(); });
+      expect(focus).toHaveBeenCalledOnce();
+      act(() => { body().props.onModalShow(); vi.advanceTimersByTime(500); });
+      expect(focus).toHaveBeenCalledOnce();
+      await act(async () => {
+        tree.update(<QuickCaptureSheet visible openRequestId={2} onClose={onClose} />);
+      });
+      expect(focus).toHaveBeenCalledTimes(2);
+      act(() => { tree.unmount(); });
+    });
+  });
+
+  it.each(['close', 'more', 'audio', 'hidden', 'unmount'] as const)(
+    'does not steal Android focus after %s cancels the initial request', async (reason) => {
+      vi.useFakeTimers();
+      await withPlatform('android', async () => {
+        let tree!: ReturnType<typeof create>;
+        const onClose = vi.fn();
+        await act(async () => {
+          tree = create(<QuickCaptureSheet visible openRequestId={1} autoRecord={reason === 'audio'} onClose={onClose} />);
+        });
+        const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+        const onModalShow = body.props.onModalShow;
+        const focus = vi.fn();
+        body.props.inputRef.current = { focus, blur: vi.fn() };
+        await act(async () => {
+          if (reason === 'close') body.props.handleClose();
+          if (reason === 'more') body.props.onToggleOptions();
+          if (reason === 'hidden') tree.update(<QuickCaptureSheet visible={false} openRequestId={1} onClose={onClose} />);
+          if (reason === 'unmount') tree.unmount();
+        });
+        act(() => {
+          onModalShow();
+          vi.advanceTimersByTime(500);
+        });
+        expect(focus).not.toHaveBeenCalled();
+        if (reason === 'hidden') {
+          await act(async () => {
+            tree.update(<QuickCaptureSheet visible openRequestId={2} onClose={onClose} />);
+          });
+          expect(focus).not.toHaveBeenCalled();
+          act(() => { onModalShow(); });
+          expect(focus).toHaveBeenCalledOnce();
+        }
+        if (reason !== 'unmount') act(() => { tree.unmount(); });
+      });
+    },
+  );
+
+  it('preserves the iOS initial-focus timing', async () => {
+    vi.useFakeTimers();
+    await withPlatform('ios', async () => {
+      let tree!: ReturnType<typeof create>;
+      await act(async () => {
+        tree = create(<QuickCaptureSheet visible onClose={vi.fn()} />);
+      });
+      const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+      const focus = vi.fn();
+      body.props.inputRef.current = { focus, blur: vi.fn() };
+      act(() => { body.props.onModalShow(); vi.advanceTimersByTime(119); });
+      expect(focus).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(focus).toHaveBeenCalledOnce();
+      act(() => { tree.unmount(); });
+    });
+  });
+
   it('opens organize options collapsed for global capture', async () => {
     let tree!: ReturnType<typeof create>;
     await act(async () => {

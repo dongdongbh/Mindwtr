@@ -52,6 +52,7 @@ interface QuickCaptureSheetBodyProps {
   contentAccessibilityHidden?: boolean;
   handleClose: () => void;
   handleRequestClose?: () => void;
+  onModalShow?: () => void;
   handleImportTextFile?: () => void;
   handleSave: () => void;
   handleSaveAndEdit?: () => void;
@@ -115,6 +116,7 @@ export function QuickCaptureSheetBody({
   contentAccessibilityHidden = false,
   handleClose,
   handleRequestClose,
+  onModalShow,
   handleImportTextFile,
   handleSave,
   handleSaveAndEdit,
@@ -225,6 +227,7 @@ export function QuickCaptureSheetBody({
 
   return (
     <Modal
+      onShow={onModalShow}
       visible={visible}
       transparent
       // Transparent Android modal animations can blend stale frames on some tablet GPUs.
