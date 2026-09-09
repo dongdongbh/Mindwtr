@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const nlOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Geavanceerd",
+        'settings.aiRequestTimeout': "Time-out voor verzoeken",
+        'settings.aiRequestTimeoutDesc': "Hoelang op een AI-antwoord wordt gewacht. Verhoog dit voor trage lokale modellen. Geannuleerde verzoeken en verzoeken met een time-out worden niet automatisch herhaald.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} seconden",
         'bulk.exportCsv': 'Geselecteerde taken als CSV exporteren',
         'settings.automationCapture': 'Geautomatiseerd vastleggen',
         'settings.automationCaptureDesc': 'Sta vertrouwde automatiseringsapps met je token toe om tekst klaar te zetten voor Postvak IN. Vastgelegde items verschijnen wanneer Mindwtr de volgende keer wordt geopend.',

@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import type { AIProviderId, AppData } from '@mindwtr/core';
-import { buildAIConfig, buildCopilotConfig, getAIKeyStorageKey, loadAIKeyFromStorage, saveAIKeyToStorage } from '@mindwtr/core';
+import type { AIProviderConfig, AIProviderId, AppData } from '@mindwtr/core';
+import { buildAIConfig as buildCoreAIConfig, buildCopilotConfig as buildCoreCopilotConfig, getAIKeyStorageKey, loadAIKeyFromStorage, saveAIKeyToStorage } from '@mindwtr/core';
+import { logInfo } from './app-log';
 
 import {
     deleteSessionSecret,
@@ -70,8 +71,29 @@ export async function saveAIKey(provider: AIProviderId, value: string): Promise<
 }
 
 export function isAIKeyRequired(settings: AppData['settings'] | undefined): boolean {
-    const config = buildAIConfig(settings ?? {}, '');
+    const config = buildCoreAIConfig(settings ?? {}, '');
     return !(config.provider === 'openai' && Boolean(config.endpoint));
 }
 
-export { buildAIConfig, buildCopilotConfig };
+const withRequestDiagnostics = (config: AIProviderConfig): AIProviderConfig => ({
+    ...config,
+    onRequestStop: (reason) => {
+        void logInfo('AI request stopped without retry', {
+            scope: 'ai',
+            extra: {
+                releaseCheck: 'v1.3.0/ai-request-stop-once',
+                outcome: reason,
+                provider: config.provider,
+                timeoutMs: config.timeoutMs,
+            },
+        }).catch(() => undefined);
+    },
+});
+
+export function buildAIConfig(settings: AppData['settings'], apiKey: string): AIProviderConfig {
+    return withRequestDiagnostics(buildCoreAIConfig(settings, apiKey));
+}
+
+export function buildCopilotConfig(settings: AppData['settings'], apiKey: string): AIProviderConfig {
+    return withRequestDiagnostics(buildCoreCopilotConfig(settings, apiKey));
+}

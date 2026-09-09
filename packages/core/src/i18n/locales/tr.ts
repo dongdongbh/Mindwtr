@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const trOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Gelişmiş",
+        'settings.aiRequestTimeout': "İstek zaman aşımı",
+        'settings.aiRequestTimeoutDesc': "Yapay zekâ yanıtının ne kadar bekleneceği. Yavaş yerel modeller için artırın. İptal edilen veya zaman aşımına uğrayan istekler otomatik olarak yeniden denenmez.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} saniye",
         'settings.automationCapture': 'Otomatik yakalama',
         'settings.automationCaptureDesc': "Tokeninizi kullanan güvenilir otomasyon uygulamalarının Gelen Kutusu'na metin eklemesine izin verin. Yakalanan içerikler Mindwtr bir sonraki açılışında görünür.",
         'settings.automationCaptureToken': 'Yakalama tokeni',

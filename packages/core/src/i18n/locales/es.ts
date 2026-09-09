@@ -2,6 +2,10 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Spanish.
 export const esOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Avanzado",
+        'settings.aiRequestTimeout': "Tiempo de espera",
+        'settings.aiRequestTimeoutDesc': "Cuánto esperar una respuesta de la IA. Auméntalo para modelos locales lentos. Las solicitudes canceladas o que agoten el tiempo no se reintentan automáticamente.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} segundos",
         'settings.automationCapture': 'Captura automatizada',
         'settings.automationCaptureDesc': 'Permite que las aplicaciones de automatización de confianza que tengan tu token pongan texto en cola en la bandeja de entrada. Las capturas aparecerán la próxima vez que abras Mindwtr.',
         'settings.automationCaptureToken': 'Token de captura',

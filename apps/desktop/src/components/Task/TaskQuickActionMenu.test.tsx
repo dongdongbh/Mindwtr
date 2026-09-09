@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { useState, type ComponentProps } from 'react';
@@ -34,6 +34,7 @@ const t = (key: string) => ({
     'common.save': 'Save',
     'nav.calendar': 'Calendar',
     'projects.duplicate': 'Duplicate',
+    'projects.create': 'Create project',
     'projects.search': 'Search projects',
     'review.markReviewed': 'Mark reviewed',
     'task.convertToReference': 'Convert to Reference',
@@ -76,6 +77,7 @@ const createMenuProps = (overrides: Partial<ComponentProps<typeof TaskQuickActio
     onDelete: vi.fn(),
     onStatusChange: vi.fn(),
     onCreateArea: vi.fn(async () => null),
+    onCreateProject: vi.fn(async () => null),
     onUpdateTask: vi.fn(async () => ({ success: true })),
     ...overrides,
 });
@@ -105,6 +107,34 @@ const renderClosableMenu = (overrides: Partial<ComponentProps<typeof TaskQuickAc
 };
 
 describe('TaskQuickActionMenu', () => {
+    it.each([
+        ['garden', ['@garden']],
+        ['garden, @garden, @@garden, #garden', ['@garden']],
+        [' @, #, , home office, @工作/電話 ', ['@home office', '@工作/電話']],
+    ])('saves canonical contexts for typed input %s (#1189)', async (input, expected) => {
+        const props = renderMenu();
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
+        fireEvent.change(screen.getByRole('textbox', { name: 'task.aria.contexts' }), { target: { value: input } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(props.onUpdateTask).toHaveBeenCalledExactlyOnceWith({ contexts: expected }));
+    });
+
+    it('allows explicitly saving a legacy bare context without changing other task fields (#1189)', async () => {
+        const props = renderMenu({ task: { ...task, contexts: ['garden', '@garden'], tags: ['#keep'] } });
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
+        const save = screen.getByRole('button', { name: 'Save' });
+        expect(save).toBeEnabled();
+        fireEvent.click(save);
+        await waitFor(() => expect(props.onUpdateTask).toHaveBeenCalledExactlyOnceWith({ contexts: ['@garden'] }));
+    });
+
+    it('does not write canonical contexts merely by opening or cancelling the menu (#1189)', () => {
+        const props = renderMenu({ task: { ...task, contexts: ['garden'] } });
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+        expect(props.onUpdateTask).not.toHaveBeenCalled();
+    });
+
     it('reopens a completed task from its read-only menu using the keyboard', async () => {
         const user = userEvent.setup();
         const props = renderClosableMenu({ task: { ...task, status: 'done' }, readOnly: true });
@@ -390,6 +420,108 @@ describe('TaskQuickActionMenu', () => {
 
         await waitFor(() => expect(onUpdateTask).toHaveBeenCalledWith({ projectId: 'project-alpha', sectionId: undefined }));
         await waitFor(() => expect(props.onClose).toHaveBeenCalled());
+    });
+
+    it('creates a project as a draft and waits for Save before assigning the task', async () => {
+        let finishCreate!: (id: string | null) => void;
+        const onCreateProject = vi.fn(() => new Promise<string | null>((resolve) => {
+            finishCreate = resolve;
+        }));
+        const onUpdateTask = vi.fn(async () => ({ success: true as const }));
+        const props = renderMenu({
+            task: { ...task, sectionId: 'section-old' },
+            onCreateProject,
+            onUpdateTask,
+        });
+
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Project…' }));
+        const panel = screen.getByRole('dialog', { name: 'Project' });
+        fireEvent.click(within(panel).getByRole('button', { name: 'No Project' }));
+        fireEvent.change(screen.getByRole('textbox', { name: 'Search projects' }), {
+            target: { value: 'Garden redesign' },
+        });
+        const createOption = screen.getByRole('option', { name: 'Create project "Garden redesign"' });
+        fireEvent.click(createOption);
+        fireEvent.click(createOption);
+
+        expect(onCreateProject).toHaveBeenCalledExactlyOnceWith('Garden redesign');
+        expect(onUpdateTask).not.toHaveBeenCalled();
+        expect(within(panel).getByRole('button', { name: 'Save' })).toBeDisabled();
+
+        await act(async () => {
+            finishCreate('project-garden');
+        });
+
+        expect(onUpdateTask).not.toHaveBeenCalled();
+        fireEvent.click(within(panel).getByRole('button', { name: 'Save' }));
+
+        await waitFor(() => expect(onUpdateTask).toHaveBeenCalledExactlyOnceWith({
+            projectId: 'project-garden',
+            sectionId: undefined,
+        }));
+        expect(props.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps a successfully created project unassigned when the project draft is cancelled', async () => {
+        const onCreateProject = vi.fn(async () => 'project-garden');
+        const onUpdateTask = vi.fn(async () => ({ success: true as const }));
+        renderMenu({
+            task: { ...task, projectId: 'project-original' },
+            projects: [{
+                id: 'project-original',
+                title: 'Original',
+                status: 'active',
+                color: '#2563eb',
+                order: 0,
+                tagIds: [],
+                createdAt: now,
+                updatedAt: now,
+            }],
+            onCreateProject,
+            onUpdateTask,
+        });
+
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Project…' }));
+        const panel = screen.getByRole('dialog', { name: 'Project' });
+        fireEvent.click(within(panel).getByRole('button', { name: 'Original' }));
+        fireEvent.change(screen.getByRole('textbox', { name: 'Search projects' }), {
+            target: { value: 'Garden redesign' },
+        });
+        fireEvent.click(screen.getByRole('option', { name: 'Create project "Garden redesign"' }));
+        await waitFor(() => expect(within(panel).getByRole('button', { name: 'Save' })).toBeEnabled());
+        fireEvent.click(within(panel).getByRole('button', { name: 'Cancel' }));
+
+        expect(onCreateProject).toHaveBeenCalledOnce();
+        expect(onUpdateTask).not.toHaveBeenCalled();
+    });
+
+    it('retains the project search after a failed creation so it can be retried', async () => {
+        const onCreateProject = vi.fn()
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce('project-garden');
+        renderMenu({ onCreateProject });
+
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Project…' }));
+        const panel = screen.getByRole('dialog', { name: 'Project' });
+        fireEvent.click(within(panel).getByRole('button', { name: 'No Project' }));
+        const search = screen.getByRole('textbox', { name: 'Search projects' });
+        fireEvent.change(search, { target: { value: 'Garden redesign' } });
+        fireEvent.click(screen.getByRole('option', { name: 'Create project "Garden redesign"' }));
+
+        await waitFor(() => expect(search).toHaveValue('Garden redesign'));
+        const retryOption = screen.getByRole('option', { name: 'Create project "Garden redesign"' });
+        expect(retryOption).toBeEnabled();
+        fireEvent.click(retryOption);
+
+        await waitFor(() => expect(onCreateProject).toHaveBeenCalledTimes(2));
+    });
+
+    it('does not expose project creation in a read-only task menu', () => {
+        const onCreateProject = vi.fn(async () => 'project-new');
+        renderMenu({ task: { ...task, status: 'done' }, readOnly: true, onCreateProject });
+
+        expect(screen.queryByRole('menuitem', { name: 'Project…' })).not.toBeInTheDocument();
+        expect(onCreateProject).not.toHaveBeenCalled();
     });
 
     it('leaves Enter to the area selector dropdown instead of saving the panel', () => {

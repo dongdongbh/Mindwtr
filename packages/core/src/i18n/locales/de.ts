@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const deOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Erweitert",
+        'settings.aiRequestTimeout': "Zeitlimit für Anfragen",
+        'settings.aiRequestTimeoutDesc': "Wie lange auf eine KI-Antwort gewartet wird. Für langsame lokale Modelle erhöhen. Abgebrochene Anfragen und Anfragen mit Zeitüberschreitung werden nicht automatisch wiederholt.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} Sekunden",
         'settings.automationCapture': 'Automatisierte Erfassung',
         'settings.automationCaptureDesc': 'Erlaube vertrauenswürdigen Automatisierungs-Apps, mit deinem Token Text im Eingang abzulegen. Erfasste Inhalte erscheinen, wenn Mindwtr das nächste Mal geöffnet wird.',
         'settings.automationCaptureToken': 'Erfassungs-Token',

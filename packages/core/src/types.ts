@@ -479,6 +479,7 @@ export interface AiSettings {
     reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high';
     thinkingBudget?: number;
     copilotModel?: string;
+    requestTimeoutSeconds?: number;
     speechToText?: SpeechToTextSettings;
 }
 

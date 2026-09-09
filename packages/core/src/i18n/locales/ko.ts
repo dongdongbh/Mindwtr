@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const koOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "고급",
+        'settings.aiRequestTimeout': "요청 제한 시간",
+        'settings.aiRequestTimeoutDesc': "AI 응답을 기다리는 시간입니다. 느린 로컬 모델에서는 늘려 주세요. 시간이 초과되거나 취소된 요청은 자동으로 재시도하지 않습니다.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}}초",
         'settings.automationCapture': '자동화 캡처',
         'settings.automationCaptureDesc': '신뢰할 수 있는 자동화 앱이 토큰으로 텍스트를 받은 편지함 대기열에 추가하도록 허용합니다. 캡처한 내용은 다음에 Mindwtr를 열 때 표시됩니다.',
         'settings.automationCaptureToken': '캡처 토큰',

@@ -1,7 +1,9 @@
 import {
     fetchWithTimeoutAndConsume as fetchHttpWithTimeoutAndConsume,
     readResponseText,
+    SUSPENDED_REQUEST_MESSAGE,
 } from '../http-utils';
+import type { AIProvider, AIProviderConfig, AIRequestStopReason } from './types';
 
 const MAX_JSON_REPAIR_BOUNDARIES = 50;
 const MAX_AI_RESPONSE_BYTES = 16 * 1024 * 1024;
@@ -200,6 +202,88 @@ export type BufferedAIResponse = {
     bodyText: string;
 };
 
+export class AIRequestStopError extends Error {
+    readonly reason: AIRequestStopReason;
+
+    constructor(reason: AIRequestStopReason, message: string) {
+        super(message);
+        this.name = 'AIRequestStopError';
+        this.reason = reason;
+    }
+}
+
+export const isAIRequestStopError = (error: unknown): error is AIRequestStopError => (
+    error instanceof AIRequestStopError
+);
+
+export const throwIfAIRequestAborted = (signal: AbortSignal | undefined, label: string): void => {
+    if (signal?.aborted) {
+        throw new AIRequestStopError('aborted', `${label} request aborted`);
+    }
+};
+
+export const waitForAIRequestRetry = async (
+    delayMs: number,
+    signal: AbortSignal | undefined,
+    label: string,
+): Promise<void> => {
+    throwIfAIRequestAborted(signal, label);
+    if (delayMs <= 0) return;
+
+    await new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, delayMs);
+        const onAbort = () => {
+            clearTimeout(timeoutId);
+            signal?.removeEventListener('abort', onAbort);
+            reject(new AIRequestStopError('aborted', `${label} request aborted`));
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
+};
+
+export const runAIProviderOperation = async <T>(
+    config: AIProviderConfig,
+    operation: () => Promise<T>,
+): Promise<T> => {
+    try {
+        return await operation();
+    } catch (error) {
+        if (isAIRequestStopError(error)) {
+            try {
+                config.onRequestStop?.(error.reason);
+            } catch {
+                // Diagnostics must never replace the request's terminal error.
+            }
+        }
+        throw error;
+    }
+};
+
+export const withAIRequestStopNotifications = (
+    config: AIProviderConfig,
+    provider: AIProvider,
+): AIProvider => ({
+    clarifyTask: (input, options) => runAIProviderOperation(
+        config,
+        () => provider.clarifyTask(input, options),
+    ),
+    breakDownTask: (input, options) => runAIProviderOperation(
+        config,
+        () => provider.breakDownTask(input, options),
+    ),
+    analyzeReview: (input, options) => runAIProviderOperation(
+        config,
+        () => provider.analyzeReview(input, options),
+    ),
+    predictMetadata: (input, options) => runAIProviderOperation(
+        config,
+        () => provider.predictMetadata(input, options),
+    ),
+});
+
 export async function fetchTextWithTimeout(
     url: string,
     init: RequestInit,
@@ -209,13 +293,38 @@ export async function fetchTextWithTimeout(
     fetcher: typeof fetch = globalThis.fetch
 ): Promise<BufferedAIResponse> {
     const callerSignal = externalSignal ?? init.signal ?? undefined;
+    const timeoutMessage = `${label} request timed out`;
+    throwIfAIRequestAborted(callerSignal, label);
+    const stopController = typeof AbortController === 'function' ? new AbortController() : null;
+    let didTimeout = false;
+    let didCallerAbort = false;
+    const startedAt = Date.now();
+    const timeoutId = stopController
+        ? setTimeout(() => {
+            didTimeout = true;
+            const message = Date.now() - startedAt > timeoutMs * 3
+                ? `${timeoutMessage}; ${SUSPENDED_REQUEST_MESSAGE}`
+                : timeoutMessage;
+            stopController.abort(new AIRequestStopError('timeout', message));
+        }, timeoutMs)
+        : null;
+    const onCallerAbort = stopController && callerSignal
+        ? () => {
+            didCallerAbort = true;
+            stopController.abort(new AIRequestStopError('aborted', `${label} request aborted`));
+        }
+        : null;
+    if (callerSignal && onCallerAbort) {
+        callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+    }
+    const requestSignal = stopController?.signal ?? callerSignal;
     try {
         return await fetchHttpWithTimeoutAndConsume(
             url,
-            { ...init, signal: callerSignal },
+            { ...init, signal: requestSignal },
             timeoutMs,
             fetcher,
-            `${label} request timed out`,
+            timeoutMessage,
             async (response, signal) => ({
                 ok: response.ok,
                 status: response.status,
@@ -225,21 +334,39 @@ export async function fetchTextWithTimeout(
             }),
         );
     } catch (error) {
-        if (callerSignal?.aborted) {
-            throw new Error(`${label} request aborted`);
+        if (isAIRequestStopError(error)) {
+            throw error;
+        }
+        if (didCallerAbort || callerSignal?.aborted) {
+            throw new AIRequestStopError('aborted', `${label} request aborted`);
+        }
+        if (didTimeout) {
+            const message = error instanceof Error ? error.message : timeoutMessage;
+            throw new AIRequestStopError('timeout', message);
         }
         throw error;
+    } finally {
+        if (timeoutId !== null) clearTimeout(timeoutId);
+        if (callerSignal && onCallerAbort) {
+            callerSignal.removeEventListener('abort', onCallerAbort);
+        }
     }
 }
 
 const lastRequestAt = new Map<string, number>();
 
-export async function rateLimit(key: string, minIntervalMs = 250): Promise<void> {
+export async function rateLimit(
+    key: string,
+    minIntervalMs = 250,
+    signal?: AbortSignal,
+    label = 'AI',
+): Promise<void> {
+    throwIfAIRequestAborted(signal, label);
     const now = Date.now();
     const last = lastRequestAt.get(key) ?? 0;
     const waitMs = minIntervalMs - (now - last);
     if (waitMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        await waitForAIRequestRetry(waitMs, signal, label);
     }
     lastRequestAt.set(key, Date.now());
 }

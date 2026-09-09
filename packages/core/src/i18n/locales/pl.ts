@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const plOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Zaawansowane",
+        'settings.aiRequestTimeout': "Limit czasu żądania",
+        'settings.aiRequestTimeoutDesc': "Czas oczekiwania na odpowiedź AI. Zwiększ go dla wolnych modeli lokalnych. Anulowane żądania i żądania po przekroczeniu limitu czasu nie są ponawiane automatycznie.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} sekund",
         'settings.automationCapture': 'Automatyczne przechwytywanie',
         'settings.automationCaptureDesc': 'Zezwalaj zaufanym aplikacjom do automatyzacji używającym Twojego tokenu na dodawanie tekstu do kolejki Skrzynki odbiorczej. Przechwycone elementy pojawią się przy następnym otwarciu Mindwtr.',
         'settings.automationCaptureToken': 'Token przechwytywania',

@@ -306,6 +306,7 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
                     enabled: true,
                     provider: 'openai',
                     apiKey: 'secret',
+                    requestTimeoutSeconds: 120,
                     speechToText: {
                         enabled: true,
                         provider: 'whisper',
@@ -339,6 +340,7 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
         expect(sanitized.settings.timeFormat).toBeUndefined();
 
         expect(sanitized.settings.ai?.apiKey).toBeUndefined();
+        expect(sanitized.settings.ai?.requestTimeoutSeconds).toBe(120);
         expect(sanitized.settings.ai?.speechToText?.offlineModelPath).toBeUndefined();
 
         expect(sanitized.settings.globalQuickAddShortcut).toBeUndefined();

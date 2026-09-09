@@ -345,6 +345,7 @@ const aiProps: Parameters<typeof SettingsAiPage>[0] = {
     aiOpenAIExtraBodyParams: undefined,
     aiCopilotModel: 'gpt-4o-mini',
     aiCopilotOptions: ['gpt-4o-mini'],
+    aiRequestTimeoutSeconds: 120,
     aiReasoningEffort: 'medium',
     aiThinkingBudget: 1024,
     anthropicThinkingEnabled: true,

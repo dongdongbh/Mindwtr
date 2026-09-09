@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const itOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Avanzate",
+        'settings.aiRequestTimeout': "Tempo di attesa",
+        'settings.aiRequestTimeoutDesc': "Quanto attendere una risposta dell’IA. Aumentalo per i modelli locali lenti. Le richieste annullate o scadute non vengono ripetute automaticamente.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} secondi",
         'settings.automationCapture': 'Acquisizione automatizzata',
         'settings.automationCaptureDesc': 'Consenti alle app di automazione attendibili che dispongono del tuo token di accodare testo nella Posta in arrivo. Le acquisizioni appariranno alla prossima apertura di Mindwtr.',
         'settings.automationCaptureToken': 'Token di acquisizione',

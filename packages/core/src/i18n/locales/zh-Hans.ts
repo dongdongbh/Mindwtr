@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const zhHans: Record<string, string> = {
+        'settings.aiAdvanced': "高级",
+        'settings.aiRequestTimeout': "请求超时",
+        'settings.aiRequestTimeoutDesc': "等待 AI 响应的最长时间。较慢的本地模型可延长此时间。超时或取消的请求不会自动重试。",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} 秒",
         'settings.automationCapture': '自动化采集',
         'settings.automationCaptureDesc': '允许可信的自动化应用使用你的令牌，将文本加入收件箱队列。采集的内容会在下次打开 Mindwtr 时显示。',
         'settings.automationCaptureToken': '采集令牌',

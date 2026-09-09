@@ -1,5 +1,6 @@
 import { createElement, useCallback, useMemo } from 'react';
 import {
+    createBulkOrganizeProject,
     DEFAULT_PROJECT_COLOR,
     isProjectedRecurringTask,
     isTaskActionable,
@@ -16,6 +17,7 @@ import {
 } from '@mindwtr/core';
 
 import { useLanguage } from '../../contexts/language-context';
+import { logInfo } from '../../lib/app-log';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { resolveNativeDateInputLocale } from '../../lib/native-date-input-locale';
 import { reportError } from '../../lib/report-error';
@@ -168,6 +170,41 @@ export function useTaskQuickActionMenuProps(
         return created?.id ?? null;
     }, [areas]);
 
+    const onCreateProject = useCallback(async (title: string) => {
+        const inheritedAreaId = task.projectId
+            ? projects.find((project) => project.id === task.projectId)?.areaId
+            : task.areaId;
+        const activeAreaId = inheritedAreaId
+            && areas.some((area) => area.id === inheritedAreaId && !area.deletedAt)
+            ? inheritedAreaId
+            : undefined;
+        try {
+            const created = await createBulkOrganizeProject(title, activeAreaId);
+            if (!created) {
+                useUiStore.getState().showToast(
+                    tFallback(t, 'projects.createFailed', 'Failed to create project'),
+                    'error',
+                );
+                return null;
+            }
+            void logInfo('Task menu project creation saved', {
+                scope: 'project',
+                extra: {
+                    releaseCheck: 'v1.3.0/task-menu-project-create',
+                    outcome: 'created',
+                },
+            }).catch((error) => reportError('Failed to log task-menu project creation', error));
+            return created.id;
+        } catch (error) {
+            reportError('Failed to create project from task quick actions', error);
+            useUiStore.getState().showToast(
+                tFallback(t, 'projects.createFailed', 'Failed to create project'),
+                'error',
+            );
+            return null;
+        }
+    }, [areas, projects, t, task.areaId, task.projectId]);
+
     const onUpdateTask = useCallback(
         (updates: Partial<Task>) => useTaskStore.getState().updateTask(task.id, updates),
         [task.id],
@@ -266,6 +303,7 @@ export function useTaskQuickActionMenuProps(
         onDelete,
         onStatusChange: overrides?.onStatusChange ?? defaultOnStatusChange,
         onCreateArea,
+        onCreateProject,
         onUpdateTask,
         extraActions: [...cancelAction, ...(overrides?.extraActions ?? [])],
     };

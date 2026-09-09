@@ -79,6 +79,14 @@ const pomodoroAlertSettingsKeys = [
 ] as const;
 
 describe('locale parity', () => {
+    it.each(locales)('keeps the AI request timeout controls translated in %s', (lang) => {
+        const translations = translationsByLocale[lang];
+        for (const key of ['settings.aiAdvanced', 'settings.aiRequestTimeout', 'settings.aiRequestTimeoutDesc']) {
+            expect(translations[key]).toBeTruthy();
+        }
+        expect(translations['settings.aiRequestTimeoutSeconds']).toContain('{{seconds}}');
+    });
+
     it.each(locales)('keeps the selected-task CSV action translated in %s', (lang) => {
         expect(translationsByLocale[lang]['bulk.exportCsv']).toBeTruthy();
     });

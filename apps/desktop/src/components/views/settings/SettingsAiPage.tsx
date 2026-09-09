@@ -1,5 +1,9 @@
 import type { AIProviderId, AIReasoningEffort, AiSettings } from '@mindwtr/core';
-import { formatOpenAIExtraBodyParams, parseOpenAIExtraBodyParamsInput } from '@mindwtr/core';
+import {
+    AI_REQUEST_TIMEOUT_OPTIONS,
+    formatOpenAIExtraBodyParams,
+    parseOpenAIExtraBodyParamsInput,
+} from '@mindwtr/core';
 
 import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
@@ -31,6 +35,10 @@ type Labels = {
     aiExtraBodyParamsSave: string;
     aiCopilotModel: string;
     aiCopilotHint: string;
+    aiAdvanced: string;
+    aiRequestTimeout: string;
+    aiRequestTimeoutDesc: string;
+    aiRequestTimeoutSeconds: string;
     aiConsentTitle: string;
     aiConsentDescription: string;
     aiConsentCancel: string;
@@ -125,6 +133,7 @@ type SettingsAiPageProps = {
     aiOpenAIExtraBodyParams?: Record<string, unknown>;
     aiCopilotModel: string;
     aiCopilotOptions: string[];
+    aiRequestTimeoutSeconds: number;
     aiReasoningEffort: AIReasoningEffort;
     aiThinkingBudget: number;
     anthropicThinkingEnabled: boolean;
@@ -167,6 +176,7 @@ export function SettingsAiPage({
     aiOpenAIExtraBodyParams,
     aiCopilotModel,
     aiCopilotOptions,
+    aiRequestTimeoutSeconds,
     aiReasoningEffort,
     aiThinkingBudget,
     anthropicThinkingEnabled,
@@ -201,6 +211,7 @@ export function SettingsAiPage({
     const { requestConfirmation, confirmModal } = useConfirmDialog();
     const [aiOpen, setAiOpen] = useState(false);
     const [speechOpen, setSpeechOpen] = useState(false);
+    const [aiAdvancedOpen, setAiAdvancedOpen] = useState(false);
     const [openAIExtraOpen, setOpenAIExtraOpen] = useState(false);
     const [openAIExtraDraft, setOpenAIExtraDraft] = useState(() => formatOpenAIExtraBodyParams(aiOpenAIExtraBodyParams));
     const [openAIExtraError, setOpenAIExtraError] = useState<string | null>(null);
@@ -510,6 +521,48 @@ export function SettingsAiPage({
                             />
                             <div className="text-xs text-muted-foreground">{t.aiApiKeyHint}</div>
                         </SettingField>
+
+                        <div className="border-t border-border">
+                            <button
+                                type="button"
+                                onClick={() => setAiAdvancedOpen((open) => !open)}
+                                aria-label={t.aiAdvanced}
+                                aria-expanded={aiAdvancedOpen}
+                                data-settings-section="aiRequestTimeout"
+                                className="flex w-full items-center justify-between gap-4 p-4 text-left"
+                            >
+                                <div className="min-w-0 text-sm font-medium">{t.aiAdvanced}</div>
+                                {aiAdvancedOpen ? (
+                                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                ) : (
+                                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                )}
+                            </button>
+                            {aiAdvancedOpen && (
+                                <div className="border-t border-border p-4">
+                                    <SettingRow
+                                        settingsKey="aiRequestTimeout"
+                                        title={t.aiRequestTimeout}
+                                        description={t.aiRequestTimeoutDesc}
+                                    >
+                                        <select
+                                            aria-label={t.aiRequestTimeout}
+                                            value={String(aiRequestTimeoutSeconds)}
+                                            onChange={(event) => onUpdateAISettings({
+                                                requestTimeoutSeconds: Number(event.target.value) as NonNullable<AiSettings['requestTimeoutSeconds']>,
+                                            })}
+                                            className="rounded border border-border bg-muted/50 px-2 py-1 text-sm text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        >
+                                            {AI_REQUEST_TIMEOUT_OPTIONS.map((seconds) => (
+                                                <option key={seconds} value={String(seconds)}>
+                                                    {t.aiRequestTimeoutSeconds.replace('{{seconds}}', String(seconds))}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </SettingRow>
+                                </div>
+                            )}
+                        </div>
                     </>
                 )}
             </div>

@@ -13,6 +13,7 @@ import { BookOpen, Calendar, CalendarClock, Check, ChevronRight, Copy, Flag, Fol
 import {
     getAdvancedReviewDate,
     isDueForReview,
+    normalizeBulkTaskTokenInput,
     safeParseDate,
     tFallback,
     type Area,
@@ -75,6 +76,7 @@ export interface TaskQuickActionMenuProps {
     onDelete: () => void;
     onStatusChange: (status: TaskStatus) => void;
     onCreateArea: (name: string) => Promise<string | null>;
+    onCreateProject: (title: string) => Promise<string | null>;
     onUpdateTask: (updates: Partial<Task>) => Promise<StoreActionResult>;
     /** Extra entries rendered above Delete. Generic by design — the menu does not interpret them. */
     extraActions?: Array<{
@@ -159,6 +161,7 @@ export function TaskQuickActionMenu({
     onDelete,
     onStatusChange,
     onCreateArea,
+    onCreateProject,
     onUpdateTask,
     extraActions = [],
 }: TaskQuickActionMenuProps) {
@@ -209,6 +212,7 @@ export function TaskQuickActionMenu({
     ];
     const noProjectLabel = tFallback(t, 'taskEdit.noProjectOption', 'No Project');
     const searchProjectsLabel = tFallback(t, 'projects.search', 'Search projects');
+    const createProjectLabel = tFallback(t, 'projects.create', 'Create project');
     const noAreaLabel = tFallback(t, 'taskEdit.noAreaOption', 'No Area');
     const renameLabel = tFallback(t, 'task.renameTitle', 'Rename task');
     const duplicateLabel = tFallback(t, 'projects.duplicate', 'Duplicate');
@@ -226,8 +230,13 @@ export function TaskQuickActionMenu({
     const createAreaLabel = tFallback(t, 'areas.create', 'Create area');
     const canEditArea = !task.projectId;
     const canMarkReviewed = isDueForReview(task.reviewAt);
+    // Keep the stored baseline so an explicit Save can repair legacy bare tokens.
     const normalizedInitialContexts = parseTokenInput(initialContextsDraft);
-    const normalizedDraftContexts = parseTokenInput(contextsDraft);
+    const normalizedDraftContexts = Array.from(new Set(
+        parseTokenInput(contextsDraft)
+            .map((token) => normalizeBulkTaskTokenInput(token, 'contexts'))
+            .filter(Boolean)
+    ));
     const startDraftChanged = startDateDraft !== initialStartDraft.date || startTimeDraft !== initialStartDraft.time;
     const dueDraftChanged = dueDateDraft !== initialDueDraft.date || dueTimeDraft !== initialDueDraft.time;
     const reviewDraftChanged = reviewDateDraft !== initialReviewDraft.date || reviewTimeDraft !== initialReviewDraft.time;
@@ -641,7 +650,7 @@ export function TaskQuickActionMenu({
     const handleContextsSave = async () => {
         setSavingPanel('contexts');
         try {
-            const result = await onUpdateTask({ contexts: parseTokenInput(contextsDraft) });
+            const result = await onUpdateTask({ contexts: normalizedDraftContexts });
             if (!result.success) {
                 throw new Error(result.error || 'Failed to update task contexts');
             }
@@ -1124,10 +1133,13 @@ export function TaskQuickActionMenu({
                                     projects={projects}
                                     value={projectDraft}
                                     onChange={setProjectDraft}
+                                    onCreateProject={onCreateProject}
                                     placeholder={noProjectLabel}
                                     noProjectLabel={noProjectLabel}
                                     searchPlaceholder={searchProjectsLabel}
                                     noMatchesLabel={noMatchesLabel}
+                                    createProjectLabel={createProjectLabel}
+                                    closeOnCreateFailure={false}
                                     className="w-full"
                                 />
                             </div>

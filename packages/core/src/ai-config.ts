@@ -7,6 +7,12 @@ const OPENAI_CHAT_COMPLETIONS_PATH = '/chat/completions';
 const OPENAI_TRANSCRIBE_PATH = '/audio/transcriptions';
 const OPENAI_TRANSCRIBE_URL = `https://api.openai.com/v1${OPENAI_TRANSCRIBE_PATH}`;
 
+export const AI_REQUEST_TIMEOUT_OPTIONS = [30, 60, 120, 300] as const;
+
+export const resolveAIRequestTimeoutSeconds = (value: unknown): number => (
+    AI_REQUEST_TIMEOUT_OPTIONS.some((option) => option === value) ? value as number : 30
+);
+
 export function getAIKeyStorageKey(provider: AIProviderId): string {
     return `${AI_KEY_PREFIX}:${provider}`;
 }
@@ -134,6 +140,7 @@ export function buildAIConfig(settings: AppData['settings'], apiKey: string): AI
         model: settings.ai?.model ?? defaults.model,
         reasoningEffort: settings.ai?.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
         thinkingBudget: settings.ai?.thinkingBudget ?? defaults.thinkingBudget,
+        timeoutMs: resolveAIRequestTimeoutSeconds(settings.ai?.requestTimeoutSeconds) * 1000,
         ...(endpoint ? { endpoint } : {}),
         ...(extraBodyParams ? { extraBodyParams } : {}),
     };
@@ -152,6 +159,7 @@ export function buildCopilotConfig(settings: AppData['settings'], apiKey: string
         apiKey,
         model: settings.ai?.copilotModel ?? getDefaultCopilotModel(provider),
         reasoningEffort: COPILOT_REASONING_EFFORT,
+        timeoutMs: resolveAIRequestTimeoutSeconds(settings.ai?.requestTimeoutSeconds) * 1000,
         ...(provider === 'gemini' ? { thinkingBudget: DEFAULT_GEMINI_THINKING_BUDGET } : {}),
         ...(provider === 'anthropic' ? { thinkingBudget: DEFAULT_ANTHROPIC_THINKING_BUDGET } : {}),
         ...(endpoint ? { endpoint } : {}),

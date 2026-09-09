@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const svOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Avancerat",
+        'settings.aiRequestTimeout': "Tidsgräns för förfrågningar",
+        'settings.aiRequestTimeoutDesc': "Hur länge ett AI-svar inväntas. Öka tiden för långsamma lokala modeller. Avbrutna förfrågningar eller förfrågningar som når tidsgränsen upprepas inte automatiskt.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} sekunder",
         'settings.automationCapture': 'Automatiserad insamling',
         'settings.automationCaptureDesc': 'Tillåt betrodda automatiseringsappar med din token att köa text till Inkorgen. Insamlat innehåll visas nästa gång Mindwtr öppnas.',
         'settings.automationCaptureToken': 'Insamlingstoken',

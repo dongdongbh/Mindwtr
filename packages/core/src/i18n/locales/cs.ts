@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const csOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Pokročilé",
+        'settings.aiRequestTimeout': "Časový limit požadavku",
+        'settings.aiRequestTimeoutDesc': "Jak dlouho čekat na odpověď AI. U pomalých místních modelů limit zvyšte. Zrušené požadavky ani požadavky po vypršení limitu se automaticky neopakují.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} sekund",
         'settings.automationCapture': 'Automatizované zachytávání',
         'settings.automationCaptureDesc': 'Umožněte důvěryhodným automatizačním aplikacím s vaším tokenem zařazovat text do schránky. Zachycené položky se zobrazí při příštím otevření Mindwtr.',
         'settings.automationCaptureToken': 'Token pro zachytávání',

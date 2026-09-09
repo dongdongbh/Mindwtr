@@ -16,6 +16,7 @@ import {
     getModelOptions,
     mergeModelOptions,
     parseOpenAIExtraBodyParamsInput,
+    resolveAIRequestTimeoutSeconds,
     shallow,
     type AIProviderId,
     type AIReasoningEffort,
@@ -97,6 +98,7 @@ export function AISettingsScreen() {
     const staticAiCopilotOptions = isFossBuild ? FOSS_LOCAL_LLM_COPILOT_OPTIONS : getCopilotModelOptions(aiProvider);
     const aiCopilotModel = settings.ai?.copilotModel ?? (isFossBuild ? FOSS_LOCAL_LLM_COPILOT_OPTIONS[0] : getDefaultCopilotModel(aiProvider));
     const aiCopilotOptions = mergeModelOptions(fetchedChatModels, staticAiCopilotOptions, aiCopilotModel);
+    const aiRequestTimeoutSeconds = resolveAIRequestTimeoutSeconds(settings.ai?.requestTimeoutSeconds);
     const anthropicThinkingEnabled = aiProvider === 'anthropic' && aiThinkingBudget > 0;
     const speechSettings = settings.ai?.speechToText ?? {};
     const speechEnabled = speechSettings.enabled === true;
@@ -564,6 +566,7 @@ export function AISettingsScreen() {
                         aiModelOptions={aiModelOptions}
                         aiProvider={aiProvider}
                         aiReasoningEffort={aiReasoningEffort}
+                        aiRequestTimeoutSeconds={aiRequestTimeoutSeconds}
                         aiThinkingBudget={aiThinkingBudget}
                         anthropicThinkingEnabled={anthropicThinkingEnabled}
                         getAIProviderLabel={getAIProviderLabel}
@@ -578,6 +581,7 @@ export function AISettingsScreen() {
                         onAiModelChange={(value) => updateAISettings({ model: value })}
                         onAiProviderChange={handleAIProviderChange}
                         onAiReasoningEffortChange={(value) => updateAISettings({ reasoningEffort: value })}
+                        onAiRequestTimeoutSecondsChange={(value) => updateAISettings({ requestTimeoutSeconds: value })}
                         onAiThinkingBudgetChange={(value) => updateAISettings({ thinkingBudget: value })}
                         onAnthropicThinkingEnabledChange={handleAnthropicThinkingEnabledChange}
                         onModelPickerChange={setModelPicker}

@@ -1,4 +1,8 @@
 export const viOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Nâng cao",
+        'settings.aiRequestTimeout': "Thời gian chờ yêu cầu",
+        'settings.aiRequestTimeoutDesc': "Thời gian chờ phản hồi từ AI. Tăng thời gian này cho mô hình cục bộ chậm. Yêu cầu hết thời gian chờ hoặc bị hủy sẽ không được tự động thử lại.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} giây",
         'settings.automationCapture': 'Thu thập tự động',
         'settings.automationCaptureDesc': 'Cho phép các ứng dụng tự động hóa đáng tin cậy dùng token của bạn để đưa văn bản vào hàng đợi Hộp thư đến. Nội dung đã thu thập sẽ xuất hiện vào lần tiếp theo bạn mở Mindwtr.',
         'settings.automationCaptureToken': 'Token thu thập',

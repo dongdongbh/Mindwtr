@@ -5,7 +5,7 @@ import {
     getAIKeyStorageKey,
 } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
-import { logError } from './app-log';
+import { logError, logInfo } from './app-log';
 import { invokeNative } from './tauri-invoke';
 
 const AI_SECRET_KEY = 'mindwtr-ai-key-secret';
@@ -32,7 +32,21 @@ const loadTauriFetch = async (): Promise<Fetcher | null> => {
 
 const withDesktopFetch = async (config: AIProviderConfig): Promise<AIProviderConfig> => {
     const fetcher = await loadTauriFetch();
-    return fetcher ? { ...config, fetcher } : config;
+    return {
+        ...config,
+        ...(fetcher ? { fetcher } : {}),
+        onRequestStop: (reason) => {
+            void logInfo('AI request stopped without retry', {
+                scope: 'ai',
+                extra: {
+                    releaseCheck: 'v1.3.0/ai-request-stop-once',
+                    outcome: reason,
+                    provider: config.provider,
+                    timeoutMs: config.timeoutMs,
+                },
+            }).catch(() => undefined);
+        },
+    };
 };
 
 const getSessionSecretBytes = (): Uint8Array | null => {

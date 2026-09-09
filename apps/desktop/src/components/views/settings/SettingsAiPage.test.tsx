@@ -1,7 +1,8 @@
-import { fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SettingsAiPage } from './SettingsAiPage';
+import { expandSettingsSection } from './settings-search';
 
 const t = {
     aiEnable: 'Enable AI assistant',
@@ -26,6 +27,10 @@ const t = {
     aiExtraBodyParamsSave: 'Save parameters',
     aiCopilotModel: 'Copilot model',
     aiCopilotHint: 'Used for fast autocomplete suggestions.',
+    aiAdvanced: 'Advanced',
+    aiRequestTimeout: 'Request timeout',
+    aiRequestTimeoutDesc: 'How long to wait for an AI response.',
+    aiRequestTimeoutSeconds: '{{seconds}} seconds',
     aiConsentTitle: 'Enable AI Features?',
     aiConsentDescription: 'To use this feature, your task data will be sent to {provider} for processing.',
     aiConsentCancel: 'Cancel',
@@ -94,6 +99,7 @@ const baseProps: Parameters<typeof SettingsAiPage>[0] = {
     aiOpenAIExtraBodyParams: undefined,
     aiCopilotModel: 'gpt-4o-mini',
     aiCopilotOptions: ['gpt-4o-mini'],
+    aiRequestTimeoutSeconds: 30,
     aiReasoningEffort: 'medium',
     aiThinkingBudget: 0,
     anthropicThinkingEnabled: false,
@@ -127,6 +133,49 @@ const baseProps: Parameters<typeof SettingsAiPage>[0] = {
 };
 
 describe('SettingsAiPage', () => {
+    it('keeps request timeout collapsed until Advanced opens and offers every supported duration', () => {
+        const onUpdateAISettings = vi.fn();
+        const { getByLabelText, getByRole, queryByLabelText } = render(
+            <SettingsAiPage
+                {...baseProps}
+                onUpdateAISettings={onUpdateAISettings}
+            />
+        );
+
+        fireEvent.click(getByRole('button', { name: /Enable AI assistant/i }));
+        expect(queryByLabelText('Request timeout')).not.toBeInTheDocument();
+
+        fireEvent.click(getByRole('button', { name: 'Advanced' }));
+        const timeoutSelect = getByLabelText('Request timeout');
+        expect(timeoutSelect).toHaveValue('30');
+        expect([...timeoutSelect.querySelectorAll('option')].map((option) => option.textContent)).toEqual([
+            '30 seconds',
+            '60 seconds',
+            '120 seconds',
+            '300 seconds',
+        ]);
+
+        fireEvent.change(timeoutSelect, { target: { value: '120' } });
+        expect(onUpdateAISettings).toHaveBeenCalledWith({ requestTimeoutSeconds: 120 });
+    });
+
+    it('displays a persisted timeout and lets settings search reveal its nested disclosure', () => {
+        const { getByLabelText } = render(
+            <SettingsAiPage
+                {...baseProps}
+                aiRequestTimeoutSeconds={120}
+            />
+        );
+
+        act(() => {
+            expect(expandSettingsSection('aiRequestTimeout')).toBe(true);
+        });
+        act(() => {
+            expect(expandSettingsSection('aiRequestTimeout')).toBe(true);
+        });
+        expect(getByLabelText('Request timeout')).toHaveValue('120');
+    });
+
     it('warns when a non-OpenAI model is configured without a custom endpoint', () => {
         const { getByRole, getByText } = render(<SettingsAiPage {...baseProps} />);
 
