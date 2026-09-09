@@ -745,6 +745,35 @@ describe('AgendaView', () => {
         expect(getByRole('heading', { name: /^today\s*\(2\)$/i })).toBeInTheDocument();
     });
 
+    it('walks Today rows in displayed order before and after a later start arrives', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 1, 28, 12, 0, 0, 0));
+        setAgendaTasks([
+            makeAgendaTask('later-today', 'Later today task', {
+                dueDate: new Date(2026, 1, 28, 18).toISOString(),
+                startTime: new Date(2026, 1, 28, 17).toISOString(),
+            }),
+            makeAgendaTask('ready-today', 'Ready today task', {
+                dueDate: new Date(2026, 1, 28, 20).toISOString(),
+            }),
+        ]);
+        const { queryByRole } = renderAgendaWithKeyboard();
+        const focusedTaskId = () => document.activeElement
+            ?.closest<HTMLElement>('[data-task-id]')?.dataset.taskId;
+
+        fireEvent.keyDown(window, { key: 'j' });
+        expect(focusedTaskId()).toBe('later-today');
+        fireEvent.keyDown(window, { key: 'k' });
+        expect(focusedTaskId()).toBe('ready-today');
+
+        act(() => { vi.advanceTimersByTime(5 * 60 * 60 * 1000 + 50); });
+        expect(queryByRole('heading', { name: /^later today$/i })).not.toBeInTheDocument();
+        fireEvent.keyDown(window, { key: 'j' });
+        expect(focusedTaskId()).toBe('ready-today');
+        fireEvent.keyDown(window, { key: 'k' });
+        expect(focusedTaskId()).toBe('later-today');
+    });
+
     it('does not render Later today when Today contains only ready and date-only rows', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date(2026, 1, 28, 12, 0, 0, 0));

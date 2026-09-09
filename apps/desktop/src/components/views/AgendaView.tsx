@@ -857,6 +857,9 @@ export function AgendaView() {
         void localDayKey;
         return splitTodayTasksByStartTime(sections.schedule, new Date());
     }, [futureStartTick, localDayKey, sections.schedule]);
+    const orderedTodayTasks = useMemo(() => (
+        [...todayTaskGroups.ready, ...todayTaskGroups.laterToday]
+    ), [todayTaskGroups]);
     const setCollapsedGroups = useCallback<SetFocusCollapsedGroups>((updater) => {
         setPersistedViewState((current) => ({
             ...current,
@@ -893,7 +896,7 @@ export function AgendaView() {
     // collapsed sections and collapsed groups contribute no rows.
     const visibleTasks = useMemo(() => {
         const visible = [...focusedTasks];
-        if (expandedSections.schedule) visible.push(...sections.schedule);
+        if (expandedSections.schedule) visible.push(...orderedTodayTasks);
         if (expandedSections.reviewDue) visible.push(...sections.reviewDue);
         if (expandedSections.nextActions) visible.push(...visibleNextActions);
         if (expandedSections.upcoming) visible.push(...sections.upcoming);
@@ -901,6 +904,7 @@ export function AgendaView() {
     }, [
         expandedSections,
         focusedTasks,
+        orderedTodayTasks,
         sections,
         visibleNextActions,
     ]);
@@ -991,7 +995,7 @@ export function AgendaView() {
     const pomodoroTasks = (() => {
         const ordered = [
             ...focusedTasks,
-            ...sections.schedule,
+            ...orderedTodayTasks,
             ...sections.reviewDue,
             ...sections.nextActions,
         ];
