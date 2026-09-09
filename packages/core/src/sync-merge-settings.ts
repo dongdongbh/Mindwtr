@@ -29,6 +29,7 @@ import { normalizeSavedFilters } from './saved-filters';
 import { chooseDeterministicWinner } from './sync-signatures';
 import { DELETE_VS_LIVE_AMBIGUOUS_WINDOW_MS } from './sync-types';
 import { normalizeExternalCalendarColor } from './external-calendar-colors';
+import { AI_REQUEST_TIMEOUT_OPTIONS } from './ai-config';
 
 const parseSyncTimestamp = (value?: string): number => {
     if (!value) return NaN;
@@ -272,6 +273,23 @@ const sanitizeAiSettings = (
     }
     if (next.copilotModel !== undefined && !isNonEmptyString(next.copilotModel)) {
         next.copilotModel = fallback?.copilotModel;
+    }
+    const isSupportedRequestTimeout = (candidate: unknown): candidate is number => (
+        AI_REQUEST_TIMEOUT_OPTIONS.some((seconds) => seconds === candidate)
+    );
+    const fallbackRequestTimeout = isSupportedRequestTimeout(fallback?.requestTimeoutSeconds)
+        ? fallback.requestTimeoutSeconds
+        : undefined;
+    if (next.requestTimeoutSeconds === undefined) {
+        if (fallbackRequestTimeout !== undefined) {
+            next.requestTimeoutSeconds = fallbackRequestTimeout;
+        }
+    } else if (!isSupportedRequestTimeout(next.requestTimeoutSeconds)) {
+        if (fallbackRequestTimeout !== undefined) {
+            next.requestTimeoutSeconds = fallbackRequestTimeout;
+        } else {
+            delete next.requestTimeoutSeconds;
+        }
     }
     if (next.speechToText !== undefined && !isObjectRecord(next.speechToText)) {
         next.speechToText = fallback?.speechToText ? cloneSettingValue(fallback.speechToText) : undefined;

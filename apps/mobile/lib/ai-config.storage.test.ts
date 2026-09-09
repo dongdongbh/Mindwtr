@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { loadAIKey, saveAIKey } from './ai-config';
+import { buildAIConfig, buildCopilotConfig, loadAIKey, saveAIKey } from './ai-config';
 import { __resetSecureSecretStoreForTests } from './secure-secret-store';
+
+const logInfoMock = vi.hoisted(() => vi.fn().mockResolvedValue(null));
+vi.mock('./app-log', () => ({ logInfo: logInfoMock }));
 
 const storeMocks = vi.hoisted(() => ({
     secureAvailable: true,
@@ -54,11 +57,40 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 describe('AI credential storage', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        logInfoMock.mockReset().mockResolvedValue(null);
         __resetSecureSecretStoreForTests();
         storeMocks.secureAvailable = true;
         storeMocks.availabilityFailuresRemaining = 0;
         storeMocks.secureItems.clear();
         storeMocks.asyncItems.clear();
+    });
+
+    it.each([buildAIConfig, buildCopilotConfig])('adds safe cancellation diagnostics to assistant and Copilot config', (buildConfig) => {
+        const config = buildConfig({ ai: {
+            provider: 'openai',
+            baseUrl: 'http://localhost:11434/v1',
+            model: 'private-model',
+            requestTimeoutSeconds: 120,
+        } }, 'private-credential');
+        expect(config.timeoutMs).toBe(120_000);
+        expect(logInfoMock).not.toHaveBeenCalled();
+        config.onRequestStop?.('aborted');
+        expect(logInfoMock).toHaveBeenCalledExactlyOnceWith('AI request stopped without retry', {
+            scope: 'ai',
+            extra: {
+                releaseCheck: 'v1.3.0/ai-request-stop-once',
+                outcome: 'aborted',
+                provider: 'openai',
+                timeoutMs: 120_000,
+            },
+        });
+    });
+
+    it('does not surface a diagnostics backend failure after cancellation', async () => {
+        logInfoMock.mockRejectedValueOnce(new Error('diagnostics unavailable'));
+        const config = buildAIConfig({ ai: { provider: 'openai' } }, '');
+        expect(() => config.onRequestStop?.('aborted')).not.toThrow();
+        await Promise.resolve();
     });
 
     it('migrates a legacy plaintext key into secure storage on read', async () => {

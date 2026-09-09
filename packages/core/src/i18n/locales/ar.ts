@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const arOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "متقدم",
+        'settings.aiRequestTimeout': "مهلة الطلب",
+        'settings.aiRequestTimeoutDesc': "مدة انتظار رد الذكاء الاصطناعي. زدها للنماذج المحلية البطيئة. لا تُعاد تلقائيًا الطلبات الملغاة أو التي انتهت مهلتها.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} ثانية",
         'settings.automationCapture': 'الالتقاط عبر الأتمتة',
         'settings.automationCaptureDesc': 'اسمح لتطبيقات الأتمتة الموثوقة التي تستخدم رمزك بإضافة نص إلى قائمة الوارد. ستظهر العناصر الملتقطة عند فتح Mindwtr في المرة التالية.',
         'settings.automationCaptureToken': 'رمز الالتقاط',

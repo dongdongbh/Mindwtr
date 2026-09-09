@@ -8,6 +8,8 @@ export type AIReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
 
 export type AIRequestExtraBodyParams = Record<string, unknown>;
 
+export type AIRequestStopReason = 'timeout' | 'aborted';
+
 export type AudioCaptureMode = 'smart_parse' | 'transcribe_only';
 
 export type AudioFieldStrategy = 'smart' | 'title_only' | 'description_only';
@@ -99,6 +101,7 @@ export interface AIProviderConfig {
     thinkingBudget?: number;
     extraBodyParams?: AIRequestExtraBodyParams;
     timeoutMs?: number;
+    onRequestStop?: (reason: AIRequestStopReason) => void;
 }
 
 export interface AIRequestOptions {

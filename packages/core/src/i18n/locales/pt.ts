@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const ptOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Avançado",
+        'settings.aiRequestTimeout': "Tempo limite da solicitação",
+        'settings.aiRequestTimeoutDesc': "Quanto esperar por uma resposta da IA. Aumente para modelos locais lentos. Solicitações canceladas ou com tempo esgotado não são repetidas automaticamente.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} segundos",
         'settings.automationCapture': 'Captura automatizada',
         'settings.automationCaptureDesc': 'Permita que apps de automação confiáveis com seu token coloquem texto na fila da Caixa de entrada. As capturas aparecerão na próxima vez que o Mindwtr for aberto.',
         'settings.automationCaptureToken': 'Token de captura',

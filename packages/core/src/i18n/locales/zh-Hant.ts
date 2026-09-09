@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const zhHant: Record<string, string> = {
+        'settings.aiAdvanced': "進階",
+        'settings.aiRequestTimeout': "請求逾時",
+        'settings.aiRequestTimeoutDesc': "等待 AI 回應的最長時間。較慢的本機模型可延長此時間。逾時或取消的請求不會自動重試。",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} 秒",
         'settings.automationCapture': '自動化擷取',
         'settings.automationCaptureDesc': '允許受信任的自動化 App 使用你的權杖，將文字加入收件匣佇列。擷取的內容會在下次開啟 Mindwtr 時顯示。',
         'settings.automationCaptureToken': '擷取權杖',

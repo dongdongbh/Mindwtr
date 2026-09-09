@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const faOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "پیشرفته",
+        'settings.aiRequestTimeout': "مهلت درخواست",
+        'settings.aiRequestTimeoutDesc': "مدت انتظار برای پاسخ هوش مصنوعی. برای مدل‌های محلی کند آن را افزایش دهید. درخواست‌های لغوشده یا با مهلت پایان‌یافته خودکار تکرار نمی‌شوند.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} ثانیه",
         'settings.automationCapture': 'ثبت خودکار',
         'settings.automationCaptureDesc': 'به برنامه‌های خودکارسازی مورداعتماد اجازه دهید با توکن شما متن را برای صندوق ورودی در صف قرار دهند. موارد ثبت‌شده دفعه بعد که Mindwtr باز شود نمایش داده می‌شوند.',
         'settings.automationCaptureToken': 'توکن ثبت',

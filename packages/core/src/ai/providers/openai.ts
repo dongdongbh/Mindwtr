@@ -2,14 +2,17 @@ import type { AIProvider, AIProviderConfig, BreakdownInput, BreakdownResponse, C
 import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildReviewAnalysisPrompt } from '../prompts';
 import {
     fetchTextWithTimeout,
+    isAIRequestStopError,
     normalizeTags,
     normalizeTimeEstimate,
     parseJson,
     rateLimit,
+    throwIfAIRequestAborted,
     type BufferedAIResponse,
+    waitForAIRequestRetry,
+    withAIRequestStopNotifications,
 } from '../utils';
 import { isBreakdownResponse, isClarifyResponse, isCopilotResponse, isReviewAnalysisResponse } from '../validators';
-import { sleep } from '../../async-utils';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -309,12 +312,13 @@ async function requestOpenAI(config: AIProviderConfig, prompt: { system: string;
         headers.Authorization = `Bearer ${apiKey}`;
     }
 
-    await rateLimit('openai');
+    await rateLimit('openai', 250, options?.signal, 'OpenAI');
 
     // Runs the transient-retry loop for one body and returns the final Response
     // (ok or a non-retryable error); throws only on network failure after retries.
     const dispatch = async (requestBody: unknown): Promise<BufferedAIResponse> => {
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+            throwIfAIRequestAborted(options?.signal, 'OpenAI');
             let response: BufferedAIResponse;
             try {
                 response = await fetchTextWithTimeout(
@@ -330,15 +334,16 @@ async function requestOpenAI(config: AIProviderConfig, prompt: { system: string;
                     config.fetcher
                 );
             } catch (error) {
+                if (isAIRequestStopError(error)) throw error;
                 if (attempt < MAX_RETRIES) {
-                    await sleep(400 * Math.pow(2, attempt));
+                    await waitForAIRequestRetry(400 * Math.pow(2, attempt), options?.signal, 'OpenAI');
                     continue;
                 }
                 throw error;
             }
 
             if (!response.ok && RETRYABLE_STATUSES.has(response.status) && attempt < MAX_RETRIES) {
-                await sleep(400 * Math.pow(2, attempt));
+                await waitForAIRequestRetry(400 * Math.pow(2, attempt), options?.signal, 'OpenAI');
                 continue;
             }
             return response;
@@ -377,7 +382,7 @@ async function requestOpenAI(config: AIProviderConfig, prompt: { system: string;
 }
 
 export function createOpenAIProvider(config: AIProviderConfig): AIProvider {
-    return {
+    return withAIRequestStopNotifications(config, {
         clarifyTask: async (input: ClarifyInput, options?: AIRequestOptions): Promise<ClarifyResponse> => {
             const prompt = buildClarifyPrompt(input);
             const text = await requestOpenAI(config, prompt, CLARIFY_JSON_SCHEMA, options);
@@ -450,5 +455,5 @@ export function createOpenAIProvider(config: AIProviderConfig): AIProvider {
                 };
             }
         },
-    };
+    });
 }

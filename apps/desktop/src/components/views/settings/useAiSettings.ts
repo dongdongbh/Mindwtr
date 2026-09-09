@@ -10,6 +10,7 @@ import {
     getCopilotModelOptions,
     getModelOptions,
     mergeModelOptions,
+    resolveAIRequestTimeoutSeconds,
 } from '@mindwtr/core';
 import { exists, remove, size } from '@tauri-apps/plugin-fs';
 import { join } from '@tauri-apps/api/path';
@@ -95,6 +96,7 @@ export function useAiSettings({ isTauri, settings, updateSettings, showSaved, en
     const aiModelOptions = mergeModelOptions(fetchedChatModels, getModelOptions(aiProvider), aiModel);
     const aiCopilotModel = settings?.ai?.copilotModel ?? getDefaultCopilotModel(aiProvider);
     const aiCopilotOptions = mergeModelOptions(fetchedChatModels, getCopilotModelOptions(aiProvider), aiCopilotModel);
+    const aiRequestTimeoutSeconds = resolveAIRequestTimeoutSeconds(settings?.ai?.requestTimeoutSeconds);
 
     const speechSettings = settings?.ai?.speechToText ?? {};
     const speechProvider = speechSettings.provider ?? 'gemini';
@@ -547,6 +549,7 @@ export function useAiSettings({ isTauri, settings, updateSettings, showSaved, en
         aiModelOptions,
         aiCopilotModel,
         aiCopilotOptions,
+        aiRequestTimeoutSeconds,
         aiReasoningEffort,
         aiThinkingBudget,
         anthropicThinkingEnabled,

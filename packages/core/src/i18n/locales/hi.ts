@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const hiOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "उन्नत",
+        'settings.aiRequestTimeout': "अनुरोध की समय सीमा",
+        'settings.aiRequestTimeoutDesc': "AI के उत्तर की प्रतीक्षा का समय। धीमे स्थानीय मॉडल के लिए इसे बढ़ाएँ। समय सीमा समाप्त होने या रद्द होने पर अनुरोध अपने आप दोबारा नहीं भेजा जाता।",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} सेकंड",
         'settings.automationCapture': 'ऑटोमेशन कैप्चर',
         'settings.automationCaptureDesc': 'विश्वसनीय ऑटोमेशन ऐप्स को अपने टोकन से इनबॉक्स में टेक्स्ट कतारबद्ध करने दें। कैप्चर अगली बार Mindwtr खोलने पर दिखाई देंगे।',
         'settings.automationCaptureToken': 'कैप्चर टोकन',

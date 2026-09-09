@@ -2,15 +2,18 @@ import type { AIProvider, AIProviderConfig, BreakdownInput, BreakdownResponse, C
 import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildReviewAnalysisPrompt } from '../prompts';
 import {
     fetchTextWithTimeout,
+    isAIRequestStopError,
     normalizeTags,
     normalizeTimeEstimate,
     parseJson,
     rateLimit,
+    throwIfAIRequestAborted,
     type BufferedAIResponse,
+    waitForAIRequestRetry,
+    withAIRequestStopNotifications,
 } from '../utils';
 import { resolveGeminiModel } from '../catalog';
 import { isBreakdownResponse, isClarifyResponse, isCopilotResponse, isReviewAnalysisResponse } from '../validators';
-import { sleep } from '../../async-utils';
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -242,10 +245,11 @@ async function requestGemini(config: AIProviderConfig, prompt: { system: string;
         },
     };
 
-    await rateLimit('gemini');
+    await rateLimit('gemini', 250, options?.signal, 'Gemini');
 
     let response: BufferedAIResponse | null = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+        throwIfAIRequestAborted(options?.signal, 'Gemini');
         try {
             response = await fetchTextWithTimeout(
                 url,
@@ -263,8 +267,9 @@ async function requestGemini(config: AIProviderConfig, prompt: { system: string;
                 config.fetcher
             );
         } catch (error) {
+            if (isAIRequestStopError(error)) throw error;
             if (attempt < MAX_RETRIES) {
-                await sleep(400 * Math.pow(2, attempt));
+                await waitForAIRequestRetry(400 * Math.pow(2, attempt), options?.signal, 'Gemini');
                 continue;
             }
             throw error;
@@ -272,7 +277,7 @@ async function requestGemini(config: AIProviderConfig, prompt: { system: string;
 
         if (!response.ok) {
             if (RETRYABLE_STATUSES.has(response.status) && attempt < MAX_RETRIES) {
-                await sleep(400 * Math.pow(2, attempt));
+                await waitForAIRequestRetry(400 * Math.pow(2, attempt), options?.signal, 'Gemini');
                 continue;
             }
             throw await buildGeminiError(response, usingOfficialGemini);
@@ -294,7 +299,7 @@ async function requestGemini(config: AIProviderConfig, prompt: { system: string;
 }
 
 export function createGeminiProvider(config: AIProviderConfig): AIProvider {
-    return {
+    return withAIRequestStopNotifications(config, {
         clarifyTask: async (input: ClarifyInput, options?: AIRequestOptions): Promise<ClarifyResponse> => {
             const prompt = buildClarifyPrompt(input);
             const text = await requestGemini(config, prompt, CLARIFY_SCHEMA, options);
@@ -367,5 +372,5 @@ export function createGeminiProvider(config: AIProviderConfig): AIProvider {
                 };
             }
         },
-    };
+    });
 }

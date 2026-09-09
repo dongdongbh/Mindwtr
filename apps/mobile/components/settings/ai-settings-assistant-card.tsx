@@ -1,7 +1,7 @@
-import React from 'react';
-import { Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { Modal, Pressable, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import type { AIProviderId, AIReasoningEffort } from '@mindwtr/core';
+import { AI_REQUEST_TIMEOUT_OPTIONS, type AIProviderId, type AIReasoningEffort } from '@mindwtr/core';
 
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CompactText } from '@/components/compact-text';
@@ -14,6 +14,7 @@ import { styles } from './settings.styles';
 type SettingsTranslator = (key: string, values?: Record<string, string | number | boolean | null | undefined>) => string;
 type ModelPickerKind = null | 'model' | 'copilot' | 'speech';
 type Translate = (key: string) => string;
+type AIRequestTimeoutSeconds = (typeof AI_REQUEST_TIMEOUT_OPTIONS)[number];
 
 type AiSettingsAssistantCardProps = {
     aiApiKey: string;
@@ -28,6 +29,7 @@ type AiSettingsAssistantCardProps = {
     aiModelOptions: string[];
     aiProvider: AIProviderId;
     aiReasoningEffort: AIReasoningEffort;
+    aiRequestTimeoutSeconds: number;
     aiThinkingBudget: number;
     anthropicThinkingEnabled: boolean;
     getAIProviderLabel: (provider: AIProviderId) => string;
@@ -42,6 +44,7 @@ type AiSettingsAssistantCardProps = {
     onAiModelChange: (value: string) => void;
     onAiProviderChange: (provider: AIProviderId) => void;
     onAiReasoningEffortChange: (value: AIReasoningEffort) => void;
+    onAiRequestTimeoutSecondsChange: (value: AIRequestTimeoutSeconds) => void;
     onAiThinkingBudgetChange: (value: number) => void;
     onAnthropicThinkingEnabledChange: (value: boolean) => void;
     onModelPickerChange: (value: ModelPickerKind) => void;
@@ -63,6 +66,7 @@ export function AiSettingsAssistantCard({
     aiModelOptions,
     aiProvider,
     aiReasoningEffort,
+    aiRequestTimeoutSeconds,
     aiThinkingBudget,
     anthropicThinkingEnabled,
     getAIProviderLabel,
@@ -77,6 +81,7 @@ export function AiSettingsAssistantCard({
     onAiModelChange,
     onAiProviderChange,
     onAiReasoningEffortChange,
+    onAiRequestTimeoutSecondsChange,
     onAiThinkingBudgetChange,
     onAnthropicThinkingEnabledChange,
     onModelPickerChange,
@@ -84,6 +89,9 @@ export function AiSettingsAssistantCard({
     t,
     tc,
 }: AiSettingsAssistantCardProps) {
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [timeoutPickerOpen, setTimeoutPickerOpen] = useState(false);
+
     return (
         <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
             <TouchableOpacity style={styles.settingRow} onPress={onToggleOpen}>
@@ -265,6 +273,93 @@ export function AiSettingsAssistantCard({
                             t={t}
                             tc={tc}
                         />
+                    )}
+
+                    <TouchableOpacity
+                        style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
+                        onPress={() => setAdvancedOpen((open) => !open)}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('settings.aiAdvanced')}
+                        accessibilityState={{ expanded: advancedOpen }}
+                    >
+                        <View style={styles.settingInfo}>
+                            <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiAdvanced')}</Text>
+                        </View>
+                        <Text style={[styles.chevron, { color: tc.secondaryText }]}>{advancedOpen ? '▾' : '▸'}</Text>
+                    </TouchableOpacity>
+
+                    {advancedOpen && (
+                        <>
+                            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                                <View style={styles.settingInfo}>
+                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiRequestTimeout')}</Text>
+                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                        {t('settings.aiRequestTimeoutDesc')}
+                                    </Text>
+                                </View>
+                            </View>
+                            <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                                <TouchableOpacity
+                                    style={[styles.dropdownButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
+                                    onPress={() => setTimeoutPickerOpen(true)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={t('settings.aiRequestTimeout')}
+                                >
+                                    <Text style={[styles.dropdownValue, { color: tc.text }]}>
+                                        {tr('settings.aiRequestTimeoutSeconds', { seconds: aiRequestTimeoutSeconds })}
+                                    </Text>
+                                    <Text style={[styles.dropdownChevron, { color: tc.secondaryText }]}>▾</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <Modal
+                                transparent
+                                visible={timeoutPickerOpen}
+                                animationType="fade"
+                                onRequestClose={() => setTimeoutPickerOpen(false)}
+                            >
+                                <Pressable style={styles.pickerOverlay} onPress={() => setTimeoutPickerOpen(false)}>
+                                    <View
+                                        style={[styles.pickerCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
+                                        onStartShouldSetResponder={() => true}
+                                    >
+                                        <Text style={[styles.pickerTitle, { color: tc.text }]}>
+                                            {t('settings.aiRequestTimeout')}
+                                        </Text>
+                                        <ScrollView style={styles.pickerList} contentContainerStyle={styles.pickerListContent}>
+                                            {AI_REQUEST_TIMEOUT_OPTIONS.map((seconds) => {
+                                                const selected = aiRequestTimeoutSeconds === seconds;
+                                                const label = tr('settings.aiRequestTimeoutSeconds', { seconds });
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={seconds}
+                                                        style={[
+                                                            styles.pickerOption,
+                                                            {
+                                                                borderColor: tc.border,
+                                                                backgroundColor: selected ? tc.filterBg : 'transparent',
+                                                            },
+                                                        ]}
+                                                        onPress={() => {
+                                                            onAiRequestTimeoutSecondsChange(seconds);
+                                                            setTimeoutPickerOpen(false);
+                                                        }}
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={label}
+                                                        accessibilityState={{ selected }}
+                                                    >
+                                                        <Text style={[styles.pickerOptionText, { color: selected ? tc.tint : tc.text }]}>
+                                                            {label}
+                                                        </Text>
+                                                        {selected && <Text style={{ color: tc.tint, fontSize: 18 }}>✓</Text>}
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                        </ScrollView>
+                                    </View>
+                                </Pressable>
+                            </Modal>
+                        </>
                     )}
                 </>
             )}

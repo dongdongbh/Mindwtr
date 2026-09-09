@@ -1,16 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import {
+    AI_REQUEST_TIMEOUT_OPTIONS,
     buildAIConfig,
     buildCopilotConfig,
     formatOpenAIExtraBodyParams,
     openAITranscribeLanguageFieldName,
     parseOpenAIExtraBodyParamsInput,
+    resolveAIRequestTimeoutSeconds,
     resolveOpenAITranscribeEndpoint,
 } from './ai-config';
 import type { AiSettings, AppSettings } from './types';
 
 const createSettings = (ai: AiSettings): AppSettings => ({
     ai,
+});
+
+describe('AI request timeout configuration', () => {
+    it('exposes the supported choices and applies a saved timeout to both request paths', () => {
+        expect(AI_REQUEST_TIMEOUT_OPTIONS).toEqual([30, 60, 120, 300]);
+        expect(resolveAIRequestTimeoutSeconds(120)).toBe(120);
+        expect(resolveAIRequestTimeoutSeconds(31)).toBe(30);
+        expect(buildAIConfig(createSettings({ requestTimeoutSeconds: 120 }), 'test-key').timeoutMs).toBe(120_000);
+        expect(buildCopilotConfig(createSettings({ requestTimeoutSeconds: 120 }), 'test-key').timeoutMs).toBe(120_000);
+    });
+
+    it('keeps the 30 second default for missing and invalid saved values', () => {
+        expect(buildAIConfig(createSettings({ provider: 'gemini' }), 'test-key').timeoutMs).toBe(30_000);
+        expect(buildCopilotConfig(createSettings({ provider: 'anthropic' }), 'test-key').timeoutMs).toBe(30_000);
+        expect(buildAIConfig(createSettings({ requestTimeoutSeconds: 0 }), 'test-key').timeoutMs).toBe(30_000);
+        expect(buildCopilotConfig(createSettings({ requestTimeoutSeconds: 31 }), 'test-key').timeoutMs).toBe(30_000);
+    });
 });
 
 describe('ai-config endpoint mapping', () => {

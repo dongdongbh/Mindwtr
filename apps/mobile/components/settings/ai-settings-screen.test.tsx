@@ -147,6 +147,7 @@ describe('AISettingsScreen live model lists', () => {
 
         expect(latest().aiModelOptions).toEqual(['my-model', 'live-a', 'live-b']);
         expect(latest().aiCopilotOptions).toEqual(['my-copilot', 'live-a', 'live-b']);
+        expect(latest().aiRequestTimeoutSeconds).toBe(30);
         expect(coreMocks.fetchProviderModelsCached).toHaveBeenCalledWith('openai', {
             apiKey: 'sk-test',
             baseUrl: '',
@@ -157,6 +158,34 @@ describe('AISettingsScreen live model lists', () => {
             expect.anything(),
             expect.objectContaining({ kind: 'transcription' }),
         );
+    });
+
+    it('passes through a persisted timeout and preserves sibling AI settings when changing it', async () => {
+        const latest = await renderScreen({
+            ai: {
+                enabled: true,
+                provider: 'openai',
+                model: 'my-model',
+                requestTimeoutSeconds: 120,
+                speechToText: localWhisperSpeech,
+            },
+        });
+
+        expect(latest().aiRequestTimeoutSeconds).toBe(120);
+        storeState.updateSettings.mockClear();
+        await act(async () => {
+            latest().onAiRequestTimeoutSecondsChange(300);
+        });
+
+        expect(storeState.updateSettings).toHaveBeenCalledWith({
+            ai: {
+                enabled: true,
+                provider: 'openai',
+                model: 'my-model',
+                requestTimeoutSeconds: 300,
+                speechToText: localWhisperSpeech,
+            },
+        });
     });
 
     it('keeps the static catalog when the fetch fails', async () => {

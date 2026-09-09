@@ -10,6 +10,10 @@
 //   パーサのコマンドトークン (/due:, @context, #tag, +Project…) は英語のまま。
 // - 数値プレースホルダは詰める ({{count}}件)、英単語は前後に半角スペースを入れる (Dropbox に接続)。
 export const jaOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "詳細設定",
+        'settings.aiRequestTimeout': "リクエストのタイムアウト",
+        'settings.aiRequestTimeoutDesc': "AI の応答を待つ時間です。低速なローカルモデルでは長く設定してください。タイムアウトまたはキャンセルされたリクエストは自動再試行されません。",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} 秒",
         'settings.automationCapture': '自動化キャプチャ',
         'settings.automationCaptureDesc': '信頼できる自動化アプリが、トークンを使ってテキストを受信トレイへの取り込み待ちに追加できるようにします。取り込まれた内容は、次に Mindwtr を開いたときに表示されます。',
         'settings.automationCaptureToken': 'キャプチャトークン',

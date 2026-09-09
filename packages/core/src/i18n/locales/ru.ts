@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const ruOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Дополнительно",
+        'settings.aiRequestTimeout': "Время ожидания запроса",
+        'settings.aiRequestTimeoutDesc': "Как долго ждать ответ ИИ. Увеличьте время для медленных локальных моделей. Отменённые запросы и запросы с истёкшим временем ожидания не повторяются автоматически.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} секунд",
         'settings.automationCapture': 'Автоматический захват',
         'settings.automationCaptureDesc': 'Разрешить доверенным приложениям автоматизации с вашим токеном добавлять текст в очередь входящих. Добавленные данные появятся при следующем запуске Mindwtr.',
         'settings.automationCaptureToken': 'Токен захвата',

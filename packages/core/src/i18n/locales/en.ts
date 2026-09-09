@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const en: Record<string, string> = {
+        'settings.aiAdvanced': "Advanced",
+        'settings.aiRequestTimeout': "Request timeout",
+        'settings.aiRequestTimeoutDesc': "How long to wait for an AI response. Increase this for slow local models. Timed-out or cancelled requests are not retried automatically.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} seconds",
         'settings.automationCapture': 'Automation capture',
         'settings.automationCaptureDesc': 'Allow trusted automation apps with your token to queue text to Inbox. Captures appear the next time Mindwtr opens.',
         'settings.automationCaptureToken': 'Capture token',

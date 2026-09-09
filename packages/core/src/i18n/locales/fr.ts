@@ -1,5 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const frOverrides: Record<string, string> = {
+        'settings.aiAdvanced': "Avancé",
+        'settings.aiRequestTimeout': "Délai d’attente",
+        'settings.aiRequestTimeoutDesc': "Durée d’attente d’une réponse de l’IA. Augmentez-la pour les modèles locaux lents. Les requêtes annulées ou expirées ne sont pas relancées automatiquement.",
+        'settings.aiRequestTimeoutSeconds': "{{seconds}} secondes",
         'settings.automationCapture': 'Capture automatisée',
         'settings.automationCaptureDesc': 'Autorisez les applications d’automatisation de confiance disposant de votre jeton à mettre du texte en attente dans la boîte de réception. Les captures apparaîtront à la prochaine ouverture de Mindwtr.',
         'settings.automationCaptureToken': 'Jeton de capture',

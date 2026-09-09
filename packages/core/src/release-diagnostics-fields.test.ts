@@ -13,6 +13,8 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // ai-request-stop-once (desktop/mobile AI configuration adapters)
+    'provider', 'timeoutMs',
     // sync-attachment-copy-elision reuses releaseCheck and count below.
     // sync-signature-pruning reuses releaseCheck, elapsedMs, and count below.
     // pomodoro-alert-delivery reuses releaseCheck, reason, outcome, and count below.

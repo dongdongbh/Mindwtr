@@ -173,6 +173,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         { key: 'aiApiKey', section: 'aiEnable' },
         { key: 'aiBaseUrl', section: 'aiEnable' },
         { key: 'aiExtraBodyParams', section: 'aiEnable' },
+        { key: 'aiRequestTimeout', section: 'aiRequestTimeout' },
         { key: 'aiCopilotModel', section: 'aiEnable' },
         { key: 'aiReasoning', section: 'aiEnable' },
         { key: 'aiThinkingEnable', section: 'aiEnable' },

@@ -79,6 +79,40 @@ const stamp = (settings: Settings, group: SettingsSyncGroup | 'preferences', at:
     syncPreferencesUpdatedAt: { ...settings.syncPreferencesUpdatedAt, [group]: at },
 });
 
+describe('mergeSettingsForSync > AI request timeout', () => {
+    it('preserves a local explicit timeout when a newer old-version peer omits it', () => {
+        const local = stamp({ ai: { model: 'local-model', requestTimeoutSeconds: 120 } }, 'ai', OLDER);
+        const incoming = stamp({ ai: { model: 'incoming-model' } }, 'ai', NEWER);
+
+        const merged = mergeSettingsForSync(local, incoming);
+
+        expect(merged.ai).toMatchObject({ model: 'incoming-model', requestTimeoutSeconds: 120 });
+        expect(mergeSettingsForSync(merged, incoming)).toEqual(merged);
+    });
+
+    it('preserves a local explicit timeout when a newer peer sends an invalid value', () => {
+        const local = stamp({ ai: { requestTimeoutSeconds: 300 } }, 'ai', OLDER);
+        const incoming = stamp({ ai: { requestTimeoutSeconds: 45 } }, 'ai', NEWER);
+
+        expect(mergeSettingsForSync(local, incoming).ai?.requestTimeoutSeconds).toBe(300);
+    });
+
+    it('drops an invalid timeout when neither peer has an explicit valid value', () => {
+        const sanitized = sanitizeMergedSettingsForSync(
+            { ai: { requestTimeoutSeconds: 0 } },
+            { ai: {} },
+        );
+
+        expect(sanitized.ai?.requestTimeoutSeconds).toBeUndefined();
+    });
+
+    it('does not materialize the default timeout while sanitizing old settings', () => {
+        const sanitized = sanitizeMergedSettingsForSync({ ai: {} }, { ai: {} });
+
+        expect(sanitized.ai?.requestTimeoutSeconds).toBeUndefined();
+    });
+});
+
 // One representative field per value-replacing group. savedFilters is excluded on
 // purpose: it merges by filter id with its own per-filter LWW, covered separately below.
 const GROUP_CASES: Array<{

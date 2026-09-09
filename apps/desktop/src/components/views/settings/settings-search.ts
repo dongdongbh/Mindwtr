@@ -21,7 +21,7 @@ export const SETTINGS_PAGE_SYNONYMS: Record<SettingsSearchPageId, readonly strin
     sync: ['file sync', 'WebDAV', 'cloud', 'sync now', 'sync history', 'recovery snapshots', 'dropbox', 'self-hosted', 'iCloud', 'settings sync'],
     data: ['backup', 'restore', 'import', 'Todoist', 'DGT GTD', 'OmniFocus', 'CSV', 'Mindwtr CSV', 'attachments', 'cleanup', 'diagnostics', 'logging'],
     integrations: ['obsidian', 'vault', 'calendar', 'ICS', 'apple calendar', 'integration'],
-    ai: ['OpenAI', 'Gemini', 'Anthropic', 'API key', 'speech', 'whisper', 'copilot', 'model'],
+    ai: ['OpenAI', 'Gemini', 'Anthropic', 'API key', 'speech', 'whisper', 'copilot', 'model', 'timeout'],
     advanced: ['automation', 'local api', 'localhost', 'port', 'mcp', 'Claude', 'LLM'],
     about: ['version', 'update', 'license', 'sponsor'],
 };
@@ -40,6 +40,10 @@ export const SETTINGS_ROW_ATTR = 'data-settings-key';
 export const SETTINGS_SECTION_ATTR = 'data-settings-section';
 export const SETTINGS_HIGHLIGHT_ATTR = 'data-settings-highlight';
 
+const SETTINGS_SECTION_ANCESTORS: Partial<Record<string, string>> = {
+    aiRequestTimeout: 'aiEnable',
+};
+
 export function findSettingsRow(key: string): HTMLElement | null {
     if (typeof document === 'undefined') return null;
     return document.querySelector<HTMLElement>(`[${SETTINGS_ROW_ATTR}="${key}"]`);
@@ -50,9 +54,17 @@ export function findSettingsRow(key: string): HTMLElement | null {
 // row again after React re-renders.
 export function expandSettingsSection(section: string | undefined): boolean {
     if (!section || typeof document === 'undefined') return false;
-    const toggle = document.querySelector<HTMLElement>(
+    let toggle = document.querySelector<HTMLElement>(
         `[${SETTINGS_SECTION_ATTR}="${section}"][aria-expanded="false"]`,
     );
+    if (!toggle) {
+        const ancestor = SETTINGS_SECTION_ANCESTORS[section];
+        if (ancestor) {
+            toggle = document.querySelector<HTMLElement>(
+                `[${SETTINGS_SECTION_ATTR}="${ancestor}"][aria-expanded="false"]`,
+            );
+        }
+    }
     if (!toggle) return false;
     toggle.click();
     return true;

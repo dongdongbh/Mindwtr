@@ -14,14 +14,17 @@ import type {
 import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildReviewAnalysisPrompt } from '../prompts';
 import {
     fetchTextWithTimeout,
+    isAIRequestStopError,
     normalizeTags,
     normalizeTimeEstimate,
     parseJson,
     rateLimit,
+    throwIfAIRequestAborted,
     type BufferedAIResponse,
+    waitForAIRequestRetry,
+    withAIRequestStopNotifications,
 } from '../utils';
 import { isBreakdownResponse, isClarifyResponse, isCopilotResponse, isReviewAnalysisResponse } from '../validators';
-import { sleep } from '../../async-utils';
 import { resolveAnthropicModel } from '../catalog';
 
 const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1/messages';
@@ -163,10 +166,11 @@ async function requestAnthropic(
             : { type: 'enabled', budget_tokens: thinkingBudget };
     }
 
-    await rateLimit('anthropic');
+    await rateLimit('anthropic', 250, options?.signal, 'Anthropic');
 
     let response: BufferedAIResponse | null = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+        throwIfAIRequestAborted(options?.signal, 'Anthropic');
         try {
             response = await fetchTextWithTimeout(
                 url,
@@ -189,8 +193,9 @@ async function requestAnthropic(
                 config.fetcher
             );
         } catch (error) {
+            if (isAIRequestStopError(error)) throw error;
             if (attempt < MAX_RETRIES) {
-                await sleep(400 * Math.pow(2, attempt));
+                await waitForAIRequestRetry(400 * Math.pow(2, attempt), options?.signal, 'Anthropic');
                 continue;
             }
             throw error;
@@ -198,7 +203,7 @@ async function requestAnthropic(
 
         if (!response.ok) {
             if (RETRYABLE_STATUSES.has(response.status) && attempt < MAX_RETRIES) {
-                await sleep(400 * Math.pow(2, attempt));
+                await waitForAIRequestRetry(400 * Math.pow(2, attempt), options?.signal, 'Anthropic');
                 continue;
             }
             throw await buildAnthropicError(response, usingOfficialAnthropic);
@@ -226,7 +231,7 @@ async function requestAnthropic(
 }
 
 export function createAnthropicProvider(config: AIProviderConfig): AIProvider {
-    return {
+    return withAIRequestStopNotifications(config, {
         clarifyTask: async (input: ClarifyInput, options?: AIRequestOptions): Promise<ClarifyResponse> => {
             const prompt = buildClarifyPrompt(input);
             const text = await requestAnthropic(config, prompt, options);
@@ -299,5 +304,5 @@ export function createAnthropicProvider(config: AIProviderConfig): AIProvider {
                 };
             }
         },
-    };
+    });
 }
