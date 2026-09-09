@@ -394,12 +394,12 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   }, [aboutPageProps.appVersion, aboutPageProps.installChannel, language]);
 
   useLayoutEffect(() => {
-    markSettingsOpenTrace("settings-view-layout-effect", {
-      page,
-      releaseCheck: page === "main"
-        ? "v1.3.0/settings-default-coload"
-        : "v1.3.0/settings-page-transition",
-    });
+    markSettingsOpenTrace(
+      "settings-view-layout-effect",
+      page === "main"
+        ? { page, releaseCheck: "v1.3.0/settings-default-coload" }
+        : { page, releaseCheck: "v1.3.0/settings-page-transition" },
+    );
   }, [page]);
 
   useEffect(() => {
