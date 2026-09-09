@@ -51,6 +51,38 @@ it('rejects an interaction run before accessing adb without synthetic-data confi
   expect(result.stderr).not.toContain('spawnSync /nonexistent-adb');
 });
 
+for (const [scenario, mode] of [['settingsNavigation', 'timing'], ['captureOpenClose', 'memory']]) {
+  for (const fault of ['target', 'runner', 'missing-target', 'missing-runner', 'disconnected', 'same-build-new-path']) {
+    it(`verifies both installed builds after ${scenario}/${mode} (${fault})`, () => {
+      const scratch = join(import.meta.dir, '../../build/performance-tools');
+      mkdirSync(scratch, { recursive: true });
+      const directory = mkdtempSync(join(scratch, 'build-identity-test-'));
+      try {
+        const adb = join(directory, 'adb.mjs');
+        copyFileSync(join(import.meta.dir, 'fake-interaction-adb.mjs'), adb);
+        chmodSync(adb, 0o700);
+        const env = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: scenario,
+          METRIC_MODE: mode, RUNS: '1', SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1',
+          DEVICE_LABEL: 'synthetic', NETWORK: 'offline', EXPECTED_APK_SHA256: 'a'.repeat(64),
+          FAKE_ADB_LOG: join(directory, 'calls.log'), OUT_DIR: join(directory, 'output'), FAKE_MEASUREMENT_CHANGE: fault };
+        const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], { env, encoding: 'utf8', timeout: 15000 });
+        const changed = fault !== 'same-build-new-path';
+        expect(result.status, result.stderr).toBe(changed ? 1 : 0);
+        const artifacts = join(env.OUT_DIR, readdirSync(env.OUT_DIR)[0]);
+        const metadata = JSON.parse(readFileSync(join(artifacts, 'metadata.json'), 'utf8'));
+        expect(metadata.status).toBe(changed ? 'failed' : 'passed');
+        expect(metadata.finalBuildIdentity.status).toBe(changed ? 'failed' : 'passed');
+        if (fault === 'disconnected') expect(metadata.diagnosticsError).toBeDefined();
+        expect(readFileSync(join(artifacts, 'instrumentation.txt'), 'utf8')).toContain('OK (1 test)');
+        expect(readdirSync(join(artifacts, 'native'))).toContain('synthetic.perfetto-trace');
+        const calls = readFileSync(env.FAKE_ADB_LOG, 'utf8');
+        expect(calls).not.toMatch(/pm clear|install |logcat -c/);
+        if (scenario.startsWith('capture')) expect(metadata.readiness.status).toBe('passed');
+      } finally { rmSync(directory, { recursive: true, force: true }); }
+    });
+  }
+}
+
 it('rejects an unknown scenario before driving the phone', () => {
   const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], {
     env: { ...process.env, SCENARIO: 'wipe', ADB_BIN: '/nonexistent-adb' }, encoding: 'utf8',
