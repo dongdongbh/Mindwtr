@@ -973,10 +973,21 @@ fn persist_data_snapshot(
     ensure_data_file(app)?;
     let mut conn = open_sqlite(app)?;
     refuse_empty_snapshot_overwrite(&conn, data, baseline_entities)?;
-    let canonical = merge_json_to_sqlite(&mut conn, data, baseline_entities)?;
+    let (canonical, retained) =
+        merge_json_to_sqlite_with_retained_tasks(&mut conn, data, baseline_entities)?;
+    static REPORTED_APPEND_SNAPSHOT: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    if retained > 0 && !REPORTED_APPEND_SNAPSHOT.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        log::info!(
+            "SQLite capture snapshot retained unchanged tasks extra.releaseCheck=v1.3.0/sqlite-snapshot-append count={retained}"
+        );
+        crate::logging::append_native_log_line(app, &format!(
+            "SQLite capture snapshot retained unchanged tasks extra.releaseCheck=v1.3.0/sqlite-snapshot-append count={retained}"
+        ));
+    }
     static REPORTED_CACHED_SNAPSHOT: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
-    if !REPORTED_CACHED_SNAPSHOT.swap(true, std::sync::atomic::Ordering::Relaxed) {
+    if retained == 0 && !REPORTED_CACHED_SNAPSHOT.swap(true, std::sync::atomic::Ordering::Relaxed) {
         let count = canonical
             .get("tasks")
             .and_then(Value::as_array)
@@ -1706,7 +1717,9 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
     let view_section_ids_json = json_str(task.get("viewSectionIds"));
     let normalized_rev = normalized_revision_for_storage(task.get("rev"));
     let normalized_rev_by = normalized_rev_by(task.get("revBy"));
-    conn.execute(
+    let execute_insert =
+        |sql: &str, values: &[&dyn ToSql]| conn.prepare_cached(sql)?.execute(values);
+    execute_insert(
         "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, cancelledAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45)",
         params![
             task.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3068,9 +3081,8 @@ fn normalize_revision_metadata_in_data(data: &mut Value) {
     }
 }
 
-fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Value, String> {
-    ensure_orphan_section_tombstones_schema(conn)?;
-    let issues = sanitize_dangling_container_references(&mut data);
+fn prepare_snapshot_for_storage(data: &mut Value) {
+    let issues = sanitize_dangling_container_references(data);
     if !issues.is_empty() {
         log::warn!(
             "JSON->SQLite migration found {} dangling container reference(s), repaired/tombstoned: {}",
@@ -3082,7 +3094,19 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
                 .join(", ")
         );
     }
-    normalize_revision_metadata_in_data(&mut data);
+    normalize_revision_metadata_in_data(data);
+}
+
+fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Value, String> {
+    ensure_orphan_section_tombstones_schema(conn)?;
+    prepare_snapshot_for_storage(&mut data);
+    replace_prepared_data_in_transaction(conn, data)
+}
+
+fn replace_prepared_data_in_transaction(
+    conn: &Connection,
+    mut data: Value,
+) -> Result<Value, String> {
     let orphan_section_tombstones = take_orphan_section_tombstones(&mut data);
     let data = &data;
     // Reuse each table's statement within this connection. Recompiling the
@@ -3349,17 +3373,85 @@ fn merge_json_to_sqlite(
     data: &Value,
     baseline_entities: Option<&Value>,
 ) -> Result<Value, String> {
+    merge_json_to_sqlite_with_retained_tasks(conn, data, baseline_entities).map(|(data, _)| data)
+}
+
+// A deliberately narrow optimization after normal merge/revision/CAS arbitration
+// and reference repair, under the same writer lock. Exact restores never use it.
+// Strict equality is conservative: codec differences simply take the old path.
+fn appended_snapshot_tasks<'a>(current: &Value, merged: &'a Value) -> Option<&'a [Value]> {
+    // Full replacement also scrubs this legacy, untrusted sidecar marker.
+    // Do not bypass that cleanup for a database produced by an older writer.
+    if merged
+        .get("sections")?
+        .as_array()?
+        .iter()
+        .any(|section| section.get("_mindwtrOrphanSectionTombstone").is_some())
+    {
+        return None;
+    }
+    for collection in ["projects", "sections", "areas", "people", "settings"] {
+        if current.get(collection) != merged.get(collection) {
+            return None;
+        }
+    }
+    let existing = current.get("tasks")?.as_array()?;
+    let tasks = merged.get("tasks")?.as_array()?;
+    if existing.is_empty()
+        || tasks.len() <= existing.len()
+        || tasks[..existing.len()] != existing[..]
+    {
+        return None;
+    }
+    let mut ids: HashSet<&str> = existing
+        .iter()
+        .filter_map(|task| task.get("id")?.as_str())
+        .collect();
+    let appended = &tasks[existing.len()..];
+    for task in appended {
+        let id = task.get("id")?.as_str().filter(|id| !id.is_empty())?;
+        if !ids.insert(id) {
+            return None;
+        }
+    }
+    Some(appended)
+}
+
+fn write_merged_snapshot_in_transaction(
+    conn: &Connection,
+    current: &Value,
+    mut merged: Value,
+) -> Result<(Value, usize), String> {
+    ensure_orphan_section_tombstones_schema(conn)?;
+    prepare_snapshot_for_storage(&mut merged);
+    if let Some(appended) = appended_snapshot_tasks(current, &merged) {
+        let retained = current["tasks"].as_array().map_or(0, Vec::len);
+        for task in appended {
+            // Proven new IDs only. This uses the same snapshot column codec;
+            // no existing row or parent can be replaced/cascade-deleted here.
+            replace_task_row(conn, task)?;
+        }
+        return Ok((read_sqlite_data(conn)?, retained));
+    }
+    replace_prepared_data_in_transaction(conn, merged).map(|data| (data, 0))
+}
+
+fn merge_json_to_sqlite_with_retained_tasks(
+    conn: &mut Connection,
+    data: &Value,
+    baseline_entities: Option<&Value>,
+) -> Result<(Value, usize), String> {
     // Acquire the cross-process writer lock before reloading. A stale whole
     // snapshot can then merge with canonical rows without erasing an MCP,
     // CLI, or Local API write committed after the snapshot was captured.
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| e.to_string())?;
-    let result: Result<Value, String> = (|| {
+    let result: Result<(Value, usize), String> = (|| {
         let current = read_sqlite_data(conn)?;
         let merged = merge_data_snapshots(&current, data, baseline_entities);
-        let canonical = replace_data_in_transaction(conn, merged)?;
+        let result = write_merged_snapshot_in_transaction(conn, &current, merged)?;
         conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
-        Ok(canonical)
+        Ok(result)
     })();
     if result.is_err() {
         let _ = conn.execute_batch("ROLLBACK");
@@ -4988,6 +5080,35 @@ mod tests {
     use std::sync::{Arc, Barrier};
 
     #[test]
+    fn snapshot_append_preserves_unchanged_rows() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut conn = open_sqlite_path(&temp.path().join("append.db")).unwrap();
+        let seed = serde_json::json!({"tasks":[{"id":"old","title":"existingneedle","status":"inbox"}],
+            "projects":[],"sections":[],"areas":[],"people":[],"settings":{}});
+        let mut incoming = replace_json_in_sqlite(&mut conn, &seed).unwrap();
+        conn.execute_batch("CREATE TRIGGER protect_old_task BEFORE DELETE ON tasks WHEN old.id = 'old' BEGIN SELECT RAISE(ABORT, 'unchanged row rewritten'); END;").unwrap();
+        incoming["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id":"new","title":"captureneedle","status":"inbox","rev":1,"revBy":"device-a"
+            }));
+        let canonical = merge_json_to_sqlite(&mut conn, &incoming, None).unwrap();
+        assert_eq!(canonical["tasks"].as_array().unwrap().len(), 2);
+        for term in ["existingneedle", "captureneedle"] {
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM tasks_fts WHERE tasks_fts MATCH ?1",
+                    [term],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+        }
+    }
+
+    #[test]
     fn cached_snapshot_inserts_match_uncached_and_recover_after_rollback() {
         let source = serde_json::json!({
             "areas": [{"id":"a","name":"Area","color":"red"},{"id":"b","name":"Other"}],
@@ -5076,6 +5197,240 @@ mod tests {
         }
     }
 
+    #[test]
+    fn snapshot_append_matches_full_replacement_and_rolls_back() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut actual = open_sqlite_path(&temp.path().join("actual.db")).unwrap();
+        let mut reference = open_sqlite_path(&temp.path().join("reference.db")).unwrap();
+        let seed = serde_json::json!({
+            "tasks":[{"id":"old","title":"oldneedle","status":"inbox","rev":8,"revBy":"device-a",
+                "projectId":"p","sectionId":"s","tags":[],"contexts":[]},
+                {"id":"deleted","title":"Tombstone","status":"done","rev":10,"deletedAt":"2026-01-01"}],
+            "areas":[{"id":"a","name":"Area"}],
+            "projects":[{"id":"p","title":"projectneedle","areaId":"a"}],
+            "sections":[{"id":"s","projectId":"p","title":"Section"},
+                {"id":"orphan","projectId":"missing","title":"Gone","deletedAt":"2026-01-01","rev":5}],
+            "people":[{"id":"person","name":"Person"}],"settings":{"language":"en"}
+        });
+        let initial = replace_json_in_sqlite(&mut actual, &seed).unwrap();
+        replace_json_in_sqlite(&mut reference, &initial).unwrap();
+        let mut input = initial.clone();
+        input["tasks"].as_array_mut().unwrap().push(serde_json::json!({
+            "id":"new","title":"captureneedle","status":"done","projectId":"p","sectionId":"s",
+            "areaId":"a","assignedTo":"person","rev":2.8,"revBy":" device-a ",
+            "tags":["tag"],"contexts":["@home"],"orderNum":1.5,"boardOrder":4,"focusOrder":5,
+            "checklist":[{"id":"item","title":"checkneedle","isCompleted":false}],
+            "attachments":[{"id":"att","kind":"link","uri":"https://example.invalid"}],
+            "description":"descriptionneedle","textDirection":"rtl","location":"Here",
+            "dueDate":"2026-09-09","startTime":"2026-09-08","reviewAt":"2026-09-10",
+            "completedAt":"2026-09-09","cancelledAt":"2026-09-08",
+            "priority":"high","energyLevel":"low","taskMode":"scheduled","pushCount":2,
+            "relativeStartOffset":{"days":1},"recurrence":{"rule":"FREQ=DAILY"},"showFutureRecurrence":true,
+            "viewSectionIds":{"focus":"section"},"isFocusedToday":true,"timeEstimate":"30m",
+            "suppressMindwtrReminders":true,"repeatReminderMinutes":10,"timeSpentMinutes":12,
+            "statusBeforeProjectArchive":"next","completedAtBeforeProjectArchive":"2026-09-07",
+            "isFocusedTodayBeforeProjectArchive":false,"projectArchivedAt":"2026-09-08",
+            "deletedAt":null,"purgedAt":null,"createdAt":"2026-09-08","updatedAt":"2026-09-09"
+        }));
+        let merged = merge_data_snapshots(&initial, &input, None);
+        let expected = replace_json_in_sqlite(&mut reference, &merged).unwrap();
+        let (saved, retained) =
+            merge_json_to_sqlite_with_retained_tasks(&mut actual, &input, None).unwrap();
+        assert_eq!(retained, 2);
+        assert_eq!(
+            saved, expected,
+            "new-task codec must match full replacement"
+        );
+        actual.execute_batch("INSERT INTO tasks_fts(tasks_fts, rank) VALUES ('integrity-check', 1); INSERT INTO projects_fts(projects_fts, rank) VALUES ('integrity-check', 1);").unwrap();
+        assert_eq!(
+            actual
+                .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+
+        // A failed second insert must roll back the first new row and its FTS
+        // entry, keep old rows intact, and permit a later retry.
+        let mut failed = saved.clone();
+        failed["tasks"].as_array_mut().unwrap().extend([
+            serde_json::json!({"id":"first","title":"rollbackneedle"}),
+            serde_json::json!({"id":"second","title":"Failure"}),
+        ]);
+        actual.execute_batch("CREATE TRIGGER fail_append BEFORE INSERT ON tasks WHEN new.id='second' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;").unwrap();
+        assert!(merge_json_to_sqlite(&mut actual, &failed, None).is_err());
+        assert!(actual.is_autocommit());
+        assert_eq!(read_sqlite_data(&actual).unwrap(), saved);
+        assert_eq!(
+            actual
+                .query_row(
+                    "SELECT count(*) FROM tasks_fts WHERE tasks_fts MATCH 'rollbackneedle'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        actual.execute_batch("DROP TRIGGER fail_append").unwrap();
+        assert_eq!(
+            merge_json_to_sqlite_with_retained_tasks(&mut actual, &failed, None)
+                .unwrap()
+                .1,
+            3
+        );
+        // Exact restore intentionally remains authoritative, including removal.
+        assert_eq!(
+            replace_json_in_sqlite(&mut actual, &initial).unwrap(),
+            initial
+        );
+    }
+
+    #[test]
+    fn snapshot_append_falls_back_for_changes_and_keeps_merge_arbitration() {
+        let temp = tempfile::tempdir().unwrap();
+        for scenario in [
+            "edit",
+            "settings",
+            "container",
+            "prune",
+            "stale",
+            "duplicate",
+            "missing-id",
+            "unseen",
+            "restore-stale",
+        ] {
+            let mut conn = open_sqlite_path(&temp.path().join(format!("{scenario}.db"))).unwrap();
+            let mut reference =
+                open_sqlite_path(&temp.path().join(format!("{scenario}-ref.db"))).unwrap();
+            let seed = serde_json::json!({"tasks":[{"id":"old","title":"Existing","status":"inbox","rev":8}],
+                "projects":[],"sections":[],"areas":[],"people":[],"settings":{}});
+            let current = replace_json_in_sqlite(&mut conn, &seed).unwrap();
+            replace_json_in_sqlite(&mut reference, &current).unwrap();
+            let mut input = current.clone();
+            let mut baseline = current.clone();
+            input["tasks"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({"id":"new","title":"New","status":"inbox","rev":1}));
+            match scenario {
+                "edit" => {
+                    input["tasks"][0]["title"] = serde_json::json!("Edited");
+                    input["tasks"][0]["rev"] = serde_json::json!(9);
+                }
+                "settings" => input["settings"]["language"] = serde_json::json!("zh"),
+                "container" => {
+                    input["projects"] = serde_json::json!([{"id":"p","title":"New project"}])
+                }
+                "prune" => {
+                    input["tasks"].as_array_mut().unwrap().remove(0);
+                }
+                "stale" => {
+                    input["tasks"][0]["rev"] = serde_json::json!(1);
+                    input["tasks"][0]["title"] = serde_json::json!("Stale");
+                }
+                "duplicate" => {
+                    let new = input["tasks"][1].clone();
+                    input["tasks"].as_array_mut().unwrap().push(new);
+                }
+                "missing-id" => input["tasks"][1]["id"] = serde_json::json!(""),
+                "unseen" => {
+                    input["tasks"].as_array_mut().unwrap().remove(0);
+                    baseline["tasks"] = serde_json::json!([]);
+                }
+                "restore-stale" => {
+                    baseline["observedEntityIds"] = serde_json::json!({"tasks":["old","new"]})
+                }
+                _ => unreachable!(),
+            }
+            let merged = merge_data_snapshots(&current, &input, Some(&baseline));
+            let expected = replace_json_in_sqlite(&mut reference, &merged).unwrap();
+            let (actual, retained) =
+                merge_json_to_sqlite_with_retained_tasks(&mut conn, &input, Some(&baseline))
+                    .unwrap();
+            assert_eq!(actual, expected, "scenario {scenario}");
+            assert_eq!(
+                retained > 0,
+                matches!(scenario, "stale" | "unseen"),
+                "scenario {scenario}"
+            );
+            let again = merge_json_to_sqlite(&mut conn, &actual, None).unwrap();
+            assert_eq!(again, actual, "second save must converge: {scenario}");
+        }
+    }
+
+    #[test]
+    fn snapshot_append_reloads_late_writer_and_retry_does_not_duplicate_capture() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("writers.db");
+        let mut conn = open_sqlite_path(&path).unwrap();
+        let seed = serde_json::json!({"tasks":[{"id":"old","title":"Old","rev":8}],
+            "projects":[],"sections":[],"areas":[],"people":[],"settings":{}});
+        let observed = replace_json_in_sqlite(&mut conn, &seed).unwrap();
+        let mut input = observed.clone();
+        input["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"id":"capture","title":"Capture","rev":1}));
+        let other = open_sqlite_path(&path).unwrap();
+        other.execute_batch("BEGIN IMMEDIATE").unwrap();
+        replace_task_row(
+            &other,
+            &serde_json::json!({"id":"external","title":"externalneedle","rev":9}),
+        )
+        .unwrap();
+        other.execute_batch("COMMIT").unwrap();
+        let (saved, retained) =
+            merge_json_to_sqlite_with_retained_tasks(&mut conn, &input, Some(&observed)).unwrap();
+        assert_eq!(
+            retained, 2,
+            "late writer must be reloaded inside the transaction"
+        );
+        assert_eq!(saved["tasks"].as_array().unwrap().len(), 3);
+        let retried = merge_json_to_sqlite(&mut conn, &input, Some(&observed)).unwrap();
+        assert_eq!(
+            retried, saved,
+            "lost acknowledgement retry must be idempotent"
+        );
+        assert_eq!(
+            read_sqlite_data(&other).unwrap(),
+            saved,
+            "other connection sees the committed capture"
+        );
+    }
+
+    #[test]
+    fn snapshot_append_does_not_bypass_legacy_sidecar_cleanup() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut conn = open_sqlite_path(&temp.path().join("legacy.db")).unwrap();
+        let seed = serde_json::json!({"tasks":[{"id":"old","title":"Old"}],
+            "projects":[],"sections":[],"areas":[],"people":[],"settings":{}});
+        replace_json_in_sqlite(&mut conn, &seed).unwrap();
+        let legacy = serde_json::json!({"id":"orphan","projectId":"missing","title":"Old tombstone",
+            "deletedAt":"2026-01-01","_mindwtrOrphanSectionTombstone":true});
+        conn.execute(
+            "INSERT INTO orphan_section_tombstones (id,data) VALUES ('orphan',?1)",
+            [legacy.to_string()],
+        )
+        .unwrap();
+        let mut input = read_sqlite_data(&conn).unwrap();
+        input["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"id":"capture","title":"Capture"}));
+        let (saved, retained) =
+            merge_json_to_sqlite_with_retained_tasks(&mut conn, &input, None).unwrap();
+        assert_eq!(retained, 0);
+        assert!(saved["sections"][0]
+            .get("_mindwtrOrphanSectionTombstone")
+            .is_none());
+        assert_eq!(saved["sections"][0]["id"], "orphan");
+        assert_eq!(
+            merge_json_to_sqlite(&mut conn, &saved, None).unwrap(),
+            saved
+        );
+    }
+
     // Opt-in, disk-backed diagnostic; never a timing gate on variable CI hosts.
     #[test]
     #[ignore]
@@ -5113,7 +5468,12 @@ mod tests {
             let read = started.elapsed().as_secs_f64() * 1000.0;
             let merged = merge_data_snapshots(&current, &incoming, None);
             let merge = started.elapsed().as_secs_f64() * 1000.0;
-            let canonical = replace_data_in_transaction(&conn, merged).unwrap();
+            let (canonical, retained) =
+                if std::env::var("MINDWTR_SNAPSHOT_APPEND").as_deref() == Ok("0") {
+                    (replace_data_in_transaction(&conn, merged).unwrap(), 0)
+                } else {
+                    write_merged_snapshot_in_transaction(&conn, &current, merged).unwrap()
+                };
             let replace = started.elapsed().as_secs_f64() * 1000.0;
             conn.execute_batch("COMMIT").unwrap();
             let committed = started.elapsed().as_secs_f64() * 1000.0;
@@ -5126,7 +5486,7 @@ mod tests {
                     .unwrap(),
                 10_001 + run
             );
-            println!("snapshot run={run} lock_ms={locked:.2} read_ms={:.2} merge_ms={:.2} replace_ms={:.2} commit_ms={:.2} total_ms={committed:.2}",
+            println!("snapshot run={run} retained={retained} lock_ms={locked:.2} read_ms={:.2} merge_ms={:.2} replace_ms={:.2} commit_ms={:.2} total_ms={committed:.2}",
                 read - locked, merge - read, replace - merge, committed - replace);
             if let Ok(budget) = std::env::var("MINDWTR_SNAPSHOT_BUDGET_MS") {
                 assert!(
