@@ -11,6 +11,37 @@ const areas: Area[] = [
 ];
 
 describe('AreaSelector', () => {
+    it('offers distinct Keep and No area choices and supports a disabled field label', () => {
+        const onChange = vi.fn();
+        const { getByRole, rerender } = render(
+            <AreaSelector
+                areas={areas}
+                value="__KEEP__"
+                onChange={onChange}
+                leadingOption={{ value: '__KEEP__', label: 'Keep area' }}
+                noAreaValue="__NONE__"
+                noAreaLabel="No area"
+                ariaLabel="Area"
+            />
+        );
+
+        fireEvent.click(getByRole('button', { name: 'Area' }));
+        expect(getByRole('option', { name: 'Keep area' })).toHaveAttribute('aria-selected', 'true');
+        fireEvent.click(getByRole('option', { name: 'No area' }));
+        expect(onChange).toHaveBeenCalledWith('__NONE__');
+
+        rerender(
+            <AreaSelector
+                areas={areas}
+                value="__KEEP__"
+                onChange={onChange}
+                ariaLabel="Area"
+                disabled
+            />
+        );
+        expect(getByRole('button', { name: 'Area' })).toBeDisabled();
+    });
+
     it('renders the dropdown in a body portal so task rows cannot clip it', () => {
         const { getByRole } = render(
             <AreaSelector

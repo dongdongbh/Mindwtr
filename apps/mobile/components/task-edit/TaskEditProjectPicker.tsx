@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { getProjectChoiceState, type Project } from '@mindwtr/core';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { getProjectChoiceState, tFallback, type Project } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { styles } from './task-edit-modal.styles';
 import { logError } from '../../lib/app-log';
 import { useAndroidKeyboardInset } from '../../lib/use-android-keyboard-inset';
 
-type ProjectPickerThemeColors = Pick<ThemeColors, 'border' | 'cardBg' | 'inputBg' | 'secondaryText' | 'text' | 'tint'>;
+type ProjectPickerThemeColors = Pick<ThemeColors, 'border' | 'cardBg' | 'inputBg' | 'secondaryText' | 'text' | 'tint'> & {
+    danger?: ThemeColors['danger'];
+};
 
 const byOrder = (a: Project, b: Project) => {
     const orderA = Number.isFinite(a.order) ? a.order : 0;
@@ -55,10 +57,22 @@ export function TaskEditProjectPicker({
     noMatchesLabel,
 }: TaskEditProjectPickerProps) {
     const [projectQuery, setProjectQuery] = useState('');
+    const [createError, setCreateError] = useState<string | null>(null);
+    const [isCreating, setIsCreating] = useState(false);
+    const createAttemptRef = useRef(0);
+    const creatingRef = useRef(false);
     const keyboardInset = useAndroidKeyboardInset(visible);
 
     useEffect(() => {
+        createAttemptRef.current += 1;
+        creatingRef.current = false;
+        setIsCreating(false);
+        setCreateError(null);
         if (visible) setProjectQuery('');
+        return () => {
+            createAttemptRef.current += 1;
+            creatingRef.current = false;
+        };
     }, [visible]);
 
     const normalizedProjectQuery = projectQuery.trim().toLowerCase();
@@ -72,7 +86,7 @@ export function TaskEditProjectPicker({
     );
 
     const handleCreateProject = async () => {
-        if (!allowCreate) return;
+        if (!allowCreate || creatingRef.current) return;
         const title = projectQuery.trim();
         if (!title) return;
         if (exactMatch) {
@@ -80,14 +94,36 @@ export function TaskEditProjectPicker({
             onClose();
             return;
         }
+        const attempt = ++createAttemptRef.current;
+        creatingRef.current = true;
+        setIsCreating(true);
+        setCreateError(null);
         try {
             const created = await onCreateProject(title);
-            if (!created) return;
+            if (attempt !== createAttemptRef.current) return;
+            if (!created) {
+                setCreateError(tFallback(t, 'projects.createFailed', 'Failed to create project'));
+                return;
+            }
             onSelectProject(created.id);
             onClose();
         } catch (error) {
+            if (attempt !== createAttemptRef.current) return;
+            setCreateError(tFallback(t, 'projects.createFailed', 'Failed to create project'));
             void logError(error, { scope: 'project', extra: { message: 'Failed to create project' } });
+        } finally {
+            if (attempt === createAttemptRef.current) {
+                creatingRef.current = false;
+                setIsCreating(false);
+            }
         }
+    };
+
+    const closePicker = () => {
+        if (creatingRef.current) return;
+        createAttemptRef.current += 1;
+        setCreateError(null);
+        onClose();
     };
 
     return (
@@ -95,7 +131,7 @@ export function TaskEditProjectPicker({
             visible={visible}
             transparent
             animationType="fade"
-            onRequestClose={onClose}
+            onRequestClose={closePicker}
             accessibilityViewIsModal
         >
             <View style={keyboardInset > 0 ? [styles.overlay, { paddingBottom: keyboardInset }] : styles.overlay}>
@@ -105,7 +141,10 @@ export function TaskEditProjectPicker({
                     </Text>
                     <TextInput
                         value={projectQuery}
-                        onChangeText={setProjectQuery}
+                        onChangeText={(value) => {
+                            setProjectQuery(value);
+                            setCreateError(null);
+                        }}
                         placeholder={t('common.search')}
                         placeholderTextColor={tc.secondaryText}
                         style={[styles.modalInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
@@ -114,21 +153,42 @@ export function TaskEditProjectPicker({
                         returnKeyType="done"
                         blurOnSubmit
                         onSubmitEditing={handleCreateProject}
+                        editable={!isCreating}
                         accessibilityLabel={t('taskEdit.projectLabel')}
                         accessibilityHint={t('common.search')}
                     />
                     {allowCreate && canCreate && (
                         <Pressable
                             onPress={handleCreateProject}
+                            disabled={isCreating}
                             style={styles.pickerItem}
                             accessibilityRole="button"
                             accessibilityLabel={`${t('projects.create')}: ${projectQuery.trim()}`}
+                            accessibilityState={{ disabled: isCreating, busy: isCreating }}
                         >
-                            <Text style={[styles.pickerItemText, { color: tc.tint }]}>
-                                + {t('projects.create')} &quot;{projectQuery.trim()}&quot;
-                            </Text>
+                            {isCreating ? (
+                                <ActivityIndicator size="small" color={tc.tint} />
+                            ) : (
+                                <Text
+                                    style={[styles.pickerItemText, { color: tc.tint }]}
+                                >
+                                    + {t('projects.create')} &quot;{projectQuery.trim()}&quot;
+                                </Text>
+                            )}
                         </Pressable>
                     )}
+                    {createError ? (
+                        <View style={styles.pickerItem}>
+                            <Text
+                                testID="project-create-error"
+                                style={[styles.pickerItemText, { color: tc.danger ?? tc.secondaryText }]}
+                                accessibilityRole="alert"
+                                accessibilityLiveRegion="assertive"
+                            >
+                                {createError}
+                            </Text>
+                        </View>
+                    ) : null}
                     <ScrollView
                         style={[styles.pickerList, { borderColor: tc.border, backgroundColor: tc.inputBg }]}
                         contentContainerStyle={{ paddingVertical: 4 }}
@@ -138,13 +198,13 @@ export function TaskEditProjectPicker({
                                 key={option.key}
                                 onPress={() => {
                                     option.onPress();
-                                    onClose();
+                                    closePicker();
                                 }}
-                                disabled={option.disabled}
+                                disabled={option.disabled || isCreating}
                                 style={styles.pickerItem}
                                 accessibilityRole="button"
                                 accessibilityLabel={option.accessibilityLabel ?? option.label}
-                                accessibilityState={{ selected: Boolean(option.selected), disabled: Boolean(option.disabled) }}
+                                accessibilityState={{ selected: Boolean(option.selected), disabled: Boolean(option.disabled) || isCreating }}
                             >
                                 <Text style={[styles.pickerItemText, { color: option.disabled ? tc.secondaryText : tc.text }]}>{option.label}</Text>
                             </Pressable>
@@ -152,12 +212,13 @@ export function TaskEditProjectPicker({
                         <Pressable
                             onPress={() => {
                                 onSelectProject(undefined);
-                                onClose();
+                                closePicker();
                             }}
+                            disabled={isCreating}
                             style={styles.pickerItem}
                             accessibilityRole="button"
                             accessibilityLabel={t('taskEdit.noProjectOption')}
-                            accessibilityState={{ selected: selectedProjectId === null }}
+                            accessibilityState={{ selected: selectedProjectId === null, disabled: isCreating }}
                         >
                             <Text style={[styles.pickerItemText, { color: tc.text }]}>{t('taskEdit.noProjectOption')}</Text>
                         </Pressable>
@@ -166,12 +227,13 @@ export function TaskEditProjectPicker({
                                 key={project.id}
                                 onPress={() => {
                                     onSelectProject(project.id);
-                                    onClose();
+                                    closePicker();
                                 }}
+                                disabled={isCreating}
                                 style={styles.pickerItem}
                                 accessibilityRole="button"
                                 accessibilityLabel={project.title}
-                                accessibilityState={{ selected: selectedProjectId === project.id }}
+                                accessibilityState={{ selected: selectedProjectId === project.id, disabled: isCreating }}
                             >
                                 <Text style={[styles.pickerItemText, { color: tc.text }]}>{project.title}</Text>
                             </Pressable>
@@ -190,10 +252,12 @@ export function TaskEditProjectPicker({
                     </ScrollView>
                     <View style={styles.modalButtons}>
                         <TouchableOpacity
-                            onPress={onClose}
+                            onPress={closePicker}
+                            disabled={isCreating}
                             style={styles.modalButton}
                             accessibilityRole="button"
                             accessibilityLabel={t('common.cancel')}
+                            accessibilityState={{ disabled: isCreating }}
                         >
                             <Text style={[styles.modalButtonText, { color: tc.secondaryText }]}>{t('common.cancel')}</Text>
                         </TouchableOpacity>

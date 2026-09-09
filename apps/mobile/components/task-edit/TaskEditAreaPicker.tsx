@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import type { Area } from '@mindwtr/core';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { tFallback, type Area } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { styles } from './task-edit-modal.styles';
 import { logError } from '../../lib/app-log';
 import { useAndroidKeyboardInset } from '../../lib/use-android-keyboard-inset';
 
-type AreaPickerThemeColors = Pick<ThemeColors, 'border' | 'cardBg' | 'inputBg' | 'secondaryText' | 'text' | 'tint'>;
+type AreaPickerThemeColors = Pick<ThemeColors, 'border' | 'cardBg' | 'inputBg' | 'secondaryText' | 'text' | 'tint'> & {
+    danger?: ThemeColors['danger'];
+};
 
 type AreaPickerLeadingOption = {
     key: string;
@@ -43,10 +45,22 @@ export function TaskEditAreaPicker({
     selectedAreaId,
 }: TaskEditAreaPickerProps) {
     const [areaQuery, setAreaQuery] = useState('');
+    const [createError, setCreateError] = useState<string | null>(null);
+    const [isCreating, setIsCreating] = useState(false);
+    const createAttemptRef = useRef(0);
+    const creatingRef = useRef(false);
     const keyboardInset = useAndroidKeyboardInset(visible);
 
     useEffect(() => {
+        createAttemptRef.current += 1;
+        creatingRef.current = false;
+        setIsCreating(false);
+        setCreateError(null);
         if (visible) setAreaQuery('');
+        return () => {
+            createAttemptRef.current += 1;
+            creatingRef.current = false;
+        };
     }, [visible]);
 
     const activeAreas = useMemo(() => {
@@ -67,7 +81,7 @@ export function TaskEditAreaPicker({
     }, [activeAreas, normalizedAreaQuery]);
 
     const handleCreateArea = async () => {
-        if (!allowCreate) return;
+        if (!allowCreate || creatingRef.current) return;
         const name = areaQuery.trim();
         if (!name) return;
         if (hasExactAreaMatch) {
@@ -78,15 +92,36 @@ export function TaskEditAreaPicker({
             onClose();
             return;
         }
+        const attempt = ++createAttemptRef.current;
+        creatingRef.current = true;
+        setIsCreating(true);
+        setCreateError(null);
         try {
             const created = await onCreateArea(name);
-            if (created) {
-                onSelectArea(created.id);
+            if (attempt !== createAttemptRef.current) return;
+            if (!created) {
+                setCreateError(tFallback(t, 'projects.createAreaFailed', 'Failed to create area'));
+                return;
             }
+            onSelectArea(created.id);
             onClose();
         } catch (error) {
+            if (attempt !== createAttemptRef.current) return;
+            setCreateError(tFallback(t, 'projects.createAreaFailed', 'Failed to create area'));
             void logError(error, { scope: 'project', extra: { message: 'Failed to create area' } });
+        } finally {
+            if (attempt === createAttemptRef.current) {
+                creatingRef.current = false;
+                setIsCreating(false);
+            }
         }
+    };
+
+    const closePicker = () => {
+        if (creatingRef.current) return;
+        createAttemptRef.current += 1;
+        setCreateError(null);
+        onClose();
     };
 
     return (
@@ -94,7 +129,7 @@ export function TaskEditAreaPicker({
             visible={visible}
             transparent
             animationType="fade"
-            onRequestClose={onClose}
+            onRequestClose={closePicker}
             accessibilityViewIsModal
         >
             <View style={keyboardInset > 0 ? [styles.overlay, { paddingBottom: keyboardInset }] : styles.overlay}>
@@ -104,7 +139,10 @@ export function TaskEditAreaPicker({
                     </Text>
                     <TextInput
                         value={areaQuery}
-                        onChangeText={setAreaQuery}
+                        onChangeText={(value) => {
+                            setAreaQuery(value);
+                            setCreateError(null);
+                        }}
                         placeholder={t('common.search')}
                         placeholderTextColor={tc.secondaryText}
                         style={[styles.modalInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
@@ -113,21 +151,42 @@ export function TaskEditAreaPicker({
                         returnKeyType="done"
                         blurOnSubmit
                         onSubmitEditing={handleCreateArea}
+                        editable={!isCreating}
                         accessibilityLabel={t('taskEdit.areaLabel')}
                         accessibilityHint={t('common.search')}
                     />
                     {allowCreate && !hasExactAreaMatch && areaQuery.trim() && (
                         <Pressable
                             onPress={handleCreateArea}
+                            disabled={isCreating}
                             style={styles.pickerItem}
                             accessibilityRole="button"
                             accessibilityLabel={`${t('areas.create')}: ${areaQuery.trim()}`}
+                            accessibilityState={{ disabled: isCreating, busy: isCreating }}
                         >
-                            <Text style={[styles.pickerItemText, { color: tc.tint }]}>
-                                + {t('areas.create')} &quot;{areaQuery.trim()}&quot;
-                            </Text>
+                            {isCreating ? (
+                                <ActivityIndicator size="small" color={tc.tint} />
+                            ) : (
+                                <Text
+                                    style={[styles.pickerItemText, { color: tc.tint }]}
+                                >
+                                    + {t('areas.create')} &quot;{areaQuery.trim()}&quot;
+                                </Text>
+                            )}
                         </Pressable>
                     )}
+                    {createError ? (
+                        <View style={styles.pickerItem}>
+                            <Text
+                                testID="area-create-error"
+                                style={[styles.pickerItemText, { color: tc.danger ?? tc.secondaryText }]}
+                                accessibilityRole="alert"
+                                accessibilityLiveRegion="assertive"
+                            >
+                                {createError}
+                            </Text>
+                        </View>
+                    ) : null}
                     <ScrollView
                         style={[styles.pickerList, { borderColor: tc.border, backgroundColor: tc.inputBg }]}
                         contentContainerStyle={{ paddingVertical: 4 }}
@@ -137,13 +196,13 @@ export function TaskEditAreaPicker({
                                 key={option.key}
                                 onPress={() => {
                                     option.onPress();
-                                    onClose();
+                                    closePicker();
                                 }}
-                                disabled={option.disabled}
+                                disabled={option.disabled || isCreating}
                                 style={styles.pickerItem}
                                 accessibilityRole="button"
                                 accessibilityLabel={option.accessibilityLabel ?? option.label}
-                                accessibilityState={{ selected: Boolean(option.selected), disabled: Boolean(option.disabled) }}
+                                accessibilityState={{ selected: Boolean(option.selected), disabled: Boolean(option.disabled) || isCreating }}
                             >
                                 <Text style={[styles.pickerItemText, { color: option.disabled ? tc.secondaryText : tc.text }]}>{option.label}</Text>
                             </Pressable>
@@ -151,12 +210,13 @@ export function TaskEditAreaPicker({
                         <Pressable
                             onPress={() => {
                                 onSelectArea(undefined);
-                                onClose();
+                                closePicker();
                             }}
+                            disabled={isCreating}
                             style={styles.pickerItem}
                             accessibilityRole="button"
                             accessibilityLabel={t('taskEdit.noAreaOption')}
-                            accessibilityState={{ selected: selectedAreaId === null }}
+                            accessibilityState={{ selected: selectedAreaId === null, disabled: isCreating }}
                         >
                             <Text style={[styles.pickerItemText, { color: tc.text }]}>{t('taskEdit.noAreaOption')}</Text>
                         </Pressable>
@@ -165,12 +225,13 @@ export function TaskEditAreaPicker({
                                 key={area.id}
                                 onPress={() => {
                                     onSelectArea(area.id);
-                                    onClose();
+                                    closePicker();
                                 }}
+                                disabled={isCreating}
                                 style={styles.pickerItem}
                                 accessibilityRole="button"
                                 accessibilityLabel={area.name}
-                                accessibilityState={{ selected: selectedAreaId === area.id }}
+                                accessibilityState={{ selected: selectedAreaId === area.id, disabled: isCreating }}
                             >
                                 <Text style={[styles.pickerItemText, { color: tc.text }]}>{area.name}</Text>
                             </Pressable>
@@ -189,10 +250,12 @@ export function TaskEditAreaPicker({
                     </ScrollView>
                     <View style={styles.modalButtons}>
                         <TouchableOpacity
-                            onPress={onClose}
+                            onPress={closePicker}
+                            disabled={isCreating}
                             style={styles.modalButton}
                             accessibilityRole="button"
                             accessibilityLabel={t('common.cancel')}
+                            accessibilityState={{ disabled: isCreating }}
                         >
                             <Text style={[styles.modalButtonText, { color: tc.secondaryText }]}>{t('common.cancel')}</Text>
                         </TouchableOpacity>

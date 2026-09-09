@@ -1,7 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { ChevronRight, ClipboardCheck, X } from 'lucide-react-native';
 import {
+  createBulkOrganizeArea,
+  createBulkOrganizeProject,
+  ensureBulkOrganizeDestinationSaved,
   isSelectableProjectForTaskAssignment,
   parseBulkOrganizeTokenInput,
   tFallback,
@@ -70,9 +73,21 @@ export function TaskListBulkOrganizeModal({
   const [reviewDate, setReviewDate] = useState('');
   const [delegateWho, setDelegateWho] = useState('');
   const [showValidation, setShowValidation] = useState(false);
+  const [isCreatingDestination, setIsCreatingDestination] = useState(false);
+  const [destinationError, setDestinationError] = useState<string | null>(null);
+  const destinationCreateSessionRef = useRef(0);
+  const destinationCreatePendingRef = useRef(false);
 
   useEffect(() => {
-    if (!visible) return;
+    destinationCreateSessionRef.current += 1;
+    destinationCreatePendingRef.current = false;
+    setIsCreatingDestination(false);
+    setDestinationError(null);
+    if (!visible) {
+      setProjectPickerVisible(false);
+      setAreaPickerVisible(false);
+      return;
+    }
     setStatus(KEEP_VALUE);
     setProjectChoice(KEEP_VALUE);
     setAreaChoice(KEEP_VALUE);
@@ -85,7 +100,59 @@ export function TaskListBulkOrganizeModal({
     setReviewDate('');
     setDelegateWho('');
     setShowValidation(false);
+    return () => {
+      destinationCreateSessionRef.current += 1;
+      destinationCreatePendingRef.current = false;
+    };
   }, [visible]);
+
+  const runDestinationCreate = useCallback(async <T,>(operation: () => Promise<T | null>): Promise<T | null> => {
+    if (isApplying || destinationCreatePendingRef.current) return null;
+    const session = ++destinationCreateSessionRef.current;
+    destinationCreatePendingRef.current = true;
+    setIsCreatingDestination(true);
+    setDestinationError(null);
+    try {
+      const created = await operation();
+      return session === destinationCreateSessionRef.current && visible ? created : null;
+    } catch (error) {
+      if (session === destinationCreateSessionRef.current && visible) throw error;
+      return null;
+    } finally {
+      if (session === destinationCreateSessionRef.current) {
+        destinationCreatePendingRef.current = false;
+        setIsCreatingDestination(false);
+      }
+    }
+  }, [isApplying, visible]);
+
+  const selectDestination = async (kind: 'project' | 'area', id?: string) => {
+    if (isApplying || destinationCreatePendingRef.current) return;
+    try {
+      const savedId = id ? await runDestinationCreate(async () => {
+        await ensureBulkOrganizeDestinationSaved();
+        return id;
+      }) : NONE_VALUE;
+      if (!savedId) return;
+      setDestinationError(null);
+      if (kind === 'project') {
+        setProjectChoice(savedId);
+        setAreaChoice(KEEP_VALUE);
+      } else {
+        setAreaChoice(savedId);
+      }
+    } catch {
+      setDestinationError(kind === 'project'
+        ? tFallback(t, 'projects.createFailed', 'Failed to create project.')
+        : tFallback(t, 'projects.createAreaFailed', 'Failed to create area.'));
+    }
+  };
+
+  const closeModal = useCallback(() => {
+    if (isApplying || destinationCreatePendingRef.current) return;
+    destinationCreateSessionRef.current += 1;
+    onClose();
+  }, [isApplying, onClose]);
 
   const activeProjects = useMemo(
     () => projects
@@ -116,20 +183,21 @@ export function TaskListBulkOrganizeModal({
       : selectedArea?.name ?? tFallback(t, 'projects.areaLabel', 'Area');
   const isWaiting = status === 'waiting';
   const canApply = selectedCount > 0 && (!isWaiting || delegateWho.trim().length > 0);
+  const isBusy = isApplying || isCreatingDestination;
 
   const renderChip = (label: string, selected: boolean, onPress: () => void, disabled = false) => (
     <TouchableOpacity
       key={label}
       accessibilityRole="button"
-      accessibilityState={{ selected, disabled }}
-      disabled={disabled || isApplying}
+      accessibilityState={{ selected, disabled: disabled || isBusy }}
+      disabled={disabled || isBusy}
       onPress={onPress}
       style={[
         styles.bulkOrganizeChip,
         {
           backgroundColor: selected ? themeColors.tint : themeColors.filterBg,
           borderColor: selected ? themeColors.tint : themeColors.border,
-          opacity: disabled ? 0.45 : 1,
+          opacity: disabled || isBusy ? 0.45 : 1,
         },
       ]}
     >
@@ -156,15 +224,15 @@ export function TaskListBulkOrganizeModal({
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={`${label}: ${value}`}
-      accessibilityState={{ disabled }}
-      disabled={disabled || isApplying}
+      accessibilityState={{ disabled: disabled || isBusy }}
+      disabled={disabled || isBusy}
       onPress={onPress}
       style={[
         styles.bulkOrganizePickerRow,
         {
           backgroundColor: themeColors.inputBg,
           borderColor: themeColors.border,
-          opacity: disabled ? 0.5 : 1,
+          opacity: disabled || isBusy ? 0.5 : 1,
         },
       ]}
     >
@@ -179,6 +247,7 @@ export function TaskListBulkOrganizeModal({
   );
 
   const apply = () => {
+    if (isApplying || destinationCreatePendingRef.current) return;
     if (!canApply) {
       setShowValidation(true);
       return;
@@ -209,11 +278,11 @@ export function TaskListBulkOrganizeModal({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onClose}
+      onRequestClose={closeModal}
     >
       <Pressable
         style={keyboardInset > 0 ? [styles.modalOverlay, { paddingBottom: keyboardInset }] : styles.modalOverlay}
-        onPress={onClose}
+        onPress={closeModal}
       >
         <Pressable
           style={[styles.bulkOrganizeCard, { backgroundColor: themeColors.cardBg, borderColor: themeColors.border }]}
@@ -234,8 +303,10 @@ export function TaskListBulkOrganizeModal({
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel={tFallback(t, 'common.close', 'Close')}
+              accessibilityState={{ disabled: isBusy }}
+              disabled={isBusy}
               hitSlop={8}
-              onPress={onClose}
+              onPress={closeModal}
               style={styles.bulkOrganizeCloseButton}
             >
               <X size={20} color={themeColors.secondaryText} />
@@ -397,6 +468,11 @@ export function TaskListBulkOrganizeModal({
               />
             </View>
 
+            {destinationError && (
+              <Text accessibilityRole="alert" style={[styles.bulkOrganizeValidation, { color: themeColors.danger }]}>
+                {destinationError}
+              </Text>
+            )}
             {showValidation && (
               <Text style={[styles.bulkOrganizeValidation, { color: themeColors.danger }]}>
                 {tFallback(t, 'bulk.waitingPersonRequired', 'Choose who these items are waiting for.')}
@@ -406,10 +482,11 @@ export function TaskListBulkOrganizeModal({
 
           <View style={[styles.bulkOrganizeFooter, { borderTopColor: themeColors.border }]}>
             <TouchableOpacity
-              onPress={onClose}
-              disabled={isApplying}
+              onPress={closeModal}
+              disabled={isBusy}
               style={styles.bulkOrganizeFooterButton}
               accessibilityRole="button"
+              accessibilityState={{ disabled: isBusy }}
             >
               <Text style={[styles.bulkOrganizeFooterText, { color: themeColors.secondaryText }]}>
                 {tFallback(t, 'common.cancel', 'Cancel')}
@@ -417,12 +494,13 @@ export function TaskListBulkOrganizeModal({
             </TouchableOpacity>
             <TouchableOpacity
               onPress={apply}
-              disabled={isApplying || selectedCount === 0}
+              disabled={isBusy || selectedCount === 0}
               style={[
                 styles.bulkOrganizeApplyButton,
-                { backgroundColor: filledButton.backgroundColor, opacity: isApplying || selectedCount === 0 ? 0.6 : 1 },
+                { backgroundColor: filledButton.backgroundColor, opacity: isBusy || selectedCount === 0 ? 0.6 : 1 },
               ]}
               accessibilityRole="button"
+              accessibilityState={{ disabled: isBusy || selectedCount === 0, busy: isApplying }}
             >
               {isApplying ? (
                 <ActivityIndicator size="small" color={filledButton.textColor ?? themeColors.onTint} />
@@ -436,12 +514,12 @@ export function TaskListBulkOrganizeModal({
       </Pressable>
 
       <TaskEditProjectPicker
-        visible={projectPickerVisible}
+        visible={visible && projectPickerVisible}
         projects={activeProjects}
         allProjects={projects}
         tc={themeColors}
         t={t}
-        allowCreate={false}
+        allowCreate={!isApplying}
         leadingOptions={[{
           key: 'keep-project',
           label: tFallback(t, 'bulk.keepProject', 'Keep project'),
@@ -453,19 +531,18 @@ export function TaskListBulkOrganizeModal({
         }]}
         selectedProjectId={projectChoice === NONE_VALUE ? null : selectedProjectId}
         onClose={() => setProjectPickerVisible(false)}
-        onSelectProject={(projectId?: string) => {
-          setProjectChoice(projectId ?? NONE_VALUE);
-          setAreaChoice(KEEP_VALUE);
-        }}
-        onCreateProject={async () => null}
+        onSelectProject={(projectId?: string) => { void selectDestination('project', projectId); }}
+        onCreateProject={(title) => runDestinationCreate(
+          () => createBulkOrganizeProject(title, selectedAreaId),
+        )}
       />
 
       <TaskEditAreaPicker
-        visible={areaPickerVisible}
+        visible={visible && areaPickerVisible}
         areas={activeAreas}
         tc={themeColors}
         t={t}
-        allowCreate={false}
+        allowCreate={!isApplying}
         leadingOptions={[{
           key: 'keep-area',
           label: tFallback(t, 'bulk.keepArea', 'Keep area'),
@@ -474,10 +551,8 @@ export function TaskListBulkOrganizeModal({
         }]}
         selectedAreaId={areaChoice === NONE_VALUE ? null : selectedAreaId}
         onClose={() => setAreaPickerVisible(false)}
-        onSelectArea={(areaId?: string) => {
-          setAreaChoice(areaId ?? NONE_VALUE);
-        }}
-        onCreateArea={async () => null}
+        onSelectArea={(areaId?: string) => { void selectDestination('area', areaId); }}
+        onCreateArea={(name) => runDestinationCreate(() => createBulkOrganizeArea(name))}
       />
     </Modal>
   );

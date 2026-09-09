@@ -21,6 +21,7 @@ export * from './range-selection';
 export * from './task-metadata-filter-visibility';
 export * from './resolve-feature-flags';
 export * from './bulk-organize';
+export * from './bulk-organize-create';
 export * from './announcements';
 export * from './user-prompts';
 export * from './process-inbox-workflow';

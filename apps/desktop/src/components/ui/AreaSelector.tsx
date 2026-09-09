@@ -15,6 +15,11 @@ interface AreaSelectorProps {
     searchPlaceholder?: string;
     noMatchesLabel?: string;
     createAreaLabel?: string;
+    leadingOption?: { value: string; label: string };
+    noAreaValue?: string;
+    ariaLabel?: string;
+    disabled?: boolean;
+    closeOnCreateFailure?: boolean;
     className?: string;
     controlClassName?: string;
     menuClassName?: string;
@@ -30,6 +35,11 @@ export function AreaSelector({
     searchPlaceholder = 'Search areas',
     noMatchesLabel = 'No matches',
     createAreaLabel = 'Create area',
+    leadingOption,
+    noAreaValue = '',
+    ariaLabel,
+    disabled = false,
+    closeOnCreateFailure = true,
     className,
     controlClassName,
     menuClassName,
@@ -39,7 +49,19 @@ export function AreaSelector({
     const containerRef = useRef<HTMLDivElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
+    const restoreFocusRef = useRef(false);
+    const createPendingRef = useRef(false);
+    const mountedRef = useRef(true);
+    const [isCreating, setIsCreating] = useState(false);
     const selected = areas.find((area) => area.id === value);
+    const selectedLabel = leadingOption?.value === value
+        ? leadingOption.label
+        : value === noAreaValue && noAreaValue !== ''
+            ? noAreaLabel
+            : selected?.name ?? placeholder;
+    const hasSelectedLabel = Boolean(selected)
+        || leadingOption?.value === value
+        || (noAreaValue !== '' && value === noAreaValue);
     const { fixedDropdownStyle, listMaxHeight } = useDropdownPosition({
         open,
         containerRef,
@@ -69,13 +91,26 @@ export function AreaSelector({
         return () => document.removeEventListener('mousedown', handleClick);
     }, [open]);
 
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
+
     // Keyboard/selection closes return focus to the trigger so the user is not
     // stranded on a removed node (outside clicks bypass this on purpose).
     const closeDropdown = () => {
         setOpen(false);
         setQuery('');
-        triggerRef.current?.focus();
+        restoreFocusRef.current = true;
     };
+
+    useEffect(() => {
+        if (open || disabled || !restoreFocusRef.current) return;
+        restoreFocusRef.current = false;
+        triggerRef.current?.focus();
+    }, [disabled, open]);
 
     const focusSelectableOption = (direction: 1 | -1) => {
         const options = dropdownRef.current?.querySelectorAll<HTMLButtonElement>('[data-selector-option="true"]');
@@ -120,14 +155,24 @@ export function AreaSelector({
     };
 
     const handleCreate = async () => {
-        if (!onCreateArea) return;
+        if (!onCreateArea || disabled || createPendingRef.current) return;
         const name = query.trim();
         if (!name) return;
-        const id = await onCreateArea(name);
-        if (id) {
-            onChange(id);
+        createPendingRef.current = true;
+        setIsCreating(true);
+        try {
+            const id = await onCreateArea(name);
+            if (!mountedRef.current) return;
+            if (id) {
+                onChange(id);
+                closeDropdown();
+            } else if (closeOnCreateFailure) {
+                closeDropdown();
+            }
+        } finally {
+            createPendingRef.current = false;
+            if (mountedRef.current) setIsCreating(false);
         }
-        closeDropdown();
     };
 
     const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -150,7 +195,7 @@ export function AreaSelector({
     };
 
     return (
-        <div ref={containerRef} className={cn('relative', className)}>
+        <div ref={containerRef} className={cn('relative', className)} aria-busy={isCreating || undefined}>
             <button
                 ref={triggerRef}
                 type="button"
@@ -168,15 +213,18 @@ export function AreaSelector({
                         setOpen(true);
                     }
                 }}
+                aria-label={ariaLabel}
+                disabled={disabled}
                 className={cn(
                     'w-full flex items-center justify-between text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground',
+                    'disabled:cursor-not-allowed disabled:opacity-50',
                     controlClassName,
                 )}
                 aria-haspopup="listbox"
                 aria-expanded={open}
             >
-                <span className={cn('truncate', !selected && 'text-muted-foreground/70')}>{selected?.name ?? placeholder}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                <span className={cn('truncate', !hasSelectedLabel && 'text-muted-foreground/70')}>{selectedLabel}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
             </button>
             {open && (
                 <ModalPortal>
@@ -195,24 +243,46 @@ export function AreaSelector({
                             value={query}
                             onChange={(event) => setQuery(event.target.value)}
                             onKeyDown={handleSearchKeyDown}
+                            disabled={disabled || isCreating}
                             placeholder={searchPlaceholder}
                             aria-label={searchPlaceholder}
                             className="w-full mb-1 rounded border border-border bg-muted/40 px-2 py-1 text-xs"
                         />
-                        <div role="listbox" aria-label={placeholder}>
+                        <div role="listbox" aria-label={ariaLabel ?? placeholder}>
+                            {leadingOption && (
+                                <button
+                                    type="button"
+                                    data-selector-option="true"
+                                    data-selector-option-kind="leading"
+                                    role="option"
+                                    aria-selected={value === leadingOption.value}
+                                    disabled={disabled || isCreating}
+                                    onClick={() => {
+                                        onChange(leadingOption.value);
+                                        closeDropdown();
+                                    }}
+                                    className={cn(
+                                        'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
+                                        value === leadingOption.value && 'bg-muted/70'
+                                    )}
+                                >
+                                    {leadingOption.label}
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 data-selector-option="true"
                                 data-selector-option-kind="none"
                                 role="option"
-                                aria-selected={value === ''}
+                                aria-selected={value === noAreaValue}
+                                disabled={disabled || isCreating}
                                 onClick={() => {
-                                    onChange('');
+                                    onChange(noAreaValue);
                                     closeDropdown();
                                 }}
                                 className={cn(
-                                    'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none',
-                                    value === '' && 'bg-muted/70'
+                                    'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
+                                    value === noAreaValue && 'bg-muted/70'
                                 )}
                             >
                                 {noAreaLabel}
@@ -224,10 +294,11 @@ export function AreaSelector({
                                     data-selector-option-kind="create"
                                     role="option"
                                     aria-selected={false}
+                                    disabled={disabled || isCreating}
                                     onClick={handleCreate}
-                                    className="w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none text-primary flex items-center gap-2"
+                                    className="w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none text-primary flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                    <Plus className="h-3.5 w-3.5" />
+                                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                                     {createAreaLabel} &quot;{query.trim()}&quot;
                                 </button>
                             )}
@@ -240,12 +311,13 @@ export function AreaSelector({
                                         data-selector-option-kind="item"
                                         role="option"
                                         aria-selected={area.id === value}
+                                        disabled={disabled || isCreating}
                                         onClick={() => {
                                             onChange(area.id);
                                             closeDropdown();
                                         }}
                                         className={cn(
-                                            'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none',
+                                            'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
                                             area.id === value && 'bg-muted/70'
                                         )}
                                     >
