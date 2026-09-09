@@ -2,14 +2,53 @@ import { describe, expect, it } from 'vitest';
 
 import {
     DEFAULT_TASK_EDITOR_ORDER,
+    DEFAULT_TASK_EDITOR_HIDDEN,
     DEFAULT_TASK_EDITOR_VISIBLE,
     getTaskEditorSectionAssignments,
     getTaskEditorSectionOpenDefaults,
     isTaskEditorSectionableField,
+    isTaskEditorSectionFieldVisible,
     normalizeTaskEditorOrder,
     TASK_EDITOR_FIXED_FIELDS,
 } from './task-editor-layout';
-import type { TaskEditorFieldId } from './types';
+import type { TaskEditorFieldId, TaskEditorSettings } from './types';
+
+describe('isTaskEditorSectionFieldVisible (#1190)', () => {
+    it.each([
+        { name: 'reveals sections when the selected project has them', hasProjectSections: true, expected: true },
+        { name: 'keeps sectionless projects simple', hasProjectSections: false, expected: false },
+        { name: 'respects an explicitly hidden empty field', hidden: ['section'], hasProjectSections: true, expected: false },
+        { name: 'respects an explicitly enabled field', hidden: [], hasProjectSections: false, expected: true },
+        { name: 'keeps an existing assignment editable', hidden: ['section'], sectionId: 'section-1', hasProjectSections: true, expected: true },
+        { name: 'does not depend on sections having synced before the task', sectionId: 'section-1', hasProjectSections: false, expected: true },
+    ] satisfies Array<{
+        name: string;
+        hidden?: TaskEditorSettings['hidden'];
+        sectionId?: string;
+        hasProjectSections: boolean;
+        expected: boolean;
+    }>)('$name', ({ hidden, sectionId, hasProjectSections, expected }) => {
+        expect(isTaskEditorSectionFieldVisible({ hidden }, {
+            projectId: 'project-1', sectionId, hasProjectSections,
+        })).toBe(expected);
+    });
+
+    it('never shows a project section without a selected project', () => {
+        expect(isTaskEditorSectionFieldVisible({ hidden: [] }, {
+            projectId: '', sectionId: 'old-section', hasProjectSections: true,
+        })).toBe(false);
+    });
+
+    it('distinguishes persisted defaults from saved field customizations', () => {
+        const defaults = { defaultsVersion: 5, hidden: [...DEFAULT_TASK_EDITOR_HIDDEN] };
+        const context = { projectId: 'project-1', sectionId: '', hasProjectSections: true };
+        expect(isTaskEditorSectionFieldVisible(defaults, context)).toBe(true);
+        expect(isTaskEditorSectionFieldVisible({
+            ...defaults, order: [...DEFAULT_TASK_EDITOR_ORDER],
+        }, context)).toBe(false);
+        expect(defaults.hidden).toEqual(DEFAULT_TASK_EDITOR_HIDDEN);
+    });
+});
 
 describe('isTaskEditorSectionableField', () => {
     it('excludes the fixed fields and textDirection', () => {

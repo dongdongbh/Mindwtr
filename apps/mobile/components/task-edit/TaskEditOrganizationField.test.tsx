@@ -1,5 +1,5 @@
 import React, { type ComponentProps } from 'react';
-import { Text, TextInput } from 'react-native';
+import { Text, TextInput, TouchableOpacity } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -180,6 +180,26 @@ describe('TaskEditOrganizationField', () => {
         });
 
         expect(setShowAreaPicker).toHaveBeenCalledWith(true);
+    });
+
+    it('opens the section picker for a project task with no section (#1190)', () => {
+        const setShowSectionPicker = vi.fn();
+        const props = {
+            ...baseProps,
+            fieldId: 'section',
+            draft: { ...baseProps.draft, projectId: 'project-1' },
+            projectSections: [{ id: 'section-1', projectId: 'project-1', title: 'Planning' }],
+            setShowSectionPicker,
+        } as unknown as ComponentProps<typeof TaskEditOrganizationField>;
+        let tree!: renderer.ReactTestRenderer;
+        act(() => { tree = renderer.create(<TaskEditOrganizationField {...props} />); });
+        try {
+            expect(tree.root.findAllByType(Text).some((node) => node.props.children === 'No Section')).toBe(true);
+            act(() => tree.root.findByType(TouchableOpacity).props.onPress());
+            expect(setShowSectionPicker).toHaveBeenCalledWith(true);
+        } finally {
+            act(() => tree.unmount());
+        }
     });
 
     it('hides section after clearing the task project', () => {
