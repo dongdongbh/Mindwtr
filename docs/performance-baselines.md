@@ -564,6 +564,8 @@ profiling flags as Gradle bundle-task inputs. Metro separately versions its tran
 cache for capture/startup profiling. Merely forcing a Gradle task or passing
 `--reset-cache` did not invalidate an old disabled capture transform in the September
 2026 investigation. See [the cache-isolation verification](performance-profiling-cache-2026-09.md).
+The [capture-context follow-up](performance-capture-context-2026-09.md) correlates
+the fresh Hermes samples with native frames and removes a redundant context invalidation.
 
 Before a long sampling batch, force-stop and freshly launch the exact-hash Benchmark
 APK, record the existing capture-profile filenames, and open/close one empty in-place
