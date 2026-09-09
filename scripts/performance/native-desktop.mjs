@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { fixture } from './fixture.mjs';
 import { summarizeNativeRun, validateNativeReadiness } from './native-desktop-report.mjs';
 import { waitForNativeSaveIdle } from './native-save-idle.mjs';
+import { installCaptureRenderProbe, validateCaptureRenderProbe } from './native-capture-probe.mjs';
 
 assert.equal(process.platform, 'linux', 'Native desktop runner currently supports Linux only');
 const root = resolve(import.meta.dirname, '../..');
@@ -29,6 +30,8 @@ assert.equal(binaryHash, process.env.EXPECTED_BINARY_SHA256, 'Supply EXPECTED_BI
 assert(process.env.DEVICE_LABEL, 'DEVICE_LABEL is required');
 const driverPath = process.env.TAURI_DRIVER ?? 'tauri-driver';
 const diagnostics = process.env.NATIVE_DIAGNOSTICS === '1';
+const renderProbe = process.env.NATIVE_RENDER_PROBE === '1';
+assert(!process.env.NATIVE_RENDER_PROBE || ['0', '1'].includes(process.env.NATIVE_RENDER_PROBE), 'NATIVE_RENDER_PROBE must be 0 or 1');
 const saveQueueMode = process.env.SAVE_QUEUE_MODE ?? 'idle';
 assert(['idle', 'early-session'].includes(saveQueueMode), 'SAVE_QUEUE_MODE must be idle or early-session');
 assert(!process.env.NATIVE_DIAGNOSTICS || ['0', '1'].includes(process.env.NATIVE_DIAGNOSTICS), 'NATIVE_DIAGNOSTICS must be 0 or 1');
@@ -172,6 +175,7 @@ for (const size of sizes) {
       const title = `Native benchmark capture ${run}`;
       await request(`/session/${session}/element/${input}/value`, { text: title });
       if (saveQueueMode === 'idle') sample.saveIdle.beforeCapture = await waitForSaves();
+      if (renderProbe) await execute(`(${installCaptureRenderProbe.toString()})(arguments[0], arguments[1])`, captureSelector, title);
       const captureStart = performance.now();
       await request(`/session/${session}/element/${input}/value`, { text: '\uE007' });
       await until(() => execute('return [...document.querySelectorAll("[data-task-id]")].some(el=>el.textContent.includes(arguments[0])&&el.getClientRects().length>0)', title));
@@ -191,6 +195,11 @@ for (const size of sizes) {
       assert.equal(hash(app), binaryHash, 'Launched binary changed during measurement');
       if (diagnostics) sample.ipc = await execute('return window.__nativeBenchmarkIpc');
       if (saveQueueMode === 'idle') sample.saveIdle.afterCapture = await waitForSaves();
+      if (renderProbe) {
+        await until(() => execute('return Number.isFinite(window.__nativeCaptureRender?.frameMs)'));
+        sample.renderProbe = await execute('return window.__nativeCaptureRender');
+        sample.renderTimings = validateCaptureRenderProbe(sample.renderProbe);
+      }
       // A new WebView loads the canonical native store again after the capture.
       await request(`/session/${session}/refresh`, {});
       await ready();
@@ -220,7 +229,8 @@ for (const size of sizes) {
     device: process.env.DEVICE_LABEL, dataset: seed.id, buildType: 'release', binaryHash, sourceRevision, dirty,
     viewport, scenario: saveQueueMode === 'idle' ? 'portable-native-settings-capture-idle-v2' : 'portable-native-settings-capture-v1',
     saveQueueMode, network: 'host-network-sync-off',
-    profiling: diagnostics ? 'settings-diagnostics-ipc-headers' : 'none', capturedAt: new Date().toISOString(),
+    profiling: [diagnostics ? 'settings-diagnostics-ipc-headers' : '', renderProbe ? 'capture-render-probe' : ''].filter(Boolean).join('+') || 'none',
+    capturedAt: new Date().toISOString(),
   }, samples, warnings: ['Portable Linux Tauri with an isolated session bus; does not measure OS keyring access or macOS/Windows.',
     'Automation latency includes WebDriver dispatch/polling. SQLite readback is not a hardware power-loss test.',
     'Initial import and subsequent warm-database WebView readiness are separate; neither is native process TTID.',

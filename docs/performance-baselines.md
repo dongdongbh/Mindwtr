@@ -174,6 +174,18 @@ never arguments or payloads. Response headers are not the complete invoke callba
 or deserialization duration. Do not compare diagnostic timings with normal runs.
 Keep raw profiles and logs local.
 
+For capture visibility diagnosis, `NATIVE_RENDER_PROBE=1` installs an opt-in
+WebView observer after the pre-capture save-idle gate. It records the first Enter
+keydown, the matching task row's DOM appearance with a layout box, and the next
+animation-frame callback in the same `performance.now()` clock. Raw clocks and
+`eventToDomMs`/`eventToFrameMs` are retained per sample. The frame callback is a
+rendering opportunity, not proof that pixels reached the display. This helps
+separate in-page latency from WebDriver dispatch/polling; the observer itself has
+overhead, so reports carry `profiling: capture-render-probe` (combined with the IPC
+label if both flags are enabled). Compare only matching diagnostic cohorts, never
+these samples against uninstrumented baselines. The probe is runner-injected,
+never bundled into the application, and only observes synthetic benchmark tasks.
+
 Measured example and outstanding save-path finding:
 [native desktop and Android scrolling baseline](performance-native-interactions-2026-09.md).
 
