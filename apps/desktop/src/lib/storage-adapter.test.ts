@@ -21,7 +21,7 @@ vi.mock('./report-error', () => ({
     reportError: (...args: unknown[]) => reportErrorMock(...args),
 }));
 
-import { tauriStorage } from './storage-adapter';
+import { getDesktopSaveStatus, tauriStorage } from './storage-adapter';
 
 const entityIds = (tasks: string[] = []) => ({
     tasks,
@@ -89,6 +89,8 @@ describe('tauriStorage.saveData stuck-save warning (#913)', () => {
 
         const savePromise = tauriStorage.saveData(emptyData());
 
+        expect(getDesktopSaveStatus().pending).toBe(1);
+
         await vi.advanceTimersByTimeAsync(14_999);
         expect(useTaskStore.getState().error).toBeNull();
 
@@ -97,6 +99,8 @@ describe('tauriStorage.saveData stuck-save warning (#913)', () => {
 
         resolveInvoke(canonical);
         await savePromise;
+
+        expect(getDesktopSaveStatus()).toMatchObject({ pending: 0, failed: false });
 
         expect(useTaskStore.getState().error).toBeNull();
     });
@@ -183,7 +187,9 @@ describe('tauriStorage.saveData stuck-save warning (#913)', () => {
 
         await tauriStorage.getData();
         await expect(tauriStorage.saveData(target)).rejects.toThrow('Failed to save data: disk full');
+        expect(getDesktopSaveStatus()).toMatchObject({ pending: 0, failed: true });
         await tauriStorage.saveData(target);
+        expect(getDesktopSaveStatus()).toMatchObject({ pending: 0, failed: false });
 
         const saveCalls = invokeMock.mock.calls.filter(([command]) => command === 'save_data');
         expect(saveCalls[1]).toEqual([

@@ -5,7 +5,7 @@ import App from './App.tsx';
 import { QuickAddWindowApp } from './QuickAddWindowApp.tsx';
 import './index.css';
 
-import { consoleLogger, setLogger, setStorageAdapter } from '@mindwtr/core';
+import { consoleLogger, getPersistenceStatus, setLogger, setStorageAdapter } from '@mindwtr/core';
 import { LanguageProvider } from './contexts/language-context';
 import { isTauriRuntime } from './lib/runtime';
 import { invokeNative, preloadNativeTransport } from './lib/tauri-invoke';
@@ -111,8 +111,15 @@ if (isTauriRuntime()) {
 
 async function initStorage() {
     if (isTauriRuntime()) {
-        const { tauriStorage } = await import('./lib/storage-adapter');
+        const { tauriStorage, getDesktopSaveStatus } = await import('./lib/storage-adapter');
         setStorageAdapter(tauriStorage);
+        // No global store or flush control: profiling builds expose counts only.
+        if (import.meta.env.VITE_STARTUP_PROFILING === '1') {
+            Object.defineProperty(window, '__mindwtrSaveStatus', {
+                value: () => ({ core: getPersistenceStatus(), desktop: getDesktopSaveStatus() }),
+                configurable: true,
+            });
+        }
         return;
     }
 

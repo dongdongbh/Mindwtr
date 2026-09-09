@@ -9,6 +9,7 @@ import { cpus, release } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fixture } from './fixture.mjs';
 import { summarizeNativeRun, validateNativeReadiness } from './native-desktop-report.mjs';
+import { waitForNativeSaveIdle } from './native-save-idle.mjs';
 
 assert.equal(process.platform, 'linux', 'Native desktop runner currently supports Linux only');
 const root = resolve(import.meta.dirname, '../..');
@@ -28,6 +29,8 @@ assert.equal(binaryHash, process.env.EXPECTED_BINARY_SHA256, 'Supply EXPECTED_BI
 assert(process.env.DEVICE_LABEL, 'DEVICE_LABEL is required');
 const driverPath = process.env.TAURI_DRIVER ?? 'tauri-driver';
 const diagnostics = process.env.NATIVE_DIAGNOSTICS === '1';
+const saveQueueMode = process.env.SAVE_QUEUE_MODE ?? 'idle';
+assert(['idle', 'early-session'].includes(saveQueueMode), 'SAVE_QUEUE_MODE must be idle or early-session');
 assert(!process.env.NATIVE_DIAGNOSTICS || ['0', '1'].includes(process.env.NATIVE_DIAGNOSTICS), 'NATIVE_DIAGNOSTICS must be 0 or 1');
 const output = resolve(process.env.OUT_DIR ?? join(root, 'build/performance-native'));
 mkdirSync(output, { recursive: true });
@@ -125,6 +128,10 @@ for (const size of sizes) {
         return dismissed;
       });
       sample.initialImportReady = await ready();
+      const waitForSaves = () => waitForNativeSaveIdle(() => execute(
+        'return typeof window.__mindwtrSaveStatus === "function" ? window.__mindwtrSaveStatus() : null'));
+      sample.saveIdle = {};
+      if (saveQueueMode === 'idle') sample.saveIdle.initialImport = await waitForSaves();
       await execute("localStorage.setItem('mindwtr:desktop:first-run-onboarding:v1','dismissed')");
       await request(`/session/${session}/refresh`, {});
       sample.readiness = await ready();
@@ -135,6 +142,7 @@ for (const size of sizes) {
       assert.equal(canonical.tasks.length, size, 'Unexpected native fixture size');
       assert(canonical.tasks.every(task => task.id.startsWith('perf-task-')), 'Non-synthetic native data');
       sample.countBefore = canonical.tasks.length;
+      if (saveQueueMode === 'idle') sample.saveIdle.beforeSettings = await waitForSaves();
       await execute('window.__MINDWTR_DIAGNOSTICS__=arguments[0]', diagnostics);
       if (diagnostics) await execute(`
         const originalFetch = window.fetch.bind(window);
@@ -163,6 +171,7 @@ for (const size of sizes) {
       const input = element['element-6066-11e4-a52e-4f735466cecf'];
       const title = `Native benchmark capture ${run}`;
       await request(`/session/${session}/element/${input}/value`, { text: title });
+      if (saveQueueMode === 'idle') sample.saveIdle.beforeCapture = await waitForSaves();
       const captureStart = performance.now();
       await request(`/session/${session}/element/${input}/value`, { text: '\uE007' });
       await until(() => execute('return [...document.querySelectorAll("[data-task-id]")].some(el=>el.textContent.includes(arguments[0])&&el.getClientRects().length>0)', title));
@@ -181,6 +190,7 @@ for (const size of sizes) {
       assert.equal(await invoke('get_sync_backend'), 'off', 'Native baseline requires sync off');
       assert.equal(hash(app), binaryHash, 'Launched binary changed during measurement');
       if (diagnostics) sample.ipc = await execute('return window.__nativeBenchmarkIpc');
+      if (saveQueueMode === 'idle') sample.saveIdle.afterCapture = await waitForSaves();
       // A new WebView loads the canonical native store again after the capture.
       await request(`/session/${session}/refresh`, {});
       await ready();
@@ -208,13 +218,14 @@ for (const size of sizes) {
   const report = { schemaVersion: 1, status: 'failed', metadata: {
     platform: 'desktop-native-linux', runtime: capabilities, os: release(), cpu: cpus()[0]?.model,
     device: process.env.DEVICE_LABEL, dataset: seed.id, buildType: 'release', binaryHash, sourceRevision, dirty,
-    viewport, scenario: 'portable-native-settings-capture-v1', network: 'host-network-sync-off',
+    viewport, scenario: saveQueueMode === 'idle' ? 'portable-native-settings-capture-idle-v2' : 'portable-native-settings-capture-v1',
+    saveQueueMode, network: 'host-network-sync-off',
     profiling: diagnostics ? 'settings-diagnostics-ipc-headers' : 'none', capturedAt: new Date().toISOString(),
   }, samples, warnings: ['Portable Linux Tauri with an isolated session bus; does not measure OS keyring access or macOS/Windows.',
     'Automation latency includes WebDriver dispatch/polling. SQLite readback is not a hardware power-loss test.',
     'Initial import and subsequent warm-database WebView readiness are separate; neither is native process TTID.',
     'Desktop viewport must remain unchanged. Fewer than 100 samples cannot establish a p95 release gate.'] };
-  try { Object.assign(report, summarizeNativeRun(samples, runs, binaryHash, hash(binary))); }
+  try { Object.assign(report, summarizeNativeRun(samples, runs, binaryHash, hash(binary), saveQueueMode)); }
   catch (error) { report.error = String(error); failed = true; }
   writeFileSync(join(directory, `${size}-report.json`), JSON.stringify(report, null, 2));
   if (failed) break;

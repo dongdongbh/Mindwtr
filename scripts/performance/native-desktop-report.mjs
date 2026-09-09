@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { summarize } from './report.mjs';
+import { isNativeSaveIdle } from './native-save-idle.mjs';
 
 export function validateNativeReadiness(marks) {
   const read = name => {
@@ -15,7 +16,8 @@ export function validateNativeReadiness(marks) {
   return { localDataReadyMs, interactiveReadyMs };
 }
 
-export function summarizeNativeRun(samples, runs, initialHash, finalHash) {
+export function summarizeNativeRun(samples, runs, initialHash, finalHash, saveQueueMode = 'early-session') {
+  assert(['idle', 'early-session'].includes(saveQueueMode), 'Invalid save-queue mode');
   assert(Number.isInteger(runs) && runs > 0 && runs <= 100, 'Invalid native run count');
   assert(typeof initialHash === 'string' && /^[a-f0-9]{64}$/.test(initialHash), 'Invalid native binary identity');
   assert.equal(initialHash, finalHash, 'Native binary changed during measurement');
@@ -24,6 +26,15 @@ export function summarizeNativeRun(samples, runs, initialHash, finalHash) {
     'captureVisibleAutomationMs', 'captureDurableAutomationMs'];
   for (const sample of samples) {
     assert.equal(sample.status, 'passed', 'Invalid native sample');
+    if (saveQueueMode === 'idle') {
+      for (const boundary of ['initialImport', 'beforeSettings', 'beforeCapture', 'afterCapture']) {
+        const observation = sample.saveIdle?.[boundary];
+        assert(observation && Number.isFinite(observation.waitMs) && observation.waitMs >= 0,
+          `Missing save-idle observation: ${boundary}`);
+        assert(Number.isSafeInteger(observation.polls) && observation.polls >= 2, 'Incomplete idle observation');
+        assert(isNativeSaveIdle(observation.status), 'Save queue was not idle');
+      }
+    }
     for (const name of names) assert(Number.isFinite(sample[name]) && sample[name] >= 0, `Invalid ${name}`);
     assert(Number.isInteger(sample.countBefore) && sample.countBefore >= 0, 'Invalid native task count');
     assert.equal(sample.countAfter, sample.countBefore + 1, 'Capture not durable');

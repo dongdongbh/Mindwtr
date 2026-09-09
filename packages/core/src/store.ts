@@ -66,6 +66,15 @@ const SAVE_FLUSH_DELAY_MS = 120;
 const ERROR_AUTO_CLEAR_MS = 10_000;
 const SAVE_QUEUE_OVERFLOW_ERROR_PREFIX = 'Save queue overflow:';
 const hasPendingSaveWork = (): boolean => pendingSaves.length > 0 || saveInFlight !== null || immediateSavesInFlight.size > 0;
+/** Read-only diagnostics: does not flush, retry, or acknowledge persistence. */
+export const getPersistenceStatus = () => ({
+    queued: pendingSaves.length,
+    inFlight: saveInFlight !== null,
+    immediate: immediateSavesInFlight.size,
+    retrying: persistenceRetryInFlight !== null,
+    generation: pendingVersion,
+    failed: useTaskStore.getState().persistenceFailure !== null,
+});
 const hasOwnField = (value: object, field: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, field);
 const getSaveRetryDelayMs = (attempt: number): number => {
     const cappedAttempt = Math.max(0, attempt - 1);

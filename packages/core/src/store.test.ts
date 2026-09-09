@@ -4,6 +4,7 @@ import { safeParseDate } from './date';
 import {
     useTaskStore,
     flushPendingSave,
+    getPersistenceStatus,
     resetForTests,
     runWithImmediateSaveTracking,
     setStorageAdapter,
@@ -110,6 +111,25 @@ describe('TaskStore', () => {
         resetForTests();
         vi.useRealTimers();
         vi.restoreAllMocks();
+    });
+
+    it('observes queued and in-flight saves without flushing them', async () => {
+        let finish!: () => void;
+        const pending = new Promise<void>(resolve => { finish = resolve; });
+        vi.mocked(mockStorage.saveData).mockReturnValue(pending);
+        try {
+            useTaskStore.getState().addTask('Queue observation');
+            expect(getPersistenceStatus().queued).toBe(1);
+            expect(mockStorage.saveData).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(120);
+            expect(getPersistenceStatus()).toMatchObject({ queued: 0, inFlight: true, failed: false });
+        } finally {
+            finish();
+        }
+        await flushPendingSave();
+        expect(getPersistenceStatus()).toMatchObject({ queued: 0, inFlight: false, immediate: 0 });
+        useTaskStore.setState({ persistenceFailure: { message: 'Failed', failedAt: '2026-09-09', retrying: false } });
+        expect(getPersistenceStatus().failed).toBe(true);
     });
 
     it('should add a task', () => {
@@ -316,6 +336,7 @@ describe('TaskStore', () => {
         expect(result).toEqual({ success: true });
         expect(saveTask).toHaveBeenCalledTimes(1);
 
+        expect(getPersistenceStatus().immediate).toBe(1);
         let flushed = false;
         const flushPromise = flushPendingSave().then(() => {
             flushed = true;
@@ -326,6 +347,7 @@ describe('TaskStore', () => {
         resolveSaveTask?.();
         await flushPromise;
         expect(flushed).toBe(true);
+        expect(getPersistenceStatus().immediate).toBe(0);
         expect(mockStorage.saveData).not.toHaveBeenCalled();
     });
 

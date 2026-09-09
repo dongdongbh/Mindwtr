@@ -134,10 +134,23 @@ does the runner measure Settings, Integrations, and Inbox quick capture. Refresh
 before the first import completes can leave native work in flight and contaminate
 subsequent timings. A visible shell is not a readiness gate.
 
-These are early-session interactions after canonical readiness, not proven
-save-queue quiescence. Startup-scheduled saves can still overlap the first capture;
-record that context when interpreting the result. A steady-state capture benchmark
-needs a separate explicit save-queue-idle contract.
+The default `SAVE_QUEUE_MODE=idle` additionally observes the shared store and
+desktop adapter queues before the first refresh, Settings, capture, and the final
+reload. Two consecutive idle observations must have unchanged save generations.
+Queued/debounced, immediate, in-flight, retrying, and pending reconciliation work
+block the gate; missing hooks, malformed observations, persistence failures, and
+a 60-second timeout fail the sample. The hook exists only in profiling builds,
+exposes counts/booleans, and never flushes, retries, or changes save scheduling.
+Each wait is retained separately from the interaction timing.
+
+This boundary covers known local save work, not future scheduled work, other
+processes, sync, or every background job. It is not proof of whole-app quiescence.
+For older archived binaries without the hook, explicitly use
+`SAVE_QUEUE_MODE=early-session`. That mode retains the original v1 scenario;
+idle-boundary measurements use `portable-native-settings-capture-idle-v2` and
+must not be treated as a like-for-like speedup over v1 measurements.
+
+See [the save-queue boundary validation and local results](performance-native-save-idle-2026-09.md).
 
 Capture must appear in the task list, be readable from SQLite through a separate
 read-only connection, and survive a WebView reload. The reader allows a bounded

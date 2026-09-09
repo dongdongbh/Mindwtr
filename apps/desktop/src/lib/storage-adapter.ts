@@ -43,10 +43,19 @@ let saveQueue: Promise<SaveQueueOutcome> = Promise.resolve({
     failed: false,
 });
 let pendingSaveCount = 0;
+let lastSaveFailed = false;
 let lastObservedData: AppData | null = null;
 let lastPersistedData: AppData | null = null;
 let saveVersion = 0;
 let pendingCanonicalReconciliationCleanup: (() => void) | null = null;
+
+/** Counts only this WebView's saves, not other processes or future work. */
+export const getDesktopSaveStatus = () => ({
+    pending: pendingSaveCount,
+    generation: saveVersion,
+    failed: lastSaveFailed,
+    reconciliationPending: pendingCanonicalReconciliationCleanup !== null,
+});
 
 const beginSaveGeneration = (): number => {
     const cleanup = pendingCanonicalReconciliationCleanup;
@@ -227,6 +236,7 @@ const enqueueSave = (
     saveQueue = outcome;
     return outcome.then((result) => {
         pendingSaveCount -= 1;
+        lastSaveFailed = result.failed;
         if (result.failed) throw result.error;
         return result.canonical;
     });

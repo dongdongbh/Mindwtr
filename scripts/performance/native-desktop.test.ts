@@ -26,6 +26,7 @@ describe('native desktop measurement contract', () => {
     const sample = { status: 'passed', settingsOpenAutomationMs: 15, integrationsOpenAutomationMs: 12,
       captureVisibleAutomationMs: 20, captureDurableAutomationMs: 25, countBefore: 1000, countAfter: 1001 };
     expect(summarizeNativeRun([sample], 1, 'a'.repeat(64), 'a'.repeat(64)).status).toBe('passed');
+    expect(() => summarizeNativeRun([sample], 1, 'a'.repeat(64), 'a'.repeat(64), 'idle')).toThrow();
     for (const bad of [ { ...sample, status: 'failed' }, { ...sample, countAfter: 1000 },
       { ...sample, captureDurableAutomationMs: 10 }, { ...sample, settingsOpenAutomationMs: NaN } ]) {
       expect(() => summarizeNativeRun([bad], 1, 'a'.repeat(64), 'a'.repeat(64))).toThrow();
@@ -43,5 +44,26 @@ describe('native desktop measurement contract', () => {
       expect(() => summarizeNativeRun([{ ...sample, countBefore, countAfter: countBefore + 1 }],
         1, 'a'.repeat(64), 'a'.repeat(64))).toThrow();
     }
+  });
+
+  it('requires every queue-idle boundary in v2 reports', () => {
+    const observation = { waitMs: 60, polls: 2, status: {
+      core: { queued: 0, immediate: 0, inFlight: false, retrying: false, failed: false, generation: 2 },
+      desktop: { pending: 0, generation: 2, failed: false, reconciliationPending: false },
+    } };
+    const sample = { status: 'passed', settingsOpenAutomationMs: 15, integrationsOpenAutomationMs: 12,
+      captureVisibleAutomationMs: 20, captureDurableAutomationMs: 25, countBefore: 0, countAfter: 1,
+      saveIdle: Object.fromEntries(['initialImport', 'beforeSettings', 'beforeCapture', 'afterCapture']
+        .map(boundary => [boundary, observation])) };
+    const summary = () => summarizeNativeRun([sample], 1, 'a'.repeat(64), 'a'.repeat(64), 'idle');
+    expect(summary().status).toBe('passed');
+    observation.polls = 1;
+    expect(summary).toThrow();
+    observation.polls = 2;
+    observation.status.desktop.pending = 1;
+    expect(summary).toThrow();
+    observation.status.desktop.pending = 0;
+    delete sample.saveIdle.afterCapture;
+    expect(summary).toThrow();
   });
 });
