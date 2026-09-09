@@ -170,3 +170,14 @@ Considered and rejected: no fresh evidence reopens the snapshot-sync ADRs, MCP p
 Strong and automatically selected: both WebDAV adapters can stamp an unknown remote result as a completed daily proof. Replace their duplicated decision with the existing core attachment-presence module. Keep each platform's local-prepass, cancellation, cooldown and activation behavior. No dependencies on077–081. The timestamped HTML report is a temporary review artifact; plan082 is the durable Spec.
 
 Rejected after current-body comparison: whole attachment-backend consolidation and deletion of existing Cloud/Dropbox adapters widen interfaces without removing domain decisions; sync configuration transactions already have a deep module; notification polling and native alarm scheduling remain distinct adapters; editor mega-interface and Daily Review direction remain unselected.
+
+
+## 2026-09-09 improve and architecture audit (v1.2.8 review loop)
+
+Selected against `57b257812`: product and integrity broad audits found no additional supported defects after comprehensive remediation. The architecture/performance audit reproduced one calendar-specific N+1 storage path. User selection is automatic under review-improve-loop; all reviews use Astra, implementation uses Sol.
+
+| # | Plan | Priority | Effort | Status |
+|---|------|----------|--------|--------|
+| 083 | calendar-push-mapping-inventory | P2 | S-M | TODO |
+
+Plan083 is both PERF-01 and the sole Strong architecture candidate; one implementation commit. No dependencies. Rejected: another shared UI draft lifecycle and another visibility controller would move platform lifetime decisions into wider interfaces without a reproduced remaining defect. Prior ADR/roadmap/dependency deferrals stay unchanged. A source comment suggests checking cancellation-alert presentation on iOS pageSheet during a device round; no current runtime evidence establishes a defect, so no implementation plan was created.
