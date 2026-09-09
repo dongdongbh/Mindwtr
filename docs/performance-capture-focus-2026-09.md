@@ -297,6 +297,54 @@ No runtime UI change was made from this follow-up. A window-lifecycle experiment
 must preserve modal accessibility, dismissal, keyboard resizing, pickers, recording,
 and failed-save behavior, then pass the readiness gate before matched A/B timing.
 
+## Activity-local presentation experiment: not promoted
+
+On September 9, a bounded Android-only prototype presented tab capture inside the
+existing Activity instead of creating a Modal window. Route capture and iOS kept
+their Modal path; the 120 ms focus timing and all capture/save logic were unchanged.
+The first prototype incorrectly relied on Activity resizing and put the sheet
+behind the keyboard. Restoring the existing measured keyboard inset corrected it.
+
+The corrected prototype and a freshly built control both passed the automatic
+10-cold/10-warm keyboard gate, then 15 `captureOpenClose` timing iterations. The
+CPH2655, online condition, runner APK and 1,021-task synthetic fixture were unchanged;
+both batches report thermal status 0 before and after. No tasks were saved.
+
+| Descriptive metric | Native Modal control | Activity-local candidate |
+| --- | ---: | ---: |
+| Median frame count per iteration | 33 | 25 |
+| Pooled frame CPU duration p95 | 15.28 ms | 17.09 ms |
+| Pooled frame overrun p95 | 5.48 ms | 6.91 ms |
+| Median worst-frame CPU duration per iteration | 16.92 ms | 22.51 ms |
+
+Fewer frames did not establish faster interaction, and the slow-frame observations
+did not justify the new presentation machinery. These are one ordered A/B pair of
+15 iterations, not independent samples per frame or a statistically reliable tail
+gate. The candidate was withdrawn; no runtime optimization is claimed. Memory,
+recording and exhaustive picker acceptance were not pursued after this rejection.
+
+Manual checks confirmed the corrected candidate's keyboard lift, More expansion,
+title refocus, and Back dismissal. Its compressed accessibility hierarchy excluded
+the underlying Inbox. Refocusing an expanded sheet exposed status-bar/header overlap
+in **both** builds; this is a separate existing layout issue, not an inline-specific
+regression, and remains to be fixed.
+
+Local evidence is under
+`/home/dd/.cache/mindwtr-performance-tmp/capture-window-experiment/`:
+
+- Control `control.apk`: SHA-256
+  `f177cf605b62105eb49b8dcb0a18aeb10084a592bd9c7d3b2536987588f1e202`;
+  batch `control-timing/captureOpenClose-1JS85G`.
+- Corrected candidate `inline-inset.apk`: SHA-256
+  `2c8bb9ab9c6a21f4155baf2178e3e05cf387196e9a4fb420573c2d3dadce814b`;
+  batch `inline-inset-timing/captureOpenClose-S9BICs`.
+- Rejected initial candidate `inline.apk`: SHA-256
+  `587ba4f304749998193f825853216097d6dd335f5db7c035d1942493125d2738`.
+
+Both passing batches retain their readiness JSON, native benchmark JSON, 15 traces,
+and power/thermal metadata. The working control APK was restored to the Benchmark
+package and the phone returned to Home. The normal app was untouched.
+
 ## Prepared local artifacts
 
 Both APKs are under `/home/dd/.cache/mindwtr-performance-tmp/`:
