@@ -10,3 +10,13 @@ gradle.settingsEvaluated { settings ->
     settings.include ':macrobenchmark'
     settings.project(':macrobenchmark').projectDir = new File(settings.settingsDir, '../benchmark')
 }
+
+// Environment changes alone are not inputs of RN's bundle task. A cached
+// release bundle must not survive a switch between profiling and timing APKs.
+gradle.projectsEvaluated {
+    if (gradle.parent != null) return
+    gradle.rootProject.project(':app').tasks.named('createBundleReleaseJsAndAssets') {
+        inputs.property('mindwtrCaptureProfiling', System.getenv('EXPO_PUBLIC_CAPTURE_PROFILING') ?: '')
+        inputs.property('mindwtrStartupProfiling', System.getenv('EXPO_PUBLIC_STARTUP_PROFILING') ?: '')
+    }
+}

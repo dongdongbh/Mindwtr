@@ -35,6 +35,15 @@ const resolveWhisperRnPath = (relativePath) => {
 
 const config = getDefaultConfig(projectRoot);
 
+// Expo public flags are inlined during transformation. Explicitly isolate the
+// optional profiler variants: export:embed can otherwise reuse a disabled
+// capture transform even after a forced bundle with --reset-cache (and vice versa).
+const captureProfiling = process.env.EXPO_PUBLIC_CAPTURE_PROFILING === '1';
+const startupProfiling = ['1', 'true'].includes(
+    String(process.env.EXPO_PUBLIC_STARTUP_PROFILING || '').trim().toLowerCase(),
+);
+config.cacheVersion = `${config.cacheVersion}-mindwtr-profiling-${Number(captureProfiling)}-${Number(startupProfiling)}`;
+
 // 0. CRITICAL: Load polyfill shim BEFORE any other module
 config.serializer = {
     ...config.serializer,

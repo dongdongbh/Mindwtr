@@ -559,6 +559,31 @@ module; it also checks the installed package is `tech.dongdongbh.mindwtr.benchma
 The native sampling library is not compiled or packaged when the opt-in is absent.
 No setting, exported component, permission, task payload or remote telemetry is added.
 
+Always build through `-I ../benchmark/include.gradle`: it registers both public
+profiling flags as Gradle bundle-task inputs. Metro separately versions its transform
+cache for capture/startup profiling. Merely forcing a Gradle task or passing
+`--reset-cache` did not invalidate an old disabled capture transform in the September
+2026 investigation. See [the cache-isolation verification](performance-profiling-cache-2026-09.md).
+
+Before a long sampling batch, force-stop and freshly launch the exact-hash Benchmark
+APK, record the existing capture-profile filenames, and open/close one empty in-place
+capture. Require a **new**, nonempty profile with `samples` and `stackFrames`; existing
+files survive APK replacement and are not proof the current build sampled. Record
+the new profile's APK/map hashes. Do not symbolize old files with a new source map.
+If no fresh file appears, stop and inspect the built bundle before repeating the batch:
+
+```bash
+node_modules/react-native/sdks/hermesc/linux64-bin/hermesc -b -dump-bytecode \
+  apps/mobile/android/app/build/generated/assets/createBundleReleaseJsAndAssets/index.android.bundle \
+  -out=<disk-backed-artifact-directory>/bundle-disassembly.txt
+```
+
+`beginCaptureProfile` must contain the native start call, not just
+`LoadConstUndefined` followed by `Ret`. Confirm the bundle is the one packaged in
+the archived/installed APK. This is a build preflight, not a substitute for a fresh
+on-device profile. After switching sampling off, verify that the native sampling
+library is absent and no new profile is exported.
+
 The in-place tab capture starts Hermes sampling before setting its visible state, then
 stops 200 ms after the close callback to include React unmount work. Rapid reopening
 retains the existing session. A 30-second JS timer also requests stop; backgrounding and
