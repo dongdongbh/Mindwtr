@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useMemo,
   useState,
+  useTransition,
   type ComponentType,
 } from "react";
 import { ErrorBoundary } from "../ErrorBoundary";
@@ -202,6 +203,12 @@ type SettingsViewProps = {
 export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboarding }: SettingsViewProps = {}) {
   const perf = usePerformanceMonitor("SettingsView");
   const [page, setPage] = useState<SettingsPage>(initialPage ?? "main");
+  const [isPagePending, startPageTransition] = useTransition();
+  // Keep the current page usable while the next lazy chunk resolves. Urgent
+  // switches replace it with a fallback and can pay Suspense's reveal delay.
+  const selectPage = useCallback((next: SettingsPage) => {
+    startPageTransition(() => setPage(next));
+  }, [startPageTransition]);
   // Defer section-specific IO, not hook ownership: once visited, keep state
   // alive so navigating away and back cannot reload over an unfinished draft.
   const [visitedPages, setVisitedPages] = useState(() => new Set<SettingsPage>([initialPage ?? "main"]));
@@ -273,8 +280,8 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
 
   useEffect(() => {
     if (!initialPage) return;
-    setPage(initialPage);
-  }, [initialPage]);
+    selectPage(initialPage);
+  }, [initialPage, selectPage]);
 
   const aiPageProps = useAiSettings({
     isTauri,
@@ -334,10 +341,13 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   }, [revealSetting]);
 
   const handleSelectSearchResult = useCallback((result: SettingsSearchResult) => {
-    setPage(result.pageId as SettingsPage);
-    // Fresh object so picking the same result twice re-runs the reveal effect.
-    setRevealSetting({ ...result });
-  }, []);
+    startPageTransition(() => {
+      setPage(result.pageId as SettingsPage);
+      // Reveal only after the requested page commits, including a slow chunk.
+      // Fresh object so picking the same result twice re-runs the reveal effect.
+      setRevealSetting({ ...result });
+    });
+  }, [startPageTransition]);
 
   const advancedPageProps = useSettingsAdvancedPage({ loadEnabled: advancedLoadEnabled, isTauri, showSaved, t });
 
@@ -388,7 +398,10 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   }, [aboutPageProps.appVersion, aboutPageProps.installChannel, language]);
 
   useLayoutEffect(() => {
-    markSettingsOpenTrace("settings-view-layout-effect", { page });
+    markSettingsOpenTrace("settings-view-layout-effect", {
+      page,
+      releaseCheck: "v1.3.0/settings-page-transition",
+    });
   }, [page]);
 
   useEffect(() => {
@@ -688,13 +701,13 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
               searchPlaceholder={t.searchPlaceholder}
               items={navItems}
               activeId={page}
-              onSelect={(id) => setPage(id as SettingsPage)}
+              onSelect={(id) => selectPage(id as SettingsPage)}
               searchResults={searchResults}
               onSelectSearchResult={handleSelectSearchResult}
               noResultsLabel={translateWithFallback(translate, "common.noMatches", "No matches")}
             />
 
-            <main className="min-w-0 flex-1 lg:max-w-[920px]">
+            <main className="min-w-0 flex-1 lg:max-w-[920px]" aria-busy={isPagePending}>
               <div className={`space-y-6 ${LIST_END_GAP}`} data-list-end>
                 <header className="flex items-start justify-between gap-4">
                   <div>

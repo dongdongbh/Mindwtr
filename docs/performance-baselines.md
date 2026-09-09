@@ -90,6 +90,8 @@ them, even against other sampled runs. Use profiles to choose a change, then
 measure its benefit with fresh **unprofiled** repeated runs. Failed UI actions
 still attempt to retain their profile, clean up the session, and fail the run.
 
+Measured example: [desktop Settings page transitions](performance-desktop-settings-2026-09.md).
+
 ## Storage and sync processing
 
 ```bash
