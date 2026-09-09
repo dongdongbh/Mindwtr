@@ -62,14 +62,16 @@ it('requires a matching release APK, a passing test and collected native evidenc
 it('isolates timing and memory and rejects the observed shortened scalar reports', () => {
   const scratch = join(import.meta.dir, '../../build/performance-tools');
   mkdirSync(scratch, { recursive: true });
-  for (const mode of ['timing', 'memory']) {
+  const cases = ['settingsNavigation', 'captureOpenClose'].flatMap(scenario =>
+    ['timing', 'memory'].map(mode => ({ scenario, mode })));
+  for (const { scenario, mode } of cases) {
     for (const shortened of [false, true]) {
       const directory = mkdtempSync(join(scratch, 'metric-mode-test-'));
       try {
         const adb = join(directory, 'adb.mjs');
         copyFileSync(join(import.meta.dir, 'fake-interaction-adb.mjs'), adb);
         chmodSync(adb, 0o700);
-        const env = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: 'settingsNavigation', RUNS: '5',
+        const env = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: scenario, RUNS: '5',
           METRIC_MODE: mode, SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1', DEVICE_LABEL: 'synthetic', NETWORK: 'offline',
           EXPECTED_APK_SHA256: 'a'.repeat(64), FAKE_ADB_LOG: join(directory, 'calls.log'), OUT_DIR: join(directory, 'output'),
           FAKE_SHORT_SCALARS: shortened ? '1' : '' };
@@ -79,6 +81,8 @@ it('isolates timing and memory and rejects the observed shortened scalar reports
         if (shortened) expect(result.stderr).toContain('Missing or invalid native metric');
         const metadata = JSON.parse(readFileSync(join(env.OUT_DIR, readdirSync(env.OUT_DIR)[0], 'metadata.json'), 'utf8'));
         expect(metadata.metricMode).toBe(mode);
+        expect(metadata.listSort).toBe(scenario === 'captureOpenClose' ? 'newest' : undefined);
+        expect(readFileSync(env.FAKE_ADB_LOG, 'utf8')).toContain(`MindwtrBenchmark#${scenario}`);
       } finally { rmSync(directory, { recursive: true, force: true }); }
     }
   }

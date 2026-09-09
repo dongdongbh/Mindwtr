@@ -188,14 +188,23 @@ EXPECTED_APK_SHA256=<sha256-of-built-app-release.apk> \
 SCENARIO=inboxScroll METRIC_MODE=timing RUNS=10 bun run perf:android-interactions
 ```
 
-Scenarios: `coldStartup` (native TTID/TTFD), `inboxScroll`, `settingsNavigation`, and
+Scenarios: `coldStartup` (native TTID/TTFD), `inboxScroll`, `settingsNavigation`, `captureOpenClose`, and
 `captureSave` (frame metrics). Run one scenario at a time. The target package is fixed to
 `tech.dongdongbh.mindwtr.benchmark`; the actual installed APK hash must match the supplied
 build hash. Non-debuggable/profileable checks and AndroidX device-quality checks are not
 suppressed. Compilation uses partial compilation after three warm-up iterations, with
 baseline-profile installation disabled to make that condition explicit and repeatable.
 
-Run capture last: warm-ups and measurements intentionally leave synthetic tasks in Inbox.
+Use `captureOpenClose` for repeated same-fixture capture A/A and A/B measurements. It
+opens the normal sheet, waits for title focus and UI idle, then uses the header Close
+control. It asserts that the sheet disappears and the Inbox count is unchanged. No title
+is entered or saved. Its `benchmark.capture.open` and `.close` sections include automation
+waits, not app-only latency. This isolates modal/keyboard work from task persistence;
+retain `captureSave` as a separate end-to-end correctness and performance scenario.
+Keep APK, runner, fixture, sort, keyboard and device conditions identical for A/A runs;
+collect multiple batches before choosing regression thresholds.
+
+Run `captureSave` last: warm-ups and measurements intentionally leave synthetic tasks in Inbox.
 Restore the fixture through the normal import workflow before comparable capture reruns.
 UI Automator fills the title directly; this is not a physical keyboard typing-latency test.
 Capture traces include runner-process `benchmark.capture.open`, `.enterTitle`, and `.save`
@@ -255,6 +264,41 @@ Retain failures and compare equivalent fixture/cache/network conditions. For imp
 changes repeat interleaved A/B runs; investigate distributions and traces, not best-of-N.
 
 ## Native profiling and optimization loop
+
+### Capture A/A reference (2026-09-09 UTC)
+
+Three unchanged five-iteration `captureOpenClose` batches passed on a OnePlus CPH2655
+(Android 16), each after three compilation warm-ups. The synthetic fixture contained
+1,021 tasks; Inbox remained at 221 before and after the runs. Thermal status was 0
+at every batch boundary. These are local observations, not portable CI budgets.
+
+| Batch artifact under `build/performance-android/` | Frames | Positive overruns | Frame CPU p95 | Frame overrun p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `captureOpenClose-LMnn2M` | 119 | 19 | 17.19 ms | 7.56 ms |
+| `captureOpenClose-bdXpiQ` | 157 | 21 | 16.49 ms | 6.89 ms |
+| `captureOpenClose-aKRz3h` | 152 | 21 | 16.23 ms | 5.87 ms |
+
+Percentiles above are AndroidX's pooled **frame** percentiles within each batch, not
+interaction-latency percentiles. All batches used app SHA-256
+`4ce98483172b9ce46edfcca58e37920c4990e209f32d18c47479bd98a2b05fce`
+and runner SHA-256 `b45c3778aaaf81e525731fc507ea8e059c907ffc1e0e77169cb6c48033e46c86`.
+Do not interpret variation between these unchanged batches as an optimization gain.
+
+In batch one's iteration 1 trace, the opening UI frame took 22.40 ms, including native
+modal creation and a 5.49 ms window-relayout binder call. The closing frame took 14.07 ms;
+its 10.62 ms REMOVE slice included 1.36 ms accessibility removal and 5.35 ms window removal
+calls. Thread-state accounting showed 5.96 ms Running and 7.96 ms Sleeping for that closing
+frame: its mount/removal slice is not exclusive React CPU time. The server-side windows
+included surface placement, focus updates and monitor contention. This no-save scenario
+demonstrates capture UI jank independently of task persistence; it does not prove the save
+path is free of other costs.
+
+No production modal, keyboard, accessibility or save behavior was changed from this
+evidence. Before testing a lifecycle redesign, attribute JS/React commit costs separately
+and test modal focus, dismissal, keyboard resizing, pickers, recording and save failure.
+Keep timing thresholds unset until longer, interleaved same-build runs establish noise.
+
+### Optimization procedure
 
 1. Reproduce with a signed/profileable **release** build and synthetic data. Capture
    cold launch, foreground resume, open quick capture, first input, save, Focus/Inbox/

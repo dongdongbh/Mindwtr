@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 // Intentionally no package/activity override and no install/reset/import command.
 const target = 'tech.dongdongbh.mindwtr.benchmark';
 const testPackage = 'tech.dongdongbh.mindwtr.macrobenchmark';
-const scenarios = ['coldStartup', 'inboxScroll', 'settingsNavigation', 'captureSave'];
+const scenarios = ['coldStartup', 'inboxScroll', 'settingsNavigation', 'captureOpenClose', 'captureSave'];
 const scenario = process.env.SCENARIO;
 const metricMode = process.env.METRIC_MODE ?? 'timing';
 assert(['timing', 'memory'].includes(metricMode), 'METRIC_MODE must be timing or memory');
@@ -44,7 +44,7 @@ const metadata = {
   os: adb('shell', 'getprop', 'ro.build.fingerprint'), network: process.env.NETWORK,
   apkHash, testApkHash, buildType: 'release-profileable', runtime: 'android-macrobenchmark-1.4.1',
   compilation: 'partial-no-baseline-3-warmups',
-  listSort: scenario === 'captureSave' ? 'newest' : scenario === 'inboxScroll' ? 'default' : undefined,
+  listSort: scenario.startsWith('capture') ? 'newest' : scenario === 'inboxScroll' ? 'default' : undefined,
   capturedAt: new Date().toISOString(), status: 'running',
   warnings: ['UI selectors require English. Dataset and disabled sync are operator-verified, not inferred from an app label.',
     'captureSave grows the synthetic fixture during warm-up and measurement; restore it before a comparable rerun.',

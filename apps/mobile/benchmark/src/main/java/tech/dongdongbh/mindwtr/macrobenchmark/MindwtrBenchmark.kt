@@ -141,6 +141,30 @@ class MindwtrBenchmark {
         find(By.desc("Inbox"))
     }
 
+    // Non-mutating capture baseline: identical data across A/A and A/B runs.
+    // Exercise the normal autofocus/keyboard path, then use the header close
+    // control (not the full-screen backdrop, which also has a Close label).
+    @Test fun captureOpenClose() = benchmark.measureRepeated(
+        packageName = TARGET, metrics = metrics(), iterations = iterations,
+        compilationMode = compilation,
+        setupBlock = { startActivityAndWait(); ready(); tap("Inbox"); settleStartupNotice(); selectSort("Newest") },
+    ) {
+        val inboxBefore = find(By.descStartsWith("Process Inbox (")).contentDescription
+        stage("open") {
+            tap("Add Task")
+            find(By.desc("Task title").focused(true))
+            device.waitForIdle()
+        }
+        stage("close") {
+            find(By.desc("Close").clazz("android.view.ViewGroup")).click()
+            assertTrue("Capture must close", device.wait(Until.gone(By.desc("Task title").pkg(TARGET)), TIMEOUT))
+            find(By.desc("Add Task"))
+            device.waitForIdle()
+        }
+        assertTrue("Opening and cancelling must not change the Inbox count",
+            inboxBefore == find(By.descStartsWith("Process Inbox (")).contentDescription)
+    }
+
     // Run last or alone: successful captures intentionally remain in this
     // synthetic-only app. A fresh fixture is required for comparable reruns.
     @Test fun captureSave() = benchmark.measureRepeated(
