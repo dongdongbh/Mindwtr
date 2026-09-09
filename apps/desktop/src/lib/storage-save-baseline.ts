@@ -1,4 +1,5 @@
-import { computeStableValueFingerprint, type AppData } from '@mindwtr/core';
+import { computeStableValueFingerprint, isDeepJsonEqual, type AppData } from '@mindwtr/core';
+import { logInfo } from './app-log';
 
 const ENTITY_COLLECTION_KEYS = ['tasks', 'projects', 'sections', 'areas', 'people'] as const;
 type EntityCollectionKey = typeof ENTITY_COLLECTION_KEYS[number];
@@ -7,12 +8,24 @@ export type ChangedEntityBaseline = Partial<Pick<AppData, EntityCollectionKey | 
     observedEntityIds: ObservedEntityIds;
 };
 
-const sameEntitySnapshot = (left: unknown, right: unknown): boolean => (
-    left === right
-    || (left !== undefined
-        && right !== undefined
-        && computeStableValueFingerprint(left) === computeStableValueFingerprint(right))
-);
+let reportedStructuralComparison = false;
+const sameEntitySnapshot = (left: unknown, right: unknown): boolean => {
+    if (left === right) return true;
+    if (left === undefined || right === undefined) return false;
+    // Positive-only shortcut: cloned unchanged rows need no sorted serialization
+    // or hashing. A structural mismatch is NOT proof of a snapshot difference:
+    // stable fingerprints also normalize ID-array order and JSON-only values.
+    if (isDeepJsonEqual(left, right)) {
+        if (!reportedStructuralComparison) {
+            reportedStructuralComparison = true;
+            void logInfo('Storage snapshot comparison skipped fingerprinting', {
+                scope: 'storage', extra: { releaseCheck: 'v1.3.0/storage-baseline-equality' },
+            });
+        }
+        return true;
+    }
+    return computeStableValueFingerprint(left) === computeStableValueFingerprint(right);
+};
 
 const STORAGE_FALSE_DEFAULT_FIELDS: Partial<Record<EntityCollectionKey, readonly string[]>> = {
     tasks: ['showFutureRecurrence', 'isFocusedToday', 'suppressMindwtrReminders'],

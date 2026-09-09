@@ -214,6 +214,16 @@ Measured example and outstanding save-path finding:
 
 ## Storage and sync processing
 
+For the desktop pre-save comparison identified by native capture sampling, run
+`bun scripts/performance/save-baseline.ts`. It compares a 10,000-task cloned
+synthetic snapshot with a new capture, asserting retained observed IDs and an
+empty changed-entity baseline. `SIZE=1..50000` and `RUNS=3..100` override the
+defaults (10,000 and 7); one warm-up is excluded. JSON stdout retains every
+measured duration and the median. This is in-memory baseline preparation only,
+not serialization across IPC, durable saving, or UI latency. Run it separately
+from builds and tests. A deterministic large-store unit test additionally guards
+against restoring fingerprint serialization for unchanged cloned tasks.
+
 ```bash
 RUNS=10 SIZES=1000,10000,50000 bun run perf:storage
 ```

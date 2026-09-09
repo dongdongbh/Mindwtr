@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import type { AppData } from '@mindwtr/core';
+import { describe, expect, it, vi } from 'vitest';
+import { computeStableValueFingerprint, type AppData } from '@mindwtr/core';
+import { logInfo } from './app-log';
 import {
     advanceSaveProvenance,
     buildChangedEntityBaseline,
     rebaseQueuedSettings,
 } from './storage-save-baseline';
+
+vi.mock('./app-log', () => ({ logInfo: vi.fn().mockResolvedValue(null) }));
 
 const snapshot = (): AppData => ({
     tasks: [
@@ -19,6 +22,65 @@ const snapshot = (): AppData => ({
 }) as unknown as AppData;
 
 describe('buildChangedEntityBaseline', () => {
+    it('does not serialize deeply equal cloned rows just to compare them', () => {
+        const baseline = snapshot();
+        const target = structuredClone(baseline);
+        const stringify = vi.spyOn(JSON, 'stringify');
+        let calls: number;
+        try {
+            buildChangedEntityBaseline(baseline, target);
+            calls = stringify.mock.calls.length;
+        } finally {
+            stringify.mockRestore();
+        }
+        expect(calls).toBe(0);
+        expect(logInfo).toHaveBeenCalledWith('Storage snapshot comparison skipped fingerprinting', {
+            scope: 'storage', extra: { releaseCheck: 'v1.3.0/storage-baseline-equality' },
+        });
+    });
+
+    it('retains all observed IDs without serializing 10,000 unchanged cloned tasks', () => {
+        const baseline = snapshot();
+        baseline.tasks = Array.from({ length: 10000 }, (_, index) => ({
+            ...baseline.tasks[0], id: `synthetic-${index}`, title: `Synthetic ${index}`,
+        }));
+        const target = structuredClone(baseline);
+        target.tasks.push({ ...target.tasks[0], id: 'synthetic-new' });
+        const stringify = vi.spyOn(JSON, 'stringify');
+        let calls: number;
+        let result: ReturnType<typeof buildChangedEntityBaseline>;
+        try {
+            result = buildChangedEntityBaseline(baseline, target);
+            calls = stringify.mock.calls.length;
+        } finally {
+            stringify.mockRestore();
+        }
+        expect(calls).toBe(0);
+        expect(result.observedEntityIds.tasks).toEqual(baseline.tasks.map(task => task.id));
+        expect(Object.keys(result)).toEqual(['observedEntityIds']);
+    });
+
+    it('matches existing fingerprint semantics across nested snapshots', () => {
+        const values: unknown[] = [
+            {}, { a: undefined }, { a: null }, { a: false }, { a: 0 }, { a: -0 },
+            { a: NaN }, { a: Infinity }, { a: '0' },
+            { b: { x: 1, y: [null, 2] }, a: 3 }, { a: 3, b: { y: [null, 2], x: 1 } },
+            { a: ['one', 'two'] }, { a: ['two', 'one'] },
+            { a: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }] },
+            { a: [{ text: 'B', id: 'b' }, { text: 'A', id: 'a' }] },
+            { a: [{ id: 'same', text: 'A' }, { id: 'same', text: 'B' }] },
+            { a: [{ id: 'same', text: 'B' }, { id: 'same', text: 'A' }] },
+            { a: [undefined, 1] }, { a: [null, 1] },
+        ];
+        for (const left of values) for (const right of values) {
+            const baseline = { ...snapshot(), settings: left } as AppData;
+            const target = { ...baseline, settings: right } as AppData;
+            const expectedEqual = computeStableValueFingerprint(left) === computeStableValueFingerprint(right);
+            expect(Object.prototype.hasOwnProperty.call(buildChangedEntityBaseline(baseline, target), 'settings'))
+                .toBe(!expectedEqual);
+        }
+    });
+
     it('includes originals for nested changes and omissions only', () => {
         const baseline = snapshot();
         const target = {

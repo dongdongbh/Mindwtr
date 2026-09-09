@@ -47,6 +47,10 @@ milliseconds, and absent samples are not proof that a function never ran.
 
 ## Next bounded fix
 
+Implemented and locally validated in the
+[save-baseline comparison follow-up](performance-storage-baseline-equality-2026-09.md).
+The investigation scope below records the safety requirements used for that fix.
+
 Investigate avoiding repeated sorted serialization and fingerprint hashing when
 comparing save-baseline entities. Preserve full snapshot equality semantics,
 observed IDs, queued-write provenance, concurrent-writer protection, and settings
