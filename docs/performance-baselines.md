@@ -92,6 +92,66 @@ still attempt to retain their profile, clean up the session, and fail the run.
 
 Measured example: [desktop Settings page transitions](performance-desktop-settings-2026-09.md).
 
+## Native Linux desktop interactions
+
+`bun run perf:native` drives the real release Tauri/WebKitGTK app through
+[Tauri WebDriver](https://tauri.app/develop/tests/webdriver/manual-setup/).
+It requires Linux, `tauri-driver`, `WebKitWebDriver`, `dbus-run-session`, `sqlite3`,
+and an available graphical session. Build a separate Benchmark executable first:
+
+```bash
+cd apps/desktop
+VITE_STARTUP_PROFILING=1 bunx tauri build --no-bundle \
+  --config '{"identifier":"tech.dongdongbh.mindwtr.benchmark","productName":"Mindwtr Benchmark"}'
+cd ../..
+sha256sum apps/desktop/src-tauri/target/release/mindwtr
+EXPECTED_BINARY_SHA256=<the-built-executable-hash> DEVICE_LABEL=lab-linux \
+  RUNS=30 SIZES=0,1000,10000 bun run perf:native
+```
+
+Use a separate worktree under `/home/dd/worktrees/Mindwtr/` on the shared lab
+machine. Keep dependencies, build caches, `TMPDIR`, and `OUT_DIR` on disk under
+`/home/dd`, not a RAM filesystem. `TAURI_DRIVER` may point to a privately installed
+driver. Pass the graphical session's actual environment when the shell does not
+inherit it; do not guess a display socket or resize other applications.
+
+Each iteration copies the hash-checked executable into a new portable directory,
+seeds only synthetic JSON, and starts a separate session bus. It verifies the native
+data path and Benchmark product name before proceeding. This avoids the normal
+profile and single-instance connection. Portable mode also bypasses the OS keyring;
+these results cannot characterize keyring latency.
+
+The first launch completes JSON-to-SQLite import and canonical interactive readiness
+before a WebView refresh. Only after the refreshed view reports canonical readiness
+does the runner measure Settings, Integrations, and Inbox quick capture. Refreshing
+before the first import completes can leave native work in flight and contaminate
+subsequent timings. A visible shell is not a readiness gate.
+
+Capture must appear in the task list, be readable from SQLite through a separate
+read-only connection, and survive a WebView reload. The reader allows a bounded
+five-second SQLite busy wait; time spent waiting remains in the recorded duration.
+It never disables durability or modifies application storage settings.
+
+Reports retain raw samples, startup/import marks, fixture and executable hashes,
+WebDriver capabilities, viewport, source revision/dirty state, and failure evidence.
+One warm-up is excluded per fixture. Use `RUNS=1` for a smoke test; fewer than 30
+samples are descriptive only and fewer than 100 cannot establish a p95 release gate.
+Native reports are currently reporting-only, not input to `perf:compare`.
+
+These are automation-observed upper bounds including WebDriver dispatch and polling,
+not native process TTID, compositor input latency, or power-loss recovery evidence.
+The SQLite readback check happens after UI visibility, so its duration is not an
+isolated measure of disk writing. Sync is off; this does not test editing during sync.
+Linux observations do not establish macOS or Windows performance. Use
+`NATIVE_DIAGNOSTICS=1` only for a separate diagnostic run with Settings phase logs;
+it also records allowlisted IPC command names and fetch response-header timing,
+never arguments or payloads. Response headers are not the complete invoke callback
+or deserialization duration. Do not compare diagnostic timings with normal runs.
+Keep raw profiles and logs local.
+
+Measured example and outstanding save-path finding:
+[native desktop and Android scrolling baseline](performance-native-interactions-2026-09.md).
+
 ## Storage and sync processing
 
 ```bash

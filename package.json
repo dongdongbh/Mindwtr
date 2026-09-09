@@ -121,6 +121,7 @@
     "mobile:startup:bench": "bash apps/mobile/scripts/android_startup_benchmark.sh",
     "test:perf-tools": "bun test scripts/performance",
     "perf:web": "node scripts/performance/web-startup.mjs",
+    "perf:native": "node scripts/performance/native-desktop.mjs",
     "perf:storage": "bun scripts/performance/storage-sync.ts",
     "perf:android-interactions": "node scripts/performance/android-interactions.mjs",
     "test:reliability": "bun scripts/performance/reliability.ts",
