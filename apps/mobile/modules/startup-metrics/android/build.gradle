@@ -5,6 +5,27 @@ applyKotlinExpoModulesCorePlugin()
 useCoreDependencies()
 useDefaultAndroidSdkVersions()
 
+def captureProfiling = System.getenv("APP_VARIANT") == "benchmark" && System.getenv("EXPO_PUBLIC_CAPTURE_PROFILING") == "1"
+
 android {
   namespace "tech.dongdongbh.mindwtr.startupmetrics"
+  buildFeatures { buildConfig true }
+  defaultConfig {
+    buildConfigField "boolean", "CAPTURE_PROFILING_ENABLED", String.valueOf(captureProfiling)
+  }
+  if (captureProfiling) {
+    ndkVersion rootProject.ext.ndkVersion
+    buildFeatures { prefab true }
+    defaultConfig {
+      externalNativeBuild { cmake { arguments "-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON" } }
+    }
+    externalNativeBuild { cmake { path "src/profiler/CMakeLists.txt" } }
+  }
+}
+
+if (captureProfiling) {
+  dependencies {
+    implementation "com.facebook.react:react-android"
+    implementation "com.facebook.react:hermes-android"
+  }
 }

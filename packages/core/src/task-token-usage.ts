@@ -77,8 +77,19 @@ export const getUsedTaskTokens = (
     tasks: Task[],
     selector: TaskTokenSelector,
     options?: TaskTokenOptions
-): string[] =>
-    getUsedTaskTokensFromUsage(collectTaskTokenUsage(tasks, selector, options));
+): string[] => {
+    // Name-only callers (including capture parsing) do not need usage counts or
+    // recency. Avoid parsing every task's timestamps and allocating usage rows.
+    const tokens = new Set<string>();
+    tasks.forEach((task) => {
+        if (task.deletedAt) return;
+        (selector(task) ?? []).forEach((rawToken) => {
+            const token = normalizeToken(rawToken);
+            if (token && matchesPrefix(token, options?.prefix)) tokens.add(token);
+        });
+    });
+    return Array.from(tokens).sort((a, b) => baseTextCollator.compare(a, b));
+};
 
 export const getUsedTaskTokensFromUsage = (usage: readonly TaskTokenUsage[]): string[] =>
     usage

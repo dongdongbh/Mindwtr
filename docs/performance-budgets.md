@@ -36,7 +36,13 @@ Budgets are intentionally explicit and conservative. They should only change in 
 | Focus derivation | 40ms | 500ms | 2500ms | 50k <= 12x 10k |
 | Search/filter/sort derivation | 30ms | 130ms | 650ms | 50k <= 12x 10k |
 | Production sync-change fingerprint | 20ms | 80ms | 350ms | 50k <= 8x 10k |
+| Capture parser options | 25ms | 90ms | 450ms | 50k <= 8x 10k |
 | Full snapshot merge | 150ms | 1500ms | 7500ms | 50k <= 8x 10k |
+
+The capture-options gate exercises the production parser-options builder, including context
+and tag discovery. Its broad CPU/scaling limits are not native interaction-latency targets.
+A separate regression test requires name-only token collection to avoid timestamp reads
+and compares it with usage-derived output across 5,000 mixed tasks.
 
 The full-merge gate measures normalization, conflict resolution, attachment reconciliation,
 and reference repair against an aligned snapshot, using fresh object identities for both

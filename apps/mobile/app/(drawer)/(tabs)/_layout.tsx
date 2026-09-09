@@ -17,6 +17,7 @@ import { useThemeTokens } from '@/hooks/use-theme-tokens';
 import { MOBILE_HOME_TAB_ROUTE } from '@/lib/home-route';
 import { useLanguage } from '../../../contexts/language-context';
 import { QuickCaptureSheet } from '@/components/quick-capture-sheet';
+import { beginCaptureProfile, endCaptureProfile } from '@/lib/capture-profiler';
 import { QuickCaptureProvider, useQuickCapture, type QuickCaptureOptions } from '../../../contexts/quick-capture-context';
 import { useToastBottomOffset } from '../../../contexts/toast-context';
 import { getDefaultTaskAreaMode, useTaskStore, type MobileQuickAccessView, type SavedSearch, type Task } from '@mindwtr/core';
@@ -613,6 +614,7 @@ export default function TabLayout() {
       openRouteQuickCapture({ ...options, initialProps: withSelectedArea(options.initialProps) });
       return;
     }
+    beginCaptureProfile();
     setCaptureState((prev) => ({
       visible: true,
       openRequestId: prev.openRequestId + 1,
@@ -623,6 +625,7 @@ export default function TabLayout() {
   }, [openRouteQuickCapture, withSelectedArea]);
 
   const closeQuickCapture = useCallback(() => {
+    endCaptureProfile();
     setCaptureState((prev) => ({
       visible: false,
       openRequestId: prev.openRequestId,

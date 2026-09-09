@@ -298,7 +298,93 @@ evidence. Before testing a lifecycle redesign, attribute JS/React commit costs s
 and test modal focus, dismissal, keyboard resizing, pickers, recording and save failure.
 Keep timing thresholds unset until longer, interleaved same-build runs establish noise.
 
+### Capture token-discovery optimization (2026-09-09 UTC)
+
+Follow-up Hermes sampling found `readQuickAddParseOptions` scanning task contexts/tags
+through the full usage accumulator. Name-only callers were paying to parse every task's
+timestamps and calculate counts/recency that their output discarded. `getUsedTaskTokens`
+now collects normalized names directly in a Set and uses the same collator. Frequency and
+recency APIs still use the full accumulator; deleted-task filtering, deduplication and
+fresh reads after captures are preserved. No cache or persistence change was introduced.
+
+Three sampled phone iterations before/after all passed against the same 1,021-task fixture.
+The parser-options stack appeared in 9/10/10 samples before and 2/3/2 after; task-timestamp
+stack samples fell from 5/7/6 to zero. These small sampling counts locate removed work;
+they are not precise durations or evidence of a proportional whole-screen speedup.
+The retained native artifact batches are `captureOpenClose-j2NCBb` (before) and
+`captureOpenClose-I6Vil3` (after). Their sampled APK hashes are respectively
+`d620c91009299ed46d35bc5f70e7a0001eb40906f84ec7d864ef8883f960a462` and
+`c8a5c89362acf9479a82d289e8562d4717022e18003f3a1ea143bc7a9688d628`.
+
+A local Bun comparison alternated the previous usage-derived collector with the direct
+collector for 20 repetitions after five warm-ups, asserting identical context/tag output:
+
+| Synthetic tasks | Previous median | Direct-name median |
+| --- | ---: | ---: |
+| 1,000 | 1.214 ms | 0.289 ms |
+| 5,000 | 4.003 ms | 1.191 ms |
+| 50,000 | 42.413 ms | 12.804 ms |
+
+These are host helper timings, not Android or end-to-end capture latency. A regression
+test rejects timestamp access in the name-only path and checks output parity across
+5,000 mixed tasks. The production parser-options builder is also covered by the existing
+1k/10k/50k CPU/scaling budget suite.
+
+The final uninstrumented APK (`ba2f721b6b12fa51ef23e963a9364b7b6121b6beece4175487f42042bff4f467`)
+passed five phone iterations in `captureOpenClose-NpmRBN`: 136 frames, 24 positive overruns,
+frame CPU p95 14.19 ms and frame-overrun p95 2.71 ms. Thermal status stayed 0 at the batch
+boundaries. This is one post-change batch, not an interleaved statistical comparison;
+remaining positive overruns mean capture jank is not eliminated. The opt-out APK contains
+no `libmindwtr_capture_profiler.so`, produced no new sampling files, and retained the same
+221-item synthetic Inbox.
+
 ### Optimization procedure
+
+#### Optional capture JS sampling (Android Benchmark only)
+
+For JS stack attribution, rebuild the Benchmark release with
+`EXPO_PUBLIC_CAPTURE_PROFILING=1` in addition to the normal Benchmark/profileable build
+environment. Both `APP_VARIANT=benchmark` and that exact flag are required by the native
+module; it also checks the installed package is `tech.dongdongbh.mindwtr.benchmark`.
+The native sampling library is not compiled or packaged when the opt-in is absent.
+No setting, exported component, permission, task payload or remote telemetry is added.
+
+The in-place tab capture starts Hermes sampling before setting its visible state, then
+stops 200 ms after the close callback to include React unmount work. Rapid reopening
+retains the existing session. A 30-second JS timer also requests stop; backgrounding and
+module teardown cancel native sampling independently. At most eight sessions start per
+module lifetime. Background-cancelled sessions are not exported. Route-based capture and
+widget capture are not instrumented by this probe.
+
+Run `captureOpenClose` against this APK with its **new** SHA-256. Sampling is 1,000 Hz,
+so its frame timings are diagnostic, not comparable with an uninstrumented APK. Pull the
+profiles from the synthetic app after instrumentation finishes:
+
+```bash
+adb -s <device> pull /sdcard/Android/data/tech.dongdongbh.mindwtr.benchmark/files/capture-profiles <disk-backed-artifact-directory>
+```
+
+Retain the exact APK, its SHA-256, and
+`apps/mobile/android/app/build/generated/sourcemaps/react/release/index.android.bundle.map`
+with its SHA-256 before rebuilding. Preserve raw profiles and symbolicate **copies** with
+the installed Metro tool (it rewrites the input profile):
+
+```bash
+node node_modules/metro-symbolicate/src/index.js <matching-bundle.map> <profile-copy.cpuprofile>
+```
+
+Require nonempty `samples` and `stackFrames`, then verify app frames resolve to the
+expected source files. Sampling counts are not exact function durations; root-only samples
+must not be assigned to React rendering. Distinguish warm-ups from measured iterations.
+Keep profiles local and use synthetic data. To restore the timing baseline, reinstall the
+saved uninstrumented Benchmark APK; never clear the normal app's data. Clean/rebundle when
+changing Expo public build flags so Metro/Gradle caches cannot retain an older JS bundle.
+
+The small JNI bridge calls `IHermesRootAPI` directly. The pinned RN 0.81.5 legacy adapter's
+local source registers its `disable` JNI name against `enable`; the probe does not use that
+adapter. Native dump exceptions are contained, and dump I/O runs off the UI thread.
+
+#### Measurement loop
 
 1. Reproduce with a signed/profileable **release** build and synthetic data. Capture
    cold launch, foreground resume, open quick capture, first input, save, Focus/Inbox/

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectTaskTokenUsage, getFrequentTaskTokens, getRecentTaskTokens, getUsedTaskTokens } from './task-token-usage';
+import { collectTaskTokenUsage, getFrequentTaskTokens, getRecentTaskTokens, getUsedTaskTokens, getUsedTaskTokensFromUsage } from './task-token-usage';
 import type { Task } from './types';
 
 const buildTask = (overrides: Partial<Task>): Task => ({
@@ -14,6 +14,28 @@ const buildTask = (overrides: Partial<Task>): Task => ({
 });
 
 describe('task token usage', () => {
+    it('does not inspect timestamps when only token names are requested', () => {
+        const task = buildTask({ id: 'names-only', contexts: ['@work', '@work'] });
+        Object.defineProperty(task, 'updatedAt', { get() { throw new Error('Names do not need recency'); } });
+        Object.defineProperty(task, 'createdAt', { get() { throw new Error('Names do not need recency'); } });
+        expect(getUsedTaskTokens([task], (entry) => entry.contexts, { prefix: '@' })).toEqual(['@work']);
+    });
+
+    it('matches usage-derived names for a large mixed store without changing its tasks', () => {
+        const tasks = Array.from({ length: 5000 }, (_, index) => Object.freeze(buildTask({
+            id: `tokens-${index}`,
+            contexts: index % 5 === 0 ? [] : [` @Office ${index % 11} `, '@home', '@home', '#other', '', '@office 1'],
+            deletedAt: index % 7 === 0 ? '2026-03-02T00:00:00.000Z' : undefined,
+            updatedAt: index % 2 === 0 ? 'invalid-date' : '2026-03-03T00:00:00.000Z',
+        })));
+        for (const prefix of [undefined, '@', '#', '!']) {
+            const selector = (task: Task) => task.id.endsWith('3') ? null : task.contexts;
+            expect(getUsedTaskTokens(tasks, selector, { prefix })).toEqual(
+                getUsedTaskTokensFromUsage(collectTaskTokenUsage(tasks, selector, { prefix })),
+            );
+        }
+    });
+
     it('returns only used tokens and skips deleted tasks', () => {
         const tasks = [
             buildTask({ id: '1', contexts: ['@work', '@home'] }),

@@ -13,6 +13,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import { buildEntityMap, computeTaskDerivedState } from './store-helpers';
 import { computeSyncChangeFingerprint } from './sync-helpers';
 import { mergeAppDataWithStats } from './sync';
+import { buildQuickAddParseOptions } from './quick-add';
 import type {
     AppData,
     Area,
@@ -44,7 +45,8 @@ type BudgetedOperationId =
     | 'taskDerivedState'
     | 'focusDerivation'
     | 'searchFilterSort'
-    | 'syncChangeFingerprint';
+    | 'syncChangeFingerprint'
+    | 'captureParseOptions';
 
 type BudgetedOperation = {
     id: BudgetedOperationId;
@@ -74,6 +76,7 @@ const LARGE_STORE_PERFORMANCE_BUDGETS_MS: Record<LargeStoreSize, Record<Budgeted
         focusDerivation: 40,
         searchFilterSort: 30,
         syncChangeFingerprint: 20,
+        captureParseOptions: 25,
     },
     10_000: {
         projectDetailLookupAndSort: 90,
@@ -81,6 +84,7 @@ const LARGE_STORE_PERFORMANCE_BUDGETS_MS: Record<LargeStoreSize, Record<Budgeted
         focusDerivation: 500,
         searchFilterSort: 130,
         syncChangeFingerprint: 80,
+        captureParseOptions: 90,
     },
     50_000: {
         projectDetailLookupAndSort: 450,
@@ -88,6 +92,7 @@ const LARGE_STORE_PERFORMANCE_BUDGETS_MS: Record<LargeStoreSize, Record<Budgeted
         focusDerivation: 2_500,
         searchFilterSort: 650,
         syncChangeFingerprint: 350,
+        captureParseOptions: 450,
     },
 };
 
@@ -286,6 +291,15 @@ function expectWithinBudget(label: string, size: LargeStoreSize, actualMs: numbe
 }
 
 const operations: BudgetedOperation[] = [
+    {
+        id: 'captureParseOptions',
+        label: 'Capture parser options',
+        maxGrowthFrom10kTo50k: 8,
+        run: (fixture) => {
+            const options = buildQuickAddParseOptions(fixture.data.settings, fixture.data);
+            return (options.knownContexts?.length ?? 0) + (options.knownTags?.length ?? 0);
+        },
+    },
     {
         id: 'projectDetailLookupAndSort',
         label: 'Project detail lookup and sort',

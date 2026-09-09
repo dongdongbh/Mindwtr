@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(mindwtr_capture_profiler)
+find_package(hermes-engine REQUIRED CONFIG)
+find_package(ReactAndroid REQUIRED CONFIG)
+add_library(mindwtr_capture_profiler SHARED CaptureProfiler.cpp)
+target_compile_features(mindwtr_capture_profiler PRIVATE cxx_std_20)
+target_link_libraries(mindwtr_capture_profiler hermes-engine::libhermes ReactAndroid::jsi)
