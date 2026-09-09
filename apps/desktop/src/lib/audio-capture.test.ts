@@ -43,7 +43,7 @@ const installFakeWebAudio = () => {
         createGain: vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn() })),
         destination: {},
     };
-    (window as any).AudioContext = vi.fn(() => context);
+    (window as any).AudioContext = vi.fn(function () { return context; });
     return { context, processor, track };
 };
 

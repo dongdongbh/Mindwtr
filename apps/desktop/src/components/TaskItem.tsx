@@ -586,6 +586,9 @@ export const TaskItem = memo(function TaskItem({
     }, [showToast, t]);
     const visibleAttachments = (task.attachments || []).filter((a) => !a.deletedAt);
     const visibleEditAttachments = editAttachments.filter((a) => !a.deletedAt);
+    const selectedProjectHasSections = Boolean(
+        draft.projectId && (sectionsByProject.get(draft.projectId)?.length ?? 0) > 0
+    );
     const wasEditingRef = useRef(false);
 
     const {
@@ -604,6 +607,7 @@ export const TaskItem = memo(function TaskItem({
         draft,
         prioritiesEnabled,
         timeEstimatesEnabled,
+        hasProjectSections: selectedProjectHasSections,
         visibleEditAttachmentsLength: visibleEditAttachments.length,
     });
     const activeProjectId = draft.projectId || task.projectId || '';

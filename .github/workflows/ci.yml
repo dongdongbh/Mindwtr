@@ -137,6 +137,9 @@ jobs:
       - name: Locale parity check
         run: bun run i18n:check
 
+      - name: Ubuntu APT preparation regression tests
+        run: python3 scripts/ci/prepare-ubuntu-apt.test.py
+
       - name: Schema and release workflow governance checks
         run: bun run test:governance
 
@@ -223,13 +226,10 @@ jobs:
             sudo cp /etc/apt/apt-mirrors.txt "$APT_MIRROR_BACKUP"
           fi
 
-          # The runner image also carries optional Microsoft apt feeds that are
-          # unrelated to Tauri. If those feeds return 403, apt-get update fails
-          # before the Ubuntu packages below can install.
-          mapfile -t MICROSOFT_APT_SOURCES < <(grep -rl 'packages.microsoft.com' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null || true)
-          for source_file in "${MICROSOFT_APT_SOURCES[@]}"; do
-            sudo mv "$source_file" "$source_file.disabled"
-          done
+          # Unused Google/Microsoft feeds can fail independently of Ubuntu
+          # (hash mismatches, invalid signatures, or 403s). Keep integrity
+          # verification enabled and disable only those vendor entries.
+          sudo python3 scripts/ci/prepare-ubuntu-apt.py
 
           APT_OPTIONS=(
             -o Acquire::Retries=3
@@ -547,16 +547,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Drop unused Microsoft apt repos
-        # packages.microsoft.com intermittently serves invalid clearsigned
-        # indexes, which fails the apt update inside `playwright install
-        # --with-deps`. The E2E job never installs from these repos; same
-        # workaround as the desktop build job.
-        run: |
-          mapfile -t MICROSOFT_APT_SOURCES < <(grep -rl 'packages.microsoft.com' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null || true)
-          for source_file in "${MICROSOFT_APT_SOURCES[@]}"; do
-            sudo mv "$source_file" "$source_file.disabled"
-          done
+      - name: Disable unused vendor APT feeds
+        # Playwright downloads its pinned Chromium, not Google Chrome from APT.
+        # Its system dependencies come from Ubuntu, just like Tauri's.
+        run: sudo python3 scripts/ci/prepare-ubuntu-apt.py
 
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps chromium

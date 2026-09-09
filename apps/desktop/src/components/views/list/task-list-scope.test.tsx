@@ -6,6 +6,8 @@ import { useUiStore } from '../../../store/ui-store';
 import { takeUndoableAction, clearUndoableAction } from '../../../lib/undo-registry';
 import { createTaskListScope, type TaskListScopeDeps } from './task-list-scope';
 
+type ShowToast = ReturnType<typeof useUiStore.getState>['showToast'];
+
 const makeTask = (id: string, overrides: Partial<Task> = {}): Task => ({
     id,
     title: `Task ${id}`,
@@ -89,11 +91,16 @@ const setStore = (overrides: Record<string, unknown>) => {
     useTaskStore.setState((state) => ({ ...state, ...overrides } as never));
 };
 
-let showToast: ReturnType<typeof vi.fn>;
+let showToast = vi.fn<ShowToast>();
+const firstToastAction = () => {
+    const action = showToast.mock.calls[0]?.[3];
+    if (!action) throw new Error('Expected the first toast to include an action');
+    return action;
+};
 
 beforeEach(() => {
     clearUndoableAction();
-    showToast = vi.fn();
+    showToast = vi.fn<ShowToast>();
     useUiStore.setState({ showToast });
     useTaskStore.setState((state) => ({
         settings: { ...state.settings, undoNotificationsEnabled: true },
@@ -304,7 +311,7 @@ describe.each(SCOPE_CASES)('createTaskListScope — $name', ({ extraDeps }) => {
             expect.objectContaining({ label: 'RUECKGAENGIG' }),
         );
 
-        showToast.mock.calls[0][3].onClick();
+        firstToastAction().onClick();
         expect(moveTask).toHaveBeenCalledWith('1', 'next');
     });
 
@@ -333,7 +340,7 @@ describe.each(SCOPE_CASES)('createTaskListScope — $name', ({ extraDeps }) => {
             expect.objectContaining({ label: 'RUECKGAENGIG' }),
         );
 
-        showToast.mock.calls[0][3].onClick();
+        firstToastAction().onClick();
         expect(restoreTask).toHaveBeenCalledWith('1');
     });
 

@@ -118,6 +118,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 vi.mock('@mindwtr/core', async (importOriginal) => {

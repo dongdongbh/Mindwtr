@@ -1,7 +1,7 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_TASK_EDITOR_ORDER, type AppData, type Task } from '@mindwtr/core';
+import { DEFAULT_TASK_EDITOR_HIDDEN, DEFAULT_TASK_EDITOR_ORDER, type AppData, type Section, type Task } from '@mindwtr/core';
 import { createTaskDraft, setTaskDraftField } from '@mindwtr/core/task-draft';
 
 import { useTaskEditDerivedState } from './use-task-edit-derived-state';
@@ -17,6 +17,68 @@ const baseTask: Task = {
 };
 
 describe('useTaskEditDerivedState', () => {
+    it('reveals project sections for an unassigned task and follows draft project changes (#1190)', () => {
+        let derived: ReturnType<typeof useTaskEditDerivedState> | undefined;
+        const task = { ...baseTask, projectId: 'project-1' };
+        let draft = createTaskDraft(task);
+        const section: Section = {
+            id: 'section-1', projectId: 'project-1', title: 'Planning', order: 0,
+            createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt,
+        };
+        let sections: Section[] = [section];
+        let settings: AppData['settings'] = {
+            gtd: { taskEditor: { defaultsVersion: 5, hidden: [...DEFAULT_TASK_EDITOR_HIDDEN] } },
+        };
+        function Probe() {
+            derived = useTaskEditDerivedState({
+                task, draft, sections, settings, projects: [], checklist: [],
+                prioritiesEnabled: true, timeEstimatesEnabled: true,
+                contextInputDraft: '', descriptionDraft: '', tagInputDraft: '',
+                visibleAttachmentsLength: 0, t: (key) => key,
+            });
+            return null;
+        }
+        let view: renderer.ReactTestRenderer;
+        renderer.act(() => { view = renderer.create(React.createElement(Probe)); });
+        const update = () => renderer.act(() => view.update(React.createElement(Probe)));
+        try {
+            expect(derived?.basicFields).toContain('section');
+            expect(derived?.projectSections.map((section) => section.id)).toEqual(['section-1']);
+
+            draft = setTaskDraftField(draft, 'projectId', 'project-2');
+            update();
+            expect(derived?.basicFields).not.toContain('section');
+            expect(derived?.projectSections).toEqual([]);
+
+            sections = [...sections, { ...section, id: 'section-2', projectId: 'project-2', title: 'Delivery' }];
+            update();
+            expect(derived?.basicFields).toContain('section');
+            expect(derived?.projectSections.map((section) => section.id)).toEqual(['section-2']);
+
+            settings = { gtd: { taskEditor: { hidden: ['section'] } } };
+            update();
+            expect(derived?.basicFields).not.toContain('section');
+
+            draft = setTaskDraftField(draft, 'sectionId', 'section-2');
+            update();
+            expect(derived?.basicFields).toContain('section');
+
+            draft = setTaskDraftField(draft, 'sectionId', '');
+            settings = {};
+            sections = sections.map((section) => ({ ...section, deletedAt: '2026-09-09T12:00:00Z' }));
+            update();
+            expect(derived?.basicFields).not.toContain('section');
+
+            draft = setTaskDraftField(draft, 'projectId', '');
+            settings = { gtd: { taskEditor: { hidden: [] } } };
+            update();
+            expect(derived?.basicFields).not.toContain('section');
+            expect(derived?.projectSections).toEqual([]);
+        } finally {
+            renderer.act(() => view.unmount());
+        }
+    });
+
     it('hides status when the task editor layout disables it even for non-inbox tasks', () => {
         let derived: ReturnType<typeof useTaskEditDerivedState> | undefined;
         const settings: AppData['settings'] = {

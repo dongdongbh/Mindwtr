@@ -1,7 +1,7 @@
 import React from 'react';
 import { FlatList, Text, TouchableOpacity } from 'react-native';
 import { act, create } from 'react-test-renderer';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildEntityMap, safeFormatDate, type Task } from '@mindwtr/core';
 
 const routerPushMock = vi.hoisted(() => vi.fn());
@@ -133,6 +133,12 @@ const makeTask = (id: string, title: string, overrides: Partial<Task> = {}): Tas
 import SearchScreen from './global-search';
 
 describe('SearchScreen task results', () => {
+    const mountedTrees: ReturnType<typeof create>[] = [];
+    const trackTree = (tree: ReturnType<typeof create>) => {
+        mountedTrees.push(tree);
+        return tree;
+    };
+
     beforeEach(() => {
         vi.clearAllMocks();
         routeParams.q = 'Launch';
@@ -150,11 +156,18 @@ describe('SearchScreen task results', () => {
         storeState.setHighlightTask = setHighlightTaskMock;
     });
 
+    afterEach(() => {
+        act(() => {
+            mountedTrees.splice(0).forEach((tree) => tree.unmount());
+        });
+        vi.useRealTimers();
+    });
+
     it('opens the task editor when pressing a task search result', () => {
         let tree!: ReturnType<typeof create>;
 
         act(() => {
-            tree = create(<SearchScreen />);
+            tree = trackTree(create(<SearchScreen />));
         });
 
         const resultList = tree.root.findByType(FlatList);
@@ -182,7 +195,7 @@ describe('SearchScreen task results', () => {
         updateTaskMock.mockResolvedValue({ success: true });
         let tree!: ReturnType<typeof create>;
         act(() => {
-            tree = create(<SearchScreen />);
+            tree = trackTree(create(<SearchScreen />));
         });
 
         const resultList = tree.root.findByType(FlatList);
@@ -192,7 +205,7 @@ describe('SearchScreen task results', () => {
         });
         let rowTree!: ReturnType<typeof create>;
         act(() => {
-            rowTree = create(resultRow);
+            rowTree = trackTree(create(resultRow));
         });
         const checkButton = rowTree.root.findAllByType(TouchableOpacity).find(
             (node) => node.props.accessibilityLabel === 'Mark Done'
@@ -224,7 +237,7 @@ describe('SearchScreen task results', () => {
 
         let tree!: ReturnType<typeof create>;
         act(() => {
-            tree = create(<SearchScreen />);
+            tree = trackTree(create(<SearchScreen />));
         });
 
         const filterButton = tree.root
@@ -251,45 +264,41 @@ describe('SearchScreen task results', () => {
 
     it('refreshes hidden-future results at midnight and at an explicit start time', () => {
         vi.useFakeTimers();
-        try {
-            vi.setSystemTime(new Date('2026-04-16T23:59:30'));
-            routeParams.q = '';
-            storeState._allTasks = [
-                makeTask('tomorrow-date', 'Tomorrow date task', { startTime: '2026-04-17' }),
-                makeTask('tomorrow-time', 'Tomorrow timed task', { startTime: '2026-04-17T00:01' }),
-            ];
+        vi.setSystemTime(new Date('2026-04-16T23:59:30'));
+        routeParams.q = '';
+        storeState._allTasks = [
+            makeTask('tomorrow-date', 'Tomorrow date task', { startTime: '2026-04-17' }),
+            makeTask('tomorrow-time', 'Tomorrow timed task', { startTime: '2026-04-17T00:01' }),
+        ];
 
-            let tree!: ReturnType<typeof create>;
-            act(() => {
-                tree = create(<SearchScreen />);
-            });
-            const filterButton = tree.root
-                .findAllByType(TouchableOpacity)
-                .find((node) => node.props.accessibilityLabel === 'Filters');
-            act(() => {
-                filterButton!.props.onPress();
-            });
-            const hideFutureChip = tree.root.findAllByType(TouchableOpacity).find((node) => (
-                node.findAllByType(Text).some((textNode) => textNode.props.children === 'Hide future tasks')
-            ));
-            act(() => {
-                hideFutureChip!.props.onPress();
-            });
-            const resultIds = () => tree.root.findByType(FlatList).props.data.map((result: any) => result.item.id);
-            expect(resultIds()).toEqual([]);
+        let tree!: ReturnType<typeof create>;
+        act(() => {
+            tree = trackTree(create(<SearchScreen />));
+        });
+        const filterButton = tree.root
+            .findAllByType(TouchableOpacity)
+            .find((node) => node.props.accessibilityLabel === 'Filters');
+        act(() => {
+            filterButton!.props.onPress();
+        });
+        const hideFutureChip = tree.root.findAllByType(TouchableOpacity).find((node) => (
+            node.findAllByType(Text).some((textNode) => textNode.props.children === 'Hide future tasks')
+        ));
+        act(() => {
+            hideFutureChip!.props.onPress();
+        });
+        const resultIds = () => tree.root.findByType(FlatList).props.data.map((result: any) => result.item.id);
+        expect(resultIds()).toEqual([]);
 
-            act(() => {
-                vi.advanceTimersByTime(30_100);
-            });
-            expect(resultIds()).toEqual(['tomorrow-date']);
+        act(() => {
+            vi.advanceTimersByTime(30_100);
+        });
+        expect(resultIds()).toEqual(['tomorrow-date']);
 
-            act(() => {
-                vi.advanceTimersByTime(60_100);
-            });
-            expect(resultIds()).toEqual(['tomorrow-date', 'tomorrow-time']);
-        } finally {
-            vi.useRealTimers();
-        }
+        act(() => {
+            vi.advanceTimersByTime(60_100);
+        });
+        expect(resultIds()).toEqual(['tomorrow-date', 'tomorrow-time']);
     });
 
     it('offers to include hidden done and archived matches instead of hiding them silently', () => {
@@ -300,7 +309,7 @@ describe('SearchScreen task results', () => {
 
         let tree!: ReturnType<typeof create>;
         act(() => {
-            tree = create(<SearchScreen />);
+            tree = trackTree(create(<SearchScreen />));
         });
 
         expect(tree.root.findByType(FlatList).props.data).toEqual([]);
@@ -325,7 +334,7 @@ describe('SearchScreen task results', () => {
     it('does not offer hidden matches when nothing matching is done or archived', () => {
         let tree!: ReturnType<typeof create>;
         act(() => {
-            tree = create(<SearchScreen />);
+            tree = trackTree(create(<SearchScreen />));
         });
 
         const hint = tree.root.findAllByType(TouchableOpacity).find((node) =>
@@ -345,7 +354,7 @@ describe('SearchScreen task results', () => {
 
         let tree!: ReturnType<typeof create>;
         act(() => {
-            tree = create(<SearchScreen />);
+            tree = trackTree(create(<SearchScreen />));
         });
 
         expect(tree.root.findByType(FlatList).props.data.map((result: any) => result.item.id)).toEqual(['task-1']);
@@ -369,7 +378,7 @@ describe('SearchScreen task results', () => {
 
             let tree!: ReturnType<typeof create>;
             act(() => {
-                tree = create(<SearchScreen />);
+                tree = trackTree(create(<SearchScreen />));
             });
 
             // Done and Archived matches are hidden until asked for.
@@ -393,7 +402,7 @@ describe('SearchScreen task results', () => {
             const element = list.props.renderItem({ item: list.props.data[index], index });
             let rowTree!: ReturnType<typeof create>;
             act(() => {
-                rowTree = create(element);
+                rowTree = trackTree(create(element));
             });
             return rowTree.root
                 .findAllByType(Text)
@@ -434,38 +443,34 @@ describe('SearchScreen task results', () => {
 
     it('keeps literal CJK substring matches when SQLite search returns partial token matches', async () => {
         vi.useFakeTimers();
-        try {
-            routeParams.q = '搬家';
-            const tasks = [
-                makeTask('task-1', '準備搬家了'),
-                makeTask('task-2', '列出需要處理的搬家物品'),
-                makeTask('task-3', '搬家到新住處'),
-            ];
-            storeState._allTasks = tasks;
-            storageAdapterState.searchAll = vi.fn(async () => ({
-                tasks: [tasks[2]],
-                projects: [],
-            }));
+        routeParams.q = '搬家';
+        const tasks = [
+            makeTask('task-1', '準備搬家了'),
+            makeTask('task-2', '列出需要處理的搬家物品'),
+            makeTask('task-3', '搬家到新住處'),
+        ];
+        storeState._allTasks = tasks;
+        storageAdapterState.searchAll = vi.fn(async () => ({
+            tasks: [tasks[2]],
+            projects: [],
+        }));
 
-            let tree!: ReturnType<typeof create>;
-            await act(async () => {
-                tree = create(<SearchScreen />);
-            });
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = trackTree(create(<SearchScreen />));
+        });
 
-            await act(async () => {
-                vi.advanceTimersByTime(250);
-                await Promise.resolve();
-            });
+        await act(async () => {
+            vi.advanceTimersByTime(250);
+            await Promise.resolve();
+        });
 
-            const resultList = tree.root.findByType(FlatList);
-            expect(resultList.props.data.map((result: any) => result.item.id)).toEqual([
-                'task-3',
-                'task-1',
-                'task-2',
-            ]);
-            expect(storageAdapterState.searchAll).toHaveBeenCalledWith('搬家');
-        } finally {
-            vi.useRealTimers();
-        }
+        const resultList = tree.root.findByType(FlatList);
+        expect(resultList.props.data.map((result: any) => result.item.id)).toEqual([
+            'task-3',
+            'task-1',
+            'task-2',
+        ]);
+        expect(storageAdapterState.searchAll).toHaveBeenCalledWith('搬家');
     });
 });

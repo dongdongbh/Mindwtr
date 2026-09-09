@@ -14,6 +14,11 @@ import {
 } from './theme';
 import { setNativeInvokeTransport } from './tauri-invoke';
 
+type NativeThemeWindowModule = Awaited<
+    ReturnType<Parameters<typeof watchNativeSystemThemePreference>[0]>
+>;
+type NativeThemeWindow = ReturnType<NativeThemeWindowModule['getCurrentWindow']>;
+
 // The theme commands go through the invoke seam, which refuses to reach Rust
 // unless a Tauri runtime is present. Both are true in the desktop shell.
 const enableNativeInvoke = (transport: (command: string) => Promise<unknown>) => {
@@ -334,14 +339,11 @@ describe('watchSystemThemeCommandPreference', () => {
 
 describe('watchNativeSystemThemePreference', () => {
     it('does not touch the native window api after cleanup when the module resolves late', async () => {
-        const windowModuleDeferred = createDeferred<{
-            getCurrentWindow: () => {
-                theme: ReturnType<typeof vi.fn>;
-                onThemeChanged: ReturnType<typeof vi.fn>;
-            };
-        }>();
-        const theme = vi.fn(async () => 'dark');
-        const onThemeChanged = vi.fn(async () => vi.fn());
+        const windowModuleDeferred = createDeferred<NativeThemeWindowModule>();
+        const theme = vi.fn<NativeThemeWindow['theme']>(async () => 'dark');
+        const onThemeChanged = vi.fn<NativeThemeWindow['onThemeChanged']>(
+            async () => vi.fn<() => void>(),
+        );
         const onChange = vi.fn();
 
         const stopWatching = watchNativeSystemThemePreference(

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import type { Project, Task } from '@mindwtr/core';
 import { hasTimeComponent, safeFormatDate, useTaskStore } from '@mindwtr/core';
 
@@ -156,9 +157,11 @@ describe('TaskItemDisplay', () => {
         openSpy.mockRestore();
     });
 
+    type TaskItemDisplayActions = ComponentProps<typeof TaskItemDisplay>['actions'];
+
     const renderWithRename = (props: {
-        onRenameTitle: ReturnType<typeof vi.fn>;
-        onEdit?: ReturnType<typeof vi.fn>;
+        onRenameTitle: NonNullable<TaskItemDisplayActions['onRenameTitle']>;
+        onEdit?: TaskItemDisplayActions['onEdit'];
         renameRequestToken?: number;
     }) => (
         <LanguageProvider>

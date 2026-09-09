@@ -1,6 +1,6 @@
 import { act, render, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { type Task, useTaskStore } from '@mindwtr/core';
+import { type Task, type TaskDraftSetter, useTaskStore } from '@mindwtr/core';
 
 import { useTaskItemAi } from './useTaskItemAi';
 import { TaskItem } from '../TaskItem';
@@ -34,7 +34,7 @@ vi.mock('../../lib/app-log', () => ({ logWarn }));
 
 const settings = { ai: { enabled: true, provider: 'openai' } } as never;
 
-const renderAi = (setField: ReturnType<typeof vi.fn>, overrides: Record<string, unknown> = {}) => renderHook(() => useTaskItemAi({
+const renderAi = (setField: TaskDraftSetter, overrides: Record<string, unknown> = {}) => renderHook(() => useTaskItemAi({
     taskId: 'task-1',
     settings,
     t: (key: string) => key,

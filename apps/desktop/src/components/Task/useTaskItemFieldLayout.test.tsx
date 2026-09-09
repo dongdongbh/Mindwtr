@@ -44,6 +44,7 @@ const buildParams = (
         },
         prioritiesEnabled: overrides.prioritiesEnabled ?? true,
         timeEstimatesEnabled: overrides.timeEstimatesEnabled ?? true,
+        hasProjectSections: overrides.hasProjectSections ?? false,
         visibleEditAttachmentsLength: overrides.visibleEditAttachmentsLength ?? 1,
     };
 };
@@ -122,6 +123,97 @@ describe('useTaskItemFieldLayout', () => {
         expect(result.current.schedulingFields).toEqual([]);
         expect(result.current.organizationFields).toEqual([]);
         expect(result.current.detailsFields).toEqual([]);
+    });
+
+    it('reveals the section field by default when the selected project has sections (#1190)', () => {
+        const { result } = renderHook(() => useTaskItemFieldLayout(buildParams({
+            task: baseTask,
+            draft: { projectId: 'project-1', sectionId: '' },
+            hasProjectSections: true,
+        })));
+
+        expect(result.current.showSectionField).toBe(true);
+        expect(result.current.organizerFields).toContain('section');
+    });
+
+    it('does not show the section field without a selected project', () => {
+        const { result } = renderHook(() => useTaskItemFieldLayout(buildParams({
+            task: baseTask,
+            draft: { projectId: '', sectionId: '' },
+            hasProjectSections: true,
+        })));
+
+        expect(result.current.showSectionField).toBe(false);
+    });
+
+    it('keeps the section field hidden by default for a project without sections', () => {
+        const { result } = renderHook(() => useTaskItemFieldLayout(buildParams({
+            task: baseTask,
+            draft: { projectId: 'project-1', sectionId: '' },
+            hasProjectSections: false,
+        })));
+
+        expect(result.current.showSectionField).toBe(false);
+    });
+
+    it('respects an explicitly hidden empty section field', () => {
+        const { result } = renderHook(() => useTaskItemFieldLayout(buildParams({
+            settings: {
+                gtd: {
+                    taskEditor: {
+                        hidden: ['section'],
+                    },
+                },
+            },
+            task: baseTask,
+            draft: { projectId: 'project-1', sectionId: '' },
+            hasProjectSections: true,
+        })));
+
+        expect(result.current.showSectionField).toBe(false);
+    });
+
+    it('keeps an existing section assignment visible even when explicitly hidden', () => {
+        const { result } = renderHook(() => useTaskItemFieldLayout(buildParams({
+            settings: {
+                gtd: {
+                    taskEditor: {
+                        hidden: ['section'],
+                    },
+                },
+            },
+            task: baseTask,
+            draft: { projectId: 'project-1', sectionId: 'section-1' },
+            hasProjectSections: false,
+        })));
+
+        expect(result.current.showSectionField).toBe(true);
+        expect(result.current.organizerFields).toContain('section');
+    });
+
+    it('tracks live project sections when switching and clearing the selected project', () => {
+        const params = buildParams({ task: baseTask });
+        const { result, rerender } = renderHook(
+            ({ projectId, hasProjectSections }) => useTaskItemFieldLayout({
+                ...params,
+                draft: { ...params.draft, projectId, sectionId: '' },
+                hasProjectSections,
+            }),
+            {
+                initialProps: { projectId: 'project-with-sections', hasProjectSections: true },
+            },
+        );
+
+        expect(result.current.showSectionField).toBe(true);
+
+        rerender({ projectId: 'sectionless-project', hasProjectSections: false });
+        expect(result.current.showSectionField).toBe(false);
+
+        rerender({ projectId: 'another-project-with-sections', hasProjectSections: true });
+        expect(result.current.showSectionField).toBe(true);
+
+        rerender({ projectId: '', hasProjectSections: true });
+        expect(result.current.showSectionField).toBe(false);
     });
 
     it('hides action-only fields while a task is being edited as reference', () => {

@@ -84,6 +84,30 @@ const isTaskEditorSectionId = (value: unknown): value is TaskEditorSectionId =>
 export const isTaskEditorSectionableField = (fieldId: TaskEditorFieldId): boolean =>
     TASK_EDITOR_SECTIONABLE_FIELDS.includes(fieldId);
 
+// Creating a project's sections engages this optional field, even before the
+// first task is assigned. Explicit layout choices still win for empty fields.
+export function isTaskEditorSectionFieldVisible(
+    taskEditor: TaskEditorSettings | undefined,
+    { projectId, sectionId, hasProjectSections }: {
+        projectId: string | undefined;
+        sectionId: string | undefined;
+        hasProjectSections: boolean;
+    },
+): boolean {
+    if (!projectId) return false;
+    if (sectionId) return true;
+    const hidden = taskEditor?.hidden;
+    // Load migrations persist the lean defaults without an order. Both editors
+    // save an order when customizing field visibility, so do not mistake these
+    // migration-generated defaults for an explicit choice to hide sections.
+    const hasPersistedDefaults = Boolean(taskEditor?.defaultsVersion)
+        && !taskEditor?.order?.length
+        && hidden?.length === DEFAULT_TASK_EDITOR_HIDDEN.length
+        && DEFAULT_TASK_EDITOR_HIDDEN.every((field) => hidden.includes(field));
+    if (hidden && !hasPersistedDefaults) return !hidden.includes('section');
+    return hasProjectSections;
+}
+
 export const getTaskEditorSectionAssignments = (
     taskEditor: TaskEditorSettings | undefined
 ): Record<TaskEditorFieldId, TaskEditorSectionId> => {

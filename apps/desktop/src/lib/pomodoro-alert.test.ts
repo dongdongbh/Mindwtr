@@ -28,6 +28,7 @@ describe('pomodoro-alert', () => {
         globalThis.AudioContext = originalAudioContext;
         (globalThis as typeof globalThis & { webkitAudioContext?: unknown }).webkitAudioContext = originalWebkitAudioContext;
         vi.restoreAllMocks();
+        vi.clearAllMocks();
     });
 
     it('plays a short two-tone completion chime when Web Audio is available', async () => {
@@ -64,7 +65,7 @@ describe('pomodoro-alert', () => {
             }),
         };
 
-        globalThis.AudioContext = vi.fn(() => audioContext) as unknown as typeof AudioContext;
+        globalThis.AudioContext = vi.fn(function () { return audioContext; }) as unknown as typeof AudioContext;
 
         await playPomodoroCompletionSound();
 
@@ -137,7 +138,7 @@ describe('pomodoro-alert', () => {
                 type: undefined,
             })),
         };
-        const startClickConstructor = vi.fn(() => armedContext);
+        const startClickConstructor = vi.fn(function () { return armedContext; });
         globalThis.AudioContext = startClickConstructor as unknown as typeof AudioContext;
 
         armPomodoroCompletionSound();

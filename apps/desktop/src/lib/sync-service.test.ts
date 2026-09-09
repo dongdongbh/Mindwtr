@@ -131,6 +131,7 @@ const setPendingExternalSyncChangeForTests = () => {
 afterEach(async () => {
     __syncServiceTestUtils.resetDependenciesForTests();
     await SyncService.resetForTests();
+    vi.restoreAllMocks();
     localStorage.clear();
     sessionStorage.clear();
 });

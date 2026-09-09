@@ -42,7 +42,7 @@ function TestHarness({
 }: {
   incomingUrl: string | null;
   incomingUrlKey?: number;
-  returnToBackground?: ReturnType<typeof vi.fn>;
+  returnToBackground?: () => void;
   resolveText?: (key: string, fallback: string) => string;
 }) {
   useRootLayoutContextAutomation({

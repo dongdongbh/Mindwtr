@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 
 import { useRootLayoutExternalCapture } from '@/hooks/root-layout/use-root-layout-external-capture';
 
@@ -39,10 +39,13 @@ vi.mock('expo-file-system', () => ({
 }));
 
 type RouterMock = {
-  canGoBack: ReturnType<typeof vi.fn>;
-  push: ReturnType<typeof vi.fn>;
-  replace: ReturnType<typeof vi.fn>;
+  canGoBack: Mock<() => boolean>;
+  push: Mock<(...args: any[]) => void>;
+  replace: Mock<(...args: any[]) => void>;
 };
+
+type ExternalCaptureOptions = Parameters<typeof useRootLayoutExternalCapture>[0];
+type ShowToast = ExternalCaptureOptions['showToast'];
 
 type SharedFile = {
   fileName?: string | null;
@@ -66,13 +69,13 @@ function TestHarness({
   hasShareIntent?: boolean;
   incomingUrl: string | null;
   incomingUrlKey?: number;
-  resetShareIntent?: ReturnType<typeof vi.fn>;
+  resetShareIntent?: () => void;
   router: RouterMock;
   shareFiles?: SharedFile[] | null;
   shareSubject?: string | null;
   shareText?: string | null;
   shareWebUrl?: string | null;
-  showToast: ReturnType<typeof vi.fn>;
+  showToast: ShowToast;
 }) {
   useRootLayoutExternalCapture({
     dataReady: true,
@@ -93,7 +96,7 @@ function TestHarness({
 
 describe('useRootLayoutExternalCapture', () => {
   let router: RouterMock;
-  let showToast: ReturnType<typeof vi.fn>;
+  let showToast = vi.fn<ShowToast>();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -105,7 +108,7 @@ describe('useRootLayoutExternalCapture', () => {
       push: vi.fn(),
       replace: vi.fn(),
     };
-    showToast = vi.fn();
+    showToast = vi.fn<ShowToast>();
   });
 
   it('opens shared text capture with the shared text as the task title', () => {

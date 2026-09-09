@@ -7,6 +7,7 @@ import {
     getTaskEditorSectionAssignments,
     getTaskEditorSectionOpenDefaults,
     isCustomTimeEstimate,
+    isTaskEditorSectionFieldVisible,
     normalizeTaskEditorOrder,
     parseRRuleString,
     safeParseDate,
@@ -192,6 +193,22 @@ export function useTaskEditDerivedState({
         [taskEditorOrder]
     );
     const activeSectionId = draft ? draft.sectionId : task?.sectionId;
+    const projectSections = useMemo(() => {
+        if (!activeProjectId) return [];
+        return sections
+            .filter((section) => section.projectId === activeProjectId && !section.deletedAt)
+            .sort((a, b) => {
+                const aOrder = Number.isFinite(a.order) ? a.order : 0;
+                const bOrder = Number.isFinite(b.order) ? b.order : 0;
+                if (aOrder !== bOrder) return aOrder - bOrder;
+                return a.title.localeCompare(b.title);
+            });
+    }, [activeProjectId, sections]);
+    const showSectionField = isTaskEditorSectionFieldVisible(settings.gtd?.taskEditor, {
+        projectId: activeProjectId,
+        sectionId: activeSectionId,
+        hasProjectSections: projectSections.length > 0,
+    });
     const activeAreaId = draft ? draft.areaId : task?.areaId;
     const hasValue = useCallback((fieldId: TaskEditorFieldId) => {
         switch (fieldId) {
@@ -262,10 +279,11 @@ export function useTaskEditDerivedState({
     const isFieldVisible = useCallback(
         (fieldId: TaskEditorFieldId) => {
             if (isReference && REFERENCE_HIDDEN_FIELDS.has(fieldId)) return false;
+            if (fieldId === 'section') return showSectionField;
             if (fieldId === 'assignedTo' && editStatus === 'waiting' && !isAssignedToExplicitlyHidden) return true;
             return !hiddenSet.has(fieldId) || hasValue(fieldId);
         },
-        [editStatus, hasValue, hiddenSet, isAssignedToExplicitlyHidden, isReference]
+        [editStatus, hasValue, hiddenSet, isAssignedToExplicitlyHidden, isReference, showSectionField]
     );
     const filterVisibleFields = useCallback(
         (fields: TaskEditorFieldId[]) => fields.filter(isFieldVisible),
@@ -293,17 +311,6 @@ export function useTaskEditDerivedState({
         [filterVisibleFields, orderFields, sectionAssignments, taskEditorOrder]
     );
     const showStatusField = isFieldVisible('status');
-    const projectSections = useMemo(() => {
-        if (!activeProjectId) return [];
-        return sections
-            .filter((section) => section.projectId === activeProjectId && !section.deletedAt)
-            .sort((a, b) => {
-                const aOrder = Number.isFinite(a.order) ? a.order : 0;
-                const bOrder = Number.isFinite(b.order) ? b.order : 0;
-                if (aOrder !== bOrder) return aOrder - bOrder;
-                return a.title.localeCompare(b.title);
-            });
-    }, [activeProjectId, sections]);
 
     return {
         activeProjectId,

@@ -45,7 +45,10 @@ vi.mock('@/modules/notification-open-intents', () => ({
   consumePendingNotificationOpenPayload,
 }));
 
-function TestHarness({ router }: { router: { push: ReturnType<typeof vi.fn> } }) {
+type NotificationRouter = Parameters<typeof useRootLayoutNotificationOpenHandler>[0]['router'];
+const createRouter = () => ({ push: vi.fn<NotificationRouter['push']>() });
+
+function TestHarness({ router }: { router: NotificationRouter }) {
   useRootLayoutNotificationOpenHandler({
     appReady: true,
     pathname: '/inbox',
@@ -61,7 +64,7 @@ function TestHarnessWithState({
 }: {
   appReady: boolean;
   pathname?: string | null;
-  router: { push: ReturnType<typeof vi.fn> };
+  router: NotificationRouter;
 }) {
   useRootLayoutNotificationOpenHandler({
     appReady,
@@ -82,7 +85,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
   });
 
   it('routes review notifications to the dedicated review flows', () => {
-    const router = { push: vi.fn() };
+    const router = createRouter();
 
     act(() => {
       create(<TestHarness router={router} />);
@@ -107,7 +110,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
   });
 
   it('routes review date reminders to the review page before task or project fallbacks', () => {
-    const router = { push: vi.fn() };
+    const router = createRouter();
 
     act(() => {
       create(<TestHarness router={router} />);
@@ -132,7 +135,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
   });
 
   it('replays a pending Android notification open on mount', async () => {
-    const router = { push: vi.fn() };
+    const router = createRouter();
     consumePendingNotificationOpenPayload.mockResolvedValue({
       kind: 'weekly-review',
       notificationId: 'pending-weekly',
@@ -150,7 +153,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
   });
 
   it('routes Android review alarm opens when only the alarm key is present', () => {
-    const router = { push: vi.fn() };
+    const router = createRouter();
 
     act(() => {
       create(<TestHarness router={router} />);
@@ -174,7 +177,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
   });
 
   it('routes context automation notification taps to the matching Contexts screen', () => {
-    const router = { push: vi.fn() };
+    const router = createRouter();
 
     act(() => {
       create(<TestHarness router={router} />);
@@ -193,7 +196,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
   });
 
   it('waits for app readiness before replaying a pending open from the root path', async () => {
-    const router = { push: vi.fn() };
+    const router = createRouter();
     consumePendingNotificationOpenPayload.mockResolvedValue({
       kind: 'task-reminder',
       notificationId: 'pending-task',
@@ -223,7 +226,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
 
   it('routes task notification taps with a fresh open token so the editor can reopen', () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(12345);
-    const router = { push: vi.fn() };
+    const router = createRouter();
 
     try {
       act(() => {
@@ -252,7 +255,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
   });
 
   it('marks a task done from a complete notification action without navigating', () => {
-    const router = { push: vi.fn() };
+    const router = createRouter();
     storeTasksById.set('task-1', {
       id: 'task-1',
       title: 'Pay rent',
@@ -280,7 +283,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
   });
 
   it('ignores snooze and dismiss notification actions', () => {
-    const router = { push: vi.fn() };
+    const router = createRouter();
 
     act(() => {
       create(<TestHarness router={router} />);
@@ -299,7 +302,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
   });
 
   it('clears the notification handler on unmount', () => {
-    const router = { push: vi.fn() };
+    const router = createRouter();
     let tree!: ReturnType<typeof create>;
 
     act(() => {

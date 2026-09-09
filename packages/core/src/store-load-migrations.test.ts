@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
+import { isTaskEditorSectionFieldVisible } from './task-editor-layout';
 import {
     buildLoadContext,
     runLoadMigrations,
@@ -256,6 +257,9 @@ describe('runLoadMigrations', () => {
         expect(applied).toEqual(['task-editor-defaults']);
         expect(result.settings.gtd?.taskEditor?.defaultsVersion).toBe(5);
         expect(result.settings.gtd?.taskEditor?.hidden).toEqual(expect.arrayContaining(['section', 'priority']));
+        expect(isTaskEditorSectionFieldVisible(result.settings.gtd?.taskEditor, {
+            projectId: 'project-with-sections', sectionId: undefined, hasProjectSections: true,
+        })).toBe(true);
     });
 
     it('focus-group-by-defaults: migrates the legacy context grouping default to none', () => {

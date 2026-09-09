@@ -30,16 +30,20 @@ const baseTask: Task = {
 
 const t = (key: string) => key;
 
+type TaskEditActionsArgs = Parameters<typeof useTaskEditActions>[0];
+type ShowToast = TaskEditActionsArgs['showToast'];
+type SetChecklist = TaskEditActionsArgs['setChecklist'];
+
 type Harness = {
     onSave: (taskId: string, updates: Partial<Task>) => unknown;
     onClose: () => void;
-    showToast: ReturnType<typeof vi.fn>;
+    showToast: ShowToast;
     cancelTask?: (taskId: string) => Promise<StoreActionResult>;
     deleteTask?: (taskId: string) => Promise<StoreActionResult>;
     resetTaskChecklist?: (taskId: string) => Promise<StoreActionResult>;
     restoreTask?: (taskId: string) => Promise<StoreActionResult>;
     convertTaskToSection?: (taskId: string) => Promise<StoreActionResult>;
-    setChecklist?: ReturnType<typeof vi.fn>;
+    setChecklist?: SetChecklist;
 };
 
 let saveHandle: () => Promise<boolean>;
@@ -64,6 +68,7 @@ function SaveProbe({
         onClose,
         onSave,
         onSaveError: (message) => showToast({
+            title: 'Task update failed',
             tone: 'error',
             message: message || 'Could not update task.',
         }),
@@ -116,7 +121,7 @@ function SaveProbe({
 }
 
 async function runSave(onSave: Harness['onSave']) {
-    const showToast = vi.fn();
+    const showToast = vi.fn<ShowToast>();
     const onClose = vi.fn();
     await act(async () => {
         renderer.create(<SaveProbe onSave={onSave} onClose={onClose} showToast={showToast} />);
@@ -129,9 +134,9 @@ async function runSave(onSave: Harness['onSave']) {
 }
 
 async function renderActions(overrides: Partial<Harness> = {}) {
-    const showToast = vi.fn();
+    const showToast = vi.fn<ShowToast>();
     const onClose = vi.fn();
-    const setChecklist = vi.fn();
+    const setChecklist = vi.fn<SetChecklist>();
     await act(async () => {
         renderer.create(
             <SaveProbe
@@ -287,8 +292,9 @@ describe('task editor save results', () => {
             await deleteHandle();
         });
         const deletedToast = showToast.mock.calls[0]?.[0];
+        expect(deletedToast?.onAction).toBeTypeOf('function');
         await act(async () => {
-            await deletedToast.onAction();
+            await deletedToast?.onAction?.();
         });
 
         expect(showToast).toHaveBeenLastCalledWith(expect.objectContaining({

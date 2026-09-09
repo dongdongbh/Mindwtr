@@ -5,6 +5,7 @@ import {
     TASK_EDITOR_FIXED_FIELDS,
     getTaskEditorSectionAssignments,
     getTaskEditorSectionOpenDefaults,
+    isTaskEditorSectionFieldVisible,
     normalizeTaskEditorOrder,
 } from '@mindwtr/core';
 
@@ -14,6 +15,7 @@ type UseTaskItemFieldLayoutParams = {
     draft: TaskDraft;
     prioritiesEnabled: boolean;
     timeEstimatesEnabled: boolean;
+    hasProjectSections: boolean;
     visibleEditAttachmentsLength: number;
 };
 
@@ -23,6 +25,7 @@ export function useTaskItemFieldLayout({
     draft,
     prioritiesEnabled,
     timeEstimatesEnabled,
+    hasProjectSections,
     visibleEditAttachmentsLength,
 }: UseTaskItemFieldLayoutParams) {
     const {
@@ -167,7 +170,11 @@ export function useTaskItemFieldLayout({
     );
     const showProjectField = isFieldVisible('project');
     const showAreaField = isFieldVisible('area') && !editProjectId;
-    const showSectionField = isFieldVisible('section') && !!editProjectId;
+    const showSectionField = isTaskEditorSectionFieldVisible(settings?.gtd?.taskEditor, {
+        projectId: editProjectId || undefined,
+        sectionId: editSectionId || undefined,
+        hasProjectSections,
+    });
     const orderFields = useCallback(
         (fields: TaskEditorFieldId[]) => {
             const ordered = taskEditorOrder.filter((id) => fields.includes(id));

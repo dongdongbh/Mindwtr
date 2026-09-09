@@ -5,6 +5,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Area, Project, Task } from '@mindwtr/core';
 import { useInboxProcessingController } from './useInboxProcessingController';
 
+type InboxControllerOptions = Parameters<typeof useInboxProcessingController>[0];
+type AddTask = InboxControllerOptions['addTask'];
+type UpdateTask = InboxControllerOptions['updateTask'];
+
 const makeTask = (id: string, status: Task['status'] = 'inbox'): Task => ({
     id,
     title: `Task ${id}`,
@@ -76,7 +80,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
     const settings = {};
 
     const renderController = (
-        updateTask: ReturnType<typeof vi.fn>,
+        updateTask: UpdateTask,
         controllerSettings: Parameters<typeof useInboxProcessingController>[0]['settings'] = settings,
     ) => renderHook(() => {
         // The session closes itself once the queue drains, so isProcessing has
@@ -431,8 +435,8 @@ describe('useInboxProcessingController project conversion persistence', () => {
     };
 
     const renderController = (
-        addTask: ReturnType<typeof vi.fn>,
-        updateTask: ReturnType<typeof vi.fn>,
+        addTask: AddTask,
+        updateTask: UpdateTask,
         options: RenderControllerOptions = {},
     ) => renderHook(() => {
         const [isProcessing, setIsProcessing] = useState(true);
@@ -611,7 +615,7 @@ describe('useInboxProcessingController title grammar', () => {
     const projects = [{ id: 'p1', title: 'Vacation', status: 'active' } as Project];
     const areas = [{ id: 'a1', name: 'Work', order: 0 } as Area];
 
-    const renderController = (updateTask: ReturnType<typeof vi.fn>) => renderHook(() => {
+    const renderController = (updateTask: UpdateTask) => renderHook(() => {
         const [isProcessing, setIsProcessing] = useState(true);
         return useInboxProcessingController({
             t: (key) => key,
