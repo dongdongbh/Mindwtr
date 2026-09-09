@@ -81,13 +81,63 @@ Reports contain raw samples, fixture IDs, source revision/dirty state and exact
 artifact hashes. Source changes were uncommitted while measured; the artifact hash
 identifies the build. Profiles and bundles remain local, not in git.
 
-## Still open
+## Follow-up: first-open General Settings
 
-First-open **General Settings** still has a separate, variable lazy-loading delay:
-the control medians were 443/451/156 ms and candidate medians 454/441/150 ms at the
-three fixture sizes. This change does not fix that initial route/page waterfall.
-Investigate co-loading the small default page with Settings before changing the
-app-level navigation behavior, which already has prior latency fixes.
+A fresh baseline at `3ed9004a5` reproduced the remaining delay. Co-loading General
+with the already-lazy Settings route alone did **not** reliably improve it: medians
+were 440/394/148 ms versus 400/430/156 ms at 0/1k/10k tasks. The app-level Settings
+navigation still bypassed the transition used by other routes. A production test
+holding the real Settings route chunk failed because the current Focus screen
+disappeared during that wait.
+
+The combined change loads General with Settings and uses the existing route
+transition for Settings too. Other settings pages stay lazy, resource activation
+and hook ownership stay unchanged, and no data writes or user-facing controls are
+added. The Settings route grows about 13 KB minified (3 KB gzip); the initial main
+bundle does not grow. This follows React's documented
+[lazy loading](https://react.dev/reference/react/lazy) and
+[preserving visible content during suspension](https://react.dev/reference/react/Suspense#preventing-already-revealed-content-from-hiding).
+
+First ordered A/B pass, 30 fresh contexts per fixture:
+
+| Synthetic tasks | Control General | Combined General |
+| --- | ---: | ---: |
+| 0 | 400.2 ms | 137.5 ms |
+| 1,000 | 429.5 ms | 149.1 ms |
+| 10,000 | 156.3 ms | 146.7 ms |
+
+All 180 samples were valid. The 0/1k median comparison gates passed. The first
+10k comparison flagged Integrations at 175.0 versus 152.0 ms (23 ms slower).
+Repeating 30 runs of the exact candidate, then 30 of the exact control, produced
+150.6 versus 152.2 ms; that comparison passed all unchanged median gates. All 60
+repeat samples were valid. The initial flagged batch remains in the evidence;
+it was not reproduced, not silently discarded or fixed by weakening a threshold.
+The co-load-only experiment is retained separately, not counted as a successful fix.
+Across both 10k batches per build (60 observations each), General medians were
+151.5/147.2 ms and Integrations medians were 152.2/164.2 ms (control/candidate).
+There is no claimed median speedup at 10k or for Integrations; the strong General
+median reduction is in the empty/1k fixtures. Sixty samples still do not establish
+a p95 release gate.
+
+Regression coverage includes a test that fails if General suspends after the
+Settings route loads, plus production checks holding the actual route and
+Integrations chunks. They assert current content remains visible, later navigation
+wins over pending Settings, and search, keyboard controls and narrow/wide light/dark
+layouts still work. All 257 App/Settings tests passed; desktop typecheck/build,
+scoped ESLint and diagnostic-field checks passed. No independent agent review was
+run. General's layout diagnostic is tagged `v1.3.0/settings-default-coload`.
+
+Artifacts for this follow-up are under
+`/home/dd/.cache/mindwtr-performance-tmp/settings-first-open/`: `control`,
+`candidate` (co-load only), `transition`, matching saved bundles and route regression
+screenshots. Reports retain artifact hashes and raw samples; timings include
+automation overhead. The same limitations and host conditions above apply.
+The saved control bundle was replayed for the final repeat without rebuilding;
+its artifact hash, not that run's candidate checkout revision, identifies the code.
+Control SHA-256: `f44a2bfd49d28aadc669e23f0c6929fac357141cd020c61c6b1ea33e58c45830`.
+Combined SHA-256: `d5d54a07d19a4c09272ea2f1315bb538b9f37db9ec23cafb05a3287d722fff41`.
+
+## Still open
 
 These are production desktop React UI measurements, **not native Tauri startup,
 WebKit/WebView2 measurements, keyring access, SQLite durability, or macOS/Windows

@@ -1233,9 +1233,9 @@ function App() {
         setCurrentView(nextView);
         if (nextView === 'settings') {
             beginSettingsOpenTrace('handleViewChange');
-            setActiveView(nextView);
-            return;
         }
+        // Settings can still suspend on its first render after a preload.
+        // Keep the current screen visible, just as for the other lazy routes.
         startTransition(() => {
             setActiveView(nextView);
         });
