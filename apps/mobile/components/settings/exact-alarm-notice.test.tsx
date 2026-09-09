@@ -1,7 +1,9 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Text } from 'react-native';
+import { Text, View } from 'react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ExactAlarmNoticeRow, useExactAlarmPermission } from './exact-alarm-notice';
+import { SettingRow } from './setting-row';
 
 const { mockRelevant, mockRefresh, mockOpen, appStateListeners } = vi.hoisted(() => ({
   mockRelevant: vi.fn(() => true),
@@ -44,8 +46,6 @@ vi.mock('react-native', async () => {
     },
   };
 });
-
-import { ExactAlarmNoticeRow, useExactAlarmPermission } from './exact-alarm-notice';
 
 function Probe({ enabled }: { enabled: boolean }) {
   const { showNotice } = useExactAlarmPermission(enabled);
@@ -132,6 +132,24 @@ describe('useExactAlarmPermission', () => {
 });
 
 describe('ExactAlarmNoticeRow', () => {
+  it('renders permission help below its parent setting instead of another settings row', async () => {
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <ExactAlarmNoticeRow inline label="Android permission needed" description="This alert is on." actionLabel="Open Android settings" />
+      );
+    });
+    const notice = tree.root.findAllByType(View).find((node) => node.props.testID === 'exact-alarm-notice');
+    expect(notice).toBeDefined();
+    expect(tree.root.findAllByType(SettingRow)).toHaveLength(0);
+    const button = tree.root.findByProps({ testID: 'exact-alarm-allow' });
+    expect(button.props.accessibilityRole).toBe('button');
+    expect(button.props.accessibilityLabel).toBe('Open Android settings');
+    await act(async () => { button.props.onPress(); });
+    expect(mockOpen).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
+
   it('opens the system screen from its action button', async () => {
     let tree!: renderer.ReactTestRenderer;
     await act(async () => {

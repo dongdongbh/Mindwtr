@@ -5,6 +5,18 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { AppData } from '@mindwtr/core';
 
 import { GtdSettingsScreen } from './gtd-settings-screen';
+import { ExactAlarmNoticeRow } from './exact-alarm-notice';
+
+const alarmPermission = vi.hoisted(() => ({
+  relevant: vi.fn(() => true),
+  refresh: vi.fn(async () => true),
+  open: vi.fn(async () => undefined),
+}));
+vi.mock('@/lib/exact-alarm-permission', () => ({
+  isExactAlarmPermissionRelevant: alarmPermission.relevant,
+  refreshExactAlarmPermission: alarmPermission.refresh,
+  openExactAlarmSettings: alarmPermission.open,
+}));
 
 const updateSettings = vi.fn().mockResolvedValue(undefined);
 const showToast = vi.fn();
@@ -172,6 +184,9 @@ describe('GtdSettingsScreen task editor layout', () => {
   beforeEach(() => {
     updateSettings.mockClear();
     showToast.mockClear();
+    alarmPermission.relevant.mockReturnValue(true);
+    alarmPermission.refresh.mockReset().mockResolvedValue(true);
+    alarmPermission.open.mockClear();
     storeState.settings = {
       gtd: {
         taskEditor: {},
@@ -220,6 +235,42 @@ describe('GtdSettingsScreen task editor layout', () => {
     });
 
     expect(tree.root.findByType(Modal).props.visible).toBe(true);
+  });
+
+  it.each([
+    { enabled: true, alert: true, allowed: false, relevant: true, notice: true },
+    { enabled: true, alert: false, allowed: false, relevant: true, notice: false },
+    { enabled: false, alert: true, allowed: false, relevant: true, notice: false },
+    { enabled: true, alert: true, allowed: true, relevant: true, notice: false },
+    { enabled: true, alert: true, allowed: false, relevant: false, notice: false },
+  ])('groups Android permission help with the enabled Pomodoro alert: %j', async ({ enabled, alert, allowed, relevant, notice }) => {
+    storeState.settings = { features: { pomodoro: enabled }, gtd: { pomodoro: { completionAlert: alert } } };
+    alarmPermission.relevant.mockReturnValue(relevant);
+    alarmPermission.refresh.mockResolvedValue(allowed);
+    let tree!: renderer.ReactTestRenderer;
+    await renderer.act(async () => {
+      tree = renderer.create(<GtdSettingsScreen onNavigate={vi.fn()} screen="gtd-pomodoro" />);
+    });
+    const notices = tree.root.findAllByType(ExactAlarmNoticeRow);
+    expect(notices).toHaveLength(notice ? 1 : 0);
+    if (notice) {
+      expect(notices[0].props).toMatchObject({
+        inline: true,
+        label: 'settings.pomodoroAlertPermissionTitle',
+        description: 'settings.pomodoroAlertPermissionDesc',
+        actionLabel: 'settings.pomodoroAlertPermissionAction',
+      });
+      expect(notices[0].props.divider).toBeUndefined();
+      const control = tree.root.findAllByType(Switch).find((node) => node.props.testID === 'pomodoro-completion-alert');
+      expect(control?.props.value).toBe(true);
+      expect(control?.props.accessibilityLabel).toBe('Alert when timer ends');
+      await renderer.act(async () => { control?.props.onValueChange(false); });
+      expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+        gtd: expect.objectContaining({ pomodoro: expect.objectContaining({ completionAlert: false }) }),
+      }));
+    }
+    if (!enabled || !alert || !relevant) expect(alarmPermission.refresh).not.toHaveBeenCalled();
+    renderer.act(() => tree.unmount());
   });
 
   it('shows one notice when enabling Pomodoro auto-start', async () => {

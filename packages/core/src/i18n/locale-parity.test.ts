@@ -69,6 +69,14 @@ const recoverySettingsKeys = [
     'settings.importSetupGuideTitle',
     'settings.importSetupGuideDesc',
 ] as const;
+const pomodoroAlertSettingsKeys = [
+    'settings.pomodoroCompletionAlert',
+    'settings.pomodoroCompletionAlertDesc',
+    'settings.pomodoroAlertPermissionTitle',
+    'settings.pomodoroAlertPermissionDesc',
+    'settings.pomodoroAlertPermissionAction',
+    'settings.exactAlarmsDesc',
+] as const;
 
 describe('locale parity', () => {
     it.each(fullParityLocales)('keeps %s in full key parity with English', (lang) => {
@@ -109,6 +117,22 @@ describe('locale parity', () => {
 
     it.each(locales)('keeps recovery settings copy translated in %s', (lang) => {
         const missing = recoverySettingsKeys.filter((key) => !translationsByLocale[lang][key]);
+        expect(missing).toEqual([]);
+    });
+
+    it('defines the Pomodoro alert settings contract in English', () => {
+        expect(Object.fromEntries(pomodoroAlertSettingsKeys.map((key) => [key, en[key]]))).toEqual({
+            'settings.pomodoroCompletionAlert': 'Alert when timer ends',
+            'settings.pomodoroCompletionAlertDesc': 'Notify me when a focus session or break ends.',
+            'settings.pomodoroAlertPermissionTitle': 'Android permission needed for on-time alerts',
+            'settings.pomodoroAlertPermissionDesc': 'This alert is on, but Android may delay it. Allow Mindwtr in Android’s “Alarms & reminders” settings to improve timing.',
+            'settings.pomodoroAlertPermissionAction': 'Open Android settings',
+            'settings.exactAlarmsDesc': 'Android may delay reminders because Mindwtr does not have permission to schedule exact alarms.',
+        });
+    });
+
+    it.each(['de', 'fr'] as const)('keeps Pomodoro alert settings copy translated in %s', (lang) => {
+        const missing = pomodoroAlertSettingsKeys.filter((key) => !translationsByLocale[lang][key]);
         expect(missing).toEqual([]);
     });
 

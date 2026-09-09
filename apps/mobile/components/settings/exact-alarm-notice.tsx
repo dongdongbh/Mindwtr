@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AppState, Text, TouchableOpacity } from 'react-native';
+import { AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useThemeColors } from '@/hooks/use-theme-colors';
 
 import {
     isExactAlarmPermissionRelevant,
@@ -52,13 +53,34 @@ export interface ExactAlarmNoticeRowProps {
     description: string;
     actionLabel: string;
     divider?: boolean;
+    /** Supporting permission help belonging to the toggle immediately above. */
+    inline?: boolean;
 }
 
 /** The one row both reminder and pomodoro settings show while exact alarms are denied. */
-export function ExactAlarmNoticeRow({ label, description, actionLabel, divider }: ExactAlarmNoticeRowProps) {
+export function ExactAlarmNoticeRow({ label, description, actionLabel, divider, inline = false }: ExactAlarmNoticeRowProps) {
+    const tc = useThemeColors();
     const onPress = useCallback(() => {
         openExactAlarmSettings().catch(console.error);
     }, []);
+
+    if (inline) {
+        return (
+            <View style={noticeStyles.container} testID="exact-alarm-notice">
+                <Text style={[noticeStyles.label, { color: tc.text }]}>{label}</Text>
+                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{description}</Text>
+                <TouchableOpacity
+                    style={noticeStyles.action}
+                    onPress={onPress}
+                    accessibilityRole="button"
+                    accessibilityLabel={actionLabel}
+                    testID="exact-alarm-allow"
+                >
+                    <Text style={[noticeStyles.actionText, { color: tc.tint }]}>{actionLabel}</Text>
+                </TouchableOpacity>
+            </View>
+        );
+    }
 
     return (
         <SettingRow
@@ -81,3 +103,10 @@ export function ExactAlarmNoticeRow({ label, description, actionLabel, divider }
         </SettingRow>
     );
 }
+
+const noticeStyles = StyleSheet.create({
+    container: { paddingHorizontal: 16, paddingBottom: 12, gap: 4 },
+    label: { fontSize: 13, fontWeight: '600' },
+    action: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingVertical: 10 },
+    actionText: { fontSize: 14, fontWeight: '600' },
+});

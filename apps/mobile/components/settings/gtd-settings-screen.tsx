@@ -140,7 +140,7 @@ export function GtdSettingsScreen({
     // switch is what made #528 read as broken.
     const pomodoroCompletionAlert = settings.gtd?.pomodoro?.completionAlert !== false;
     const { showNotice: showExactAlarmNotice } = useExactAlarmPermission(
-        screen === 'gtd-pomodoro' && pomodoroCompletionAlert
+        screen === 'gtd-pomodoro' && pomodoroEnabled && pomodoroCompletionAlert
     );
     const [pomodoroFocusDraft, setPomodoroFocusDraft] = useState(String(pomodoroCustomDurations.focusMinutes));
     const [pomodoroBreakDraft, setPomodoroBreakDraft] = useState(String(pomodoroCustomDurations.breakMinutes));
@@ -350,11 +350,11 @@ export function GtdSettingsScreen({
     const pomodoroAutoStartFocusDesc = pomodoroAutoStartFocusDescRaw === 'settings.pomodoroAutoStartFocusDesc'
         ? tr('settings.gtdMobile.startTheNextFocusSessionAutomaticallyWhenABreakEnds')
         : pomodoroAutoStartFocusDescRaw;
-    const pomodoroCompletionAlertLabel = tFallback(t, 'settings.pomodoroCompletionAlert', 'Session-end alert');
+    const pomodoroCompletionAlertLabel = tFallback(t, 'settings.pomodoroCompletionAlert', 'Alert when timer ends');
     const pomodoroCompletionAlertDesc = tFallback(
         t,
         'settings.pomodoroCompletionAlertDesc',
-        'Play a sound and show a notification when a focus session or break ends.'
+        'Notify me when a focus session or break ends.'
     );
     const defaultScheduleTimeLabel = tFallback(t, 'settings.defaultScheduleTime', tr('settings.gtdMobile.defaultScheduleTime'));
     const defaultScheduleTimeDesc = tFallback(
@@ -700,14 +700,15 @@ export function GtdSettingsScreen({
                                 label={pomodoroCompletionAlertLabel}
                                 description={pomodoroCompletionAlertDesc}
                                 value={pomodoroCompletionAlert}
+                                switchTestID="pomodoro-completion-alert"
                                 onChange={(value) => updatePomodoroSettings({ completionAlert: value })}
                             />
                             {showExactAlarmNotice && (
                                 <ExactAlarmNoticeRow
-                                    divider
-                                    label={t('settings.exactAlarmsLabel')}
-                                    description={t('settings.exactAlarmsDesc')}
-                                    actionLabel={t('settings.exactAlarmsAllow')}
+                                    inline
+                                    label={t('settings.pomodoroAlertPermissionTitle')}
+                                    description={t('settings.pomodoroAlertPermissionDesc')}
+                                    actionLabel={t('settings.pomodoroAlertPermissionAction')}
                                 />
                             )}
                         </View>

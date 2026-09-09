@@ -152,6 +152,7 @@ export function SettingToggleRow({
             testID={testID}
         >
             <Switch
+                accessibilityLabel={accessibilityLabel ?? label}
                 value={value}
                 onValueChange={onChange}
                 disabled={disabled}
