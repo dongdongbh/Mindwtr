@@ -4,6 +4,9 @@ Measure before optimizing. Keep fast CI budgets (`bun run test:perf`), productio
 measurements, and native device traces as separate layers. A faster splash screen is
 not a faster usable app; a browser timing is not a native launch timing.
 
+For completed optimizations, rejected experiments, remaining work and the next-session
+checklist, start with the [performance and stability handoff](performance-stability-handoff.md).
+
 ## Readiness contract
 
 | Signal | Meaning | Clock |
