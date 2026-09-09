@@ -19,7 +19,7 @@ const fileSystemMocks = vi.hoisted(() => ({
 vi.mock('./file-system', () => fileSystemMocks);
 const appLogMocks = vi.hoisted(() => ({
     logError: vi.fn(async () => undefined),
-    logInfo: vi.fn(async () => undefined),
+    logInfo: vi.fn<typeof import('./app-log').logInfo>(async () => null),
     logWarn: vi.fn(async () => undefined),
 }));
 vi.mock('./app-log', () => appLogMocks);
@@ -86,6 +86,25 @@ describe('parsePendingCapture', () => {
             .toMatchObject({ kind: 'pomodoro', action: 'start', taskId: 'task-1' });
         expect(parsePendingCapture(JSON.stringify({ kind: 'defer', id: 'd1', taskId: 'task-1', startDate: '2026-02-30' }))).toBeNull();
         expect(parsePendingCapture(JSON.stringify({ kind: 'pomodoro', id: 'p1', action: 'toggle' }))).toBeNull();
+    });
+
+    it('parses only strict Watch outbox retry markers on text and audio captures', () => {
+        expect(parsePendingCapture(JSON.stringify({
+            kind: 'text', id: 't1', title: 'Retry text', source: 'apple-watch', outboxRetried: true,
+        }))).toMatchObject({ kind: 'text', outboxRetried: true });
+        expect(parsePendingCapture(JSON.stringify({
+            kind: 'audio', id: 'a1', audioPath: 'file:///data/Documents/watch-audio/a1.wav',
+            source: 'apple-watch', outboxRetried: true,
+        }))).toMatchObject({ kind: 'audio', outboxRetried: true });
+
+        for (const outboxRetried of ['true', 1, false]) {
+            expect(parsePendingCapture(JSON.stringify({
+                kind: 'text', id: 't1', title: 'Retry text', source: 'apple-watch', outboxRetried,
+            }))).toBeNull();
+        }
+        expect(parsePendingCapture(JSON.stringify({
+            kind: 'complete', id: 'c1', taskId: 'task-1', source: 'apple-watch', outboxRetried: true,
+        }))).toBeNull();
     });
 
     it('trims the optional typed prefix on an audio capture', () => {
@@ -879,6 +898,67 @@ describe('ingestPendingCaptures', () => {
         );
     });
 
+    it('logs a Watch text outbox retry only after its Inbox task is durably saved', async () => {
+        oneFile('watch-text.json', {
+            kind: 'text',
+            id: 'watch-text-retry',
+            title: 'Retry this capture',
+            createdAt: '2026-09-09T20:00:00.000Z',
+            source: 'apple-watch',
+            outboxRetried: true,
+        });
+        const flushPendingSave = vi.fn(async () => undefined);
+        const addTask = addTaskMock();
+
+        expect(await ingestPendingCaptures({
+            addTask,
+            updateTask,
+            addProject,
+            projects: [],
+            areas: [],
+            tasks: [],
+            people: [],
+            settings: emptySettings,
+            flushPendingSave,
+        })).toBe(1);
+
+        expect(addTask).toHaveBeenCalledWith('Retry this capture', { status: 'inbox' });
+        expect(addTask.mock.calls[0]?.[1]).not.toHaveProperty('outboxRetried');
+        expect(appLogMocks.logInfo).toHaveBeenCalledWith('Watch outbox retry ingested', {
+            scope: 'capture',
+            extra: { releaseCheck: 'v1.3.0/watch-outbox-retry', kind: 'text', outcome: 'created' },
+        });
+        const retryLog = appLogMocks.logInfo.mock.calls.findIndex(
+            ([, context]) => context?.extra?.releaseCheck === 'v1.3.0/watch-outbox-retry',
+        );
+        expect(flushPendingSave.mock.invocationCallOrder[0])
+            .toBeLessThan(appLogMocks.logInfo.mock.invocationCallOrder[retryLog]);
+    });
+
+    it('does not log a Watch outbox retry when the durable text flush fails', async () => {
+        oneFile('watch-text.json', {
+            kind: 'text', id: 'watch-text-retry', title: 'Keep this capture',
+            source: 'apple-watch', outboxRetried: true,
+        });
+
+        expect(await ingestPendingCaptures({
+            addTask: addTaskMock(),
+            updateTask,
+            addProject,
+            projects: [],
+            areas: [],
+            tasks: [],
+            people: [],
+            settings: emptySettings,
+            flushPendingSave: vi.fn(async () => { throw new Error('disk full'); }),
+        })).toBe(0);
+
+        expect(appLogMocks.logInfo).not.toHaveBeenCalledWith(
+            'Watch outbox retry ingested',
+            expect.anything(),
+        );
+    });
+
     it('flushes a Watch audio task before deleting its queue file, then deletes its confined WAV', async () => {
         oneFile('audio.json', {
             kind: 'audio',
@@ -886,6 +966,7 @@ describe('ingestPendingCaptures', () => {
             audioPath: `file:///old/container/Documents/watch-audio/${WATCH_AUDIO_ID}.wav`,
             createdAt: '2026-09-06T10:00:00.000Z',
             source: 'apple-watch',
+            outboxRetried: true,
         });
         const addTask = addTaskMock();
         const flushPendingSave = vi.fn(async () => undefined);
@@ -905,6 +986,7 @@ describe('ingestPendingCaptures', () => {
         })).toBe(1);
 
         expect(addTask).toHaveBeenCalledWith('Buy milk', expect.objectContaining({ status: 'inbox', dueDate: '2026-09-07' }));
+        expect(addTask.mock.calls[0]?.[1]).not.toHaveProperty('outboxRetried');
         expect(transcribeAudio).toHaveBeenCalledWith(
             `file:///data/Documents/watch-audio/${WATCH_AUDIO_ID}.wav`,
             emptySettings,
@@ -918,6 +1000,15 @@ describe('ingestPendingCaptures', () => {
         expect(flushPendingSave).toHaveBeenCalledOnce();
         expect(fileSystemMocks.deleteAsync).toHaveBeenNthCalledWith(1, 'file:///data/Documents/pending-captures/audio.json', { idempotent: true });
         expect(fileSystemMocks.deleteAsync).toHaveBeenNthCalledWith(2, `file:///data/Documents/watch-audio/${WATCH_AUDIO_ID}.wav`, { idempotent: true });
+        expect(appLogMocks.logInfo).toHaveBeenCalledWith('Watch outbox retry ingested', {
+            scope: 'capture',
+            extra: { releaseCheck: 'v1.3.0/watch-outbox-retry', kind: 'audio', outcome: 'created' },
+        });
+        const retryLog = appLogMocks.logInfo.mock.calls.findIndex(
+            ([, context]) => context?.extra?.releaseCheck === 'v1.3.0/watch-outbox-retry',
+        );
+        expect(flushPendingSave.mock.invocationCallOrder[0])
+            .toBeLessThan(appLogMocks.logInfo.mock.invocationCallOrder[retryLog]);
     });
 
     it('retains Watch audio and queue when transcription is unavailable', async () => {
@@ -948,6 +1039,7 @@ describe('ingestPendingCaptures', () => {
             id: WATCH_AUDIO_ID,
             audioPath: `file:///data/Documents/watch-audio/${WATCH_AUDIO_ID}.wav`,
             source: 'apple-watch',
+            outboxRetried: true,
         });
         const common = {
             addTask: addTaskMock(),
@@ -975,6 +1067,10 @@ describe('ingestPendingCaptures', () => {
         expect(fileSystemMocks.deleteAsync).toHaveBeenCalledTimes(1);
         expect(fileSystemMocks.deleteAsync).not.toHaveBeenCalledWith(
             `file:///data/Documents/watch-audio/${WATCH_AUDIO_ID}.wav`,
+            expect.anything(),
+        );
+        expect(appLogMocks.logInfo).not.toHaveBeenCalledWith(
+            'Watch outbox retry ingested',
             expect.anything(),
         );
     });

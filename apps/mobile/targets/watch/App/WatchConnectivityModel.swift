@@ -16,6 +16,7 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
     private let session: WCSession?
     private var inFlightCommandIds = Set<String>()
     private var lastHapticEndTime: TimeInterval?
+    private var pendingTextCapture = MindwtrWatchPendingCaptureOwner()
 
     override private init() {
         session = WCSession.isSupported() ? .default : nil
@@ -49,9 +50,19 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
             statusMessage = String(localized: "Please shorten this capture before sending.")
             return
         }
-        guard let payload = MindwtrWatchProtocol.textCapture(title: trimmed) else { return }
-        rejectedCaptureDraft = nil
-        enqueue(payload: payload, transport: .userInfo)
+        var pendingOwner = pendingTextCapture
+        let pending = pendingOwner.prepareText(trimmed)
+        guard let payload = MindwtrWatchProtocol.textCapture(
+            title: trimmed,
+            id: pending.id,
+            createdAt: pending.createdAt,
+            outboxRetried: pending.outboxRetried
+        ) else { return }
+        let saved = pendingOwner.persistPending { _ in
+            enqueue(payload: payload, transport: .userInfo)
+        }
+        pendingTextCapture = pendingOwner
+        rejectedCaptureDraft = saved ? nil : text
     }
 
     func complete(task: MindwtrWatchFocusTask) {
@@ -76,9 +87,19 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
         )
     }
 
-    func transferAudio(fileURL: URL, id: UUID, createdAt: Date) {
+    @discardableResult
+    func transferAudio(
+        fileURL: URL,
+        id: UUID,
+        createdAt: Date,
+        outboxRetried: Bool = false
+    ) -> Bool {
         enqueue(
-            payload: MindwtrWatchProtocol.audioMetadata(id: id, createdAt: createdAt),
+            payload: MindwtrWatchProtocol.audioMetadata(
+                id: id,
+                createdAt: createdAt,
+                outboxRetried: outboxRetried
+            ),
             transport: .audio,
             audioURL: fileURL
         )
@@ -96,19 +117,22 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
         WKInterfaceDevice.current().play(.notification)
     }
 
+    @discardableResult
     private func enqueue(
         payload: [String: Any],
         transport: MindwtrWatchOutbox.Transport,
         audioURL: URL? = nil
-    ) {
+    ) -> Bool {
         do {
             try MindwtrWatchOutbox.save(payload: payload, transport: transport, audioURL: audioURL)
             statusMessage = transport == .audio
                 ? String(localized: "Recording saved for delivery")
                 : String(localized: "Saved for delivery")
             activate()
+            return true
         } catch {
             statusMessage = String(localized: "Couldn’t save this item. Please try again.")
+            return false
         }
     }
 

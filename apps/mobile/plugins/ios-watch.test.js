@@ -376,8 +376,10 @@ describe('ios-watch', () => {
   it('keeps captures durable until app-level receipts and ships foreground capture plus glanceable widgets', () => {
     const sourceRoot = path.resolve(testDirectory, '..', 'targets', 'watch');
     const protocolSource = fs.readFileSync(path.join(sourceRoot, 'Shared', 'WatchProtocol.swift'), 'utf8');
+    const audioRecorderSource = fs.readFileSync(path.join(sourceRoot, 'App', 'WatchAudioRecorder.swift'), 'utf8');
     const connectivitySource = fs.readFileSync(path.join(sourceRoot, 'App', 'WatchConnectivityModel.swift'), 'utf8');
     const outboxSource = fs.readFileSync(path.join(sourceRoot, 'App', 'WatchOutbox.swift'), 'utf8');
+    const viewsSource = fs.readFileSync(path.join(sourceRoot, 'App', 'MindwtrWatchViews.swift'), 'utf8');
     const intentsSource = fs.readFileSync(path.join(sourceRoot, 'App', 'MindwtrWatchIntents.swift'), 'utf8');
     const widgetSource = fs.readFileSync(path.join(sourceRoot, 'Widgets', 'MindwtrWatchWidgets.swift'), 'utf8');
     const watchInfo = fs.readFileSync(path.join(sourceRoot, 'Resources', 'Watch-Info.plist'), 'utf8');
@@ -406,6 +408,19 @@ describe('ios-watch', () => {
     ]);
     expect(outboxSource).toContain('if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }');
     expect(outboxSource).not.toContain('.sorted { $0.lastPathComponent < $1.lastPathComponent }');
+    expect(connectivitySource).toContain('pendingOwner.prepareText(trimmed)');
+    expect(connectivitySource).toContain('id: pending.id');
+    expect(connectivitySource).toContain('rejectedCaptureDraft = saved ? nil : text');
+    expect(protocolSource).toContain('if outboxRetried { payload["outboxRetried"] = true }');
+    expect(connectivitySource).toContain('func transferAudio(');
+    expect(connectivitySource).toContain('outboxRetried: Bool = false');
+    expect(connectivitySource).toContain('outboxRetried: pending.outboxRetried');
+    expect(outboxSource).toContain('outboxRetried: true');
+    expect(audioRecorderSource).toContain('pendingCapture.persistPending');
+    expect(audioRecorderSource).toContain('!handledCompletion');
+    expect(audioRecorderSource).toContain('hasPendingRecording = !saved');
+    expect(viewsSource).toContain('"Retry recording"');
+    expect(viewsSource).toContain('"Resend capture"');
     expect(connectivitySource).toContain('session.activationState == .activated');
     expect(connectivitySource).toContain('outstandingUserInfoTransfers');
     expect(connectivitySource).toContain('receipt["kind"] as? String == "receipt"');

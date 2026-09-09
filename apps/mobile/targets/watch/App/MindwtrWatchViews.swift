@@ -59,8 +59,12 @@ private struct MindwtrCaptureView: View {
                     audioRecorder.toggle(using: model)
                 } label: {
                     Label(
-                        audioRecorder.isRecording ? "Send recording" : "Speak to Capture",
-                        systemImage: audioRecorder.isRecording ? "stop.circle.fill" : "mic.fill"
+                        audioRecorder.isRecording
+                            ? "Send recording"
+                            : audioRecorder.hasPendingRecording ? "Retry recording" : "Speak to Capture",
+                        systemImage: audioRecorder.isRecording
+                            ? "stop.circle.fill"
+                            : audioRecorder.hasPendingRecording ? "arrow.clockwise" : "mic.fill"
                     )
                 }
                 .buttonStyle(.borderedProminent)
@@ -73,14 +77,14 @@ private struct MindwtrCaptureView: View {
 
                 if model.rejectedCaptureDraft != nil {
                     TextField(
-                        "Shorten capture",
+                        "Edit capture",
                         text: Binding(
                             get: { model.rejectedCaptureDraft ?? "" },
                             set: { model.rejectedCaptureDraft = $0 }
                         )
                     )
                     .privacySensitive()
-                    Button("Send shortened capture") {
+                    Button("Resend capture") {
                         model.capture(text: model.rejectedCaptureDraft ?? "")
                     }
                     .font(.caption)

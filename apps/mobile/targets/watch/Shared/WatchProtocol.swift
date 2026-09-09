@@ -22,23 +22,35 @@ enum MindwtrWatchProtocol {
         case reset
     }
 
-    static func envelope(id: UUID, createdAt: Date, kind: Kind) -> [String: Any] {
-        [
+    static func envelope(
+        id: UUID,
+        createdAt: Date,
+        kind: Kind,
+        outboxRetried: Bool = false
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
             "protocolVersion": version,
             "id": id.uuidString.lowercased(),
             "createdAt": iso8601.string(from: createdAt),
             "source": source,
             "kind": kind.rawValue,
         ]
+        if outboxRetried { payload["outboxRetried"] = true }
+        return payload
     }
 
-    static func textCapture(title: String, id: UUID = UUID(), createdAt: Date = Date()) -> [String: Any]? {
+    static func textCapture(
+        title: String,
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        outboxRetried: Bool = false
+    ) -> [String: Any]? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard trimmed.count <= maximumCaptureCharacters,
               trimmed.lengthOfBytes(using: .utf8) <= maximumCaptureUtf8Bytes
         else { return nil }
-        var payload = envelope(id: id, createdAt: createdAt, kind: .text)
+        var payload = envelope(id: id, createdAt: createdAt, kind: .text, outboxRetried: outboxRetried)
         payload["title"] = trimmed
         return payload
     }
@@ -58,8 +70,12 @@ enum MindwtrWatchProtocol {
         return payload
     }
 
-    static func audioMetadata(id: UUID, createdAt: Date) -> [String: Any] {
-        envelope(id: id, createdAt: createdAt, kind: .audio)
+    static func audioMetadata(
+        id: UUID,
+        createdAt: Date,
+        outboxRetried: Bool = false
+    ) -> [String: Any] {
+        envelope(id: id, createdAt: createdAt, kind: .audio, outboxRetried: outboxRetried)
     }
 
     static func tomorrowDate(from now: Date = Date(), calendar: Calendar = .current) -> String {

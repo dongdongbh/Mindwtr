@@ -80,9 +80,9 @@ enum MindwtrWatchPayloadValidator {
         let allowedKeys: Set<String>
         switch kind {
         case .text:
-            allowedKeys = baseKeys.union(["title"])
+            allowedKeys = baseKeys.union(["title", "outboxRetried"])
         case .audio:
-            allowedKeys = baseKeys
+            allowedKeys = baseKeys.union(["outboxRetried"])
         case .complete:
             allowedKeys = baseKeys.union(["taskId"])
         case .deferTask:
@@ -101,6 +101,12 @@ enum MindwtrWatchPayloadValidator {
             "createdAt": createdAt,
             "source": source,
         ]
+        if raw.keys.contains("outboxRetried") {
+            guard strictBoolean(raw["outboxRetried"]) == true else {
+                throw MindwtrWatchPayloadValidationError.invalidField("outboxRetried")
+            }
+            queue["outboxRetried"] = true
+        }
 
         switch kind {
         case .text:
@@ -321,6 +327,14 @@ enum MindwtrWatchPayloadValidator {
         if let value = value as? Double { return value }
         if let value = value as? Int { return Double(value) }
         return nil
+    }
+
+    private static func strictBoolean(_ value: Any?) -> Bool? {
+        guard let value = value as? NSNumber,
+              CFGetTypeID(value) == CFBooleanGetTypeID() else {
+            return nil
+        }
+        return value.boolValue
     }
 
     private static func stripNullValues(_ value: Any) -> Any? {

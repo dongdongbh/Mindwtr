@@ -1,5 +1,74 @@
 import Foundation
 
+struct MindwtrWatchPendingCapture: Equatable {
+    enum Content: Equatable {
+        case text(String)
+        case audio(URL)
+    }
+
+    let id: UUID
+    let createdAt: Date
+    let content: Content
+    let outboxRetried: Bool
+
+    init(id: UUID, createdAt: Date, content: Content, outboxRetried: Bool = false) {
+        self.id = id
+        self.createdAt = createdAt
+        self.content = content
+        self.outboxRetried = outboxRetried
+    }
+}
+
+struct MindwtrWatchPendingCaptureOwner {
+    private(set) var pending: MindwtrWatchPendingCapture?
+
+    mutating func prepareText(
+        _ text: String,
+        id: UUID = UUID(),
+        createdAt: Date = Date()
+    ) -> MindwtrWatchPendingCapture {
+        if let pending, pending.content == .text(text) {
+            return pending
+        }
+        let capture = MindwtrWatchPendingCapture(id: id, createdAt: createdAt, content: .text(text))
+        pending = capture
+        return capture
+    }
+
+    mutating func prepareAudio(
+        fileURL: URL,
+        id: UUID,
+        createdAt: Date
+    ) -> MindwtrWatchPendingCapture {
+        let capture = MindwtrWatchPendingCapture(id: id, createdAt: createdAt, content: .audio(fileURL))
+        pending = capture
+        return capture
+    }
+
+    mutating func persistPending(
+        using persist: (MindwtrWatchPendingCapture) -> Bool
+    ) -> Bool {
+        guard let pending else { return false }
+        guard persist(pending) else {
+            self.pending = MindwtrWatchPendingCapture(
+                id: pending.id,
+                createdAt: pending.createdAt,
+                content: pending.content,
+                outboxRetried: true
+            )
+            return false
+        }
+        if self.pending == pending {
+            self.pending = nil
+        }
+        return true
+    }
+
+    mutating func discardPending() {
+        pending = nil
+    }
+}
+
 enum MindwtrWatchOutbox {
     enum Transport: String {
         case userInfo

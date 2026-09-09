@@ -468,6 +468,9 @@ jobs:
       - name: Run Watch payload and receipt recovery tests
         run: swift test --package-path apps/mobile/modules/watch-connectivity
 
+      - name: Run Watch outbox retry tests
+        run: swift test --package-path apps/mobile/targets/watch
+
       - name: Generate iOS native project
         working-directory: apps/mobile
         env:

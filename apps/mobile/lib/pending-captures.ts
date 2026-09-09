@@ -41,6 +41,7 @@ export type PendingCapture = {
     startDate?: string;
     // Which native writer queued the item; absent for the iOS Shortcut.
     source?: string;
+    outboxRetried?: true;
 };
 
 // A check-off from the Android widget ring (#1173 phase 2): the task is
@@ -61,6 +62,7 @@ export type PendingAudioCapture = {
     title?: string;
     createdAt?: string;
     source?: string;
+    outboxRetried?: true;
 };
 
 export type PendingDefer = {
@@ -124,6 +126,13 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
     if (!id) return null;
     const createdAt = trimOrUndefined(record.createdAt);
     const source = trimOrUndefined(record.source);
+    const hasOutboxRetryMarker = Object.prototype.hasOwnProperty.call(record, 'outboxRetried');
+    if (hasOutboxRetryMarker && (
+        record.outboxRetried !== true
+        || source !== 'apple-watch'
+        || (record.kind !== 'text' && record.kind !== 'audio')
+    )) return null;
+    const outboxRetried = record.outboxRetried === true ? true : undefined;
     if (record.kind === 'complete') {
         const taskId = trimOrUndefined(record.taskId);
         if (!taskId) return null;
@@ -148,6 +157,7 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
             ...(title ? { title } : {}),
             ...(createdAt ? { createdAt } : {}),
             ...(source ? { source } : {}),
+            ...(outboxRetried ? { outboxRetried } : {}),
         };
     }
     if (record.kind === 'defer') {
@@ -184,6 +194,7 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
         ...(dueDate ? { dueDate } : {}),
         ...(startDate ? { startDate } : {}),
         ...(source ? { source } : {}),
+        ...(outboxRetried ? { outboxRetried } : {}),
     };
 }
 
@@ -244,10 +255,19 @@ type IngestDeps = {
 const WATCH_CAPTURE_RELEASE_CHECK = 'v1.3.0/watch-capture';
 const WATCH_AUDIO_READY_RELEASE_CHECK = 'v1.3.0/watch-audio-ready';
 const WATCH_COMMAND_RELEASE_CHECK = 'v1.3.0/watch-command';
+const WATCH_OUTBOX_RETRY_RELEASE_CHECK = 'v1.3.0/watch-outbox-retry';
 const ANDROID_QUICK_CAPTURE_AUDIO_RELEASE_CHECK = 'v1.3.0/android-quick-capture-audio';
 const APPLE_WATCH_SOURCE = 'apple-watch';
 const QUICK_CAPTURE_AUDIO_DIRECTORY = 'quick-capture-audio';
 const UUID_PATTERN = /^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i;
+
+function logWatchOutboxRetry(kind: 'text' | 'audio', capture: PendingCapture | PendingAudioCapture): void {
+    if (capture.outboxRetried !== true) return;
+    void logInfo('Watch outbox retry ingested', {
+        scope: 'capture',
+        extra: { releaseCheck: WATCH_OUTBOX_RETRY_RELEASE_CHECK, kind, outcome: 'created' },
+    });
+}
 
 function hasRawDotSegment(fileUri: string): boolean {
     if (!/^file:/i.test(fileUri)) return false;
@@ -769,6 +789,7 @@ export async function ingestPendingCaptures({
                     scope: 'capture',
                     extra: { releaseCheck: WATCH_CAPTURE_RELEASE_CHECK, kind: 'audio', outcome: 'created' },
                 });
+                logWatchOutboxRetry('audio', capture);
             }
             continue;
         }
@@ -803,6 +824,7 @@ export async function ingestPendingCaptures({
                 scope: 'capture',
                 extra: { releaseCheck: WATCH_CAPTURE_RELEASE_CHECK, kind: 'text', outcome: 'created' },
             });
+            logWatchOutboxRetry('text', capture);
         }
     }
     return ingested;

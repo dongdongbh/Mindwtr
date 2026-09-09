@@ -33,6 +33,28 @@ final class MindwtrWatchPayloadValidatorTests: XCTestCase {
         XCTAssertThrowsError(try MindwtrWatchPayloadValidator.validateTransport(payload))
     }
 
+    func testAcceptsOnlyStrictTrueOutboxRetryMarkersOnCaptures() throws {
+        for kind in ["text", "audio"] {
+            var payload = basePayload(kind: kind)
+            if kind == "text" { payload["title"] = "Retry" }
+            payload["outboxRetried"] = true
+
+            let validated = try MindwtrWatchPayloadValidator.validateTransport(payload)
+            XCTAssertEqual(validated.queuePayload["outboxRetried"] as? Bool, true)
+
+            let invalidMarkers: [Any] = [NSNumber(value: 1), "true", false]
+            for invalidMarker in invalidMarkers {
+                payload["outboxRetried"] = invalidMarker
+                XCTAssertThrowsError(try MindwtrWatchPayloadValidator.validateTransport(payload))
+            }
+        }
+
+        var command = basePayload(kind: "complete")
+        command["taskId"] = "task-1"
+        command["outboxRetried"] = true
+        XCTAssertThrowsError(try MindwtrWatchPayloadValidator.validateTransport(command))
+    }
+
     func testRejectsUnknownFieldsAndProtocolKinds() {
         var payload = basePayload(kind: "text")
         payload["title"] = "Capture"

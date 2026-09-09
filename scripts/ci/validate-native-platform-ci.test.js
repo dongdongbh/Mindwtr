@@ -81,6 +81,8 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(iosJob).toContain("-sdk watchsimulator");
   expect(iosJob).toContain('MINDWTR_WATCH_ENABLED: "true"');
   expect(iosJob).toContain("swift test --package-path apps/mobile/modules/watch-connectivity");
+  expect(iosJob).toContain("name: Run Watch outbox retry tests");
+  expect(iosJob).toContain("swift test --package-path apps/mobile/targets/watch");
   expect(iosJob).toContain("name: Validate generated Watch Xcode project");
   expect(iosJob).toContain("name: Typecheck Watch receiver against the iOS SDK");
   expect(iosJob).toContain("apps/mobile/modules/watch-connectivity/ios/MindwtrWatchConnectivityReceiver.swift");

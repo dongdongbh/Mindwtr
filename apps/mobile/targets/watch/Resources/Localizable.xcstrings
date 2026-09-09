@@ -5,6 +5,7 @@
     "Couldn’t save this item. Please try again." : {},
     "Couldn’t start recording." : {},
     "Delivered" : {},
+    "Edit capture" : {},
     "Mindwtr timer finished" : {},
     "Please shorten this capture before sending." : {},
     "Ready to focus?" : {},
@@ -12,6 +13,8 @@
     "Recording saved for delivery" : {},
     "Recording saved. It will retry when the connection changes." : {},
     "Recording stopped unexpectedly." : {},
+    "Resend capture" : {},
+    "Retry recording" : {},
     "Saved for delivery" : {},
     "Sent" : {},
     "Time for a break." : {}
