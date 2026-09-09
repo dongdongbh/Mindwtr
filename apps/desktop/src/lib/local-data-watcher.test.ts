@@ -198,6 +198,25 @@ afterEach(async () => {
 });
 
 describe('local-data-watcher', () => {
+    it('reuses property ordering for repeated task shapes while marking a local write', () => {
+        const data: AppData = {
+            ...emptyData(),
+            tasks: Array.from({ length: 500 }, (_, index) => ({
+                id: `task-${index}`, title: 'Synthetic task', status: 'inbox', tags: [], contexts: [],
+                createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+            })),
+        };
+        const sort = vi.spyOn(Array.prototype, 'sort');
+        try {
+            markLocalWrite(data);
+            // Root, settings, task property names and the ID-keyed task array;
+            // not one property-name sort for every task.
+            expect(sort.mock.calls.length).toBeLessThan(10);
+        } finally {
+            sort.mockRestore();
+        }
+    });
+
     it('retries only the watcher channel whose registration failed', async () => {
         const dataUnwatch = vi.fn();
         const sqliteUnwatch = vi.fn();
@@ -1142,6 +1161,24 @@ describe('local-data-watcher', () => {
         nowMs = 2200;
         await flushScheduledTimers();
 
+        expect(saveCalls).toHaveLength(0);
+        expect(__localDataWatcherTestUtils.getPendingSelfWritePayloadLengthForTests()).toBe(0);
+    });
+
+    it('retains an immutable mark despite later edits and diagnostic failures', async () => {
+        const written: AppData = {
+            ...emptyData(),
+            tasks: [{ id: 'written', title: 'Before edit', status: 'inbox', tags: [], contexts: [],
+                createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
+        };
+        externalData = structuredClone(written);
+        __localDataWatcherTestUtils.setDependenciesForTests({
+            logInfo: () => { throw new Error('diagnostics unavailable'); },
+        });
+        markLocalWrite(written);
+        written.tasks[0].title = 'After edit';
+        nowMs = 2200;
+        await __localDataWatcherTestUtils.triggerChangeForTests();
         expect(saveCalls).toHaveLength(0);
         expect(__localDataWatcherTestUtils.getPendingSelfWritePayloadLengthForTests()).toBe(0);
     });

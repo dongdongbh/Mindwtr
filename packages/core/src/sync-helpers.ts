@@ -319,6 +319,26 @@ const isIdKeyed = (item: unknown): item is { id: string } => (
     !!item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string'
 );
 
+type SyncPropertyOrder = { original: string[]; sorted: string[] };
+
+// Most entities share a handful of field layouts. Reuse only their property
+// order, never values or serialized entities. The small cache belongs to one
+// comparison traversal, so edits, new fields and subsequent calls cannot see
+// stale data. Exact enumeration-order matching also avoids delimiter collisions.
+const getSortedSyncProperties = (value: object, orders: SyncPropertyOrder[]): string[] => {
+    const properties = Object.keys(value);
+    for (const order of orders) {
+        if (properties.length === order.original.length
+            && properties.every((property, index) => property === order.original[index])) {
+            return order.sorted;
+        }
+    }
+    const sorted = properties.slice().sort();
+    if (orders.length === 8) orders.shift();
+    orders.push({ original: properties, sorted });
+    return sorted;
+};
+
 // Lists of id-keyed records (entities, attachments, checklist items) compare
 // by content, not position. A merge emits the local side's order first, so two
 // devices that added records concurrently hold the same set in different
@@ -333,9 +353,9 @@ const isIdKeyed = (item: unknown): item is { id: string } => (
 // though this comparison can no longer see the position change directly. A
 // hypothetical path that reordered checklist items without touching the
 // owning task would NOT sync — nothing here would notice.
-const normalizeForSyncComparison = (value: unknown): unknown => {
+const normalizeForSyncComparison = (value: unknown, orders: SyncPropertyOrder[] = []): unknown => {
     if (Array.isArray(value)) {
-        const items = value.map((item) => normalizeForSyncComparison(item));
+        const items = value.map((item) => normalizeForSyncComparison(item, orders));
         if (items.length > 1 && items.every(isIdKeyed)) {
             items.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
         }
@@ -344,8 +364,8 @@ const normalizeForSyncComparison = (value: unknown): unknown => {
     if (value && typeof value === 'object') {
         const record = value as Record<string, unknown>;
         const normalized: Record<string, unknown> = {};
-        for (const key of Object.keys(record).sort()) {
-            normalized[key] = normalizeForSyncComparison(record[key]);
+        for (const key of getSortedSyncProperties(record, orders)) {
+            normalized[key] = normalizeForSyncComparison(record[key], orders);
         }
         return normalized;
     }

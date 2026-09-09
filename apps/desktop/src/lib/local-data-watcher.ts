@@ -183,6 +183,7 @@ export const createLocalDataWatcherController = (
     let sqliteSuppressedSelfWriteEvents = 0;
     let lastKnownHash = '';
     let pendingSelfWrites: Array<{ payload: string; expiresAt: number }> = [];
+    let selfWriteSerializationLogged = false;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     let sqliteDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     let ignoreDrainTimer: ReturnType<typeof setTimeout> | null = null;
@@ -982,6 +983,16 @@ export const createLocalDataWatcherController = (
                 if (pendingSelfWrites.length > MAX_PENDING_SELF_WRITES) {
                     pendingSelfWrites = pendingSelfWrites.slice(-MAX_PENDING_SELF_WRITES);
                 }
+                if (!selfWriteSerializationLogged) {
+                    selfWriteSerializationLogged = true;
+                    try {
+                        localDataWatcherDependencies.logInfo('Self-write snapshot prepared with bounded property ordering', {
+                            releaseCheck: 'v1.3.0/watcher-property-order',
+                        });
+                    } catch {
+                        // Diagnostics must not discard the retained self-write.
+                    }
+                }
             } catch {
                 pendingSelfWrites = [];
             }
@@ -1279,6 +1290,7 @@ export const createLocalDataWatcherController = (
             lastKnownHash = '';
             pendingSelfWrites = [];
             mergeInFlight = null;
+            selfWriteSerializationLogged = false;
             mergeInFlightGeneration = null;
             sqliteRefreshInFlight = null;
             sqliteRefreshInFlightGeneration = null;

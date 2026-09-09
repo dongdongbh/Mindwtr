@@ -13,6 +13,7 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // watcher-property-order reuses releaseCheck below.
     // storage-baseline-equality reuses releaseCheck below.
     // sqlite-snapshot-append reuses releaseCheck and count below.
     // sqlite-snapshot-statements reuses releaseCheck and count below.

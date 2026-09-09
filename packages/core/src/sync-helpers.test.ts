@@ -11,10 +11,67 @@ import {
     normalizeCloudUrl,
     normalizeWebdavUrl,
     sanitizeAppDataForRemote,
+    toStableSyncJson,
 } from './sync-helpers';
 import { GTD_SYNCED_FIELD_KEYS, type GtdSyncedFieldKey } from './settings-options';
 import { mergeSettingsForSync } from './sync-merge-settings';
 import type { AppData, Attachment, GtdSettings } from './types';
+
+describe('stable sync property-order reuse', () => {
+    // Original serializer, kept as a byte-for-byte compatibility oracle. These
+    // bytes drive self-write detection and sync fingerprints across old clients.
+    const originalNormalize = (value: unknown): unknown => {
+        if (Array.isArray(value)) {
+            const items = value.map(originalNormalize);
+            if (items.length > 1 && items.every((item) => item && typeof item === 'object'
+                && typeof (item as { id?: unknown }).id === 'string')) {
+                items.sort((left, right) => {
+                    const a = (left as { id: string }).id;
+                    const b = (right as { id: string }).id;
+                    return a < b ? -1 : a > b ? 1 : 0;
+                });
+            }
+            return items;
+        }
+        if (value && typeof value === 'object') {
+            const result: Record<string, unknown> = {};
+            for (const property of Object.keys(value).sort()) {
+                result[property] = originalNormalize((value as Record<string, unknown>)[property]);
+            }
+            return result;
+        }
+        return value;
+    };
+
+    it('preserves exact bytes across nested shapes, unusual names, and cache eviction', () => {
+        const values: unknown[] = [undefined, null, NaN, Infinity, -0, true, '', 'text',
+            [undefined, null], ['b', 'a'], [{ id: 'b' }, { id: 'a' }],
+            [{ id: 'same', value: 2 }, { id: 'same', value: 1 }],
+            new Date('2026-01-01'), JSON.parse('{"__proto__":{"id":"a"},"constructor":2}')];
+        for (let round = 0; round < 30; round++) {
+            const records = values.map((value, index) => Object.fromEntries([
+                ['z', value], [`field-${index % (round + 1)}`, index], ['id', `id-${index % 3}`],
+                ['a,b', { 'a': 1, 'b,c': value }], ['a', { 'a,b': 1, 'c': value }],
+                ['10', 10], ['2', 2],
+            ].slice().reverse()));
+            const input = { records, repeated: records.slice().reverse(), values };
+            expect(toStableSyncJson(input)).toBe(JSON.stringify(originalNormalize(input)));
+        }
+    });
+
+    it('reuses no entity values and leaves inputs unchanged across edits', () => {
+        const first = { z: 1, a: { id: 'b', title: 'first' } };
+        const second = { z: 2, a: { id: 'a', title: 'second' } };
+        const before = structuredClone([first, second]);
+        expect(toStableSyncJson([first, second])).toBe(JSON.stringify(originalNormalize(before)));
+        expect([first, second]).toEqual(before);
+        first.a.title = 'edited';
+        const withNewField = { ...second, added: 'new field' };
+        expect(toStableSyncJson([first, withNewField]))
+            .toBe(JSON.stringify(originalNormalize([first, withNewField])));
+        expect(toStableSyncJson([first, withNewField])).not.toBe(toStableSyncJson(before));
+    });
+});
 
 // One representative, distinct-from-default value per gtd synced field, used
 // to drive the allowlist-drift guard test below without hardcoding the field

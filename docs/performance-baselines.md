@@ -214,6 +214,14 @@ Measured example and outstanding save-path finding:
 
 ## Storage and sync processing
 
+For desktop self-write marking, run `bun scripts/performance/watcher-mark.ts`.
+It measures the actual watcher controller with a synthetic 10,000-task snapshot,
+without native calls or timers. `SIZE=1..50000` and `RUNS=3..100` override the
+defaults (10,000 and 7); one warm-up is excluded. JSON stdout includes every
+sample and the median. Run separately from other workloads. This isolates
+snapshot preparation, not durable saving or UI latency.
+See [the property-order measurement and compatibility checks](performance-watcher-property-order-2026-09.md).
+
 For the desktop pre-save comparison identified by native capture sampling, run
 `bun scripts/performance/save-baseline.ts`. It compares a 10,000-task cloned
 synthetic snapshot with a new capture, asserting retained observed IDs and an
