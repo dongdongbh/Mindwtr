@@ -421,6 +421,18 @@ describe('ios-watch', () => {
     expect(audioRecorderSource).toContain('hasPendingRecording = !saved');
     expect(viewsSource).toContain('"Retry recording"');
     expect(viewsSource).toContain('"Resend capture"');
+    const freshTypeControl = viewsSource.slice(
+      viewsSource.indexOf('TextFieldLink'),
+      viewsSource.indexOf('if model.rejectedCaptureDraft != nil'),
+    );
+    expect(freshTypeControl).toContain('.disabled(model.rejectedCaptureDraft != nil)');
+    const rejectedDraftRetry = viewsSource.slice(
+      viewsSource.indexOf('if model.rejectedCaptureDraft != nil'),
+      viewsSource.indexOf('if let message = audioRecorder.errorMessage'),
+    );
+    expect(rejectedDraftRetry).toContain('TextField(');
+    expect(rejectedDraftRetry).toContain('Button("Resend capture")');
+    expect(rejectedDraftRetry).not.toContain('.disabled(');
     expect(connectivitySource).toContain('session.activationState == .activated');
     expect(connectivitySource).toContain('outstandingUserInfoTransfers');
     expect(connectivitySource).toContain('receipt["kind"] as? String == "receipt"');

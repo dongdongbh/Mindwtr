@@ -74,6 +74,7 @@ private struct MindwtrCaptureView: View {
                     Label("Type", systemImage: "keyboard")
                 } onSubmit: { model.capture(text: $0) }
                 .buttonStyle(.bordered)
+                .disabled(model.rejectedCaptureDraft != nil)
 
                 if model.rejectedCaptureDraft != nil {
                     TextField(
