@@ -417,6 +417,33 @@ describe('ingestPendingCaptures', () => {
         expect(outcomes).toEqual(['completed', 'already-done', 'missing']);
     });
 
+    it.each([
+        { label: 'archived', props: {} },
+        { label: 'cancelled', props: { cancelledAt: '2026-09-07T12:00:00.000Z' } },
+        { label: 'archived recurring', props: { recurrence: { rule: 'daily' } } },
+    ])('keeps $label history intact when an Android widget completion arrives late', async ({ props }) => {
+        oneFile('complete.json', { kind: 'complete', id: 'late-completion', taskId: 'closed', source: 'android-widget' });
+        const closedTask = { id: 'closed', title: 'Closed', status: 'archived', ...props } as Task;
+        const addTask = addTaskMock();
+        const flushPendingSave = vi.fn(async () => undefined);
+
+        expect(await ingestPendingCaptures({
+            addTask, updateTask, addProject, projects: [], areas: [], tasks: [closedTask],
+            people: [], settings: emptySettings, flushPendingSave,
+        })).toBe(1);
+
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(addTask).not.toHaveBeenCalled();
+        expect(flushPendingSave).toHaveBeenCalledOnce();
+        expect(fileSystemMocks.deleteAsync).toHaveBeenCalledOnce();
+        expect(flushPendingSave.mock.invocationCallOrder[0])
+            .toBeLessThan(fileSystemMocks.deleteAsync.mock.invocationCallOrder[0]);
+        expect(appLogMocks.logInfo).toHaveBeenCalledWith('Widget check-off ingested', {
+            scope: 'capture',
+            extra: { releaseCheck: 'v1.3.0/widget-terminal-preserved', outcome: 'terminal' },
+        });
+    });
+
     it('refreshes task state between Watch commands and treats stale terminal commands as no-ops', async () => {
         const tasks = [
             { id: 'open', title: 'Open', status: 'next' } as Task,

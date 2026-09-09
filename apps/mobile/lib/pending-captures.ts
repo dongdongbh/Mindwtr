@@ -416,19 +416,18 @@ async function assembleCaptureTask(
     }
 }
 
-// At-least-once: a task already done, deleted or unknown is a no-op and the
+// At-least-once: a task already done, archived, deleted or unknown is a no-op and the
 // file still goes away. The success line is the phase-2 release check.
 async function applyPendingCompletion(
     completion: PendingCompletion,
     { updateTask, tasks, getTasks }: Pick<IngestDeps, 'updateTask' | 'tasks' | 'getTasks'>,
 ): Promise<'completed' | 'already-done' | 'terminal' | 'missing' | null> {
     const task = (getTasks?.() ?? tasks).find((candidate) => candidate.id === completion.taskId);
-    const watchTerminal = completion.source === 'apple-watch' && task?.status === 'archived';
     const outcome = !task || task.deletedAt
         ? 'missing'
         : task.status === 'done'
             ? 'already-done'
-            : watchTerminal
+            : task.status === 'archived'
                 ? 'terminal'
                 : 'completed';
     if (outcome === 'completed') {
@@ -538,6 +537,11 @@ export async function ingestPendingCaptures({
                 void logInfo('Watch command ingested', {
                     scope: 'capture',
                     extra: { releaseCheck: WATCH_COMMAND_RELEASE_CHECK, kind: 'complete', outcome },
+                });
+            } else if (outcome === 'terminal') {
+                void logInfo('Widget check-off ingested', {
+                    scope: 'capture',
+                    extra: { releaseCheck: 'v1.3.0/widget-terminal-preserved', outcome },
                 });
             } else {
                 void logInfo('Widget check-off ingested', {
