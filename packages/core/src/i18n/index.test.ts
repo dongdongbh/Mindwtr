@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { formatI18nTemplate, getEnglishI18nValue, getI18nKeyForEnglishText, getLocaleCoverageTier, getTranslator, resolveI18nText } from './index';
 import { loadTranslations } from './i18n-loader';
+import { LOCALES, MIXED_ENGLISH_COVERAGE_CEILING, type LocaleDescriptor } from './i18n-locales';
+import { en } from './locales/en';
 
 describe('formatI18nTemplate', () => {
     it('replaces repeated named placeholders wherever translators place them', () => {
@@ -42,12 +44,20 @@ describe('getLocaleCoverageTier', () => {
         expect(getLocaleCoverageTier('kl')).toBe('full');
     });
 
-    it('tracks the floor rather than a hand-kept list', () => {
-        // vi sits just under 'all' but far above the ceiling; if this ever flips,
-        // a floor moved and the label follows it automatically.
-        expect(getLocaleCoverageTier('vi')).toBe('full');
-        // de reached full key parity via override translations without an 'all' commitment.
-        expect(getLocaleCoverageTier('de')).toBe('full');
+    it('tracks a numeric floor across the coverage threshold', () => {
+        // Real locales can cross the threshold when the English dictionary grows.
+        // Exercise both sides with a fixture instead of pinning a locale's label.
+        const locales = LOCALES as Record<string, LocaleDescriptor>;
+        const code = 'test-coverage';
+        const minimumFullFloor = Math.ceil(Object.keys(en).length * MIXED_ENGLISH_COVERAGE_CEILING / 100);
+        locales[code] = { ...LOCALES.vi, translatedKeyFloor: minimumFullFloor - 1 };
+        try {
+            expect(getLocaleCoverageTier(code)).toBe('partial');
+            locales[code].translatedKeyFloor = minimumFullFloor;
+            expect(getLocaleCoverageTier(code)).toBe('full');
+        } finally {
+            delete locales[code];
+        }
     });
 });
 
