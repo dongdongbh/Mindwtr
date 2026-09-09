@@ -9,6 +9,7 @@ import {
     getMergeComparableSignature,
     setSignatureCacheValidationForTests,
     toComparableSignature,
+    toComparableValue,
 } from './sync-signatures';
 import type { Area, Project, Section, Task } from './types';
 
@@ -59,6 +60,24 @@ const project = (updates: Partial<Project> = {}): Project => ({
 });
 
 describe('sync signatures', () => {
+    it('sorts only present comparable fields, not the absent normalized task schema', () => {
+        const normalized = normalizeTaskForContentComparison(task());
+        const originalSort = Array.prototype.sort;
+        let sortedFields = 0;
+        const spy = vi.spyOn(Array.prototype, 'sort').mockImplementation(function (this: unknown[], compare) {
+            sortedFields += this.length;
+            return originalSort.call(this, compare);
+        });
+        let signature: unknown;
+        try {
+            signature = toComparableValue(normalized);
+        } finally {
+            spy.mockRestore();
+        }
+        expect(signature).toEqual({ id: 'task-1', status: 'next', title: 'Task' });
+        expect(sortedFields).toBeLessThanOrEqual(3);
+    });
+
     it('treats default, undefined, null, and missing project taskSortBy as equal', () => {
         const missing = toComparableSignature(normalizeProjectForContentComparison(project()));
         const undefinedValue = toComparableSignature(normalizeProjectForContentComparison(project({ taskSortBy: undefined })));

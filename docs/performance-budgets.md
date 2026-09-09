@@ -36,6 +36,14 @@ Budgets are intentionally explicit and conservative. They should only change in 
 | Focus derivation | 40ms | 500ms | 2500ms | 50k <= 12x 10k |
 | Search/filter/sort derivation | 30ms | 130ms | 650ms | 50k <= 12x 10k |
 | Production sync-change fingerprint | 20ms | 80ms | 350ms | 50k <= 8x 10k |
+| Full snapshot merge | 150ms | 1500ms | 7500ms | 50k <= 8x 10k |
+
+The full-merge gate measures normalization, conflict resolution, attachment reconciliation,
+and reference repair against an aligned snapshot, using fresh object identities for both
+inputs on every attempt. Fixture cloning and result assertions are outside the timed region.
+It takes the best of three attempts and verifies unchanged data, zero task conflicts, and
+zero tombstone repairs. `bun run perf:storage` additionally reports unchanged and one-task
+changed merges. These are CPU measurements, not network or end-to-end sync latency.
 
 The suite also runs the real Zustand `updateTask` mutation and incremental persistence path at every dataset size. Its absolute budgets are 100ms at 1k, 250ms at 10k, and 1000ms at 50k, with a maximum 12x growth from 10k to 50k. Like the pure hot-path rows, this path uses the best of three measured runs to reduce runner and garbage-collection noise. Fingerprint cases assert both deterministic no-op behavior for aligned data and sensitivity to a synced revision change.
 

@@ -1,5 +1,5 @@
 import type { AppData, Attachment, Area, Person, Project, Task } from './types';
-import { logWarn } from './logger';
+import { logInfo, logWarn } from './logger';
 import {
     type ClockSkewWarning,
     type ConflictReason,
@@ -1344,12 +1344,24 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
         && remoteData.areas.length === 0
         && (remoteData.people?.length ?? 0) === 0
         && Object.keys(remoteData.settings ?? {}).length === 0;
-    const mergeResult: MergeResult = io.skipEmptyRemoteMerge?.() === true && remoteIsEmpty
+    const skipMerge = io.skipEmptyRemoteMerge?.() === true && remoteIsEmpty;
+    const mergeStartedAt = performance.now();
+    const mergeResult: MergeResult = skipMerge
         ? { data: localData, stats: createLocalOnlyMergeStats(localData) }
         : mergeAppDataWithStats(localData, remoteData, {
             nowIso,
             preferIncomingAttachmentCloudKeys: io.preferIncomingAttachmentCloudKeys,
         });
+    if (!skipMerge) {
+        logInfo('Full sync merge completed', {
+            scope: 'sync',
+            context: {
+                releaseCheck: 'v1.3.0/sync-signature-pruning',
+                elapsedMs: Math.round(performance.now() - mergeStartedAt),
+                count: mergeResult.data.tasks.length,
+            },
+        });
+    }
     const mergeSummary = summarizeMergeStats(mergeResult.stats);
     const conflictCount = mergeSummary.conflicts;
     const nextSyncStatus: SyncCycleResult['status'] = conflictCount > 0 ? 'conflict' : 'success';

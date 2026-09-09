@@ -191,10 +191,17 @@ export const toComparableValue = (value: unknown, options?: { includeIgnoredKeys
     if (value && typeof value === 'object') {
         const record = value as Record<string, unknown>;
         const comparable: Record<string, unknown> = {};
-        for (const key of Object.keys(record).sort()) {
-            if (SIGNATURE_OPAQUE_KEYS.has(key)) continue;
-            if (!includeIgnoredKeys && CONTENT_DIFF_IGNORED_KEYS.has(key)) continue;
-            if (!includeIgnoredKeys && key === 'uri' && record.kind === 'file') continue;
+        // Normalized entities carry the full optional schema, mostly absent.
+        // Discard fields that cannot contribute before sorting their names:
+        // the resulting byte order is identical, without sorting dozens of
+        // undefined/ignored keys for every entity and every signature flavor.
+        const keys = Object.keys(record).filter((key) => (
+            record[key] !== undefined && record[key] !== null
+            && !SIGNATURE_OPAQUE_KEYS.has(key)
+            && (includeIgnoredKeys || !CONTENT_DIFF_IGNORED_KEYS.has(key))
+            && (includeIgnoredKeys || key !== 'uri' || record.kind !== 'file')
+        ));
+        for (const key of keys.sort()) {
             const comparableValue = toComparableValue(record[key], options);
             if (comparableValue === undefined || comparableValue === null) continue;
             comparable[key] = comparableValue;
