@@ -2347,6 +2347,20 @@ fn sanitize_dangling_container_references(data: &mut Value) -> Vec<(&'static str
     let project_ids = collect_ids(data, "projects");
     let live_area_ids = collect_live_ids(data, "areas");
     let live_project_ids = collect_live_ids(data, "projects");
+    let archived_project_ids = data
+        .get("projects")
+        .and_then(Value::as_array)
+        .map(|projects| {
+            projects
+                .iter()
+                .filter(|project| {
+                    !entity_is_deleted(project)
+                        && project.get("status").and_then(Value::as_str) == Some("archived")
+                })
+                .filter_map(|project| optional_id(project.get("id")))
+                .collect::<std::collections::HashSet<_>>()
+        })
+        .unwrap_or_default();
     let repair_rev_by = reference_repair_identity(data);
     let repair_now = reference_repair_timestamp();
     let mut issues: Vec<(&'static str, String, String)> = Vec::new();
@@ -2436,6 +2450,30 @@ fn sanitize_dangling_container_references(data: &mut Value) -> Vec<(&'static str
                 .collect::<std::collections::HashMap<_, _>>()
         })
         .unwrap_or_default();
+    let archived_section_projects = data
+        .get("sections")
+        .and_then(Value::as_array)
+        .map(|sections| {
+            sections
+                .iter()
+                .filter_map(|section| {
+                    let archived_at = section
+                        .get("projectArchivedAt")
+                        .and_then(Value::as_str)
+                        .filter(|timestamp| !timestamp.is_empty())?;
+                    if section.get("deletedAt").and_then(Value::as_str) != Some(archived_at) {
+                        return None;
+                    }
+                    let id = optional_id(section.get("id"))?;
+                    let project_id = optional_id(section.get("projectId"))?;
+                    archived_project_ids
+                        .contains(&project_id)
+                        .then_some((id, project_id))
+                })
+                .collect::<std::collections::HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let mut preserved_archived_section_references = 0usize;
 
     if let Some(tasks) = data.get_mut("tasks").and_then(|v| v.as_array_mut()) {
         for task in tasks {
@@ -2471,16 +2509,26 @@ fn sanitize_dangling_container_references(data: &mut Value) -> Vec<(&'static str
                 } else {
                     live_section_projects.get(&section_id)
                 };
-                if section_project_id.is_none()
+                let is_archived_section_reference =
+                    task_project_id.as_ref().is_some_and(|project_id| {
+                        archived_section_projects.get(&section_id) == Some(project_id)
+                    }) && matches!(
+                        task.get("status").and_then(Value::as_str),
+                        Some("done" | "archived" | "reference")
+                    );
+                if (section_project_id.is_none()
                     || task_project_id
                         .as_ref()
-                        .is_some_and(|project_id| section_project_id != Some(project_id))
+                        .is_some_and(|project_id| section_project_id != Some(project_id)))
+                    && !is_archived_section_reference
                 {
                     issues.push(("task.sectionId", id.clone(), section_id));
                     if let Some(task) = task.as_object_mut() {
                         task.remove("sectionId");
                     }
                     changed = true;
+                } else if section_project_id.is_none() && is_archived_section_reference {
+                    preserved_archived_section_references += 1;
                 }
             }
             if let Some(area_id) = optional_id(task.get("areaId")) {
@@ -2501,6 +2549,12 @@ fn sanitize_dangling_container_references(data: &mut Value) -> Vec<(&'static str
                 stamp_reference_repair(task, &repair_now, &repair_rev_by, false);
             }
         }
+    }
+
+    if preserved_archived_section_references > 0 {
+        log::info!(
+            "Archived project section references preserved extra.releaseCheck=v1.3.0/archive-section-preserved count={preserved_archived_section_references}"
+        );
     }
 
     issues
@@ -9217,6 +9271,176 @@ mod tests {
                 .iter()
                 .any(|task| task["id"] == "task-2"));
         }
+    }
+
+    #[test]
+    fn archived_project_sections_preserve_child_restore_identity() {
+        let at = "2026-09-01T00:00:00.000Z";
+        let mut data = serde_json::json!({
+            "tasks": [
+                {"id":"cancelled","title":"C","status":"archived","cancelledAt":at,"projectId":"p","sectionId":"s","statusBeforeProjectArchive":"next","projectArchivedAt":at,"updatedAt":at,"rev":2},
+                {"id":"completed","title":"D","status":"done","completedAt":at,"projectId":"p","sectionId":"s","statusBeforeProjectArchive":"next","projectArchivedAt":at,"updatedAt":at,"rev":2},
+                {"id":"reference","title":"R","status":"reference","projectId":"p","sectionId":"s","updatedAt":at,"rev":1}
+            ],
+            "projects":[{"id":"p","status":"archived","cancelledAt":at}],
+            "sections":[{"id":"s","projectId":"p","deletedAt":at,"projectArchivedAt":at,"updatedAt":at}],
+            "areas":[], "people":[], "settings":{"deviceId":"audit"}
+        });
+        let before = data.clone();
+
+        let issues = sanitize_dangling_container_references(&mut data);
+
+        assert!(
+            issues.is_empty(),
+            "archive-owned section links are valid: {issues:?}"
+        );
+        assert_eq!(
+            data, before,
+            "valid links must not change revision or edit timestamp"
+        );
+
+        let settled = data.clone();
+        assert!(sanitize_dangling_container_references(&mut data).is_empty());
+        assert_eq!(data, settled, "a second sanitization must be a no-op");
+    }
+
+    #[test]
+    fn archived_section_reference_exception_rejects_invalid_relationships() {
+        let at = "2026-09-01T00:00:00.000Z";
+        let fixtures = [
+            (
+                "non-archived project",
+                serde_json::json!({
+                    "tasks": [{"id":"t","status":"reference","projectId":"p","sectionId":"s","updatedAt":at,"rev":5}],
+                    "projects": [{"id":"p","status":"active"}],
+                    "sections": [{"id":"s","projectId":"p","deletedAt":at,"projectArchivedAt":at}],
+                    "areas":[], "people":[], "settings":{"deviceId":"audit"}
+                }),
+                true,
+            ),
+            (
+                "deleted archived project",
+                serde_json::json!({
+                    "tasks": [{"id":"t","status":"reference","projectId":"p","sectionId":"s","updatedAt":at,"rev":5}],
+                    "projects": [{"id":"p","status":"archived","deletedAt":at}],
+                    "sections": [{"id":"s","projectId":"p","deletedAt":at,"projectArchivedAt":at}],
+                    "areas":[], "people":[], "settings":{"deviceId":"audit"}
+                }),
+                false,
+            ),
+            (
+                "purged archived project",
+                serde_json::json!({
+                    "tasks": [{"id":"t","status":"reference","projectId":"p","sectionId":"s","updatedAt":at,"rev":5}],
+                    "projects": [{"id":"p","status":"archived","purgedAt":at}],
+                    "sections": [{"id":"s","projectId":"p","deletedAt":at,"projectArchivedAt":at}],
+                    "areas":[], "people":[], "settings":{"deviceId":"audit"}
+                }),
+                false,
+            ),
+            (
+                "deleted section without an archive marker",
+                serde_json::json!({
+                    "tasks": [{"id":"t","status":"done","projectId":"p","sectionId":"s","updatedAt":at,"rev":5}],
+                    "projects": [{"id":"p","status":"archived"}],
+                    "sections": [{"id":"s","projectId":"p","deletedAt":at}],
+                    "areas":[], "people":[], "settings":{"deviceId":"audit"}
+                }),
+                true,
+            ),
+            (
+                "cross-project link",
+                serde_json::json!({
+                    "tasks": [{"id":"t","status":"archived","projectId":"q","sectionId":"s","updatedAt":at,"rev":5}],
+                    "projects": [{"id":"p","status":"archived"},{"id":"q","status":"archived"}],
+                    "sections": [{"id":"s","projectId":"p","deletedAt":at,"projectArchivedAt":at}],
+                    "areas":[], "people":[], "settings":{"deviceId":"audit"}
+                }),
+                true,
+            ),
+            (
+                "actionable child",
+                serde_json::json!({
+                    "tasks": [{"id":"t","status":"next","projectId":"p","sectionId":"s","updatedAt":at,"rev":5}],
+                    "projects": [{"id":"p","status":"archived"}],
+                    "sections": [{"id":"s","projectId":"p","deletedAt":at,"projectArchivedAt":at}],
+                    "areas":[], "people":[], "settings":{"deviceId":"audit"}
+                }),
+                true,
+            ),
+        ];
+
+        for (label, mut data, keeps_project_link) in fixtures {
+            let project_id = data["tasks"][0]["projectId"].clone();
+
+            let issues = sanitize_dangling_container_references(&mut data);
+
+            assert!(
+                issues
+                    .iter()
+                    .any(|(kind, id, missing)| *kind == "task.sectionId"
+                        && id == "t"
+                        && missing == "s"),
+                "{label} must remain repairable: {issues:?}"
+            );
+            assert!(data["tasks"][0].get("sectionId").is_none(), "{label}");
+            if keeps_project_link {
+                assert_eq!(data["tasks"][0]["projectId"], project_id, "{label}");
+            } else {
+                assert!(data["tasks"][0].get("projectId").is_none(), "{label}");
+            }
+            assert_eq!(data["tasks"][0]["rev"], 6, "{label}");
+            assert_ne!(data["tasks"][0]["updatedAt"], at, "{label}");
+
+            let settled = data.clone();
+            assert!(sanitize_dangling_container_references(&mut data).is_empty());
+            assert_eq!(data, settled, "{label} repair must be idempotent");
+        }
+    }
+
+    #[test]
+    fn archived_project_section_references_survive_sqlite_round_trip() {
+        let at = "2026-09-01T00:00:00.000Z";
+        let created_at = "2026-08-01T00:00:00.000Z";
+        let input = serde_json::json!({
+            "tasks": [
+                {"id":"cancelled","title":"C","status":"archived","cancelledAt":at,"projectId":"p","sectionId":"s","statusBeforeProjectArchive":"next","projectArchivedAt":at,"tags":[],"contexts":[],"order":0,"createdAt":created_at,"updatedAt":at,"rev":2,"revBy":"audit"},
+                {"id":"completed","title":"D","status":"done","completedAt":at,"projectId":"p","sectionId":"s","statusBeforeProjectArchive":"next","projectArchivedAt":at,"tags":[],"contexts":[],"order":1,"createdAt":created_at,"updatedAt":at,"rev":2,"revBy":"audit"},
+                {"id":"reference","title":"R","status":"reference","projectId":"p","sectionId":"s","tags":[],"contexts":[],"order":2,"createdAt":created_at,"updatedAt":at,"rev":1,"revBy":"audit"}
+            ],
+            "projects":[{"id":"p","title":"P","status":"archived","cancelledAt":at,"color":"#000000","order":0,"tagIds":[],"createdAt":created_at,"updatedAt":at,"rev":2,"revBy":"audit"}],
+            "sections":[{"id":"s","title":"S","projectId":"p","order":0,"deletedAt":at,"projectArchivedAt":at,"createdAt":created_at,"updatedAt":at,"rev":2,"revBy":"audit"}],
+            "areas":[], "people":[], "settings":{"deviceId":"audit"}
+        });
+        let conn = Connection::open_in_memory().expect("database");
+        conn.execute_batch(SQLITE_SCHEMA).expect("schema");
+
+        let first = replace_data_in_transaction(&conn, input.clone()).expect("first save");
+        let reloaded = read_sqlite_data(&conn).expect("reload");
+
+        for task in input["tasks"].as_array().expect("input tasks") {
+            let id = task["id"].as_str().expect("task id");
+            let stored = reloaded["tasks"]
+                .as_array()
+                .expect("stored tasks")
+                .iter()
+                .find(|candidate| candidate["id"] == id)
+                .expect("stored task");
+            assert_eq!(stored.get("sectionId"), task.get("sectionId"));
+            assert_eq!(stored.get("updatedAt"), task.get("updatedAt"));
+            assert_eq!(stored.get("rev"), task.get("rev"));
+        }
+        assert_eq!(reloaded, first, "the canonical save must reload unchanged");
+        let section = &reloaded["sections"][0];
+        assert_eq!(section["deletedAt"], at);
+        assert_eq!(section["projectArchivedAt"], at);
+        assert_eq!(section["updatedAt"], at);
+
+        let second = replace_data_in_transaction(&conn, reloaded.clone()).expect("second save");
+        assert_eq!(
+            second, reloaded,
+            "the second save must not stamp any entity"
+        );
     }
 
     #[test]
