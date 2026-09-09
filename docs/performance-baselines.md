@@ -186,6 +186,29 @@ label if both flags are enabled). Compare only matching diagnostic cohorts, neve
 these samples against uninstrumented baselines. The probe is runner-injected,
 never bundled into the application, and only observes synthetic benchmark tasks.
 
+Add `NATIVE_JSC_PROFILE=1` to that diagnostic command to retain JavaScriptCore
+stack samples from the isolated Linux WebView. It requires the render probe and
+labels reports additionally with `jsc-capture-1000us`. Only the child benchmark
+environment exposes JSC's profiler hooks; the application binary is unchanged.
+Sampling starts in the probe-installation WebDriver entry, before Enter dispatch,
+and stops at the first matching-row animation-frame callback. A five-second timer
+stops sampling if the frame never arrives; a timed-out or missing/empty profile
+fails the run. This is not a hard real-time deadline if JavaScript is blocked.
+
+The runner dumps stacks after the measured interaction to `jsc-samples/` inside
+each isolated disk-backed profile, validates the 1 ms requested interval, and
+retains the relative filename and sample count. No sandbox disabling or system
+profiler installation is needed. The internal hooks are WebKit-version-dependent:
+unsupported hooks fail explicitly. See WebKit's
+[profiler implementation](https://github.com/WebKit/WebKit/blob/main/Source/JavaScriptCore/runtime/JSGlobalObject.cpp).
+Profiles can include script URLs and function names; keep them local. They are
+statistical JS stacks, not native Rust/I/O stacks, compositor traces, or an exact
+wall-time allocation. The sampling timestamp has its own clock: do not directly
+subtract it from the WebView's `performance.now()`. The window also includes the
+short pre-Enter dispatch period. Use only matched instrumented runs for comparison.
+
+See [the captured slow native interaction](performance-native-capture-sampling-2026-09.md).
+
 Measured example and outstanding save-path finding:
 [native desktop and Android scrolling baseline](performance-native-interactions-2026-09.md).
 

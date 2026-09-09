@@ -3,14 +3,14 @@
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { cpus, release } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fixture } from './fixture.mjs';
 import { summarizeNativeRun, validateNativeReadiness } from './native-desktop-report.mjs';
 import { waitForNativeSaveIdle } from './native-save-idle.mjs';
-import { installCaptureRenderProbe, validateCaptureRenderProbe } from './native-capture-probe.mjs';
+import { installCaptureRenderProbe, validateCaptureRenderProbe, validateCaptureSampling } from './native-capture-probe.mjs';
 
 assert.equal(process.platform, 'linux', 'Native desktop runner currently supports Linux only');
 const root = resolve(import.meta.dirname, '../..');
@@ -31,6 +31,9 @@ assert(process.env.DEVICE_LABEL, 'DEVICE_LABEL is required');
 const driverPath = process.env.TAURI_DRIVER ?? 'tauri-driver';
 const diagnostics = process.env.NATIVE_DIAGNOSTICS === '1';
 const renderProbe = process.env.NATIVE_RENDER_PROBE === '1';
+const sampleJS = process.env.NATIVE_JSC_PROFILE === '1';
+assert(!process.env.NATIVE_JSC_PROFILE || ['0', '1'].includes(process.env.NATIVE_JSC_PROFILE), 'NATIVE_JSC_PROFILE must be 0 or 1');
+assert(!sampleJS || renderProbe, 'NATIVE_JSC_PROFILE requires NATIVE_RENDER_PROBE=1');
 assert(!process.env.NATIVE_RENDER_PROBE || ['0', '1'].includes(process.env.NATIVE_RENDER_PROBE), 'NATIVE_RENDER_PROBE must be 0 or 1');
 const saveQueueMode = process.env.SAVE_QUEUE_MODE ?? 'idle';
 assert(['idle', 'early-session'].includes(saveQueueMode), 'SAVE_QUEUE_MODE must be idle or early-session');
@@ -68,6 +71,8 @@ for (const size of sizes) {
   for (let run = 0; run <= runs; run++) {
     const profileDir = mkdtempSync(join(directory, `${size}-${run}-`));
     const app = join(profileDir, 'mindwtr');
+    const samplingDir = join(profileDir, 'jsc-samples');
+    if (sampleJS) mkdirSync(samplingDir);
     copyFileSync(binary, app);
     assert.equal(hash(app), binaryHash, 'Binary changed before native launch');
     writeFileSync(join(profileDir, 'portable.txt'), 'Synthetic performance fixture only\n', { flag: 'wx' });
@@ -78,7 +83,10 @@ for (const size of sizes) {
     while (nativePort === port) nativePort = await availablePort();
     const driver = spawn('dbus-run-session', ['--', driverPath, '--port', String(port), '--native-port', String(nativePort)], {
       env: { ...process.env, XDG_CONFIG_HOME: join(profileDir, 'xdg-config'), XDG_DATA_HOME: join(profileDir, 'xdg-data'),
-        XDG_CACHE_HOME: join(profileDir, 'xdg-cache') },
+        XDG_CACHE_HOME: join(profileDir, 'xdg-cache'), ...(sampleJS ? {
+          TMPDIR: samplingDir, JSC_exposeProfilersOnGlobalObject: 'true',
+          JSC_useSamplingProfiler: 'false', JSC_sampleInterval: '1000',
+        } : {}) },
       stdio: ['ignore', 'pipe', 'pipe'], detached: true,
     });
     ownedDrivers.add(driver);
@@ -175,7 +183,7 @@ for (const size of sizes) {
       const title = `Native benchmark capture ${run}`;
       await request(`/session/${session}/element/${input}/value`, { text: title });
       if (saveQueueMode === 'idle') sample.saveIdle.beforeCapture = await waitForSaves();
-      if (renderProbe) await execute(`(${installCaptureRenderProbe.toString()})(arguments[0], arguments[1])`, captureSelector, title);
+      if (renderProbe) await execute(`(${installCaptureRenderProbe.toString()})(arguments[0], arguments[1], arguments[2])`, captureSelector, title, sampleJS);
       const captureStart = performance.now();
       await request(`/session/${session}/element/${input}/value`, { text: '\uE007' });
       await until(() => execute('return [...document.querySelectorAll("[data-task-id]")].some(el=>el.textContent.includes(arguments[0])&&el.getClientRects().length>0)', title));
@@ -199,6 +207,15 @@ for (const size of sizes) {
         await until(() => execute('return Number.isFinite(window.__nativeCaptureRender?.frameMs)'));
         sample.renderProbe = await execute('return window.__nativeCaptureRender');
         sample.renderTimings = validateCaptureRenderProbe(sample.renderProbe);
+        if (sampleJS) {
+          assert(!sample.renderProbe.samplingTimedOut, 'JSC capture sampling timed out');
+          assert(Number.isFinite(sample.renderProbe.samplingStopMs), 'JSC sampling did not stop');
+          await execute('window.__dumpAndClearSamplingProfilerSamples("mindwtr-capture-")');
+          const files = readdirSync(samplingDir).filter(name => name.startsWith('mindwtr-capture-'));
+          assert.equal(files.length, 1, 'Expected one JSC capture profile');
+          const data = JSON.parse(readFileSync(join(samplingDir, files[0]), 'utf8'));
+          sample.jscProfile = { file: join('jsc-samples', files[0]), ...validateCaptureSampling(sample.renderProbe, data) };
+        }
       }
       // A new WebView loads the canonical native store again after the capture.
       await request(`/session/${session}/refresh`, {});
@@ -229,7 +246,7 @@ for (const size of sizes) {
     device: process.env.DEVICE_LABEL, dataset: seed.id, buildType: 'release', binaryHash, sourceRevision, dirty,
     viewport, scenario: saveQueueMode === 'idle' ? 'portable-native-settings-capture-idle-v2' : 'portable-native-settings-capture-v1',
     saveQueueMode, network: 'host-network-sync-off',
-    profiling: [diagnostics ? 'settings-diagnostics-ipc-headers' : '', renderProbe ? 'capture-render-probe' : ''].filter(Boolean).join('+') || 'none',
+    profiling: [diagnostics ? 'settings-diagnostics-ipc-headers' : '', renderProbe ? 'capture-render-probe' : '', sampleJS ? 'jsc-capture-1000us' : ''].filter(Boolean).join('+') || 'none',
     capturedAt: new Date().toISOString(),
   }, samples, warnings: ['Portable Linux Tauri with an isolated session bus; does not measure OS keyring access or macOS/Windows.',
     'Automation latency includes WebDriver dispatch/polling. SQLite readback is not a hardware power-loss test.',
