@@ -39,6 +39,8 @@ import { SyncService } from '../lib/sync-service';
 import { SidebarAreaFilter } from './ui/SidebarAreaFilter';
 import { getCalendarTaskDragTaskId, hasCalendarTaskDragData } from '../lib/calendar-task-drag';
 import { stageCalendarDropLanding } from '../lib/calendar-view-params';
+import { ViewExportProvider } from '../contexts/view-export-context';
+import { ViewActionsMenu } from './ViewActionsMenu';
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -744,6 +746,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
 
 
     return (
+        <ViewExportProvider viewKey={currentView}>
         <div className="flex h-screen overflow-hidden bg-background text-foreground">
             <a
                 href="#main-content"
@@ -757,7 +760,10 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                     "border-r border-border bg-card flex flex-col",
                     isCollapsed ? "w-16 p-2" : "w-64 px-3 pt-5 pb-3"
                 )}>
-                <div className={cn("flex items-center gap-2 px-1.5 mb-6", isCollapsed && "justify-center")}>
+                <div className={cn(
+                    "flex items-center gap-2 px-1.5 mb-6",
+                    isCollapsed && "flex-col justify-center"
+                )}>
                     {!isCollapsed && (
                         <img
                             src="/logo.png"
@@ -766,18 +772,20 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                         />
                     )}
                     {!isCollapsed && <h1 className="text-base font-semibold tracking-tight">{t('app.name')}</h1>}
-                    <button
-                        onClick={toggleSidebar}
-                        className={cn(
-                            "ml-auto p-1 rounded-md hover:bg-accent transition-colors text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/40",
-                            isCollapsed && "ml-0",
-                            compactViewport && "hidden"
-                        )}
-                        title={t('keybindings.toggleSidebar')}
-                        aria-label={t('keybindings.toggleSidebar')}
-                    >
-                        {isCollapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
-                    </button>
+                    <div className={cn("ml-auto flex items-center gap-1", isCollapsed && "ml-0 flex-col")}>
+                        <ViewActionsMenu collapsed={isCollapsed} />
+                        <button
+                            onClick={toggleSidebar}
+                            className={cn(
+                                "inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                                compactViewport && "hidden"
+                            )}
+                            title={t('keybindings.toggleSidebar')}
+                            aria-label={t('keybindings.toggleSidebar')}
+                        >
+                            {isCollapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
+                        </button>
+                    </div>
                 </div>
 
                 {/* Search Button */}
@@ -1097,5 +1105,6 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
             </main>
             <ToastHost />
         </div>
+        </ViewExportProvider>
     );
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useTaskStore, type MergeStats } from '@mindwtr/core';
 
 import { LanguageProvider } from '../contexts/language-context';
@@ -105,6 +105,42 @@ const resetStores = () => {
         useObsidianStore.setState(initialObsidianState, true);
     });
 };
+
+describe('Layout shared view actions', () => {
+    it('renders one More menu in sidebar chrome and no per-view export button', () => {
+        const { rerender } = renderLayout('next');
+
+        expect(screen.getAllByRole('button', { name: 'More' })).toHaveLength(1);
+        expect(screen.queryByRole('button', { name: 'Export CSV' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'More' }));
+        expect(screen.getByRole('menuitem', { name: 'Export current results as CSV' })).toBeDisabled();
+
+        rerender(
+            <LanguageProvider>
+                <KeybindingProvider currentView="settings" onNavigate={onNavigate}>
+                    <Layout currentView="settings" onViewChange={vi.fn()}>
+                        <div>Main content</div>
+                    </Layout>
+                </KeybindingProvider>
+            </LanguageProvider>,
+        );
+        expect(screen.getAllByRole('button', { name: 'More' })).toHaveLength(1);
+    });
+
+    it('stacks the header controls in a collapsed sidebar', () => {
+        act(() => {
+            useTaskStore.setState((state) => ({
+                settings: { ...state.settings, sidebarCollapsed: true },
+            }));
+        });
+        renderLayout('next');
+
+        const more = screen.getByRole('button', { name: 'More' });
+        expect(more.parentElement?.parentElement).toHaveClass('flex-col');
+        fireEvent.click(more);
+        expect(screen.getByRole('menu')).toHaveClass('left-0');
+    });
+});
 
 beforeEach(() => {
     window.localStorage.clear();

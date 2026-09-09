@@ -1,12 +1,19 @@
 import { act, fireEvent, render } from '@testing-library/react';
 import type { Task } from '@mindwtr/core';
 import { useTaskStore } from '@mindwtr/core';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../../contexts/language-context';
 import { ContextsView } from './ContextsView';
 import { CONTEXTS_VIEW_STATE_STORAGE_KEY, dispatchContextsTokenSelection } from '../../lib/contexts-view-state';
 import { selectToolbarOption } from '../../test/toolbar-select';
 import { expectScrolledEndGap } from '../../test/list-end-gap';
+
+const contextExportInputs = vi.hoisted(() => ({ tasks: null as Task[] | null }));
+vi.mock('../../contexts/view-export-context', () => ({
+    useViewExportTasks: (tasks: Task[] | null) => {
+        contextExportInputs.tasks = tasks;
+    },
+}));
 
 // Its own key, separate from the view state above: see the note in ContextsView.
 const CONTEXTS_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:contexts:groups:v1';
@@ -33,6 +40,7 @@ const renderContextsView = () => render(
 
 describe('ContextsView', () => {
     beforeEach(() => {
+        contextExportInputs.tasks = null;
         window.localStorage.clear();
         useTaskStore.setState(initialTaskState, true);
         const tasks = [
@@ -95,6 +103,7 @@ describe('ContextsView', () => {
 
         expect(getByRole('heading', { name: '#ERP' })).toBeInTheDocument();
         expect(getByText('Plan launch')).toBeInTheDocument();
+        expect(contextExportInputs.tasks?.map((task) => task.title)).toEqual(['Plan launch']);
     });
 
     it('keeps the sort control labeled and visually scannable', () => {

@@ -1,9 +1,16 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/react';
 import { useTaskStore, type Task } from '@mindwtr/core';
 
 import { LanguageProvider } from '../../contexts/language-context';
 import { SearchView } from './SearchView';
+
+const searchExportInputs = vi.hoisted(() => ({ tasks: null as Task[] | null }));
+vi.mock('../../contexts/view-export-context', () => ({
+    useViewExportTasks: (tasks: Task[] | null) => {
+        searchExportInputs.tasks = tasks;
+    },
+}));
 
 const initialTaskState = useTaskStore.getState();
 const nowIso = '2026-06-01T12:00:00.000Z';
@@ -27,6 +34,7 @@ const renderSearchView = () => render(
 
 describe('SearchView', () => {
     beforeEach(() => {
+        searchExportInputs.tasks = null;
         useTaskStore.setState(initialTaskState, true);
         const tasks = [
             makeTask('task-1', { title: 'Launch notes' }),
@@ -58,6 +66,10 @@ describe('SearchView', () => {
         expect(getByText('Launch notes')).toBeInTheDocument();
         expect(getByText('Launch checklist')).toBeInTheDocument();
         expect(queryByText('Home errands')).not.toBeInTheDocument();
+        expect(searchExportInputs.tasks?.map((task) => task.title)).toEqual([
+            'Launch notes',
+            'Launch checklist',
+        ]);
 
         fireEvent.click(getByRole('button', { name: 'Select' }));
         fireEvent.click(getByRole('button', { name: 'Select All' }));

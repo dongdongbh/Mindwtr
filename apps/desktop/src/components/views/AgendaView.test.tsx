@@ -9,6 +9,13 @@ import { MINDWTR_NAVIGATE_EVENT } from '../../lib/navigation-events';
 import { selectToolbarOption } from '../../test/toolbar-select';
 import { expectScrolledEndGap } from '../../test/list-end-gap';
 
+const agendaExportInputs = vi.hoisted(() => ({ tasks: null as Task[] | null }));
+vi.mock('../../contexts/view-export-context', () => ({
+    useViewExportTasks: (tasks: Task[] | null) => {
+        agendaExportInputs.tasks = tasks;
+    },
+}));
+
 // Capture the focus-drag handler so tests can drive a drop without a real
 // pointer gesture; dnd-kit contexts render as passthroughs (see BoardView.test).
 let capturedFocusDndProps: { onDragEnd?: (event: unknown) => void } = {};
@@ -106,6 +113,7 @@ describe('AgendaView', () => {
     });
 
     beforeEach(() => {
+        agendaExportInputs.tasks = null;
         window.localStorage.removeItem(focusViewStateStorageKey);
         useTaskStore.setState({
             tasks: [focusedTask],
@@ -2337,6 +2345,11 @@ describe('AgendaView', () => {
         expect(getByRole('button', { name: /next actions/i })).toHaveAttribute('aria-expanded', 'false');
         expect(container.querySelector('[data-task-id="next-action-task"]')).toBeNull();
         expect(container.querySelector('[data-task-id="waiting-review-task"]')).toBeTruthy();
+        expect(agendaExportInputs.tasks?.map((task) => task.id).sort()).toEqual([
+            'next-action-task',
+            'waiting-review-task',
+        ]);
+        expect(new Set(agendaExportInputs.tasks?.map((task) => task.id)).size).toBe(agendaExportInputs.tasks?.length);
     });
 
     it('persists collapsed Focus sections after leaving and returning to the view', () => {

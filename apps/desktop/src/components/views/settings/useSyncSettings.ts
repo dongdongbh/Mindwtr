@@ -1573,8 +1573,10 @@ export const useSyncSettings = ({
         addBreadcrumb('transfer:export');
         setTransferAction('export:csv');
         try {
-            await exportDesktopCsv(getInMemoryAppDataSnapshot());
-            showToast(resolveText('settings.exportCsvSuccess', 'CSV exported successfully!'), 'success');
+            const completed = await exportDesktopCsv(getInMemoryAppDataSnapshot());
+            if (completed) {
+                showToast(resolveText('settings.exportCsvSuccess', 'CSV exported successfully!'), 'success');
+            }
         } catch (error) {
             showToast(toErrorMessage(error, resolveText('settings.exportCsvFailed', 'Failed to export CSV')), 'error');
         } finally {

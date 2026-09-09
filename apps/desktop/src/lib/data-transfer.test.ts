@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_IMPORT_SOURCE_LIMITS, MAX_BACKUP_SOURCE_BYTES, type AppData } from '@mindwtr/core';
+import {
+    DEFAULT_IMPORT_SOURCE_LIMITS,
+    MAX_BACKUP_SOURCE_BYTES,
+    type AppData,
+    type Task,
+} from '@mindwtr/core';
 import type { ParsedTodoistProject } from '@mindwtr/core/todoist-import';
 
 const emptyData: AppData = {
@@ -40,9 +45,11 @@ const syncServiceMocks = vi.hoisted(() => ({
 
 const nativePickerMocks = vi.hoisted(() => ({
     open: vi.fn(),
+    save: vi.fn(),
     readFile: vi.fn(),
     readTextFile: vi.fn(),
     stat: vi.fn(),
+    writeTextFile: vi.fn(),
 }));
 
 vi.mock('@mindwtr/core', async () => {
@@ -82,12 +89,14 @@ vi.mock('./sync-service', () => ({
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
     open: nativePickerMocks.open,
+    save: nativePickerMocks.save,
 }));
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
     readFile: nativePickerMocks.readFile,
     readTextFile: nativePickerMocks.readTextFile,
     stat: nativePickerMocks.stat,
+    writeTextFile: nativePickerMocks.writeTextFile,
 }));
 
 vi.mock('./app-log', () => ({
@@ -97,6 +106,7 @@ vi.mock('./app-log', () => ({
 
 import {
     createDesktopRecoverySnapshot,
+    exportDesktopCsv,
     importDesktopTodoistData,
     inspectDesktopMindwtrCsvImport,
     inspectDesktopBackup,
@@ -129,8 +139,10 @@ describe('desktop data transfer', () => {
         runtimeRef.isTauri = false;
         syncServiceMocks.createDataSnapshot.mockResolvedValue('data.snapshot.json');
         nativePickerMocks.open.mockResolvedValue('/tmp/import.csv');
+        nativePickerMocks.save.mockResolvedValue('/home/dd/export.csv');
         nativePickerMocks.stat.mockResolvedValue({ size: 0 });
         nativePickerMocks.readFile.mockResolvedValue(new Uint8Array());
+        nativePickerMocks.writeTextFile.mockResolvedValue(undefined);
     });
 
     it('aborts Todoist import when local data changes before the full snapshot write', async () => {
@@ -247,5 +259,94 @@ describe('desktop data transfer', () => {
 
         await expect(inspectDesktopBackup()).rejects.toThrow('could not verify the selected backup file size');
         expect(nativePickerMocks.readTextFile).not.toHaveBeenCalled();
+    });
+
+    it('returns false and does not report completion when the native CSV save is cancelled', async () => {
+        runtimeRef.isTauri = true;
+        nativePickerMocks.save.mockResolvedValue(null);
+
+        await expect(exportDesktopCsv(emptyData)).resolves.toBe(false);
+
+        expect(coreMocks.flushPendingSave).toHaveBeenCalledOnce();
+        expect(nativePickerMocks.writeTextFile).not.toHaveBeenCalled();
+        expect(logMocks.logInfo).not.toHaveBeenCalledWith(
+            'CSV export complete',
+            expect.anything(),
+        );
+    });
+
+    it('reports CSV success only after the native file write finishes', async () => {
+        runtimeRef.isTauri = true;
+        let finishWrite: (() => void) | undefined;
+        nativePickerMocks.writeTextFile.mockImplementation(() => new Promise<void>((resolve) => {
+            finishWrite = resolve;
+        }));
+
+        let result: boolean | undefined;
+        const exporting = exportDesktopCsv(emptyData).then((completed) => {
+            result = completed;
+        });
+        await vi.waitFor(() => expect(nativePickerMocks.writeTextFile).toHaveBeenCalledOnce());
+
+        expect(result).toBeUndefined();
+        expect(logMocks.logInfo).not.toHaveBeenCalledWith(
+            'CSV export complete',
+            expect.anything(),
+        );
+
+        finishWrite?.();
+        await exporting;
+
+        expect(result).toBe(true);
+        expect(logMocks.logInfo).toHaveBeenCalledWith(
+            'CSV export complete',
+            expect.objectContaining({ scope: 'transfer' }),
+        );
+    });
+
+    it('rejects and logs a native CSV write failure', async () => {
+        runtimeRef.isTauri = true;
+        const error = new Error('disk full');
+        nativePickerMocks.writeTextFile.mockRejectedValue(error);
+
+        await expect(exportDesktopCsv(emptyData)).rejects.toThrow('disk full');
+
+        expect(logMocks.logError).toHaveBeenCalledWith(error, {
+            scope: 'transfer',
+            extra: { operation: 'exportCsv' },
+        });
+        expect(logMocks.logInfo).not.toHaveBeenCalledWith(
+            'CSV export complete',
+            expect.anything(),
+        );
+    });
+
+    it('writes only the supplied filtered task subset', async () => {
+        runtimeRef.isTauri = true;
+        const makeTask = (id: string, title: string): Task => ({
+            id,
+            title,
+            status: 'inbox',
+            tags: [],
+            contexts: [],
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+        });
+        const included = makeTask('included', 'Included task');
+        const excluded = makeTask('excluded', 'Excluded task');
+
+        await expect(exportDesktopCsv(
+            { ...emptyData, tasks: [included, excluded] },
+            [included],
+        )).resolves.toBe(true);
+
+        expect(nativePickerMocks.save).toHaveBeenCalledWith(expect.objectContaining({
+            defaultPath: expect.stringMatching(/-filtered\.csv$/u),
+        }));
+        expect(nativePickerMocks.writeTextFile).toHaveBeenCalledWith(
+            '/home/dd/export.csv',
+            expect.stringContaining('Included task'),
+        );
+        expect(nativePickerMocks.writeTextFile.mock.calls[0]?.[1]).not.toContain('Excluded task');
     });
 });

@@ -50,6 +50,7 @@ import { PromptModal } from '../PromptModal';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { FocusStarIcon } from '../FocusStarIcon';
 import { useFutureStartRevealTick, useLocalDayKey } from '../../hooks/useLocalDayKey';
+import { useViewExportTasks } from '../../contexts/view-export-context';
 
 const AGENDA_VIRTUALIZATION_THRESHOLD = 25;
 const NO_PROJECT_FILTER_ID = SAVED_FILTER_NO_PROJECT_ID;
@@ -849,6 +850,18 @@ export function AgendaView() {
         sortBySavedPerspective,
         upcomingCandidates,
     ]);
+    const exportTasks = useMemo(() => {
+        const tasksById = new Map<string, Task>();
+        [
+            ...focusedTasks,
+            ...sections.schedule,
+            ...sections.reviewDue,
+            ...sections.nextActions,
+            ...sections.upcoming,
+        ].forEach((task) => tasksById.set(task.id, task));
+        return Array.from(tasksById.values());
+    }, [focusedTasks, sections.nextActions, sections.reviewDue, sections.schedule, sections.upcoming]);
+    useViewExportTasks(exportTasks);
     const nextActionGroups = useMemo(() => (
         groupTasks(effectiveNextGroupBy, { tasks: sections.nextActions, areas, projectMap, t, theme: settings?.theme })
     ), [areas, effectiveNextGroupBy, projectMap, sections.nextActions, settings?.theme, t]);

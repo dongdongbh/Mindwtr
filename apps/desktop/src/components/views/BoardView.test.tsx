@@ -11,6 +11,13 @@ import { expectScrolledEndGap } from '../../test/list-end-gap';
 const { dndSensorCalls } = vi.hoisted(() => ({
     dndSensorCalls: [] as Array<{ sensor: unknown; options: unknown }>,
 }));
+const boardExportInputs = vi.hoisted(() => ({ tasks: null as Task[] | null }));
+
+vi.mock('../../contexts/view-export-context', () => ({
+    useViewExportTasks: (tasks: Task[] | null) => {
+        boardExportInputs.tasks = tasks;
+    },
+}));
 
 vi.mock('@dnd-kit/core', () => ({
     DndContext: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -78,6 +85,7 @@ const setBoardStoreState = ({
 
 describe('BoardView', () => {
     beforeEach(() => {
+        boardExportInputs.tasks = null;
         dndSensorCalls.length = 0;
         window.localStorage.clear();
         setBoardStoreState({
@@ -202,6 +210,7 @@ describe('BoardView', () => {
 
         expect(getByText('Active project next action')).toBeInTheDocument();
         expect(queryByText('Someday project next action')).not.toBeInTheDocument();
+        expect(boardExportInputs.tasks?.map((task) => task.title)).toEqual(['Active project next action']);
     });
 
     it('marks a focused Next task with an always-visible star and keeps other stars hover-only (#908)', () => {

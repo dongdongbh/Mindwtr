@@ -1,4 +1,4 @@
-import { CheckSquare, ChevronsUpDown, Download, Filter, List, SlidersHorizontal } from 'lucide-react';
+import { CheckSquare, ChevronsUpDown, Filter, List, SlidersHorizontal } from 'lucide-react';
 import { tFallback, type TaskSortBy } from '@mindwtr/core';
 import { FOCUS_AXES, type TaskListGroupBy } from './next-grouping';
 import { GroupBySelect } from './GroupBySelect';
@@ -28,8 +28,6 @@ type ListHeaderProps = {
     onToggleDetails: () => void;
     densityMode: 'comfortable' | 'compact' | 'condensed';
     onToggleDensity: () => void;
-    /** Exports what the list currently shows, filters and all (#1096). */
-    onExportCsv?: () => void;
     t: (key: string) => string;
 };
 
@@ -57,7 +55,6 @@ export function ListHeader({
     onToggleDetails,
     densityMode,
     onToggleDensity,
-    onExportCsv,
     t,
 }: ListHeaderProps) {
     // The button names what clicking it does, not the current state — "Details off"
@@ -68,7 +65,6 @@ export function ListHeader({
     const detailsLabel = showListDetails
         ? tFallback(t, 'list.hideDetails', 'Hide details')
         : tFallback(t, 'list.showDetails', 'Show details');
-    const exportCsvTitle = tFallback(t, 'list.exportCsvFiltered', 'Export current results as CSV');
     const densityTitle = (() => {
         const value = t('list.density');
         return value === 'list.density' ? 'Density' : value;
@@ -166,15 +162,6 @@ export function ListHeader({
                 >
                     {densityLabel}
                 </ToolbarButton>
-                {onExportCsv && (
-                    <ToolbarButton
-                        onClick={onExportCsv}
-                        title={exportCsvTitle}
-                        icon={<Download className="h-3.5 w-3.5" aria-hidden="true" />}
-                    >
-                        {tFallback(t, 'list.exportCsv', 'Export CSV')}
-                    </ToolbarButton>
-                )}
             </div>
         </header>
     );

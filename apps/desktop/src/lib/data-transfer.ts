@@ -146,7 +146,7 @@ const downloadTextFile = async (
     fileName: string,
     text: string,
     format: { name: string; extension: string; mimeType: string } = { name: 'JSON', extension: 'json', mimeType: 'application/json' },
-): Promise<void> => {
+): Promise<boolean> => {
     if (isTauriRuntime()) {
         const { save } = await import('@tauri-apps/plugin-dialog');
         const selected = await save({
@@ -154,10 +154,10 @@ const downloadTextFile = async (
             filters: [{ name: format.name, extensions: [format.extension] }],
             title: 'Export backup',
         });
-        if (!selected || typeof selected !== 'string') return;
+        if (!selected || typeof selected !== 'string') return false;
         const { writeTextFile } = await import('@tauri-apps/plugin-fs');
         await writeTextFile(selected, text);
-        return;
+        return true;
     }
 
     if (typeof window === 'undefined' || typeof document === 'undefined') {
@@ -174,6 +174,7 @@ const downloadTextFile = async (
     } finally {
         window.URL.revokeObjectURL(url);
     }
+    return true;
 };
 
 const desktopBoundaries: DataTransferBoundaries = {
@@ -244,7 +245,7 @@ export const exportDesktopBackup = async (data: AppData): Promise<void> => {
  * stays the full dataset because that is where the serializer looks up project,
  * section and area titles.
  */
-export const exportDesktopCsv = async (data: AppData, tasks?: readonly Task[]): Promise<void> => {
+export const exportDesktopCsv = async (data: AppData, tasks?: readonly Task[]): Promise<boolean> => {
     addBreadcrumb('transfer:export');
     void logInfo('CSV export started', {
         scope: 'transfer',
@@ -252,15 +253,17 @@ export const exportDesktopCsv = async (data: AppData, tasks?: readonly Task[]): 
     });
     try {
         await flushPendingSave();
-        await downloadTextFile(
+        const completed = await downloadTextFile(
             createBackupFileName().replace(/\.json$/u, tasks ? '-filtered.csv' : '.csv'),
             serializeMindwtrCsv(data, tasks ? { tasks } : {}),
             { name: 'CSV', extension: 'csv', mimeType: 'text/csv' },
         );
+        if (!completed) return false;
         void logInfo('CSV export complete', {
             scope: 'transfer',
             extra: { operation: 'exportCsv', source: 'local', ...toCountExtra(data) },
         });
+        return true;
     } catch (error) {
         void logError(error, { scope: 'transfer', extra: { operation: 'exportCsv' } });
         throw error;

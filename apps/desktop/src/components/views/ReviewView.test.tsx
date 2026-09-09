@@ -6,6 +6,13 @@ import { LanguageProvider } from '../../contexts/language-context';
 import { useUiStore } from '../../store/ui-store';
 import { fetchExternalCalendarEvents } from '../../lib/external-calendar-events';
 
+const reviewExportInputs = vi.hoisted(() => ({ tasks: null as Task[] | null }));
+vi.mock('../../contexts/view-export-context', () => ({
+    useViewExportTasks: (tasks: Task[] | null) => {
+        reviewExportInputs.tasks = tasks;
+    },
+}));
+
 const renderWithProviders = (ui: React.ReactElement) => {
     return render(
         <LanguageProvider>
@@ -66,6 +73,7 @@ describe('ReviewView', () => {
     });
 
     beforeEach(() => {
+        reviewExportInputs.tasks = null;
         window.localStorage.removeItem('mindwtr:view:review:v1');
         window.localStorage.removeItem('mindwtr:weeklyReview:currentStep');
         useTaskStore.setState(initialTaskState, true);
@@ -150,6 +158,7 @@ describe('ReviewView', () => {
 
         expect(getByText('Completed review task')).toBeInTheDocument();
         expect(queryByText('Open review task')).not.toBeInTheDocument();
+        expect(reviewExportInputs.tasks?.map((task) => task.id)).toEqual(['done-1']);
     });
 
     it('selects and clears all visible review tasks', () => {

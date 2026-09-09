@@ -26,6 +26,7 @@ import { LIST_END_GAP } from './list/list-toolbar';
 import { useTaskSelection } from './list/useTaskSelection';
 import { useUiStore } from '../../store/ui-store';
 import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
+import { useViewExportTasks } from '../../contexts/view-export-context';
 
 interface SearchViewProps {
     savedSearchId: string;
@@ -94,6 +95,7 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
             sortBy
         );
     }, [tasks, projects, query, sortBy, resolvedAreaFilter, projectMapById, areaById]);
+    useViewExportTasks(filteredTasks);
     const shouldVirtualize = filteredTasks.length > LIST_VIRTUALIZATION_THRESHOLD;
     const rowVirtualizer = useVirtualizer({
         count: shouldVirtualize ? filteredTasks.length : 0,

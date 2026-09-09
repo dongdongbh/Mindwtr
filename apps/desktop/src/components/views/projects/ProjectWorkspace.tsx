@@ -61,6 +61,7 @@ import {
 } from './projects-utils';
 import { toDateTimeLocalValue } from '../../Task/task-item-helpers';
 import type { ConfirmationRequestOptions } from '../../../hooks/useConfirmDialog';
+import { useViewExportTasks } from '../../../contexts/view-export-context';
 
 // The one visible line is far shorter; the cap only keeps a pathological
 // single-line note out of the inline markdown tokenizer.
@@ -904,6 +905,14 @@ export function ProjectWorkspace({
 
         return sortProjectTasks(references);
     }, [allTasks, normalizedSearchQuery, selectedProject, sortProjectTasks]);
+
+    const projectExportTasks = useMemo(() => {
+        const tasksById = new Map<string, Task>();
+        [...orderedProjectTaskList, ...projectReferenceTasks]
+            .forEach((task) => tasksById.set(task.id, task));
+        return Array.from(tasksById.values());
+    }, [orderedProjectTaskList, projectReferenceTasks]);
+    useViewExportTasks(selectedProject ? projectExportTasks : null);
 
     // Reference tasks render as their own section below the task list, so the
     // keyboard walks them last rather than skipping them.

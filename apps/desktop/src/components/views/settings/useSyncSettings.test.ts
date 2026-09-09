@@ -367,7 +367,7 @@ describe('useSyncSettings cloud token validation', () => {
         languageMocks.t.mockImplementation((key: string) => `localized:${key}`);
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
-        const exportCsv = vi.spyOn(dataTransfer, 'exportDesktopCsv').mockResolvedValue(undefined);
+        const exportCsv = vi.spyOn(dataTransfer, 'exportDesktopCsv').mockResolvedValue(true);
 
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
@@ -377,6 +377,22 @@ describe('useSyncSettings cloud token validation', () => {
 
         expect(exportCsv).toHaveBeenCalledTimes(1);
         expect(showToast).toHaveBeenCalledWith('localized:settings.exportCsvSuccess', 'success');
+    });
+
+    it('does not report CSV success when the save dialog is cancelled', async () => {
+        languageMocks.t.mockImplementation((key: string) => `localized:${key}`);
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const exportCsv = vi.spyOn(dataTransfer, 'exportDesktopCsv').mockResolvedValue(false);
+
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await act(async () => {
+            await result.current.dataTransferProps.onExportCsv();
+        });
+
+        expect(exportCsv).toHaveBeenCalledTimes(1);
+        expect(showToast).not.toHaveBeenCalled();
     });
 
     it('uses the active locale for sync setup feedback', async () => {
