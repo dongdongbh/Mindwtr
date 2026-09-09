@@ -25,6 +25,7 @@ import {
     getUnknownErrorMessage,
     isActionFailure,
 } from '../store-action-result';
+import { logInfo } from '../../lib/app-log';
 
 export type TaskEditTab = 'task' | 'view';
 const NOOP_ATTACHMENT_DRAFT_SETTLEMENT = () => {};
@@ -41,6 +42,7 @@ export type SetTaskEditDraftField = <K extends TaskDraftField>(
 ) => void;
 
 export type TaskEditDraftLifecycle = {
+    cancel: () => Promise<boolean>;
     convertToReference: () => Promise<boolean>;
     discard: () => void;
     hasPendingChanges: () => boolean;
@@ -89,7 +91,7 @@ export function useTaskEditState({
     const isDirtyRef = React.useRef(false);
     const baseTaskRef = React.useRef<Task | null>(null);
     const attachmentDraftSettledRef = React.useRef(true);
-    const attachmentSaveAwaitingDurabilityRef = React.useRef(false);
+    const saveAwaitingDurabilityRef = React.useRef(false);
     const setDraftField = React.useCallback<SetTaskEditDraftField>((field, value, markDirty = true) => {
         if (markDirty) isDirtyRef.current = true;
         setTaskEditDraftState((current) => {
@@ -153,7 +155,7 @@ export function useTaskEditState({
         // A successful store action is still optimistic: its immediate SQLite
         // write may be in flight. On a durability failure preserve every file
         // that either the old snapshot or the retrying new snapshot can own.
-        if (attachmentSaveAwaitingDurabilityRef.current) return;
+        if (saveAwaitingDurabilityRef.current) return;
         const baselineTask = baseTaskRef.current ?? liveTask;
         const currentDraft = taskEditDraftRef.current;
         if (baselineTask && currentDraft) {
@@ -195,7 +197,7 @@ export function useTaskEditState({
         return false;
     }, [onSave, onSaveError]);
 
-    const saveDraft = React.useCallback(async (): Promise<boolean> => {
+    const saveDraft = React.useCallback(async (mode: 'save' | 'cancel' = 'save'): Promise<boolean> => {
         const currentTask = baseTaskRef.current ?? liveTask;
         if (!currentTask || !taskEditDraft) return Promise.resolve(false);
         clearPendingTextChanges();
@@ -215,25 +217,35 @@ export function useTaskEditState({
             }
         }
 
-        const updates = buildTaskEditUpdatePatch(saveDraftState, currentTask, {
+        let updates: Partial<Task> | null = buildTaskEditUpdatePatch(saveDraftState, currentTask, {
             title: titleDraftRef.current,
             description: descriptionDraftRef.current,
         });
-        const wasAwaitingDurability = attachmentSaveAwaitingDurabilityRef.current;
+        if (mode === 'cancel') {
+            if (!updates) return false;
+            updates = {
+                ...updates,
+                status: 'archived',
+                cancelledAt: new Date().toISOString(),
+                completedAt: undefined,
+            };
+        }
+        const wasAwaitingDurability = saveAwaitingDurabilityRef.current;
         if (updates && Object.keys(updates).length > 0) {
             const attachmentSaveRequiresDurability = areDraftAttachmentsDirty(
                 saveDraftState.attachments,
                 currentTask,
             );
-            attachmentSaveAwaitingDurabilityRef.current = wasAwaitingDurability
-                || attachmentSaveRequiresDurability;
+            saveAwaitingDurabilityRef.current = wasAwaitingDurability
+                || attachmentSaveRequiresDurability
+                || mode === 'cancel';
             const saved = await Promise.resolve(writePatch(currentTask.id, updates));
             if (!saved) {
-                attachmentSaveAwaitingDurabilityRef.current = wasAwaitingDurability;
+                saveAwaitingDurabilityRef.current = wasAwaitingDurability;
                 return false;
             }
         }
-        if (attachmentSaveAwaitingDurabilityRef.current) {
+        if (saveAwaitingDurabilityRef.current) {
             try {
                 await flushPendingSave();
             } catch (error) {
@@ -244,7 +256,16 @@ export function useTaskEditState({
                 return false;
             }
         }
-        attachmentSaveAwaitingDurabilityRef.current = false;
+        saveAwaitingDurabilityRef.current = false;
+        if (mode === 'cancel') {
+            void logInfo('Mobile task cancellation draft saved', {
+                scope: 'task-edit',
+                extra: {
+                    releaseCheck: 'v1.3.0/mobile-cancel-draft',
+                    outcome: 'cancelled',
+                },
+            });
+        }
         settleCurrentAttachmentDraft(saveDraftState.attachments ?? currentTask.attachments);
         onClose();
         return true;
@@ -258,6 +279,8 @@ export function useTaskEditState({
         taskEditDraft,
         writePatch,
     ]);
+
+    const cancelDraft = React.useCallback(() => saveDraft('cancel'), [saveDraft]);
 
     const discardDraft = React.useCallback(() => {
         clearPendingTextChanges();
@@ -341,11 +364,12 @@ export function useTaskEditState({
     }, [liveTask, writePatch]);
 
     const draftLifecycle = React.useMemo<TaskEditDraftLifecycle>(() => ({
+        cancel: cancelDraft,
         convertToReference,
         discard: discardDraft,
         hasPendingChanges,
         save: saveDraft,
-    }), [convertToReference, discardDraft, hasPendingChanges, saveDraft]);
+    }), [cancelDraft, convertToReference, discardDraft, hasPendingChanges, saveDraft]);
 
     React.useEffect(() => {
         if (!visible) {

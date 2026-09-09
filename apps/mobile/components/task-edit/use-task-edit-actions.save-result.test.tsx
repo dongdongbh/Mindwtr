@@ -38,7 +38,6 @@ type Harness = {
     onSave: (taskId: string, updates: Partial<Task>) => unknown;
     onClose: () => void;
     showToast: ShowToast;
-    cancelTask?: (taskId: string) => Promise<StoreActionResult>;
     deleteTask?: (taskId: string) => Promise<StoreActionResult>;
     resetTaskChecklist?: (taskId: string) => Promise<StoreActionResult>;
     restoreTask?: (taskId: string) => Promise<StoreActionResult>;
@@ -56,7 +55,6 @@ function SaveProbe({
     onSave,
     onClose,
     showToast,
-    cancelTask = vi.fn(async () => ({ success: true })),
     deleteTask = vi.fn(async () => ({ success: true })),
     resetTaskChecklist = vi.fn(async () => ({ success: true })),
     restoreTask = vi.fn(async () => ({ success: true })),
@@ -81,7 +79,6 @@ function SaveProbe({
     state.titleDraftRef.current = 'Plan launch v2';
     const actions = useTaskEditActions({
         aiEnabled: false,
-        cancelTask,
         closeAIModal: vi.fn(),
         deleteTask,
         descriptionDraft: '',
@@ -219,15 +216,20 @@ describe('task editor save results', () => {
         }));
     });
 
-    it('uses the cancellation write and closes only after it succeeds', async () => {
-        const cancelTask = vi.fn(async () => ({ success: true }));
-        const { onClose } = await renderActions({ cancelTask });
+    it('routes cancellation through the draft lifecycle', async () => {
+        const onSave = vi.fn(async () => ({ success: true }));
+        const { onClose } = await renderActions({ onSave });
 
         await act(async () => {
             await cancelHandle();
         });
 
-        expect(cancelTask).toHaveBeenCalledWith('task-1');
+        expect(onSave).toHaveBeenCalledOnce();
+        expect(onSave).toHaveBeenCalledWith('task-1', expect.objectContaining({
+            title: 'Plan launch v2',
+            status: 'archived',
+            completedAt: undefined,
+        }));
         expect(onClose).toHaveBeenCalledOnce();
     });
 

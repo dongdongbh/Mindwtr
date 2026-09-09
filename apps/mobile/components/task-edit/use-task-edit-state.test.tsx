@@ -6,11 +6,13 @@ import type { Task } from '@mindwtr/core';
 import { useTaskEditState } from './use-task-edit-state';
 
 const flushPendingSaveMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const logInfoMock = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@mindwtr/core')>();
     return { ...actual, flushPendingSave: flushPendingSaveMock };
 });
+vi.mock('../../lib/app-log', () => ({ logInfo: logInfoMock }));
 
 const task: Task = {
     id: 'task-1',
@@ -26,6 +28,8 @@ describe('useTaskEditState', () => {
     beforeEach(() => {
         flushPendingSaveMock.mockReset();
         flushPendingSaveMock.mockResolvedValue(undefined);
+        logInfoMock.mockReset();
+        logInfoMock.mockResolvedValue(null);
     });
 
     it('can synchronize a persisted field without marking the draft dirty', () => {
@@ -106,6 +110,276 @@ describe('useTaskEditState', () => {
         await renderer.act(async () => {
             expect(await state.draftLifecycle.save()).toBe(true);
         });
+        expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('preserves the complete draft in one cancellation write without completing a recurring task', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-09-09T14:30:00.000Z'));
+        const recurringTask: Task = {
+            ...task,
+            description: 'Original notes',
+            recurrence: { rule: 'daily', strategy: 'strict' },
+            checklist: [{ id: 'step-1', title: 'Close venue', isCompleted: false }],
+        };
+        const added = {
+            id: 'draft-file',
+            kind: 'file' as const,
+            title: 'reason.txt',
+            uri: 'file:///documents/attachments/draft-file.txt',
+            createdAt: '2026-09-09T14:00:00.000Z',
+            updatedAt: '2026-09-09T14:00:00.000Z',
+        };
+        let state!: ReturnType<typeof useTaskEditState>;
+        const onSave = vi.fn().mockResolvedValue({ success: true });
+        const onClose = vi.fn();
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose,
+                onSave,
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                sections: [],
+                task: recurringTask,
+                tasks: [recurringTask],
+                visible: true,
+            });
+            return null;
+        }
+
+        try {
+            renderer.act(() => {
+                renderer.create(React.createElement(Probe));
+            });
+            renderer.act(() => {
+                state.titleDraftRef.current = 'Cancel launch';
+                state.descriptionDraftRef.current = 'Cancelled because the venue closed';
+                state.setDraftField('title', 'Cancel launch');
+                state.setDraftField('description', 'Cancelled because the venue closed');
+                state.setAttachments([added]);
+                state.setChecklist([{ id: 'step-1', title: 'Close venue', isCompleted: true }]);
+                state.setDraftField('status', 'done');
+                state.setDraftField('completedAt', '2026-09-09T14:20:00.000Z');
+            });
+
+            await renderer.act(async () => {
+                expect(await state.draftLifecycle.cancel()).toBe(true);
+            });
+
+            expect(onSave).toHaveBeenCalledOnce();
+            expect(onSave).toHaveBeenCalledWith('task-1', expect.objectContaining({
+                title: 'Cancel launch',
+                description: 'Cancelled because the venue closed',
+                attachments: [added],
+                checklist: [{ id: 'step-1', title: 'Close venue', isCompleted: true }],
+                status: 'archived',
+                cancelledAt: '2026-09-09T14:30:00.000Z',
+                completedAt: undefined,
+            }));
+            expect(flushPendingSaveMock).toHaveBeenCalledOnce();
+            expect(logInfoMock).toHaveBeenCalledWith(
+                'Mobile task cancellation draft saved',
+                {
+                    scope: 'task-edit',
+                    extra: {
+                        releaseCheck: 'v1.3.0/mobile-cancel-draft',
+                        outcome: 'cancelled',
+                    },
+                },
+            );
+            expect(onClose).toHaveBeenCalledOnce();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('writes a cancellation-only patch for an otherwise unchanged valid draft', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-09-09T15:00:00.000Z'));
+        let state!: ReturnType<typeof useTaskEditState>;
+        const onSave = vi.fn().mockResolvedValue({ success: true });
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose: vi.fn(),
+                onSave,
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                sections: [],
+                task,
+                tasks: [task],
+                visible: true,
+            });
+            return null;
+        }
+
+        try {
+            renderer.act(() => {
+                renderer.create(React.createElement(Probe));
+            });
+            await renderer.act(async () => {
+                expect(await state.draftLifecycle.cancel()).toBe(true);
+            });
+
+            expect(onSave).toHaveBeenCalledWith('task-1', {
+                status: 'archived',
+                cancelledAt: '2026-09-09T15:00:00.000Z',
+                completedAt: undefined,
+            });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('rejects cancellation when the normal draft patch is invalid', async () => {
+        const invalidTask: Task = { ...task, title: '' };
+        let state!: ReturnType<typeof useTaskEditState>;
+        const onSave = vi.fn();
+        const onClose = vi.fn();
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose,
+                onSave,
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                sections: [],
+                task: invalidTask,
+                tasks: [invalidTask],
+                visible: true,
+            });
+            return null;
+        }
+
+        renderer.act(() => {
+            renderer.create(React.createElement(Probe));
+        });
+        await renderer.act(async () => {
+            expect(await state.draftLifecycle.cancel()).toBe(false);
+        });
+
+        expect(onSave).not.toHaveBeenCalled();
+        expect(flushPendingSaveMock).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('keeps the cancellation draft and copied file after a rejected write so both can retry', async () => {
+        const added = {
+            id: 'draft-file',
+            kind: 'file' as const,
+            title: 'reason.txt',
+            uri: 'file:///documents/attachments/draft-file.txt',
+            createdAt: '2026-09-09T14:00:00.000Z',
+            updatedAt: '2026-09-09T14:00:00.000Z',
+        };
+        let state!: ReturnType<typeof useTaskEditState>;
+        const onSave = vi.fn()
+            .mockResolvedValueOnce({ success: false, error: 'disk full' })
+            .mockResolvedValueOnce({ success: true });
+        const onSaveError = vi.fn();
+        const onClose = vi.fn();
+        const settleAttachmentDraft = vi.fn();
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose,
+                onSave,
+                onSaveError,
+                resetCopilotStateRef: { current: vi.fn() },
+                settleAttachmentDraft,
+                sections: [],
+                task,
+                tasks: [task],
+                visible: true,
+            });
+            return null;
+        }
+
+        renderer.act(() => {
+            renderer.create(React.createElement(Probe));
+        });
+        renderer.act(() => state.setAttachments([added]));
+
+        await renderer.act(async () => {
+            expect(await state.draftLifecycle.cancel()).toBe(false);
+        });
+        expect(state.taskEditDraft?.attachments).toEqual([added]);
+        expect(onSaveError).toHaveBeenCalledWith('disk full');
+        expect(settleAttachmentDraft).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+        expect(logInfoMock).not.toHaveBeenCalled();
+
+        await renderer.act(async () => {
+            expect(await state.draftLifecycle.cancel()).toBe(true);
+        });
+        expect(onSave).toHaveBeenCalledTimes(2);
+        expect(settleAttachmentDraft).toHaveBeenCalledWith({
+            baselineAttachments: undefined,
+            draftAttachments: [added],
+            committedAttachments: [added],
+        });
+        expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the cancellation draft and copied file after a failed durability barrier', async () => {
+        flushPendingSaveMock
+            .mockRejectedValueOnce(new Error('sqlite unavailable'))
+            .mockResolvedValueOnce(undefined);
+        const added = {
+            id: 'draft-file',
+            kind: 'file' as const,
+            title: 'reason.txt',
+            uri: 'file:///documents/attachments/draft-file.txt',
+            createdAt: '2026-09-09T14:00:00.000Z',
+            updatedAt: '2026-09-09T14:00:00.000Z',
+        };
+        let state!: ReturnType<typeof useTaskEditState>;
+        const onSave = vi.fn().mockResolvedValue({ success: true });
+        const onSaveError = vi.fn();
+        const onClose = vi.fn();
+        const settleAttachmentDraft = vi.fn();
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose,
+                onSave,
+                onSaveError,
+                resetCopilotStateRef: { current: vi.fn() },
+                settleAttachmentDraft,
+                sections: [],
+                task,
+                tasks: [task],
+                visible: true,
+            });
+            return null;
+        }
+
+        renderer.act(() => {
+            renderer.create(React.createElement(Probe));
+        });
+        renderer.act(() => state.setAttachments([added]));
+
+        await renderer.act(async () => {
+            expect(await state.draftLifecycle.cancel()).toBe(false);
+        });
+        expect(state.taskEditDraft?.attachments).toEqual([added]);
+        expect(onSaveError).toHaveBeenCalledWith('sqlite unavailable');
+        expect(settleAttachmentDraft).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+        expect(logInfoMock).not.toHaveBeenCalled();
+
+        await renderer.act(async () => {
+            expect(await state.draftLifecycle.cancel()).toBe(true);
+        });
+        expect(onSave).toHaveBeenCalledTimes(2);
+        expect(flushPendingSaveMock).toHaveBeenCalledTimes(2);
+        expect(settleAttachmentDraft).toHaveBeenCalledWith({
+            baselineAttachments: undefined,
+            draftAttachments: [added],
+            committedAttachments: [added],
+        });
+        expect(logInfoMock).toHaveBeenCalledOnce();
         expect(onClose).toHaveBeenCalledOnce();
     });
 

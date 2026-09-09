@@ -115,7 +115,6 @@ function TaskEditModalInner({
         addSection,
         addArea,
         addPerson,
-        cancelTask,
         deleteTask,
         restoreTask,
         allContexts = [],
@@ -142,7 +141,6 @@ function TaskEditModalInner({
             addArea: state.addArea,
             addPerson: state.addPerson,
             deleteTask: state.deleteTask,
-            cancelTask: state.cancelTask,
             restoreTask: state.restoreTask,
             allContexts: derived.allContexts,
             allTags: derived.allTags,
@@ -717,7 +715,6 @@ function TaskEditModalInner({
         handleShare,
     } = useTaskEditActions({
         aiEnabled,
-        cancelTask,
         closeAIModal,
         deleteTask,
         descriptionDraft,

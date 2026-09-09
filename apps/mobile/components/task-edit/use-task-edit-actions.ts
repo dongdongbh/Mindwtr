@@ -44,7 +44,6 @@ type ShowToast = (options: {
 
 type TaskEditActionsParams = {
     aiEnabled: boolean;
-    cancelTask: (taskId: string) => Promise<StoreActionResult>;
     closeAIModal: () => void;
     deleteTask: (taskId: string) => Promise<StoreActionResult>;
     descriptionDraft: string;
@@ -80,7 +79,6 @@ type TaskEditActionsParams = {
 
 export function useTaskEditActions({
     aiEnabled,
-    cancelTask,
     closeAIModal,
     deleteTask,
     descriptionDraft,
@@ -342,13 +340,8 @@ export function useTaskEditActions({
 
     const handleCancelTask = useCallback(async () => {
         if (!task || !canMutate()) return;
-        const cancelled = await runStoreAction(
-            () => cancelTask(task.id),
-            'Failed to cancel task',
-            tFallback(t, 'task.cancelFailed', 'Failed to cancel task'),
-        );
-        if (cancelled) onClose();
-    }, [canMutate, cancelTask, onClose, runStoreAction, t, task]);
+        await draftLifecycle.cancel();
+    }, [canMutate, draftLifecycle, task]);
 
     const handleConvertToReference = useCallback(() => {
         if (!canMutate()) return;
