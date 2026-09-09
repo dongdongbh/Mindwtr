@@ -17,6 +17,16 @@ const tc = {
     tint: '#3b82f6',
 };
 
+const deferred = <T,>() => {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+    });
+    return { promise, reject, resolve };
+};
+
 describe('Task edit pickers', () => {
     it('adds modal accessibility metadata to the area picker', () => {
         let tree: renderer.ReactTestRenderer;
@@ -202,5 +212,119 @@ describe('Task edit pickers', () => {
             input.props.onChangeText('');
         });
         expect(findLabelled('Other Area Project')).toHaveLength(0);
+    });
+
+    it('keeps project creation open while pending, ignores repeat submits, and allows retry after null', async () => {
+        const firstCreate = deferred<null>();
+        const createdProject = {
+            id: 'project-new',
+            title: 'New Project',
+            status: 'active' as const,
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+        };
+        const onCreateProject = vi.fn()
+            .mockReturnValueOnce(firstCreate.promise)
+            .mockResolvedValueOnce(createdProject);
+        const onClose = vi.fn();
+        const onSelectProject = vi.fn();
+        let tree: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(
+                <TaskEditProjectPicker
+                    visible
+                    projects={[]}
+                    tc={tc as any}
+                    t={(key) => key === 'projects.createFailed' ? 'Failed to create project' : key}
+                    onClose={onClose}
+                    onSelectProject={onSelectProject}
+                    onCreateProject={onCreateProject}
+                />
+            );
+        });
+
+        const input = tree!.root.findByProps({ accessibilityLabel: 'taskEdit.projectLabel' });
+        act(() => {
+            input.props.onChangeText('New Project');
+        });
+        const createButton = () => tree!.root.findByProps({ accessibilityLabel: 'projects.create: New Project' });
+        act(() => {
+            void createButton().props.onPress();
+            void createButton().props.onPress();
+        });
+
+        expect(onCreateProject).toHaveBeenCalledTimes(1);
+        expect(createButton().props.accessibilityState).toEqual({ disabled: true, busy: true });
+        expect(tree!.root.findByProps({ accessibilityLabel: 'common.cancel' }).props.disabled).toBe(true);
+
+        await act(async () => {
+            firstCreate.resolve(null);
+            await firstCreate.promise;
+        });
+        expect(onClose).not.toHaveBeenCalled();
+        expect(onSelectProject).not.toHaveBeenCalled();
+        expect(tree!.root.findByProps({ testID: 'project-create-error' }).props.children)
+            .toBe('Failed to create project');
+
+        await act(async () => {
+            await createButton().props.onPress();
+        });
+        expect(onCreateProject).toHaveBeenCalledTimes(2);
+        expect(onSelectProject).toHaveBeenCalledWith('project-new');
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows an area creation rejection without clearing the query and succeeds on retry', async () => {
+        const createdArea = {
+            id: 'area-new',
+            name: 'Errands',
+            order: 0,
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+        };
+        const onCreateArea = vi.fn()
+            .mockRejectedValueOnce(new Error('save failed'))
+            .mockResolvedValueOnce(createdArea);
+        const onClose = vi.fn();
+        const onSelectArea = vi.fn();
+        let tree: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(
+                <TaskEditAreaPicker
+                    visible
+                    areas={[]}
+                    tc={tc as any}
+                    t={(key) => key === 'projects.createAreaFailed' ? 'Failed to create area' : key}
+                    onClose={onClose}
+                    onSelectArea={onSelectArea}
+                    onCreateArea={onCreateArea}
+                />
+            );
+        });
+
+        const input = tree!.root.findByProps({ accessibilityLabel: 'taskEdit.areaLabel' });
+        act(() => {
+            input.props.onChangeText('Errands');
+        });
+        const createButton = () => tree!.root.findByProps({ accessibilityLabel: 'areas.create: Errands' });
+        await act(async () => {
+            await createButton().props.onPress();
+        });
+
+        expect(onClose).not.toHaveBeenCalled();
+        expect(onSelectArea).not.toHaveBeenCalled();
+        expect(input.props.value).toBe('Errands');
+        expect(tree!.root.findByProps({ testID: 'area-create-error' }).props.children)
+            .toBe('Failed to create area');
+
+        await act(async () => {
+            await createButton().props.onPress();
+        });
+        expect(onCreateArea).toHaveBeenCalledTimes(2);
+        expect(onSelectArea).toHaveBeenCalledWith('area-new');
+        expect(onClose).toHaveBeenCalledTimes(1);
     });
 });

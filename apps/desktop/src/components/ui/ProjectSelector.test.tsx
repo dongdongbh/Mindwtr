@@ -90,6 +90,27 @@ afterEach(() => {
 });
 
 describe('ProjectSelector', () => {
+    it('offers a distinct leading Keep choice alongside No project', () => {
+        const onChange = vi.fn();
+        const { getByRole } = render(
+            <ProjectSelector
+                projects={projects}
+                value="__KEEP__"
+                onChange={onChange}
+                leadingOption={{ value: '__KEEP__', label: 'Keep project' }}
+                noProjectValue="__NONE__"
+                noProjectLabel="No project"
+                ariaLabel="Project"
+            />
+        );
+
+        fireEvent.click(getByRole('button', { name: 'Project' }));
+
+        expect(getByRole('option', { name: 'Keep project' })).toHaveAttribute('aria-selected', 'true');
+        fireEvent.click(getByRole('option', { name: 'No project' }));
+        expect(onChange).toHaveBeenCalledWith('__NONE__');
+    });
+
     it('hides archived and legacy completed projects from the selectable options', () => {
         const inactiveProjects: Project[] = [
             ...projects,

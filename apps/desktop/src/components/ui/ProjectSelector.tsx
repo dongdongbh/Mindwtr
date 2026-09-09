@@ -17,6 +17,11 @@ interface ProjectSelectorProps {
     noMatchesLabel?: string;
     emptyLabel?: string;
     createProjectLabel?: string;
+    leadingOption?: { value: string; label: string };
+    noProjectValue?: string;
+    ariaLabel?: string;
+    disabled?: boolean;
+    closeOnCreateFailure?: boolean;
     className?: string;
     controlClassName?: string;
     menuClassName?: string;
@@ -34,6 +39,11 @@ export function ProjectSelector({
     noMatchesLabel = 'No matches',
     emptyLabel,
     createProjectLabel = 'Create project',
+    leadingOption,
+    noProjectValue = '',
+    ariaLabel,
+    disabled = false,
+    closeOnCreateFailure = true,
     className,
     controlClassName,
     menuClassName,
@@ -42,8 +52,21 @@ export function ProjectSelector({
     const [query, setQuery] = useState('');
     const containerRef = useRef<HTMLDivElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    const restoreFocusRef = useRef(false);
+    const createPendingRef = useRef(false);
+    const mountedRef = useRef(true);
+    const [isCreating, setIsCreating] = useState(false);
     const projectPool = allProjects ?? projects;
     const selected = projectPool.find((p) => p.id === value);
+    const selectedLabel = leadingOption?.value === value
+        ? leadingOption.label
+        : value === noProjectValue && noProjectValue !== ''
+            ? noProjectLabel
+            : selected?.title ?? placeholder;
+    const hasSelectedLabel = Boolean(selected)
+        || leadingOption?.value === value
+        || (noProjectValue !== '' && value === noProjectValue);
     const { fixedDropdownStyle, listMaxHeight } = useDropdownPosition({
         open,
         containerRef,
@@ -68,10 +91,24 @@ export function ProjectSelector({
         return () => document.removeEventListener('mousedown', handleClick);
     }, [open]);
 
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
+
     const closeDropdown = () => {
         setOpen(false);
         setQuery('');
+        restoreFocusRef.current = true;
     };
+
+    useEffect(() => {
+        if (open || disabled || !restoreFocusRef.current) return;
+        restoreFocusRef.current = false;
+        triggerRef.current?.focus();
+    }, [disabled, open]);
 
     const focusSelectableOption = (direction: 1 | -1) => {
         const options = dropdownRef.current?.querySelectorAll<HTMLButtonElement>('[data-selector-option="true"]');
@@ -95,29 +132,42 @@ export function ProjectSelector({
     const handleDropdownKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closeDropdown();
             return;
         }
         if (event.key === 'ArrowDown') {
             event.preventDefault();
+            event.stopPropagation();
             focusSelectableOption(1);
             return;
         }
         if (event.key === 'ArrowUp') {
             event.preventDefault();
+            event.stopPropagation();
             focusSelectableOption(-1);
         }
     };
 
     const handleCreate = async () => {
-        if (!onCreateProject) return;
+        if (!onCreateProject || disabled || createPendingRef.current) return;
         const title = query.trim();
         if (!title) return;
-        const id = await onCreateProject(title);
-        if (id) {
-            onChange(id);
+        createPendingRef.current = true;
+        setIsCreating(true);
+        try {
+            const id = await onCreateProject(title);
+            if (!mountedRef.current) return;
+            if (id) {
+                onChange(id);
+                closeDropdown();
+            } else if (closeOnCreateFailure) {
+                closeDropdown();
+            }
+        } finally {
+            createPendingRef.current = false;
+            if (mountedRef.current) setIsCreating(false);
         }
-        closeDropdown();
     };
 
     const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -142,25 +192,36 @@ export function ProjectSelector({
     const emptyStateLabel = normalizedQuery ? noMatchesLabel : (emptyLabel ?? noMatchesLabel);
 
     return (
-        <div ref={containerRef} className={cn('relative', className)}>
+        <div ref={containerRef} className={cn('relative', className)} aria-busy={isCreating || undefined}>
             <button
+                ref={triggerRef}
                 type="button"
                 onClick={() => setOpen((prev) => !prev)}
                 onKeyDown={(event) => {
                     if (event.key === 'Escape' && open) {
                         event.preventDefault();
+                        event.stopPropagation();
                         closeDropdown();
+                        return;
+                    }
+                    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !open) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setOpen(true);
                     }
                 }}
+                aria-label={ariaLabel}
+                disabled={disabled}
                 className={cn(
                     'w-full flex items-center justify-between text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground',
+                    'disabled:cursor-not-allowed disabled:opacity-50',
                     controlClassName,
                 )}
                 aria-haspopup="listbox"
                 aria-expanded={open}
             >
-                <span className={cn('truncate', !selected && 'text-muted-foreground/70')}>{selected?.title ?? placeholder}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                <span className={cn('truncate', !hasSelectedLabel && 'text-muted-foreground/70')}>{selectedLabel}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
             </button>
             {open && (
                 <ModalPortal>
@@ -179,24 +240,46 @@ export function ProjectSelector({
                             value={query}
                             onChange={(event) => setQuery(event.target.value)}
                             onKeyDown={handleSearchKeyDown}
+                            disabled={disabled || isCreating}
                             placeholder={searchPlaceholder}
                             aria-label={searchPlaceholder}
                             className="w-full mb-1 rounded border border-border bg-muted/40 px-2 py-1 text-[inherit]"
                         />
-                        <div role="listbox" aria-label={placeholder}>
+                        <div role="listbox" aria-label={ariaLabel ?? placeholder}>
+                            {leadingOption && (
+                                <button
+                                    type="button"
+                                    data-selector-option="true"
+                                    data-selector-option-kind="leading"
+                                    role="option"
+                                    aria-selected={value === leadingOption.value}
+                                    disabled={disabled || isCreating}
+                                    onClick={() => {
+                                        onChange(leadingOption.value);
+                                        closeDropdown();
+                                    }}
+                                    className={cn(
+                                        'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
+                                        value === leadingOption.value && 'bg-muted/70'
+                                    )}
+                                >
+                                    {leadingOption.label}
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 data-selector-option="true"
                                 data-selector-option-kind="none"
                                 role="option"
-                                aria-selected={value === ''}
+                                aria-selected={value === noProjectValue}
+                                disabled={disabled || isCreating}
                                 onClick={() => {
-                                    onChange('');
+                                    onChange(noProjectValue);
                                     closeDropdown();
                                 }}
                                 className={cn(
-                                    'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none',
-                                    value === '' && 'bg-muted/70'
+                                    'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
+                                    value === noProjectValue && 'bg-muted/70'
                                 )}
                             >
                                 {noProjectLabel}
@@ -208,10 +291,11 @@ export function ProjectSelector({
                                     data-selector-option-kind="create"
                                     role="option"
                                     aria-selected={false}
+                                    disabled={disabled || isCreating}
                                     onClick={handleCreate}
-                                    className="w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none text-primary flex items-center gap-2"
+                                    className="w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none text-primary flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                    <Plus className="h-3.5 w-3.5" />
+                                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                                     {createProjectLabel} &quot;{query.trim()}&quot;
                                 </button>
                             )}
@@ -224,12 +308,13 @@ export function ProjectSelector({
                                         data-selector-option-kind="item"
                                         role="option"
                                         aria-selected={project.id === value}
+                                        disabled={disabled || isCreating}
                                         onClick={() => {
                                             onChange(project.id);
                                             closeDropdown();
                                         }}
                                         className={cn(
-                                            'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none',
+                                            'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
                                             project.id === value && 'bg-muted/70'
                                         )}
                                     >

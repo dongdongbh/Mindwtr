@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ClipboardCheck, X } from 'lucide-react';
 import {
+    createBulkOrganizeArea,
+    createBulkOrganizeProject,
+    ensureBulkOrganizeDestinationSaved,
     isSelectableProjectForTaskAssignment,
     parseBulkOrganizeTokenInput,
     safeParseDate,
@@ -15,6 +18,8 @@ import {
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from '../../ui/Dialog';
 import { Button } from '../../ui/Button';
 import { DateField } from '../../ui/DateField';
+import { ProjectSelector } from '../../ui/ProjectSelector';
+import { AreaSelector } from '../../ui/AreaSelector';
 import { useNativeDateInputLocale } from '../../../hooks/use-native-date-input-locale';
 
 type TaskBulkOrganizeModalProps = {
@@ -65,9 +70,17 @@ export function TaskBulkOrganizeModal({
     const [reviewDate, setReviewDate] = useState('');
     const [delegateWho, setDelegateWho] = useState('');
     const [showValidation, setShowValidation] = useState(false);
+    const [createPending, setCreatePending] = useState(false);
+    const [createError, setCreateError] = useState<string | null>(null);
+    const createPendingRef = useRef(false);
+    const createSessionRef = useRef(0);
     const { nativeDateInputLocale, dateFormatSetting } = useNativeDateInputLocale();
 
     useEffect(() => {
+        createSessionRef.current += 1;
+        createPendingRef.current = false;
+        setCreatePending(false);
+        setCreateError(null);
         if (!isOpen) return;
         setStatus(KEEP_VALUE);
         setProjectChoice(KEEP_VALUE);
@@ -81,6 +94,10 @@ export function TaskBulkOrganizeModal({
         setDelegateWho('');
         setShowValidation(false);
     }, [isOpen]);
+
+    useEffect(() => () => {
+        createSessionRef.current += 1;
+    }, []);
 
     const activeProjects = useMemo(
         () => projects
@@ -99,6 +116,7 @@ export function TaskBulkOrganizeModal({
 
     const isWaiting = status === 'waiting';
     const canApply = selectedCount > 0 && (!isWaiting || delegateWho.trim().length > 0);
+    const isBusy = isApplying || createPending;
     const selectedProjectId = projectChoice !== KEEP_VALUE && projectChoice !== NONE_VALUE ? projectChoice : undefined;
     // A section lives inside its project, so the picker goes quiet as soon as
     // the modal is about to move the tasks to a different project.
@@ -111,7 +129,117 @@ export function TaskBulkOrganizeModal({
         ? tFallback(t, 'process.followUpLabel', 'Follow-up')
         : tFallback(t, 'taskEdit.reviewDateLabel', 'Review');
 
+    const finishCreate = (session: number) => {
+        if (createSessionRef.current !== session) return;
+        createPendingRef.current = false;
+        setCreatePending(false);
+    };
+
+    const handleCreateProject = async (projectTitle: string): Promise<string | null> => {
+        if (isApplying || createPendingRef.current) return null;
+        const session = createSessionRef.current;
+        createPendingRef.current = true;
+        setCreatePending(true);
+        setCreateError(null);
+        const explicitAreaId = areaChoice !== KEEP_VALUE && areaChoice !== NONE_VALUE
+            ? areaChoice
+            : undefined;
+        try {
+            const created = await createBulkOrganizeProject(projectTitle, explicitAreaId);
+            if (createSessionRef.current !== session) return null;
+            if (!created) {
+                setCreateError(tFallback(t, 'projects.createFailed', 'Failed to create project'));
+                return null;
+            }
+            return created.id;
+        } catch {
+            if (createSessionRef.current === session) {
+                setCreateError(tFallback(t, 'projects.createFailed', 'Failed to create project'));
+            }
+            return null;
+        } finally {
+            finishCreate(session);
+        }
+    };
+
+    const handleCreateArea = async (areaName: string): Promise<string | null> => {
+        if (isApplying || createPendingRef.current) return null;
+        const session = createSessionRef.current;
+        createPendingRef.current = true;
+        setCreatePending(true);
+        setCreateError(null);
+        try {
+            const created = await createBulkOrganizeArea(areaName);
+            if (createSessionRef.current !== session) return null;
+            if (!created) {
+                setCreateError(tFallback(t, 'projects.createAreaFailed', 'Failed to create area'));
+                return null;
+            }
+            return created.id;
+        } catch {
+            if (createSessionRef.current === session) {
+                setCreateError(tFallback(t, 'projects.createAreaFailed', 'Failed to create area'));
+            }
+            return null;
+        } finally {
+            finishCreate(session);
+        }
+    };
+
+    const commitProjectChoice = (value: string) => {
+        setProjectChoice(value);
+        setCreateError(null);
+        if (value !== KEEP_VALUE && value !== NONE_VALUE) {
+            setAreaChoice(KEEP_VALUE);
+        }
+        if (sectionScope && value !== KEEP_VALUE && value !== sectionScope.projectId) {
+            setSectionChoice(KEEP_VALUE);
+        }
+    };
+
+    const handleProjectChoice = (value: string) => {
+        if (value === KEEP_VALUE || value === NONE_VALUE) {
+            commitProjectChoice(value);
+            return;
+        }
+        if (isApplying || createPendingRef.current) return;
+        const session = createSessionRef.current;
+        createPendingRef.current = true;
+        setCreatePending(true);
+        setCreateError(null);
+        void ensureBulkOrganizeDestinationSaved().then(() => {
+            if (createSessionRef.current === session) commitProjectChoice(value);
+        }).catch(() => {
+            if (createSessionRef.current === session) {
+                setCreateError(tFallback(t, 'projects.createFailed', 'Failed to create project'));
+            }
+        }).finally(() => finishCreate(session));
+    };
+
+    const handleAreaChoice = (value: string) => {
+        if (value === KEEP_VALUE || value === NONE_VALUE) {
+            setAreaChoice(value);
+            setCreateError(null);
+            return;
+        }
+        if (isApplying || createPendingRef.current) return;
+        const session = createSessionRef.current;
+        createPendingRef.current = true;
+        setCreatePending(true);
+        setCreateError(null);
+        void ensureBulkOrganizeDestinationSaved().then(() => {
+            if (createSessionRef.current !== session) return;
+            setAreaChoice(value);
+            setCreateError(null);
+        }).catch(() => {
+            if (createSessionRef.current === session) {
+                setCreateError(tFallback(t, 'projects.createAreaFailed', 'Failed to create area'));
+            }
+        }).finally(() => finishCreate(session));
+    };
+
     const apply = () => {
+        if (isBusy || createPendingRef.current) return;
         if (!canApply) {
             setShowValidation(true);
             return;
@@ -144,7 +272,10 @@ export function TaskBulkOrganizeModal({
 
     // Cancel is already disabled while applying; route every other dismissal
     // (X, backdrop, Escape) through the same guard.
-    const cancel = () => { if (!isApplying) onCancel(); };
+    const cancel = () => {
+        if (isBusy || createPendingRef.current) return;
+        onCancel();
+    };
 
     return (
         <Dialog
@@ -170,7 +301,7 @@ export function TaskBulkOrganizeModal({
                     variant="ghost"
                     size="icon-sm"
                     onClick={cancel}
-                    disabled={isApplying}
+                    disabled={isBusy}
                     aria-label={tFallback(t, 'common.close', 'Close')}
                 >
                     <X className="h-4 w-4" aria-hidden="true" />
@@ -199,45 +330,47 @@ export function TaskBulkOrganizeModal({
                         </select>
                     </label>
 
-                    <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                    <div className="space-y-1 text-xs font-medium text-muted-foreground">
                         <span>{tFallback(t, 'taskEdit.projectLabel', 'Project')}</span>
-                        <select
+                        <ProjectSelector
+                            projects={activeProjects}
                             value={projectChoice}
-                            onChange={(event) => {
-                                setProjectChoice(event.currentTarget.value);
-                                if (event.currentTarget.value !== KEEP_VALUE && event.currentTarget.value !== NONE_VALUE) {
-                                    setAreaChoice(KEEP_VALUE);
-                                }
-                            }}
-                            className="h-9 w-full rounded-md border border-border bg-card px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                        >
-                            <option value={KEEP_VALUE}>{tFallback(t, 'bulk.keepProject', 'Keep project')}</option>
-                            <option value={NONE_VALUE}>{tFallback(t, 'taskEdit.noProjectOption', 'No project')}</option>
-                            {activeProjects.map((project) => (
-                                <option key={project.id} value={project.id}>
-                                    {project.title}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
+                            onChange={handleProjectChoice}
+                            onCreateProject={handleCreateProject}
+                            leadingOption={{ value: KEEP_VALUE, label: tFallback(t, 'bulk.keepProject', 'Keep project') }}
+                            noProjectValue={NONE_VALUE}
+                            noProjectLabel={tFallback(t, 'taskEdit.noProjectOption', 'No project')}
+                            placeholder={tFallback(t, 'bulk.keepProject', 'Keep project')}
+                            searchPlaceholder={tFallback(t, 'projects.search', 'Search projects')}
+                            noMatchesLabel={tFallback(t, 'common.noMatches', 'No matches')}
+                            createProjectLabel={tFallback(t, 'projects.create', 'Create project')}
+                            ariaLabel={tFallback(t, 'taskEdit.projectLabel', 'Project')}
+                            disabled={isBusy}
+                            closeOnCreateFailure={false}
+                            controlClassName="h-9 rounded-md bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                    </div>
 
-                    <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                    <div className="space-y-1 text-xs font-medium text-muted-foreground">
                         <span>{tFallback(t, 'projects.areaLabel', 'Area')}</span>
-                        <select
+                        <AreaSelector
+                            areas={activeAreas}
                             value={areaChoice}
-                            onChange={(event) => setAreaChoice(event.currentTarget.value)}
-                            disabled={Boolean(selectedProjectId)}
-                            className="h-9 w-full rounded-md border border-border bg-card px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                            <option value={KEEP_VALUE}>{tFallback(t, 'bulk.keepArea', 'Keep area')}</option>
-                            <option value={NONE_VALUE}>{tFallback(t, 'taskEdit.noAreaOption', 'No area')}</option>
-                            {activeAreas.map((area) => (
-                                <option key={area.id} value={area.id}>
-                                    {area.name}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
+                            onChange={handleAreaChoice}
+                            onCreateArea={handleCreateArea}
+                            leadingOption={{ value: KEEP_VALUE, label: tFallback(t, 'bulk.keepArea', 'Keep area') }}
+                            noAreaValue={NONE_VALUE}
+                            noAreaLabel={tFallback(t, 'taskEdit.noAreaOption', 'No area')}
+                            placeholder={tFallback(t, 'bulk.keepArea', 'Keep area')}
+                            searchPlaceholder={tFallback(t, 'areas.search', 'Search areas')}
+                            noMatchesLabel={tFallback(t, 'common.noMatches', 'No matches')}
+                            createAreaLabel={tFallback(t, 'areas.create', 'Create area')}
+                            ariaLabel={tFallback(t, 'projects.areaLabel', 'Area')}
+                            disabled={Boolean(selectedProjectId) || isBusy}
+                            closeOnCreateFailure={false}
+                            controlClassName="h-9 rounded-md bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                    </div>
 
                     {sectionScope && sectionScope.sections.length > 0 && (
                         <label className="space-y-1 text-xs font-medium text-muted-foreground">
@@ -354,13 +487,18 @@ export function TaskBulkOrganizeModal({
                         {tFallback(t, 'bulk.waitingPersonRequired', 'Choose who these items are waiting for.')}
                     </p>
                 )}
+                {createError && (
+                    <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                        {createError}
+                    </p>
+                )}
             </DialogBody>
 
             <DialogFooter className="flex justify-end gap-2 border-t border-border px-4 py-3">
-                <Button variant="secondary" onClick={onCancel} disabled={isApplying}>
+                <Button variant="secondary" onClick={cancel} disabled={isBusy}>
                     {tFallback(t, 'common.cancel', 'Cancel')}
                 </Button>
-                <Button onClick={apply} loading={isApplying} disabled={selectedCount === 0}>
+                <Button onClick={apply} loading={isApplying} disabled={selectedCount === 0 || createPending}>
                     {tFallback(t, 'bulk.applyToSelected', 'Apply to selected')}
                 </Button>
             </DialogFooter>
