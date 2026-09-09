@@ -102,7 +102,7 @@
     "eslint-config-expo": "~10.0.0",
     "react-test-renderer": "19.1.0",
     "typescript": "~5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "4.1.11"
   },
   "overrides": {
     "postcss": "8.5.25",
@@ -112,8 +112,11 @@
     "browserslist": "4.28.8",
     "postcss-selector-parser": "6.1.4",
     "fast-uri": "3.1.7",
+    "js-yaml": "4.3.2",
+    "rollup": "4.59.0",
     "@xmldom/xmldom": "0.8.15",
-    "@humanfs/node": "0.16.8"
+    "@humanfs/node": "0.16.8",
+    "vite": "7.3.6"
   },
   "op-sqlite": {
     "fts5": true

@@ -284,7 +284,8 @@ describe('buildPendingCaptureTaskProps', () => {
 });
 
 describe('ingestPendingCaptures', () => {
-    let addProject: ReturnType<typeof vi.fn>;
+    type AddProject = Parameters<typeof ingestPendingCaptures>[0]['addProject'];
+    let addProject = vi.fn<AddProject>();
     const updateTask = vi.fn(async (_id: string, _updates: Partial<Task>) => ({ success: true }));
     const emptySettings = {} as AppData['settings'];
 
@@ -302,7 +303,7 @@ describe('ingestPendingCaptures', () => {
         vi.clearAllMocks();
         fileSystemMocks.getInfoAsync.mockResolvedValue({ exists: true });
         fileSystemMocks.deleteAsync.mockResolvedValue(undefined);
-        addProject = vi.fn(async (title: string) => project({ id: 'created-project', title }));
+        addProject = vi.fn<AddProject>(async (title: string) => project({ id: 'created-project', title }));
     });
 
     it('creates a task per queue file and deletes each file after the write resolves', async () => {

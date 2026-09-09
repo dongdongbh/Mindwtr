@@ -11,6 +11,8 @@ import { fetchExternalCalendarEvents } from '../../lib/external-calendar-events'
 import { setCalendarTaskDragData } from '../../lib/calendar-task-drag';
 import { clearUndoableAction, takeUndoableAction } from '../../lib/undo-registry';
 
+type ShowToast = ReturnType<typeof useUiStore.getState>['showToast'];
+
 const storeMocks = vi.hoisted(() => {
     const taskStoreState = {
         addArea: vi.fn(async () => null),
@@ -1304,10 +1306,15 @@ describe('CalendarView', () => {
     });
 
     describe('quick-action menu on calendar blocks and chips', () => {
-        let showToast: ReturnType<typeof vi.fn>;
+        let showToast = vi.fn<ShowToast>();
+        const firstToastAction = () => {
+            const action = showToast.mock.calls[0]?.[3];
+            if (!action) throw new Error('Expected the first toast to include an action');
+            return action;
+        };
 
         beforeEach(() => {
-            showToast = vi.fn();
+            showToast = vi.fn<ShowToast>();
             useUiStore.setState({ showToast });
             clearUndoableAction();
         });
@@ -1376,7 +1383,7 @@ describe('CalendarView', () => {
                 5000,
                 expect.objectContaining({ label: 'Undo' })
             );
-            showToast.mock.calls[0][3].onClick();
+            firstToastAction().onClick();
 
             expect(storeMocks.taskStoreState.updateTask).toHaveBeenCalledWith('scheduled-task', {
                 startTime: '2026-04-04T09:00:00',
@@ -1466,7 +1473,7 @@ describe('CalendarView', () => {
             expect(Object.keys(removeUpdates)).toEqual(['dueDate']);
             expect(removeUpdates.dueDate).toBeUndefined();
 
-            showToast.mock.calls[0][3].onClick();
+            firstToastAction().onClick();
 
             const undoCall = storeMocks.taskStoreState.updateTask.mock.calls
                 .slice(1)

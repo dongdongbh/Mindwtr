@@ -69,7 +69,7 @@ describe('useTaskEditCopilot suggestion parts', () => {
     vi.useRealTimers();
   });
 
-  const mountCopilot = async (setDraftField: ReturnType<typeof vi.fn>) => {
+  const mountCopilot = async (setDraftField: (field: string, value: unknown) => void) => {
     let copilot!: ReturnType<typeof useTaskEditCopilot>;
     await act(async () => {
       create(<CopilotHost setDraftField={setDraftField} onResult={(value) => { copilot = value; }} />);

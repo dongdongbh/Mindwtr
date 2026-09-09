@@ -98,7 +98,13 @@ describe('selectDeferredProjects', () => {
 });
 
 describe('DeferredProjectsSection', () => {
-  const render = (projects: Project[], handlers: Record<string, ReturnType<typeof vi.fn>> = {}) => {
+  const render = (
+    projects: Project[],
+    handlers: {
+      onActivateProject?: (projectId: string) => void;
+      onOpenProject?: (projectId: string) => void;
+    } = {},
+  ) => {
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(

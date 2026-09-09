@@ -9,6 +9,9 @@ import { useUiStore } from '../../store/ui-store';
 import { AgendaView } from './AgendaView';
 import { ListView } from './ListView';
 
+type ShowToast = ReturnType<typeof useUiStore.getState>['showToast'];
+type MoveTask = ReturnType<typeof useTaskStore.getState>['moveTask'];
+
 // The desktop LanguageProvider pins tests to English, so the locale under test
 // is injected through useLanguage — with the strings actually shipped for
 // Simplified Chinese ('zh'), not a stand-in.
@@ -40,12 +43,12 @@ const task: Task = {
 
 const expectedDoneToast = zh['task.markedDone'].replace('{title}', task.title);
 
-let showToast: ReturnType<typeof vi.fn>;
-let moveTask: ReturnType<typeof vi.fn>;
+let showToast = vi.fn<ShowToast>();
+let moveTask = vi.fn<MoveTask>();
 
 beforeEach(() => {
-    showToast = vi.fn();
-    moveTask = vi.fn(async () => ({ success: true }));
+    showToast = vi.fn<ShowToast>();
+    moveTask = vi.fn<MoveTask>(async () => ({ success: true }));
     useUiStore.setState({ showToast, editingTaskId: null });
     useTaskStore.setState((state) => ({
         ...state,

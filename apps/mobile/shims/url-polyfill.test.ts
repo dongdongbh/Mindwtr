@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { probeWebdavSyncCompatibility, webdavGetSyncDocument } from '@mindwtr/core';
 
@@ -8,12 +9,29 @@ vi.mock('../lib/app-log', () => ({
 import { logWarn } from '../lib/app-log';
 import * as shim from './url-polyfill';
 
+const originalURL = globalThis.URL;
+const originalURLSearchParams = globalThis.URLSearchParams;
+const nodeRequire = createRequire(import.meta.url);
+const urlPolyfillModulePath = nodeRequire.resolve('./url-polyfill.js');
+
+const loadFreshUrlPolyfill = (): typeof shim => {
+    delete nodeRequire.cache[urlPolyfillModulePath];
+    return nodeRequire(urlPolyfillModulePath) as typeof shim;
+};
+
+const clearUrlPolyfillCache = () => {
+    delete nodeRequire.cache[urlPolyfillModulePath];
+};
+
 describe('URL Polyfill Shim', () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
     afterEach(() => {
+        globalThis.URL = originalURL;
+        globalThis.URLSearchParams = originalURLSearchParams;
+        clearUrlPolyfillCache();
     });
 
     test('exports URL and URLSearchParams', () => {
@@ -32,7 +50,7 @@ describe('URL Polyfill Shim', () => {
         // @ts-expect-error simulate a runtime without a native URL
         globalThis.URL = undefined;
         try {
-            const shimModule = await import('./url-polyfill');
+            const shimModule = loadFreshUrlPolyfill();
             const FallbackURL = shimModule.URL as unknown as typeof URL;
             expect(new FallbackURL('/focus', 'file:').pathname).toBe('/focus');
             const resolved = new FallbackURL('/focus', 'exp://127.0.0.1:8081');
@@ -118,7 +136,7 @@ describe('URL Polyfill Shim', () => {
         try {
             vi.resetModules();
             globalThis.URL = undefined as unknown as typeof URL;
-            const fallbackModule = await import('./url-polyfill');
+            const fallbackModule = loadFreshUrlPolyfill();
             const FallbackURL = fallbackModule.URL as unknown as typeof URL;
             const bundle = new FallbackURL('http://127.0.0.1:8081/apps/mobile/index.bundle//&platform=android&dev=true');
             expect(bundle.origin).toBe('http://127.0.0.1:8081');
@@ -146,7 +164,7 @@ describe('URL Polyfill Shim', () => {
             vi.resetModules();
             globalThis.URL = undefined as unknown as typeof URL;
 
-            const fallbackModule = await import('./url-polyfill');
+            const fallbackModule = loadFreshUrlPolyfill();
             const routeUrl = new fallbackModule.URL!('mindwtr:///focus');
             routeUrl.href = 'mindwtr:///inbox';
 
@@ -165,7 +183,7 @@ describe('URL Polyfill Shim', () => {
         try {
             vi.resetModules();
             globalThis.URL = undefined as unknown as typeof URL;
-            await import('./url-polyfill');
+            loadFreshUrlPolyfill();
 
             const documentUrl = 'https://example.com/dav/data.json';
             const files = new Map<string, { bytes: Uint8Array; version: number }>();
