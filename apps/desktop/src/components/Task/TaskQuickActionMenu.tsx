@@ -13,6 +13,7 @@ import { BookOpen, Calendar, CalendarClock, Check, ChevronRight, Copy, Flag, Fol
 import {
     getAdvancedReviewDate,
     isDueForReview,
+    normalizeBulkTaskTokenInput,
     safeParseDate,
     tFallback,
     type Area,
@@ -229,8 +230,13 @@ export function TaskQuickActionMenu({
     const createAreaLabel = tFallback(t, 'areas.create', 'Create area');
     const canEditArea = !task.projectId;
     const canMarkReviewed = isDueForReview(task.reviewAt);
+    // Keep the stored baseline so an explicit Save can repair legacy bare tokens.
     const normalizedInitialContexts = parseTokenInput(initialContextsDraft);
-    const normalizedDraftContexts = parseTokenInput(contextsDraft);
+    const normalizedDraftContexts = Array.from(new Set(
+        parseTokenInput(contextsDraft)
+            .map((token) => normalizeBulkTaskTokenInput(token, 'contexts'))
+            .filter(Boolean)
+    ));
     const startDraftChanged = startDateDraft !== initialStartDraft.date || startTimeDraft !== initialStartDraft.time;
     const dueDraftChanged = dueDateDraft !== initialDueDraft.date || dueTimeDraft !== initialDueDraft.time;
     const reviewDraftChanged = reviewDateDraft !== initialReviewDraft.date || reviewTimeDraft !== initialReviewDraft.time;
@@ -644,7 +650,7 @@ export function TaskQuickActionMenu({
     const handleContextsSave = async () => {
         setSavingPanel('contexts');
         try {
-            const result = await onUpdateTask({ contexts: parseTokenInput(contextsDraft) });
+            const result = await onUpdateTask({ contexts: normalizedDraftContexts });
             if (!result.success) {
                 throw new Error(result.error || 'Failed to update task contexts');
             }

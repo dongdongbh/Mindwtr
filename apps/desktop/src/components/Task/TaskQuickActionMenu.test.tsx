@@ -107,6 +107,34 @@ const renderClosableMenu = (overrides: Partial<ComponentProps<typeof TaskQuickAc
 };
 
 describe('TaskQuickActionMenu', () => {
+    it.each([
+        ['garden', ['@garden']],
+        ['garden, @garden, @@garden, #garden', ['@garden']],
+        [' @, #, , home office, @工作/電話 ', ['@home office', '@工作/電話']],
+    ])('saves canonical contexts for typed input %s (#1189)', async (input, expected) => {
+        const props = renderMenu();
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
+        fireEvent.change(screen.getByRole('textbox', { name: 'task.aria.contexts' }), { target: { value: input } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(props.onUpdateTask).toHaveBeenCalledExactlyOnceWith({ contexts: expected }));
+    });
+
+    it('allows explicitly saving a legacy bare context without changing other task fields (#1189)', async () => {
+        const props = renderMenu({ task: { ...task, contexts: ['garden', '@garden'], tags: ['#keep'] } });
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
+        const save = screen.getByRole('button', { name: 'Save' });
+        expect(save).toBeEnabled();
+        fireEvent.click(save);
+        await waitFor(() => expect(props.onUpdateTask).toHaveBeenCalledExactlyOnceWith({ contexts: ['@garden'] }));
+    });
+
+    it('does not write canonical contexts merely by opening or cancelling the menu (#1189)', () => {
+        const props = renderMenu({ task: { ...task, contexts: ['garden'] } });
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+        expect(props.onUpdateTask).not.toHaveBeenCalled();
+    });
+
     it('reopens a completed task from its read-only menu using the keyboard', async () => {
         const user = userEvent.setup();
         const props = renderClosableMenu({ task: { ...task, status: 'done' }, readOnly: true });
