@@ -178,6 +178,6 @@ Selected against `57b257812`: product and integrity broad audits found no additi
 
 | # | Plan | Priority | Effort | Status |
 |---|------|----------|--------|--------|
-| 083 | calendar-push-mapping-inventory | P2 | S-M | TODO |
+| 083 | calendar-push-mapping-inventory | P2 | S-M | DONE |
 
 Plan083 is both PERF-01 and the sole Strong architecture candidate; one implementation commit. No dependencies. Rejected: another shared UI draft lifecycle and another visibility controller would move platform lifetime decisions into wider interfaces without a reproduced remaining defect. Prior ADR/roadmap/dependency deferrals stay unchanged. A source comment suggests checking cancellation-alert presentation on iOS pageSheet during a device round; no current runtime evidence establishes a defect, so no implementation plan was created.

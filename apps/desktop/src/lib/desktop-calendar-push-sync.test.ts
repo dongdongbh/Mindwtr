@@ -56,6 +56,7 @@ describe('desktop calendar push sync', () => {
     let getTargetCalendarId: ReturnType<typeof vi.fn<() => Promise<string | null>>>;
     let getTargets: ReturnType<typeof vi.fn<() => Promise<SystemCalendarPushTarget[]>>>;
     let ensureMindwtrCalendar: ReturnType<typeof vi.fn<() => Promise<SystemCalendarPushTarget | null>>>;
+    let syncEntries: Map<string, CalendarSyncEntry>;
 
     const managedTarget: SystemCalendarPushTarget = {
         id: 'cal-mindwtr',
@@ -72,10 +73,22 @@ describe('desktop calendar push sync', () => {
         createEvent = vi.fn(async () => writeOk('event-new'));
         updateEvent = vi.fn(async (_eventId) => writeOk(_eventId));
         deleteEvent = vi.fn(async (_eventId) => writeOk(_eventId));
-        upsertSyncEntry = vi.fn(async () => undefined);
-        deleteSyncEntry = vi.fn(async () => undefined);
-        getSyncEntry = vi.fn(async () => null);
-        getAllSyncEntries = vi.fn(async () => []);
+        syncEntries = new Map();
+        upsertSyncEntry = vi.fn(async (entry) => {
+            syncEntries.set(entry.taskId, entry);
+        });
+        deleteSyncEntry = vi.fn(async (taskId, platform) => {
+            if (syncEntries.get(taskId)?.platform === platform) {
+                syncEntries.delete(taskId);
+            }
+        });
+        getSyncEntry = vi.fn(async (taskId, platform) => {
+            const entry = syncEntries.get(taskId);
+            return entry?.platform === platform ? entry : null;
+        });
+        getAllSyncEntries = vi.fn(async (platform) =>
+            Array.from(syncEntries.values()).filter((entry) => entry.platform === platform)
+        );
         getTargetCalendarId = vi.fn(async () => null);
         getTargets = vi.fn(async () => [managedTarget]);
         ensureMindwtrCalendar = vi.fn(async () => managedTarget);
@@ -238,7 +251,7 @@ describe('desktop calendar push sync', () => {
             platform: 'macos',
             lastSyncedAt: '2026-01-01T00:00:00.000Z',
         };
-        getSyncEntry.mockResolvedValue(entry);
+        syncEntries.set(entry.taskId, entry);
         setStoreTasks([makeTask({ dueDate: '2026-01-10', status: 'done' })]);
 
         await runFullDesktopCalendarPushSync();
@@ -257,7 +270,7 @@ describe('desktop calendar push sync', () => {
             lastSyncedAt: '2026-01-01T00:00:00.000Z',
         };
         deleteEvent.mockResolvedValue(writeFailed('calendar-temporarily-unavailable'));
-        getSyncEntry.mockResolvedValue(entry);
+        syncEntries.set(entry.taskId, entry);
         setStoreTasks([makeTask({ dueDate: '2026-01-10', status: 'done' })]);
 
         await runFullDesktopCalendarPushSync();
@@ -276,7 +289,7 @@ describe('desktop calendar push sync', () => {
             lastSyncedAt: '2026-01-01T00:00:00.000Z',
         };
         updateEvent.mockResolvedValue(writeFailed('calendar-temporarily-unavailable'));
-        getSyncEntry.mockResolvedValue(entry);
+        syncEntries.set(entry.taskId, entry);
         setStoreTasks([makeTask({ dueDate: '2026-01-10' })]);
 
         await runFullDesktopCalendarPushSync();
@@ -298,7 +311,7 @@ describe('desktop calendar push sync', () => {
             lastSyncedAt: '2026-01-01T00:00:00.000Z',
         };
         updateEvent.mockResolvedValue(writeFailed('event-not-found'));
-        getSyncEntry.mockResolvedValue(entry);
+        syncEntries.set(entry.taskId, entry);
         setStoreTasks([makeTask({ dueDate: '2026-01-10' })]);
 
         await runFullDesktopCalendarPushSync();
@@ -313,13 +326,14 @@ describe('desktop calendar push sync', () => {
     });
 
     it('reconciles stale calendar sync entries on full sync', async () => {
-        getAllSyncEntries.mockResolvedValue([{
+        const entry: CalendarSyncEntry = {
             taskId: 'ghost-task',
             calendarEventId: 'event-ghost',
             calendarId: 'cal-mindwtr',
             platform: 'macos',
             lastSyncedAt: '2026-01-01T00:00:00.000Z',
-        }]);
+        };
+        syncEntries.set(entry.taskId, entry);
         setStoreTasks([]);
 
         await runFullDesktopCalendarPushSync();

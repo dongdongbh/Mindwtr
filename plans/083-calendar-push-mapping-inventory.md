@@ -1,6 +1,6 @@
 # 083: Batch full calendar mapping lookups
 
-Status: TODO. Priority P2. Confidence HIGH. Effort S-M. Risk MED (calendar event/mapping cleanup). Selected automatically by the v1.2.8 review-improve loop, against app HEAD 57b257812c1054fa47c0bb8b95cd4115a564a277. This is both PERF-01 and architecture candidate A, one finding and one implementation commit.
+Status: DONE. Priority P2. Confidence HIGH. Effort S-M. Risk MED (calendar event/mapping cleanup). Selected automatically by the v1.2.8 review-improve loop, against app HEAD 57b257812c1054fa47c0bb8b95cd4115a564a277. This is both PERF-01 and architecture candidate A, one finding and one implementation commit.
 
 ## Problem and evidence
 `runCalendarPushFullSync` in packages/core/src/calendar-push-run.ts:157 expands the full task inventory, then syncCalendarPushTask/removeCalendarTask call getSyncEntry for each task before a final getAllSyncEntries stale sweep. Both production adapters pass _allTasks (desktop-calendar-push-sync.ts:408, mobile calendar-push-sync.ts:735). Desktop getSyncEntry crosses Tauri and opens SQLite per lookup (storage.rs:3730); mobile makes a point SELECT.
@@ -53,3 +53,6 @@ Stop and report if batching requires a new public interface, changes scheduler/e
 
 ## Worktree handoff rules
 Use /home/dd/worktrees/Mindwtr/review-20260909-calendar-inventory. Dependencies and build output stay under /home/dd; set TMPDIR/BUN_TMPDIR=/home/dd/.cache/mindwtr-review-tmp. RTK prefix all shell commands. CodeGraph before structural discovery. Read AGENTS, CONTEXT, guardrails and TDD skills. You are not alone: preserve others edits. No crash-log/secret reads, no delegation, commits, push or issue messages. Root owns integration, plan status, ledger and independent Astra review.
+
+## Implementation validation
+Implemented with a private initial mapping inventory and the existing fresh ending sweep. Both 5,000-task regressions failed with 5,000 point lookups before the change and pass with zero afterward. Core/calendar scheduler 23 tests, desktop adapter 12, mobile adapter 45, three platform typechecks, scoped lint, and diff checks passed. Full verification and independent closure are recorded in the local review result.

@@ -418,6 +418,7 @@ const runFullDesktopCalendarPushSyncUnsafe = async (): Promise<void> => {
             total: String(result.total),
             failed: String(result.failed),
             stale: String(result.stale),
+            releaseCheck: 'v1.3.0/calendar-push-inventory',
         },
     });
 };

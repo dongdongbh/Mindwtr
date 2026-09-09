@@ -161,11 +161,19 @@ export async function runCalendarPushFullSync(
     const calendarTasks = options.tasks.flatMap((task) =>
         expandCalendarRecurringTasks(task, projectedAtIso)
     );
+    const initialEntries = await options.ports.getAllSyncEntries();
+    const entriesByTaskId = new Map(
+        initialEntries.map((entry) => [entry.taskId, entry]),
+    );
+    const runPorts: CalendarPushRunPorts = {
+        ...options.ports,
+        getSyncEntry: async (taskId) => entriesByTaskId.get(taskId) ?? null,
+    };
     const concurrency = options.concurrency ?? 4;
     const results = await runLimitedSettled(
         calendarTasks,
         concurrency,
-        (task) => syncCalendarPushTask(task, options.target, options.ports),
+        (task) => syncCalendarPushTask(task, options.target, runPorts),
     );
     const activeTaskIds = new Set(
         calendarTasks
