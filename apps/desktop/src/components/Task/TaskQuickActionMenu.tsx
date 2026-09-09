@@ -75,6 +75,7 @@ export interface TaskQuickActionMenuProps {
     onDelete: () => void;
     onStatusChange: (status: TaskStatus) => void;
     onCreateArea: (name: string) => Promise<string | null>;
+    onCreateProject: (title: string) => Promise<string | null>;
     onUpdateTask: (updates: Partial<Task>) => Promise<StoreActionResult>;
     /** Extra entries rendered above Delete. Generic by design — the menu does not interpret them. */
     extraActions?: Array<{
@@ -159,6 +160,7 @@ export function TaskQuickActionMenu({
     onDelete,
     onStatusChange,
     onCreateArea,
+    onCreateProject,
     onUpdateTask,
     extraActions = [],
 }: TaskQuickActionMenuProps) {
@@ -209,6 +211,7 @@ export function TaskQuickActionMenu({
     ];
     const noProjectLabel = tFallback(t, 'taskEdit.noProjectOption', 'No Project');
     const searchProjectsLabel = tFallback(t, 'projects.search', 'Search projects');
+    const createProjectLabel = tFallback(t, 'projects.create', 'Create project');
     const noAreaLabel = tFallback(t, 'taskEdit.noAreaOption', 'No Area');
     const renameLabel = tFallback(t, 'task.renameTitle', 'Rename task');
     const duplicateLabel = tFallback(t, 'projects.duplicate', 'Duplicate');
@@ -1124,10 +1127,13 @@ export function TaskQuickActionMenu({
                                     projects={projects}
                                     value={projectDraft}
                                     onChange={setProjectDraft}
+                                    onCreateProject={onCreateProject}
                                     placeholder={noProjectLabel}
                                     noProjectLabel={noProjectLabel}
                                     searchPlaceholder={searchProjectsLabel}
                                     noMatchesLabel={noMatchesLabel}
+                                    createProjectLabel={createProjectLabel}
+                                    closeOnCreateFailure={false}
                                     className="w-full"
                                 />
                             </div>
