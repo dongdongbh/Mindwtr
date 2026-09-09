@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { cpus, release } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -11,6 +11,7 @@ import { fixture } from './fixture.mjs';
 import { summarizeNativeRun, validateNativeReadiness } from './native-desktop-report.mjs';
 import { waitForNativeSaveIdle } from './native-save-idle.mjs';
 import { installCaptureRenderProbe, validateCaptureRenderProbe, validateCaptureSampling } from './native-capture-probe.mjs';
+import { configureOwnedNativeWindow, findOwnedNativeWindow, installNativeViewportGuard, parseNativeViewport, validateNativeViewport } from './native-viewport.mjs';
 
 assert.equal(process.platform, 'linux', 'Native desktop runner currently supports Linux only');
 const root = resolve(import.meta.dirname, '../..');
@@ -29,6 +30,8 @@ const binaryHash = hash(binary);
 assert.equal(binaryHash, process.env.EXPECTED_BINARY_SHA256, 'Supply EXPECTED_BINARY_SHA256 for the freshly built native release');
 assert(process.env.DEVICE_LABEL, 'DEVICE_LABEL is required');
 const driverPath = process.env.TAURI_DRIVER ?? 'tauri-driver';
+const requestedViewport = parseNativeViewport(process.env.NATIVE_VIEWPORT);
+if (requestedViewport) assert(process.env.NIRI_SOCKET, 'Fixed native viewport currently requires an explicit NIRI_SOCKET');
 const diagnostics = process.env.NATIVE_DIAGNOSTICS === '1';
 const renderProbe = process.env.NATIVE_RENDER_PROBE === '1';
 const sampleJS = process.env.NATIVE_JSC_PROFILE === '1';
@@ -133,6 +136,23 @@ for (const size of sizes) {
       await until(() => execute('return !!window.__TAURI_INTERNALS__ && !!document.body'));
       assert.equal(await invoke('get_data_path_cmd'), join(profileDir, 'profile/data/data.json'), 'Non-isolated native profile');
       assert.equal(await invoke('plugin:app|name'), 'Mindwtr Benchmark', 'Build with the Benchmark product name');
+      if (requestedViewport) {
+        let ownedWindow;
+        await until(() => {
+          ownedWindow = findOwnedNativeWindow(
+            JSON.parse(execFileSync('niri', ['msg', '--json', 'windows'], { encoding: 'utf8', timeout: 5000 })),
+            app, pid => readlinkSync(`/proc/${pid}/exe`));
+          return !!ownedWindow;
+        });
+        configureOwnedNativeWindow(ownedWindow, requestedViewport, (...args) => {
+          execFileSync('niri', ['msg', 'action', ...args], { timeout: 5000 });
+        });
+        await until(async () => {
+          const actual = await execute('return {width:innerWidth,height:innerHeight,ratio:devicePixelRatio}');
+          return actual.width === requestedViewport.width && actual.height === requestedViewport.height
+            && actual.ratio === requestedViewport.ratio;
+        });
+      }
       // Onboarding suppresses the main-screen mark; dismiss it through its UI.
       await until(async () => {
         const dismissed = await execute('const b=[...document.querySelectorAll("button")].find(b=>b.textContent.trim()==="Skip for now"); if(b){b.click();return true;} return performance.getEntriesByName("mindwtr.interactive_ready").length===1;');
@@ -147,8 +167,10 @@ for (const size of sizes) {
       await request(`/session/${session}/refresh`, {});
       sample.readiness = await ready();
       const view = await execute('return {width:innerWidth,height:innerHeight,ratio:devicePixelRatio}');
+      validateNativeViewport(view, requestedViewport);
       if (viewport) assert.deepEqual(view, viewport, 'Native viewport changed across samples');
       viewport = view;
+      await execute(`(${installNativeViewportGuard.toString()})(arguments[0])`, view);
       const canonical = await invoke('get_data');
       assert.equal(canonical.tasks.length, size, 'Unexpected native fixture size');
       assert(canonical.tasks.every(task => task.id.startsWith('perf-task-')), 'Non-synthetic native data');
@@ -217,10 +239,13 @@ for (const size of sizes) {
           sample.jscProfile = { file: join('jsc-samples', files[0]), ...validateCaptureSampling(sample.renderProbe, data) };
         }
       }
+      assert.equal(await execute('return window.__nativeViewportDrift'), false, 'Native viewport changed during measured interactions');
+      validateNativeViewport(await execute('return {width:innerWidth,height:innerHeight,ratio:devicePixelRatio}'), viewport);
       // A new WebView loads the canonical native store again after the capture.
       await request(`/session/${session}/refresh`, {});
       await ready();
       assert.equal((await invoke('get_data')).tasks.filter(task => task.title === title).length, 1, 'Capture did not survive reload');
+      validateNativeViewport(await execute('return {width:innerWidth,height:innerHeight,ratio:devicePixelRatio}'), viewport);
       sample.status = 'passed';
     } catch (error) {
       sample.status = 'failed';
@@ -244,7 +269,8 @@ for (const size of sizes) {
   const report = { schemaVersion: 1, status: 'failed', metadata: {
     platform: 'desktop-native-linux', runtime: capabilities, os: release(), cpu: cpus()[0]?.model,
     device: process.env.DEVICE_LABEL, dataset: seed.id, buildType: 'release', binaryHash, sourceRevision, dirty,
-    viewport, scenario: saveQueueMode === 'idle' ? 'portable-native-settings-capture-idle-v2' : 'portable-native-settings-capture-v1',
+    viewport, requestedViewport, windowMode: requestedViewport ? 'owned-niri-floating' : 'compositor-default',
+    scenario: saveQueueMode === 'idle' ? 'portable-native-settings-capture-idle-v2' : 'portable-native-settings-capture-v1',
     saveQueueMode, network: 'host-network-sync-off',
     profiling: [diagnostics ? 'settings-diagnostics-ipc-headers' : '', renderProbe ? 'capture-render-probe' : '', sampleJS ? 'jsc-capture-1000us' : ''].filter(Boolean).join('+') || 'none',
     capturedAt: new Date().toISOString(),

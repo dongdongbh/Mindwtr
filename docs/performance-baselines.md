@@ -115,6 +115,21 @@ machine. Keep dependencies, build caches, `TMPDIR`, and `OUT_DIR` on disk under
 driver. Pass the graphical session's actual environment when the shell does not
 inherit it; do not guess a display socket or resize other applications.
 
+On niri, opt into a fixed comparison viewport with `NATIVE_VIEWPORT=1200x800@2`
+and the graphical session's explicit `NIRI_SOCKET`. The runner first verifies
+the isolated data path and Benchmark product, then finds the unique compositor
+window whose PID resolves to this iteration's copied executable. Only that
+window is floated and sized, always using its explicit window ID. There is no
+focused-window fallback, global display change, or modification of other windows.
+Unsupported/missing compositor access, ambiguous ownership, wrong scale, or an
+unattainable size fails the run. Leave the option unset on other compositors.
+
+Reports record both requested and actual viewport and the window mode. Every
+sample checks the requested dimensions/scale, and a resize observer rejects
+temporary changes during measured interactions. Compare only identical viewport
+and window-mode cohorts. Monitor orientation alone is not a valid comparison
+condition. See [the fixed-viewport follow-up](performance-fixed-viewport-2026-09.md).
+
 For A/B checks, set `NATIVE_BINARY` to an archived Benchmark executable and supply
 its matching `EXPECTED_BINARY_SHA256`. The runner still copies it into a fresh
 portable profile and checks its native identity. This avoids rebuilding between
