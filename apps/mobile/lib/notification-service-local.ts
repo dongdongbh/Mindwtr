@@ -62,8 +62,15 @@ type LocalAlarmMapEntry = {
 };
 
 type PomodoroAlarmEntry = {
-  id: AlarmId;
+  id?: AlarmId;
   fireAtMs?: number;
+  phase?: string;
+  notifiedImmediately?: boolean;
+};
+
+type PomodoroAlarmLoadResult = {
+  entry: PomodoroAlarmEntry | null;
+  failed: boolean;
 };
 
 type LocalAlarmMap = Record<string, LocalAlarmMapEntry>;
@@ -101,6 +108,7 @@ const NOTIFICATION_EVENT_RESCHEDULE_DEBOUNCE_MS = 250;
 // out, so a short scheduling delay is imperceptible.
 const STORE_RESCHEDULE_DEBOUNCE_MS = 2_500;
 const TASK_REMINDER_SNOOZE_MINUTES = 10;
+const POMODORO_ALERT_DELIVERY_RELEASE_CHECK = 'v1.3.0/pomodoro-alert-delivery';
 
 let started = false;
 let alarmApi: AlarmNotificationsApi | null = null;
@@ -112,6 +120,13 @@ let rescheduleTimer: ReturnType<typeof setTimeout> | null = null;
 let oneShotTopUpTimer: ReturnType<typeof setTimeout> | null = null;
 let notificationEventRescheduleTimer: ReturnType<typeof setTimeout> | null = null;
 let rescheduleQueue: Promise<void> = Promise.resolve();
+let pomodoroAlarmQueue: Promise<void> = Promise.resolve();
+let pomodoroRequestOrder = 0;
+let latestPomodoroCancellationRequest: {
+  order: number;
+  requestedAtMs: number;
+  reason: string;
+} | null = null;
 let alarmMap = new Map<string, LocalAlarmMapEntry>();
 let loadedAlarmMap = false;
 let alarmMapLoadPromise: Promise<void> | null = null;
@@ -137,38 +152,57 @@ const logNotificationWarn = (message: string, extra?: Record<string, unknown>) =
   void logWarn(`[Local Notifications] ${message}`, { scope: 'notifications', extra });
 };
 
-async function loadPomodoroAlarmEntry(): Promise<PomodoroAlarmEntry | null> {
+async function loadPomodoroAlarmEntry(): Promise<PomodoroAlarmLoadResult> {
   try {
     const raw = await AsyncStorage.getItem(LOCAL_POMODORO_ALARM_KEY);
-    if (!raw) return null;
+    if (!raw) return { entry: null, failed: false };
     const parsed = JSON.parse(raw) as Partial<PomodoroAlarmEntry>;
     const id = Number(parsed?.id);
-    if (!Number.isFinite(id)) return null;
     const fireAtMs = Number(parsed?.fireAtMs);
-    return {
-      id: Math.floor(id),
+    const entry: PomodoroAlarmEntry = {
+      ...(Number.isFinite(id) ? { id: Math.floor(id) } : {}),
       ...(Number.isFinite(fireAtMs) ? { fireAtMs } : {}),
+      ...(typeof parsed?.phase === 'string' ? { phase: parsed.phase } : {}),
+      ...(parsed?.notifiedImmediately === true ? { notifiedImmediately: true } : {}),
     };
+    if (entry.id === undefined && entry.fireAtMs === undefined) {
+      return { entry: null, failed: false };
+    }
+    return { entry, failed: false };
   } catch (error) {
     logNotificationError('Failed to load pomodoro alarm', error);
-    return null;
+    return { entry: null, failed: true };
   }
 }
 
-async function savePomodoroAlarmEntry(entry: PomodoroAlarmEntry): Promise<void> {
+async function savePomodoroAlarmEntry(entry: PomodoroAlarmEntry): Promise<boolean> {
   try {
     await AsyncStorage.setItem(LOCAL_POMODORO_ALARM_KEY, JSON.stringify(entry));
+    return true;
   } catch (error) {
     logNotificationError('Failed to persist pomodoro alarm', error);
+    return false;
   }
 }
 
-async function clearPomodoroAlarmEntry(): Promise<void> {
+async function clearPomodoroAlarmEntry(): Promise<boolean> {
   try {
     await AsyncStorage.removeItem(LOCAL_POMODORO_ALARM_KEY);
+    return true;
   } catch (error) {
     logNotificationError('Failed to clear pomodoro alarm', error);
+    return false;
   }
+}
+
+function enqueuePomodoroAlarmOperation(label: string, operation: () => Promise<void>): Promise<void> {
+  const current = pomodoroAlarmQueue
+    .catch(() => undefined)
+    .then(operation);
+  pomodoroAlarmQueue = current.catch((error) => {
+    logNotificationError(`Failed to ${label} pomodoro alarm`, error);
+  });
+  return current.catch(() => undefined);
 }
 
 function resetRuntimeState(): void {
@@ -247,9 +281,17 @@ async function loadAlarmApi(): Promise<AlarmNotificationsApi | null> {
   }
 }
 
-async function clearScheduledAlarms(api: AlarmNotificationsApi | null): Promise<void> {
+async function clearScheduledAlarms(
+  api: AlarmNotificationsApi | null,
+  options: { cancelPomodoro: boolean },
+): Promise<void> {
   await loadAlarmMapIfNeeded();
-  await cancelLocalPomodoroCompletionNotification(api, { removeFired: true, reason: 'service-clear' });
+  if (options.cancelPomodoro) {
+    await cancelLocalPomodoroCompletionNotification(api, {
+      removeFired: true,
+      reason: 'notification-permission-denied',
+    });
+  }
   const scheduledAlarmCount = alarmMap.size;
 
   if (api) {
@@ -855,6 +897,18 @@ export async function sendLocalMobileNotification(
   const permission = await requestLocalNotificationPermission();
   if (!permission.granted) return;
 
+  await sendLocalMobileNotificationWithApi(api, trimmedTitle, message, data);
+}
+
+async function sendLocalMobileNotificationWithApi(
+  api: AlarmNotificationsApi,
+  title: string,
+  message?: string,
+  data?: Record<string, string>,
+): Promise<boolean> {
+  const trimmedTitle = String(title || '').trim();
+  if (!trimmedTitle) return false;
+
   try {
     const details = {
       title: trimmedTitle,
@@ -876,7 +930,7 @@ export async function sendLocalMobileNotification(
 
     if (typeof api.sendNotification === 'function') {
       api.sendNotification(details);
-      return;
+      return true;
     }
 
     await api.scheduleAlarm({
@@ -884,8 +938,145 @@ export async function sendLocalMobileNotification(
       fire_date: api.parseDate(new Date(Date.now() + 2000)),
       schedule_type: 'once',
     });
+    return true;
   } catch (error) {
     logNotificationError('Failed to send local mobile notification', error);
+    return false;
+  }
+}
+
+function nativeAlarmHasPomodoroData(value: unknown): boolean {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    return record.kind === 'pomodoro' || nativeAlarmHasPomodoroData(record.data);
+  }
+  if (typeof value !== 'string') return false;
+  try {
+    return nativeAlarmHasPomodoroData(JSON.parse(value) as unknown);
+  } catch {
+    return value.split(';;').some((item) => {
+      const separator = item.indexOf('==>');
+      return separator >= 0
+        && item.slice(0, separator) === 'kind'
+        && item.slice(separator + 3) === 'pomodoro';
+    });
+  }
+}
+
+async function loadNativePomodoroAlarmIds(api: AlarmNotificationsApi): Promise<Set<AlarmId> | null> {
+  if (typeof api.getScheduledAlarms !== 'function') {
+    logNotificationWarn('Pomodoro native alarm inventory unavailable');
+    return null;
+  }
+  try {
+    const alarms = await api.getScheduledAlarms();
+    if (!Array.isArray(alarms)) {
+      logNotificationWarn('Pomodoro native alarm inventory unreadable');
+      return null;
+    }
+    const ids = new Set<AlarmId>();
+    for (const alarm of alarms) {
+      if (!alarm || typeof alarm !== 'object' || !nativeAlarmHasPomodoroData(alarm)) continue;
+      const id = Number((alarm as Record<string, unknown>).id);
+      if (Number.isFinite(id)) ids.add(Math.floor(id));
+    }
+    return ids;
+  } catch (error) {
+    logNotificationError('Failed to read pomodoro native alarm inventory', error);
+    return null;
+  }
+}
+
+function cancelPomodoroAlarmId(
+  api: AlarmNotificationsApi,
+  id: AlarmId,
+  removeFired: boolean,
+): boolean {
+  try {
+    // Android resolves the delivered notification id from its alarm row, so
+    // remove the tray item before deleteAlarm removes that row.
+    if (removeFired) api.removeFiredNotification(id);
+    api.deleteAlarm(id);
+    api.deleteRepeatingAlarm(id);
+    return true;
+  } catch (error) {
+    logNotificationError('Failed to cancel pomodoro alarm', error);
+    return false;
+  }
+}
+
+function logPreservedDuePomodoroAlarm(reason: string, count = 1): void {
+  logNotificationInfo('Pomodoro due alarm preserved', {
+    reason,
+    outcome: 'preserved',
+    count,
+    releaseCheck: POMODORO_ALERT_DELIVERY_RELEASE_CHECK,
+  });
+}
+
+function isPomodoroScheduleSuperseded(
+  scheduleOrder: number,
+  fireAtMs: number,
+): boolean {
+  const cancellation = latestPomodoroCancellationRequest;
+  if (!cancellation || cancellation.order <= scheduleOrder) return false;
+  return cancellation.reason !== 'timer-not-running'
+    || cancellation.requestedAtMs < fireAtMs;
+}
+
+async function cancelLocalPomodoroCompletionNotificationUnlocked(
+  api: AlarmNotificationsApi | null,
+  options: { removeFired?: boolean; reason?: string },
+  requestedAtMs: number,
+): Promise<void> {
+  const loaded = await loadPomodoroAlarmEntry();
+  const reason = options.reason ?? 'unspecified';
+  const explicitCancellation = reason !== 'timer-not-running';
+  if (loaded.failed && !explicitCancellation) return;
+  const entry = loaded.entry;
+  const preserveDue = reason === 'timer-not-running'
+    && entry?.fireAtMs !== undefined
+    && entry.fireAtMs <= requestedAtMs;
+
+  if (preserveDue) {
+    if (entry?.id !== undefined) {
+      logPreservedDuePomodoroAlarm(reason);
+    }
+    return;
+  }
+
+  if (!api) {
+    if (entry) {
+      logNotificationWarn('Pomodoro alarm cancellation deferred; alarm module unavailable', { reason });
+    }
+    return;
+  }
+
+  const ids = new Set<AlarmId>();
+  if (entry?.id !== undefined) ids.add(entry.id);
+  let inventoryComplete = true;
+  if (explicitCancellation) {
+    const nativeIds = await loadNativePomodoroAlarmIds(api);
+    inventoryComplete = nativeIds !== null;
+    for (const id of nativeIds ?? []) ids.add(id);
+  }
+
+  let cancellationComplete = true;
+  for (const id of ids) {
+    const shouldRemoveFired = options.removeFired
+      ?? (explicitCancellation || entry?.id !== id || !entry.fireAtMs || entry.fireAtMs > requestedAtMs);
+    cancellationComplete = cancelPomodoroAlarmId(api, id, shouldRemoveFired) && cancellationComplete;
+  }
+
+  if (entry || ids.size > 0) {
+    logNotificationInfo('Pomodoro alarm cancelled', {
+      reason,
+      outcome: cancellationComplete && inventoryComplete ? 'cancelled' : 'incomplete',
+      count: ids.size,
+    });
+  }
+  if (cancellationComplete && inventoryComplete) {
+    await clearPomodoroAlarmEntry();
   }
 }
 
@@ -893,31 +1084,17 @@ export async function cancelLocalPomodoroCompletionNotification(
   loadedApi?: AlarmNotificationsApi | null,
   options: { removeFired?: boolean; reason?: string } = {},
 ): Promise<void> {
-  const api = loadedApi ?? await loadAlarmApi();
-  const entry = await loadPomodoroAlarmEntry();
-  if (entry) {
-    // Every path that kills a pending completion alert must say so: #888's
-    // empty diagnostic log was itself the bug report.
-    logNotificationInfo('Pomodoro alarm cancelled', {
-      alarmId: entry.id,
-      reason: options.reason ?? 'unspecified',
-      fireAt: entry.fireAtMs ? new Date(entry.fireAtMs).toISOString() : '',
-      apiAvailable: String(Boolean(api)),
-    });
-  }
-  if (api && entry) {
-    try {
-      api.deleteAlarm(entry.id);
-      api.deleteRepeatingAlarm(entry.id);
-      const shouldRemoveFired = options.removeFired ?? (!entry.fireAtMs || entry.fireAtMs > Date.now());
-      if (shouldRemoveFired) {
-        api.removeFiredNotification(entry.id);
-      }
-    } catch (error) {
-      logNotificationError('Failed to cancel pomodoro alarm', error);
-    }
-  }
-  await clearPomodoroAlarmEntry();
+  const requestedAtMs = Date.now();
+  const order = ++pomodoroRequestOrder;
+  latestPomodoroCancellationRequest = {
+    order,
+    requestedAtMs,
+    reason: options.reason ?? 'unspecified',
+  };
+  return enqueuePomodoroAlarmOperation('cancel', async () => {
+    const api = loadedApi ?? await loadAlarmApi();
+    await cancelLocalPomodoroCompletionNotificationUnlocked(api, options, requestedAtMs);
+  });
 }
 
 export async function scheduleLocalPomodoroCompletionNotification(
@@ -926,6 +1103,8 @@ export async function scheduleLocalPomodoroCompletionNotification(
   fireAt: Date,
   data?: Record<string, string>,
 ): Promise<void> {
+  const requestedAtMs = Date.now();
+  const order = ++pomodoroRequestOrder;
   const trimmedTitle = String(title || '').trim();
   const fireAtMs = fireAt.getTime();
   const fireAtValid = Number.isFinite(fireAtMs);
@@ -935,7 +1114,7 @@ export async function scheduleLocalPomodoroCompletionNotification(
   // an empty log used to be ambiguous (#888).
   logNotificationInfo('Pomodoro alarm requested', {
     fireAt: fireAtValid ? new Date(fireAtMs).toISOString() : 'invalid',
-    inMs: fireAtValid ? String(fireAtMs - Date.now()) : 'invalid',
+    inMs: fireAtValid ? String(fireAtMs - requestedAtMs) : 'invalid',
     phase: data?.phase ?? '',
     hasTitle: String(Boolean(trimmedTitle)),
   });
@@ -949,82 +1128,116 @@ export async function scheduleLocalPomodoroCompletionNotification(
     return;
   }
 
-  const api = await loadAlarmApi();
-  if (!api) {
-    logNotificationWarn('Pomodoro alarm skipped; alarm module unavailable');
-    return;
-  }
-
-  const permission = await requestLocalNotificationPermission();
-  if (!permission.granted) {
-    logNotificationWarn('Pomodoro alarm skipped; notification permission not granted');
-    return;
-  }
-
-  if (fireAtMs <= Date.now() + 1000) {
-    logNotificationInfo('Pomodoro completion already due; notifying immediately');
-    await cancelLocalPomodoroCompletionNotification(api, { reason: 'past-due-immediate' });
-    await sendLocalMobileNotification(trimmedTitle, message, data);
-    return;
-  }
-
-  const previousEntry = await loadPomodoroAlarmEntry();
-
-  try {
-    const result = await api.scheduleAlarm({
-      title: trimmedTitle,
-      message: normalizeNotificationMessage(trimmedTitle, message),
-      channel: LOCAL_NOTIFICATION_CHANNEL,
-      auto_cancel: true,
-      small_icon: LOCAL_SMALL_ICON,
-      color: LOCAL_NOTIFICATION_COLOR,
-      has_button: false,
-      // The patched iOS module reads this key into a dictionary literal, where
-      // a missing value is nil and throws NSInvalidArgumentException — the
-      // reason no pomodoro alert ever scheduled on iOS (#888). Always pass it,
-      // like the task-reminder path does.
-      has_complete_action: false,
-      loop_sound: false,
-      play_sound: true,
-      schedule_type: 'once',
-      use_big_text: true,
-      vibrate: false,
-      fire_date: toAlarmFireDate(api, fireAt),
-      data: {
-        kind: 'pomodoro',
-        ...(data ?? {}),
-      },
-    });
-    const id = Number(result?.id);
-    if (!Number.isFinite(id)) {
-      logNotificationError('Pomodoro alarm returned invalid id');
+  return enqueuePomodoroAlarmOperation('schedule', async () => {
+    const api = await loadAlarmApi();
+    if (!api) {
+      logNotificationWarn('Pomodoro alarm skipped; alarm module unavailable');
       return;
     }
-    const scheduledId = Math.floor(id);
-    await savePomodoroAlarmEntry({ id: scheduledId, fireAtMs });
-    logNotificationInfo('Pomodoro alarm scheduled', {
-      alarmId: scheduledId,
-      fireAt: new Date(fireAtMs).toISOString(),
-    });
-    // Cancel the superseded alarm only after its replacement exists, so an app
-    // suspension mid-flight never leaves a running phase with no pending alert.
-    // Skip when the ids match: the iOS module keys requests by creation second,
-    // so a same-second reschedule already replaced the old request natively and
-    // deleting the shared id would remove the alarm we just scheduled (#888).
-    if (previousEntry && previousEntry.id !== scheduledId) {
-      try {
-        api.deleteAlarm(previousEntry.id);
-        api.deleteRepeatingAlarm(previousEntry.id);
-        if (!previousEntry.fireAtMs || previousEntry.fireAtMs > Date.now()) {
-          api.removeFiredNotification(previousEntry.id);
-        }
-      } catch (error) {
-        logNotificationError('Failed to cancel superseded pomodoro alarm', error);
-      }
+
+    const permission = await requestLocalNotificationPermission();
+    if (!permission.granted) {
+      logNotificationWarn('Pomodoro alarm skipped; notification permission not granted');
+      await cancelLocalPomodoroCompletionNotificationUnlocked(
+        api,
+        { removeFired: true, reason: 'notification-permission-denied' },
+        requestedAtMs,
+      );
+      return;
     }
-  } catch (error) {
-    logNotificationError('Failed to schedule pomodoro alarm', error);
-  }
+
+    if (isPomodoroScheduleSuperseded(order, fireAtMs)) return;
+
+    const loaded = await loadPomodoroAlarmEntry();
+    if (loaded.failed) return;
+    if (isPomodoroScheduleSuperseded(order, fireAtMs)) return;
+    const previousEntry = loaded.entry;
+    const phase = data?.phase ?? '';
+    const samePhase = !previousEntry?.phase || !phase || previousEntry.phase === phase;
+    if (previousEntry?.fireAtMs === fireAtMs && samePhase) {
+      logNotificationInfo('Pomodoro alarm already matches requested phase');
+      return;
+    }
+
+    if (fireAtMs <= Date.now() + 1000) {
+      logNotificationInfo('Pomodoro completion already due; notifying immediately');
+      const delivered = await sendLocalMobileNotificationWithApi(api, trimmedTitle, message, data);
+      if (!delivered) return;
+      const saved = await savePomodoroAlarmEntry({
+        fireAtMs,
+        ...(phase ? { phase } : {}),
+        notifiedImmediately: true,
+      });
+      if (!saved) return;
+      if (previousEntry?.id !== undefined && previousEntry.id !== 0) {
+        if (previousEntry.fireAtMs !== undefined && previousEntry.fireAtMs <= requestedAtMs) {
+          logPreservedDuePomodoroAlarm('phase-replaced');
+        } else {
+          cancelPomodoroAlarmId(api, previousEntry.id, true);
+        }
+      }
+      return;
+    }
+
+    try {
+      const result = await api.scheduleAlarm({
+        title: trimmedTitle,
+        message: normalizeNotificationMessage(trimmedTitle, message),
+        channel: LOCAL_NOTIFICATION_CHANNEL,
+        auto_cancel: true,
+        small_icon: LOCAL_SMALL_ICON,
+        color: LOCAL_NOTIFICATION_COLOR,
+        has_button: false,
+        // The patched iOS module reads this key into a dictionary literal, where
+        // a missing value is nil and throws NSInvalidArgumentException — the
+        // reason no pomodoro alert ever scheduled on iOS (#888). Always pass it,
+        // like the task-reminder path does.
+        has_complete_action: false,
+        loop_sound: false,
+        play_sound: true,
+        schedule_type: 'once',
+        use_big_text: true,
+        vibrate: false,
+        fire_date: toAlarmFireDate(api, fireAt),
+        data: {
+          kind: 'pomodoro',
+          ...(data ?? {}),
+        },
+      });
+      const id = Number(result?.id);
+      if (!Number.isFinite(id)) {
+        logNotificationError('Pomodoro alarm returned invalid id');
+        return;
+      }
+      const scheduledId = Math.floor(id);
+      const saved = await savePomodoroAlarmEntry({
+        id: scheduledId,
+        fireAtMs,
+        ...(phase ? { phase } : {}),
+      });
+      if (!saved) {
+        if (previousEntry?.id !== scheduledId) {
+          cancelPomodoroAlarmId(api, scheduledId, true);
+        }
+        return;
+      }
+      logNotificationInfo('Pomodoro alarm scheduled', {
+        alarmId: scheduledId,
+        fireAt: new Date(fireAtMs).toISOString(),
+      });
+      // Skip when the ids match: the iOS module keys requests by creation second,
+      // so deleting the shared id would remove the replacement alarm (#888).
+      if (previousEntry?.id !== undefined && previousEntry.id !== scheduledId) {
+        if (previousEntry.fireAtMs !== undefined && previousEntry.fireAtMs <= requestedAtMs) {
+          logPreservedDuePomodoroAlarm('phase-replaced');
+        } else {
+          cancelPomodoroAlarmId(api, previousEntry.id, true);
+        }
+      }
+    } catch (error) {
+      logNotificationError('Failed to schedule pomodoro alarm', error);
+    }
+  });
 }
 
 export async function startLocalMobileNotifications(): Promise<void> {
@@ -1052,7 +1265,7 @@ export async function startLocalMobileNotifications(): Promise<void> {
   const permission = await requestLocalNotificationPermission();
   if (!permission.granted) {
     logNotificationInfo('Start aborted; notification permission not granted', permission);
-    await clearScheduledAlarms(api);
+    await clearScheduledAlarms(api, { cancelPomodoro: true });
     started = false;
     return;
   }
@@ -1122,7 +1335,7 @@ export async function stopLocalMobileNotifications(): Promise<void> {
   notificationOpenHandler = null;
 
   const api = await loadAlarmApi();
-  await clearScheduledAlarms(api);
+  await clearScheduledAlarms(api, { cancelPomodoro: false });
   resetRuntimeState();
   started = false;
   logNotificationInfo('Service stopped');
@@ -1153,5 +1366,8 @@ export const __localNotificationTestUtils = {
     alarmMap = new Map<string, LocalAlarmMapEntry>();
     loadedAlarmMap = false;
     resetRuntimeState();
+    pomodoroAlarmQueue = Promise.resolve();
+    pomodoroRequestOrder = 0;
+    latestPomodoroCancellationRequest = null;
   },
 };

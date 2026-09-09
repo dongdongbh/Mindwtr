@@ -14,6 +14,7 @@ import { sanitizeLogContext } from './log-sanitize';
  */
 const RELEASE_CHECK_FIELD_NAMES = [
     // sync-signature-pruning reuses releaseCheck, elapsedMs, and count below.
+    // pomodoro-alert-delivery reuses releaseCheck, reason, outcome, and count below.
     // settings-lazy-resources (desktop SettingsView)
     'page', 'integrationsLoadEnabled', 'syncLoadEnabled', 'advancedLoadEnabled',
     // startup-readiness (mobile and desktop)

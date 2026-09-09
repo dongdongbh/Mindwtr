@@ -1161,6 +1161,24 @@ const applyAlarmIosDeletePendingPatchToSource = (original) => original.replace(
   'RCT_EXPORT_METHOD($1: (NSInteger)id)'
 );
 
+// Keep pending Pomodoro requests identifiable after the next phase replaces
+// the JS current-alarm record. Export only the discriminator, not task data.
+const applyAlarmIosPendingKindPatchToSource = (original) => {
+  if (original.includes('// Mindwtr pending notification kind')) return original;
+  return original.replace(
+    'formattedNotification[@"id"] = request.identifier;',
+    `formattedNotification[@"id"] = request.identifier;
+    // Mindwtr pending notification kind
+    id pendingData = content.userInfo[@"data"];
+    if ([pendingData isKindOfClass:[NSDictionary class]]) {
+        id pendingKind = [(NSDictionary *)pendingData objectForKey:@"kind"];
+        if ([pendingKind isKindOfClass:[NSString class]]) {
+            formattedNotification[@"data"] = @{ @"kind": pendingKind };
+        }
+    }`
+  );
+};
+
 const logPatchedCandidate = (label, candidate) => {
   console.log(`[${label}] patched ${candidate}`);
 };
@@ -1436,6 +1454,15 @@ const PATCHES = [
     required: true,
     firstMatchOnly: true,
     appliedMarker: 'RCT_EXPORT_METHOD(deleteAlarm: (NSInteger)id)',
+  },
+  {
+    id: 'alarm-ios-pending-kind',
+    platform: 'ios',
+    getCandidates: iosSourceCandidates,
+    transform: applyAlarmIosPendingKindPatchToSource,
+    required: true,
+    firstMatchOnly: true,
+    appliedMarker: '// Mindwtr pending notification kind',
   },
 ];
 

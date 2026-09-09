@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
+
+const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 const plugin = require('./patch-alarm-notification-gradle');
 
@@ -42,8 +45,25 @@ const applyAlarmExactPermissionModulePatchToSource = transformFor('alarm-exact-p
 const applyAlarmIosCompleteActionPatchToSource = transformFor('alarm-ios-complete-action');
 const applyAlarmIosUniqueIdentifierPatchToSource = transformFor('alarm-ios-unique-identifier');
 const applyAlarmIosDeletePendingPatchToSource = transformFor('alarm-ios-delete-pending-arg');
+const applyAlarmIosPendingKindPatchToSource = transformFor('alarm-ios-pending-kind');
 
 describe('patch-alarm-notification-gradle', () => {
+  it('exposes only a type-checked pending notification kind on iOS and converges', () => {
+    const input = `static NSDictionary *RCTFormatUNNotificationRequest(UNNotificationRequest *request)
+{
+    NSMutableDictionary *formattedNotification = [NSMutableDictionary dictionary];
+    UNNotificationContent *content = request.content;
+    formattedNotification[@"id"] = request.identifier;
+    return formattedNotification;
+}`;
+    const output = applyAlarmIosPendingKindPatchToSource(input);
+    expect(output).toContain('[pendingData isKindOfClass:[NSDictionary class]]');
+    expect(output).toContain('[pendingKind isKindOfClass:[NSString class]]');
+    expect(output).toContain('formattedNotification[@"data"] = @{ @"kind": pendingKind };');
+    expect(output).not.toContain('formattedNotification[@"data"] = pendingData');
+    expect(applyAlarmIosPendingKindPatchToSource(output)).toBe(output);
+  });
+
   it('patches AlarmUtil pending intent flags for Android 12+', () => {
     const input = `class AlarmUtil {
     private NotificationManager getNotificationManager() {
@@ -950,6 +970,7 @@ describe('PATCHES registry completeness', () => {
     // Added after the collapse (#1020), pinned here for the same reason as the
     // original sites: dropping it silently restores the duplicate-reminder leak.
     ['RnAlarmNotification.m', 'applyAlarmIosDeletePendingPatchToSource'],
+    ['RnAlarmNotification.m', 'applyAlarmIosPendingKindPatchToSource'],
     // Added for #1028: dropping either silently restores the dead-row silent
     // no-op on a notification action tap.
     ['AlarmUtil.java', 'applyAlarmDeadRowUtilPatchToSource'],
@@ -971,7 +992,7 @@ describe('PATCHES registry completeness', () => {
   });
 
   it('every entry declares required/firstMatchOnly explicitly', () => {
-    expect(PATCHES).toHaveLength(21);
+    expect(PATCHES).toHaveLength(22);
     for (const patch of PATCHES) {
       expect(typeof patch.id).toBe('string');
       expect(typeof patch.required).toBe('boolean');
@@ -1041,7 +1062,7 @@ describe('applyPatches (registry-driven fixture tree)', () => {
   });
 
   it('running applyPatches twice against the real installed package succeeds both times and converges', () => {
-    const realPackageRoot = path.join(__dirname, '..', '..', '..', 'node_modules', 'react-native-alarm-notification');
+    const realPackageRoot = path.join(testDirectory, '..', '..', '..', 'node_modules', 'react-native-alarm-notification');
     if (!fs.existsSync(realPackageRoot)) {
       // react-native-alarm-notification isn't installed in this environment
       // (e.g. a pruned/production install) — nothing to verify against.
@@ -1086,7 +1107,7 @@ describe('applyPatches (registry-driven fixture tree)', () => {
   // reports no error. Any exported method that takes an id this way is a
   // silent no-op waiting to happen — assert none survive the patch pass.
   it('leaves no pointer-typed scalar arguments in the patched iOS module', () => {
-    const realPackageRoot = path.join(__dirname, '..', '..', '..', 'node_modules', 'react-native-alarm-notification');
+    const realPackageRoot = path.join(testDirectory, '..', '..', '..', 'node_modules', 'react-native-alarm-notification');
     if (!fs.existsSync(realPackageRoot)) return;
 
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alarm-patch-ptr-'));

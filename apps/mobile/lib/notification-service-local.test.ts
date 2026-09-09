@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const POMODORO_ALARM_STORAGE_KEY = 'mindwtr:local:pomodoro-alarm:v1';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 const {
   mockAsyncStorageGetItem,
   mockAsyncStorageRemoveItem,
@@ -48,7 +60,7 @@ const {
   mockAlarmRequestPermissions: vi.fn(async () => ({ alert: true })),
   mockAlarmSendNotification: vi.fn(),
   mockAlarmScheduleAlarm: vi.fn(async () => ({ id: 99 })),
-  mockAlarmGetScheduledAlarms: vi.fn(async () => [] as Array<{ id: string }>),
+  mockAlarmGetScheduledAlarms: vi.fn(async () => [] as Record<string, unknown>[]),
   mockEnsureReminderNotificationChannel: vi.fn(async () => undefined),
   mockRestorePersistentCaptureNotification: vi.fn(),
   mockIsLoggingEnabled: vi.fn(() => true),
@@ -60,6 +72,21 @@ const {
   mockPermissionsAndroidCheck: vi.fn(async () => true),
   mockPermissionsAndroidRequest: vi.fn(async () => 'granted'),
 }));
+
+function installPomodoroStorage(initial: string | null = null) {
+  const values = new Map<string, string>();
+  if (initial !== null) values.set(POMODORO_ALARM_STORAGE_KEY, initial);
+  mockAsyncStorageGetItem.mockImplementation(async (key: string) => values.get(key) ?? null);
+  mockAsyncStorageSetItem.mockImplementation(async (key: string, value: string) => {
+    values.set(key, value);
+  });
+  mockAsyncStorageRemoveItem.mockImplementation(async (key: string) => {
+    values.delete(key);
+  });
+  return {
+    getPomodoro: () => values.get(POMODORO_ALARM_STORAGE_KEY) ?? null,
+  };
+}
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: {
@@ -823,7 +850,7 @@ describe('notification-service-local', () => {
     );
     expect(mockAsyncStorageSetItem).toHaveBeenCalledWith(
       'mindwtr:local:pomodoro-alarm:v1',
-      JSON.stringify({ id: 99, fireAtMs: fireAt.getTime() })
+      JSON.stringify({ id: 99, fireAtMs: fireAt.getTime(), phase: 'focus-complete' })
     );
   });
 
@@ -846,6 +873,23 @@ describe('notification-service-local', () => {
       'mindwtr:local:pomodoro-alarm:v1',
       JSON.stringify({ id: 99, fireAtMs: fireAt.getTime() })
     );
+  });
+
+  it('preserves an expired pomodoro alarm when the next phase auto-starts', async () => {
+    mockAsyncStorageGetItem.mockImplementation(async (key: string) => (
+      key === 'mindwtr:local:pomodoro-alarm:v1'
+        ? JSON.stringify({ id: 41, fireAtMs: Date.now() - 1000 })
+        : null
+    ));
+    const fireAt = new Date('2099-05-22T12:30:00.000Z');
+
+    await scheduleLocalPomodoroCompletionNotification('Pomodoro Break', 'Ready to focus.', fireAt, {
+      phase: 'break-complete',
+    });
+
+    expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
+    expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(41);
+    expect(mockAlarmDeleteRepeatingAlarm).not.toHaveBeenCalledWith(41);
   });
 
   it('keeps the fresh pomodoro alarm when the module reuses the previous identifier', async () => {
@@ -878,18 +922,351 @@ describe('notification-service-local', () => {
     expect(mockAsyncStorageRemoveItem).toHaveBeenCalledWith('mindwtr:local:pomodoro-alarm:v1');
   });
 
-  it('keeps an already fired pomodoro notification visible while clearing its stored alarm', async () => {
+  it('preserves a due pomodoro alarm when normal timer completion reaches JS first', async () => {
+    const nativePending = new Set([41]);
+    mockAlarmDeleteAlarm.mockImplementation((id: number) => { nativePending.delete(id); });
     mockAsyncStorageGetItem.mockImplementation(async (key: string) => (
       key === 'mindwtr:local:pomodoro-alarm:v1'
         ? JSON.stringify({ id: 41, fireAtMs: Date.now() - 1000 })
         : null
     ));
 
-    await cancelLocalPomodoroCompletionNotification();
+    await cancelLocalPomodoroCompletionNotification(undefined, { reason: 'timer-not-running' });
+
+    expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(41);
+    expect(mockAlarmDeleteRepeatingAlarm).not.toHaveBeenCalledWith(41);
+    expect(mockAlarmRemoveFiredNotification).not.toHaveBeenCalled();
+    expect(mockAsyncStorageRemoveItem).not.toHaveBeenCalledWith('mindwtr:local:pomodoro-alarm:v1');
+    expect(nativePending.has(41)).toBe(true);
+
+    // Model AlarmManager dispatching only after the JS completion transition.
+    const dispatchedAfterJsCompletion = nativePending.delete(41);
+    expect(dispatchedAfterJsCompletion).toBe(true);
+    expect(mockLogInfo).toHaveBeenCalledWith(
+      '[Local Notifications] Pomodoro due alarm preserved',
+      expect.objectContaining({
+        extra: {
+          reason: 'timer-not-running',
+          outcome: 'preserved',
+          count: 1,
+          releaseCheck: 'v1.3.0/pomodoro-alert-delivery',
+        },
+      }),
+    );
+  });
+
+  it('cancels a future alarm when pause was requested before its deadline, even if queued work crosses it', async () => {
+    vi.useFakeTimers();
+    const now = new Date('2026-09-09T12:00:00.000Z');
+    vi.setSystemTime(now);
+    const storage = installPomodoroStorage();
+    const firstSchedule = deferred<{ id: number }>();
+    const scheduleEntered = deferred<void>();
+    mockAlarmScheduleAlarm
+      .mockImplementationOnce(() => {
+        scheduleEntered.resolve();
+        return firstSchedule.promise;
+      })
+      .mockResolvedValueOnce({ id: 42 });
+    const firstFireAt = new Date(now.getTime() + 5_000);
+    const nextFireAt = new Date(now.getTime() + 60_000);
+
+    const scheduling = scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', firstFireAt, { phase: 'focus-complete' },
+    );
+    await scheduleEntered.promise;
+
+    const cancelling = cancelLocalPomodoroCompletionNotification(undefined, { reason: 'timer-not-running' });
+    const rescheduling = scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Break', 'Ready to focus.', nextFireAt, { phase: 'break-complete' },
+    );
+    vi.setSystemTime(new Date(now.getTime() + 10_000));
+    firstSchedule.resolve({ id: 41 });
+    await Promise.all([scheduling, cancelling, rescheduling]);
 
     expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(41);
-    expect(mockAlarmDeleteRepeatingAlarm).toHaveBeenCalledWith(41);
-    expect(mockAlarmRemoveFiredNotification).not.toHaveBeenCalled();
-    expect(mockAsyncStorageRemoveItem).toHaveBeenCalledWith('mindwtr:local:pomodoro-alarm:v1');
+    expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(2);
+    expect(storage.getPomodoro()).toBe(JSON.stringify({
+      id: 42,
+      fireAtMs: nextFireAt.getTime(),
+      phase: 'break-complete',
+    }));
+  });
+
+  it('sends immediately when permission resolution crosses the deadline without cancellation', async () => {
+    vi.useFakeTimers();
+    const now = new Date('2026-09-09T12:00:00.000Z');
+    vi.setSystemTime(now);
+    installPomodoroStorage();
+    const permission = deferred<boolean>();
+    const permissionStarted = deferred<void>();
+    mockPermissionsAndroidCheck.mockImplementationOnce(() => {
+      permissionStarted.resolve();
+      return permission.promise;
+    });
+    const fireAt = new Date(now.getTime() + 5_000);
+
+    const scheduling = scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },
+    );
+    await permissionStarted.promise;
+    vi.setSystemTime(new Date(now.getTime() + 10_000));
+    permission.resolve(true);
+    await scheduling;
+
+    expect(mockAlarmSendNotification).toHaveBeenCalledTimes(1);
+    expect(mockAlarmScheduleAlarm).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['pause', 'timer-not-running'],
+    ['alert off', 'completion-alert-off'],
+  ])('does not notify after %s is requested while permission is pending', async (_label, reason) => {
+    vi.useFakeTimers();
+    const now = new Date('2026-09-09T12:00:00.000Z');
+    vi.setSystemTime(now);
+    installPomodoroStorage();
+    const permission = deferred<boolean>();
+    const permissionStarted = deferred<void>();
+    mockPermissionsAndroidCheck.mockImplementationOnce(() => {
+      permissionStarted.resolve();
+      return permission.promise;
+    });
+    const fireAt = new Date(now.getTime() + 5_000);
+
+    const scheduling = scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },
+    );
+    await permissionStarted.promise;
+    const cancelling = cancelLocalPomodoroCompletionNotification(undefined, { reason });
+    vi.setSystemTime(new Date(now.getTime() + 10_000));
+    permission.resolve(true);
+    await Promise.all([scheduling, cancelling]);
+
+    expect(mockAlarmSendNotification).not.toHaveBeenCalled();
+    expect(mockAlarmScheduleAlarm).not.toHaveBeenCalled();
+  });
+
+  it('allows normal completion requested after the deadline while permission is pending', async () => {
+    vi.useFakeTimers();
+    const now = new Date('2026-09-09T12:00:00.000Z');
+    vi.setSystemTime(now);
+    installPomodoroStorage();
+    const permission = deferred<boolean>();
+    const permissionStarted = deferred<void>();
+    mockPermissionsAndroidCheck.mockImplementationOnce(() => {
+      permissionStarted.resolve();
+      return permission.promise;
+    });
+    const fireAt = new Date(now.getTime() + 5_000);
+
+    const scheduling = scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },
+    );
+    await permissionStarted.promise;
+    vi.setSystemTime(new Date(now.getTime() + 6_000));
+    const completing = cancelLocalPomodoroCompletionNotification(undefined, { reason: 'timer-not-running' });
+    permission.resolve(true);
+    await Promise.all([scheduling, completing]);
+
+    expect(mockAlarmSendNotification).toHaveBeenCalledTimes(1);
+    expect(mockAlarmScheduleAlarm).not.toHaveBeenCalled();
+  });
+
+  it('does not reschedule the same future phase and deadline', async () => {
+    installPomodoroStorage();
+    const fireAt = new Date('2099-05-22T12:30:00.000Z');
+
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },
+    );
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },
+    );
+
+    expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send the same already-due completion alert twice', async () => {
+    installPomodoroStorage();
+    const fireAt = new Date(Date.now() - 1_000);
+
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },
+    );
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },
+    );
+
+    expect(mockAlarmSendNotification).toHaveBeenCalledTimes(1);
+    expect(mockAlarmScheduleAlarm).not.toHaveBeenCalled();
+  });
+
+  it('does not describe an already-sent immediate alert as a preserved native alarm', async () => {
+    installPomodoroStorage();
+    const fireAt = new Date(Date.now() - 1_000);
+
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },
+    );
+    mockLogInfo.mockClear();
+    await cancelLocalPomodoroCompletionNotification(undefined, { reason: 'timer-not-running' });
+
+    expect(mockLogInfo).not.toHaveBeenCalledWith(
+      '[Local Notifications] Pomodoro due alarm preserved',
+      expect.anything(),
+    );
+  });
+
+  it('treats a legacy same-deadline record without phase as idempotent', async () => {
+    const fireAt = new Date('2099-05-22T12:30:00.000Z');
+    installPomodoroStorage(JSON.stringify({ id: 41, fireAtMs: fireAt.getTime() }));
+
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },
+    );
+
+    expect(mockAlarmScheduleAlarm).not.toHaveBeenCalled();
+    expect(mockAlarmSendNotification).not.toHaveBeenCalled();
+  });
+
+  it('retains the previous alarm when replacement scheduling fails', async () => {
+    const previous = JSON.stringify({ id: 41, fireAtMs: Date.now() + 60_000 });
+    const storage = installPomodoroStorage(previous);
+    mockAlarmScheduleAlarm.mockRejectedValueOnce(new Error('native rejected'));
+
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Break', 'Ready to focus.', new Date(Date.now() + 120_000),
+      { phase: 'break-complete' },
+    );
+
+    expect(storage.getPomodoro()).toBe(previous);
+    expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(41);
+  });
+
+  it('continues queued scheduling after native API rejection', async () => {
+    const storage = installPomodoroStorage();
+    mockAlarmScheduleAlarm
+      .mockRejectedValueOnce(new Error('native rejected'))
+      .mockResolvedValueOnce({ id: 42 });
+    const secondFireAt = new Date('2099-05-22T12:35:00.000Z');
+
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', new Date('2099-05-22T12:30:00.000Z'),
+      { phase: 'focus-complete' },
+    );
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Break', 'Ready to focus.', secondFireAt, { phase: 'break-complete' },
+    );
+
+    expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(2);
+    expect(storage.getPomodoro()).toBe(JSON.stringify({
+      id: 42,
+      fireAtMs: secondFireAt.getTime(),
+      phase: 'break-complete',
+    }));
+  });
+
+  it('continues queued scheduling after storage rejection and cancels the untracked alarm', async () => {
+    let stored: string | null = null;
+    mockAsyncStorageGetItem.mockImplementation(async (key: string) => (
+      key === POMODORO_ALARM_STORAGE_KEY ? stored : null
+    ));
+    mockAsyncStorageSetItem
+      .mockRejectedValueOnce(new Error('storage rejected'))
+      .mockImplementation(async (key: string, value: string) => {
+        if (key === POMODORO_ALARM_STORAGE_KEY) stored = value;
+      });
+    mockAlarmScheduleAlarm
+      .mockResolvedValueOnce({ id: 41 })
+      .mockResolvedValueOnce({ id: 42 });
+    const secondFireAt = new Date('2099-05-22T12:35:00.000Z');
+
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Focus', 'Take a break.', new Date('2099-05-22T12:30:00.000Z'),
+      { phase: 'focus-complete' },
+    );
+    await scheduleLocalPomodoroCompletionNotification(
+      'Pomodoro Break', 'Ready to focus.', secondFireAt, { phase: 'break-complete' },
+    );
+
+    expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(41);
+    expect(stored).toBe(JSON.stringify({
+      id: 42,
+      fireAtMs: secondFireAt.getTime(),
+      phase: 'break-complete',
+    }));
+  });
+
+  it('explicit alert-off cancels every native pomodoro alarm but leaves task alarms alone', async () => {
+    const storage = installPomodoroStorage(JSON.stringify({
+      id: 41,
+      fireAtMs: Date.now() - 1_000,
+      phase: 'focus-complete',
+    }));
+    mockAlarmGetScheduledAlarms.mockResolvedValue([
+      { id: '41', data: 'kind==>pomodoro;;phase==>focus-complete;;' },
+      { id: 42, data: { kind: 'pomodoro' } },
+      { id: 7, data: 'kind==>task;;taskId==>task-1;;' },
+    ]);
+
+    await cancelLocalPomodoroCompletionNotification(undefined, { reason: 'completion-alert-off' });
+
+    expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(41);
+    expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(42);
+    expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(7);
+    expect(storage.getPomodoro()).toBeNull();
+    expect(mockAlarmRemoveFiredNotification.mock.invocationCallOrder[0])
+      .toBeLessThan(mockAlarmDeleteAlarm.mock.invocationCallOrder[0]);
+  });
+
+  it.each(['corrupt', 'rejected'] as const)(
+    'explicit alert-off still uses native inventory when local storage is %s',
+    async (failure) => {
+      if (failure === 'corrupt') {
+        mockAsyncStorageGetItem.mockResolvedValue('{not-json');
+      } else {
+        mockAsyncStorageGetItem.mockRejectedValue(new Error('storage read rejected'));
+      }
+      mockAlarmGetScheduledAlarms.mockResolvedValue([
+        { id: 42, data: { kind: 'pomodoro' } },
+        { id: 7, data: { kind: 'task' } },
+      ]);
+
+      await cancelLocalPomodoroCompletionNotification(undefined, { reason: 'completion-alert-off' });
+
+      expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(42);
+      expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(7);
+      expect(mockAsyncStorageRemoveItem).toHaveBeenCalledWith(POMODORO_ALARM_STORAGE_KEY);
+    },
+  );
+
+  it('does not cancel an active pomodoro when the task-reminder service stops', async () => {
+    const current = JSON.stringify({ id: 41, fireAtMs: Date.now() + 60_000 });
+    const storage = installPomodoroStorage(current);
+
+    await stopLocalMobileNotifications();
+
+    expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(41);
+    expect(storage.getPomodoro()).toBe(current);
+  });
+
+  it('cancels native pomodoro alarms when OS notification permission is denied', async () => {
+    const storage = installPomodoroStorage(JSON.stringify({
+      id: 41,
+      fireAtMs: Date.now() + 60_000,
+    }));
+    mockAlarmGetScheduledAlarms.mockResolvedValue([
+      { id: 41, data: 'kind==>pomodoro;;' },
+      { id: 42, data: { kind: 'pomodoro' } },
+    ]);
+    mockPermissionsAndroidCheck.mockResolvedValue(false);
+    mockPermissionsAndroidRequest.mockResolvedValue('never_ask_again');
+
+    await startLocalMobileNotifications();
+
+    expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(41);
+    expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(42);
+    expect(storage.getPomodoro()).toBeNull();
   });
 });
