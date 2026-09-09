@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { performSyncCycle } from './sync';
 import { createSyncCycleExecutor } from './sync-cycle';
+import { consoleLogger, setLogger, type LogPayload } from './logger';
 import { createMockArea, createMockProject, createMockSection, createMockTask, mockAppData } from './sync-test-utils';
 import type { AppData, Project, Section, Task } from './types';
 
@@ -58,6 +59,34 @@ describe('createSyncCycleExecutor', () => {
 });
 
 describe('performSyncCycle', () => {
+    it.each([false, true])('reports full merge timing only when computation ran (skip=%s)', async (skip) => {
+        const logs: LogPayload[] = [];
+        const local = mockAppData([createMockTask('private-id', '2026-06-01')]);
+        setLogger((payload) => logs.push(payload));
+        try {
+            await performSyncCycle({
+                readLocal: async () => local,
+                readRemote: async () => skip ? {} : structuredClone(local),
+                writeLocal: async () => undefined,
+                writeRemote: async () => undefined,
+                skipEmptyRemoteMerge: () => skip,
+            });
+            const entries = logs.filter(entry => entry.message === 'Full sync merge completed');
+            expect(entries).toHaveLength(skip ? 0 : 1);
+            if (!skip) {
+                expect(entries[0].context).toEqual({
+                    releaseCheck: 'v1.3.0/sync-signature-pruning',
+                    elapsedMs: expect.any(Number),
+                    count: 1,
+                });
+                expect(entries[0].context!.elapsedMs).toBeGreaterThanOrEqual(0);
+                expect(JSON.stringify(entries)).not.toContain('private-id');
+            }
+        } finally {
+            setLogger(consoleLogger);
+        }
+    });
+
     it('still merges a non-empty remote when the empty-remote skip flag is set', async () => {
         // The local-only upload fast path sets skipEmptyRemoteMerge; the skip
         // must never discard a real remote document if that flag is ever set on

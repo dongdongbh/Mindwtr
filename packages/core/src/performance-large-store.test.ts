@@ -12,6 +12,7 @@ import {
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { buildEntityMap, computeTaskDerivedState } from './store-helpers';
 import { computeSyncChangeFingerprint } from './sync-helpers';
+import { mergeAppDataWithStats } from './sync';
 import type {
     AppData,
     Area,
@@ -98,6 +99,12 @@ const STORE_MUTATION_BUDGETS_MS: Record<LargeStoreSize, number> = {
 
 const STORE_MUTATION_MAX_GROWTH_FROM_10K_TO_50K = 12;
 const STORE_MUTATION_ATTEMPTS = 3;
+
+const FULL_MERGE_BUDGETS_MS: Record<LargeStoreSize, number> = {
+    1_000: 150,
+    10_000: 1_500,
+    50_000: 7_500,
+};
 
 // "Select all -> Move" hands batchUpdateTasks every visible task in one
 // synchronous set(), the largest mutation a user can trigger.
@@ -340,6 +347,35 @@ describePerf('large-store performance budgets', () => {
         mkdirSync(dirname(PERF_MEASUREMENTS_PATH), { recursive: true });
         writeFileSync(PERF_MEASUREMENTS_PATH, JSON.stringify(perfMeasurements, null, 2));
     });
+
+    it('keeps full snapshot merging within absolute and growth budgets', () => {
+        const measurements = new Map<LargeStoreSize, number>();
+        for (const size of DATASET_SIZES) {
+            const seed = createLargeStoreFixture(size).data;
+            // The shared UI fixture includes updates throughout June. Run
+            // after those dates so this measures an ordinary aligned merge,
+            // not per-entity clock-skew warning serialization.
+            const options = { nowIso: '2026-07-01T12:00:00.000Z' };
+            const canonical = mergeAppDataWithStats(seed, structuredClone(seed), options).data;
+            let best = Infinity;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                // A remote snapshot arrives as new objects. Never benchmark a
+                // warmed identity cache or charge fixture cloning to the merge.
+                const local = structuredClone(canonical);
+                const incoming = structuredClone(canonical);
+                const start = performance.now();
+                const result = mergeAppDataWithStats(local, incoming, options);
+                best = Math.min(best, performance.now() - start);
+                expect(result.data).toEqual(canonical);
+                expect(result.stats.tasks.conflicts).toBe(0);
+                expect(result.stats.tombstoneRepairs).toBe(0);
+            }
+            measurements.set(size, best);
+            expectWithinBudget('Full snapshot merge', size, best, FULL_MERGE_BUDGETS_MS[size]);
+        }
+        expect(measurements.get(50_000)! / Math.max(measurements.get(10_000)!, GROWTH_BASELINE_FLOOR_MS))
+            .toBeLessThanOrEqual(8);
+    }, 90_000);
 
     it('builds a 5k-item Trash timeline within budget', () => {
         const fixture = createLargeStoreFixture(10_000);
