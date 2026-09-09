@@ -248,6 +248,55 @@ the input-connection race is universally solved with a timer. Any future attempt
 to reduce that delay needs a reliable native readiness mechanism and must pass
 this gate before its performance results count.
 
+## Automatic acceptance gate and rendering follow-up
+
+The host interaction runner now runs `CaptureKeyboardReadinessTest` automatically
+before **either capture scenario, in both metric modes**. It requires ten cold/warm
+pairs, successful instrumentation and a complete report matching the installed APK
+and declared fixture. Failed/missing/duplicate samples block measurement; failure
+evidence is retained. This is separate from timed iterations and does not alter the
+restored 120 ms focus behavior. See [the runner protocol](performance-baselines.md#native-interaction-runner).
+
+The complete CLI flow passed on the connected CPH2655 with the restored control
+APK and runner `b1f4a0c82b82fda7242c79755e1918aa45ffafe1b914c40386f4106d912b8112`.
+Readiness produced 20 passing samples in 108.4 seconds; only then did the normal
+compilation warm-ups and one timing iteration run. Metadata reports both readiness
+and measurement `passed`, with native JSON and a Perfetto trace retained under
+`/home/dd/.cache/mindwtr-performance-tmp/capture-preflight-smoke/captureOpenClose-SmnWtz/`.
+This is a harness smoke test using the previously verified APK, not a fresh main
+build or a statistically meaningful performance comparison. Cancellation left
+Inbox unchanged, and the phone returned to Home. No production package was used.
+
+A bounded re-examination of control batch `captureOpenClose-xPPxSJ`, iteration 0
+(`2026-09-09-04-24-51.perfetto-trace`), separated wall time from scheduled CPU:
+
+| Target main-thread frame | Wall time | Running | Sleeping | Runnable |
+| --- | ---: | ---: | ---: | ---: |
+| Opening, slice 2932 | 19.864 ms | 11.068 ms | 8.508 ms | 0.288 ms |
+| Closing, slice 24471 | 14.453 ms | 6.549 ms | 7.717 ms | 0.187 ms |
+
+Opening includes 5.819 ms creating the native modal host, a 2.417 ms mount batch
+(1.051 ms updating 52 layout instructions), and 1.928 ms drawing. The opening
+window-relayout Binder call takes 2.945 ms; its system-server reply takes 2.894 ms,
+including surface creation/placement and focus updates. Closing removes 52 views
+in a 10.717 ms slice, including 1.080 ms accessibility-connection removal and
+4.567 ms window removal. The latter's 4.502 ms system-server reply includes
+surface placement, focus updates, and 0.327 ms monitor contention. Nested slice
+durations overlap; they must not be added as independent costs.
+
+These observations point to native window lifecycle work as a candidate for a
+future controlled experiment, not a reason to broadly memoize components or change
+focus timing. This uninstrumented trace does not expose React render durations;
+Hermes/React attribution needs a separately sampled build. Global inspection also
+found background system waits and a concurrent ART GC, but does not establish
+either as the cause of these two frames. An incomplete initial thread-state record
+was bounded by the next recorded state rather than extended across the whole trace.
+This is a bounded diagnosis, not an exhaustive system audit or a new speedup claim.
+
+No runtime UI change was made from this follow-up. A window-lifecycle experiment
+must preserve modal accessibility, dismissal, keyboard resizing, pickers, recording,
+and failed-save behavior, then pass the readiness gate before matched A/B timing.
+
 ## Prepared local artifacts
 
 Both APKs are under `/home/dd/.cache/mindwtr-performance-tmp/`:
