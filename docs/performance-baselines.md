@@ -115,6 +115,13 @@ machine. Keep dependencies, build caches, `TMPDIR`, and `OUT_DIR` on disk under
 driver. Pass the graphical session's actual environment when the shell does not
 inherit it; do not guess a display socket or resize other applications.
 
+For A/B checks, set `NATIVE_BINARY` to an archived Benchmark executable and supply
+its matching `EXPECTED_BINARY_SHA256`. The runner still copies it into a fresh
+portable profile and checks its native identity. This avoids rebuilding between
+control and candidate runs. The recorded checkout revision describes the runner's
+checkout, not necessarily that archived executable; retain the artifact's source
+provenance separately and compare the actual binary hashes.
+
 Each iteration copies the hash-checked executable into a new portable directory,
 seeds only synthetic JSON, and starts a separate session bus. It verifies the native
 data path and Benchmark product name before proceeding. This avoids the normal
@@ -126,6 +133,11 @@ before a WebView refresh. Only after the refreshed view reports canonical readin
 does the runner measure Settings, Integrations, and Inbox quick capture. Refreshing
 before the first import completes can leave native work in flight and contaminate
 subsequent timings. A visible shell is not a readiness gate.
+
+These are early-session interactions after canonical readiness, not proven
+save-queue quiescence. Startup-scheduled saves can still overlap the first capture;
+record that context when interpreting the result. A steady-state capture benchmark
+needs a separate explicit save-queue-idle contract.
 
 Capture must appear in the task list, be readable from SQLite through a separate
 read-only connection, and survive a WebView reload. The reader allows a bounded

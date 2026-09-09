@@ -974,6 +974,22 @@ fn persist_data_snapshot(
     let mut conn = open_sqlite(app)?;
     refuse_empty_snapshot_overwrite(&conn, data, baseline_entities)?;
     let canonical = merge_json_to_sqlite(&mut conn, data, baseline_entities)?;
+    static REPORTED_CACHED_SNAPSHOT: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    if !REPORTED_CACHED_SNAPSHOT.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        let count = canonical
+            .get("tasks")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        log::info!(
+            "SQLite snapshot committed with cached inserts extra.releaseCheck=v1.3.0/sqlite-snapshot-statements count={count}"
+        );
+        // The optional log plugin has its own file; field testers export the
+        // app's Diagnostics log, so retain the same privacy-safe proof there.
+        crate::logging::append_native_log_line(app, &format!(
+            "SQLite snapshot committed with cached inserts extra.releaseCheck=v1.3.0/sqlite-snapshot-statements count={count}"
+        ));
+    }
     // SQLite has committed and is canonical at this point. data.json is a
     // secondary recovery copy: failing to refresh it must not report the
     // already-committed write as failed (a caller retry could duplicate a
@@ -3069,6 +3085,12 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
     normalize_revision_metadata_in_data(&mut data);
     let orphan_section_tombstones = take_orphan_section_tombstones(&mut data);
     let data = &data;
+    // Reuse each table's statement within this connection. Recompiling the
+    // task INSERT (including FK/FTS trigger programs) for every unchanged row
+    // adds work to large full-snapshot saves. SQL and transaction semantics stay
+    // identical; every execution binds all parameters again.
+    let execute_insert =
+        |sql: &str, values: &[&dyn ToSql]| conn.prepare_cached(sql)?.execute(values);
 
     conn.execute("DELETE FROM tasks", [])
         .map_err(|e| e.to_string())?;
@@ -3105,7 +3127,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
         .cloned()
         .unwrap_or_default();
     for area in areas {
-        conn.execute(
+        execute_insert(
             "INSERT OR REPLACE INTO areas (id, name, color, icon, orderNum, deletedAt, deletedAtBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 area.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3134,7 +3156,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
     for project in projects {
         let tag_ids_json = json_str_or_default(project.get("tagIds"), "[]");
         let attachments_json = json_str(project.get("attachments"));
-        conn.execute(
+        execute_insert(
             "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             params![
                 project.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3172,7 +3194,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
         .cloned()
         .unwrap_or_default();
     for section in sections {
-        conn.execute(
+        execute_insert(
             "INSERT OR REPLACE INTO sections (id, projectId, title, description, orderNum, isCollapsed, rev, revBy, createdAt, updatedAt, deletedAt, deletedAtBeforeProjectArchive, projectArchivedAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 section.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3202,7 +3224,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
             .filter(|id| !id.is_empty())
             .ok_or_else(|| "Orphan section tombstone id is required".to_string())?;
         let payload = serde_json::to_string(&section).map_err(|e| e.to_string())?;
-        conn.execute(
+        execute_insert(
             "INSERT INTO orphan_section_tombstones (id, data) VALUES (?1, ?2)",
             params![id, payload],
         )
@@ -3222,7 +3244,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
         let checklist_json = json_str(task.get("checklist"));
         let attachments_json = json_str(task.get("attachments"));
         let view_section_ids_json = json_str(task.get("viewSectionIds"));
-        conn.execute(
+        execute_insert(
             "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, cancelledAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45)",
             params![
                 task.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3295,7 +3317,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
         .cloned()
         .unwrap_or_default();
     for person in people {
-        conn.execute(
+        execute_insert(
             "INSERT OR REPLACE INTO people (id, name, note, referenceLink, rev, revBy, createdAt, updatedAt, deletedAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 person.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -4965,6 +4987,156 @@ mod tests {
     use rusqlite::Connection;
     use std::sync::{Arc, Barrier};
 
+    #[test]
+    fn cached_snapshot_inserts_match_uncached_and_recover_after_rollback() {
+        let source = serde_json::json!({
+            "areas": [{"id":"a","name":"Area","color":"red"},{"id":"b","name":"Other"}],
+            "projects": [{"id":"p","title":"Project","areaId":"a","supportNotes":"projectneedle"},{"id":"q","title":"Other"}],
+            "sections": [{"id":"s","projectId":"p","title":"Section","isCollapsed":true},{"id":"t","projectId":"q","title":"Other"}],
+            "people": [{"id":"person","name":"One","note":"Note"},{"id":"other","name":"Two"}],
+            "tasks": [
+                {"id":"one","title":"searchneedle","status":"next","projectId":"p","sectionId":"s",
+                 "assignedTo":"assignee","order":1.5,"tags":["work"],"contexts":["@home"],
+                 "checklist":[{"id":"item","title":"checkneedle","isCompleted":false}],
+                 "attachments":[{"id":"att","kind":"link","title":"Synthetic","uri":"https://example.invalid"}],
+                 "rev":7,"revBy":"device-a","description":"Text","isFocusedToday":true},
+                {"id":"two","title":"Empty optional fields","status":"inbox","areaId":"b"}
+            ],
+            "settings":{"language":"en"}
+        });
+        let mut expected = None;
+        for capacity in [0, 16] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut conn = open_sqlite_path(&temp.path().join("snapshot.db")).unwrap();
+            conn.set_prepared_statement_cache_capacity(capacity);
+            let first = replace_json_in_sqlite(&mut conn, &source).unwrap();
+            let repeated = replace_json_in_sqlite(&mut conn, &source).unwrap();
+            assert_eq!(first, repeated, "bindings leaked between replacements");
+            if let Some(expected) = &expected {
+                assert_eq!(&first, expected);
+            } else {
+                expected = Some(first.clone());
+            }
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM tasks_fts WHERE tasks_fts MATCH 'checkneedle'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM projects_fts WHERE projects_fts MATCH 'projectneedle'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+                0
+            );
+            conn.execute_batch("CREATE TRIGGER fail_snapshot BEFORE INSERT ON tasks WHEN new.id = 'two' BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;").unwrap();
+            assert!(replace_json_in_sqlite(&mut conn, &source).is_err());
+            assert!(conn.is_autocommit());
+            assert_eq!(
+                read_sqlite_snapshot(&conn).unwrap(),
+                first,
+                "failed replacement must roll back every table"
+            );
+            conn.execute_batch("DROP TRIGGER fail_snapshot").unwrap();
+            let mut changed = source.clone();
+            changed["tasks"][0]["title"] = Value::String("replacementneedle".into());
+            changed["tasks"][0]["checklist"] = serde_json::json!([]);
+            replace_json_in_sqlite(&mut conn, &changed).unwrap();
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM tasks_fts WHERE tasks_fts MATCH 'checkneedle'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0
+            );
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM tasks_fts WHERE tasks_fts MATCH 'replacementneedle'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+        }
+    }
+
+    // Opt-in, disk-backed diagnostic; never a timing gate on variable CI hosts.
+    #[test]
+    #[ignore]
+    fn profile_large_snapshot_save() {
+        let temp = tempfile::tempdir().expect("synthetic profile");
+        let mut conn = open_sqlite_path(&temp.path().join("snapshot.db")).unwrap();
+        if std::env::var("MINDWTR_SNAPSHOT_CACHE").as_deref() == Ok("0") {
+            conn.set_prepared_statement_cache_capacity(0);
+        }
+        let tasks: Vec<Value> = (0..10_000)
+            .map(|i| {
+                serde_json::json!({
+                    "id": format!("perf-task-{i}"), "title": format!("Synthetic task {i}"),
+                    "status": "inbox", "tags": [format!("tag-{}", i % 7)],
+                    "contexts": [format!("@context-{}", i % 4)],
+                    "createdAt": "2020-01-01T00:00:00.000Z", "updatedAt": "2020-01-01T00:00:00.000Z"
+                })
+            })
+            .collect();
+        let seed = serde_json::json!({"tasks":tasks,"projects":[],"sections":[],"areas":[],"people":[],"settings":{}});
+        migrate_json_to_sqlite(&mut conn, &seed).unwrap();
+        for run in 0..3 {
+            let mut incoming = read_sqlite_snapshot(&conn).unwrap();
+            incoming["tasks"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "id": format!("capture-{run}"), "title": "Synthetic capture", "status": "inbox",
+                    "createdAt": "2026-09-09T00:00:00.000Z", "updatedAt": "2026-09-09T00:00:00.000Z"
+                }));
+            let started = std::time::Instant::now();
+            conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+            let locked = started.elapsed().as_secs_f64() * 1000.0;
+            let current = read_sqlite_data(&conn).unwrap();
+            let read = started.elapsed().as_secs_f64() * 1000.0;
+            let merged = merge_data_snapshots(&current, &incoming, None);
+            let merge = started.elapsed().as_secs_f64() * 1000.0;
+            let canonical = replace_data_in_transaction(&conn, merged).unwrap();
+            let replace = started.elapsed().as_secs_f64() * 1000.0;
+            conn.execute_batch("COMMIT").unwrap();
+            let committed = started.elapsed().as_secs_f64() * 1000.0;
+            assert_eq!(canonical["tasks"].as_array().unwrap().len(), 10_001 + run);
+            let reader = Connection::open(temp.path().join("snapshot.db")).unwrap();
+            assert_eq!(
+                reader
+                    .query_row("SELECT count(*) FROM tasks", [], |row| row
+                        .get::<_, usize>(0))
+                    .unwrap(),
+                10_001 + run
+            );
+            println!("snapshot run={run} lock_ms={locked:.2} read_ms={:.2} merge_ms={:.2} replace_ms={:.2} commit_ms={:.2} total_ms={committed:.2}",
+                read - locked, merge - read, replace - merge, committed - replace);
+            if let Ok(budget) = std::env::var("MINDWTR_SNAPSHOT_BUDGET_MS") {
+                assert!(
+                    committed < budget.parse::<f64>().unwrap(),
+                    "snapshot exceeded diagnostic budget: {committed:.2}ms"
+                );
+            }
+        }
+    }
+
     // The three retry loops in this file gate entirely on this classifier, and
     // it matches on message text — so pin it against the strings SQLite really
     // produces, not against strings someone wrote from memory.
@@ -5015,7 +5187,9 @@ mod tests {
         assert!(!is_retryable_storage_error("no such table: tasks"));
         assert!(!is_retryable_storage_error("unable to open database file"));
         assert!(!is_retryable_storage_error("disk I/O error"));
-        assert!(!is_retryable_storage_error("database disk image is malformed"));
+        assert!(!is_retryable_storage_error(
+            "database disk image is malformed"
+        ));
         assert!(!is_retryable_storage_error(""));
     }
 

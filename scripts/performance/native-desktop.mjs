@@ -17,7 +17,11 @@ const sizes = (process.env.SIZES ?? '0,1000,10000').split(',').map(Number);
 assert(Number.isInteger(runs) && runs > 0 && runs <= 100, 'RUNS must be 1..100');
 assert(new Set(sizes).size === sizes.length, 'SIZES must not repeat fixtures');
 sizes.forEach(fixture);
-const binary = join(root, 'apps/desktop/src-tauri/target/release/mindwtr');
+// An archived Benchmark executable allows interleaved A/B checks without
+// rebuilding (or mutating either checkout) between measurements.
+const binary = process.env.NATIVE_BINARY
+  ? resolve(process.env.NATIVE_BINARY)
+  : join(root, 'apps/desktop/src-tauri/target/release/mindwtr');
 const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 const binaryHash = hash(binary);
 assert.equal(binaryHash, process.env.EXPECTED_BINARY_SHA256, 'Supply EXPECTED_BINARY_SHA256 for the freshly built native release');
