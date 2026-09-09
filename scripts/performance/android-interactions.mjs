@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
 // Intentionally no package/activity override and no install/reset/import command.
 const target = 'tech.dongdongbh.mindwtr.benchmark';
@@ -37,9 +37,10 @@ const root = resolve(import.meta.dirname, '../..');
 const output = resolve(process.env.OUT_DIR ?? join(root, 'build/performance-android'));
 mkdirSync(output, { recursive: true });
 const directory = mkdtempSync(join(output, `${scenario}-`));
-const remoteOutput = `/sdcard/Android/media/${testPackage}/run-${Date.now()}`;
+const remoteRoot = `/sdcard/Android/media/${testPackage}/run-${Date.now()}-${basename(directory)}`;
+const remoteOutput = `${remoteRoot}/measurement`;
 const metadata = {
-  schemaVersion: 2, scenario, metricMode, requestedRuns: runs, dataset: process.env.DATASET_ID,
+  schemaVersion: 3, scenario, metricMode, requestedRuns: runs, dataset: process.env.DATASET_ID,
   device: process.env.DEVICE_LABEL, deviceModel: adb('shell', 'getprop', 'ro.product.model'),
   os: adb('shell', 'getprop', 'ro.build.fingerprint'), network: process.env.NETWORK,
   apkHash, testApkHash, buildType: 'release-profileable', runtime: 'android-macrobenchmark-1.4.1',
@@ -54,6 +55,53 @@ const metadata = {
 };
 const saveMetadata = () => writeFileSync(join(directory, 'metadata.json'), `${JSON.stringify(metadata, null, 2)}\n`);
 saveMetadata();
+if (scenario.startsWith('capture')) {
+  // Correctness is not a latency metric. Require an actual visible IME after
+  // cold and warm opens before compilation warm-ups or measured interactions.
+  const coldLaunches = 10;
+  metadata.readiness = { status: 'running', coldLaunches, expectedSamples: coldLaunches * 2,
+    report: 'readiness/keyboard-readiness.json' };
+  saveMetadata();
+  const readiness = spawnSync(adbBin, [...deviceArgs, 'shell', 'am', 'instrument', '-w', '-r',
+    '-e', 'class', `${testPackage}.CaptureKeyboardReadinessTest#coldAndWarmCapture`,
+    '-e', 'iterations', String(coldLaunches), '-e', 'syntheticDataConfirmed', 'true',
+    '-e', 'datasetId', process.env.DATASET_ID, '-e', 'expectedApkSha256', apkHash.toLowerCase(),
+    '-e', 'additionalTestOutputDir', `${remoteRoot}/readiness`,
+    `${testPackage}/androidx.test.runner.AndroidJUnitRunner`],
+  { encoding: 'utf8', timeout: 10 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 });
+  const readinessLog = `${readiness.stdout ?? ''}\n${readiness.stderr ?? ''}`;
+  writeFileSync(join(directory, 'readiness-instrumentation.txt'), readinessLog);
+  try {
+    // Collect even a failing test's report/screenshot, but never accept JSON
+    // alone: Android instrumentation can return shell exit 0 for a failed test.
+    adb('pull', `${remoteRoot}/readiness`, join(directory, 'readiness'));
+    assert(!readiness.error && readiness.status === 0 && /OK \(1 test\)/.test(readinessLog),
+      `Keyboard-readiness instrumentation failed: ${readiness.error?.message ?? readinessLog}`);
+    const report = JSON.parse(readFileSync(join(directory, metadata.readiness.report), 'utf8'));
+    assert.equal(report.status, 'passed', 'Keyboard-readiness report did not pass');
+    assert.equal(report.apkHash, apkHash.toLowerCase(), 'Keyboard-readiness APK differs');
+    assert.equal(report.dataset, metadata.dataset, 'Keyboard-readiness dataset differs');
+    assert.equal(report.requestedColdLaunches, coldLaunches, 'Keyboard-readiness launch count differs');
+    assert(Array.isArray(report.samples) && report.samples.length === coldLaunches * 2, 'Incomplete keyboard-readiness samples');
+    const expected = new Set(Array.from({ length: coldLaunches }, (_, iteration) => [`${iteration}:cold`, `${iteration}:warm`]).flat());
+    for (const sample of report.samples) {
+      assert(Number.isInteger(sample.iteration) && sample.keyboardVisible === true && expected.delete(`${sample.iteration}:${sample.kind}`),
+        'Invalid or duplicate keyboard-readiness sample');
+    }
+    assert.equal(adb('shell', 'sha256sum', paths[0]).split(/\s/)[0], apkHash, 'Target APK changed during readiness');
+    assert.equal(adb('shell', 'sha256sum', testPath).split(/\s/)[0], testApkHash, 'Runner APK changed during readiness');
+    metadata.readiness.status = 'passed';
+  } catch (error) {
+    metadata.readiness.status = 'failed';
+    metadata.readiness.error = String(error);
+    metadata.status = 'failed';
+    saveMetadata();
+    console.error(`Capture benchmark skipped: ${error}`);
+    console.log(`Android interaction artifacts: ${directory}`);
+    process.exit(1);
+  }
+  saveMetadata();
+}
 writeFileSync(join(directory, 'battery-before.txt'), adb('shell', 'dumpsys', 'battery'));
 writeFileSync(join(directory, 'thermal-before.txt'), adb('shell', 'dumpsys', 'thermalservice'));
 const result = spawnSync(adbBin, [...deviceArgs, 'shell', 'am', 'instrument', '-w', '-r',

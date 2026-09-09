@@ -12,6 +12,7 @@ const aiHookTracker = {
     enabled: [] as boolean[],
 };
 const resourceTracker = { sync: false, calendar: false, obsidian: false, advanced: false };
+let pendingIntegrations: Promise<void> | null = null;
 let calendarHookUseEffect: typeof import('react').useEffect | null = null;
 
 vi.mock('../../hooks/usePerformanceMonitor', () => ({
@@ -112,7 +113,10 @@ vi.mock('./settings/SettingsAboutPage', () => ({
 }));
 
 vi.mock('./settings/SettingsIntegrationsPage', () => ({
-    SettingsIntegrationsPage: () => <div>integrations-page</div>,
+    SettingsIntegrationsPage: () => {
+        if (pendingIntegrations) throw pendingIntegrations;
+        return <div>integrations-page</div>;
+    },
 }));
 
 vi.mock('./settings/useAiSettings', () => ({
@@ -192,6 +196,7 @@ describe('SettingsView', () => {
     });
 
     beforeEach(async () => {
+        pendingIntegrations = null;
         window.localStorage.clear();
         calendarHookTracker.mounts = 0;
         calendarHookTracker.unmounts = 0;
@@ -241,6 +246,29 @@ describe('SettingsView', () => {
         await waitFor(() => {
             expect(aiHookTracker.enabled[aiHookTracker.enabled.length - 1]).toBe(true);
         });
+    });
+
+    it('keeps the current settings page visible until the requested page is ready', async () => {
+        const { getByRole, getByText, queryByText } = render(
+            <LanguageProvider>
+                <KeybindingProvider currentView="settings" onNavigate={() => undefined}>
+                    <SettingsView />
+                </KeybindingProvider>
+            </LanguageProvider>
+        );
+        await waitFor(() => expect(getByText('main-page')).toBeVisible());
+        let resolvePage!: () => void;
+        pendingIntegrations = new Promise<void>((resolve) => { resolvePage = resolve; });
+        fireEvent.click(getByRole('button', { name: 'integrations' }));
+        expect(getByText('main-page')).toBeVisible();
+        expect(getByRole('main')).toHaveAttribute('aria-busy', 'true');
+        await act(async () => {
+            pendingIntegrations = null;
+            resolvePage();
+        });
+        await waitFor(() => expect(getByText('integrations-page')).toBeVisible());
+        expect(queryByText('main-page')).not.toBeInTheDocument();
+        expect(getByRole('main')).toHaveAttribute('aria-busy', 'false');
     });
 
     it('keeps integrations state mounted across parent rerenders', async () => {

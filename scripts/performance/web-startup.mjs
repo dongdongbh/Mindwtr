@@ -8,11 +8,14 @@ import { fileURLToPath } from 'node:url';
 import { fixture } from './fixture.mjs';
 import { summarize } from './report.mjs';
 import { startPreview } from './preview-server.mjs';
+import { profileBrowserWork } from './browser-profile.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const runs = Number(process.env.RUNS ?? 30);
 const sizes = (process.env.SIZES ?? '0,1000,10000').split(',').map(Number);
 const port = Number(process.env.PORT ?? 4179);
+const cpuProfile = process.env.CPU_PROFILE === '1';
+if (process.env.CPU_PROFILE && !['0', '1'].includes(process.env.CPU_PROFILE)) throw new Error('CPU_PROFILE must be 0 or 1');
 if (!Number.isInteger(runs) || runs < 1 || runs > 1000) throw new Error('RUNS must be 1..1000');
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('PORT must be 1024..65535');
 sizes.forEach(fixture);
@@ -48,6 +51,8 @@ try {
     for (let run = 0; run <= runs; run++) {
       const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US', timezoneId: 'UTC' });
       const page = await context.newPage();
+      const profileStage = (name, work) => profileBrowserWork(context, page,
+        cpuProfile && run ? join(output, `${size}-${run}-${name}.cpuprofile`) : null, work);
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
       await context.route('**/*', (route) => new URL(route.request().url()).origin === url ? route.continue() : route.abort());
@@ -65,11 +70,13 @@ try {
 
         // End-to-end automation latency includes Playwright dispatch/polling. Keep it
         // separate from app-only startup marks and compare only this same harness.
-        const navigationStart = performance.now();
-        await page.locator('[data-sidebar-item][data-view="inbox"]').click();
         const input = page.getByPlaceholder(/add task/i);
-        await expect(input).toBeVisible();
-        const navigationMs = performance.now() - navigationStart;
+        const navigationMs = await profileStage('inbox', async () => {
+          const navigationStart = performance.now();
+          await page.locator('[data-sidebar-item][data-view="inbox"]').click();
+          await expect(input).toBeVisible();
+          return performance.now() - navigationStart;
+        });
         const title = `Benchmark capture ${run}`;
         await input.fill(title);
         const captureStart = performance.now();
@@ -99,14 +106,18 @@ try {
             throw new Error(`Unbounded or blank virtual list: ${mountedRowsBefore}/${mountedRowsAfter} rows`);
           }
         }
-        const settingsStart = performance.now();
-        await page.getByRole('button', { name: 'Settings', exact: true }).click();
-        await expect(page.locator('[data-settings-key="appearance"]')).toBeVisible();
-        const settingsOpenMs = performance.now() - settingsStart;
-        const integrationsStart = performance.now();
-        await page.getByRole('button', { name: 'Integrations', exact: true }).click();
-        await expect(page.locator('[data-settings-key="calendar"]')).toBeVisible();
-        const integrationsOpenMs = performance.now() - integrationsStart;
+        const settingsOpenMs = await profileStage('settings', async () => {
+          const settingsStart = performance.now();
+          await page.getByRole('button', { name: 'Settings', exact: true }).click();
+          await expect(page.locator('[data-settings-key="appearance"]')).toBeVisible();
+          return performance.now() - settingsStart;
+        });
+        const integrationsOpenMs = await profileStage('integrations', async () => {
+          const integrationsStart = performance.now();
+          await page.getByRole('button', { name: 'Integrations', exact: true }).click();
+          await expect(page.locator('[data-settings-key="calendar"]')).toBeVisible();
+          return performance.now() - integrationsStart;
+        });
         if (errors.length) throw new Error(errors.join('; '));
         if (run) samples.push({ run, quality: 'ok', marks, navigationMs, captureVisibleMs, capturePersistedMs,
           scrollAutomationMs, mountedRowsBefore, mountedRowsAfter, settingsOpenMs, integrationsOpenMs });
@@ -123,7 +134,8 @@ try {
       metadata: { platform: 'desktop-web', runtime: `chromium-${browser.version()}`, device: process.env.DEVICE_LABEL ?? `local-${cpus()[0]?.model}-${cpus().length}cpu`,
         deviceModel: cpus()[0]?.model, cpuCount: cpus().length,
         os: `${platform()}-${release()}`, buildType: 'production', dataset: seed.id, network: 'loopback-external-blocked',
-        scenario: 'fresh-context-focus-inbox-capture-scroll-settings-v2', revision, dirty, artifactHash, capturedAt: new Date().toISOString() },
+        scenario: 'fresh-context-focus-inbox-capture-scroll-settings-v2', profiling: cpuProfile ? 'chromium-cpu-1000us' : 'none',
+        revision, dirty, artifactHash, capturedAt: new Date().toISOString() },
       sampleCount: samples.length, invalidSamples: samples.length - valid.length,
       metrics: Object.fromEntries([
         ['webInteractive', valid.map((sample) => sample.marks.interactive_ready)],
@@ -135,7 +147,9 @@ try {
         ['settingsOpenAutomation', valid.map((sample) => sample.settingsOpenMs)],
         ['integrationsOpenAutomation', valid.map((sample) => sample.integrationsOpenMs)],
       ].filter(([, values]) => values.length > 0).map(([name, values]) => [name, summarize(values)])),
-      warnings: ['Browser production UI, not native Tauri launch or SQLite durability.', ...(runs < 100 ? ['Fewer than 100 runs: do not gate on p95.'] : [])],
+      warnings: ['Browser production UI, not native Tauri launch or SQLite durability.',
+        ...(cpuProfile ? ['CPU sampling changes execution; these timings are diagnostic only, not comparison baselines.'] : []),
+        ...(runs < 100 ? ['Fewer than 100 runs: do not gate on p95.'] : [])],
     };
     writeFileSync(join(output, `${size}-samples.json`), `${JSON.stringify(samples, null, 2)}\n`);
     writeFileSync(join(output, `${size}-report.json`), `${JSON.stringify(report, null, 2)}\n`);

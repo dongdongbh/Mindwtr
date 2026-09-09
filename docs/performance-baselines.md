@@ -66,6 +66,32 @@ on manual dispatch, uploading 90-day artifacts and a job summary. Hosted hardwar
 these runs are reporting-only. Harness failures still fail the job. Existing PR budget
 gates remain unchanged, with added benchmark-tool regression tests.
 
+### Desktop CPU attribution
+
+Use a separate diagnostic run when navigation or Settings timings need explanation:
+
+```bash
+# Optional local source maps for resolving minified profile frames; do not publish them.
+VITE_STARTUP_PROFILING=1 bun --cwd apps/desktop x vite build --sourcemap hidden
+CPU_PROFILE=1 DEVICE_LABEL=lab-linux RUNS=3 SIZES=1000,10000 bun run perf:web
+```
+
+Each measured iteration retains separate Chromium `.cpuprofile` files for Inbox
+navigation, first-open General Settings, and Integrations, alongside the usual
+fixture/build metadata and raw samples. Open the profiles in Chrome DevTools;
+retain the matching `dist` and source maps locally before rebuilding. Sampling is
+1,000 microseconds using the [DevTools CPU profiler](https://chromedevtools.github.io/devtools-protocol/tot/Profiler/).
+Idle samples and automation waits are not application CPU. These profiles do not
+attribute native Tauri/keyring/SQLite work or GPU/compositor time.
+
+`CPU_PROFILE` defaults off: normal baselines never open a profiling session.
+Sampled runs carry `profiling: chromium-cpu-1000us`; the comparison tool rejects
+them, even against other sampled runs. Use profiles to choose a change, then
+measure its benefit with fresh **unprofiled** repeated runs. Failed UI actions
+still attempt to retain their profile, clean up the session, and fail the run.
+
+Measured example: [desktop Settings page transitions](performance-desktop-settings-2026-09.md).
+
 ## Storage and sync processing
 
 ```bash
@@ -204,6 +230,24 @@ retain `captureSave` as a separate end-to-end correctness and performance scenar
 Keep APK, runner, fixture, sort, keyboard and device conditions identical for A/A runs;
 collect multiple batches before choosing regression thresholds.
 
+Both capture scenarios now require an automatic keyboard-readiness preflight in **timing
+and memory** mode, even with `RUNS=1`. Before compilation warm-ups, it checks ten cold
+launches and ten same-process reopenings. Every open requires a focused title and a
+visible on-screen input-method window; every cancellation must leave Inbox unchanged.
+This catches the case where a title is focused but Android has not served its input
+connection. The restored 120 ms initial focus behavior is unchanged.
+
+Rebuild/install the runner APK if it predates `CaptureKeyboardReadinessTest`. A missing
+test, failed instrumentation, missing/malformed report, wrong APK/fixture, incomplete or
+duplicate samples, or hidden keyboard blocks measurement and returns nonzero. There is
+no skip switch. Metadata schema 3 records the preflight status; its log and native report
+(plus failure screenshots when available) are retained separately under
+`readiness-instrumentation.txt` and `readiness/`. Preflight time is not a capture timing
+sample. It exercises the app before the existing compilation warm-ups, so keep this
+protocol constant between comparison builds. Battery/thermal snapshots for the measured
+run are taken after preflight. Schema 2 capture reports have no automatic readiness proof;
+do not treat them as equivalent without separately matched correctness evidence.
+
 Run `captureSave` last: warm-ups and measurements intentionally leave synthetic tasks in Inbox.
 Restore the fixture through the normal import workflow before comparable capture reruns.
 UI Automator fills the title directly; this is not a physical keyboard typing-latency test.
@@ -232,7 +276,7 @@ even when every frame-timing array was present. Isolating timing and collecting 
 for the memory experiment avoids that coupling without relaxing the sample-count guard.
 If ART/GPU counters are needed, inspect the retained traces and report their availability
 separately. Do not compare the old mixed/max-memory reports with the new separate/last-RSS
-reports. Metadata schema 2 records the metric mode; the test APK hash identifies the runner.
+reports. Metadata records the metric mode; the test APK hash identifies the runner.
 
 For retention investigation, run `SCENARIO=inboxScroll METRIC_MODE=memory RUNS=15` (with
 the same safety/identity variables above), then repeat with a longer session if RSS has not

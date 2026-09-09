@@ -20,6 +20,12 @@ export function compareReports(baseline, candidate, { relative = 0.15, absoluteM
     return { comparable: false, errors: ['Expected two report objects'], regressions: [] };
   }
   const errors = [];
+  for (const report of [baseline, candidate]) {
+    if (report.metadata?.profiling && report.metadata.profiling !== 'none') {
+      errors.push('Profiled runs are diagnostic only, not timing comparisons');
+      break;
+    }
+  }
   for (const field of COMPARISON_FIELDS) {
     const left = baseline.metadata?.[field];
     const right = candidate.metadata?.[field];

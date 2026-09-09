@@ -3,6 +3,45 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 
+const readinessCases = [
+  ...['captureOpenClose', 'captureSave'].flatMap(scenario => ['timing', 'memory'].flatMap(mode =>
+    ['', 'test-failure'].map(fault => ({ scenario, mode, fault })))),
+  ...['missing', 'pull-failure', 'malformed', 'incomplete', 'duplicate', 'hidden', 'wrong-hash', 'wrong-dataset', 'wrong-count', 'failed', 'wrong-kind', 'wrong-iteration', 'shell-failure', 'target-changed', 'runner-changed']
+    .map(fault => ({ scenario: 'captureOpenClose', mode: 'timing', fault })),
+];
+for (const { scenario, mode, fault } of readinessCases) it(`gates ${scenario}/${mode} on complete keyboard readiness (${fault || 'passed'})`, () => {
+  const scratch = join(import.meta.dir, '../../build/performance-tools');
+  mkdirSync(scratch, { recursive: true });
+  const directory = mkdtempSync(join(scratch, 'readiness-test-'));
+  try {
+    const adb = join(directory, 'adb.mjs');
+    copyFileSync(join(import.meta.dir, 'fake-interaction-adb.mjs'), adb);
+    chmodSync(adb, 0o700);
+    const env = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: scenario, METRIC_MODE: mode, RUNS: '1',
+      SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1', DEVICE_LABEL: 'synthetic', NETWORK: 'offline',
+      EXPECTED_APK_SHA256: 'a'.repeat(64), FAKE_ADB_LOG: join(directory, 'calls.log'), OUT_DIR: join(directory, 'output'),
+      FAKE_READINESS: fault };
+    const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], { env, encoding: 'utf8', timeout: 15000 });
+    expect(result.status, result.stderr).toBe(fault ? 1 : 0);
+    const calls = readFileSync(env.FAKE_ADB_LOG, 'utf8');
+    expect(calls).toContain('CaptureKeyboardReadinessTest#coldAndWarmCapture');
+    expect(calls).toContain('-e iterations 10 -e syntheticDataConfirmed true');
+    expect(calls).toContain(`-e expectedApkSha256 ${'a'.repeat(64)}`);
+    expect(calls).not.toMatch(/pm clear|install|logcat -c/);
+    if (fault) expect(calls).not.toContain('MindwtrBenchmark#');
+    else {
+      expect(calls.indexOf('CaptureKeyboardReadinessTest#')).toBeLessThan(calls.indexOf(`MindwtrBenchmark#${scenario}`));
+      expect(calls).toContain(`-e metricMode ${mode}`);
+    }
+    const artifacts = join(env.OUT_DIR, readdirSync(env.OUT_DIR)[0]);
+    const metadata = JSON.parse(readFileSync(join(artifacts, 'metadata.json'), 'utf8'));
+    expect(metadata.status).toBe(fault ? 'failed' : 'passed');
+    expect(metadata.readiness.status).toBe(fault ? 'failed' : 'passed');
+    expect(metadata.readiness.expectedSamples).toBe(20);
+    expect(readFileSync(join(artifacts, 'readiness-instrumentation.txt'), 'utf8')).toContain(fault === 'test-failure' ? 'FAILURES!!!' : 'OK (1 test)');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 it('rejects an interaction run before accessing adb without synthetic-data confirmation', () => {
   const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], {
     env: { ...process.env, SCENARIO: 'captureSave', SYNTHETIC_DATA_CONFIRMED: '', ADB_BIN: '/nonexistent-adb' }, encoding: 'utf8',
@@ -49,6 +88,7 @@ it('requires a matching release APK, a passing test and collected native evidenc
       expect(result.status, result.stderr).toBe(condition ? 1 : 0);
       const calls = readFileSync(log, 'utf8');
       expect(calls).not.toMatch(/pm clear|install|logcat -c/);
+      expect(calls).not.toContain('CaptureKeyboardReadinessTest#');
       if (condition === 'FAKE_STALE' || condition === 'FAKE_DEBUGGABLE') expect(calls).not.toContain('am instrument');
       else {
         const metadata = JSON.parse(readFileSync(join(output, readdirSync(output)[0], 'metadata.json'), 'utf8'));
@@ -83,6 +123,7 @@ it('isolates timing and memory and rejects the observed shortened scalar reports
         expect(metadata.metricMode).toBe(mode);
         expect(metadata.listSort).toBe(scenario === 'captureOpenClose' ? 'newest' : undefined);
         expect(readFileSync(env.FAKE_ADB_LOG, 'utf8')).toContain(`MindwtrBenchmark#${scenario}`);
+        expect(metadata.readiness?.status).toBe(scenario.startsWith('capture') ? 'passed' : undefined);
       } finally { rmSync(directory, { recursive: true, force: true }); }
     }
   }

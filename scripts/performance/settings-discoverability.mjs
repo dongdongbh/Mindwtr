@@ -42,6 +42,28 @@ try {
       await expect(page.locator('[data-settings-key="appearance"]')).toHaveAttribute('data-settings-highlight', 'true');
       await expect(input).toHaveValue('');
       await page.screenshot({ path: join(output, `${width}-${theme}-selected.png`) });
+
+      // A slow, previously unopened lazy page must not hide the current page.
+      // Hold the actual production chunk, not a component mock or fixed sleep.
+      let releaseChunk;
+      let chunkRequested = false;
+      const chunkReady = new Promise(resolve => { releaseChunk = resolve; });
+      await context.route('**/assets/SettingsIntegrationsPage-*.js', async route => {
+        chunkRequested = true;
+        await chunkReady;
+        await route.continue();
+      });
+      try {
+        if (width < 1024) await page.getByRole('combobox', { name: 'Settings', exact: true }).selectOption('integrations');
+        else await page.getByRole('button', { name: 'Integrations', exact: true }).click();
+        await expect.poll(() => chunkRequested).toBe(true);
+        await expect(page.locator('main[aria-busy="true"]')).toBeVisible();
+        await expect(page.locator('[data-settings-key="appearance"]')).toBeVisible();
+        await page.screenshot({ path: join(output, `${width}-${theme}-pending.png`) });
+      } finally { releaseChunk(); }
+      await expect(page.locator('[data-settings-key="calendar"]')).toBeVisible();
+      await expect(page.locator('main[aria-busy="false"]')).toBeVisible();
+      await page.screenshot({ path: join(output, `${width}-${theme}-integrations.png`) });
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
       expect(overflow).toBe(false);
       console.log(`Settings search passed: ${width}px ${theme}`);
