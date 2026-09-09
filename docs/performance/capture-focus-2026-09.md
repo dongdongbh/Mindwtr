@@ -25,7 +25,7 @@ Both control and candidate must be built from the same base commit and dependenc
 installation. The control for this experiment is `9858c113c8f537a3e88d2c2b7842092831398c17`.
 Do not compare the candidate to the older saved APK as if focus were the only change.
 
-Follow [the device baseline procedure](performance-baselines.md). Confirm the phone
+Follow [the device baseline procedure](baselines.md). Confirm the phone
 is idle, the imported fixture is synthetic, sync is disabled, and the inbox count is
 unchanged. The prepared fixture is `mixed-v1-1000-cbfcca2e13cf76a5-plus21captures`
 (1,021 tasks, 221 Inbox tasks at the previous inspection; recheck before measuring).
@@ -255,7 +255,7 @@ before **either capture scenario, in both metric modes**. It requires ten cold/w
 pairs, successful instrumentation and a complete report matching the installed APK
 and declared fixture. Failed/missing/duplicate samples block measurement; failure
 evidence is retained. This is separate from timed iterations and does not alter the
-restored 120 ms focus behavior. See [the runner protocol](performance-baselines.md#native-interaction-runner).
+restored 120 ms focus behavior. See [the runner protocol](baselines.md#native-interaction-runner).
 
 The complete CLI flow passed on the connected CPH2655 with the restored control
 APK and runner `b1f4a0c82b82fda7242c79755e1918aa45ffafe1b914c40386f4106d912b8112`.

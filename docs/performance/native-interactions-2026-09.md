@@ -39,7 +39,7 @@ for the whole capture-to-readback interval.
 
 ### Next investigation: capture persistence
 
-Follow-up: [native snapshot statement reuse](performance-native-snapshot-save-2026-09.md)
+Follow-up: [native snapshot statement reuse](native-snapshot-save-2026-09.md)
 addresses repeated SQL preparation without changing snapshot semantics.
 
 `createTaskActions.addTask` uses the queued full-snapshot path. Native `save_data`

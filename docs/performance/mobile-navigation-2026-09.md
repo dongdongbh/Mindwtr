@@ -94,4 +94,4 @@ identity proof; their status must not be retroactively presented as schema-4
 acceptance. Local evidence notes and the exact inspected trace names are under
 `/home/dd/.cache/mindwtr-performance-tmp/mindwtr-perfetto/`. APKs, traces, synthetic
 data and screenshots remain local, not committed. Reproduction commands and
-limitations are in [Performance baselines](performance-baselines.md).
+limitations are in [Performance baselines](baselines.md).

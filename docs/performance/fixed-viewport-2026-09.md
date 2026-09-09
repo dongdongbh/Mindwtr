@@ -1,6 +1,6 @@
 # Fixed-viewport native comparison — September 9, 2026
 
-The previous [property-order comparison](performance-watcher-property-order-2026-09.md)
+The previous [property-order comparison](watcher-property-order-2026-09.md)
 could not complete its reverse-order batch: the workstation has landscape and
 portrait monitors, and new tiled windows could start on either. A passing batch
 was not necessarily comparable with the preceding batch.

@@ -2,7 +2,7 @@
 
 ## Finding and boundary
 
-The [save-baseline follow-up](performance-storage-baseline-equality-2026-09.md)
+The [save-baseline follow-up](storage-baseline-equality-2026-09.md)
 identified synchronous sorting in desktop self-write marking. A test at the
 actual watcher controller reproduced 503 sorts for 500 identical task shapes.
 The bounded property-order implementation reduces this to fewer than ten.
@@ -96,4 +96,4 @@ Each directory contains `10000-report.json` plus per-run synthetic profiles.
 
 The release marker `v1.3.0/watcher-property-order` records successful desktop
 self-write snapshot preparation. It does not prove a cache hit, durable save,
-or a particular latency; see the [diagnostics ledger](release-notes/diagnostics-ledger.md).
+or a particular latency; see the [diagnostics ledger](../release-notes/diagnostics-ledger.md).

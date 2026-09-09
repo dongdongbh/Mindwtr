@@ -22,7 +22,7 @@ timing, parsing, task writes, and capture workflow are unchanged.
 ## Why investigate context identity
 
 The three fresh sampled control traces from the
-[profiling-cache investigation](performance-profiling-cache-2026-09.md) contain
+[profiling-cache investigation](profiling-cache-2026-09.md) contain
 React context propagation, property copying/diffing, Fabric commits, and GC
 before the native opening frames. Clock alignment places 40, 35, and 40 Hermes
 samples in the 50 ms preceding those frames, respectively; none is root-only.
@@ -65,7 +65,7 @@ coverage check.
 The earlier sampler-inactive control traces also contain slow modal opening and
 removal frames, so native window cost is not unique to Hermes sampling.
 Previously rejected immediate-focus and inline-presentation experiments remain
-rejected; see [the focus investigation](performance-capture-focus-2026-09.md).
+rejected; see [the focus investigation](capture-focus-2026-09.md).
 This is a bounded investigation, not a complete capture latency diagnosis.
 
 ## Validation

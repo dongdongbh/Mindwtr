@@ -5,7 +5,7 @@ measurements, and native device traces as separate layers. A faster splash scree
 not a faster usable app; a browser timing is not a native launch timing.
 
 For completed optimizations, rejected experiments, remaining work and the next-session
-checklist, start with the [performance and stability handoff](performance-stability-handoff.md).
+checklist, start with the [performance and stability handoff](stability-handoff.md).
 
 ## Readiness contract
 
@@ -93,7 +93,7 @@ them, even against other sampled runs. Use profiles to choose a change, then
 measure its benefit with fresh **unprofiled** repeated runs. Failed UI actions
 still attempt to retain their profile, clean up the session, and fail the run.
 
-Measured example: [desktop Settings page transitions](performance-desktop-settings-2026-09.md).
+Measured example: [desktop Settings page transitions](desktop-settings-2026-09.md).
 
 ## Native Linux desktop interactions
 
@@ -131,7 +131,7 @@ Reports record both requested and actual viewport and the window mode. Every
 sample checks the requested dimensions/scale, and a resize observer rejects
 temporary changes during measured interactions. Compare only identical viewport
 and window-mode cohorts. Monitor orientation alone is not a valid comparison
-condition. See [the fixed-viewport follow-up](performance-fixed-viewport-2026-09.md).
+condition. See [the fixed-viewport follow-up](fixed-viewport-2026-09.md).
 
 For A/B checks, set `NATIVE_BINARY` to an archived Benchmark executable and supply
 its matching `EXPECTED_BINARY_SHA256`. The runner still copies it into a fresh
@@ -168,7 +168,7 @@ For older archived binaries without the hook, explicitly use
 idle-boundary measurements use `portable-native-settings-capture-idle-v2` and
 must not be treated as a like-for-like speedup over v1 measurements.
 
-See [the save-queue boundary validation and local results](performance-native-save-idle-2026-09.md).
+See [the save-queue boundary validation and local results](native-save-idle-2026-09.md).
 
 Capture must appear in the task list, be readable from SQLite through a separate
 read-only connection, and survive a WebView reload. The reader allows a bounded
@@ -225,10 +225,10 @@ wall-time allocation. The sampling timestamp has its own clock: do not directly
 subtract it from the WebView's `performance.now()`. The window also includes the
 short pre-Enter dispatch period. Use only matched instrumented runs for comparison.
 
-See [the captured slow native interaction](performance-native-capture-sampling-2026-09.md).
+See [the captured slow native interaction](native-capture-sampling-2026-09.md).
 
 Measured example and outstanding save-path finding:
-[native desktop and Android scrolling baseline](performance-native-interactions-2026-09.md).
+[native desktop and Android scrolling baseline](native-interactions-2026-09.md).
 
 ## Storage and sync processing
 
@@ -238,7 +238,7 @@ without native calls or timers. `SIZE=1..50000` and `RUNS=3..100` override the
 defaults (10,000 and 7); one warm-up is excluded. JSON stdout includes every
 sample and the median. Run separately from other workloads. This isolates
 snapshot preparation, not durable saving or UI latency.
-See [the property-order measurement and compatibility checks](performance-watcher-property-order-2026-09.md).
+See [the property-order measurement and compatibility checks](watcher-property-order-2026-09.md).
 
 For the desktop pre-save comparison identified by native capture sampling, run
 `bun scripts/performance/save-baseline.ts`. It compares a 10,000-task cloned
@@ -271,7 +271,7 @@ physical cold-cache reads, cloud RTT, encryption, attachment transfer, or end-to
 The weekly/manual workflow runs them sequentially after browser measurements and uploads
 JSON reports only. Timing is reporting-only on hosted hardware; integrity failures fail CI.
 
-Measured follow-up: [full-merge allocation and Android capture](performance-merge-allocation-2026-09.md).
+Measured follow-up: [full-merge allocation and Android capture](merge-allocation-2026-09.md).
 
 ## Restart recovery and sync endurance
 
@@ -325,7 +325,7 @@ preserving revision arbitration, tombstones, pending edits and durable-save guar
 
 ## Android device baseline
 
-Follow [Android Startup Profiling](../apps/mobile/README.md#android-startup-profiling)
+Follow [Android Startup Profiling](../../apps/mobile/README.md#android-startup-profiling)
 to install the separate profileable release APK. Debug/Expo development builds are rejected.
 Create a fixture export for the normal import UI, for example:
 
@@ -415,7 +415,7 @@ metadata. Schema 3 lacks this end-of-run identity proof. These are boundary chec
 continuous install monitoring: keep the device dedicated/idle, and never install or
 change data during a run even if the APK bytes are identical.
 
-Measured example: [mobile Settings and scrolling](performance-mobile-navigation-2026-09.md).
+Measured example: [mobile Settings and scrolling](mobile-navigation-2026-09.md).
 
 Run `captureSave` last: warm-ups and measurements intentionally leave synthetic tasks in Inbox.
 Restore the fixture through the normal import workflow before comparable capture reruns.
@@ -566,8 +566,8 @@ Always build through `-I ../benchmark/include.gradle`: it registers both public
 profiling flags as Gradle bundle-task inputs. Metro separately versions its transform
 cache for capture/startup profiling. Merely forcing a Gradle task or passing
 `--reset-cache` did not invalidate an old disabled capture transform in the September
-2026 investigation. See [the cache-isolation verification](performance-profiling-cache-2026-09.md).
-The [capture-context follow-up](performance-capture-context-2026-09.md) correlates
+2026 investigation. See [the cache-isolation verification](profiling-cache-2026-09.md).
+The [capture-context follow-up](capture-context-2026-09.md) correlates
 the fresh Hermes samples with native frames and removes a redundant context invalidation.
 
 Before a long sampling batch, force-stop and freshly launch the exact-hash Benchmark

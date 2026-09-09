@@ -11,7 +11,7 @@ import { Platform } from 'react-native';
  * the main task list clips subviews once it is long enough to pay for it).
  *
  * Changing a number here changes scroll behaviour on device — verify against
- * `docs/performance-budgets.md`, not a unit test: react-test-renderer has no
+ * `docs/performance/budgets.md`, not a unit test: react-test-renderer has no
  * layout engine and will happily agree with any value.
  */
 export const TASK_LIST_WINDOWING_PROPS = {

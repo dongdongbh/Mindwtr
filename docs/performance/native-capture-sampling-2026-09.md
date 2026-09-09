@@ -2,7 +2,7 @@
 
 ## What reproduced
 
-The preceding [append-save verification](performance-native-append-capture-2026-09.md)
+The preceding [append-save verification](native-append-capture-2026-09.md)
 found an intermittent visibility delay but did not capture its stacks. An opt-in
 JavaScriptCore sampler now runs alongside the in-page render probe, without
 changing application code or save scheduling.
@@ -48,7 +48,7 @@ milliseconds, and absent samples are not proof that a function never ran.
 ## Next bounded fix
 
 Implemented and locally validated in the
-[save-baseline comparison follow-up](performance-storage-baseline-equality-2026-09.md).
+[save-baseline comparison follow-up](storage-baseline-equality-2026-09.md).
 The investigation scope below records the safety requirements used for that fix.
 
 Investigate avoiding repeated sorted serialization and fingerprint hashing when

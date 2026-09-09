@@ -2,7 +2,7 @@
 
 ## Change and safety boundary
 
-[Native sampling](performance-native-capture-sampling-2026-09.md) caught stable
+[Native sampling](native-capture-sampling-2026-09.md) caught stable
 fingerprint preparation in the pre-frame path of a 344 ms capture. The desktop
 snapshot comparator now first asks core's existing `isDeepJsonEqual` whether two
 distinct JSON snapshots are structurally equal. Equal snapshots skip sorted
@@ -84,4 +84,4 @@ to retained release assets `index-BWEy44If.js` and `vendor-CrRaJ_uW.js`.
 
 The release marker `v1.3.0/storage-baseline-equality` proves the positive shortcut
 ran, not persistence or a particular latency. See the
-[diagnostics ledger](release-notes/diagnostics-ledger.md) for logging conditions.
+[diagnostics ledger](../release-notes/diagnostics-ledger.md) for logging conditions.

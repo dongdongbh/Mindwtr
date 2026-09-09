@@ -240,7 +240,7 @@ describe('TaskListView', () => {
   // Pinned literals, not a read of TASK_LIST_WINDOWING_PROPS: these numbers are
   // #766 device tuning, and a test that echoes the constant would follow it down
   // if an entry were dropped. Changing them is a perf decision — re-check
-  // docs/performance-budgets.md on hardware, not here.
+  // docs/performance/budgets.md on hardware, not here.
   it('applies the shared list windowing tuning', () => {
     const renderer = renderView();
     const list = renderer.root.findByType('FlatList' as never);

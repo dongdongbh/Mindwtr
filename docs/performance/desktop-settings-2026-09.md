@@ -66,7 +66,7 @@ attribute native I/O or prove all idle time has a single cause.
 
 ## Reproduction and retained artifacts
 
-Commands are in [Performance baselines](performance-baselines.md). Local artifacts:
+Commands are in [Performance baselines](baselines.md). Local artifacts:
 `/home/dd/.cache/mindwtr-performance-tmp/capture-window-experiment/`.
 
 - `desktop-control`: unprofiled baseline, built artifact SHA-256

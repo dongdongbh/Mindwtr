@@ -322,7 +322,7 @@ Notes:
   requires explicit `ALLOW_EXISTING_APP=1`; the recommended workflow never needs it.
 - Set `ANDROID_SERIAL` when multiple devices are attached. `BUILD_REVISION` is a declared
   source revision; `artifactHash` fingerprints the installed APK(s) independently.
-- See [Performance baselines](../../docs/performance-baselines.md) for exact clock
+- See [Performance baselines](../../docs/performance/baselines.md) for exact clock
   semantics, fixture generation, comparisons, and the native-device profiling checklist.
 
 ### 3. Capture Perfetto trace for deep root-cause

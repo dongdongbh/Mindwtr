@@ -1,6 +1,6 @@
 # Native snapshot statement reuse — 2026-09-09
 
-Follow-up to the [native interaction baseline](performance-native-interactions-2026-09.md).
+Follow-up to the [native interaction baseline](native-interactions-2026-09.md).
 At 10,000 tasks, capture became visible in 196 ms but independent SQLite readback
 took 7.46 seconds median. This change addresses one measured part of that delay,
 not the entire save pipeline.

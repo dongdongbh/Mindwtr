@@ -48,7 +48,7 @@ It contains no task text, IDs, paths, or credentials.
 ## Reproducing the isolated native diagnostic
 
 Use the disk-backed workspace and temporary-directory conventions in
-[performance baselines](performance-baselines.md). With no competing builds or
+[performance baselines](baselines.md). With no competing builds or
 tests, run `profile_large_snapshot_save` as an ignored release Rust test, first
 with `MINDWTR_SNAPSHOT_APPEND=0` and then `MINDWTR_SNAPSHOT_APPEND=1`. Both runs
 use the same test executable, 10,000 synthetic tasks and three additional captures.
