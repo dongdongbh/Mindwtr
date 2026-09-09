@@ -39,8 +39,6 @@ import { SyncService } from '../lib/sync-service';
 import { SidebarAreaFilter } from './ui/SidebarAreaFilter';
 import { getCalendarTaskDragTaskId, hasCalendarTaskDragData } from '../lib/calendar-task-drag';
 import { stageCalendarDropLanding } from '../lib/calendar-view-params';
-import { ViewExportProvider } from '../contexts/view-export-context';
-import { ViewActionsMenu } from './ViewActionsMenu';
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -746,7 +744,6 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
 
 
     return (
-        <ViewExportProvider viewKey={currentView}>
         <div className="flex h-screen overflow-hidden bg-background text-foreground">
             <a
                 href="#main-content"
@@ -773,7 +770,6 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                     )}
                     {!isCollapsed && <h1 className="text-base font-semibold tracking-tight">{t('app.name')}</h1>}
                     <div className={cn("ml-auto flex items-center gap-1", isCollapsed && "ml-0 flex-col")}>
-                        <ViewActionsMenu collapsed={isCollapsed} />
                         <button
                             onClick={toggleSidebar}
                             className={cn(
@@ -1105,6 +1101,5 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
             </main>
             <ToastHost />
         </div>
-        </ViewExportProvider>
     );
 }

@@ -1140,6 +1140,7 @@ export const ptOverrides: Record<string, string> = {
         'bulk.addContext': 'Adicionar contexto',
         'bulk.removeContext': 'Remover contexto',
         'bulk.delete': 'Excluir selecionado',
+        'bulk.exportCsv': 'Exportar tarefas selecionadas como CSV',
         'bulk.confirmDeleteTitle': 'Excluir tarefas',
         'bulk.confirmDeleteBody': 'Excluir tarefas selecionadas?',
         'sort.label': 'Ordenar',

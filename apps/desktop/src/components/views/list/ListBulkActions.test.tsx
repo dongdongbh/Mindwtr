@@ -137,4 +137,41 @@ describe('ListBulkActions', () => {
 
         expect(onAssignEnergyLevel).toHaveBeenCalledWith('high');
     });
+
+    it('offers the selected-task CSV export and disables repeats while pending', () => {
+        const onExportCsv = vi.fn();
+        const { getByRole, rerender } = render(
+            <ListBulkActions
+                selectionCount={2}
+                onMoveToStatus={() => undefined}
+                onAddTag={() => undefined}
+                onAddContext={() => undefined}
+                onExportCsv={onExportCsv}
+                onDelete={() => undefined}
+                t={t}
+            />
+        );
+
+        const exportButton = getByRole('button', { name: 'Export selected tasks as CSV' });
+        fireEvent.click(exportButton);
+        expect(onExportCsv).toHaveBeenCalledTimes(1);
+
+        rerender(
+            <ListBulkActions
+                selectionCount={2}
+                onMoveToStatus={() => undefined}
+                onAddTag={() => undefined}
+                onAddContext={() => undefined}
+                onExportCsv={onExportCsv}
+                isExporting
+                onDelete={() => undefined}
+                t={t}
+            />
+        );
+        const pendingExportButton = getByRole('button', { name: 'Export selected tasks as CSV' });
+        expect(pendingExportButton).toBeDisabled();
+        expect(pendingExportButton).toHaveAttribute('aria-busy', 'true');
+        fireEvent.click(pendingExportButton);
+        expect(onExportCsv).toHaveBeenCalledTimes(1);
+    });
 });

@@ -1066,6 +1066,7 @@ export const ruOverrides: Record<string, string> = {
         'bulk.addContext': 'Добавить контекст',
         'bulk.removeContext': 'Удалить контекст',
         'bulk.delete': 'Удалить выбранное',
+        'bulk.exportCsv': 'Экспортировать выбранные задачи в CSV',
         'bulk.confirmDeleteTitle': 'Удаление задач',
         'bulk.confirmDeleteBody': 'Удалить выбранные задачи?',
         'sort.label': 'Сортировать',

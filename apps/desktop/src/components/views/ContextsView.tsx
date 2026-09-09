@@ -47,7 +47,6 @@ import { GroupBySelect } from './list/GroupBySelect';
 import { LIST_END_GAP, SortBySelect, ToolbarButton, VIEW_FILTER_INPUT } from './list/list-toolbar';
 import { useUiStore } from '../../store/ui-store';
 import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
-import { useViewExportTasks } from '../../contexts/view-export-context';
 
 type BulkTokenPickerState = {
     field: 'tags' | 'contexts';
@@ -187,7 +186,6 @@ export function ContextsView() {
         : contextFilteredTasks
     ), [contextFilteredTasks, normalizedSearchQuery]);
     const sortedTasks = useMemo(() => sortTasksBy(filteredTasks, sortBy), [filteredTasks, sortBy]);
-    useViewExportTasks(sortedTasks);
     const groupBy = persistedViewState.groupBy;
     const setGroupBy = useCallback((value: ContextsViewGroupBy) => {
         setPersistedViewState((current) => ({
@@ -224,6 +222,8 @@ export function ContextsView() {
         assignEnergyToSelectedTasks,
         clearTaskSelection,
         deleteSelectedTasks,
+        exportSelectedTasks,
+        isExporting,
         multiSelectedIds,
         moveSelectedTasks,
         selectedIdsArray,
@@ -651,6 +651,8 @@ export function ContextsView() {
                                     onAddContext={() => handleBatchPickContext('add')}
                                     onRemoveContext={handleBatchRemoveContext}
                                     disableRemoveContext={removableContextOptions.length === 0}
+                                    onExportCsv={() => { void exportSelectedTasks(); }}
+                                    isExporting={isExporting}
                                     onDelete={handleBatchDelete}
                                     isDeleting={activeAction === 'delete'}
                                     t={t}

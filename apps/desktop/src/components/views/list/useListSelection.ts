@@ -63,8 +63,10 @@ type UseListSelectionResult = {
     handleConfirmRemoveTags: (values: string[]) => Promise<void>;
     handleConfirmTagPrompt: (value: string) => Promise<void>;
     handleSelectIndex: (index: number) => void;
+    exportSelectedTasks: () => Promise<boolean>;
     isBatchDeleting: boolean;
     isBulkOrganizing: boolean;
+    isExporting: boolean;
     organizeSelectedTasks: (
         input: BulkOrganizeTaskUpdateInput,
         options?: { afterSuccess?: () => void },
@@ -134,6 +136,8 @@ export function useListSelection({
         clearTaskSelection,
         deleteSelectedTasks,
         exitSelectionMode,
+        exportSelectedTasks,
+        isExporting,
         multiSelectedIds,
         moveSelectedTasks,
         organizeSelectedTasks,
@@ -430,8 +434,10 @@ export function useListSelection({
         handleConfirmRemoveTags,
         handleConfirmTagPrompt,
         handleSelectIndex,
+        exportSelectedTasks,
         isBatchDeleting: activeAction === 'delete',
         isBulkOrganizing: activeAction === 'organize',
+        isExporting,
         allVisibleTasksSelected,
         clearTaskSelection,
         multiSelectedIds,

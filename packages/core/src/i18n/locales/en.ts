@@ -1567,6 +1567,7 @@ export const en: Record<string, string> = {
         'bulk.tagPlaceholder': '#tag',
         'bulk.contextPlaceholder': '@context',
         'bulk.delete': 'Delete',
+        'bulk.exportCsv': 'Export selected tasks as CSV',
         'bulk.confirmDeleteTitle': 'Delete tasks',
         'bulk.confirmDeleteBody': 'Delete selected tasks?',
         'bulk.organize': 'Bulk organize',

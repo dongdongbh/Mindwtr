@@ -26,7 +26,6 @@ import { LIST_END_GAP } from './list/list-toolbar';
 import { useTaskSelection } from './list/useTaskSelection';
 import { useUiStore } from '../../store/ui-store';
 import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
-import { useViewExportTasks } from '../../contexts/view-export-context';
 
 interface SearchViewProps {
     savedSearchId: string;
@@ -95,7 +94,6 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
             sortBy
         );
     }, [tasks, projects, query, sortBy, resolvedAreaFilter, projectMapById, areaById]);
-    useViewExportTasks(filteredTasks);
     const shouldVirtualize = filteredTasks.length > LIST_VIRTUALIZATION_THRESHOLD;
     const rowVirtualizer = useVirtualizer({
         count: shouldVirtualize ? filteredTasks.length : 0,
@@ -112,6 +110,8 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
         assignAreaToSelectedTasks,
         clearTaskSelection,
         deleteSelectedTasks,
+        exportSelectedTasks,
+        isExporting,
         multiSelectedIds,
         moveSelectedTasks,
         organizeSelectedTasks,
@@ -264,6 +264,8 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
                             disableRemoveTag={removableTagOptions.length === 0}
                             onAddContext={handleBatchAddContext}
                             onRemoveContext={handleBatchRemoveContext}
+                            onExportCsv={() => { void exportSelectedTasks(); }}
+                            isExporting={isExporting}
                             onDelete={handleBatchDelete}
                             t={t}
                         />

@@ -13,7 +13,6 @@ import { expectScrolledEndGap } from '../../test/list-end-gap';
 
 const reportErrorMock = vi.hoisted(() => vi.fn());
 const selectionInputs = vi.hoisted(() => ({ scrollCallbacks: [] as unknown[] }));
-const viewExportInputs = vi.hoisted(() => ({ tasks: null as Task[] | null }));
 
 vi.mock('./list/useListSelection', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./list/useListSelection')>();
@@ -28,12 +27,6 @@ vi.mock('./list/useListSelection', async (importOriginal) => {
 
 vi.mock('../../lib/report-error', () => ({
   reportError: reportErrorMock,
-}));
-
-vi.mock('../../contexts/view-export-context', () => ({
-  useViewExportTasks: (tasks: Task[] | null) => {
-    viewExportInputs.tasks = tasks;
-  },
 }));
 
 const initialTaskState = useTaskStore.getState();
@@ -1415,111 +1408,5 @@ describe('ListView', () => {
       expect(queryByText('Work done task')).toBeInTheDocument();
       expect(queryByText('Home done task')).not.toBeInTheDocument();
     });
-  });
-});
-
-// #1096: the shared More menu receives filteredTasks — the query — not the
-// presentation-only subset left after grouping, folding or virtualization.
-describe('ListView export registration', () => {
-  const registeredTitles = () => (viewExportInputs.tasks ?? []).map((task) => task.title);
-
-  beforeEach(() => {
-    viewExportInputs.tasks = null;
-    window.localStorage.removeItem('mindwtr:view:list:next:v1');
-    useTaskStore.setState(initialTaskState, true);
-    useUiStore.setState(initialUiState, true);
-    useTaskStore.setState({
-      _allTasks: [
-        makeTask('1', { title: 'Work next', status: 'next', contexts: ['@work'] }),
-        makeTask('2', { title: 'Home next', status: 'next', contexts: ['@home'] }),
-      ],
-      _allProjects: [],
-      _allAreas: [],
-      settings: {},
-      lastDataChangeAt: 1,
-    });
-    useUiStore.setState((state) => ({
-      ...state,
-      listFilters: { criteria: {}, open: false },
-      listOptions: {
-        showDetails: false,
-        focusGroupBy: 'none', inboxGroupBy: 'none', nextGroupBy: 'none',
-        waitingGroupBy: 'none', somedayGroupBy: 'none',
-        referenceGroupBy: 'area', doneGroupBy: 'none', archivedGroupBy: 'none',
-      },
-      projectView: { selectedProjectId: null },
-      editingTaskId: null,
-      expandedTaskIds: {},
-    }));
-  });
-
-  it('registers every task the filter kept, and nothing it dropped', async () => {
-    const { getByRole, queryByText } = renderListView('next', 'Next');
-
-    fireEvent.click(getByRole('button', { name: 'Filters' }));
-    const panel = document.getElementById('list-filters-panel');
-    fireEvent.click(within(panel!).getByRole('button', { name: /@work/ }));
-    await waitFor(() => expect(queryByText('Home next')).not.toBeInTheDocument());
-
-    await waitFor(() => expect(registeredTitles()).toEqual(['Work next']));
-  });
-
-  it('registers matching customer tasks across projects only in the chosen area', async () => {
-    const workArea = {
-      id: 'area-work', name: 'Work', color: '#3b82f6', order: 0, createdAt: now, updatedAt: now,
-    };
-    const homeArea = { ...workArea, id: 'area-home', name: 'Home', order: 1 };
-    const project = (id: string, areaId: string) => ({
-      id,
-      title: id,
-      status: 'active' as const,
-      color: '#3b82f6',
-      order: 0,
-      tagIds: [],
-      areaId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    const projects = [project('work-one', workArea.id), project('work-two', workArea.id), project('home-one', homeArea.id)];
-    const tasks = [
-      makeTask('work-customer-1', { title: 'Customer follow-up one', projectId: 'work-one', tags: ['#customer'] }),
-      makeTask('work-customer-2', { title: 'Customer follow-up two', projectId: 'work-two', tags: ['#customer'] }),
-      makeTask('home-customer', { title: 'Home customer note', projectId: 'home-one', tags: ['#customer'] }),
-      makeTask('work-other', { title: 'Unrelated work', projectId: 'work-one', tags: ['#other'] }),
-    ];
-    useTaskStore.setState({
-      _allTasks: tasks,
-      _allProjects: projects,
-      _allAreas: [workArea, homeArea],
-      settings: { filters: { areaId: workArea.id } },
-      lastDataChangeAt: 1,
-    });
-
-    const { getByRole } = renderListView('next', 'Next');
-    fireEvent.click(getByRole('button', { name: 'Filters' }));
-    fireEvent.click(within(document.getElementById('list-filters-panel')!).getByRole('button', { name: /#customer/ }));
-
-    await waitFor(() => expect(registeredTitles().sort()).toEqual([
-      'Customer follow-up one',
-      'Customer follow-up two',
-    ]));
-  });
-
-  it('keeps a collapsed group registered — folding one is presentation, not a filter', async () => {
-    useUiStore.setState((state) => ({
-      ...state,
-      listOptions: { ...state.listOptions, nextGroupBy: 'context' },
-    }));
-    const { getByRole, queryByText } = renderListView('next', 'Next');
-
-    fireEvent.click(getByRole('button', { name: /@work\s*1/i }));
-    expect(queryByText('Work next')).not.toBeInTheDocument();
-
-    expect(registeredTitles().sort()).toEqual(['Home next', 'Work next']);
-  });
-
-  it('does not add export chrome to the individual list header', () => {
-    const { queryByRole } = renderListView('next', 'Next');
-    expect(queryByRole('button', { name: /export csv/i })).not.toBeInTheDocument();
   });
 });

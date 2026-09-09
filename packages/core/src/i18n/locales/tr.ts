@@ -1078,6 +1078,7 @@ export const trOverrides: Record<string, string> = {
         'bulk.addContext': 'Bağlam ekle',
         'bulk.removeContext': 'İçeriği kaldır',
         'bulk.delete': 'Seçileni sil',
+        'bulk.exportCsv': 'Seçili görevleri CSV olarak dışa aktar',
         'bulk.confirmDeleteTitle': 'Görevleri sil',
         'bulk.confirmDeleteBody': 'Seçilen görevler silinsin mi?',
         'sort.label': 'Düzenlemek',

@@ -1573,6 +1573,7 @@ export const jaOverrides: Record<string, string> = {
         'bulk.tagPlaceholder': '#tag',
         'bulk.contextPlaceholder': '@context',
         'bulk.delete': '削除',
+        'bulk.exportCsv': '選択したタスクを CSV としてエクスポート',
         'bulk.confirmDeleteTitle': 'タスクを削除',
         'bulk.confirmDeleteBody': '選択したタスクを削除しますか？',
         'bulk.organize': 'まとめて整理',

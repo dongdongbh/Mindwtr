@@ -1540,6 +1540,7 @@ export const faOverrides: Record<string, string> = {
         'bulk.tagPlaceholder': '#برچسب',
         'bulk.contextPlaceholder': '@زمینه',
         'bulk.delete': 'حذف',
+        'bulk.exportCsv': 'خروجی گرفتن کارهای انتخاب‌شده به‌صورت CSV',
         'bulk.confirmDeleteTitle': 'حذف کارها',
         'bulk.confirmDeleteBody': 'کارهای انتخاب‌شده حذف شوند؟',
         'bulk.organize': 'سازمان‌دهی گروهی',

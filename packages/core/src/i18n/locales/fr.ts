@@ -1343,6 +1343,7 @@ export const frOverrides: Record<string, string> = {
         'bulk.tagPlaceholder': '#tag',
         'bulk.contextPlaceholder': '@context',
         'bulk.delete': 'Supprimer la sélection',
+        'bulk.exportCsv': 'Exporter les tâches sélectionnées en CSV',
         'bulk.confirmDeleteTitle': 'Supprimer des tâches',
         'bulk.confirmDeleteBody': 'Supprimer les tâches sélectionnées ?',
 

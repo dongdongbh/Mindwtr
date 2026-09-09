@@ -1540,6 +1540,7 @@ export const svOverrides: Record<string, string> = {
         'bulk.tagPlaceholder': '#tagg',
         'bulk.contextPlaceholder': '@kontext',
         'bulk.delete': 'Ta bort',
+        'bulk.exportCsv': 'Exportera markerade uppgifter som CSV',
         'bulk.confirmDeleteTitle': 'Ta bort uppgifter',
         'bulk.confirmDeleteBody': 'Ta bort markerade uppgifter?',
         'bulk.organize': 'Massorganisera',

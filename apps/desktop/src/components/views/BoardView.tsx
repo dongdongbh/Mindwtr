@@ -39,7 +39,6 @@ import { usePersistedViewState } from '../../hooks/usePersistedViewState';
 import { useTaskListScope } from './list/task-list-scope';
 import { LIST_END_GAP, VIEW_FILTER_INPUT } from './list/list-toolbar';
 import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
-import { useViewExportTasks } from '../../contexts/view-export-context';
 
 const BOARD_VIEW_STATE_STORAGE_KEY = 'mindwtr:view:board:v1';
 
@@ -354,8 +353,6 @@ export function BoardView() {
         if (!normalizedSearchQuery) return criteriaFilteredTasks;
         return criteriaFilteredTasks.filter((task) => task.title.toLowerCase().includes(normalizedSearchQuery));
     }, [criteriaFilteredTasks, normalizedSearchQuery]);
-    useViewExportTasks(filteredTasks);
-
     const sequentialProjectIds = React.useMemo(() => {
         return new Set(projects.filter((p) => p.isSequential && !p.deletedAt).map((p) => p.id));
     }, [projects]);

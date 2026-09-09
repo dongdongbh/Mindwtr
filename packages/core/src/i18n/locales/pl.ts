@@ -1062,6 +1062,7 @@ export const plOverrides: Record<string, string> = {
         'bulk.addContext': 'Dodaj kontekst',
         'bulk.removeContext': 'Usuń kontekst',
         'bulk.delete': 'Usuń wybrane',
+        'bulk.exportCsv': 'Eksportuj wybrane zadania jako CSV',
         'bulk.confirmDeleteTitle': 'Usuń zadania',
         'bulk.confirmDeleteBody': 'Usunąć wybrane zadania?',
         'sort.label': 'Sortuj',

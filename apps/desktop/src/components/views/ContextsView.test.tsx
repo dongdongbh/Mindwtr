@@ -1,5 +1,5 @@
 import { act, fireEvent, render } from '@testing-library/react';
-import type { Task } from '@mindwtr/core';
+import type { Area, Project, Task } from '@mindwtr/core';
 import { useTaskStore } from '@mindwtr/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../../contexts/language-context';
@@ -7,13 +7,7 @@ import { ContextsView } from './ContextsView';
 import { CONTEXTS_VIEW_STATE_STORAGE_KEY, dispatchContextsTokenSelection } from '../../lib/contexts-view-state';
 import { selectToolbarOption } from '../../test/toolbar-select';
 import { expectScrolledEndGap } from '../../test/list-end-gap';
-
-const contextExportInputs = vi.hoisted(() => ({ tasks: null as Task[] | null }));
-vi.mock('../../contexts/view-export-context', () => ({
-    useViewExportTasks: (tasks: Task[] | null) => {
-        contextExportInputs.tasks = tasks;
-    },
-}));
+import * as dataTransfer from '../../lib/data-transfer';
 
 // Its own key, separate from the view state above: see the note in ContextsView.
 const CONTEXTS_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:contexts:groups:v1';
@@ -40,7 +34,6 @@ const renderContextsView = () => render(
 
 describe('ContextsView', () => {
     beforeEach(() => {
-        contextExportInputs.tasks = null;
         window.localStorage.clear();
         useTaskStore.setState(initialTaskState, true);
         const tasks = [
@@ -103,7 +96,6 @@ describe('ContextsView', () => {
 
         expect(getByRole('heading', { name: '#ERP' })).toBeInTheDocument();
         expect(getByText('Plan launch')).toBeInTheDocument();
-        expect(contextExportInputs.tasks?.map((task) => task.title)).toEqual(['Plan launch']);
     });
 
     it('keeps the sort control labeled and visually scannable', () => {
@@ -380,5 +372,71 @@ describe('ContextsView', () => {
         expect(getAllByRole('checkbox', { name: 'Select task' }).map((checkbox) => (
             (checkbox as HTMLInputElement).checked
         ))).toEqual([true]);
+    });
+
+    it('exports only selected customer tasks across projects in the active area', async () => {
+        const workArea: Area = {
+            id: 'area-work',
+            name: 'Work',
+            color: '#3b82f6',
+            order: 0,
+            createdAt: now,
+            updatedAt: now,
+        };
+        const homeArea: Area = { ...workArea, id: 'area-home', name: 'Home', order: 1 };
+        const project = (id: string, areaId: string): Project => ({
+            id,
+            title: id,
+            status: 'active',
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            areaId,
+            createdAt: now,
+            updatedAt: now,
+        });
+        const projects = [
+            project('work-one', workArea.id),
+            project('work-two', workArea.id),
+            project('home-one', homeArea.id),
+        ];
+        const tasks = [
+            makeTask('work-customer-1', { projectId: 'work-one', contexts: ['@customer1'] }),
+            makeTask('work-customer-2', { projectId: 'work-two', contexts: ['@customer1'] }),
+            makeTask('home-customer', { projectId: 'home-one', contexts: ['@customer1'] }),
+            makeTask('work-other', { projectId: 'work-one', contexts: ['@other'] }),
+        ];
+        useTaskStore.setState({
+            tasks,
+            _allTasks: tasks,
+            projects,
+            _allProjects: projects,
+            areas: [workArea, homeArea],
+            _allAreas: [workArea, homeArea],
+            settings: { filters: { areaId: workArea.id } },
+        });
+        const exportDesktopCsv = vi.spyOn(dataTransfer, 'exportDesktopCsv').mockResolvedValue(true);
+        const view = renderContextsView();
+
+        fireEvent.click(view.getByRole('button', { name: '@customer1 (2)' }));
+        fireEvent.click(view.getByRole('button', { name: 'Select' }));
+        fireEvent.click(view.getByRole('button', { name: 'Select All' }));
+        await act(async () => {
+            fireEvent.click(view.getByRole('button', { name: 'Export selected tasks as CSV' }));
+            await vi.waitFor(() => expect(exportDesktopCsv).toHaveBeenCalledTimes(1));
+        });
+        const [snapshot, exportedTasks = []] = exportDesktopCsv.mock.calls[0]!;
+        expect(snapshot.projects.map((item) => item.id).sort()).toEqual([
+            'home-one',
+            'work-one',
+            'work-two',
+        ]);
+        expect(exportedTasks.map((item) => item.id).sort()).toEqual([
+            'work-customer-1',
+            'work-customer-2',
+        ]);
+        expect(exportedTasks).not.toContainEqual(expect.objectContaining({ id: 'home-customer' }));
+        expect(exportedTasks).not.toContainEqual(expect.objectContaining({ id: 'work-other' }));
+        exportDesktopCsv.mockRestore();
     });
 });

@@ -1113,6 +1113,7 @@ export const arOverrides: Record<string, string> = {
         'bulk.addContext': 'أضف السياق',
         'bulk.removeContext': 'إزالة السياق',
         'bulk.delete': 'حذف المحدد',
+        'bulk.exportCsv': 'تصدير المهام المحددة بصيغة CSV',
         'bulk.confirmDeleteTitle': 'حذف المهام',
         'bulk.confirmDeleteBody': 'هل تريد حذف المهام المحددة؟',
         'sort.label': 'نوع',

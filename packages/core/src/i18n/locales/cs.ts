@@ -1392,6 +1392,7 @@ export const csOverrides: Record<string, string> = {
         'bulk.tagPlaceholder': '#štítek',
         'bulk.contextPlaceholder': '@kontext',
         'bulk.delete': 'Smazat vybrané',
+        'bulk.exportCsv': 'Exportovat vybrané úkoly jako CSV',
         'bulk.confirmDeleteTitle': 'Smazat úkoly',
         'bulk.confirmDeleteBody': 'Smazat vybrané úkoly?',
         'sort.label': 'Řazení',

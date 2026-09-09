@@ -91,7 +91,6 @@ import {
 import { QuickAddSyntaxHint } from '../ui/QuickAddSyntaxHint';
 import { useFutureStartRevealTick, useLocalDayKey } from '../../hooks/useLocalDayKey';
 import { resolveDoneTaskSortBy, resolveNonDoneTaskSortBy } from '@mindwtr/core';
-import { useViewExportTasks } from '../../contexts/view-export-context';
 
 
 interface ListViewProps {
@@ -531,9 +530,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             return sortTasksBy(filtered, deferredFilterInputs.sortBy);
         });
     }, [deferredFilterInputs, nextVisibilityDayKey, nextVisibilityTick, normalizedSearchQuery, showViewFilterInput]);
-    // The shared menu exports the query result, not the subset left after
-    // presentation-only grouping, folding or virtualization.
-    useViewExportTasks(filteredTasks);
     const activeNextGroupBy: NextGroupBy = statusFilter !== 'reference' && statusFilter !== 'done' && statusFilter !== 'someday'
         ? nextGroupBy as NextGroupBy
         : 'none';
@@ -688,8 +684,10 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         handleConfirmRemoveTags,
         handleConfirmTagPrompt,
         handleSelectIndex,
+        exportSelectedTasks,
         isBatchDeleting,
         isBulkOrganizing,
+        isExporting,
         allVisibleTasksSelected,
         clearTaskSelection,
         multiSelectedIds,
@@ -1041,6 +1039,8 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                                     disableRemoveTag={removableTagOptions.length === 0}
                                     onAddContext={handleBatchAddContext}
                                     onRemoveContext={handleBatchRemoveContext}
+                                    onExportCsv={() => { void exportSelectedTasks(); }}
+                                    isExporting={isExporting}
                                     onDelete={handleBatchDelete}
                                     isDeleting={isBatchDeleting}
                                     t={t}

@@ -107,38 +107,11 @@ const resetStores = () => {
 };
 
 describe('Layout shared view actions', () => {
-    it('renders one More menu in sidebar chrome and no per-view export button', () => {
-        const { rerender } = renderLayout('next');
-
-        expect(screen.getAllByRole('button', { name: 'More' })).toHaveLength(1);
-        expect(screen.queryByRole('button', { name: 'Export CSV' })).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'More' }));
-        expect(screen.getByRole('menuitem', { name: 'Export current results as CSV' })).toBeDisabled();
-
-        rerender(
-            <LanguageProvider>
-                <KeybindingProvider currentView="settings" onNavigate={onNavigate}>
-                    <Layout currentView="settings" onViewChange={vi.fn()}>
-                        <div>Main content</div>
-                    </Layout>
-                </KeybindingProvider>
-            </LanguageProvider>,
-        );
-        expect(screen.getAllByRole('button', { name: 'More' })).toHaveLength(1);
-    });
-
-    it('stacks the header controls in a collapsed sidebar', () => {
-        act(() => {
-            useTaskStore.setState((state) => ({
-                settings: { ...state.settings, sidebarCollapsed: true },
-            }));
-        });
+    it('removes the obsolete one-item More menu from sidebar chrome', () => {
         renderLayout('next');
 
-        const more = screen.getByRole('button', { name: 'More' });
-        expect(more.parentElement?.parentElement).toHaveClass('flex-col');
-        fireEvent.click(more);
-        expect(screen.getByRole('menu')).toHaveClass('left-0');
+        expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Export CSV' })).not.toBeInTheDocument();
     });
 });
 

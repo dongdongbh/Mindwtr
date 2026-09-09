@@ -1065,6 +1065,7 @@ export const hiOverrides: Record<string, string> = {
         'bulk.addContext': 'संदर्भ जोड़ें',
         'bulk.removeContext': 'प्रसंग हटाएँ',
         'bulk.delete': 'चयनित को हटाओ',
+        'bulk.exportCsv': 'चुने गए कार्य CSV में निर्यात करें',
         'bulk.confirmDeleteTitle': 'कार्य हटाएँ',
         'bulk.confirmDeleteBody': 'चयनित कार्य हटाएँ?',
         'sort.label': 'क्रम से लगाना',

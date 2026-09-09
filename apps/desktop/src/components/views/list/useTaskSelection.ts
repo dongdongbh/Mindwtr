@@ -11,6 +11,7 @@ import {
 } from '@mindwtr/core';
 import { reportError } from '../../../lib/report-error';
 import { registerUndoableAction } from '../../../lib/undo-registry';
+import { useSelectedTasksCsvExport } from './useSelectedTasksCsvExport';
 
 type TaskUpdate = { id: string; updates: Partial<Task> };
 type TaskLookup = Map<string, Task> | Record<string, Task | undefined>;
@@ -101,6 +102,10 @@ export function useTaskSelection(
         [multiSelectedIds, visibleIds],
     );
     const allVisibleTasksSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+    const { exportSelectedTasks, isExporting } = useSelectedTasksCsvExport(selectedIdsArray, {
+        showToast,
+        t,
+    });
 
     useEffect(() => {
         const visible = new Set(visibleIds);
@@ -318,6 +323,8 @@ export function useTaskSelection(
         clearTaskSelection,
         deleteSelectedTasks,
         exitSelectionMode,
+        exportSelectedTasks,
+        isExporting,
         multiSelectedIds,
         moveSelectedTasks,
         organizeSelectedTasks,

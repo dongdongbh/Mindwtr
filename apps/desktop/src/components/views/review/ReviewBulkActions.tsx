@@ -1,4 +1,4 @@
-import { ClipboardCheck } from 'lucide-react';
+import { ClipboardCheck, Download } from 'lucide-react';
 import { tFallback, type TaskStatus } from '@mindwtr/core';
 
 type ReviewBulkActionsProps = {
@@ -10,6 +10,8 @@ type ReviewBulkActionsProps = {
     onAddTag: () => void;
     onRemoveTag?: () => void;
     disableRemoveTag?: boolean;
+    onExportCsv?: () => void;
+    isExporting?: boolean;
     onDelete: () => void;
     statusOptions: TaskStatus[];
     t: (key: string) => string;
@@ -24,6 +26,8 @@ export function ReviewBulkActions({
     onAddTag,
     onRemoveTag,
     disableRemoveTag = false,
+    onExportCsv,
+    isExporting = false,
     onDelete,
     statusOptions,
     t,
@@ -85,6 +89,19 @@ export function ReviewBulkActions({
                         className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {t('bulk.removeTag')}
+                    </button>
+                )}
+                {onExportCsv && (
+                    <button
+                        type="button"
+                        onClick={onExportCsv}
+                        disabled={isExporting}
+                        aria-busy={isExporting}
+                        className="inline-flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label={tFallback(t, 'bulk.exportCsv', 'Export selected tasks as CSV')}
+                    >
+                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                        {tFallback(t, 'bulk.exportCsv', 'Export selected tasks as CSV')}
                     </button>
                 )}
                 <button

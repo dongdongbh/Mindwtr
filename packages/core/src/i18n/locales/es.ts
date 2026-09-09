@@ -1518,6 +1518,7 @@ export const esOverrides: Record<string, string> = {
 'bulk.tagPlaceholder': "#tag",
 'bulk.contextPlaceholder': "@context",
 'bulk.delete': "Eliminar seleccionadas",
+        'bulk.exportCsv': 'Exportar tareas seleccionadas como CSV',
 'bulk.confirmDeleteTitle': "Eliminar tareas",
 'bulk.confirmDeleteBody': "¿Eliminar las tareas seleccionadas?",
 'bulk.organize': "Organizar en lote",

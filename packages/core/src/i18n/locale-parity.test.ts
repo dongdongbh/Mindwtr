@@ -79,6 +79,10 @@ const pomodoroAlertSettingsKeys = [
 ] as const;
 
 describe('locale parity', () => {
+    it.each(locales)('keeps the selected-task CSV action translated in %s', (lang) => {
+        expect(translationsByLocale[lang]['bulk.exportCsv']).toBeTruthy();
+    });
+
     it.each(fullParityLocales)('keeps %s in full key parity with English', (lang) => {
         const englishKeys = Object.keys(en);
         const missing = englishKeys.filter((key) => !translationsByLocale[lang][key]);

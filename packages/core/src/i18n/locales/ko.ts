@@ -1448,6 +1448,7 @@ export const koOverrides: Record<string, string> = {
         'bulk.tagPlaceholder': '#tag',
         'bulk.contextPlaceholder': '@context',
         'bulk.delete': '선택 항목 삭제',
+        'bulk.exportCsv': '선택한 작업을 CSV로 내보내기',
         'bulk.confirmDeleteTitle': '할 일 삭제',
         'bulk.confirmDeleteBody': '선택한 할 일을 삭제하시겠습니까?',
 

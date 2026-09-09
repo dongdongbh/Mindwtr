@@ -1127,6 +1127,7 @@ export const deOverrides: Record<string, string> = {
         'bulk.addContext': 'Kontext hinzufügen',
         'bulk.removeContext': 'Kontext entfernen',
         'bulk.delete': 'Ausgewählte löschen',
+        'bulk.exportCsv': 'Ausgewählte Aufgaben als CSV exportieren',
         'bulk.confirmDeleteTitle': 'Aufgaben löschen',
         'bulk.confirmDeleteBody': 'Ausgewählte Aufgaben löschen?',
         

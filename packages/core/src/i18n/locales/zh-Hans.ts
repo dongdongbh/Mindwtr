@@ -1458,6 +1458,7 @@ export const zhHans: Record<string, string> = {
         'bulk.addContext': '添加情境',
         'bulk.removeContext': '移除情境',
         'bulk.delete': '删除所选',
+        'bulk.exportCsv': '将所选任务导出为 CSV',
         'bulk.confirmDeleteTitle': '删除任务',
         'bulk.confirmDeleteBody': '删除选中的任务？',
         'sort.label': '排序',

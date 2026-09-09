@@ -1219,6 +1219,7 @@ export const itOverrides: Record<string, string> = {
         'bulk.addContext': 'Aggiungi contesto',
         'bulk.removeContext': 'Rimuovi contesto',
         'bulk.delete': 'Elimina selezionate',
+        'bulk.exportCsv': 'Esporta le attività selezionate in CSV',
         'bulk.confirmDeleteTitle': 'Elimina attività',
         'bulk.confirmDeleteBody': 'Eliminare le attività selezionate?',
 

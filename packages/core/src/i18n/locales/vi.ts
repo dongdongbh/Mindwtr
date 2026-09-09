@@ -1596,6 +1596,7 @@ export const viOverrides: Record<string, string> = {
         'bulk.tagPlaceholder': '#thẻ',
         'bulk.contextPlaceholder': '@ngữ cảnh',
         'bulk.delete': 'Xóa',
+        'bulk.exportCsv': 'Xuất các công việc đã chọn sang CSV',
         'bulk.confirmDeleteTitle': 'Xóa nhiệm vụ',
         'bulk.confirmDeleteBody': 'Xóa các nhiệm vụ đã chọn?',
 

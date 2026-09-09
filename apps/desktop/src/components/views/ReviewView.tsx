@@ -27,7 +27,6 @@ import { CONTEXTS_AXES, groupTasks, sanitizeAxis, type ContextsGroupBy, type Tas
 import { GroupedTaskSections } from './list/GroupedTaskSections';
 import { useTaskSelection } from './list/useTaskSelection';
 import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
-import { useViewExportTasks } from '../../contexts/view-export-context';
 
 const STATUS_OPTIONS: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'done'];
 const REVIEW_VIEW_STATE_STORAGE_KEY = 'mindwtr:view:review:v1';
@@ -160,8 +159,6 @@ export function ReviewView() {
             };
         });
     }, [filterStatus, normalizedSearchQuery, sortBy, tasks, visibility]);
-    useViewExportTasks(filteredTasks);
-
     const filteredTaskIds = useMemo(() => filteredTasks.map((task) => task.id), [filteredTasks]);
     const {
         activeAction,
@@ -169,6 +166,8 @@ export function ReviewView() {
         clearTaskSelection,
         deleteSelectedTasks,
         exitSelectionMode,
+        exportSelectedTasks,
+        isExporting,
         multiSelectedIds,
         moveSelectedTasks,
         organizeSelectedTasks,
@@ -317,6 +316,8 @@ export function ReviewView() {
                             onAddTag={handleBatchAddTag}
                             onRemoveTag={handleBatchRemoveTag}
                             disableRemoveTag={removableTagOptions.length === 0}
+                            onExportCsv={() => { void exportSelectedTasks(); }}
+                            isExporting={isExporting}
                             onDelete={handleBatchDelete}
                             statusOptions={bulkStatuses}
                             t={t}

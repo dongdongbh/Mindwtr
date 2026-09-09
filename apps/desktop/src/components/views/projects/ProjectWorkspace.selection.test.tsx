@@ -11,13 +11,6 @@ import { selectToolbarOption } from '../../../test/toolbar-select';
 import { expectScrolledEndGap } from '../../../test/list-end-gap';
 import { ProjectWorkspace } from './ProjectWorkspace';
 
-const projectExportInputs = vi.hoisted(() => ({ tasks: null as Task[] | null }));
-vi.mock('../../../contexts/view-export-context', () => ({
-    useViewExportTasks: (tasks: Task[] | null) => {
-        projectExportInputs.tasks = tasks;
-    },
-}));
-
 vi.mock('../../TaskItem', () => ({
     TaskItem: ({
         task,
@@ -347,7 +340,6 @@ const renderWorkspaceWithKeybindings = (overrides: Record<string, unknown> = {})
 
 describe('ProjectWorkspace Select mode', () => {
     beforeEach(() => {
-        projectExportInputs.tasks = null;
         vi.clearAllMocks();
         seedStore();
         useUiStore.setState({ editingTaskId: null });
@@ -356,39 +348,6 @@ describe('ProjectWorkspace Select mode', () => {
     it('ends the project scroller with the shared end gap, not with viewport padding (#977)', () => {
         const { container } = renderWorkspace();
         expectScrolledEndGap(container);
-    });
-
-    it('registers the full project result including folded completed and reference rows', () => {
-        const activeTask = task('active-task', 'Active task');
-        const doneTask = task('done-task', 'Done task', { status: 'done' });
-        const referenceTask = task('reference-task', 'Reference task', { status: 'reference' });
-        const outsideTask = task('outside-task', 'Outside task', { projectId: 'other-project' });
-
-        renderWorkspace({
-            allTasks: [activeTask, doneTask, referenceTask, outsideTask],
-            selectedProjectTasks: [activeTask, doneTask, referenceTask],
-            showCompletedTasks: true,
-        });
-
-        expect(projectExportInputs.tasks?.map((item) => item.id).sort()).toEqual([
-            'active-task',
-            'done-task',
-            'reference-task',
-        ]);
-        expect(new Set(projectExportInputs.tasks?.map((item) => item.id)).size).toBe(projectExportInputs.tasks?.length);
-    });
-
-    it('keeps completed project tasks out of export when the completed toggle is off', () => {
-        const activeTask = task('active-task', 'Active task');
-        const doneTask = task('done-task', 'Done task', { status: 'done' });
-
-        renderWorkspace({
-            allTasks: [activeTask, doneTask],
-            selectedProjectTasks: [activeTask, doneTask],
-            showCompletedTasks: false,
-        });
-
-        expect(projectExportInputs.tasks?.map((item) => item.id)).toEqual(['active-task']);
     });
 
     it('keeps archived-project task rows out of edit, selection, and drag paths', () => {
