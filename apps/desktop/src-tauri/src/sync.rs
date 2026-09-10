@@ -14,9 +14,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
-use std::net::TcpListener;
-#[cfg(test)]
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
@@ -1558,6 +1556,23 @@ fn write_oauth_http_response(
     Ok(())
 }
 
+fn configure_dropbox_callback_stream(stream: &TcpStream) -> Result<(), String> {
+    let io_timeout = Some(Duration::from_secs(5));
+    stream
+        .set_nonblocking(false)
+        .map_err(|error| format!("Failed to set Dropbox callback stream blocking mode: {error}"))?;
+    stream
+        .set_read_timeout(io_timeout)
+        .map_err(|error| format!("Failed to set Dropbox callback stream read timeout: {error}"))?;
+    stream
+        .set_write_timeout(io_timeout)
+        .map_err(|error| format!("Failed to set Dropbox callback stream write timeout: {error}"))?;
+    log::info!(
+        "Dropbox OAuth callback stream configured extra.releaseCheck=v1.3.0/dropbox-callback-stream"
+    );
+    Ok(())
+}
+
 fn wait_for_dropbox_auth_code(
     listener: &TcpListener,
     expected_state: &str,
@@ -1566,7 +1581,7 @@ fn wait_for_dropbox_auth_code(
     while Instant::now() < deadline {
         match listener.accept() {
             Ok((mut stream, _addr)) => {
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                configure_dropbox_callback_stream(&stream)?;
                 let mut buffer = [0u8; 8192];
                 let read_len = stream
                     .read(&mut buffer)
@@ -3829,6 +3844,57 @@ mod tests {
             error.contains("Invalid proxy URL"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn dropbox_oauth_callback_stream_configuration_restores_bounded_blocking_io() {
+        use std::io::{Read, Write};
+
+        #[cfg(unix)]
+        fn socket_is_nonblocking(stream: &TcpStream) -> bool {
+            use std::os::fd::AsRawFd as _;
+
+            let flags = unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_GETFL) };
+            assert_ne!(flags, -1, "read accepted stream flags");
+            flags & libc::O_NONBLOCK != 0
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind callback listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let client = std::thread::spawn(move || {
+            let mut stream = TcpStream::connect(addr).expect("connect callback");
+            std::thread::sleep(Duration::from_millis(100));
+            stream
+                .write_all(b"callback")
+                .expect("send delayed callback");
+        });
+        let (mut stream, _) = listener.accept().expect("accept callback");
+        stream
+            .set_nonblocking(true)
+            .expect("force nonblocking accepted stream");
+
+        #[cfg(unix)]
+        assert!(socket_is_nonblocking(&stream));
+
+        configure_dropbox_callback_stream(&stream).expect("configure callback stream");
+
+        #[cfg(unix)]
+        assert!(!socket_is_nonblocking(&stream));
+        assert_eq!(
+            stream.read_timeout().expect("read callback timeout"),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            stream.write_timeout().expect("write callback timeout"),
+            Some(Duration::from_secs(5))
+        );
+
+        let mut callback = [0u8; 8];
+        stream
+            .read_exact(&mut callback)
+            .expect("read delayed callback");
+        assert_eq!(&callback, b"callback");
+        client.join().expect("client thread");
     }
 
     #[test]
