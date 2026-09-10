@@ -28,7 +28,7 @@ $manifest = @"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
-  <Identity Name="$IdentityName" 
+  <Identity Name="$IdentityName" ProcessorArchitecture="x64"
             Publisher="$Publisher" 
             Version="$MsixVersion" />
   <Properties>
