@@ -262,7 +262,7 @@ test("later RC app images rebuild for their embedded release identity", () => {
   );
 });
 
-test("tag-accepting release workflows queue by effective release tag", () => {
+test("tag-accepting release workflows queue by effective tag or shared Store flight", () => {
   const workflowDirectory = ".github/workflows";
   const effectiveTag = "${{ inputs.tag || github.ref_name }}";
   const expectedGroups = new Map([
@@ -272,6 +272,7 @@ test("tag-accepting release workflows queue by effective release tag", () => {
     ["release-linux.yml", `release-linux-${effectiveTag}`],
     ["release-macos-appstore.yml", `release-macos-appstore-${effectiveTag}`],
     ["release-macos.yml", `release-macos-${effectiveTag}`],
+    ["release-msstore-flight.yml", 'msstore-beta-flight'],
     ["release-rc.yml", `release-rc-${effectiveTag}`],
     ["release-windows.yml", `release-windows-${effectiveTag}`],
     ["release.yml", `\${{ github.workflow }}-${effectiveTag}`],
