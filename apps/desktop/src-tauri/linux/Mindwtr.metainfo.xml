@@ -88,6 +88,23 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="1.3.0-rc.2" date="2026-09-10">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.0-rc.2</url>
+      <description>
+        <p>Mindwtr 1.3.0-rc.2 improves task editing, capture, archived-project recovery, and sync performance.</p>
+        <p xml:lang="de">Mindwtr 1.3.0-rc.2 verbessert Aufgabenbearbeitung, Erfassung, Wiederherstellung archivierter Projekte und Sync-Leistung.</p>
+        <ul>
+          <li>Project sections stay available in task editors, and task menus can create project destinations.</li>
+          <li xml:lang="de">Projektabschnitte bleiben in Aufgabeneditoren verfuegbar, und Aufgabenmenues koennen Projektziele erstellen.</li>
+          <li>CSV export follows bulk selection, while Today keyboard order matches the visible groups.</li>
+          <li xml:lang="de">Der CSV-Export folgt der Mehrfachauswahl, waehrend die Tastaturreihenfolge in Heute den sichtbaren Gruppen entspricht.</li>
+          <li>Archived project references and section links survive restart and reactivation.</li>
+          <li xml:lang="de">Referenzen und Abschnittsverknuepfungen archivierter Projekte bleiben nach Neustart und Reaktivierung erhalten.</li>
+          <li>WebDAV activation and full sync reduce repeated attachment and mapping work.</li>
+          <li xml:lang="de">WebDAV-Aktivierung und vollstaendiger Sync vermeiden wiederholte Anhangs- und Zuordnungsarbeit.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.3.0-rc.1" date="2026-09-07">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.0-rc.1</url>
       <description>
