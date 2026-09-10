@@ -3,10 +3,12 @@ import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 
 import { useRootLayoutExternalCapture } from '@/hooks/root-layout/use-root-layout-external-capture';
+import { redirectSystemPath } from '@/app/+native-intent';
 
 vi.mock('@/lib/app-log', () => ({
   logError: vi.fn(),
   logWarn: vi.fn(),
+  logInfo: vi.fn(),
 }));
 
 const setHighlightTask = vi.hoisted(() => vi.fn());
@@ -109,6 +111,33 @@ describe('useRootLayoutExternalCapture', () => {
       replace: vi.fn(),
     };
     showToast = vi.fn<ShowToast>();
+  });
+
+  it.each([true, false])('returns from shortcut confirmation without a blank capture route (initial=%s)', (initial) => {
+    const url = 'mindwtr:///capture?title=Call%20dentist&note=Tomorrow&tags=phone&project=Home';
+    const stack: unknown[] = [redirectSystemPath({ path: url, initial })];
+    router.canGoBack.mockReturnValue(true);
+    router.push.mockImplementation((route) => { stack.push(route); });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TestHarness incomingUrl={url} router={router} showToast={showToast} />);
+    });
+    expect(stack[1]).toEqual({
+      pathname: '/capture-modal',
+      params: {
+        initialValue: encodeURIComponent('Call dentist'),
+        initialProps: encodeURIComponent(JSON.stringify({ description: 'Tomorrow', tags: ['#phone'] })),
+        project: 'Home',
+      },
+    });
+    // Closing confirmation (Save with Add another off, or Cancel) goes back.
+    stack.pop();
+    act(() => {
+      tree.update(<TestHarness incomingUrl={url} router={router} showToast={showToast} />);
+    });
+    expect(stack).toEqual(['/inbox']);
+    expect(router.push).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
   });
 
   it('opens shared text capture with the shared text as the task title', () => {

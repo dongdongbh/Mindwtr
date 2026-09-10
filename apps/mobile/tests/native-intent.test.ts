@@ -34,9 +34,20 @@ describe('redirectSystemPath', () => {
             .toBe('/capture-modal?origin=system');
     });
 
-    it('leaves shortcut capture and unrelated links untouched', () => {
-        expect(redirectSystemPath({ path: 'mindwtr://capture?title=Buy%20milk', initial: false }))
-            .toBe('mindwtr://capture?title=Buy%20milk');
+    it.each([true, false])('keeps shortcut links off the blank capture tab (initial=%s)', (initial) => {
+        for (const path of [
+            'mindwtr://capture?title=Buy%20milk',
+            'mindwtr:///capture?title=Buy%20milk&requestId=first',
+            'mindwtr://capture',
+        ]) {
+            expect(redirectSystemPath({ path, initial })).toBe('/inbox');
+        }
+    });
+
+    it('leaves unrelated links and internal capture navigation untouched', () => {
+        expect(redirectSystemPath({ path: '/capture', initial: false })).toBe('/capture');
+        expect(redirectSystemPath({ path: 'https://example.com/capture?title=Buy', initial: false }))
+            .toBe('https://example.com/capture?title=Buy');
         expect(redirectSystemPath({ path: '/inbox', initial: true })).toBe('/inbox');
         expect(redirectSystemPath({ path: 'not a url', initial: false })).toBe('not a url');
     });

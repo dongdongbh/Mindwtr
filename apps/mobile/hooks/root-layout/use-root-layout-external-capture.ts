@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system';
 import { generateUUID, useTaskStore, validateAttachmentForUpload, type Attachment, type Task } from '@mindwtr/core';
 
 import type { ToastOptions } from '@/contexts/toast-context';
-import { logError, logWarn } from '@/lib/app-log';
+import { logError, logInfo, logWarn } from '@/lib/app-log';
 import { syncAppSearchIndexingWithPreference } from '@/lib/app-search-service';
 import { persistAttachmentLocallyDetailed } from '@/lib/attachment-sync';
 import {
@@ -422,6 +422,10 @@ export function useRootLayoutExternalCapture({
         lastHandledKey.current = incomingUrlKey;
         try {
             openCaptureConfirmation(payload);
+            void logInfo('Shortcut capture confirmation requested', {
+                scope: 'shortcuts',
+                extra: { releaseCheck: 'v1.3.0/shortcut-capture-single-owner' },
+            });
         } catch (error) {
             lastHandledKey.current = 0;
             void logError(error, { scope: 'shortcuts', extra: { url: incomingUrl } });

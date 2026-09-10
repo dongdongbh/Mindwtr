@@ -1,4 +1,4 @@
-import { isEntityOpenUrl, isOpenFeatureUrl, parseOpenFeatureUrl, resolveOpenFeaturePath } from '@/lib/capture-deeplink';
+import { isEntityOpenUrl, isOpenFeatureUrl, isShortcutCaptureUrl, parseOpenFeatureUrl, resolveOpenFeaturePath } from '@/lib/capture-deeplink';
 
 const isQuickCaptureUrl = (path: string): boolean => {
     const url = new URL(path);
@@ -21,6 +21,13 @@ export function redirectSystemPath({ path }: { path: string; initial: boolean })
             return resolveOpenFeaturePath(parseOpenFeatureUrl(path)?.feature ?? null);
         }
         if (isEntityOpenUrl(path)) {
+            return '/inbox';
+        }
+        // The external-capture hook opens the prefilled confirmation from the
+        // original Linking delivery. Letting Router also visit /capture opens
+        // a blank quick-capture sheet behind it, which reappears after closing.
+        // Invalid capture payloads also belong to that hook's error handling.
+        if (isShortcutCaptureUrl(path)) {
             return '/inbox';
         }
         // The hidden tab route depends on a focus callback that is not reliable
