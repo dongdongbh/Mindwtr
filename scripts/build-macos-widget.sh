@@ -134,6 +134,7 @@ for SWIFT_ARCH in $SWIFT_ARCHS; do
         -parse-as-library \
         -application-extension \
         -emit-executable \
+        -emit-const-values \
         -emit-const-values-path "$CONST_VALUES" \
         -Xfrontend -const-gather-protocols-file \
         -Xfrontend "$APP_INTENTS_PROTOCOLS_FILE" \
@@ -141,6 +142,10 @@ for SWIFT_ARCH in $SWIFT_ARCHS; do
         -Xlinker _NSExtensionMain \
         -o "$SLICE" \
         "$WIDGET_SRC_DIR"/*.swift
+    if [ ! -s "$CONST_VALUES" ]; then
+        echo "::error::${WIDGET_EXECUTABLE_NAME}: Swift did not emit App Intents const values for ${SWIFT_ARCH}."
+        exit 1
+    fi
     NM_OUTPUT="$(nm "$SLICE")"
     if ! grep -q '[[:space:]]_NSExtensionMain$' <<< "$NM_OUTPUT"; then
         echo "::error::${WIDGET_EXECUTABLE_NAME}: linked binary does not reference the required _NSExtensionMain app-extension entry point."

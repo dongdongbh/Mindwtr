@@ -24,16 +24,18 @@ cat > "$STUB_BIN/swiftc" <<'STUB'
 printf 'swiftc %s\n' "$*" >> "$WIDGET_TEST_LOG"
 output=""
 const_values=""
+emit_const_values=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -o) output="$2" ;;
+        -emit-const-values) emit_const_values=true ;;
         -emit-const-values-path) const_values="$2" ;;
     esac
     shift
 done
 mkdir -p "$(dirname "$output")"
 : > "$output"
-if [ -n "$const_values" ]; then
+if [ "$emit_const_values" = true ] && [ -n "$const_values" ]; then
     mkdir -p "$(dirname "$const_values")"
     printf '{"type":"AppIntent"}\n' > "$const_values"
 fi
@@ -217,6 +219,7 @@ expect_swift_targets() {
         grep -q -- "-target ${arch}-apple-macos14.0" "$log_path"
     done
     test "$(grep -c '^swiftc .* -Xlinker -e -Xlinker _NSExtensionMain ' "$log_path")" -eq "$#"
+    test "$(grep -c '^swiftc .* -emit-const-values -emit-const-values-path ' "$log_path")" -eq "$#"
     test "$(grep -c '^nm ' "$log_path")" -eq "$#"
 }
 
