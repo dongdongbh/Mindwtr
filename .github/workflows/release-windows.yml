@@ -11,6 +11,11 @@ on:
         description: "Run Microsoft Store publish steps even if this is not a tag push"
         required: false
         type: boolean
+      run_msstore_flight:
+        description: "Submit the MSIX to Mindwtr Beta, independently of the public Store submission"
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       tag:
@@ -20,6 +25,11 @@ on:
       run_msstore:
         description: "Run Microsoft Store publish steps even if this is not a tag push"
         required: false
+        type: boolean
+      run_msstore_flight:
+        description: "Submit the MSIX to Mindwtr Beta, independently of the public Store submission"
+        required: false
+        default: false
         type: boolean
 
 permissions:
@@ -41,6 +51,9 @@ jobs:
     runs-on: windows-2025-vs2026
     name: Windows Release
     timeout-minutes: 120
+    concurrency:
+      group: ${{ inputs.run_msstore_flight && 'msstore-beta-flight' || format('release-windows-{0}', inputs.tag || github.ref_name) }}
+      cancel-in-progress: false
     env:
       VITE_DROPBOX_APP_KEY: ${{ vars.VITE_DROPBOX_APP_KEY || secrets.VITE_DROPBOX_APP_KEY }}
       VITE_FEEDBACK_ENDPOINT_URL: ${{ vars.VITE_FEEDBACK_ENDPOINT_URL || 'https://feedback.mindwtr.app' }}
@@ -94,6 +107,10 @@ jobs:
       - name: Resolve version
         id: version
         shell: pwsh
+        env:
+          RUN_MSSTORE: ${{ inputs.run_msstore }}
+          RUN_MSSTORE_FLIGHT: ${{ inputs.run_msstore_flight }}
+          MSSTORE_FLIGHT_ID: ${{ vars.MSSTORE_FLIGHT_ID }}
         run: |
           $env:GITHUB_EVENT_INPUTS_TAG = "${{ github.event.inputs.tag }}"
           $lines = & scripts/ci/resolve-release-version.ps1 -InputTag "${{ inputs.tag }}"
@@ -102,8 +119,20 @@ jobs:
           }
           $tag = (($lines | Where-Object { $_ -like 'tag=*' }) -replace '^tag=', '')
           $version = (($lines | Where-Object { $_ -like 'version=*' }) -replace '^version=', '')
-          $msixVersion = ($version.Split('.') + @('0','0','0','0'))[0..3] -join '.'
+          $msixVersion = node scripts/ci/msstore-version.mjs $tag
+          if ($LASTEXITCODE -ne 0) { throw "Invalid Microsoft Store package version" }
           echo "msix_version=$msixVersion" >> $env:GITHUB_OUTPUT
+          $isRc = $tag -match '-rc\.'
+          if ($isRc -and $env:RUN_MSSTORE -eq 'true') {
+            throw "RC packages must use run_msstore_flight, never run_msstore (public Store)."
+          }
+          $stable = -not $isRc -and ($env:GITHUB_REF.StartsWith('refs/tags/') -or $env:RUN_MSSTORE -eq 'true')
+          $flight = $env:RUN_MSSTORE_FLIGHT -eq 'true'
+          if ($flight -and $env:MSSTORE_FLIGHT_ID -notmatch '^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$') {
+            throw "Set repository variable MSSTORE_FLIGHT_ID to the Mindwtr Beta flight UUID."
+          }
+          "store_stable=$($stable.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "store_package=$(($stable -or $flight).ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
       - name: Build Tauri app
         timeout-minutes: 30
@@ -368,7 +397,7 @@ jobs:
           retention-days: 28
 
       - name: Ensure MakeAppx is available
-        if: (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || inputs.run_msstore
+        if: steps.version.outputs.store_package == 'true'
         shell: pwsh
         run: |
           $makeappx = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits" -Recurse -Filter "makeappx.exe" -ErrorAction SilentlyContinue |
@@ -385,7 +414,7 @@ jobs:
           Write-Error "makeappx.exe not found and winget is unavailable."
 
       - name: Create MSIX layout
-        if: (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || inputs.run_msstore
+        if: steps.version.outputs.store_package == 'true'
         shell: pwsh
         run: |
           $buildDir = "apps/desktop/src-tauri/target/release"
@@ -403,7 +432,7 @@ jobs:
           Copy-Item "$iconDir/Square44x44Logo.png" "$outDir\Assets\Square44x44Logo.png"
 
       - name: Generate AppxManifest.xml
-        if: (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || inputs.run_msstore
+        if: steps.version.outputs.store_package == 'true'
         shell: pwsh
         run: |
           $manifest = @"
@@ -450,7 +479,7 @@ jobs:
           $manifest | Out-File -FilePath "msix-staging\AppxManifest.xml" -Encoding UTF8
 
       - name: Build MSIX package
-        if: (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || inputs.run_msstore
+        if: steps.version.outputs.store_package == 'true'
         shell: pwsh
         run: |
           $msixPath = "mindwtr_${{ steps.version.outputs.version }}_x64.msix"
@@ -461,9 +490,54 @@ jobs:
             throw "makeappx.exe not found for x64"
           }
           & $makeappx pack /d msix-staging /p $msixPath /o
+          if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed" }
+
+      - name: Preserve Microsoft Store package
+        if: steps.version.outputs.store_package == 'true'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: msstore-package-${{ steps.version.outputs.tag }}
+          path: mindwtr_${{ steps.version.outputs.version }}_x64.msix
+          if-no-files-found: error
+          retention-days: 28
+
+      - name: Prepare Microsoft Store flight archive
+        if: inputs.run_msstore_flight
+        shell: pwsh
+        env:
+          MSIX_FILE_NAME: mindwtr_${{ steps.version.outputs.version }}_x64.msix
+        run: |
+          $zipPath = Join-Path $env:RUNNER_TEMP 'msstore-flight.zip'
+          Compress-Archive -Path $env:MSIX_FILE_NAME -DestinationPath $zipPath -Force
+
+      - name: Preserve Microsoft Store flight archive
+        if: inputs.run_msstore_flight
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: msstore-flight-payload-${{ steps.version.outputs.tag }}
+          path: ${{ runner.temp }}/msstore-flight.zip
+          if-no-files-found: error
+          retention-days: 28
+
+      - name: Submit Microsoft Store beta flight
+        if: inputs.run_msstore_flight
+        timeout-minutes: 40
+        shell: pwsh
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+          MS_STORE_APP_ID: ${{ secrets.MS_STORE_APP_ID || '9N0V5B0B6FRX' }}
+          MSSTORE_FLIGHT_ID: ${{ vars.MSSTORE_FLIGHT_ID }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          MSIX_FILE_NAME: mindwtr_${{ steps.version.outputs.version }}_x64.msix
+          MSIX_ZIP_PATH: ${{ runner.temp }}/msstore-flight.zip
+        run: |
+          node scripts/ci/publish-msstore-flight.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Microsoft Store flight submission failed" }
 
       - name: Validate Microsoft Store secrets
-        if: (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || inputs.run_msstore
+        if: steps.version.outputs.store_package == 'true'
         shell: pwsh
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
@@ -479,7 +553,7 @@ jobs:
           }
 
       - name: Check Microsoft Store submission status
-        if: (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || inputs.run_msstore
+        if: steps.version.outputs.store_stable == 'true'
         id: msstore_status
         shell: pwsh
         env:
@@ -553,7 +627,7 @@ jobs:
           "skip=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Publish to Microsoft Store (metadata + package)
-        if: ((startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || inputs.run_msstore) && steps.msstore_status.outputs.skip != 'true' && env.MSSTORE_SKIP_PUBLISH != 'true'
+        if: steps.version.outputs.store_stable == 'true' && steps.msstore_status.outputs.skip != 'true' && env.MSSTORE_SKIP_PUBLISH != 'true'
         timeout-minutes: 40
         shell: pwsh
         env:

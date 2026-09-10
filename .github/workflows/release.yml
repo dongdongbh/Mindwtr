@@ -246,6 +246,7 @@ jobs:
       actions: read
     with:
       tag: ${{ needs.validate.outputs.tag }}
+      run_msstore_flight: ${{ vars.MSSTORE_FLIGHT_ID != '' }}
     secrets: inherit
 
   android-version-code:
