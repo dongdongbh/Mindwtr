@@ -313,6 +313,10 @@ describe('task-driven project reactivation persistence', () => {
     });
 
     it('persists the reopened task, parent, and archive-owned section after the archive save already flushed', async () => {
+        // Keep the recurring fixture before its due date: otherwise normal
+        // load-time promotion changes Someday to Next as the real date advances.
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(REOPENED_AT));
         let persisted: AppData = {
             tasks: [
                 task('selected', {
