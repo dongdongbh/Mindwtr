@@ -1,0 +1,113 @@
+name: Microsoft Store flight from existing release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Published RC tag whose Windows binary will be packaged (vX.Y.Z-rc.N)'
+        required: true
+        type: string
+      submit:
+        description: 'Submit through the flight API; disable to prepare the first Partner Center upload'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: msstore-beta-flight
+  cancel-in-progress: false
+
+jobs:
+  package-flight:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Validate and download existing RC binary
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$') { throw 'Expected a published RC tag' }
+          $msixVersion = node scripts/ci/msstore-version.mjs $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid Store version' }
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read existing release' }
+          $release = $releaseJson | ConvertFrom-Json
+          if ($release.draft -or -not $release.prerelease -or $release.tag_name -ne $env:RELEASE_TAG) { throw 'Expected a published prerelease' }
+          $version = $env:RELEASE_TAG.Substring(1)
+          $assetName = "mindwtr_${version}_windows_x64_portable.zip"
+          $assets = @($release.assets | Where-Object { $_.name -eq $assetName })
+          if ($assets.Count -ne 1 -or $assets[0].digest -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Missing unique release asset with SHA256 digest' }
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern $assetName --dir downloaded-release
+          if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+          $archive = Join-Path downloaded-release $assetName
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ("sha256:$actual" -ne $assets[0].digest) { throw 'Release artifact checksum mismatch' }
+          Expand-Archive -Path $archive -DestinationPath released-binary
+          if (-not (Test-Path released-binary/mindwtr.exe)) { throw 'Released binary is missing' }
+          "msix_version=$msixVersion" >> $env:GITHUB_OUTPUT
+          "file_name=mindwtr_${version}_x64.msix" >> $env:GITHUB_OUTPUT
+          "Verified existing release asset SHA256: $actual" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Checkout tag assets
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ inputs.tag }}
+          path: release-source
+          sparse-checkout: apps/desktop/src-tauri/icons
+
+      - name: Build MSIX from the existing binary
+        shell: pwsh
+        env:
+          MSIX_VERSION: ${{ steps.release.outputs.msix_version }}
+          MSIX_FILE_NAME: ${{ steps.release.outputs.file_name }}
+        run: |
+          ./scripts/ci/build-msstore-package.ps1 `
+            -BinaryDirectory released-binary `
+            -IconDirectory release-source/apps/desktop/src-tauri/icons `
+            -MsixVersion $env:MSIX_VERSION -OutputPath $env:MSIX_FILE_NAME
+          $original = (Get-FileHash released-binary/mindwtr.exe).Hash
+          if ((Get-FileHash msix-staging/mindwtr.exe).Hash -ne $original) { throw 'Store binary differs from the released binary' }
+          $zipPath = Join-Path $env:RUNNER_TEMP 'msstore-flight.zip'
+          Compress-Archive -Path $env:MSIX_FILE_NAME -DestinationPath $zipPath
+          "MSIX version: $env:MSIX_VERSION. The executable is unchanged from the published RC." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Preserve Store upload files
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: msstore-existing-release-${{ inputs.tag }}
+          path: |
+            ${{ steps.release.outputs.file_name }}
+            ${{ runner.temp }}/msstore-flight.zip
+          if-no-files-found: error
+          retention-days: 28
+
+      - name: Submit beta flight
+        if: inputs.submit
+        timeout-minutes: 35
+        shell: pwsh
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+          MS_STORE_APP_ID: ${{ secrets.MS_STORE_APP_ID || '9N0V5B0B6FRX' }}
+          MSSTORE_FLIGHT_ID: ${{ vars.MSSTORE_FLIGHT_ID }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          MSIX_FILE_NAME: ${{ steps.release.outputs.file_name }}
+          MSIX_ZIP_PATH: ${{ runner.temp }}/msstore-flight.zip
+        run: |
+          node scripts/ci/publish-msstore-flight.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Store flight submission failed' }

@@ -134,7 +134,7 @@ test('RC defaults enable only the flight; stable refreshes the configured tester
   expect(stable.jobs.windows.with.run_msstore_flight).toBe("${{ vars.MSSTORE_FLIGHT_ID != '' }}");
   for (const trigger of ['workflow_call', 'workflow_dispatch']) expect(windows.on[trigger].inputs.run_msstore_flight.default).toBe(false);
   const steps = windows.jobs.standalone.steps;
-  for (const name of ['Ensure MakeAppx is available', 'Create MSIX layout', 'Generate AppxManifest.xml', 'Build MSIX package']) {
+  for (const name of ['Ensure MakeAppx is available', 'Build MSIX package']) {
     expect(steps.find(step => step.name === name).if).toBe("steps.version.outputs.store_package == 'true'");
   }
   expect(steps.find(step => step.name === 'Check Microsoft Store submission status').if).toBe("steps.version.outputs.store_stable == 'true'");

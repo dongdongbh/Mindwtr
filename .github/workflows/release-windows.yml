@@ -413,84 +413,15 @@ jobs:
           }
           Write-Error "makeappx.exe not found and winget is unavailable."
 
-      - name: Create MSIX layout
-        if: steps.version.outputs.store_package == 'true'
-        shell: pwsh
-        run: |
-          $buildDir = "apps/desktop/src-tauri/target/release"
-          $iconDir = "apps/desktop/src-tauri/icons"
-          $outDir = "msix-staging"
-          Remove-Item -Recurse -Force $outDir -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-          New-Item -ItemType Directory -Force -Path "$outDir\Assets" | Out-Null
-          Copy-Item "$buildDir/mindwtr.exe" -Destination "$outDir\mindwtr.exe"
-          if (Test-Path "$buildDir/WebView2Loader.dll") {
-            Copy-Item "$buildDir/WebView2Loader.dll" -Destination "$outDir"
-          }
-          Copy-Item "$iconDir/Square44x44Logo.png" "$outDir\Assets\StoreLogo.png"
-          Copy-Item "$iconDir/Square150x150Logo.png" "$outDir\Assets\Square150x150Logo.png"
-          Copy-Item "$iconDir/Square44x44Logo.png" "$outDir\Assets\Square44x44Logo.png"
-
-      - name: Generate AppxManifest.xml
-        if: steps.version.outputs.store_package == 'true'
-        shell: pwsh
-        run: |
-          $manifest = @"
-          <?xml version="1.0" encoding="utf-8"?>
-          <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-                   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-                   xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
-                   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
-            <Identity Name="$env:MS_IDENTITY_NAME" 
-                      Publisher="$env:MS_PUBLISHER_ID" 
-                      Version="${{ steps.version.outputs.msix_version }}" />
-            <Properties>
-              <DisplayName>Mindwtr</DisplayName>
-              <PublisherDisplayName>$env:MS_PUBLISHER_DISPLAY_NAME</PublisherDisplayName>
-              <Logo>Assets\StoreLogo.png</Logo>
-            </Properties>
-            <Dependencies>
-              <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
-            </Dependencies>
-            <Resources>
-              <Resource Language="en-us" />
-            </Resources>
-            <Applications>
-              <Application Id="App" Executable="mindwtr.exe" EntryPoint="Windows.FullTrustApplication">
-                <uap:VisualElements DisplayName="Mindwtr"
-                                    Description="Local-first GTD application"
-                                    BackgroundColor="transparent"
-                                    Square150x150Logo="Assets\Square150x150Logo.png"
-                                    Square44x44Logo="Assets\Square44x44Logo.png">
-                </uap:VisualElements>
-                <Extensions>
-                  <!-- TaskId must match STORE_STARTUP_TASK_ID in src-tauri/src/autostart.rs -->
-                  <uap5:Extension Category="windows.startupTask" Executable="mindwtr.exe" EntryPoint="Windows.FullTrustApplication">
-                    <uap5:StartupTask TaskId="MindwtrStartup" Enabled="false" DisplayName="Mindwtr" />
-                  </uap5:Extension>
-                </Extensions>
-              </Application>
-            </Applications>
-            <Capabilities>
-              <rescap:Capability Name="runFullTrust" />
-            </Capabilities>
-          </Package>
-          "@
-          $manifest | Out-File -FilePath "msix-staging\AppxManifest.xml" -Encoding UTF8
-
       - name: Build MSIX package
         if: steps.version.outputs.store_package == 'true'
         shell: pwsh
         run: |
-          $msixPath = "mindwtr_${{ steps.version.outputs.version }}_x64.msix"
-          $makeappx = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits" -Recurse -Filter "makeappx.exe" -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "\\x64\\makeappx.exe$" } |
-            Select-Object -First 1 -ExpandProperty FullName
-          if (-not $makeappx) {
-            throw "makeappx.exe not found for x64"
-          }
-          & $makeappx pack /d msix-staging /p $msixPath /o
-          if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed" }
+          ./scripts/ci/build-msstore-package.ps1 `
+            -BinaryDirectory apps/desktop/src-tauri/target/release `
+            -IconDirectory apps/desktop/src-tauri/icons `
+            -MsixVersion '${{ steps.version.outputs.msix_version }}' `
+            -OutputPath 'mindwtr_${{ steps.version.outputs.version }}_x64.msix'
 
       - name: Preserve Microsoft Store package
         if: steps.version.outputs.store_package == 'true'
