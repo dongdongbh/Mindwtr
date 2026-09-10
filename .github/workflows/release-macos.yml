@@ -446,6 +446,10 @@ jobs:
           fi
           codesign --verify --deep --strict --verbose=4 "$APP_PATH"
           codesign -dvv "$APP_PATH/Contents/MacOS/mindwtr"
+          # A successful link/signature does not prove dyld can resolve Swift.
+          # Check the actual packaged executable for both release architectures.
+          LOAD_COMMANDS="$(otool -l "$APP_PATH/Contents/MacOS/mindwtr")"
+          grep -F 'path /usr/lib/swift (offset' <<< "$LOAD_COMMANDS"
           ENTITLEMENTS_PATH="$RUNNER_TEMP/macos-app-entitlements.plist"
           codesign -d --entitlements :- "$APP_PATH" > "$ENTITLEMENTS_PATH" 2>/dev/null || true
           if ! grep -Fq '<key>com.apple.security.personal-information.calendars</key>' "$ENTITLEMENTS_PATH"; then

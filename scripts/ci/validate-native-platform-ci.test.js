@@ -316,4 +316,11 @@ test("macOS native CI links the release Rust and Swift bridges", () => {
   expect(workflow.match(/- "scripts\/ci\/test-build-macos-widget\.sh"/g)).toHaveLength(2);
   expect(macosJob).toContain("name: Exercise macOS widget packaging and signing order");
   expect(macosJob).toContain("run: bash scripts/ci/test-build-macos-widget.sh");
+  const loadStep = parse(workflow).jobs["macos-rust"].steps.find(
+    (step) => step.name === "Load release macOS library with the system Swift runtime",
+  );
+  expect(loadStep.run).toContain("target/release/libapp_lib.dylib");
+  expect(loadStep.run).toContain("path /usr/lib/swift (offset");
+  expect(loadStep.run).toContain("ctypes.CDLL(sys.argv[1])");
+  expect(loadStep.run).toContain("env -u DYLD_LIBRARY_PATH -u DYLD_FALLBACK_LIBRARY_PATH");
 });

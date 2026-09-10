@@ -178,6 +178,19 @@ jobs:
       - name: Run macOS native library tests
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 
+      - name: Load release macOS library with the system Swift runtime
+        run: |
+          set -euo pipefail
+          LIBRARY="apps/desktop/src-tauri/target/release/libapp_lib.dylib"
+          LOAD_COMMANDS="$(otool -l "$LIBRARY")"
+          grep -F 'path /usr/lib/swift (offset' <<< "$LOAD_COMMANDS"
+          env -u DYLD_LIBRARY_PATH -u DYLD_FALLBACK_LIBRARY_PATH python3 - "$LIBRARY" <<'PY'
+          import ctypes
+          import sys
+          ctypes.CDLL(sys.argv[1])
+          print("Release library loaded with the system Swift runtime")
+          PY
+
       - name: Link macOS widget with the app-extension entry point
         run: |
           set -euo pipefail

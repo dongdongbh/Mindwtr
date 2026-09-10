@@ -126,6 +126,10 @@ fn main() {
                 swift_runtime_path.display()
             );
             println!("cargo:rustc-link-lib=static=mindwtr_widget_reload");
+            // The shim's Swift dependencies use @rpath install names. The
+            // link-time -L above does not tell dyld where to find them on a
+            // machine without Xcode; use the runtime shipped with macOS.
+            println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
             // Weak, not `cargo:rustc-link-lib=framework=WidgetKit`: the app's own
             // deployment target stays macOS 10.15 (MACOSX_DEPLOYMENT_TARGET in
             // release-macos.yml), and WidgetKit.framework does not exist before
