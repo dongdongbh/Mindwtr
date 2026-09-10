@@ -191,23 +191,29 @@ jobs:
           print("Release library loaded with the system Swift runtime")
           PY
 
-      - name: Link macOS widget with the app-extension entry point
+      - name: Link Intel macOS widget and extract App Intents metadata
         run: |
           set -euo pipefail
-          WIDGET_BINARY="$RUNNER_TEMP/MindwtrWidgets-link-check"
-          xcrun swiftc \
-            -O \
-            -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
-            -target "$(uname -m)-apple-macos14.0" \
-            -parse-as-library \
-            -application-extension \
-            -emit-executable \
-            -Xlinker -e \
-            -Xlinker _NSExtensionMain \
-            -o "$WIDGET_BINARY" \
-            apps/desktop/widgets-macos/*.swift
-          NM_OUTPUT="$(nm "$WIDGET_BINARY")"
-          grep -q '[[:space:]]_NSExtensionMain$' <<< "$NM_OUTPUT"
+          VALIDATION_APP="$RUNNER_TEMP/Mindwtr.app"
+          mkdir -p "$VALIDATION_APP/Contents/MacOS"
+          cat > "$VALIDATION_APP/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleShortVersionString</key>
+            <string>1.3.0</string>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+          </dict>
+          </plist>
+          PLIST
+          MINDWTR_WIDGET_METADATA_ONLY=1 \
+            bash scripts/build-macos-widget.sh \
+              "$VALIDATION_APP" \
+              DEVTEAM \
+              '' \
+              x86_64-apple-darwin
 
       - name: Exercise macOS widget packaging and signing order
         run: bash scripts/ci/test-build-macos-widget.sh

@@ -219,7 +219,7 @@ expect_swift_targets() {
         grep -q -- "-target ${arch}-apple-macos14.0" "$log_path"
     done
     test "$(grep -c '^swiftc .* -Xlinker -e -Xlinker _NSExtensionMain ' "$log_path")" -eq "$#"
-    test "$(grep -c '^swiftc .* -emit-const-values -emit-const-values-path ' "$log_path")" -eq "$#"
+    test "$(grep -c '^swiftc .* -whole-module-optimization .* -emit-const-values -emit-const-values-path ' "$log_path")" -eq "$#"
     test "$(grep -c '^nm ' "$log_path")" -eq "$#"
 }
 
@@ -237,6 +237,25 @@ grep -q '^lipo -create .*MindwtrWidgets-arm64 .*MindwtrWidgets-x86_64 -output .*
 
 run_case universal-apple-darwin appstore appstore
 expect_swift_targets "$TEST_DIR/appstore/commands.log" arm64 x86_64
+
+METADATA_ONLY_APP="$TEST_DIR/metadata-only/Mindwtr.app"
+METADATA_ONLY_LOG="$TEST_DIR/metadata-only/commands.log"
+mkdir -p "$METADATA_ONLY_APP/Contents/MacOS"
+printf '<plist/>\n' > "$METADATA_ONLY_APP/Contents/Info.plist"
+: > "$METADATA_ONLY_LOG"
+(
+    cd "$ROOT_DIR"
+    PATH="$STUB_BIN:$PATH" \
+    PLIST_BUDDY="$STUB_BIN/PlistBuddy" \
+    WIDGET_TEST_DIR="$TEST_DIR/metadata-only" \
+    WIDGET_TEST_LOG="$METADATA_ONLY_LOG" \
+    WIDGET_TEST_TEAM="TEAM123" \
+    MINDWTR_WIDGET_METADATA_ONLY=1 \
+    bash scripts/build-macos-widget.sh "$METADATA_ONLY_APP" TEAM123 '' x86_64-apple-darwin
+)
+grep -q '^appintentsmetadataprocessor ' "$METADATA_ONLY_LOG"
+! grep -q '^codesign ' "$METADATA_ONLY_LOG"
+! test -e "$METADATA_ONLY_APP/Contents/PlugIns"
 
 # App Store mode without a profile must fail loudly rather than ship a widget
 # the App Store would reject.

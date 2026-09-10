@@ -54,18 +54,27 @@ APP_INTENTS_PROTOCOLS_FILE="$WIDGET_SRC_DIR/AppIntentsProtocols.json"
 APP_GROUP_PLACEHOLDER="__MINDWTR_MACOS_APP_GROUP__"
 TEAM_ID_PLACEHOLDER="__MINDWTR_MACOS_TEAM_ID__"
 PLIST_BUDDY="${PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
+METADATA_ONLY="${MINDWTR_WIDGET_METADATA_ONLY:-0}"
 
 if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
     echo "::error::build-macos-widget.sh: missing or invalid app bundle path: '${APP_PATH}'"
     exit 1
 fi
 
-if [ -z "$SIGNING_IDENTITY" ] && [ -z "$TEAM_ID" ]; then
+if [ "$METADATA_ONLY" != "0" ] && [ "$METADATA_ONLY" != "1" ]; then
+    echo "::error::build-macos-widget.sh: MINDWTR_WIDGET_METADATA_ONLY must be 0 or 1 (got '${METADATA_ONLY}')."
+    exit 1
+fi
+
+if [ "$METADATA_ONLY" = "1" ] && [ -z "$TEAM_ID" ]; then
+    echo "::error::build-macos-widget.sh: metadata-only validation needs a nonempty team ID."
+    exit 1
+elif [ "$METADATA_ONLY" = "0" ] && [ -z "$SIGNING_IDENTITY" ] && [ -z "$TEAM_ID" ]; then
     echo "No signing identity/team configured; skipping the macOS widget (#1054)."
     exit 0
 fi
 
-if [ -z "$SIGNING_IDENTITY" ] || [ -z "$TEAM_ID" ]; then
+if [ "$METADATA_ONLY" = "0" ] && { [ -z "$SIGNING_IDENTITY" ] || [ -z "$TEAM_ID" ]; }; then
     IDENTITY_STATE="unset"
     [ -n "$SIGNING_IDENTITY" ] && IDENTITY_STATE="set"
     TEAM_STATE="unset"
@@ -128,6 +137,7 @@ for SWIFT_ARCH in $SWIFT_ARCHS; do
     echo "Compiling macOS widget Swift sources for ${SWIFT_ARCH} (from ${RUST_TARGET})..."
     swiftc \
         -O \
+        -whole-module-optimization \
         -sdk "$SDK_PATH" \
         -target "${SWIFT_ARCH}-apple-macos14.0" \
         -module-name "$WIDGET_MODULE_NAME" \
@@ -223,6 +233,11 @@ fi
 if ! grep -R -Fq 'MindwtrMacQuickCaptureIntent' "$APP_INTENTS_METADATA"; then
     echo "::error::${WIDGET_EXECUTABLE_NAME}: Metadata.appintents does not register MindwtrMacQuickCaptureIntent."
     exit 1
+fi
+
+if [ "$METADATA_ONLY" = "1" ]; then
+    echo "macOS widget App Intents metadata validation passed."
+    exit 0
 fi
 
 if [ "$DISTRIBUTION" = "appstore" ]; then
