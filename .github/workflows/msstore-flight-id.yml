@@ -1,0 +1,90 @@
+name: Look up Microsoft Store flight ID
+
+on:
+  workflow_dispatch:
+    inputs:
+      flight_name:
+        description: Package flight name in Partner Center
+        required: true
+        default: Mindwtr Beta
+        type: string
+
+permissions: {}
+
+jobs:
+  lookup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Find package flight
+        id: flight
+        shell: python
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+          MS_STORE_APP_ID: ${{ secrets.MS_STORE_APP_ID || '9N0V5B0B6FRX' }}
+          FLIGHT_NAME: ${{ inputs.flight_name }}
+        run: |
+          import json
+          import os
+          import uuid
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlencode, quote
+          from urllib.request import Request, urlopen
+
+          def request_json(request):
+              try:
+                  with urlopen(request, timeout=30) as response:
+                      return json.load(response)
+              except HTTPError as error:
+                  raise SystemExit(f"Microsoft API request failed (HTTP {error.code}).") from None
+              except URLError:
+                  raise SystemExit("Microsoft API connection failed.") from None
+
+          for name in ("MS_TENANT_ID", "MS_CLIENT_ID", "MS_CLIENT_SECRET", "MS_STORE_APP_ID"):
+              if not os.environ.get(name):
+                  raise SystemExit(f"Required secret is missing: {name}")
+
+          tenant = quote(os.environ["MS_TENANT_ID"], safe="")
+          token_data = request_json(Request(
+              f"https://login.microsoftonline.com/{tenant}/oauth2/token",
+              data=urlencode({
+                  "grant_type": "client_credentials",
+                  "resource": "https://manage.devcenter.microsoft.com",
+                  "client_id": os.environ["MS_CLIENT_ID"],
+                  "client_secret": os.environ["MS_CLIENT_SECRET"],
+              }).encode(),
+              headers={"Content-Type": "application/x-www-form-urlencoded"},
+          ))
+          token = token_data.get("access_token")
+          if not token:
+              raise SystemExit("Microsoft authentication returned no access token.")
+          print(f"::add-mask::{token}", flush=True)
+
+          app_id = quote(os.environ["MS_STORE_APP_ID"], safe="")
+          endpoint = f"https://manage.devcenter.microsoft.com/v1.0/my/applications/{app_id}/listflights"
+          matches = []
+          skip = 0
+          while True:
+              page = request_json(Request(
+                  f"{endpoint}?top=100&skip={skip}",
+                  headers={"Authorization": f"Bearer {token}"},
+              ))
+              flights = page["value"]
+              matches.extend(flight for flight in flights
+                             if flight.get("friendlyName") == os.environ["FLIGHT_NAME"])
+              if not page.get("@nextLink"):
+                  break
+              if not flights:
+                  raise SystemExit("Microsoft returned an empty page with a continuation link.")
+              skip += len(flights)
+
+          if len(matches) != 1:
+              raise SystemExit(f"Expected exactly one matching flight; found {len(matches)}.")
+          flight_id = str(uuid.UUID(matches[0]["flightId"]))
+          print(f"MSSTORE_FLIGHT_ID={flight_id}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"flight_id={flight_id}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"Microsoft Store flight lookup succeeded.\n\n`MSSTORE_FLIGHT_ID={flight_id}`\n")
