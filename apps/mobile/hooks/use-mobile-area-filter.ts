@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo } from 'react';
-import { type FilterSettings, useTaskStore } from '@mindwtr/core';
-
 import {
   AREA_FILTER_ALL,
   AREA_FILTER_NONE,
@@ -8,6 +6,8 @@ import {
   areaFilterSelectionToValue,
   resolveAreaFilterSelection,
   type AreaFilterSelection,
+  type FilterSettings,
+  useTaskStore,
 } from '@mindwtr/core';
 
 let staleAreaFilterResetInFlight: string | null = null;
@@ -41,7 +41,7 @@ export function useMobileAreaFilter() {
 
   const resolvedAreaFilter = useMemo(
     () => resolveAreaFilterSelection(filterSettings, sortedAreas),
-    [storedFilterKey, sortedAreas],
+    [filterSettings, sortedAreas],
   );
   // True once the stored filter names an area that no longer exists, so the
   // resolved selection is narrower than what was saved.

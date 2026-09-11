@@ -321,7 +321,9 @@ vi.mock('../components/task-edit/TaskEditFormTab', () => ({
 // note above describes. Keep the memo; do not unwrap it.
 vi.mock('../components/swipeable-task-item', () => ({
   readTaskRowRenderCount: () => 0,
-  SwipeableTaskItem: React.memo((props: Record<string, unknown>) => React.createElement('SwipeableTaskItem', props)),
+  SwipeableTaskItem: React.memo(function SwipeableTaskItemMock(props: Record<string, unknown>) {
+    return React.createElement('SwipeableTaskItem', props);
+  }),
 }));
 
 vi.mock('../components/pomodoro-panel', () => ({

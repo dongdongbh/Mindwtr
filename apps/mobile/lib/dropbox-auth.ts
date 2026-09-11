@@ -278,7 +278,10 @@ export async function revokeDropboxTokens(
     }
 }
 
-export async function disconnectDropbox(clientId: string, fetcher: typeof fetch = fetch): Promise<void> {
+export async function disconnectDropbox(
+    clientId: string,
+    fetcher: typeof fetch = backgroundSafeFetch
+): Promise<void> {
     requireDropboxClientId(clientId);
     const stored = await getStoredDropboxTokens();
     if (!stored) {
