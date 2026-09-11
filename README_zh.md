@@ -4,19 +4,13 @@
 
 # Mindwtr
 
-中文 | [English](./README.md)
-
 **把脑子里的事都倒出来。**
 
-Mindwtr™ 是一款免费开源的待办应用，基于「搞定」（Getting Things Done，GTD）方法。记下任务和想法，拆成具体的下一步，再决定今天做什么。
+一款基于「搞定」（Getting Things Done，GTD）方法的免费待办应用。可离线使用，无需账号。
 
-**可离线使用 · 无需账号 · 无需订阅**
+20,000+ 用户 · Windows · macOS · Linux · iOS · Android
 
-20,000+ 用户 · Windows、macOS、Linux、iPhone、iPad 和 Android
-
-[**下载 Mindwtr**](https://mindwtr.app/#download) · [功能亮点](#功能亮点) · [快速开始](https://docs.mindwtr.app/start/getting-started) · [文档](https://docs.mindwtr.app/)
-
-*Mindwtr 取自 "mind like water"（心静如水）：记下惦记的事，安心做眼前的事。中文社区也可以简称为「如水」。*
+[**下载**](https://mindwtr.app/#download) · [功能](#功能亮点) · [文档](https://docs.mindwtr.app/) · [English](./README.md)
 
 [![CI](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml/badge.svg)](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml)
 [![GitHub license](https://img.shields.io/github/license/dongdongbh/Mindwtr?color=brightgreen)](LICENSE)
@@ -108,6 +102,8 @@ Mindwtr™ 是一款免费开源的待办应用，基于「搞定」（Getting T
 - **电脑和手机都能用。** Windows、macOS、Linux、iPhone、iPad 和 Android 都支持完整的 GTD 流程，并提供 20 种语言选项。
 - **带着现有任务搬过来。** 从 Todoist、TickTick、OmniFocus 等应用[导入任务](https://docs.mindwtr.app/import/)，省去重新录入。
 - **按需要添加工具。** 用日历安排时间，用重复任务处理日常事务，用备注和附件保存相关资料。AI 助手默认关闭，需要时再开启。
+
+Mindwtr 取自 *mind like water*（心静如水）：把惦记的事记下来，安心处理眼前的事。
 
 Mindwtr 专注于个人任务管理。你可以从简单的清单开始，按需要使用更多选项；没有连续打卡，也没有效率评分。
 

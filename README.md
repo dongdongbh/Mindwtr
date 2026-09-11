@@ -4,19 +4,13 @@
 
 # Mindwtr
 
-English | [中文](./README_zh.md)
-
 **Get everything out of your head.**
 
-Mindwtr™ is a free, open-source to-do app built around Getting Things Done (GTD). Capture tasks and ideas, turn them into clear next steps, and decide what to do today.
+A free to-do app built on Getting Things Done (GTD). Works offline, no account needed.
 
-**Works offline · No account required · No subscription**
+20,000+ users · Windows · macOS · Linux · iOS · Android
 
-20,000+ users · Windows, macOS, Linux, iPhone, iPad, and Android
-
-[**Download Mindwtr**](https://mindwtr.app/#download) · [Highlights](#highlights) · [Getting Started](https://docs.mindwtr.app/start/getting-started) · [Docs](https://docs.mindwtr.app/)
-
-_Mindwtr = "mind like water": write down what's on your mind so you can give your attention to what's in front of you._
+[**Download**](https://mindwtr.app/#download) · [Features](#highlights) · [Docs](https://docs.mindwtr.app/) · [中文](./README_zh.md)
 
 [![CI](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml/badge.svg)](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml)
 [![GitHub license](https://img.shields.io/github/license/dongdongbh/Mindwtr?color=brightgreen)](LICENSE)
@@ -108,6 +102,8 @@ For more about the method, read [GTD in 15 minutes](https://hamberg.no/gtd) or [
 - **The same workflow on your phone and computer.** Use the full GTD workflow on Windows, macOS, Linux, iPhone, iPad, and Android, with 20 language options.
 - **Bring your existing tasks.** [Import from Todoist, TickTick, OmniFocus, and more](https://docs.mindwtr.app/import/) so you can start with the plans you've already made.
 - **Add the tools you need.** Plan with a calendar, set up recurring tasks, and keep notes and attachments with your work. AI assistance is off by default and yours to enable.
+
+The name Mindwtr comes from *mind like water*: write down what’s on your mind so you can give your attention to the task at hand.
 
 Mindwtr is built for your personal tasks. Start with a simple list and use more options as you need them. There are no streaks or productivity scores to keep up with.
 
