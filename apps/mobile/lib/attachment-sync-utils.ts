@@ -13,6 +13,7 @@ import {
   getCloudBaseUrl,
   isAttachmentPresenceStampFresh,
   isDropboxUnauthorizedError,
+  isSandboxMode,
   markAttachmentUnrecoverable,
   reportProgress,
   sleep,
@@ -347,6 +348,7 @@ export const getAttachmentsDir = async (): Promise<string | null> => {
  * intentionally rejected.
  */
 export const deleteManagedAttachmentFile = async (attachment: Attachment): Promise<boolean> => {
+  if (isSandboxMode()) return false;
   if (attachment.kind !== 'file' || !attachment.uri || !attachment.id) return false;
   const dir = await getAttachmentsDir();
   if (!dir || !attachment.uri.startsWith(dir)) return false;
@@ -636,6 +638,7 @@ export type PersistAttachmentOutcome = {
 };
 
 export const persistAttachmentLocallyDetailed = async (attachment: Attachment): Promise<PersistAttachmentOutcome> => {
+  if (isSandboxMode()) throw new Error('Unavailable in sandbox');
   if (attachment.kind !== 'file') return { attachment, status: 'not-applicable' };
   const uri = attachment.uri || '';
   if (!uri || isHttpAttachmentUri(uri)) return { attachment, status: 'not-applicable' };

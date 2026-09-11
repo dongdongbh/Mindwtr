@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { resolveFeatureFlags, shallow, useTaskStore } from '@mindwtr/core';
+import { isSandboxMode, resolveFeatureFlags, shallow, useTaskStore } from '@mindwtr/core';
 import { useLanguage } from './language-context';
 import { KeybindingHelpModal } from '../components/KeybindingHelpModal';
 import { isFlatpakRuntime, isTauriRuntime } from '../lib/runtime';
@@ -17,6 +17,7 @@ import {
 } from '../lib/global-quick-add-shortcut';
 import { areaFilterSelectionToFilters } from '@mindwtr/core';
 import type { TaskStatus } from '@mindwtr/core';
+import { getWorkspaceCache } from '../lib/workspace-cache';
 
 export type KeybindingStyle = 'vim' | 'emacs' | 'standard';
 
@@ -201,6 +202,7 @@ export function KeybindingProvider({
     currentView: string;
     onNavigate: (view: string) => void;
 }) {
+    const sandboxMode = isSandboxMode();
     const isTest = import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test';
     const isWindows = typeof navigator !== 'undefined' && /win/i.test(navigator.userAgent);
     const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.userAgent);
@@ -347,7 +349,8 @@ export function KeybindingProvider({
             const isFullscreen = await current.isFullscreen();
             const nextFullscreen = !isFullscreen;
             await current.setFullscreen(nextFullscreen);
-            saveStoredFullscreen(nextFullscreen, localStorage);
+            const storage = getWorkspaceCache();
+            if (storage) saveStoredFullscreen(nextFullscreen, storage);
         } catch (error) {
             void logWarn('Failed to toggle fullscreen', {
                 scope: 'keybinding',
@@ -910,7 +913,7 @@ export function KeybindingProvider({
     // store wiped the on-disk data on machines where registration fails (#852).
     const isStoreHydrated = Boolean(settings.deviceId);
     useEffect(() => {
-        if (isTest || !isTauriRuntime() || !isStoreHydrated) return;
+        if (sandboxMode || isTest || !isTauriRuntime() || !isStoreHydrated) return;
         let cancelled = false;
         applyGlobalQuickAddShortcut(quickAddShortcut)
             .then((result) => {

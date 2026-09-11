@@ -18,6 +18,7 @@ import {
     shallow,
     useTaskStore,
     isTaskInActiveProject,
+    isSandboxMode,
 } from '@mindwtr/core';
 import { cn } from '../../../lib/utils';
 import { useLanguage } from '../../../contexts/language-context';
@@ -28,6 +29,7 @@ import { TaskItem } from '../../TaskItem';
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 import { useLocalDayKey } from '../../../hooks/useLocalDayKey';
+import { getWorkspaceCache } from '../../../lib/workspace-cache';
 
 type DailyReviewStep = 'today' | 'focus' | 'inbox' | 'waiting' | 'completed';
 type DailyReviewStepDefinition = {
@@ -44,7 +46,7 @@ function loadStoredDailyReviewSession(): StoredReviewStepSession<DailyReviewStep
     const now = new Date();
     const stored = typeof window === 'undefined'
         ? null
-        : window.localStorage.getItem(DAILY_REVIEW_STEP_STORAGE_KEY);
+        : getWorkspaceCache()?.getItem(DAILY_REVIEW_STEP_STORAGE_KEY) ?? null;
     return parseStoredReviewStepSession(stored, DAILY_REVIEW_STEPS, { cadence: 'daily', now })
         ?? { step: 'today', startedAt: now.toISOString() };
 }
@@ -54,6 +56,7 @@ interface DailyReviewGuideModalProps {
 }
 
 export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
+    const sandboxMode = isSandboxMode();
     const [reviewSession, setReviewSession] = useState<StoredReviewStepSession<DailyReviewStep>>(
         () => loadStoredDailyReviewSession(),
     );
@@ -122,7 +125,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     }, [currentStep, isProcessing]);
 
     useEffect(() => {
-        window.localStorage.setItem(DAILY_REVIEW_STEP_STORAGE_KEY, JSON.stringify(reviewSession));
+        getWorkspaceCache()?.setItem(DAILY_REVIEW_STEP_STORAGE_KEY, JSON.stringify(reviewSession));
     }, [reviewSession]);
 
     useEffect(() => {
@@ -137,6 +140,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     }, [onClose]);
 
     useEffect(() => {
+        if (sandboxMode) return;
         let cancelled = false;
         const loadCalendar = async () => {
             setExternalCalendarLoading(true);
@@ -163,7 +167,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
         return () => {
             cancelled = true;
         };
-    }, [today]);
+    }, [sandboxMode, today]);
 
     const getEventsForDay = useCallback((date: Date) => {
         const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
@@ -228,7 +232,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     }, [activeStep, currentStep, setCurrentStep]);
 
     const finishReview = () => {
-        window.localStorage.removeItem(DAILY_REVIEW_STEP_STORAGE_KEY);
+        getWorkspaceCache()?.removeItem(DAILY_REVIEW_STEP_STORAGE_KEY);
         onClose();
     };
 

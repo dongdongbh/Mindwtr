@@ -13,6 +13,8 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // sandbox-workspace (desktop/mobile entry drain and immutable workspace bootstrap)
+    'workspace', 'stage',
     // watcher-property-order reuses releaseCheck below.
     // storage-baseline-equality reuses releaseCheck below.
     // sqlite-snapshot-append reuses releaseCheck and count below.

@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { type AppData, type Language, useTaskStore } from '@mindwtr/core';
+import { isSandboxMode, type AppData, type Language, useTaskStore } from '@mindwtr/core';
 import * as ReactNativeWidgetKit from 'react-native-widgetkit';
 
 import * as AndroidWidget from '../modules/android-widget';
@@ -32,11 +32,11 @@ import { getLocalDayKey } from '@/hooks/use-local-day-key';
 import { getSystemColorSchemeForWidget } from './system-color-scheme';
 
 export function isAndroidWidgetSupported(): boolean {
-    return Platform.OS === 'android';
+    return !isSandboxMode() && Platform.OS === 'android';
 }
 
 export function isIosWidgetSupported(): boolean {
-    return Platform.OS === 'ios';
+    return !isSandboxMode() && Platform.OS === 'ios';
 }
 
 type IosWidgetApi = {
@@ -355,6 +355,7 @@ export function resetMobileWidgetRenderCache(): void {
 }
 
 export async function updateMobileWidgetFromData(data: AppData): Promise<boolean> {
+    if (isSandboxMode()) return false;
     if (Platform.OS !== 'android' && Platform.OS !== 'ios') return false;
     await ensureLastRenderedWidgetFingerprintLoaded();
     const language = await resolvePayloadLanguage(data);
@@ -406,6 +407,7 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
 }
 
 export async function updateMobileWidgetFromStore(): Promise<boolean> {
+    if (isSandboxMode()) return false;
     if (Platform.OS !== 'android' && Platform.OS !== 'ios') return false;
     const { _allTasks, _allProjects, _allSections, _allAreas, tasks, projects, sections, areas, settings, lastDataChangeAt } = useTaskStore.getState();
     const ensureArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
@@ -463,5 +465,6 @@ export const updateAndroidWidgetFromData = updateMobileWidgetFromData;
 export const updateAndroidWidgetFromStore = updateMobileWidgetFromStore;
 
 export async function requestPinAndroidWidget(): Promise<boolean> {
+    if (isSandboxMode()) return false;
     return false;
 }

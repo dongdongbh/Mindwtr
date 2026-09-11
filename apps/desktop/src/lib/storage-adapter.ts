@@ -49,13 +49,35 @@ let lastPersistedData: AppData | null = null;
 let saveVersion = 0;
 let pendingCanonicalReconciliationCleanup: (() => void) | null = null;
 
+export type DesktopSaveStatus = {
+    pending: number;
+    generation: number;
+    failed: boolean;
+    reconciliationPending: boolean;
+};
+
 /** Counts only this WebView's saves, not other processes or future work. */
-export const getDesktopSaveStatus = () => ({
+export const getDesktopSaveStatus = (): DesktopSaveStatus => ({
     pending: pendingSaveCount,
     generation: saveVersion,
     failed: lastSaveFailed,
     reconciliationPending: pendingCanonicalReconciliationCleanup !== null,
 });
+
+/** Read-only quiescence gate used before leaving the personal renderer runtime. */
+export async function waitForDesktopStorageIdleSnapshot(timeoutMs: number): Promise<DesktopSaveStatus | null> {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (Date.now() <= deadline) {
+        const status = getDesktopSaveStatus();
+        if (status.pending === 0 && !status.reconciliationPending) return status;
+        await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    return null;
+}
+
+export async function waitForDesktopStorageIdle(timeoutMs: number): Promise<boolean> {
+    return (await waitForDesktopStorageIdleSnapshot(timeoutMs)) !== null;
+}
 
 const beginSaveGeneration = (): number => {
     const cleanup = pendingCanonicalReconciliationCleanup;

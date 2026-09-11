@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getWorkspaceCache } from './workspace-cache';
 import {
     dismissDesktopOnboardingHint,
     isDesktopOnboardingHintDismissed,
@@ -6,8 +7,14 @@ import {
     shouldOpenDesktopFirstRunOnboarding,
 } from './desktop-onboarding-events';
 
+const sandboxState = vi.hoisted(() => ({ enabled: false }));
+vi.mock('@mindwtr/core', () => ({ isSandboxMode: () => sandboxState.enabled }));
+
 describe('desktop onboarding events', () => {
     beforeEach(() => {
+        sandboxState.enabled = true;
+        getWorkspaceCache()?.clear();
+        sandboxState.enabled = false;
         window.localStorage.clear();
     });
 
@@ -57,6 +64,19 @@ describe('desktop onboarding events', () => {
 
         expect(isDesktopOnboardingHintDismissed('sync')).toBe(true);
         expect(isDesktopOnboardingHintDismissed('data')).toBe(false);
+    });
+
+    it('keeps sandbox learning hints separate from personal dismissals', () => {
+        dismissDesktopOnboardingHint('data');
+        const before = JSON.stringify(window.localStorage);
+        sandboxState.enabled = true;
+        expect(isDesktopOnboardingHintDismissed('data')).toBe(false);
+        dismissDesktopOnboardingHint('inbox-project');
+        expect(isDesktopOnboardingHintDismissed('inbox-project')).toBe(true);
+        expect(JSON.stringify(window.localStorage)).toBe(before);
+        sandboxState.enabled = false;
+        expect(isDesktopOnboardingHintDismissed('data')).toBe(true);
+        expect(isDesktopOnboardingHintDismissed('inbox-project')).toBe(false);
     });
 
     it('keeps the inbox project hint dismissal separate from the settings handoff hints', () => {

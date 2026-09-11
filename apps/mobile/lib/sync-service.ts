@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, SYNC_ENCRYPTION_LOG_EVENTS, buildSyncEncryptionActivationExtra, buildSyncEncryptionErrorExtra, buildSyncEncryptionRemoteReadExtra, buildSyncEncryptionStateExtra, type SyncEncryptionState, type SyncEncryptionStateDecision, acquireSyncRemoteMutationFence, clearIdleSyncCycleSnapshot, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, webdavMutationFenceUrl, probeWebdavSyncCompatibility, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncFileLockUnavailableError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunResult, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
+import { AppData, SYNC_ENCRYPTION_LOG_EVENTS, buildSyncEncryptionActivationExtra, buildSyncEncryptionErrorExtra, buildSyncEncryptionRemoteReadExtra, buildSyncEncryptionStateExtra, type SyncEncryptionState, type SyncEncryptionStateDecision, acquireSyncRemoteMutationFence, clearIdleSyncCycleSnapshot, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, webdavMutationFenceUrl, probeWebdavSyncCompatibility, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, isSandboxMode, isWorkspaceTransitionActive, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncFileLockUnavailableError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunResult, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -253,6 +253,7 @@ const mergeLocalSyncStatus = async (data: AppData): Promise<AppData> => {
 
 let mobileSyncActivityState: MobileSyncActivityState = 'idle';
 const mobileSyncActivityListeners = new Set<MobileSyncActivityListener>();
+const mobileSyncDrainListeners = new Set<() => void>();
 const webdavSyncRateLimitController = createWebdavSyncRateLimitController();
 let activeMobileSyncAbortController: AbortController | null = null;
 let activeMobileSyncAbortReason: 'lifecycle' | null = null;
@@ -277,6 +278,30 @@ export const subscribeMobileSyncActivityState = (listener: MobileSyncActivityLis
   return () => {
     mobileSyncActivityListeners.delete(listener);
   };
+};
+
+export const waitForMobileSyncIdle = async (): Promise<void> => {
+  if (isSandboxMode()) return;
+  const isDrained = () => {
+    const state = mobileSyncOrchestrator.getState();
+    return !state.inFlight && !state.queued;
+  };
+  if (isDrained()) return;
+  await new Promise<void>((resolve) => {
+    const onDrained = () => {
+      if (!isDrained()) return;
+      mobileSyncDrainListeners.delete(onDrained);
+      resolve();
+    };
+    mobileSyncDrainListeners.add(onDrained);
+    onDrained();
+  });
+};
+
+const notifyMobileSyncDrainListeners = (): void => {
+  const state = mobileSyncOrchestrator.getState();
+  if (state.inFlight || state.queued) return;
+  mobileSyncDrainListeners.forEach((listener) => listener());
 };
 
 const readStoredConfigValue = async (key: string): Promise<string | null> => {
@@ -361,6 +386,7 @@ const getSupportedBackend = (rawBackend: string | null): SyncBackend =>
   coerceSupportedBackend(resolveBackend(rawBackend), isCloudKitAvailable());
 
 export async function getMobileSyncConfigurationStatus(): Promise<{ backend: SyncBackend; configured: boolean; cloudProvider?: CloudProvider }> {
+  if (isSandboxMode()) return { backend: 'off', configured: false };
   const rawBackend = (await readConfigValue(SYNC_BACKEND_KEY, false))?.trim() ?? null;
   const backend: SyncBackend = getSupportedBackend(rawBackend);
 
@@ -2109,6 +2135,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<MobileSyncRequest | undefi
   },
   onDrained: () => {
     setMobileSyncActivityState('idle');
+    notifyMobileSyncDrainListeners();
   },
 });
 
@@ -2123,6 +2150,9 @@ export async function performMobileSync(
     configOverride?: MobileSyncConfigOverride;
   }
 ): Promise<MobileSyncResult> {
+  if (isSandboxMode() || isWorkspaceTransitionActive()) {
+    return { success: true, skipped: 'disabled' };
+  }
   const wasInFlight = mobileSyncOrchestrator.getState().inFlight;
   if (wasInFlight && options?.activationProbe) {
     // The caller that owns this session-only config must observe its proof.
@@ -2163,6 +2193,7 @@ export const __mobileSyncTestUtils = {
     clearIdleSyncCycleSnapshot();
     clearMobileSyncConfigCache();
     mobileSyncActivityListeners.clear();
+    mobileSyncDrainListeners.clear();
     mobileSyncActivityState = 'idle';
     webdavSyncRateLimitController.reset();
     activeMobileSyncAbortController = null;
@@ -2170,5 +2201,12 @@ export const __mobileSyncTestUtils = {
   },
   getWebdavSyncBlockedUntil() {
     return webdavSyncRateLimitController.getBlockedUntil();
+  },
+  queueFollowUpForTests() {
+    mobileSyncOrchestrator.requestFollowUp(undefined);
+  },
+  clearFollowUpForTests() {
+    mobileSyncOrchestrator.clearFollowUp();
+    notifyMobileSyncDrainListeners();
   },
 };

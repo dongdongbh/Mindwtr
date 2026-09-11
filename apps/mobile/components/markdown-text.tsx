@@ -1,11 +1,11 @@
 import React from 'react';
-import { Pressable, View, Text, StyleSheet, type StyleProp, type TextStyle } from 'react-native';
+import { Alert, Pressable, View, Text, StyleSheet, type StyleProp, type TextStyle } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 
 import type { ThemeColors } from '@/hooks/use-theme-colors';
-import { parseInlineMarkdown, parseMarkdownReferenceHref, shallow, tFallback, useTaskStore, type Project, type Task } from '@mindwtr/core';
+import { isSandboxMode, parseInlineMarkdown, parseMarkdownReferenceHref, shallow, tFallback, useTaskStore, type Project, type Task } from '@mindwtr/core';
 import { useLanguage } from '@/contexts/language-context';
 import { openProjectScreen, openTaskScreen } from '@/lib/task-meta-navigation';
 
@@ -50,6 +50,7 @@ type MarkdownRenderOptions = {
   deletedTaskLabel: string;
   deletedProjectLabel: string;
   copyCodeLabel: string;
+  openExternalLink: (href: string) => void;
 };
 
 type MarkdownLinkLookup = {
@@ -84,6 +85,13 @@ function useMarkdownRenderOptions(): MarkdownRenderOptions {
   const deletedTaskLabel = tFallback(t, 'markdown.referenceDeletedTask', 'deleted task');
   const deletedProjectLabel = tFallback(t, 'markdown.referenceDeletedProject', 'deleted project');
   const copyCodeLabel = tFallback(t, 'markdown.copyCode', 'Copy code');
+  const openExternalLink = React.useCallback((href: string) => {
+    if (isSandboxMode()) {
+      Alert.alert(t('common.notice'), t('sandbox.unavailable'));
+      return;
+    }
+    void Linking.openURL(href);
+  }, [t]);
   const resolveTask = React.useCallback((id: string) => {
     const task = tasksById.get(id);
     if (!task) return null;
@@ -106,6 +114,7 @@ function useMarkdownRenderOptions(): MarkdownRenderOptions {
     deletedTaskLabel,
     deletedProjectLabel,
     copyCodeLabel,
+    openExternalLink,
   };
 }
 
@@ -197,7 +206,7 @@ function renderInline(
           <Text
             key={`${keyPrefix}-link-${index}`}
             style={[styles.link, { color: tc.tint }]}
-            onPress={() => Linking.openURL(token.href)}
+            onPress={() => options.openExternalLink(token.href)}
           >
             {token.text}
           </Text>

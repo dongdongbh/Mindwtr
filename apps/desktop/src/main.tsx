@@ -1,11 +1,18 @@
 import React from 'react';
 import { markDesktopStartup } from './lib/startup-profiler';
 import ReactDOM from 'react-dom/client';
-import App from './App.tsx';
-import { QuickAddWindowApp } from './QuickAddWindowApp.tsx';
 import './index.css';
 
-import { consoleLogger, getPersistenceStatus, setLogger, setStorageAdapter } from '@mindwtr/core';
+import {
+    consoleLogger,
+    createSandboxData,
+    createSandboxStorage,
+    getPersistenceStatus,
+    initializeSandboxRuntime,
+    setLogger,
+    setStorageAdapter,
+    type Language,
+} from '@mindwtr/core';
 import { LanguageProvider } from './contexts/language-context';
 import { isTauriRuntime } from './lib/runtime';
 import { invokeNative, preloadNativeTransport } from './lib/tauri-invoke';
@@ -27,6 +34,7 @@ import { isQuickAddWindowLocation } from './lib/quick-add-window';
 import {
     sendDesktopDailyHeartbeat,
 } from './lib/analytics-heartbeat';
+import { consumeDesktopSandboxBootRequest } from './lib/sandbox-session';
 
 let coreLoggerBridgeInstalled = false;
 
@@ -76,37 +84,10 @@ const installCoreLoggerBridge = () => {
     });
 };
 
-// Initialize theme immediately before React renders to prevent flash
-const savedTheme = coerceDesktopThemeMode(localStorage.getItem(THEME_STORAGE_KEY));
-applyThemeMode(savedTheme);
-if ((savedTheme ?? 'system') === 'system' && isTauriRuntime()) {
-    void resolveSystemThemeCommandPreference(
-        (step, error) => void logError(error, { scope: 'theme', step: `startup-command:${step}` }),
-    ).then((theme) => {
-        if (theme) applyThemeMode('system', theme);
-    });
-}
-const savedTextSize = coerceDesktopTextSize(localStorage.getItem(TEXT_SIZE_STORAGE_KEY));
-applyDesktopTextSize(savedTextSize);
-
 installCoreLoggerBridge();
-
-const diagnosticsEnabled = isDiagnosticsEnabled();
-if (diagnosticsEnabled) {
-    setupGlobalErrorLogging();
-}
 const isQuickAddWindow = isQuickAddWindowLocation();
 if (isQuickAddWindow) {
     document.documentElement.dataset.quickAddWindow = 'true';
-}
-
-const nativeTheme = resolveNativeTheme(savedTheme);
-if (isTauriRuntime()) {
-    void applyNativeTheme(
-        nativeTheme,
-        () => import('@tauri-apps/api/app'),
-        () => import('@tauri-apps/api/window'),
-    );
 }
 
 async function initStorage() {
@@ -203,10 +184,54 @@ async function signalUiReady() {
 async function bootstrap() {
     markDesktopStartup('bootstrap');
     installFileDropNavigationGuard();
-    await initStorage();
+
+    // The quick-add webview is always personal. The main window removes its
+    // one-shot request before validation so a failed boot cannot reopen sample
+    // data on the next launch.
+    const sandboxSettings = isQuickAddWindow ? null : consumeDesktopSandboxBootRequest();
+    const sandboxMode = sandboxSettings !== null;
+    initializeSandboxRuntime(sandboxMode);
+    if (sandboxMode) {
+        setStorageAdapter(createSandboxStorage(createSandboxData({ settings: sandboxSettings })));
+        void logInfo('Sandbox workspace bootstrap complete', {
+            scope: 'sandbox',
+            force: true,
+            extra: {
+                releaseCheck: '1.3.0/sandbox-workspace',
+                workspace: 'sandbox',
+            },
+        });
+    } else {
+        await initStorage();
+    }
     markDesktopStartup('storage_adapter_ready');
-    setupGlobalErrorLogging();
-    if (!isQuickAddWindow) {
+
+    // Apply only the allowlisted display snapshot in sandbox. Personal browser
+    // storage remains untouched and becomes authoritative again after Exit.
+    const initialTheme = coerceDesktopThemeMode(
+        sandboxMode ? sandboxSettings.theme : localStorage.getItem(THEME_STORAGE_KEY),
+    );
+    applyThemeMode(initialTheme);
+    if ((initialTheme ?? 'system') === 'system' && isTauriRuntime()) {
+        void resolveSystemThemeCommandPreference(
+            (step, error) => void logError(error, { scope: 'theme', step: `startup-command:${step}` }),
+        ).then((theme) => {
+            if (theme) applyThemeMode('system', theme);
+        });
+    }
+    applyDesktopTextSize(coerceDesktopTextSize(
+        sandboxMode ? sandboxSettings.appearance?.textSize : localStorage.getItem(TEXT_SIZE_STORAGE_KEY),
+    ));
+    if (isTauriRuntime()) {
+        void applyNativeTheme(
+            resolveNativeTheme(initialTheme),
+            () => import('@tauri-apps/api/app'),
+            () => import('@tauri-apps/api/window'),
+        );
+    }
+
+    if (!sandboxMode && isDiagnosticsEnabled()) setupGlobalErrorLogging();
+    if (!isQuickAddWindow && !sandboxMode) {
         await restoreFullscreenState();
         await restoreWebviewZoomState();
     }
@@ -230,11 +255,20 @@ async function bootstrap() {
         });
     }
 
-    const RootApp = isQuickAddWindow ? QuickAddWindowApp : App;
+    // Import the app only after the immutable workspace mode is selected.
+    // Several desktop stores read device-local caches while their modules are
+    // evaluated, so importing them earlier could expose personal view state to
+    // a sandbox renderer before React mounts.
+    const RootApp = isQuickAddWindow
+        ? (await import('./QuickAddWindowApp.tsx')).QuickAddWindowApp
+        : (await import('./App.tsx')).default;
 
+    const initialLanguage = sandboxSettings?.language && sandboxSettings.language !== 'system'
+        ? sandboxSettings.language as Language
+        : undefined;
     ReactDOM.createRoot(document.getElementById('root')!).render(
         <React.StrictMode>
-            <LanguageProvider>
+            <LanguageProvider initialLanguage={initialLanguage} persistLanguage={!sandboxMode}>
                 <RootApp />
             </LanguageProvider>
         </React.StrictMode>,
@@ -243,7 +277,7 @@ async function bootstrap() {
     if (!isQuickAddWindow) {
         requestAnimationFrame(() => markDesktopStartup('shell_ready'));
         void signalUiReady();
-        void sendDesktopDailyHeartbeat().catch((error) => {
+        if (!sandboxMode) void sendDesktopDailyHeartbeat().catch((error) => {
             void logWarn('Desktop analytics heartbeat failed', {
                 scope: 'analytics',
                 extra: { error: error instanceof Error ? error.message : String(error) },

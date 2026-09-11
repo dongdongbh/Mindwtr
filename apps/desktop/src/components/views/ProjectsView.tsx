@@ -76,6 +76,7 @@ import {
 } from '../../constants/layout';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { usePersistedViewState } from '../../hooks/usePersistedViewState';
+import { getWorkspaceCache } from '../../lib/workspace-cache';
 
 const projectsViewDndMeasuring = {
     droppable: {
@@ -136,7 +137,7 @@ function sanitizeProjectsViewState(value: unknown, fallback: ProjectsPersistedVi
 function loadCollapsedAreas(): Record<string, boolean> {
     if (typeof window === 'undefined') return {};
     try {
-        const raw = window.localStorage.getItem(COLLAPSED_AREAS_STORAGE_KEY);
+        const raw = getWorkspaceCache()?.getItem(COLLAPSED_AREAS_STORAGE_KEY);
         if (!raw) return {};
         const parsed = JSON.parse(raw);
         return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
@@ -148,7 +149,7 @@ function loadCollapsedAreas(): Record<string, boolean> {
 function saveCollapsedAreas(state: Record<string, boolean>) {
     if (typeof window === 'undefined') return;
     try {
-        window.localStorage.setItem(COLLAPSED_AREAS_STORAGE_KEY, JSON.stringify(state));
+        getWorkspaceCache()?.setItem(COLLAPSED_AREAS_STORAGE_KEY, JSON.stringify(state));
     } catch {
         // storage unavailable — fall back to in-memory only
     }

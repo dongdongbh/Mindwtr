@@ -1,5 +1,6 @@
 import type { TaskStatus } from '@mindwtr/core';
 import { CONTEXTS_AXES, sanitizeAxis, type ContextsGroupBy } from '../components/views/list/next-grouping';
+import { getWorkspaceCache } from './workspace-cache';
 
 export const CONTEXTS_VIEW_STATE_STORAGE_KEY = 'mindwtr:view:contexts:v1';
 export const NO_CONTEXT_TOKEN = '__no_context__';
@@ -62,9 +63,10 @@ export function sanitizeContextsViewState(
 }
 
 export function readContextsViewState(): ContextsPersistedViewState {
-    if (typeof window === 'undefined') return DEFAULT_CONTEXTS_VIEW_STATE;
+    const storage = getWorkspaceCache();
+    if (!storage) return DEFAULT_CONTEXTS_VIEW_STATE;
     try {
-        const raw = window.localStorage.getItem(CONTEXTS_VIEW_STATE_STORAGE_KEY);
+        const raw = storage.getItem(CONTEXTS_VIEW_STATE_STORAGE_KEY);
         if (!raw) return DEFAULT_CONTEXTS_VIEW_STATE;
         return sanitizeContextsViewState(JSON.parse(raw) as unknown, DEFAULT_CONTEXTS_VIEW_STATE);
     } catch {
@@ -77,9 +79,10 @@ export function persistContextsViewSelection(selectedContext: string | null): Co
         ...readContextsViewState(),
         selectedContext,
     };
-    if (typeof window !== 'undefined') {
+    const storage = getWorkspaceCache();
+    if (storage) {
         try {
-            window.localStorage.setItem(CONTEXTS_VIEW_STATE_STORAGE_KEY, JSON.stringify(nextState));
+            storage.setItem(CONTEXTS_VIEW_STATE_STORAGE_KEY, JSON.stringify(nextState));
         } catch {
             // View state is non-critical; navigation should still proceed.
         }

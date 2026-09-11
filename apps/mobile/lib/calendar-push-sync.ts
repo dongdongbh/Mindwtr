@@ -13,6 +13,7 @@ import {
     buildCalendarPushEventFields,
     getTaskCalendarOccurrenceDate,
     hasTimeComponent,
+    isSandboxMode,
     isProjectedRecurringTask,
     runCalendarPushFullSync,
     nameNotifyListener,
@@ -133,21 +134,25 @@ function isLocalOnlyCalendar(calendar: Calendar.Calendar): boolean {
 // MARK: - Settings
 
 export const getCalendarPushEnabled = async (): Promise<boolean> => {
+    if (isSandboxMode()) return false;
     const val = await AsyncStorage.getItem(CALENDAR_PUSH_ENABLED_KEY);
     return val === '1';
 };
 
 export const setCalendarPushEnabled = async (enabled: boolean): Promise<void> => {
+    if (isSandboxMode()) return;
     await AsyncStorage.setItem(CALENDAR_PUSH_ENABLED_KEY, enabled ? '1' : '0');
 };
 
 export const getCalendarPushTargetCalendarId = async (): Promise<string | null> => {
+    if (isSandboxMode()) return null;
     const value = await AsyncStorage.getItem(CALENDAR_TARGET_ID_KEY);
     const trimmed = value?.trim() ?? '';
     return trimmed.length > 0 ? trimmed : null;
 };
 
 export const setCalendarPushTargetCalendarId = async (calendarId: string | null): Promise<void> => {
+    if (isSandboxMode()) return;
     const trimmed = calendarId?.trim() ?? '';
     if (trimmed.length === 0) {
         await AsyncStorage.removeItem(CALENDAR_TARGET_ID_KEY);
@@ -157,12 +162,14 @@ export const setCalendarPushTargetCalendarId = async (calendarId: string | null)
 };
 
 export const getCalendarPushColor = async (): Promise<string> => {
+    if (isSandboxMode()) return DEFAULT_MANAGED_CALENDAR_COLOR;
     const value = await AsyncStorage.getItem(CALENDAR_COLOR_KEY);
     return normalizeCalendarColor(value);
 };
 
 export const setCalendarPushColor = async (color: string): Promise<string> => {
     const normalized = normalizeCalendarColor(color);
+    if (isSandboxMode()) return normalized;
     await AsyncStorage.setItem(CALENDAR_COLOR_KEY, normalized);
     return normalized;
 };
@@ -170,6 +177,7 @@ export const setCalendarPushColor = async (color: string): Promise<string> => {
 // MARK: - Permission
 
 export const requestCalendarWritePermission = async (): Promise<boolean> => {
+    if (isSandboxMode()) return false;
     try {
         const { status } = await Calendar.requestCalendarPermissionsAsync();
         return status === 'granted';
@@ -179,6 +187,7 @@ export const requestCalendarWritePermission = async (): Promise<boolean> => {
 };
 
 export const getCalendarWritePermissionStatus = async (): Promise<'granted' | 'denied' | 'undetermined'> => {
+    if (isSandboxMode()) return 'undetermined';
     try {
         const { status } = await Calendar.getCalendarPermissionsAsync();
         if (status === 'granted') return 'granted';
@@ -238,6 +247,7 @@ function isAppCreatedMindwtrCalendar(calendar: Calendar.Calendar): boolean {
 }
 
 export const getCalendarPushTargetCalendars = async (): Promise<CalendarPushTargetCalendar[]> => {
+    if (isSandboxMode()) return [];
     try {
         const [storedCalendarId, calendars] = await Promise.all([
             getStoredCalendarId(),
@@ -318,6 +328,7 @@ function getAndroidManagedCalendarSeed(
  * Returns null if the calendar cannot be created (e.g. no permission, no source).
  */
 export const ensureMindwtrCalendar = async (): Promise<string | null> => {
+    if (isSandboxMode()) return null;
     try {
         const storedId = await getStoredCalendarId();
         const allCalendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
@@ -380,6 +391,7 @@ export const ensureMindwtrCalendar = async (): Promise<string | null> => {
 };
 
 export const updateMindwtrCalendarColor = async (color: string): Promise<boolean> => {
+    if (isSandboxMode()) return false;
     const normalized = await setCalendarPushColor(color);
     try {
         if (typeof Calendar.updateCalendarAsync !== 'function') return false;
@@ -456,6 +468,7 @@ async function resolveCalendarPushTarget(): Promise<CalendarPushTarget | null> {
  * Called when the user disables calendar push sync and chooses to clean up.
  */
 export const deleteMindwtrCalendar = async (): Promise<void> => {
+    if (isSandboxMode()) return;
     const storedId = await getStoredCalendarId();
     const selectedTargetId = await getCalendarPushTargetCalendarId();
     const calendarIdsToDelete = new Set<string>();
@@ -722,7 +735,9 @@ const calendarPushScheduler = createCalendarPushScheduler({
 
 const enqueueCalendarSync = calendarPushScheduler.enqueue;
 
-export const runFullCalendarSync = (): Promise<void> => calendarPushScheduler.runFull();
+export const runFullCalendarSync = (): Promise<void> => (
+    isSandboxMode() ? Promise.resolve() : calendarPushScheduler.runFull()
+);
 
 const runFullCalendarSyncUnsafe = async (): Promise<void> => {
     const enabled = await getCalendarPushEnabled();
@@ -753,6 +768,7 @@ const runFullCalendarSyncUnsafe = async (): Promise<void> => {
 // MARK: - Debounced partial sync
 
 export const scheduleSyncDebounced = (taskIds: string[]): void => {
+    if (isSandboxMode()) return;
     calendarPushScheduler.scheduleDebounced(taskIds);
 };
 
@@ -785,6 +801,7 @@ const buildCalendarSyncTaskMap = (tasks: Task[]) => new Map(tasks.map((task) => 
  * the device calendar. Returns an unsubscribe function.
  */
 export const startCalendarPushSync = (): (() => void) => {
+    if (isSandboxMode()) return () => {};
     if (unsubscribeStore) return unsubscribeStore;
 
     let previousTaskMap = buildCalendarSyncTaskMap(useTaskStore.getState()._allTasks);
@@ -836,6 +853,7 @@ export const startCalendarPushSync = (): (() => void) => {
 };
 
 export const stopCalendarPushSync = (): void => {
+    if (isSandboxMode()) return;
     unsubscribeStore?.();
     unsubscribeStore = null;
     calendarPushScheduler.cancelPending();

@@ -154,15 +154,17 @@ vi.mock('@/lib/cloudkit-sync', () => ({
 type HarnessProps = {
   onReadyChange: (ready: boolean) => void;
   onCanonicalChange?: (ready: boolean) => void;
+  sandboxMode?: boolean;
 };
 
-function TestHarness({ onReadyChange, onCanonicalChange }: HarnessProps) {
+function TestHarness({ onReadyChange, onCanonicalChange, sandboxMode = false }: HarnessProps) {
   const { dataReady, canonicalDataReady } = useRootLayoutStartup({
     analyticsHeartbeatUrl: '',
     appVersion: '0.8.3',
     isExpoGo: false,
     isFossBuild: false,
     requestSync,
+    sandboxMode,
     storageInitError: null,
   });
 
@@ -223,6 +225,30 @@ describe('useRootLayoutStartup', () => {
       _allSections: [],
       _allAreas: [],
     };
+  });
+
+  it('hydrates sandbox data without reading or starting personal services', async () => {
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(<TestHarness sandboxMode onReadyChange={() => {}} />);
+      await flushMicrotasks();
+    });
+
+    expect(fetchData).toHaveBeenCalledOnce();
+    expect(getMobileStartupSnapshotFromBackup).not.toHaveBeenCalled();
+    expect(asyncStorageGetItem).not.toHaveBeenCalled();
+    expect(startMobileNotifications).not.toHaveBeenCalled();
+    expect(updateMobileWidgetFromStore).not.toHaveBeenCalled();
+    expect(requestSync).not.toHaveBeenCalled();
+    expect(logInfo).toHaveBeenCalledWith('Sandbox workspace bootstrapped', expect.objectContaining({
+      scope: 'sandbox',
+      extra: {
+        releaseCheck: '1.3.0/sandbox-workspace',
+        workspace: 'sandbox',
+      },
+    }));
+
+    await act(async () => tree.unmount());
   });
 
   it('applies the backup snapshot before the canonical fetch finishes', async () => {

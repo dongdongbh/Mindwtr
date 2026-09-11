@@ -1,5 +1,5 @@
 import React from 'react';
-import { parseMarkdownReferenceHref, tFallback, useTaskStore, shallow, type Project, type Task } from '@mindwtr/core';
+import { isSandboxMode, parseMarkdownReferenceHref, tFallback, useTaskStore, shallow, type Project, type Task } from '@mindwtr/core';
 
 import { useLanguage } from '../contexts/language-context';
 import { dispatchNavigateEvent } from '../lib/navigation-events';
@@ -109,6 +109,7 @@ function isSafeExternalHref(href: string): boolean {
 }
 
 async function openExternalHref(href: string): Promise<void> {
+    if (isSandboxMode()) return;
     const nextHref = href.trim();
     let openError: unknown = null;
 
@@ -159,7 +160,8 @@ export function InternalMarkdownLink({ href, className, children, linkContext }:
             <button
                 type="button"
                 role="link"
-                title={href}
+                title={isSandboxMode() ? t('sandbox.unavailable') : href}
+                disabled={isSandboxMode()}
                 className={cn('bg-transparent p-0 text-left [font:inherit] text-primary underline underline-offset-2 hover:opacity-90', className)}
                 onClick={(event) => {
                     event.stopPropagation();

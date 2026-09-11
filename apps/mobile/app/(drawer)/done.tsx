@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { translateWithFallback } from '@mindwtr/core';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 
 import { TaskList } from '../../components/task-list';
 import { useThemeColors } from '@/hooks/use-theme-colors';

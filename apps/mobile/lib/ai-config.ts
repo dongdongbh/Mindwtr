@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import type { AIProviderConfig, AIProviderId, AppData } from '@mindwtr/core';
-import { buildAIConfig as buildCoreAIConfig, buildCopilotConfig as buildCoreCopilotConfig, getAIKeyStorageKey, loadAIKeyFromStorage, saveAIKeyToStorage } from '@mindwtr/core';
+import { buildAIConfig as buildCoreAIConfig, buildCopilotConfig as buildCoreCopilotConfig, getAIKeyStorageKey, isSandboxMode, loadAIKeyFromStorage, saveAIKeyToStorage } from '@mindwtr/core';
 import { logInfo } from './app-log';
 
 import {
@@ -17,6 +17,7 @@ const getSecureKey = (provider: AIProviderId) => {
 };
 
 export async function loadAIKey(provider: AIProviderId): Promise<string> {
+    if (isSandboxMode()) return '';
     const key = getSecureKey(provider);
     if (await isSecureStoreAvailable()) {
         const value = await SecureStore.getItemAsync(key);
@@ -50,6 +51,7 @@ export async function loadAIKey(provider: AIProviderId): Promise<string> {
 }
 
 export async function saveAIKey(provider: AIProviderId, value: string): Promise<void> {
+    if (isSandboxMode()) return;
     const key = getSecureKey(provider);
     if (await isSecureStoreAvailable()) {
         if (!value) {
@@ -71,6 +73,7 @@ export async function saveAIKey(provider: AIProviderId, value: string): Promise<
 }
 
 export function isAIKeyRequired(settings: AppData['settings'] | undefined): boolean {
+    if (isSandboxMode()) return false;
     const config = buildCoreAIConfig(settings ?? {}, '');
     return !(config.provider === 'openai' && Boolean(config.endpoint));
 }
@@ -91,9 +94,11 @@ const withRequestDiagnostics = (config: AIProviderConfig): AIProviderConfig => (
 });
 
 export function buildAIConfig(settings: AppData['settings'], apiKey: string): AIProviderConfig {
+    if (isSandboxMode()) throw new Error('Unavailable in sandbox');
     return withRequestDiagnostics(buildCoreAIConfig(settings, apiKey));
 }
 
 export function buildCopilotConfig(settings: AppData['settings'], apiKey: string): AIProviderConfig {
+    if (isSandboxMode()) throw new Error('Unavailable in sandbox');
     return withRequestDiagnostics(buildCoreCopilotConfig(settings, apiKey));
 }

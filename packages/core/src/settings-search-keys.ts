@@ -121,6 +121,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         'recoverySnapshots',
     ],
     data: [
+        'sandboxWorkspace',
         'backup',
         { key: 'exportBackup', section: 'backup' },
         { key: 'exportCsv', section: 'backup' },
@@ -229,6 +230,7 @@ export const SETTINGS_SEARCH_PAGE_TITLE_KEYS: Record<SettingsSearchPageId, strin
 // exist only here, because the Manage page's cards are titled from the shared
 // areas/contexts/tags namespaces rather than `settings.*`.
 const SEARCH_KEY_I18N_OVERRIDES: Record<string, string> = {
+    sandboxWorkspace: 'sandbox.open',
     keybindings: 'keybindings.helpTitle',
     manageAreas: 'areas.manage',
     managePeople: 'people.title',
@@ -274,6 +276,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchIndexEntry[] =
 // indexed on its own. Every key in SETTINGS_SEARCH_PAGE_KEYS must be either
 // resolvable on mobile or listed here — see settings-search-keys.test.ts.
 export const SETTINGS_SEARCH_MOBILE_EXCLUSIONS: Record<string, string> = {
+    sandboxWorkspace: 'Sandbox workspace entry exists in desktop settings; mobile exposes it in its own settings screen.',
     featureTimeline: 'Timeline view exists on desktop only; the mobile GTD > Features screen has no row for it (#1145).',
     density: 'No adjustable list density setting on mobile.',
     textSize: 'Mobile follows the OS text-size setting automatically; no in-app override.',

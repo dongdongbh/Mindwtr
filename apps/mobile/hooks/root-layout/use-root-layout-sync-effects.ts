@@ -18,6 +18,7 @@ import { logError, logWarn } from '@/lib/app-log';
 type ResolveText = (key: string, fallback: string) => string;
 
 type UseRootLayoutSyncEffectsParams = {
+    disabled?: boolean;
     resolveText: ResolveText;
     openNotificationsSettings: () => void;
     openSyncSettings: () => void;
@@ -112,6 +113,7 @@ const reconcileBackgroundSyncTask = () => {
 };
 
 export function useRootLayoutSyncEffects({
+    disabled = false,
     resolveText,
     openNotificationsSettings,
     openSyncSettings,
@@ -153,6 +155,7 @@ export function useRootLayoutSyncEffects({
     }, [resolveText]);
 
     const refreshSyncCadence = useCallback(async (): Promise<AutoSyncCadence> => {
+        if (disabled) return AUTO_SYNC_CADENCE_OFF;
         const now = Date.now();
         const cached = syncBackendCacheRef.current;
         if (now - cached.readAt <= AUTO_SYNC_BACKEND_CACHE_TTL_MS) {
@@ -164,7 +167,7 @@ export function useRootLayoutSyncEffects({
         syncBackendCacheRef.current = { backend, readAt: now };
         syncCadenceRef.current = getCadenceForBackend(backend);
         return syncCadenceRef.current;
-    }, []);
+    }, [disabled]);
 
     // Device-local bookkeeping (lastSync*, pendingRemoteWrite*, network) is not
     // part of a sync payload, so the change fingerprint ignores it for free —
@@ -294,6 +297,7 @@ export function useRootLayoutSyncEffects({
     // stuck (#948). The user-facing Sync now button does not come through here; it
     // calls performMobileSync directly and still forces a run.
     const requestSync = useCallback((minIntervalMs?: number) => {
+        if (disabled) return;
         const controller = getController();
         if (typeof minIntervalMs === 'number') {
             void controller.requestAutoSync(minIntervalMs, 'external').catch(logAppError);
@@ -302,9 +306,10 @@ export function useRootLayoutSyncEffects({
         void refreshSyncCadence()
             .then(() => controller.requestAutoSync(undefined, 'external'))
             .catch(logAppError);
-    }, [getController, refreshSyncCadence]);
+    }, [disabled, getController, refreshSyncCadence]);
 
     useEffect(() => {
+        if (disabled) return undefined;
         const controller = getController();
         void refreshSyncCadence().catch(logAppError);
         reconcileBackgroundSyncTask();
@@ -336,9 +341,10 @@ export function useRootLayoutSyncEffects({
         return () => {
             unsubscribe();
         };
-    }, [getController, readCurrentSyncChangeFingerprint, refreshSyncCadence]);
+    }, [disabled, getController, readCurrentSyncChangeFingerprint, refreshSyncCadence]);
 
     useEffect(() => {
+        if (disabled) return undefined;
         const controller = getController();
         const handleAppStateChange = (nextAppState: AppStateStatus) => {
             if (!isActive.current) return;
@@ -427,6 +433,7 @@ export function useRootLayoutSyncEffects({
             flushPendingSave().catch(logAppError);
         };
     }, [
+        disabled,
         getController,
         markAppStateSyncTrigger,
         refreshSyncCadence,
@@ -434,6 +441,7 @@ export function useRootLayoutSyncEffects({
     ]);
 
     useEffect(() => {
+        if (disabled) return undefined;
         let previousEnabled = hasActiveMobileNotificationFeature(useTaskStore.getState().settings);
         const unsubscribe = useTaskStore.subscribe(nameNotifyListener('notification-feature-watcher', (state) => {
             const enabled = hasActiveMobileNotificationFeature(state.settings);
@@ -448,10 +456,11 @@ export function useRootLayoutSyncEffects({
         }));
 
         return () => unsubscribe();
-    }, []);
+    }, [disabled]);
 
     // Start calendar push sync on mount if enabled; stop on unmount.
     useEffect(() => {
+        if (disabled) return undefined;
         let stopSync: (() => void) | null = null;
         void getCalendarPushEnabled().then((enabled) => {
             if (!enabled) return;
@@ -462,7 +471,7 @@ export function useRootLayoutSyncEffects({
             stopSync?.();
             stopCalendarPushSync();
         };
-    }, []);
+    }, [disabled]);
 
     return { requestSync };
 }

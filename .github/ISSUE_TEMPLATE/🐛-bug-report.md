@@ -67,8 +67,10 @@ A clear and concise description of what you expected to happen.
 - [ ] This worked in a previous version
 - **Last known working version (if known):**
 
-### 📸 Screenshots / Logs
-If applicable, add screenshots or paste relevant logs.
+### 📸 Screenshots / Recordings / Logs
+If applicable, add screenshots, a short recording, or relevant logs.
+
+For recordings without your private tasks, use **Settings → Data → Open sandbox** near Diagnostics, then confirm **Enter sandbox**. It loads fictional tasks and projects; exit from the sandbox banner to return to your personal workspace. This is optional—sample data may not reproduce bugs involving your own data, attachments, or sync. See [Record with sample data](https://docs.mindwtr.app/data-sync/diagnostics-logs#record-with-sample-data).
 
 <details>
 <summary><strong>📋 How to collect logs (Click to expand)</strong></summary>
@@ -76,15 +78,15 @@ If applicable, add screenshots or paste relevant logs.
 For detailed instructions, please see the [Diagnostics and Logs docs](https://docs.mindwtr.app/data-sync/diagnostics-logs).
 
 **Desktop:**
-1. Go to **Settings → Sync**.
+1. Go to **Settings → Data**.
 2. Toggle **Debug logging** to ON.
 3. Reproduce the issue.
-4. Go to **Settings → Sync → Diagnostics** to find the **Log file path**.
+4. In **Settings → Data → Diagnostics**, find the **Log file path**.
 5. Attach the log file here.
    * *Note: You can also clear old logs from this screen.*
 
 **Mobile:**
-1. Go to **Settings → Diagnostics**.
+1. Go to **Settings → Data** and scroll to Diagnostics.
 2. Toggle **Debug logging** to ON.
 3. Reproduce the issue.
 4. Tap **Share log** to export the file and attach it here.

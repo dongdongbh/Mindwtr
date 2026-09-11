@@ -36,7 +36,8 @@ import {
     useTaskStore,
 } from '@mindwtr/core';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
+import { SandboxWorkspaceCue } from '@/components/sandbox-workspace-cue';
 import { useThemeColors, type ThemeColors } from '@/hooks/use-theme-colors';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 import { useLanguage } from '../../contexts/language-context';
@@ -1666,6 +1667,7 @@ export function ProjectDetailModal({
             <GestureHandlerRootView style={{ flex: 1 }}>
                 <KeyboardAccessoryHost backgroundColor={tc.bg}>
                     <SafeAreaView style={[styles.projectDetailRoot, { backgroundColor: tc.bg }]} edges={safeAreaEdges}>
+                        <SandboxWorkspaceCue />
                         {selectedProject ? (
                             <>
                                 <View style={modalHeaderStyle}>

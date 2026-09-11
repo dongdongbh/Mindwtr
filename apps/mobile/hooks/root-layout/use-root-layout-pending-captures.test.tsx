@@ -43,8 +43,8 @@ vi.mock('@/lib/app-log', () => ({ logError: vi.fn(async () => undefined) }));
 // eslint-disable-next-line import/first
 import { useRootLayoutPendingCaptures } from './use-root-layout-pending-captures';
 
-function Harness({ dataReady = true }: { dataReady?: boolean }) {
-  useRootLayoutPendingCaptures({ dataReady });
+function Harness({ dataReady = true, disabled = false }: { dataReady?: boolean; disabled?: boolean }) {
+  useRootLayoutPendingCaptures({ dataReady, disabled });
   return null;
 }
 
@@ -73,6 +73,16 @@ describe('useRootLayoutPendingCaptures', () => {
     let tree!: renderer.ReactTestRenderer;
     act(() => {
       tree = renderer.create(<Harness dataReady={false} />);
+    });
+
+    expect(mocks.ingestPendingCaptures).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('leaves the personal pending-capture queue untouched when disabled', () => {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(<Harness disabled />);
     });
 
     expect(mocks.ingestPendingCaptures).not.toHaveBeenCalled();

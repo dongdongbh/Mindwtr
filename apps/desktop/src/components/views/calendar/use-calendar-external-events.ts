@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+    isSandboxMode,
     resolveExternalCalendarColor,
     safeParseDate,
     themeExternalCalendarDisplayColor,
@@ -19,6 +20,7 @@ import {
 import { logError } from '../../../lib/app-log';
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 import { dayKey } from './calendar-primitives';
+import { getWorkspaceCache } from '../../../lib/workspace-cache';
 
 const HIDDEN_EXTERNAL_CALENDAR_IDS_STORAGE_KEY = 'mindwtr.calendar.hiddenExternalCalendars';
 
@@ -41,7 +43,7 @@ const readHiddenExternalCalendarIds = (): { serialized: string; value: Set<strin
     }
 
     try {
-        const raw = window.localStorage.getItem(HIDDEN_EXTERNAL_CALENDAR_IDS_STORAGE_KEY);
+        const raw = getWorkspaceCache()?.getItem(HIDDEN_EXTERNAL_CALENDAR_IDS_STORAGE_KEY);
         const parsed = raw ? JSON.parse(raw) : [];
         const ids = Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : [];
         return { serialized: serializeHiddenExternalCalendarIds(ids), value: new Set(ids) };
@@ -77,6 +79,7 @@ export type CalendarExternalEventsOptions = {
 };
 
 export function useCalendarExternalEvents({ filterQuery, visibleRange }: CalendarExternalEventsOptions) {
+    const sandboxMode = isSandboxMode();
     const theme = useTaskStore((state) => state.settings?.theme);
     const [externalCalendars, setExternalCalendars] = useState<ExternalCalendarSubscription[]>([]);
     const [externalEvents, setExternalEvents] = useState<ExternalCalendarEvent[]>([]);
@@ -94,10 +97,17 @@ export function useCalendarExternalEvents({ filterQuery, visibleRange }: Calenda
         const serialized = serializeHiddenExternalCalendarIds(hiddenExternalCalendarIds);
         if (hiddenExternalCalendarIdsStorageRef.current === serialized) return;
         hiddenExternalCalendarIdsStorageRef.current = serialized;
-        window.localStorage.setItem(HIDDEN_EXTERNAL_CALENDAR_IDS_STORAGE_KEY, serialized);
+        getWorkspaceCache()?.setItem(HIDDEN_EXTERNAL_CALENDAR_IDS_STORAGE_KEY, serialized);
     }, [hiddenExternalCalendarIds]);
 
     useEffect(() => {
+        if (sandboxMode) {
+            setExternalCalendars([]);
+            setExternalEvents([]);
+            setExternalError(null);
+            setIsExternalLoading(false);
+            return;
+        }
         let cancelled = false;
 
         const load = async () => {
@@ -133,7 +143,7 @@ export function useCalendarExternalEvents({ filterQuery, visibleRange }: Calenda
         return () => {
             cancelled = true;
         };
-    }, [visibleRange]);
+    }, [sandboxMode, visibleRange]);
 
     const calendarNameById = useMemo(() => new Map(externalCalendars.map((c) => [c.id, c.name])), [externalCalendars]);
     const calendarColorById = useMemo(

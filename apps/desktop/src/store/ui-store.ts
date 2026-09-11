@@ -2,6 +2,7 @@ import { createWithEqualityFn } from 'zustand/traditional';
 import { DONE_TASK_LIST_SORT_OPTIONS, useTaskStore, type FilterCriteria, type TaskSortBy } from '@mindwtr/core';
 import { DONE_AXES, FOCUS_AXES, REFERENCE_AXES, SOMEDAY_AXES, sanitizeAxis, type DoneGroupBy, type NextGroupBy, type ReferenceGroupBy, type SomedayGroupBy } from '../components/views/list/next-grouping';
 import { HIDDEN_SIDEBAR_VIEWS_STORAGE_KEY, sanitizeHiddenSidebarViews, type HideableSidebarViewId } from '../lib/sidebar-views';
+import { getWorkspaceCache } from '../lib/workspace-cache';
 
 type ToastPauseReason = 'pointer' | 'focus';
 
@@ -80,12 +81,7 @@ const DEFAULT_LIST_OPTIONS: ListOptions = {
 };
 
 function getPersistentStorage(): Storage | null {
-    if (typeof window === 'undefined') return null;
-    try {
-        return window.localStorage;
-    } catch {
-        return null;
-    }
+    return getWorkspaceCache();
 }
 
 function readStoredListOptions(): ListOptions {

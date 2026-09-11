@@ -10,6 +10,7 @@ import {
     getExternalCalendarDaySummaries,
     getUsedTaskTokens,
     getWeeklyReviewBuckets,
+    isSandboxMode,
     isTaskInActiveProject,
     parseProjectNextActionInput,
     parseStoredReviewStepSession,
@@ -41,6 +42,7 @@ import { useLanguage } from '../../../contexts/language-context';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../../lib/ai-config';
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 import { useUiStore } from '../../../store/ui-store';
+import { getWorkspaceCache } from '../../../lib/workspace-cache';
 
 type ReviewStep = 'inbox' | 'stale' | 'calendar' | 'waiting' | 'contexts' | 'projects' | 'someday' | 'completed';
 type ReviewStepDefinition = {
@@ -70,6 +72,7 @@ function SummaryRow({ good, text }: { good: boolean; text: string }) {
 }
 
 export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps) {
+    const sandboxMode = isSandboxMode();
     const [isProcessing, setIsProcessing] = useState(false);
     const [expandedExternalDays, setExpandedExternalDays] = useState<Set<string>>(new Set());
     const [expandedContextGroups, setExpandedContextGroups] = useState<Set<string>>(new Set());
@@ -93,7 +96,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const [reviewSession, setReviewSession] = useState<StoredReviewStepSession<ReviewStep>>(() => {
         const now = new Date();
         return parseStoredReviewStepSession(
-            window.localStorage.getItem(WEEKLY_REVIEW_STEP_STORAGE_KEY),
+            getWorkspaceCache()?.getItem(WEEKLY_REVIEW_STEP_STORAGE_KEY) ?? null,
             WEEKLY_REVIEW_STEPS,
             { cadence: 'weekly', now, weekStart: settings?.weekStart },
         ) ?? { step: 'inbox', startedAt: now.toISOString() };
@@ -228,7 +231,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     }, [currentStep, displayedStep, setCurrentStep]);
 
     useEffect(() => {
-        window.localStorage.setItem(WEEKLY_REVIEW_STEP_STORAGE_KEY, JSON.stringify(reviewSession));
+        getWorkspaceCache()?.setItem(WEEKLY_REVIEW_STEP_STORAGE_KEY, JSON.stringify(reviewSession));
     }, [reviewSession]);
 
     useEffect(() => {
@@ -249,6 +252,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     }, [onClose]);
 
     useEffect(() => {
+        if (sandboxMode) return;
         let cancelled = false;
         const loadCalendar = async () => {
             setExternalCalendarLoading(true);
@@ -275,7 +279,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [sandboxMode]);
 
     const nextStep = () => {
         if (nextStepId) setCurrentStep(nextStepId);
@@ -286,7 +290,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     };
 
     const finishReview = () => {
-        window.localStorage.removeItem(WEEKLY_REVIEW_STEP_STORAGE_KEY);
+        getWorkspaceCache()?.removeItem(WEEKLY_REVIEW_STEP_STORAGE_KEY);
         onClose();
     };
 

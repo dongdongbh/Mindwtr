@@ -46,6 +46,7 @@ import {
     type CalendarViewMode,
 } from './calendar/calendar-primitives';
 import { useDesktopCalendarController } from './calendar/useDesktopCalendarController';
+import { getWorkspaceCache } from '../../lib/workspace-cache';
 
 const PROJECTED_RECURRENCE_LABEL_DATE_FORMAT = 'MMM d';
 const CALENDAR_PLANNING_PANEL_COLLAPSED_KEY = 'mindwtr.calendar.planningPanelCollapsed';
@@ -53,7 +54,7 @@ const CALENDAR_PLANNING_PANEL_COLLAPSED_KEY = 'mindwtr.calendar.planningPanelCol
 const readPlanningPanelCollapsedPreference = (): boolean => {
     if (typeof window === 'undefined') return true;
     try {
-        const stored = window.localStorage.getItem(CALENDAR_PLANNING_PANEL_COLLAPSED_KEY);
+        const stored = getWorkspaceCache()?.getItem(CALENDAR_PLANNING_PANEL_COLLAPSED_KEY);
         return stored === null ? true : stored === 'true';
     } catch {
         return true;
@@ -240,7 +241,7 @@ export function CalendarView() {
     const handlePlanningPanelCollapsedChange = useCallback((collapsed: boolean) => {
         setIsPlanningPanelCollapsed(collapsed);
         try {
-            window.localStorage.setItem(CALENDAR_PLANNING_PANEL_COLLAPSED_KEY, collapsed ? 'true' : 'false');
+            getWorkspaceCache()?.setItem(CALENDAR_PLANNING_PANEL_COLLAPSED_KEY, collapsed ? 'true' : 'false');
         } catch {
             // Ignore storage failures; the in-memory state still updates.
         }

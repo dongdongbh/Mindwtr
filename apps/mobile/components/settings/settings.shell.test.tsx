@@ -2,7 +2,7 @@ import React from 'react';
 import renderer from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SettingsGuideLink } from './settings.shell';
+import { MenuItem, SettingsGuideLink } from './settings.shell';
 
 const openURL = vi.hoisted(() => vi.fn(async () => true));
 
@@ -79,5 +79,28 @@ describe('SettingsGuideLink', () => {
         expect(openURL).toHaveBeenCalledWith(
             'https://docs.mindwtr.app/import/',
         );
+    });
+});
+
+describe('MenuItem', () => {
+    it('exposes and visually reflects its disabled state', () => {
+        let tree!: renderer.ReactTestRenderer;
+
+        renderer.act(() => {
+            tree = renderer.create(
+                <MenuItem
+                    disabled
+                    onPress={vi.fn()}
+                    title="Open sandbox"
+                />,
+            );
+        });
+
+        const button = tree.root.find((node) => node.props.accessibilityRole === 'button');
+        expect(button.props.disabled).toBe(true);
+        expect(button.props.accessibilityState).toEqual({ disabled: true });
+        expect(button.props.style).toEqual(expect.arrayContaining([
+            expect.objectContaining({ opacity: 0.5 }),
+        ]));
     });
 });

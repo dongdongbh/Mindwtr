@@ -24,6 +24,7 @@ import {
     flushPendingSave,
     getAnnouncementDismissalStorageKey,
     isSupportedLanguage,
+    isSandboxMode,
     isTaskFinished,
     recordDonationPromptShown,
     recordDonationPromptSupportClicked,
@@ -135,6 +136,7 @@ import { useStartupPromptQueue, type StartupPromptDescriptor } from '@mindwtr/co
 import { useUiStore } from './store/ui-store';
 import { useObsidianStore } from './store/obsidian-store';
 import type { SettingsOnboardingHintPage, SettingsPage } from './components/views/SettingsView';
+import { SandboxSettingsView } from './components/views/SandboxSettingsView';
 import { installKeyringFallbackWarningListener } from './lib/keyring-fallback-warning';
 
 const ProjectsView = import.meta.env.DEV
@@ -252,10 +254,11 @@ const buildPromptTestReviewAnnouncement = (installSource: InstallSource | null):
 const FOCUS_TITLE_SEPARATOR = '\u0000';
 
 function App() {
+    const sandboxMode = isSandboxMode();
     // Reopening shortly after the app closed resumes the interrupted session on
     // the same screen; a fresh session starts on the default view (#842).
     const [restoredLastView] = useState(() => {
-        if (import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return null;
+        if (sandboxMode || import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return null;
         return readRestorableLastView();
     });
     // The URL is explicit user intent (a link, or a refresh mid-Settings) and
@@ -275,7 +278,9 @@ function App() {
     const [settingsOnboardingHintPage, setSettingsOnboardingHintPage] = useState<
         SettingsOnboardingHintPage | undefined
     >();
-    const [desktopOnboardingDismissed, setDesktopOnboardingDismissed] = useState(readDesktopOnboardingDismissed);
+    const [desktopOnboardingDismissed, setDesktopOnboardingDismissed] = useState(() => (
+        sandboxMode ? true : readDesktopOnboardingDismissed()
+    ));
     const [desktopOnboardingOpen, setDesktopOnboardingOpen] = useState(false);
     const [desktopOnboardingBusy, setDesktopOnboardingBusy] = useState(false);
     const [desktopOnboardingError, setDesktopOnboardingError] = useState<string | null>(null);
@@ -357,7 +362,7 @@ function App() {
     // below carry each prompt's own eligibility/present logic; the queue owns
     // precedence (announcement > update > donation), the startup delays, and
     // session dismissal. See packages/core/src/startup-prompts.ts.
-    const startupPromptsEnabled = !(
+    const startupPromptsEnabled = !sandboxMode && !(
         import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test'
     );
     const startupPromptGateOpen = (
@@ -522,8 +527,8 @@ function App() {
     }, [updateSettings]);
 
     const getActiveThemeMode = useCallback(() => (
-        resolveDesktopThemeMode(settingsTheme, localStorage.getItem(THEME_STORAGE_KEY))
-    ), [settingsTheme]);
+        resolveDesktopThemeMode(settingsTheme, sandboxMode ? null : localStorage.getItem(THEME_STORAGE_KEY))
+    ), [sandboxMode, settingsTheme]);
 
     const applyActiveNativeTheme = useCallback((stepPrefix = 'apply') => {
         if (!isTauriRuntime()) return;
@@ -540,7 +545,7 @@ function App() {
         if (!hasHydratedSettings) return;
         let cancelled = false;
         const normalizedTheme = getActiveThemeMode();
-        localStorage.setItem(THEME_STORAGE_KEY, normalizedTheme);
+        if (!sandboxMode) localStorage.setItem(THEME_STORAGE_KEY, normalizedTheme);
         applyThemeMode(normalizedTheme);
         if (normalizedTheme === 'system' && isTauriRuntime()) {
             void resolveSystemThemeCommandPreference(
@@ -553,13 +558,13 @@ function App() {
         return () => {
             cancelled = true;
         };
-    }, [applyActiveNativeTheme, getActiveThemeMode, hasHydratedSettings]);
+    }, [applyActiveNativeTheme, getActiveThemeMode, hasHydratedSettings, sandboxMode]);
 
     useEffect(() => {
         // Hydrate the shared pomodoro store once tasks are loaded so task rows
         // can show per-task session counts and a focus session that finished
         // while the app was closed credits its minutes without opening Agenda.
-        if (!hasHydratedSettings || isLoading) return;
+        if (sandboxMode || !hasHydratedSettings || isLoading) return;
         const { settings: currentSettings } = useTaskStore.getState();
         if (!resolveFeatureFlags(currentSettings).pomodoro) return;
         const pomodoroState = usePomodoroStore.getState();
@@ -568,7 +573,7 @@ function App() {
             autoStartBreaks: currentSettings.gtd?.pomodoro?.autoStartBreaks === true,
             autoStartFocus: currentSettings.gtd?.pomodoro?.autoStartFocus === true,
         });
-    }, [hasHydratedSettings, isLoading]);
+    }, [hasHydratedSettings, isLoading, sandboxMode]);
 
     useEffect(() => {
         if (!hasHydratedSettings || !isTauriRuntime()) return;
@@ -588,24 +593,26 @@ function App() {
     }, [applyActiveNativeTheme, hasHydratedSettings]);
 
     useEffect(() => {
-        if (!hasHydratedSettings) return;
+        if (sandboxMode || !hasHydratedSettings) return;
         // Native sync reads the proxy from config.toml; re-mirror after every
         // hydration so upgrades and synced-in changes take effect (#864).
         syncNativeProxyUrl(settingsProxyUrl).catch((error) => {
             reportAppError('Failed to apply proxy to native sync', error);
         });
-    }, [hasHydratedSettings, settingsProxyUrl]);
+    }, [hasHydratedSettings, sandboxMode, settingsProxyUrl]);
 
     useEffect(() => {
         if (!hasHydratedSettings) return;
         const normalizedTextSize = coerceDesktopTextSize(settingsTextSize);
-        if (normalizedTextSize === DEFAULT_DESKTOP_TEXT_SIZE_MODE) {
-            localStorage.removeItem(TEXT_SIZE_STORAGE_KEY);
-        } else {
-            localStorage.setItem(TEXT_SIZE_STORAGE_KEY, normalizedTextSize);
+        if (!sandboxMode) {
+            if (normalizedTextSize === DEFAULT_DESKTOP_TEXT_SIZE_MODE) {
+                localStorage.removeItem(TEXT_SIZE_STORAGE_KEY);
+            } else {
+                localStorage.setItem(TEXT_SIZE_STORAGE_KEY, normalizedTextSize);
+            }
         }
         applyDesktopTextSize(normalizedTextSize);
-    }, [hasHydratedSettings, settingsTextSize]);
+    }, [hasHydratedSettings, sandboxMode, settingsTextSize]);
 
     useEffect(() => {
         if (!hasHydratedSettings) return;
@@ -751,16 +758,18 @@ function App() {
                 if (!cancelled) {
                     setHasHydratedSettings(true);
                 }
-                void logDesktopStartupContext(
-                    useTaskStore.getState().settings?.diagnostics?.loggingEnabled === true,
-                ).catch(() => undefined);
+                if (!sandboxMode) {
+                    void logDesktopStartupContext(
+                        useTaskStore.getState().settings?.diagnostics?.loggingEnabled === true,
+                    ).catch(() => undefined);
+                }
             })
             .then(() => {
                 if (!cancelled && !useTaskStore.getState().error) {
                     markDesktopStartup('local_data_ready');
                     setStartupDataReady(true);
                 }
-                if (!disposed && isTauriRuntime()) {
+                if (!sandboxMode && !disposed && isTauriRuntime()) {
                     void migratePortableAttachments();
                     stopCalendarPush = startDesktopCalendarPushSync();
                     runFullDesktopCalendarPushSync()
@@ -769,6 +778,15 @@ function App() {
                 }
             })
             .catch((error) => reportError('Data load failed', error));
+
+        // Sandbox hydration ends here. Personal watchers and services are not
+        // started and therefore do not need to be stopped through native APIs.
+        if (sandboxMode) {
+            return () => {
+                cancelled = true;
+                disposed = true;
+            };
+        }
         useObsidianStore.getState().loadConfig().catch((error) => reportError('Obsidian init failed', error));
         const unsubscribeExternalSync = SyncService.subscribeExternalSyncChange(setExternalSyncChange);
 
@@ -979,10 +997,10 @@ function App() {
             SyncService.stopFileWatcher().catch((error) => reportError('File watcher failed', error));
             unsubscribeExternalSync();
         };
-    }, [fetchData, quitApp, requestConfirmation, setError, showToast]);
+    }, [fetchData, quitApp, requestConfirmation, sandboxMode, setError, showToast]);
 
     useEffect(() => {
-        if (!isTauriRuntime()) return;
+        if (sandboxMode || !isTauriRuntime()) return;
         let disposed = false;
         let unlisten: (() => void) | undefined;
         const reportQuickAddRefreshError = (error: unknown) => {
@@ -1009,17 +1027,17 @@ function App() {
             disposed = true;
             if (unlisten) unlisten();
         };
-    }, [setError]);
+    }, [sandboxMode, setError]);
 
     useEffect(() => {
-        if (!isTauriRuntime()) return;
+        if (sandboxMode || !isTauriRuntime()) return;
         return installKeyringFallbackWarningListener({
             onWarning: (message) => showToast(message, 'error', 8000),
             onError: (error) => {
                 void logError(error, { scope: 'app', step: 'keyringFallbackWarningListener' });
             },
         });
-    }, [showToast]);
+    }, [sandboxMode, showToast]);
 
     useEffect(() => {
         if (!isTauriRuntime()) return;
@@ -1039,6 +1057,10 @@ function App() {
                     void logError(error, { scope: 'app', step: 'acknowledgeCloseRequest' });
                 });
                 void logInfo('Close trace: close request acknowledged', { scope: 'app', force: true });
+                if (sandboxMode) {
+                    await quitApp();
+                    return;
+                }
                 await handleDesktopCloseRequest({
                     logStep: (step) => {
                         void logInfo(`Close trace: ${step}`, { scope: 'app', force: true });
@@ -1066,7 +1088,7 @@ function App() {
             disposed = true;
             if (unlisten) unlisten();
         };
-    }, [hideToTray, isFlatpak, quitApp, setClosePromptOpenValue, setClosePromptRememberValue, setError]);
+    }, [hideToTray, isFlatpak, quitApp, sandboxMode, setClosePromptOpenValue, setClosePromptRememberValue, setError]);
 
     useEffect(() => {
         if (!isTauriRuntime()) return;
@@ -1085,7 +1107,7 @@ function App() {
     }, [windowDecorations]);
 
     useEffect(() => {
-        if (!isTauriRuntime()) return;
+        if (sandboxMode || !isTauriRuntime()) return;
         let cancelled = false;
         let unlistenResize: (() => void) | undefined;
 
@@ -1119,18 +1141,18 @@ function App() {
             cancelled = true;
             if (unlistenResize) unlistenResize();
         };
-    }, []);
+    }, [sandboxMode]);
 
     useEffect(() => {
-        if (!isTauriRuntime()) return;
+        if (sandboxMode || !isTauriRuntime()) return;
         return installWebviewZoomShortcuts({
             storage: localStorage,
             onError: (error) => void logError(error, { scope: 'window', step: 'setWebviewZoom' }),
         });
-    }, []);
+    }, [sandboxMode]);
 
     useEffect(() => {
-        if (!isTauriRuntime()) return;
+        if (sandboxMode || !isTauriRuntime()) return;
         if (!isObsidianEnabled || !obsidianVaultPath) {
             void stopObsidianWatcher().catch((error) => void logError(error, { scope: 'obsidian', step: 'stopWatcher' }));
             return;
@@ -1141,12 +1163,12 @@ function App() {
         return () => {
             void stopObsidianWatcher().catch((error) => void logError(error, { scope: 'obsidian', step: 'stopWatcher' }));
         };
-    }, [isObsidianEnabled, obsidianVaultPath, startObsidianWatcher, stopObsidianWatcher]);
+    }, [isObsidianEnabled, obsidianVaultPath, sandboxMode, startObsidianWatcher, stopObsidianWatcher]);
 
-    useDesktopShellSync({ showTray, trayTooltip, closeBehavior });
+    useDesktopShellSync({ enabled: !sandboxMode, showTray, trayTooltip, closeBehavior });
 
     useEffect(() => {
-        if (import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return;
+        if (sandboxMode || import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return;
         // Settings is frequently opened from menu actions; preload it eagerly to avoid first-open delay.
         void import('./components/views/SettingsView');
         const idleCallback =
@@ -1165,7 +1187,7 @@ function App() {
             void import('./components/views/ReviewView');
         });
         return () => idleCancel(id);
-    }, []);
+    }, [sandboxMode]);
 
     const renderView = () => {
         if (activeView.startsWith('savedSearch:')) {
@@ -1206,7 +1228,7 @@ function App() {
             case 'review':
                 return <ReviewView />;
             case 'settings':
-                return (
+                return sandboxMode ? <SandboxSettingsView /> : (
                     <SettingsView
                         initialPage={settingsInitialPage}
                         onboardingHintPage={settingsOnboardingHintPage}
@@ -1228,7 +1250,9 @@ function App() {
             setSettingsInitialPage(undefined);
             setSettingsOnboardingHintPage(undefined);
         }
-        persistLastView(nextView, useUiStore.getState().projectView.selectedProjectId);
+        if (!sandboxMode) {
+            persistLastView(nextView, useUiStore.getState().projectView.selectedProjectId);
+        }
         writeViewToUrl(nextView);
         setCurrentView(nextView);
         if (nextView === 'settings') {
@@ -1239,7 +1263,7 @@ function App() {
         startTransition(() => {
             setActiveView(nextView);
         });
-    }, [startTransition]);
+    }, [sandboxMode, startTransition]);
 
     useEffect(() => {
         if (!viewSettingsHydrated || isLoading || timelineEnabled) return;
@@ -1263,6 +1287,7 @@ function App() {
     // The saved timestamp must reflect when the session ended, not the last
     // in-app navigation: refresh it whenever the window hides or closes.
     useEffect(() => {
+        if (sandboxMode) return;
         const refreshLastView = () => {
             persistLastView(currentView, useUiStore.getState().projectView.selectedProjectId);
         };
@@ -1275,10 +1300,14 @@ function App() {
             document.removeEventListener('visibilitychange', onVisibilityChange);
             window.removeEventListener('beforeunload', refreshLastView);
         };
-    }, [currentView]);
+    }, [currentView, sandboxMode]);
 
     useEffect(() => {
         if (!hasHydratedSettings || isLoading) return;
+        if (sandboxMode) {
+            setDesktopOnboardingGateSettled(true);
+            return;
+        }
         if (desktopOnboardingDismissed || visibleDataCount > 0) {
             setDesktopOnboardingGateSettled(true);
             return;
@@ -1318,7 +1347,7 @@ function App() {
         return () => {
             cancelled = true;
         };
-    }, [desktopOnboardingDismissed, hasHydratedSettings, isLoading, visibleDataCount]);
+    }, [desktopOnboardingDismissed, hasHydratedSettings, isLoading, sandboxMode, visibleDataCount]);
 
     const dismissDesktopOnboarding = useCallback(() => {
         writeDesktopOnboardingDismissed();
@@ -1564,7 +1593,7 @@ function App() {
     }, [desktopInstallSource, startupPromptQueue]);
 
     useEffect(() => {
-        if (import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return;
+        if (sandboxMode || import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return;
         if (localPromptActivityRecordedRef.current || !hasHydratedSettings || isLoading) return;
         localPromptActivityRecordedRef.current = true;
         try {
@@ -1575,7 +1604,7 @@ function App() {
     }, [hasHydratedSettings, isLoading]);
 
     useEffect(() => {
-        if (import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return;
+        if (sandboxMode || import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return;
         let cancelled = false;
         getInstallSourceOrFallback('unknown')
             .then((installSource) => {
@@ -1592,7 +1621,7 @@ function App() {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [sandboxMode]);
 
     const LoadingFallback = ({ view }: { view: string }) => {
         useEffect(() => {
@@ -1618,10 +1647,11 @@ function App() {
     }, [handleViewChange]);
 
     useEffect(() => {
+        if (sandboxMode) return;
         return subscribeDesktopOnboardingEvent(() => {
             resumeDesktopOnboarding();
         });
-    }, [resumeDesktopOnboarding]);
+    }, [resumeDesktopOnboarding, sandboxMode]);
 
     return (
         <ErrorBoundary>

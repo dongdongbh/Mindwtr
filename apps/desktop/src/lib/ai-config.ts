@@ -3,6 +3,7 @@ import {
     buildAIConfig as buildCoreAIConfig,
     buildCopilotConfig as buildCoreCopilotConfig,
     getAIKeyStorageKey,
+    isSandboxMode,
 } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { logError, logInfo } from './app-log';
@@ -146,6 +147,7 @@ const saveLocalKey = async (provider: AIProviderId, value: string): Promise<void
 };
 
 export async function loadAIKey(provider: AIProviderId): Promise<string> {
+    if (isSandboxMode()) return '';
     if (isTauriRuntime()) {
         try {
             const value = await invokeNative<string | null>('get_ai_key', { provider });
@@ -159,6 +161,7 @@ export async function loadAIKey(provider: AIProviderId): Promise<string> {
 }
 
 export async function saveAIKey(provider: AIProviderId, value: string): Promise<void> {
+    if (isSandboxMode()) return;
     if (isTauriRuntime()) {
         try {
             await invokeNative('set_ai_key', { provider, value: value || null });
@@ -177,9 +180,11 @@ export function isAIKeyRequired(settings: AppData['settings'] | undefined): bool
 }
 
 export async function buildAIConfig(settings: AppData['settings'] | undefined, apiKey: string): Promise<AIProviderConfig> {
+    if (isSandboxMode()) throw new Error('Unavailable in sandbox.');
     return withDesktopFetch(buildCoreAIConfig(settings ?? {}, apiKey));
 }
 
 export async function buildCopilotConfig(settings: AppData['settings'] | undefined, apiKey: string): Promise<AIProviderConfig> {
+    if (isSandboxMode()) throw new Error('Unavailable in sandbox.');
     return withDesktopFetch(buildCoreCopilotConfig(settings ?? {}, apiKey));
 }

@@ -1,4 +1,22 @@
 import { isTauriRuntime } from './runtime';
+import { isSandboxMode } from '@mindwtr/core';
+
+const SANDBOX_NATIVE_COMMAND_ALLOWLIST = new Set([
+    'acknowledge_close_request',
+    'append_log_line',
+    'get_system_theme_preference',
+    'notify_ui_ready',
+    'quit_app',
+]);
+
+export const isSandboxNativeCommandAllowed = (command: string): boolean => (
+    !isSandboxMode() || SANDBOX_NATIVE_COMMAND_ALLOWLIST.has(command)
+);
+
+const assertSandboxNativeCommandAllowed = (command: string): void => {
+    if (isSandboxNativeCommandAllowed(command)) return;
+    throw new Error('Unavailable in sandbox.');
+};
 
 /**
  * The transport that actually reaches Rust. Swappable so callers get a seam
@@ -42,6 +60,7 @@ export async function invokeNative<T>(command: string, args?: Record<string, unk
     if (!isTauriRuntime()) {
         throw new Error('Tauri runtime is unavailable.');
     }
+    assertSandboxNativeCommandAllowed(command);
     return transport<T>(command, args);
 }
 
@@ -55,5 +74,6 @@ export async function invokeNativeOr<T>(
     args?: Record<string, unknown>,
 ): Promise<T> {
     if (!isTauriRuntime()) return fallback;
+    if (!isSandboxNativeCommandAllowed(command)) return fallback;
     return transport<T>(command, args);
 }

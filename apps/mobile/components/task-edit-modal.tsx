@@ -65,6 +65,7 @@ import {
 import { useTaskEditDerivedState } from './task-edit/use-task-edit-derived-state';
 import { useTaskTokenSuggestions } from './task-edit/use-task-token-suggestions';
 import { createSomedaySection } from '../lib/someday-section-actions';
+import { SandboxWorkspaceCue } from './sandbox-workspace-cue';
 
 
 const EMPTY_COPILOT_TAGS: string[] = [];
@@ -989,6 +990,7 @@ function TaskEditModalInner({
                     style={[styles.container, { backgroundColor: tc.bg }]}
                     edges={['top']}
                 >
+                    <SandboxWorkspaceCue />
                     <TaskEditHeader
                         onDone={readOnly ? onClose : handleDone}
                         onClose={readOnly ? onClose : handleAttemptClose}

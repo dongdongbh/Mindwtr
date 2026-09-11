@@ -28,6 +28,7 @@ type ToastOptions = {
 type Props = {
   addTask: (title: string, initialProps?: Partial<Task>) => Promise<StoreActionResult>;
   disabled: boolean;
+  onBusyChange: (busy: boolean) => void;
   showToast: (options: ToastOptions) => void;
   tr: SettingsTranslator;
   tc: ThemeColors;
@@ -36,6 +37,7 @@ type Props = {
 export function AppleRemindersImportSection({
   addTask,
   disabled,
+  onBusyChange,
   showToast,
   tr,
   tc,
@@ -46,7 +48,16 @@ export function AppleRemindersImportSection({
   const [lists, setLists] = useState<AppleReminderList[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [loadingLists, setLoadingLists] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(Platform.OS === 'ios');
+  const [savingSettings, setSavingSettings] = useState(false);
   const [importing, setImporting] = useState(false);
+  const internalBusy = loadingLists || loadingSettings || savingSettings || importing;
+
+  useEffect(() => {
+    onBusyChange(internalBusy);
+  }, [internalBusy, onBusyChange]);
+
+  useEffect(() => () => onBusyChange(false), [onBusyChange]);
 
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
@@ -56,7 +67,8 @@ export function AppleRemindersImportSection({
         setSelectedListTitle(settings.selectedListTitle);
         setDeleteImportedReminders(settings.deleteImportedReminders);
       })
-      .catch(logSettingsError);
+      .catch(logSettingsError)
+      .finally(() => setLoadingSettings(false));
   }, []);
 
   const showWarning = useCallback((message: string) => {
@@ -69,7 +81,7 @@ export function AppleRemindersImportSection({
   }, [showToast, tr]);
 
   const openListPicker = useCallback(async () => {
-    if (disabled || loadingLists || importing) return;
+    if (disabled || internalBusy) return;
     setLoadingLists(true);
     try {
       const permission = await requestAppleRemindersPermission();
@@ -96,9 +108,11 @@ export function AppleRemindersImportSection({
     } finally {
       setLoadingLists(false);
     }
-  }, [disabled, importing, loadingLists, showToast, showWarning, tr]);
+  }, [disabled, internalBusy, showToast, showWarning, tr]);
 
   const selectList = useCallback(async (list: AppleReminderList) => {
+    if (disabled || internalBusy) return;
+    setSavingSettings(true);
     try {
       const current = await loadAppleRemindersImportSettings();
       await saveAppleRemindersImportSettings({
@@ -117,11 +131,14 @@ export function AppleRemindersImportSection({
         tone: 'error',
         durationMs: 5200,
       });
+    } finally {
+      setSavingSettings(false);
     }
-  }, [showToast, tr]);
+  }, [disabled, internalBusy, showToast, tr]);
 
   const handleDeleteImportedRemindersChange = useCallback(async (value: boolean) => {
-    if (disabled || loadingLists || importing) return;
+    if (disabled || internalBusy) return;
+    setSavingSettings(true);
     try {
       const current = await loadAppleRemindersImportSettings();
       await saveAppleRemindersImportSettings({
@@ -137,11 +154,13 @@ export function AppleRemindersImportSection({
         tone: 'error',
         durationMs: 5200,
       });
+    } finally {
+      setSavingSettings(false);
     }
-  }, [disabled, importing, loadingLists, showToast, tr]);
+  }, [disabled, internalBusy, showToast, tr]);
 
   const importReminders = useCallback(async () => {
-    if (disabled || importing) return;
+    if (disabled || internalBusy) return;
     if (!selectedListId) {
       await openListPicker();
       return;
@@ -192,11 +211,11 @@ export function AppleRemindersImportSection({
     } finally {
       setImporting(false);
     }
-  }, [addTask, deleteImportedReminders, disabled, importing, openListPicker, selectedListId, selectedListTitle, showToast, tr]);
+  }, [addTask, deleteImportedReminders, disabled, internalBusy, openListPicker, selectedListId, selectedListTitle, showToast, tr]);
 
   if (Platform.OS !== 'ios') return null;
 
-  const busy = disabled || loadingLists || importing;
+  const busy = disabled || internalBusy;
 
   return (
     <>
@@ -277,6 +296,7 @@ export function AppleRemindersImportSection({
                 <TouchableOpacity
                   key={list.id}
                   accessibilityRole="button"
+                  disabled={busy}
                   onPress={() => void selectList(list)}
                   style={[
                     styles.pickerOption,

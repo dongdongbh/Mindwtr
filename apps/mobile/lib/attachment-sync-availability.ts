@@ -4,6 +4,7 @@ import {
   cloudGetFile,
   computeSha256Hex,
   isSha256Hex,
+  isSandboxMode,
   markAttachmentUnrecoverable,
   parseCloudKitAttachmentKey,
   validateAttachmentHash,
@@ -472,6 +473,7 @@ const ensureAttachmentAvailableInternal = async (
 export const ensureAttachmentAvailableDetailed = async (
   attachment: Attachment,
 ): Promise<AttachmentAvailabilityOutcome> => {
+  if (isSandboxMode()) return { status: 'unavailable' };
   if (attachment.kind !== 'file') return { status: 'available', attachment };
   const identity = getAttachmentDownloadIdentity(attachment);
   const existing = downloadLocks.get(identity);

@@ -124,8 +124,9 @@ vi.mock('@/lib/app-log', () => ({
   logWarn: vi.fn(async () => undefined),
 }));
 
-function TestHarness() {
+function TestHarness({ disabled = false }: { disabled?: boolean }) {
   useRootLayoutSyncEffects({
+    disabled,
     resolveText: (_key, fallback) => fallback,
     openNotificationsSettings: vi.fn(),
     openSyncSettings: vi.fn(),
@@ -163,6 +164,24 @@ describe('useRootLayoutSyncEffects', () => {
     subscribeToCloudKitChanges.mockReturnValue(vi.fn());
     updateMobileWidgetFromStore.mockClear();
     updateMobileWidgetFromStore.mockResolvedValue(true);
+  });
+
+  it('does not initialize personal sync, calendar, notification, widget, or app-state services when disabled', async () => {
+    let tree: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<TestHarness disabled />);
+      await flushMicrotasks();
+    });
+
+    expect(asyncStorageGetItem).not.toHaveBeenCalled();
+    expect(storeSubscribe).not.toHaveBeenCalled();
+    expect(syncMobileBackgroundSyncRegistration).not.toHaveBeenCalled();
+    expect(subscribeToCloudKitChanges).not.toHaveBeenCalled();
+    expect(getCalendarPushEnabled).not.toHaveBeenCalled();
+    expect(updateMobileWidgetFromStore).not.toHaveBeenCalled();
+    expect(appStateListeners.size).toBe(0);
+
+    await act(async () => tree.unmount());
   });
 
   it('aborts the in-flight mobile sync through the AppState background transition', async () => {

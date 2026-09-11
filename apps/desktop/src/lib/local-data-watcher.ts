@@ -3,6 +3,7 @@ import {
     flushPendingSave,
     getStorageAdapter,
     getInMemoryAppDataSnapshot,
+    isWorkspaceTransitionActive,
     mergeAppData,
     normalizeAppData,
     runSerializedSyncDocumentWriteOperation,
@@ -131,6 +132,7 @@ type LocalDataWatcherTestUtils = {
 
 export type LocalDataWatcherController = {
     refreshFromDiskNow: () => Promise<void>;
+    resumeAfterWorkspaceTransitionFailure: () => void;
     rearmExhaustedWatchers: () => void;
     markLocalWrite: (data?: AppData) => void;
     markLocalSqliteWrite: () => void;
@@ -205,6 +207,9 @@ export const createLocalDataWatcherController = (
     let delayedMergedPersistRetryCount = 0;
     let sqliteRefreshRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let delayedSqliteRefreshRetryCount = 0;
+    let deferredExternalChangeDuringTransition = false;
+    let deferredSqliteChangeDuringTransition = false;
+    let deferredSqliteChangePaths: string[] = [];
     let watcherGeneration = 0;
     let sqliteEditUnlockUnsubscribe: (() => void) | null = null;
 
@@ -447,6 +452,10 @@ export const createLocalDataWatcherController = (
     };
 
     const runPendingMerge = (generation: number = watcherGeneration): Promise<void> => {
+        if (isWorkspaceTransitionActive()) {
+            deferredExternalChangeDuringTransition = true;
+            return Promise.resolve();
+        }
         if (!isCurrentWatcherGeneration(generation)) return Promise.resolve();
         if (mergeInFlight) {
             const activeMerge = mergeInFlight;
@@ -731,6 +740,10 @@ export const createLocalDataWatcherController = (
     }
 
     const runSqliteRefresh = (generation: number = watcherGeneration): Promise<void> => {
+        if (isWorkspaceTransitionActive()) {
+            deferredSqliteChangeDuringTransition = true;
+            return Promise.resolve();
+        }
         if (!isCurrentWatcherGeneration(generation)) return Promise.resolve();
         if (sqliteRefreshInFlight) {
             const activeRefresh = sqliteRefreshInFlight;
@@ -827,6 +840,14 @@ export const createLocalDataWatcherController = (
     };
 
     async function handleSqliteChange(options: { immediate?: boolean; paths?: string[] } = {}): Promise<void> {
+        if (isWorkspaceTransitionActive()) {
+            deferredSqliteChangeDuringTransition = true;
+            deferredSqliteChangePaths = Array.from(new Set([
+                ...deferredSqliteChangePaths,
+                ...(options.paths ?? []),
+            ])).slice(0, 8);
+            return;
+        }
         const generation = watcherGeneration;
         const paths = options.paths ?? [];
         const now = localDataWatcherDependencies.now();
@@ -924,6 +945,10 @@ export const createLocalDataWatcherController = (
     async function handleExternalChange(
         options: { immediate?: boolean; ignoreSelfWindow?: boolean } = {},
     ): Promise<void> {
+        if (isWorkspaceTransitionActive()) {
+            deferredExternalChangeDuringTransition = true;
+            return;
+        }
         const generation = watcherGeneration;
         const now = localDataWatcherDependencies.now();
         pruneExpiredSelfWrites(now);
@@ -952,6 +977,21 @@ export const createLocalDataWatcherController = (
             debounceTimer = null;
             void runPendingMerge(generation);
         }, DEBOUNCE_MS);
+    }
+
+    function resumeAfterWorkspaceTransitionFailure(): void {
+        if (isWorkspaceTransitionActive()) return;
+        if (deferredExternalChangeDuringTransition) {
+            deferredExternalChangeDuringTransition = false;
+            pendingExternalChange = true;
+            void runPendingMerge();
+        }
+        if (deferredSqliteChangeDuringTransition) {
+            deferredSqliteChangeDuringTransition = false;
+            const paths = deferredSqliteChangePaths;
+            deferredSqliteChangePaths = [];
+            void handleSqliteChange({ immediate: true, paths });
+        }
     }
 
     // Cheap: rearmExhaustedWatchChannel below is a no-op unless a channel is
@@ -1233,6 +1273,9 @@ export const createLocalDataWatcherController = (
         hasPendingChangeDuringIgnore = false;
         hasPendingSqliteChangeDuringSelfWrite = false;
         pendingSqliteChangePaths = [];
+        deferredExternalChangeDuringTransition = false;
+        deferredSqliteChangeDuringTransition = false;
+        deferredSqliteChangePaths = [];
         pendingExternalChange = false;
         pendingSelfWrites = [];
         // Aligned with resetForTests: a stale ignore window or hash from before
@@ -1287,6 +1330,9 @@ export const createLocalDataWatcherController = (
             sqliteSuppressedSelfWriteEvents = 0;
             hasPendingSqliteChangeDuringSelfWrite = false;
             pendingSqliteChangePaths = [];
+            deferredExternalChangeDuringTransition = false;
+            deferredSqliteChangeDuringTransition = false;
+            deferredSqliteChangePaths = [];
             lastKnownHash = '';
             pendingSelfWrites = [];
             mergeInFlight = null;
@@ -1305,6 +1351,7 @@ export const createLocalDataWatcherController = (
 
     return {
         refreshFromDiskNow,
+        resumeAfterWorkspaceTransitionFailure,
         rearmExhaustedWatchers,
         markLocalWrite,
         markLocalSqliteWrite,
@@ -1317,6 +1364,10 @@ export const createLocalDataWatcherController = (
 const defaultLocalDataWatcherController = createLocalDataWatcherController();
 
 export const refreshFromDiskNow = (): Promise<void> => defaultLocalDataWatcherController.refreshFromDiskNow();
+
+export const resumeAfterWorkspaceTransitionFailure = (): void => {
+    defaultLocalDataWatcherController.resumeAfterWorkspaceTransitionFailure();
+};
 
 export const rearmExhaustedWatchers = (): void => defaultLocalDataWatcherController.rearmExhaustedWatchers();
 

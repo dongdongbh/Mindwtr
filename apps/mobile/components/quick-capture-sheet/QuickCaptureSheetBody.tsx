@@ -8,6 +8,7 @@ import { ToastViewport } from '@/contexts/toast-context';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CompactText, CompactTextInput } from '@/components/compact-text';
 import { ThemedAlertHost } from '@/components/themed-alert';
+import { SandboxWorkspaceCue } from '@/components/sandbox-workspace-cue';
 import { QuickDateChips } from '../QuickDateChips';
 import { FocusStarIcon, FOCUS_STAR_COLOR } from '../FocusStarIcon';
 import { styles } from './quick-capture-sheet.styles';
@@ -263,6 +264,7 @@ export function QuickCaptureSheetBody({
               },
             ]}
           >
+            <SandboxWorkspaceCue />
             <View style={styles.headerRow}>
               <CompactText
                 style={[styles.title, { color: tc.text }]}

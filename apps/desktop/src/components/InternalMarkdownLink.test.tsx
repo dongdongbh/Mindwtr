@@ -8,11 +8,18 @@ import { MINDWTR_NAVIGATE_EVENT } from '../lib/navigation-events';
 import { useUiStore } from '../store/ui-store';
 import { createInternalMarkdownLinkContext, InternalMarkdownLink } from './InternalMarkdownLink';
 
+const sandboxState = vi.hoisted(() => ({ enabled: false }));
+vi.mock('@mindwtr/core', async (importOriginal) => ({
+    ...await importOriginal<typeof import('@mindwtr/core')>(),
+    isSandboxMode: () => sandboxState.enabled,
+}));
+
 const initialTaskState = useTaskStore.getState();
 const initialUiState = useUiStore.getState();
 
 describe('InternalMarkdownLink', () => {
     beforeEach(() => {
+        sandboxState.enabled = false;
         act(() => {
             useTaskStore.setState(initialTaskState, true);
             useUiStore.setState(initialUiState, true);
@@ -40,6 +47,22 @@ describe('InternalMarkdownLink', () => {
         );
 
         expect(getByRole('link', { name: 'Email' })).toHaveAttribute('title', 'mid:960830.1639@example.com');
+    });
+
+    it('does not open an external application from sandbox markdown', () => {
+        sandboxState.enabled = true;
+        const open = vi.spyOn(window, 'open');
+        const { getByRole } = render(
+            <LanguageProvider>
+                <InternalMarkdownLink href="mailto:example@example.com" linkContext={currentLinkContext()}>Email</InternalMarkdownLink>
+            </LanguageProvider>
+        );
+        const link = getByRole('link', { name: 'Email' });
+        expect(link).toBeDisabled();
+        expect(link).toHaveAttribute('title', 'Unavailable in sandbox');
+        fireEvent.click(link);
+        expect(open).not.toHaveBeenCalled();
+        open.mockRestore();
     });
 
     it('gives external links no href for the engine to preconnect to', () => {

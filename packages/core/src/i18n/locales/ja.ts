@@ -10,6 +10,21 @@
 //   パーサのコマンドトークン (/due:, @context, #tag, +Project…) は英語のまま。
 // - 数値プレースホルダは詰める ({{count}}件)、英単語は前後に半角スペースを入れる (Dropbox に接続)。
 export const jaOverrides: Record<string, string> = {
+    'sandbox.open': "サンドボックスを開く",
+    'sandbox.label': "サンドボックス",
+    'sandbox.resetShort': "リセット",
+    'sandbox.exitShort': "終了",
+    'sandbox.confirmTitle': "サンドボックスを開きますか？",
+    'sandbox.confirmDescription': "架空のタスクやプロジェクトを使って、不具合の録画やデモを行えます。個人データは別に保管されます。サンドボックスでの変更は終了時に破棄されます。",
+    'sandbox.enter': "サンドボックスを開く",
+    'sandbox.title': "サンドボックス · サンプルデータ",
+    'sandbox.exit': "サンドボックスを終了",
+    'sandbox.reset': "サンプルデータをリセット",
+    'sandbox.description': "架空のタスクやプロジェクトで Mindwtr を試せます。個人データとは別に扱われます。",
+    'sandbox.notice': "ここでの変更は一時的です。同期や外部連携は利用できません。",
+    'sandbox.unavailable': "サンドボックスでは利用できません",
+    'sandbox.switching': "ワークスペースを切り替え中…",
+    'sandbox.switchFailed': "ワークスペースを切り替えられませんでした。現在のワークスペースは変更されていません。",
         'settings.aiAdvanced': "詳細設定",
         'settings.aiRequestTimeout': "リクエストのタイムアウト",
         'settings.aiRequestTimeoutDesc': "AI の応答を待つ時間です。低速なローカルモデルでは長く設定してください。タイムアウトまたはキャンセルされたリクエストは自動再試行されません。",

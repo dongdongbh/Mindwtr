@@ -43,6 +43,7 @@ import {
     dayKey,
     type CalendarViewMode,
 } from './calendar-primitives';
+import { getWorkspaceCache } from '../../../lib/workspace-cache';
 
 /**
  * How many days the week timeline shows. A layout choice about this screen, so
@@ -88,8 +89,8 @@ const needsCalendarSelectedDate = (viewMode: CalendarViewMode): boolean => (
 const readStoredTimelineDayCount = (): number => {
     if (typeof window === 'undefined') return CALENDAR_TIMELINE_DAY_COUNT_DEFAULT;
     try {
-        const stored = window.localStorage.getItem(CALENDAR_TIMELINE_DAY_COUNT_STORAGE_KEY);
-        if (stored === null) return CALENDAR_TIMELINE_DAY_COUNT_DEFAULT;
+        const stored = getWorkspaceCache()?.getItem(CALENDAR_TIMELINE_DAY_COUNT_STORAGE_KEY);
+        if (stored == null) return CALENDAR_TIMELINE_DAY_COUNT_DEFAULT;
         // Anything unparseable — a hand-edited value, an older format — coerces
         // back to a whole week rather than leaving the timeline with no columns.
         return coerceCalendarTimelineDayCount(Number.parseInt(stored, 10));
@@ -132,7 +133,7 @@ export function useCalendarMonthNavigation({
         setTimelineDayCountState(next);
         if (typeof window === 'undefined') return;
         try {
-            window.localStorage.setItem(CALENDAR_TIMELINE_DAY_COUNT_STORAGE_KEY, String(next));
+            getWorkspaceCache()?.setItem(CALENDAR_TIMELINE_DAY_COUNT_STORAGE_KEY, String(next));
         } catch {
             // A blocked or full store only costs the preference on next launch.
         }

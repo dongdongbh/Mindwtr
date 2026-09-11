@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 import type { OnboardingTopic } from '@mindwtr/core';
 
 const prefix = 'mindwtr:mobile:onboarding-hint:v1:';

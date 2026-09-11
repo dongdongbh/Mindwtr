@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+    acquireWorkspaceTransitionLock,
     runAfterStoreWriteLock,
     runDataTransferTransactionWithoutSnapshot,
     runSerializedSyncDocumentOperation,
@@ -1523,9 +1524,17 @@ describe('SyncService testability hooks', () => {
         await Promise.resolve();
         expect(events).toEqual(['sync:start']);
 
-        releaseSync();
-        await activeSync;
-        await expect(restore).resolves.toEqual({ success: true });
+        const releaseTransition = acquireWorkspaceTransitionLock();
+        expect(releaseTransition).not.toBeNull();
+        const idle = SyncService.waitForSyncIdle(1_000);
+        try {
+            releaseSync();
+            await activeSync;
+            await expect(restore).resolves.toEqual({ success: true });
+            await expect(idle).resolves.toBe(true);
+        } finally {
+            releaseTransition?.();
+        }
         expect(events).toEqual([
             'sync:start',
             'sync:end',
@@ -3362,6 +3371,63 @@ describe('SyncService orchestration', () => {
         }, 0)
     );
 
+    it('blocks a new automatic sync while a workspace transition owns admission', async () => {
+        const backendSpy = vi.spyOn(SyncService as any, 'getSyncBackend');
+        const release = acquireWorkspaceTransitionLock();
+        expect(release).not.toBeNull();
+        try {
+            await expect(SyncService.performSync()).resolves.toEqual({
+                success: true,
+                skipped: 'disabled',
+            });
+            expect(backendSpy).not.toHaveBeenCalled();
+            expect(SyncService.getSyncStatus()).toMatchObject({ inFlight: false, queued: false });
+        } finally {
+            release?.();
+        }
+    });
+
+    it('includes admitted sync-service queue work in its idle gate', async () => {
+        const operation = createDeferred();
+        const queued = __syncServiceTestUtils.runSyncRestoreExclusiveForTests(() => operation.promise);
+        let idleSettled = false;
+        const idle = SyncService.waitForSyncIdle(1_000).then((result) => {
+            idleSettled = true;
+            return result;
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(idleSettled).toBe(false);
+        operation.resolve();
+        await queued;
+        await expect(idle).resolves.toBe(true);
+    });
+
+    it('drains a document writer admitted behind outer queue work before the transition', async () => {
+        const blocker = createDeferred();
+        const first = __syncServiceTestUtils.runSyncRestoreExclusiveForTests(() => blocker.promise);
+        const write = vi.fn(async () => undefined);
+        const admittedWriter = __syncServiceTestUtils.runSyncDocumentWriteExclusiveForTests(write);
+        const release = acquireWorkspaceTransitionLock();
+        expect(release).not.toBeNull();
+        try {
+            const idle = SyncService.waitForSyncIdle(1_000);
+            const lateWrite = vi.fn(async () => undefined);
+            await expect(
+                __syncServiceTestUtils.runSyncDocumentWriteExclusiveForTests(lateWrite),
+            ).rejects.toThrow('switching workspaces');
+            expect(lateWrite).not.toHaveBeenCalled();
+
+            blocker.resolve();
+            await first;
+            await admittedWriter;
+            expect(write).toHaveBeenCalledOnce();
+            await expect(idle).resolves.toBe(true);
+        } finally {
+            release?.();
+        }
+    });
+
     it('normalizes a native busy File Sync lease into a neutral deferred result', async () => {
         __syncServiceTestUtils.setDependenciesForTests({
             flushPendingSave: vi.fn(async () => undefined),
@@ -3763,6 +3829,33 @@ describe('SyncService orchestration', () => {
         // The probe carried its own configOverride, so it never re-read the
         // persisted backend; the active cycle's single read is all there is.
         expect(backendSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('rechecks workspace admission after an activation probe waits for an active cycle', async () => {
+        const firstRun = createDeferred();
+        const backendSpy = vi.spyOn(SyncService as any, 'getSyncBackend');
+        backendSpy.mockImplementation(async () => {
+            await firstRun.promise;
+            return 'off';
+        });
+
+        const active = SyncService.performSync();
+        await waitForAssertion(() => expect(SyncService.getSyncStatus().inFlight).toBe(true));
+        const probe = SyncService.performSync({
+            activationProbe: true,
+            configOverride: { backend: 'off' },
+            manual: true,
+        });
+        const release = acquireWorkspaceTransitionLock();
+        expect(release).not.toBeNull();
+        try {
+            firstRun.resolve();
+            await active;
+            await expect(probe).resolves.toEqual({ success: true, skipped: 'disabled' });
+            expect(backendSpy).toHaveBeenCalledTimes(1);
+        } finally {
+            release?.();
+        }
     });
 
     it('serializes re-entrant sync calls triggered by sync status listeners', async () => {

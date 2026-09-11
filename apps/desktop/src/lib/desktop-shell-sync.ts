@@ -5,6 +5,7 @@ import { invokeNative } from './tauri-invoke';
 import type { DesktopCloseBehavior } from './window-behavior';
 
 export type DesktopShellSyncOptions = {
+    enabled?: boolean;
     /** `undefined` until settings hydrate — the tray is left alone until then. */
     showTray: boolean | undefined;
     trayTooltip: string;
@@ -41,22 +42,24 @@ function runShellCommand(
  * One effect per command on purpose — each re-runs on its own inputs, and the
  * tray icon must exist before its tooltip is set.
  */
-export function useDesktopShellSync({ showTray, trayTooltip, closeBehavior }: DesktopShellSyncOptions): void {
+export function useDesktopShellSync({ enabled = true, showTray, trayTooltip, closeBehavior }: DesktopShellSyncOptions): void {
     useEffect(() => {
+        if (!enabled) return;
         if (!isTauriRuntime()) return;
         if (showTray === undefined) return;
         return runShellCommand('set_tray_visible', { visible: showTray !== false }, 'tray', 'setVisible');
-    }, [showTray]);
+    }, [enabled, showTray]);
 
     // Hovering the tray icon showed an empty rectangle because no tooltip was
     // ever set. Fill it with today's Focus so the list can be glanced at without
     // opening the window (#935). Linux ignores this natively — Tauri does not
     // support tray tooltips there — so the command is a no-op on that platform.
     useEffect(() => {
+        if (!enabled) return;
         if (!isTauriRuntime()) return;
         if (showTray === false) return;
         return runShellCommand('set_tray_tooltip', { tooltip: trayTooltip }, 'tray', 'setTooltip');
-    }, [showTray, trayTooltip]);
+    }, [enabled, showTray, trayTooltip]);
 
     // Settings alone can only ever put the app *back* in the Dock, Cmd+Tab and
     // the menu bar. Enabling close-to-tray used to make it an accessory app for
@@ -68,6 +71,7 @@ export function useDesktopShellSync({ showTray, trayTooltip, closeBehavior }: De
     // another device can do this) would otherwise be left with no Dock icon and
     // no tray to come back through.
     useEffect(() => {
+        if (!enabled) return;
         if (!isTauriRuntime()) return;
         if (closeBehavior === 'tray' && showTray !== false) return;
         return runShellCommand(
@@ -76,5 +80,5 @@ export function useDesktopShellSync({ showTray, trayTooltip, closeBehavior }: De
             'window',
             'setActivationPolicy',
         );
-    }, [closeBehavior, showTray]);
+    }, [closeBehavior, enabled, showTray]);
 }

@@ -1,4 +1,5 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
+import { getWorkspaceCache } from '../lib/workspace-cache';
 
 type SanitizePersistedViewState<T> = (value: unknown, fallback: T) => T;
 
@@ -7,9 +8,10 @@ function readPersistedViewState<T>(
     fallback: T,
     sanitize?: SanitizePersistedViewState<T>
 ): T {
-    if (typeof window === 'undefined') return fallback;
+    const storage = getWorkspaceCache();
+    if (!storage) return fallback;
     try {
-        const raw = window.localStorage.getItem(storageKey);
+        const raw = storage.getItem(storageKey);
         if (!raw) return fallback;
         const parsed = JSON.parse(raw) as unknown;
         return sanitize ? sanitize(parsed, fallback) : parsed as T;
@@ -19,9 +21,10 @@ function readPersistedViewState<T>(
 }
 
 function savePersistedViewState<T>(storageKey: string, value: T) {
-    if (typeof window === 'undefined') return;
+    const storage = getWorkspaceCache();
+    if (!storage) return;
     try {
-        window.localStorage.setItem(storageKey, JSON.stringify(value));
+        storage.setItem(storageKey, JSON.stringify(value));
     } catch {
         // View state is a convenience. Storage failures should not block UI changes.
     }

@@ -1481,11 +1481,21 @@ export const mobileStorage = createStorage();
 // Every headless entry point must call this before it returns. Order matters: a
 // SQLite write re-arms the JSON/widget timers when it completes, so the write queue
 // has to drain first or the flushes below leave freshly-armed work behind.
+const drainMobileStorageWork = async (): Promise<void> => {
+    await waitForQueuedSqliteWrites();
+    await flushPendingStartupJsonBackup();
+    await flushPendingWidgetRefresh();
+};
+
+/**
+ * Workspace switches must fail closed: a rejected drain leaves the current JS
+ * runtime mounted and no sandbox boot request is written.
+ */
+export const quiesceMobileStorageForWorkspaceSwitch = drainMobileStorageWork;
+
 export const quiesceMobileStorage = async (): Promise<void> => {
     try {
-        await waitForQueuedSqliteWrites();
-        await flushPendingStartupJsonBackup();
-        await flushPendingWidgetRefresh();
+        await drainMobileStorageWork();
     } catch (error) {
         logStorageWarn('[Storage] Failed to quiesce storage before teardown', error);
     }

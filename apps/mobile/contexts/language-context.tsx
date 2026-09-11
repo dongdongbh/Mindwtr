@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 
 import { type Language, getSystemDefaultLanguage, loadTranslations, loadStoredLanguage, saveStoredLanguage } from '@mindwtr/core';
 import { logError } from '../lib/app-log';

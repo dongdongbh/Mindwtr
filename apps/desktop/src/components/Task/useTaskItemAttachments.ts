@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, findSelectableProjectByTitleAndArea, generateUUID, normalizeLinkAttachmentInput, planAttachmentDraftSettlement, translateWithFallback, useTaskStore, type Task } from '@mindwtr/core';
+import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, findSelectableProjectByTitleAndArea, generateUUID, isSandboxMode, normalizeLinkAttachmentInput, planAttachmentDraftSettlement, translateWithFallback, useTaskStore, type Task } from '@mindwtr/core';
 import { dataDir } from '@tauri-apps/api/path';
 import { BaseDirectory, readFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { importDroppedFileAttachment, importPickedFileAttachment } from '../../lib/attachment-import';
@@ -40,6 +40,7 @@ type UseTaskItemAttachmentsProps = {
 // path-referencing attachments). Best-effort — failures are logged, never
 // thrown, so they can't block the reset.
 const deleteOrphanedAttachmentFiles = async (orphaned: Attachment[]): Promise<void> => {
+    if (isSandboxMode()) return;
     if (!isTauriRuntime()) return;
     const fileOrphans = orphaned.filter((a) => a.kind === 'file');
     if (fileOrphans.length === 0) return;
@@ -75,6 +76,7 @@ const deleteOrphanedAttachmentFiles = async (orphaned: Attachment[]): Promise<vo
 };
 
 export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps) {
+    const sandboxMode = isSandboxMode();
     const [editAttachments, setEditAttachments] = useState<Attachment[]>(task.attachments || []);
     // Mirrors editAttachments for resetAttachmentState (a useCallback) to read
     // the latest value without depending on it — StrictMode double-invokes a
@@ -358,6 +360,10 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     }, [audioAttachment, closeAudio, closeImage, closeText, imageAttachment, textAttachment]);
 
     const openAttachment = useCallback((attachment: Attachment) => {
+        if (sandboxMode) {
+            setAttachmentError(t('sandbox.unavailable'));
+            return;
+        }
         if (attachment.kind === 'link') {
             void openExternal(attachment);
             return;
@@ -416,7 +422,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
             return;
         }
         void openExternal(attachment);
-    }, [loadTextAttachment, openExternal, resolveAudioBlobSource, t]);
+    }, [loadTextAttachment, openExternal, resolveAudioBlobSource, sandboxMode, t]);
 
     useEffect(() => {
         return () => {
@@ -429,6 +435,10 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     }, []);
 
     const addFileAttachment = useCallback(async () => {
+        if (sandboxMode) {
+            setAttachmentError(t('sandbox.unavailable'));
+            return;
+        }
         if (!isTauriRuntime()) {
             setAttachmentError(t('attachments.fileNotSupported'));
             return;
@@ -447,11 +457,15 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
             return;
         }
         setEditAttachments((prev) => [...prev, result.attachment]);
-    }, [t]);
+    }, [sandboxMode, t]);
 
     // Attachments stay in editor-local state until the task is saved, same
     // as addFileAttachment above; removing a chip before saving is the undo.
     const addDroppedFileAttachments = useCallback(async (files: File[]) => {
+        if (sandboxMode) {
+            setAttachmentError(t('sandbox.unavailable'));
+            return;
+        }
         if (!isTauriRuntime()) {
             setAttachmentError(t('attachments.fileNotSupported'));
             return;
@@ -467,23 +481,31 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
             setEditAttachments((prev) => [...prev, result.attachment]);
         }
         if (firstErrorKey) setAttachmentError(t(firstErrorKey));
-    }, [t]);
+    }, [sandboxMode, t]);
 
     const addLinkAttachment = useCallback(() => {
+        if (sandboxMode) {
+            setAttachmentError(t('sandbox.unavailable'));
+            return;
+        }
         setAttachmentError(null);
         setEditingLinkAttachmentId(null);
         setLinkPromptDefaultValue('');
         setLinkPromptVariant('link');
         setShowLinkPrompt(true);
-    }, []);
+    }, [sandboxMode, t]);
 
     const addObsidianNoteAttachment = useCallback(() => {
+        if (sandboxMode) {
+            setAttachmentError(t('sandbox.unavailable'));
+            return;
+        }
         setAttachmentError(null);
         setEditingLinkAttachmentId(null);
         setLinkPromptDefaultValue('');
         setLinkPromptVariant('obsidian');
         setShowLinkPrompt(true);
-    }, []);
+    }, [sandboxMode, t]);
 
     const handleAddLinkAttachment = useCallback((value: string) => {
         const normalized = editingLinkAttachmentId

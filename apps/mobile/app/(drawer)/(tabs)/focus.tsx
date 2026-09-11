@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 import {
   View,
   Text,

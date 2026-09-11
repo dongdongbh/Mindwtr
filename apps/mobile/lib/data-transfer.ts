@@ -11,6 +11,7 @@ import {
     countActiveRecords,
     createBackupFileName,
     flushPendingSave,
+    isSandboxMode,
     prepareRestoredBackupDataForSync,
     runDataTransferTransactionWithoutSnapshot,
     serializeBackupData,
@@ -63,6 +64,10 @@ import {
 import { mobileStorage } from './storage-adapter';
 
 const StorageAccessFramework = FileSystem.StorageAccessFramework;
+
+const assertPersonalWorkspace = (): void => {
+    if (isSandboxMode()) throw new Error('Unavailable in sandbox');
+};
 // Deliberately does not match SNAPSHOT_FILE_PATTERN, so a half-written snapshot
 // is invisible to the restore roster and to pruning.
 
@@ -195,6 +200,7 @@ const runMobileDataTransferWithoutSnapshot = async (
     operation: string,
     applyData: (currentData: AppData) => AppData
 ): Promise<void> => {
+    assertPersonalWorkspace();
     await runDataTransferTransactionWithoutSnapshot({
         ...mobileDataTransferBoundaries(),
         operation,
@@ -202,13 +208,16 @@ const runMobileDataTransferWithoutSnapshot = async (
     });
 };
 
-export const pickBackupDocument = async (): Promise<TransferDocument | null> =>
-    pickDocument('application/json');
+export const pickBackupDocument = async (): Promise<TransferDocument | null> => {
+    assertPersonalWorkspace();
+    return pickDocument('application/json');
+};
 
 export const inspectBackupDocument = async (
     document: TransferDocument,
     options?: { appVersion?: string | null }
 ): Promise<ImportSourceParseResultMap['backup']> => {
+    assertPersonalWorkspace();
     const size = await resolveDocumentSize(document, 'backup');
     assertBackupSourceFileSize(size);
     const rawJson = await readTextFile(document.uri);
@@ -274,7 +283,9 @@ const IMPORT_PICKER_DESCRIPTORS: Record<ImportPickerSourceId, ImportPickerDescri
 };
 
 const pickImportDocument = (source: ImportPickerSourceId): Promise<TransferDocument | null> =>
-    pickDocument(IMPORT_PICKER_DESCRIPTORS[source].mimeTypes);
+    isSandboxMode()
+        ? Promise.reject(new Error('Unavailable in sandbox'))
+        : pickDocument(IMPORT_PICKER_DESCRIPTORS[source].mimeTypes);
 
 const resolveDocumentSize = async (document: TransferDocument, kind: 'backup' | 'import'): Promise<number> => {
     try {
@@ -301,6 +312,7 @@ const inspectImportDocument = async <S extends ImportPickerSourceId>(
     source: S,
     document: TransferDocument
 ): Promise<ImportSourceParseResultMap[S]> => {
+    assertPersonalWorkspace();
     const size = await resolveDocumentSize(document, 'import');
     assertImportSourceFileSize(size);
     const bytes = await readBinaryFile(document.uri);
@@ -335,6 +347,7 @@ export const inspectMindwtrCsvDocument = (document: TransferDocument): Promise<I
 // Mobile's snapshot writer never returns null (unlike desktop's Tauri-only snapshot), so the
 // shared `string | null` contract can be narrowed back for mobile's public result type.
 export const restoreDataFromBackup = async (backupData: AppData): Promise<SnapshotApplyResult> => {
+    assertPersonalWorkspace();
     const { snapshotName } = await runImport('backup', backupData, mobileBoundaries, mobileLog);
     return { snapshotName: snapshotName as string };
 };
@@ -342,6 +355,7 @@ export const restoreDataFromBackup = async (backupData: AppData): Promise<Snapsh
 export const mergeDataFromBackup = async (
     backupData: AppData
 ): Promise<SnapshotApplyResult & { result: MergeResult }> => {
+    assertPersonalWorkspace();
     const { result, snapshotName } = await runImport('backup-merge', backupData, mobileBoundaries, mobileLog);
     return { snapshotName: snapshotName as string, result };
 };
@@ -349,6 +363,7 @@ export const mergeDataFromBackup = async (
 export const importTodoistData = async (
     parsedProjects: ParsedTodoistProject[]
 ): Promise<SnapshotApplyResult & { result: TodoistImportExecutionResult }> => {
+    assertPersonalWorkspace();
     const { result, snapshotName } = await runImport('todoist', parsedProjects, mobileBoundaries, mobileLog);
     return { snapshotName: snapshotName as string, result };
 };
@@ -356,6 +371,7 @@ export const importTodoistData = async (
 export const importTickTickData = async (
     parsedData: ParsedTickTickImportData
 ): Promise<SnapshotApplyResult & { result: TickTickImportExecutionResult }> => {
+    assertPersonalWorkspace();
     const { result, snapshotName } = await runImport('ticktick', parsedData, mobileBoundaries, mobileLog);
     return { snapshotName: snapshotName as string, result };
 };
@@ -363,6 +379,7 @@ export const importTickTickData = async (
 export const importDgtData = async (
     parsedData: ParsedDgtImportData
 ): Promise<SnapshotApplyResult & { result: DgtImportExecutionResult }> => {
+    assertPersonalWorkspace();
     const { result, snapshotName } = await runImport('dgt', parsedData, mobileBoundaries, mobileLog);
     return { snapshotName: snapshotName as string, result };
 };
@@ -370,6 +387,7 @@ export const importDgtData = async (
 export const importOmniFocusData = async (
     parsedData: ParsedOmniFocusImportData
 ): Promise<SnapshotApplyResult & { result: OmniFocusImportExecutionResult }> => {
+    assertPersonalWorkspace();
     const { result, snapshotName } = await runImport('omnifocus', parsedData, mobileBoundaries, mobileLog);
     return { snapshotName: snapshotName as string, result };
 };
@@ -377,11 +395,13 @@ export const importOmniFocusData = async (
 export const importMindwtrCsvData = async (
     parsedData: ParsedMindwtrCsvImportData
 ): Promise<SnapshotApplyResult & { result: MindwtrCsvImportExecutionResult }> => {
+    assertPersonalWorkspace();
     const { result, snapshotName } = await runImport('mindwtr-csv', parsedData, mobileBoundaries, mobileLog);
     return { snapshotName: snapshotName as string, result };
 };
 
 export const listLocalDataSnapshots = async (): Promise<string[]> => {
+    if (isSandboxMode()) return [];
     const directory = getSnapshotDirectory();
     if (!directory?.exists) return [];
     pruneSnapshots(directory);
@@ -389,6 +409,7 @@ export const listLocalDataSnapshots = async (): Promise<string[]> => {
 };
 
 export const restoreLocalDataSnapshot = async (snapshotName: string): Promise<void> => {
+    assertPersonalWorkspace();
     addBreadcrumb('transfer:restore');
     void logInfo('Recovery snapshot restore started', {
         scope: 'transfer',
@@ -434,6 +455,7 @@ export const restoreLocalDataSnapshot = async (snapshotName: string): Promise<vo
 // One export path for both formats: the SAF/sharing dance below is identical,
 // only the filename, body and mime type differ.
 export const exportCurrentDataBackup = async (data: AppData, format: 'json' | 'csv' | 'tasknotes' = 'json'): Promise<void> => {
+    assertPersonalWorkspace();
     addBreadcrumb('transfer:export');
     const isCsv = format === 'csv';
     const isTaskNotes = format === 'tasknotes';

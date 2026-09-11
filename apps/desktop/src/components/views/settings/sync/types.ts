@@ -7,6 +7,14 @@ import type {
 } from '@mindwtr/core';
 
 export type SettingsSyncLabels = {
+    cancel: string;
+    sandboxWorkspace: string;
+    sandboxDescription: string;
+    sandboxSwitching: string;
+    sandboxSwitchFailed: string;
+    sandboxConfirmTitle: string;
+    sandboxConfirmDescription: string;
+    sandboxEnter: string;
     backup: string;
     backupDesc: string;
     importData: string;

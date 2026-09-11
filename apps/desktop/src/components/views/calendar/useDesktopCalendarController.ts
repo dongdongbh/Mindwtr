@@ -35,6 +35,7 @@ import {
     type Task,
     useTaskStore,
 } from '@mindwtr/core';
+import { getWorkspaceCache } from '../../../lib/workspace-cache';
 import {
     buildCalendarDayItems,
     buildTimedCalendarLayouts,
@@ -74,7 +75,7 @@ const CALENDAR_SHOW_SCHEDULED_KEY = 'mindwtr.calendar.showScheduled';
 const readShowCompletedPreference = (): boolean => {
     if (typeof window === 'undefined') return false;
     try {
-        return window.localStorage.getItem(CALENDAR_SHOW_COMPLETED_KEY) === 'true';
+        return getWorkspaceCache()?.getItem(CALENDAR_SHOW_COMPLETED_KEY) === 'true';
     } catch {
         return false;
     }
@@ -83,7 +84,7 @@ const readShowCompletedPreference = (): boolean => {
 const readShowScheduledPreference = (): boolean => {
     if (typeof window === 'undefined') return true;
     try {
-        return window.localStorage.getItem(CALENDAR_SHOW_SCHEDULED_KEY) !== 'false';
+        return getWorkspaceCache()?.getItem(CALENDAR_SHOW_SCHEDULED_KEY) !== 'false';
     } catch {
         return true;
     }
@@ -166,7 +167,7 @@ export function useDesktopCalendarController() {
         setShowCompleted((previous) => {
             const next = !previous;
             try {
-                window.localStorage.setItem(CALENDAR_SHOW_COMPLETED_KEY, String(next));
+                getWorkspaceCache()?.setItem(CALENDAR_SHOW_COMPLETED_KEY, String(next));
             } catch {
                 // A blocked storage quota must not stop the toggle from working.
             }
@@ -178,7 +179,7 @@ export function useDesktopCalendarController() {
         setShowScheduled((previous) => {
             const next = !previous;
             try {
-                window.localStorage.setItem(CALENDAR_SHOW_SCHEDULED_KEY, String(next));
+                getWorkspaceCache()?.setItem(CALENDAR_SHOW_SCHEDULED_KEY, String(next));
             } catch {
                 // A blocked storage quota must not stop the toggle from working.
             }

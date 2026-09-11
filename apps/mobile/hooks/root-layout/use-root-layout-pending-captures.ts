@@ -11,11 +11,12 @@ import { transcribePendingAudio } from '@/lib/watch-audio';
 // Drains background Shortcuts captures (#845) into the store on startup and
 // on every return to the foreground; the queue directory is empty on every
 // platform and flow that never enqueues, so this is a single stat call.
-export function useRootLayoutPendingCaptures({ dataReady }: { dataReady: boolean }) {
+export function useRootLayoutPendingCaptures({ dataReady, disabled = false }: { dataReady: boolean; disabled?: boolean }) {
     const runningRef = useRef(false);
     const pendingRef = useRef(false);
 
     const drainQueue = useCallback(async () => {
+        if (disabled) return;
         pendingRef.current = true;
         if (runningRef.current) return;
         runningRef.current = true;
@@ -52,16 +53,16 @@ export function useRootLayoutPendingCaptures({ dataReady }: { dataReady: boolean
             runningRef.current = false;
             if (pendingRef.current) void drainQueue();
         }
-    }, []);
+    }, [disabled]);
 
     useEffect(() => {
-        if (!dataReady) return;
+        if (!dataReady || disabled) return;
         void drainQueue();
         const subscription = AppState.addEventListener('change', (state) => {
             if (state === 'active') void drainQueue();
         });
         return () => subscription.remove();
-    }, [dataReady, drainQueue]);
+    }, [dataReady, disabled, drainQueue]);
 
     return drainQueue;
 }

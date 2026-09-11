@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, FlatList, Modal, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 import { router } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,6 +35,7 @@ import { SwipeableTaskItem, type TaskRowActions } from './swipeable-task-item';
 import { TaskEditModal } from './task-edit-modal';
 import { InboxProcessingModal } from './inbox-processing-modal';
 import { ErrorBoundary } from './ErrorBoundary';
+import { SandboxWorkspaceCue } from './sandbox-workspace-cue';
 import { fetchExternalCalendarEvents } from '../lib/external-calendar';
 import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 import { useLocalDayKey } from '@/hooks/use-local-day-key';
@@ -561,6 +562,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
             style={[styles.modalContainer, { backgroundColor: tc.bg }]}
         >
             <SafeAreaView style={[styles.modalContainer, { backgroundColor: tc.bg }]} edges={['top']}>
+                <SandboxWorkspaceCue />
                 <View style={[styles.header, { borderBottomColor: tc.border }]}>
                     <TouchableOpacity
                         onPress={onClose}

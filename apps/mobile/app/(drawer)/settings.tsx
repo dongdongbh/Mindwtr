@@ -17,6 +17,7 @@ import {
 } from 'lucide-react-native';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { isSandboxMode } from '@mindwtr/core';
 
 import { useMobileSyncBadge } from '@/hooks/use-mobile-sync-badge';
 import { useThemeColors } from '@/hooks/use-theme-colors';
@@ -40,8 +41,14 @@ import {
     UPDATE_BADGE_AVAILABLE_KEY,
 } from '@/components/settings/settings.constants';
 import { useSettingsLocalization, useSettingsScrollContent } from '@/components/settings/settings.hooks';
+import { SandboxSettingsScreen } from '@/components/settings/sandbox-settings-screen';
 
 export default function SettingsPage() {
+    if (isSandboxMode()) return <SandboxSettingsScreen />;
+    return <PersonalSettingsPage />;
+}
+
+function PersonalSettingsPage() {
     const router = useRouter();
     const tc = useThemeColors();
     const { t } = useSettingsLocalization();

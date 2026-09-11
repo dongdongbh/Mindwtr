@@ -9,6 +9,7 @@ import {
     PROJECTS_SIDEBAR_WIDTH_STORAGE_KEY,
     PROJECTS_WORKSPACE_MIN_WIDTH,
 } from '../../../constants/layout';
+import { getWorkspaceCache } from '../../../lib/workspace-cache';
 
 export {
     PROJECTS_SIDEBAR_COLLAPSED_WIDTH,
@@ -23,8 +24,7 @@ type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
 
 function resolveStorage(storage?: StorageLike | null): StorageLike | null {
     if (storage !== undefined) return storage ?? null;
-    if (typeof window === 'undefined') return null;
-    return window.localStorage;
+    return getWorkspaceCache();
 }
 
 export function getProjectsSidebarMaxWidth(containerWidth?: number) {

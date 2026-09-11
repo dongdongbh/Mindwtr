@@ -30,6 +30,7 @@ import {
   getUsedTaskTokens,
   hasTimeComponent,
   isSelectableProjectForTaskAssignment,
+  isSandboxMode,
   parseQuickAdd,
   normalizeFocusTaskLimit,
   resolveDefaultNewTaskAreaId,
@@ -727,7 +728,7 @@ export function QuickCaptureSheet({
     setSaving(true);
     try {
       try {
-        await createMobileRecoverySnapshot();
+        if (!isSandboxMode()) await createMobileRecoverySnapshot();
       } catch (error) {
         logCaptureError('Failed to create a recovery snapshot before bulk capture', error);
         showToast({
@@ -1043,6 +1044,15 @@ export function QuickCaptureSheet({
   }, [clearContextOptionsLoad]);
 
   const handleImportTextFile = useCallback(async () => {
+    if (isSandboxMode()) {
+      showToast({
+        title: t('common.notice'),
+        message: t('sandbox.unavailable'),
+        tone: 'warning',
+        durationMs: 4200,
+      });
+      return;
+    }
     try {
       const result = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,

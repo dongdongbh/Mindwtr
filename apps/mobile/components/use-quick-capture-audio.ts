@@ -12,6 +12,7 @@ import {
   DEFAULT_PROJECT_COLOR,
   buildTaskUpdatesFromSpeechResult,
   generateUUID,
+  isSandboxMode,
   findSelectableProjectByTitleAndArea,
   safeFormatDate,
   type AppSettings,
@@ -378,6 +379,15 @@ export function useQuickCaptureAudio({
   }, [onWarn, safeDeleteFile]);
 
   const startRecording = useCallback((): Promise<void> => {
+    if (isSandboxMode()) {
+      showToast({
+        title: t('common.notice'),
+        message: t('sandbox.unavailable'),
+        tone: 'warning',
+        durationMs: 4200,
+      });
+      return Promise.resolve();
+    }
     if (recording || recordingBusy || recordingStartOwnerRef.current !== null) return Promise.resolve();
     const session = getActiveSubmissionSession();
     if (session === null || !submissionCoordinator.isCurrent(session)) return Promise.resolve();
@@ -1058,7 +1068,7 @@ export function useQuickCaptureAudio({
   }, [submissionKey, visible]);
 
   useEffect(() => {
-    if (!visible || !autoRecord || recording || recordingBusy || automaticStartAttemptedRef.current) {
+    if (isSandboxMode() || !visible || !autoRecord || recording || recordingBusy || automaticStartAttemptedRef.current) {
       return undefined;
     }
     const handle = setTimeout(() => {

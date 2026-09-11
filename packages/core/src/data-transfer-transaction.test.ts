@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AppData } from './types';
+import { acquireWorkspaceTransitionLock } from './sandbox';
 import {
     runAfterStoreWriteLock,
     runDataTransferTransaction,
     runDataTransferTransactionWithoutSnapshot,
     runSerializedSyncDocumentWriteOperation,
+    waitForSyncDocumentOperationsIdle,
+    createSyncDocumentWriteAdmission,
 } from './data-transfer-transaction';
 
 const emptyData: AppData = {
@@ -18,6 +21,86 @@ const emptyData: AppData = {
 };
 
 describe('runDataTransferTransaction', () => {
+    it('carries a pre-transition restore reservation through the transaction', async () => {
+        const writeAdmission = createSyncDocumentWriteAdmission();
+        const release = acquireWorkspaceTransitionLock()!;
+        const persistData = vi.fn(async () => undefined);
+        try {
+            await runDataTransferTransactionWithoutSnapshot({
+                operation: 'restoreSnapshot',
+                writeAdmission,
+                flushPendingSave: async () => undefined,
+                getCurrentChangeAt: () => 3,
+                readCurrentData: async () => emptyData,
+                apply: () => ({ data: emptyData, result: undefined }),
+                persistData,
+                refreshData: async () => undefined,
+            });
+            expect(persistData).toHaveBeenCalledWith(emptyData);
+        } finally {
+            release();
+        }
+    });
+
+    it('honors a one-use reservation from an outer queue without admitting new writers', async () => {
+        const admission = createSyncDocumentWriteAdmission();
+        const release = acquireWorkspaceTransitionLock()!;
+        const persist = vi.fn(async () => undefined);
+        try {
+            expect(() => createSyncDocumentWriteAdmission()).toThrow('switching workspaces');
+            await runSerializedSyncDocumentWriteOperation(persist, admission);
+            expect(persist).toHaveBeenCalledOnce();
+            await expect(runSerializedSyncDocumentWriteOperation(persist, admission)).rejects.toThrow('already used');
+            await expect(runSerializedSyncDocumentWriteOperation(persist)).rejects.toThrow('switching workspaces');
+            expect(persist).toHaveBeenCalledOnce();
+        } finally {
+            release();
+        }
+    });
+
+    it('drains document writes admitted before a workspace transition', async () => {
+        let finishWrite!: () => void;
+        const pendingWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+        const persist = vi.fn(() => pendingWrite);
+        const write = runSerializedSyncDocumentWriteOperation(persist);
+        const release = acquireWorkspaceTransitionLock()!;
+        let drained = false;
+        const fence = waitForSyncDocumentOperationsIdle().then(() => { drained = true; });
+        try {
+            await Promise.resolve();
+            expect(persist).toHaveBeenCalledOnce();
+            expect(drained).toBe(false);
+            finishWrite();
+            await write;
+            await fence;
+            expect(drained).toBe(true);
+        } finally {
+            finishWrite();
+            await write;
+            release();
+        }
+    });
+
+    it('rejects an import that finishes preparation after the transition fence, and permits retry', async () => {
+        let finishPreparation!: () => void;
+        const preparation = new Promise<void>((resolve) => { finishPreparation = resolve; });
+        const persist = vi.fn(async () => undefined);
+        const lateImport = preparation.then(() => runSerializedSyncDocumentWriteOperation(persist));
+        const rejected = expect(lateImport).rejects.toThrow('switching workspaces');
+        const release = acquireWorkspaceTransitionLock()!;
+        try {
+            await waitForSyncDocumentOperationsIdle();
+            finishPreparation();
+            await rejected;
+            expect(persist).not.toHaveBeenCalled();
+        } finally {
+            finishPreparation();
+            release();
+        }
+        await runSerializedSyncDocumentWriteOperation(persist);
+        expect(persist).toHaveBeenCalledOnce();
+    });
+
     it('owns the ordered flush, read, apply, guard, snapshot, recheck, persist, and refresh transaction', async () => {
         const events: string[] = [];
         let changeReadCount = 0;

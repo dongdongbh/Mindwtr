@@ -33,7 +33,6 @@ import {
   recordUpdateReminderDismissed,
   recordUpdateReminderShown,
   setSha256HexProvider,
-  setStorageAdapter,
   setLogger,
   shouldCheckUpdateReminder,
   shouldShowAppAnnouncement,
@@ -42,12 +41,12 @@ import {
   translateWithFallback,
   useStartupPromptQueue,
   useTaskStore,
+  isSandboxMode,
   type AppAnnouncement,
   type AppAnnouncementAction,
   type StartupPromptDescriptor,
   type UserPromptState,
 } from '@mindwtr/core';
-import { mobileStorage } from '../lib/storage-adapter';
 import { mobileSha256Hex } from '../lib/sync-crypto-native';
 import { keepPersistentCaptureNotificationArmed } from '../lib/persistent-capture-notification';
 import { markStartupPhase } from '../lib/startup-profiler';
@@ -70,6 +69,8 @@ import { MobileOnboardingFlow } from '@/components/MobileOnboardingFlow';
 import { MobileAppLockGate } from '@/components/mobile-app-lock-gate';
 import { useIncomingUrl } from '@/hooks/use-incoming-url';
 import { PersistenceFailureBanner } from '@/components/persistence-failure-banner';
+import { MobileWorkspaceBootGate } from '@/components/mobile-workspace-boot-gate';
+import { MobileWorkspaceSwitchOverlay, SandboxWorkspaceBanner } from '@/components/sandbox-workspace-banner';
 import { applyAndroidSystemBars } from '@/lib/android-system-bars';
 import { isCloudKitAvailable } from '@/lib/cloudkit-sync';
 import {
@@ -321,21 +322,11 @@ const getViewBreadcrumb = (pathname: string | null): string | null => {
   return `view:${view}`;
 };
 
-// Initialize storage for mobile
-let storageInitError: Error | null = null;
-
 installCoreLoggerBridge();
 
 // Hermes has no crypto.subtle, so core's attachment integrity checks have nothing to
 // digest with until this is registered (see mobileSha256Hex).
 setSha256HexProvider(mobileSha256Hex);
-
-try {
-  setStorageAdapter(mobileStorage);
-} catch (e) {
-  storageInitError = e as Error;
-  void logError(e, { scope: 'app', extra: { message: 'Failed to initialize storage adapter' } });
-}
 
 // Keep splash visible until app is ready.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -358,6 +349,7 @@ function RootLayoutContent() {
 }
 
 function RootLayoutContentInner() {
+  const sandboxMode = isSandboxMode();
   const router = useRouter();
   const pathname = usePathname();
   const { url: incomingUrl, key: incomingUrlKey } = useIncomingUrl();
@@ -443,6 +435,7 @@ function RootLayoutContentInner() {
   }, []);
 
   const { requestSync } = useRootLayoutSyncEffects({
+    disabled: sandboxMode,
     resolveText,
     openNotificationsSettings,
     openSyncSettings,
@@ -455,14 +448,16 @@ function RootLayoutContentInner() {
     isExpoGo,
     isFossBuild,
     requestSync,
-    storageInitError,
+    sandboxMode,
+    storageInitError: null,
   });
   const isShellReady = themeReady && languageReady;
-  const isFirstPaintReady = isShellReady && (dataReady || Boolean(storageInitError));
+  const isFirstPaintReady = isShellReady && dataReady;
   const startupReadiness = useMemo(() => ({ canonicalDataReady, pathname }), [canonicalDataReady, pathname]);
 
   useRootLayoutNotificationOpenHandler({
     appReady: isFirstPaintReady,
+    disabled: sandboxMode,
     pathname,
     router,
   });
@@ -470,15 +465,16 @@ function RootLayoutContentInner() {
   // the app process; re-arm the persistent quick-capture notification (when
   // enabled) on start and on every return to the foreground (#819).
   useEffect(() => {
-    if (!languageReady || Platform.OS !== 'android') return;
+    if (sandboxMode || !languageReady || Platform.OS !== 'android') return;
     return keepPersistentCaptureNotificationArmed(() => ({
       title: resolveText('captureNotification.title', 'Quick capture'),
       text: resolveText('captureNotification.text', 'Tap to capture to your Inbox'),
       channelName: resolveText('captureNotification.channelName', 'Quick capture'),
     }));
-  }, [languageReady, resolveText]);
+  }, [languageReady, resolveText, sandboxMode]);
   useRootLayoutContextAutomation({
     dataReady,
+    disabled: sandboxMode,
     incomingUrl,
     incomingUrlKey,
     returnToBackground: returnContextAutomationToBackground,
@@ -486,6 +482,7 @@ function RootLayoutContentInner() {
   });
   useRootLayoutExternalCapture({
     dataReady,
+    disabled: sandboxMode,
     hasShareIntent,
     incomingUrl,
     incomingUrlKey,
@@ -499,9 +496,9 @@ function RootLayoutContentInner() {
     shareWebUrl: shareIntent?.webUrl,
     showToast,
   });
-  useRootLayoutPomodoro({ dataReady, resolveText });
-  const drainPendingCaptures = useRootLayoutPendingCaptures({ dataReady });
-  useRootLayoutWatch({ dataReady, language, onPendingCapture: drainPendingCaptures });
+  useRootLayoutPomodoro({ dataReady, disabled: sandboxMode, resolveText });
+  const drainPendingCaptures = useRootLayoutPendingCaptures({ dataReady, disabled: sandboxMode });
+  useRootLayoutWatch({ dataReady, disabled: sandboxMode, language, onPendingCapture: drainPendingCaptures });
 
   if (!firstRenderLogged.current) {
     firstRenderLogged.current = true;
@@ -517,10 +514,11 @@ function RootLayoutContentInner() {
   }, []);
 
   useEffect(() => {
+    if (sandboxMode) return;
     const breadcrumb = getViewBreadcrumb(pathname);
     if (!breadcrumb) return;
     addBreadcrumb(breadcrumb);
-  }, [pathname]);
+  }, [pathname, sandboxMode]);
 
   // Remember the screen the user is on so a reopen shortly after the OS kills
   // the app resumes there instead of resetting to Focus (#842).
@@ -528,10 +526,12 @@ function RootLayoutContentInner() {
   const routeProjectId = typeof globalSearchParams.projectId === 'string' ? globalSearchParams.projectId : undefined;
   const lastRouteRef = useRef<{ pathname: string; projectId?: string }>({ pathname });
   useEffect(() => {
+    if (sandboxMode) return;
     lastRouteRef.current = { pathname, projectId: routeProjectId };
     void persistLastRoute(pathname, routeProjectId ? { projectId: routeProjectId } : undefined);
-  }, [pathname, routeProjectId]);
+  }, [pathname, routeProjectId, sandboxMode]);
   useEffect(() => {
+    if (sandboxMode) return;
     // The snapshot timestamp must reflect when the session left the app, not
     // the last navigation — refresh it whenever the app goes to background.
     const subscription = AppState.addEventListener('change', (state) => {
@@ -540,7 +540,7 @@ function RootLayoutContentInner() {
       void persistLastRoute(lastPathname, projectId ? { projectId } : undefined);
     });
     return () => subscription.remove();
-  }, []);
+  }, [sandboxMode]);
 
   useEffect(() => {
     if (Platform.OS !== 'android' || isExpoGo) return;
@@ -569,6 +569,10 @@ function RootLayoutContentInner() {
   }, [language, settingsCalendarSystem, settingsDateFormat, settingsLanguage, settingsTimeFormat]);
 
   useEffect(() => {
+    if (sandboxMode) {
+      setAndroidInstallerSource('play-store');
+      return;
+    }
     if (Platform.OS !== 'android') {
       setAndroidInstallerSource('play-store');
       return;
@@ -593,9 +597,14 @@ function RootLayoutContentInner() {
     return () => {
       cancelled = true;
     };
-  }, [isFossBuild]);
+  }, [isFossBuild, sandboxMode]);
 
   useEffect(() => {
+    if (sandboxMode) {
+      setMobileOnboardingDismissed(true);
+      setMobileOnboardingDismissalLoaded(true);
+      return;
+    }
     let cancelled = false;
     readMobileOnboardingDismissed()
       .then((dismissed) => {
@@ -608,13 +617,13 @@ function RootLayoutContentInner() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sandboxMode]);
 
   // Startup prompts share one gate and open one at a time. The descriptors
   // below carry each prompt's own eligibility/present logic; the queue owns
   // precedence (onboarding > announcement > update > donation), the startup
   // delays, and session dismissal. See packages/core/src/startup-prompts.ts.
-  const startupPromptsEnabled = process.env.NODE_ENV !== 'test';
+  const startupPromptsEnabled = !sandboxMode && process.env.NODE_ENV !== 'test';
   const startupPromptGateOpen = isFirstPaintReady && mobileOnboardingDismissalLoaded;
   const startupPromptDescriptors = useMemo<StartupPromptDescriptor[]>(() => [
     {
@@ -1019,7 +1028,7 @@ function RootLayoutContentInner() {
   }, [isFirstPaintReady]);
 
   useEffect(() => {
-    if (!isFirstPaintReady) return undefined;
+    if (sandboxMode || !isFirstPaintReady) return undefined;
     let cancelled = false;
     // Today's activity is recorded first so the snapshot the donation and update
     // descriptors read already counts this launch. A failed read leaves the
@@ -1037,9 +1046,13 @@ function RootLayoutContentInner() {
     return () => {
       cancelled = true;
     };
-  }, [isFirstPaintReady]);
+  }, [isFirstPaintReady, sandboxMode]);
 
   useEffect(() => {
+    if (sandboxMode) {
+      setDonationPromptAllowed(false);
+      return;
+    }
     let cancelled = false;
     resolveMobileDonationPromptAllowed({ donationPromptEnabled, isExpoGo })
       .then((allowed) => {
@@ -1055,9 +1068,13 @@ function RootLayoutContentInner() {
     return () => {
       cancelled = true;
     };
-  }, [donationPromptEnabled, isExpoGo]);
+  }, [donationPromptEnabled, isExpoGo, sandboxMode]);
 
   useEffect(() => {
+    if (sandboxMode) {
+      setUpdateReminderAllowed(false);
+      return;
+    }
     let cancelled = false;
     resolveMobileUpdateReminderAllowed({ androidInstallerSource, isExpoGo, isFossBuild })
       .then((allowed) => {
@@ -1073,25 +1090,7 @@ function RootLayoutContentInner() {
     return () => {
       cancelled = true;
     };
-  }, [androidInstallerSource, isExpoGo, isFossBuild]);
-
-  if (storageInitError) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: tc.bg }}>
-        <View style={{ flex: 1, padding: 24, justifyContent: 'center' }}>
-          <Text style={{ fontSize: 20, fontWeight: '600', color: isDark ? '#e2e8f0' : '#0f172a', marginBottom: 12 }}>
-            Storage unavailable
-          </Text>
-          <Text style={{ fontSize: 14, color: isDark ? '#94a3b8' : '#475569', lineHeight: 20 }}>
-            Mindwtr could not initialize local storage, so changes won&apos;t be saved. Please restart the app or reinstall if the problem persists.
-          </Text>
-          <Text style={{ fontSize: 12, color: isDark ? '#64748b' : '#94a3b8', marginTop: 16 }}>
-            {storageInitError.message}
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  }, [androidInstallerSource, isExpoGo, isFossBuild, sandboxMode]);
 
   // Avoid mounting task screens against the empty default store before local hydration finishes.
   if (!isFirstPaintReady) {
@@ -1122,6 +1121,8 @@ function RootLayoutContentInner() {
           <MobileAppLockGate enabled={mobileAppLockEnabled}>
           <StartupReadinessContext.Provider value={startupReadiness}>
             <PersistenceFailureBanner />
+          <SandboxWorkspaceBanner />
+          <MobileWorkspaceSwitchOverlay />
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false, animation: 'none' }} />
             <Stack.Screen name="(drawer)" options={{ headerShown: false, animation: 'none' }} />
@@ -1199,8 +1200,8 @@ function RootLayoutContentInner() {
           </StartupReadinessContext.Provider>
         </MobileAppLockGate>
         <StatusBar
-          barStyle={isDark ? 'light-content' : 'dark-content'}
-          backgroundColor={tc.bg}
+          barStyle={sandboxMode ? 'dark-content' : (isDark ? 'light-content' : 'dark-content')}
+          backgroundColor={sandboxMode ? '#FEF3C7' : tc.bg}
         />
       </NavigationThemeProvider>
     </QuickCaptureProvider>
@@ -1209,14 +1210,16 @@ function RootLayoutContentInner() {
 
 export default function RootLayout() {
   return (
-    <ShareIntentProvider>
-      <ThemeProvider>
-        <LanguageProvider>
-          <ErrorBoundary>
-            <RootLayoutContent />
-          </ErrorBoundary>
-        </LanguageProvider>
-      </ThemeProvider>
-    </ShareIntentProvider>
+    <MobileWorkspaceBootGate>
+      <ShareIntentProvider>
+        <ThemeProvider>
+          <LanguageProvider>
+            <ErrorBoundary>
+              <RootLayoutContent />
+            </ErrorBoundary>
+          </LanguageProvider>
+        </ThemeProvider>
+      </ShareIntentProvider>
+    </MobileWorkspaceBootGate>
   );
 }

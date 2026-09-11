@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 
 // Device-local preference (P14): whether Quick Capture stays open after each
 // save so Enter chains straight into the next capture. Per-device UX state,

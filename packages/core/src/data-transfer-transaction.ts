@@ -2,10 +2,24 @@ import { ensureFreshLocalSyncSnapshot } from './sync-client-helpers';
 import { cloneAppData } from './sync-runtime-utils';
 import { createSerializedAsyncQueue } from './async-queue';
 import { markNextLoadAsDocumentReplacement } from './store-settings';
+import { isWorkspaceTransitionActive } from './sandbox';
 import type { AppData } from './types';
 
 const syncDocumentOperationQueue = createSerializedAsyncQueue();
 let activeDataTransferBarrier: Promise<void> | null = null;
+const writeAdmissionBrand = Symbol('sync-document-write-admission');
+export type SyncDocumentWriteAdmission = { readonly [writeAdmissionBrand]: true };
+const writeAdmissions = new WeakSet<SyncDocumentWriteAdmission>();
+
+/** Reserve admission before a platform's outer queue; consume once in the document lane. */
+export const createSyncDocumentWriteAdmission = (): SyncDocumentWriteAdmission => {
+    if (isWorkspaceTransitionActive()) {
+        throw new Error('Cannot write data while switching workspaces.');
+    }
+    const admission: SyncDocumentWriteAdmission = { [writeAdmissionBrand]: true };
+    writeAdmissions.add(admission);
+    return admission;
+};
 
 /**
  * Serializes operations that read and later replace the complete sync document.
@@ -16,6 +30,10 @@ let activeDataTransferBarrier: Promise<void> | null = null;
 export const runSerializedSyncDocumentOperation = <T>(
     operation: () => Promise<T> | T
 ): Promise<T> => syncDocumentOperationQueue.run(operation);
+
+/** Drain already-admitted sync/import/restore work before leaving this runtime. */
+export const waitForSyncDocumentOperationsIdle = (): Promise<void> =>
+    syncDocumentOperationQueue.run(() => undefined);
 
 export const runAfterStoreWriteLock = <T>(operation: () => Promise<T>): Promise<T> => {
     const barrier = activeDataTransferBarrier;
@@ -48,8 +66,24 @@ const runWithStoreWriteLock = <T>(operation: () => Promise<T>): Promise<T> => {
  * ordinary store actions until its read/replace window has finished.
  */
 export const runSerializedSyncDocumentWriteOperation = <T>(
-    operation: () => Promise<T>
-): Promise<T> => syncDocumentOperationQueue.run(() => runWithStoreWriteLock(operation));
+    operation: () => Promise<T>,
+    admission?: SyncDocumentWriteAdmission,
+): Promise<T> => {
+    // An import can still be reading a file when the user chooses sandbox.
+    // Reject its later apply before it joins the personal write queue. Writers
+    // admitted before the transition keep their place and drain normally.
+    try {
+        // A platform may already have admitted this write into an outer queue.
+        // Its drain must include that queue before awaiting our idle fence.
+        const ticket = admission ?? createSyncDocumentWriteAdmission();
+        if (!writeAdmissions.delete(ticket)) {
+            throw new Error('Document write admission is invalid or already used.');
+        }
+    } catch (error) {
+        return Promise.reject(error);
+    }
+    return syncDocumentOperationQueue.run(() => runWithStoreWriteLock(operation));
+};
 
 export type DataTransferStaleDetails = {
     currentChangeAt: number;
@@ -64,6 +98,8 @@ export type DataTransferApplication<TResult> = {
 
 export type DataTransferTransactionOptions<TResult> = {
     operation: string;
+    /** Already admitted by a platform outer queue that the workspace transition drains. */
+    writeAdmission?: SyncDocumentWriteAdmission;
     flushPendingSave: () => Promise<void>;
     getCurrentChangeAt: () => number;
     readCurrentData: () => Promise<AppData>;
@@ -136,7 +172,7 @@ export async function runDataTransferTransaction<TResult, TSnapshot>(
             result: application.result,
             snapshot,
         };
-    });
+    }, options.writeAdmission);
 }
 
 export const runDataTransferTransactionWithoutSnapshot = async <TResult>(

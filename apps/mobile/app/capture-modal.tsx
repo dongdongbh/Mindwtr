@@ -20,6 +20,7 @@ import {
   buildQuickAddPreviewEntries,
   createAIProvider,
   getUsedTaskTokens,
+  isSandboxMode,
   isSelectableProjectForTaskAssignment,
   parseQuickAdd,
   resolveDefaultNewTaskAreaId,
@@ -46,6 +47,7 @@ import { logError, logInfo } from '../lib/app-log';
 import { addHardwareBackPressListener, returnToPreviousApp } from '@/lib/hardware-back';
 import { showInvalidDateCommandToast } from '@/lib/quick-add-toast';
 import { ThemedAlertHost } from '@/components/themed-alert';
+import { SandboxWorkspaceCue } from '@/components/sandbox-workspace-cue';
 import { QuickAddPreview } from '@/components/QuickAddPreview';
 import type { CopilotPart } from '@/components/task-edit/use-task-edit-copilot';
 import { openTaskScreen, stashPendingCaptureTaskOpen } from '@/lib/task-meta-navigation';
@@ -171,7 +173,7 @@ const sanitizeInitialPropsParam = (
   const parsed = parseInitialPropsJson(value);
   const next: Partial<Task> = {};
 
-  const attachments = sanitizeInitialAttachments(parsed.attachments);
+  const attachments = isSandboxMode() ? undefined : sanitizeInitialAttachments(parsed.attachments);
   if (attachments) next.attachments = attachments;
 
   if (typeof parsed.description === 'string' && parsed.description.trim()) {
@@ -633,6 +635,7 @@ export default function CaptureScreen() {
         importantForAccessibility={pendingBulkLines ? 'no-hide-descendants' : 'auto'}
       >
         <View style={[styles.card, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+          <SandboxWorkspaceCue />
           <View style={styles.titleRow}>
             <Text style={[styles.title, { color: tc.text }]}>{t('nav.addTask')}</Text>
             <View style={styles.headerActions}>

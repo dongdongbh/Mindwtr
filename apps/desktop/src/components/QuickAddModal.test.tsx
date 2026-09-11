@@ -12,6 +12,12 @@ import { useUiStore } from '../store/ui-store';
 // for why the relative path (not a re-export) is used here.
 import { beginNotifyProfile, endNotifyProfile } from '../../../../packages/core/src/store-notify-profiler';
 
+const sandboxState = vi.hoisted(() => ({ enabled: false }));
+vi.mock('@mindwtr/core', async (importOriginal) => ({
+    ...await importOriginal<typeof import('@mindwtr/core')>(),
+    isSandboxMode: () => sandboxState.enabled,
+}));
+
 const tauriMocks = vi.hoisted(() => ({
     emitTo: vi.fn(async () => undefined),
     hide: vi.fn(async () => undefined),
@@ -96,6 +102,7 @@ const createImageClipboardData = (file: File) => ({
 });
 
 beforeEach(() => {
+    sandboxState.enabled = false;
     delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
     vi.clearAllMocks();
     act(() => {
@@ -124,6 +131,26 @@ beforeEach(() => {
 });
 
 describe('QuickAddModal', () => {
+    it('blocks sandbox audio and private-file capture before native access', async () => {
+        sandboxState.enabled = true;
+        renderQuickAddModal();
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add', {
+                detail: { captureMode: 'audio' },
+            }));
+        });
+        expect(screen.getByRole('button', { name: 'Audio' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Import .txt' })).toBeDisabled();
+        const input = screen.getByRole('combobox');
+        fireEvent.paste(input, {
+            clipboardData: createImageClipboardData(new File(['private image'], 'private.png', { type: 'image/png' })),
+        });
+        expect(await screen.findByText('Unavailable in sandbox')).toBeVisible();
+        expect(fsMocks.mkdir).not.toHaveBeenCalled();
+        expect(fsMocks.writeFile).not.toHaveBeenCalled();
+        expect(pathMocks.dataDir).not.toHaveBeenCalled();
+    });
+
     it('submits once and exposes a busy, non-dismissible state while saving', async () => {
         const deferred = createDeferred<{ success: true; id: string }>();
         const addTask = vi.fn(() => deferred.promise);

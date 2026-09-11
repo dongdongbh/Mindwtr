@@ -26,7 +26,7 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { shallow, useTaskStore, resolveFeatureFlags, safeFormatDate, tFallback, isAllowedInsecureUrl, formatTaskMovedMessage, isSyncFileLockUnavailableError } from '@mindwtr/core';
+import { isSandboxMode, shallow, useTaskStore, resolveFeatureFlags, safeFormatDate, tFallback, isAllowedInsecureUrl, formatTaskMovedMessage, isSyncFileLockUnavailableError } from '@mindwtr/core';
 import type { StoreActionResult, TaskStatus } from '@mindwtr/core';
 import { showUndoToast } from '../lib/undo-registry';
 import { useLanguage } from '../contexts/language-context';
@@ -39,6 +39,8 @@ import { SyncService } from '../lib/sync-service';
 import { SidebarAreaFilter } from './ui/SidebarAreaFilter';
 import { getCalendarTaskDragTaskId, hasCalendarTaskDragData } from '../lib/calendar-task-drag';
 import { stageCalendarDropLanding } from '../lib/calendar-view-params';
+import { SandboxBanner } from './sandbox/SandboxBanner';
+import { getWorkspaceCache } from '../lib/workspace-cache';
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -90,7 +92,7 @@ function createDefaultCollapsedSections(): Set<string> {
 function loadCollapsedSections(): Set<string> {
     if (typeof window === 'undefined') return new Set();
     try {
-        const raw = window.localStorage.getItem(SECTION_COLLAPSE_STORAGE_KEY);
+        const raw = getWorkspaceCache()?.getItem(SECTION_COLLAPSE_STORAGE_KEY);
         if (!raw) return createDefaultCollapsedSections();
         const parsed = JSON.parse(raw);
         return Array.isArray(parsed) ? new Set(parsed.filter((v): v is string => typeof v === 'string')) : createDefaultCollapsedSections();
@@ -102,13 +104,14 @@ function loadCollapsedSections(): Set<string> {
 function saveCollapsedSections(keys: Set<string>) {
     if (typeof window === 'undefined') return;
     try {
-        window.localStorage.setItem(SECTION_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(keys)));
+        getWorkspaceCache()?.setItem(SECTION_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(keys)));
     } catch {
         // storage unavailable — fall back to in-memory only
     }
 }
 
 export function Layout({ children, currentView, onViewChange, onOpenSyncSettings }: LayoutProps) {
+    const sandboxMode = isSandboxMode();
     const { tasks, projects, areas, settings, updateSettings, error, setError } = useTaskStore((state) => ({
         tasks: state.tasks,
         projects: state.projects,
@@ -224,7 +227,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     // Sync affordances disappear entirely while sync is off (#1001). `null`
     // means "not read yet"; keep the footer visible then so it doesn't blink
     // in a heartbeat later for the common sync-enabled case.
-    const syncOff = syncStatus.backend === 'off';
+    const syncOff = sandboxMode || syncStatus.backend === 'off';
     const syncFreshnessDotClass = syncBusy
         ? 'bg-info'
         : !isOnline
@@ -688,6 +691,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     }, [isCleartextNetworkUrl, t]);
 
     useEffect(() => {
+        if (sandboxMode) return;
         void SyncService.refreshSyncBackendStatus();
         // refreshSyncBackendStatus() runs at the end of every
         // commitProvenSyncConfiguration (sync-service.ts), so this
@@ -698,7 +702,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
             setSyncStatus(status);
             applyCleartextWarningFromConfiguration(SyncService.getLastKnownSyncSelection().configuration);
         });
-    }, [applyCleartextWarningFromConfiguration]);
+    }, [applyCleartextWarningFromConfiguration, sandboxMode]);
 
     useEffect(() => {
         if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -722,6 +726,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     }, [applyCleartextWarningFromConfiguration]);
 
     useEffect(() => {
+        if (sandboxMode) return;
         // Synchronous first-frame seed — no lock, no wait behind a sync cycle —
         // painted immediately, then corrected (usually a no-op) by the queued
         // read below once it resolves.
@@ -735,7 +740,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
             window.removeEventListener('storage', handleStorage);
             window.removeEventListener('focus', handleFocus);
         };
-    }, [applyCleartextWarningFromConfiguration, refreshCleartextSyncWarning]);
+    }, [applyCleartextWarningFromConfiguration, refreshCleartextSyncWarning, sandboxMode]);
 
     const handleAreaFilterChange = (selection: AreaFilterSelection) => {
         updateSettings({ filters: { ...(settings?.filters ?? {}), ...areaFilterSelectionToFilters(selection) } })
@@ -744,7 +749,11 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
 
 
     return (
-        <div className="flex h-screen overflow-hidden bg-background text-foreground">
+        <div className={cn(
+            "flex h-screen overflow-hidden bg-background text-foreground",
+            sandboxMode && "pt-10",
+        )}>
+            <SandboxBanner />
             <a
                 href="#main-content"
                 className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-3 focus:py-2 focus:rounded-md focus:bg-primary focus:text-primary-foreground"

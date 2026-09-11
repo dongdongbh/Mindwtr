@@ -37,6 +37,7 @@ type SharedIntentFile = {
 
 type UseRootLayoutExternalCaptureParams = {
     dataReady: boolean;
+    disabled?: boolean;
     hasShareIntent: boolean;
     incomingUrl: string | null;
     incomingUrlKey: number;
@@ -233,6 +234,7 @@ function resolveEntityOpenPath(kind: EntityOpenKind, id: string): { pathname: st
 
 export function useRootLayoutExternalCapture({
     dataReady,
+    disabled = false,
     hasShareIntent,
     incomingUrl,
     incomingUrlKey,
@@ -261,8 +263,9 @@ export function useRootLayoutExternalCapture({
     // there is no dedicated root-layout-startup file in this task's scope.
     // No-op (and no AsyncStorage read) when unsupported or off.
     useEffect(() => {
+        if (disabled) return;
         void syncAppSearchIndexingWithPreference();
-    }, []);
+    }, [disabled]);
 
     const openCaptureConfirmation = useCallback((payload: ShortcutCapturePayload) => {
         const tags = normalizeShortcutTags(payload.tags);
@@ -299,6 +302,7 @@ export function useRootLayoutExternalCapture({
     // least visible and diagnosable from the log.
     const lastShareErrorRef = useRef<string | null>(null);
     useEffect(() => {
+        if (disabled) return;
         if (!shareError || lastShareErrorRef.current === shareError) return;
         lastShareErrorRef.current = shareError;
         void logError(new Error(`Share intent failed: ${shareError}`), { scope: 'share-intent' });
@@ -307,9 +311,10 @@ export function useRootLayoutExternalCapture({
             message: resolveText('share.readFailed', 'Mindwtr could not read text, a URL, or a file from the shared item.'),
             tone: 'warning',
         });
-    }, [resolveText, shareError, showToast]);
+    }, [disabled, resolveText, shareError, showToast]);
 
     useEffect(() => {
+        if (disabled) return;
         if (!hasShareIntent) return;
         // Cold start: navigating before the root navigator and store are up
         // swallows the replace and the share dies silently (#1117). The provider
@@ -371,10 +376,10 @@ export function useRootLayoutExternalCapture({
                 resetShareIntent();
                 shareHandlingRef.current = false;
             });
-    }, [dataReady, hasShareIntent, resolveText, resetShareIntent, router, shareFiles, shareSubject, shareText, shareWebUrl, showToast]);
+    }, [dataReady, disabled, hasShareIntent, resolveText, resetShareIntent, router, shareFiles, shareSubject, shareText, shareWebUrl, showToast]);
 
     useEffect(() => {
-        if (!dataReady) return;
+        if (!dataReady || disabled) return;
         if (!incomingUrl) return;
         if (lastHandledKey.current === incomingUrlKey) return;
 
@@ -430,5 +435,5 @@ export function useRootLayoutExternalCapture({
             lastHandledKey.current = 0;
             void logError(error, { scope: 'shortcuts', extra: { url: incomingUrl } });
         }
-    }, [dataReady, incomingUrl, incomingUrlKey, resolveText, openCaptureConfirmation, router, showToast]);
+    }, [dataReady, disabled, incomingUrl, incomingUrlKey, resolveText, openCaptureConfirmation, router, showToast]);
 }

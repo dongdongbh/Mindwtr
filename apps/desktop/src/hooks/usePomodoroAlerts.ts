@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { resolveFeatureFlags, translateWithFallback, useTaskStore, type PomodoroAutoStartOptions, type PomodoroEvent } from '@mindwtr/core';
+import { isSandboxMode, resolveFeatureFlags, translateWithFallback, useTaskStore, type PomodoroAutoStartOptions, type PomodoroEvent } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { sendDesktopPomodoroCompletionAlert } from '../lib/pomodoro-alert';
 import { reconcilePomodoroSnapshot, usePomodoroStore } from '../store/pomodoro-store';
@@ -24,6 +24,7 @@ import { reconcilePomodoroSnapshot, usePomodoroStore } from '../store/pomodoro-s
  * settings, and defaults on; the OS notification permission is the outer gate.
  */
 export function usePomodoroAlerts(): void {
+    const personalServicesAllowed = !isSandboxMode();
     const pomodoroEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).pomodoro);
     const completionAlertEnabled = useTaskStore((state) => state.settings.gtd?.pomodoro?.completionAlert !== false);
     const autoStartBreaks = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartBreaks === true);
@@ -44,15 +45,15 @@ export function usePomodoroAlerts(): void {
     );
 
     useEffect(() => {
-        if (!pomodoroEnabled || !isRunning) return;
+        if (!personalServicesAllowed || !pomodoroEnabled || !isRunning) return;
         const intervalId = window.setInterval(() => {
             commitSnapshot((prev) => reconcilePomodoroSnapshot(prev, Date.now(), autoStartOptions));
         }, 1000);
         return () => window.clearInterval(intervalId);
-    }, [autoStartOptions, commitSnapshot, isRunning, pomodoroEnabled]);
+    }, [autoStartOptions, commitSnapshot, isRunning, personalServicesAllowed, pomodoroEnabled]);
 
     useEffect(() => {
-        if (!hasHydrated) return;
+        if (!personalServicesAllowed || !hasHydrated) return;
         const previous = previousEventRef.current;
         previousEventRef.current = lastEvent;
         // A session that ran out while the app was closed surfaces as the first
@@ -67,5 +68,5 @@ export function usePomodoroAlerts(): void {
             translateWithFallback(t, 'pomodoro.title', 'Pomodoro Focus'),
             message
         );
-    }, [completionAlertEnabled, hasHydrated, lastEvent, t]);
+    }, [completionAlertEnabled, hasHydrated, lastEvent, personalServicesAllowed, t]);
 }

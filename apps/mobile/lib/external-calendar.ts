@@ -4,6 +4,7 @@ import * as Calendar from 'expo-calendar';
 import {
     expandCategoryCalendars,
     generateUUID,
+    isSandboxMode,
     isMindwtrMirrorCalendar,
     mergeExternalCalendarSources,
     normalizeExternalCalendarColor,
@@ -105,13 +106,15 @@ function getSystemCalendarSourceId(calendarId: string): string {
 }
 
 export function canOpenExternalCalendarEvent(event: ExternalCalendarEvent): boolean {
-    return Platform.OS !== 'web'
+    return !isSandboxMode()
+        && Platform.OS !== 'web'
         && event.sourceId.startsWith(`${SYSTEM_CALENDAR_SOURCE_PREFIX}:`)
         && typeof event.nativeEventId === 'string'
         && event.nativeEventId.trim().length > 0;
 }
 
 export async function openExternalCalendarEvent(event: ExternalCalendarEvent): Promise<boolean> {
+    if (isSandboxMode()) return false;
     if (!canOpenExternalCalendarEvent(event)) return false;
 
     const params = {
@@ -147,6 +150,7 @@ function toDateSafe(value: unknown): Date | null {
 }
 
 export async function getExternalCalendars(): Promise<ExternalCalendarSubscription[]> {
+    if (isSandboxMode()) return [];
     const raw = await AsyncStorage.getItem(EXTERNAL_CALENDARS_KEY);
     const parsed = safeJsonParse<ExternalCalendarSubscription[]>(raw, []);
     return parsed
@@ -162,6 +166,7 @@ export async function getExternalCalendars(): Promise<ExternalCalendarSubscripti
 }
 
 export async function saveExternalCalendars(calendars: ExternalCalendarSubscription[]): Promise<void> {
+    if (isSandboxMode()) return;
     const sanitized = calendars
         .map((c) => ({
             id: c.id || generateUUID(),
@@ -175,17 +180,20 @@ export async function saveExternalCalendars(calendars: ExternalCalendarSubscript
 }
 
 export async function getSystemCalendarSettings(): Promise<SystemCalendarSettings> {
+    if (isSandboxMode()) return normalizeSystemCalendarSettings(null);
     const raw = await AsyncStorage.getItem(SYSTEM_CALENDAR_SETTINGS_KEY);
     const parsed = safeJsonParse<Partial<SystemCalendarSettings> | null>(raw, null);
     return normalizeSystemCalendarSettings(parsed);
 }
 
 export async function saveSystemCalendarSettings(settings: SystemCalendarSettings): Promise<void> {
+    if (isSandboxMode()) return;
     const sanitized = normalizeSystemCalendarSettings(settings);
     await AsyncStorage.setItem(SYSTEM_CALENDAR_SETTINGS_KEY, JSON.stringify(sanitized));
 }
 
 export async function getSystemCalendarPermissionStatus(): Promise<SystemCalendarPermissionStatus> {
+    if (isSandboxMode()) return 'denied';
     if (Platform.OS === 'web') return 'denied';
     try {
         const result = await Calendar.getCalendarPermissionsAsync();
@@ -196,6 +204,7 @@ export async function getSystemCalendarPermissionStatus(): Promise<SystemCalenda
 }
 
 export async function requestSystemCalendarPermission(): Promise<SystemCalendarPermissionStatus> {
+    if (isSandboxMode()) return 'denied';
     if (Platform.OS === 'web') return 'denied';
     try {
         const result = await Calendar.requestCalendarPermissionsAsync();
@@ -206,6 +215,7 @@ export async function requestSystemCalendarPermission(): Promise<SystemCalendarP
 }
 
 export async function getSystemCalendars(): Promise<SystemCalendarInfo[]> {
+    if (isSandboxMode()) return [];
     if (Platform.OS === 'web') return [];
     const permission = await getSystemCalendarPermissionStatus();
     if (permission !== 'granted') return [];
@@ -535,6 +545,7 @@ export async function fetchExternalCalendarEvents(
     calendars: ExternalCalendarSubscription[];
     events: ExternalCalendarEvent[];
 }> {
+    if (isSandboxMode()) return { calendars: [], events: [] };
     const { signal, cleanup } = createLinkedAbortSignal(options.signal, options.timeoutMs);
 
     try {

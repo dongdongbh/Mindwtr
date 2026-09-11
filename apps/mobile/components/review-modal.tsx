@@ -37,6 +37,7 @@ import {
     useReviewModalController,
 } from './review/useReviewModalController';
 import { styles } from './review-modal.styles';
+import { SandboxWorkspaceCue } from './sandbox-workspace-cue';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 
 interface ReviewModalProps {
@@ -885,6 +886,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={handleClose}>
             <GestureHandlerRootView style={{ flex: 1 }}>
                 <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top', 'bottom']}>
+                    <SandboxWorkspaceCue />
                     <View style={[styles.header, { borderBottomColor: tc.border }]}>
                         <TouchableOpacity
                             onPress={handleClose}

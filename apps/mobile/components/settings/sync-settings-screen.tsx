@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { Alert, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Beaker } from 'lucide-react-native';
 
 import {
     isSettingsSyncGroupEnabled,
@@ -62,8 +63,10 @@ import {
     type SettingsScreenMode,
 } from './use-sync-settings-store-slice';
 import { useSyncSettingsTransportActions, type CloudKitAccountStatus } from './use-sync-settings-transport-actions';
-import { SettingsGuideLink, SettingsTopBar } from './settings.shell';
+import { MenuItem, SettingsGuideLink, SettingsTopBar } from './settings.shell';
 import { styles } from './settings.styles';
+import { reloadIntoMobileSandbox } from '@/lib/sandbox-workspace';
+import { requestMobileSandboxEntry } from './sandbox-entry-confirmation';
 
 const DATA_AND_SYNC_GUIDE_URL = 'https://docs.mindwtr.app/data-sync/';
 const IMPORT_GUIDE_URL = 'https://docs.mindwtr.app/import/';
@@ -121,6 +124,9 @@ function SyncSettingsView({
     const [recoverySnapshots, setRecoverySnapshots] = useState<string[]>([]);
     const [recoverySnapshotsOpen, setRecoverySnapshotsOpen] = useState(false);
     const [isLoadingRecoverySnapshots, setIsLoadingRecoverySnapshots] = useState(false);
+    const [sandboxBusy, setSandboxBusy] = useState(false);
+    const [sandboxFailed, setSandboxFailed] = useState(false);
+    const [appleRemindersBusy, setAppleRemindersBusy] = useState(false);
     const { refreshSyncBadgeConfig } = useMobileSyncBadge();
 
     const syncPreferences = settings.syncPreferences ?? {};
@@ -506,6 +512,13 @@ function SyncSettingsView({
         t,
     });
     const isGettingStartedActionBusy = gettingStartedBusy || isBackupBusy || isSyncing;
+    const sandboxEntryBlocked = sandboxBusy
+        || isBackupBusy
+        || isSyncing
+        || gettingStartedBusy
+        || appleRemindersBusy;
+    const sandboxEntryBlockedRef = React.useRef(sandboxEntryBlocked);
+    sandboxEntryBlockedRef.current = sandboxEntryBlocked;
     // Encryption covers the backends Mindwtr writes whole blobs to; the self-hosted
     // cloud and CloudKit keep structured server-side state and are out of scope.
     const isEncryptionCapableBackend = syncBackend === 'file'
@@ -930,6 +943,7 @@ function SyncSettingsView({
                         <AppleRemindersImportSection
                             addTask={addTask}
                             disabled={isBackupBusy || isSyncing}
+                            onBusyChange={setAppleRemindersBusy}
                             showToast={showToast}
                             tr={tr}
                             tc={tc}
@@ -953,6 +967,26 @@ function SyncSettingsView({
                                     </CompactText>
                                 </TouchableOpacity>
                             </SettingRow>
+                        </View>
+
+                        <View style={[styles.menuCard, { backgroundColor: tc.cardBg, marginTop: 16 }]}>
+                            <MenuItem
+                                title={sandboxBusy ? t('sandbox.switching') : t('sandbox.open')}
+                                description={sandboxFailed ? t('sandbox.switchFailed') : t('sandbox.description')}
+                                icon={Beaker}
+                                isLast
+                                disabled={sandboxEntryBlocked}
+                                onPress={() => {
+                                    requestMobileSandboxEntry(t, () => {
+                                        setSandboxBusy(true);
+                                        setSandboxFailed(false);
+                                        void reloadIntoMobileSandbox().catch(() => {
+                                            setSandboxBusy(false);
+                                            setSandboxFailed(true);
+                                        });
+                                    }, () => sandboxEntryBlockedRef.current);
+                                }}
+                            />
                         </View>
 
                         <SyncDiagnosticsCard

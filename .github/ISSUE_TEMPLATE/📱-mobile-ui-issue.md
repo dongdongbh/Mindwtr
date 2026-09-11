@@ -46,6 +46,8 @@ What did you expect instead?
 ### 📸 Screenshots / Screen Recording
 Please attach screenshots or a short recording if possible.
 
+To record with fictional tasks instead of private content, choose **Settings → Data → Open sandbox** near Diagnostics, then confirm **Enter sandbox**. Use **Exit** in the sandbox banner to return to your personal workspace. This is optional; some issues need your own data to reproduce. See [Record with sample data](https://docs.mindwtr.app/data-sync/diagnostics-logs#record-with-sample-data).
+
 ### 📎 Extra Device Info (optional but helpful)
 - Display size / font scale:
 - Orientation:

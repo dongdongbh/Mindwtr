@@ -67,6 +67,7 @@ vi.mock('@mindwtr/core', async () => {
     return areaId ? { areaId } : undefined;
   },
   getUsedTaskTokens: vi.fn(() => []),
+  isSandboxMode: () => false,
   isNaturalLanguageDatesEnabled: (settings?: { gtd?: { naturalLanguageDates?: boolean } } | null) =>
     settings?.gtd?.naturalLanguageDates !== false,
   isSelectableProjectForTaskAssignment: vi.fn((project: any) => (

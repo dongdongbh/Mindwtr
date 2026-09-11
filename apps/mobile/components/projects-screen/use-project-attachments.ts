@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import {
   Attachment,
   generateUUID,
+  isSandboxMode,
   normalizeLinkAttachmentInput,
   Project,
   useTaskStore,
@@ -45,6 +46,9 @@ export function useProjectAttachments({
   const [linkModalVisible, setLinkModalVisible] = useState(false);
   const [imagePreviewAttachment, setImagePreviewAttachment] = useState<Attachment | null>(null);
   const [linkInput, setLinkInput] = useState('');
+  const showSandboxUnavailable = useCallback(() => {
+    Alert.alert(t('attachments.title'), t('sandbox.unavailable'));
+  }, [t]);
 
   const getMutableSelectedProject = useCallback((expectedId?: string): Project | null => {
     const selected = selectedProjectRef.current;
@@ -162,6 +166,10 @@ export function useProjectAttachments({
   }, []);
 
   const openAttachment = useCallback(async (attachment: Attachment) => {
+    if (isSandboxMode()) {
+      showSandboxUnavailable();
+      return;
+    }
     if (!selectedProject) return;
     const resolution = await resolveProjectAttachment(selectedProject.id, attachment);
     if (resolution.status !== 'available') {
@@ -204,7 +212,7 @@ export function useProjectAttachments({
     } else {
       Linking.openURL(resolved.uri).catch((error) => logProjectError('Failed to open attachment URL', error));
     }
-  }, [isImageAttachment, logProjectError, resolveProjectAttachment, selectedProject, showAttachmentResolutionError, t]);
+  }, [isImageAttachment, logProjectError, resolveProjectAttachment, selectedProject, showAttachmentResolutionError, showSandboxUnavailable, t]);
 
   useEffect(() => {
     if (!selectedProject) {
@@ -217,12 +225,20 @@ export function useProjectAttachments({
   }, [selectedProject]);
 
   const downloadAttachment = useCallback(async (attachment: Attachment) => {
+    if (isSandboxMode()) {
+      showSandboxUnavailable();
+      return;
+    }
     if (!selectedProject) return;
     const resolution = await resolveProjectAttachment(selectedProject.id, attachment);
     showAttachmentResolutionError(resolution);
-  }, [resolveProjectAttachment, selectedProject, showAttachmentResolutionError]);
+  }, [resolveProjectAttachment, selectedProject, showAttachmentResolutionError, showSandboxUnavailable]);
 
   const addProjectFileAttachment = useCallback(async () => {
+    if (isSandboxMode()) {
+      showSandboxUnavailable();
+      return;
+    }
     const projectAtStart = getMutableSelectedProject();
     if (!projectAtStart) return;
     const result = await DocumentPicker.getDocumentAsync({
@@ -272,9 +288,13 @@ export function useProjectAttachments({
     const next = [...(current.attachments || []), cached];
     updateProject(current.id, { attachments: next });
     setSelectedProject({ ...current, attachments: next });
-  }, [getMutableSelectedProject, setSelectedProject, t, updateProject]);
+  }, [getMutableSelectedProject, setSelectedProject, showSandboxUnavailable, t, updateProject]);
 
   const confirmAddProjectLink = useCallback(() => {
+    if (isSandboxMode()) {
+      showSandboxUnavailable();
+      return;
+    }
     const current = getMutableSelectedProject();
     if (!current) return;
     const normalized = normalizeLinkAttachmentInput(linkInput);
@@ -293,7 +313,7 @@ export function useProjectAttachments({
     setSelectedProject({ ...current, attachments: next });
     setLinkModalVisible(false);
     setLinkInput('');
-  }, [getMutableSelectedProject, linkInput, setSelectedProject, updateProject]);
+  }, [getMutableSelectedProject, linkInput, setSelectedProject, showSandboxUnavailable, updateProject]);
 
   const removeProjectAttachment = useCallback((id: string) => {
     const current = getMutableSelectedProject();

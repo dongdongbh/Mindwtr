@@ -18,6 +18,7 @@ type RouterLike = {
 
 type UseRootLayoutNotificationOpenHandlerParams = {
     appReady: boolean;
+    disabled?: boolean;
     pathname?: string | null;
     router: RouterLike;
 };
@@ -36,6 +37,7 @@ function isDailyReviewOpen(kind: string | undefined, notificationId: string): bo
 
 export function useRootLayoutNotificationOpenHandler({
     appReady,
+    disabled = false,
     pathname,
     router,
 }: UseRootLayoutNotificationOpenHandlerParams) {
@@ -50,7 +52,7 @@ export function useRootLayoutNotificationOpenHandler({
     const handledCompleteActionsRef = useRef(new Set<string>());
     const taskOpenSequenceRef = useRef(0);
     const normalizedPathname = useMemo(() => String(pathname || '').trim(), [pathname]);
-    const canNavigate = appReady && normalizedPathname.length > 0;
+    const canNavigate = !disabled && appReady && normalizedPathname.length > 0;
 
     const routeNotificationOpen = useCallback((payload: {
         notificationId?: string;
@@ -147,6 +149,7 @@ export function useRootLayoutNotificationOpenHandler({
     }, [canNavigate, routeNotificationOpen]);
 
     useEffect(() => {
+        if (disabled) return;
         setNotificationOpenHandler(handleNotificationOpen);
         void consumePendingNotificationOpenPayload().then((payload) => {
             if (!payload) return;
@@ -159,12 +162,12 @@ export function useRootLayoutNotificationOpenHandler({
         return () => {
             setNotificationOpenHandler(null);
         };
-    }, [handleNotificationOpen]);
+    }, [disabled, handleNotificationOpen]);
 
     useEffect(() => {
-        if (!canNavigate || !pendingPayloadRef.current) return;
+        if (disabled || !canNavigate || !pendingPayloadRef.current) return;
         const pendingPayload = pendingPayloadRef.current;
         pendingPayloadRef.current = null;
         routeNotificationOpen(pendingPayload);
-    }, [canNavigate, routeNotificationOpen]);
+    }, [canNavigate, disabled, routeNotificationOpen]);
 }

@@ -165,6 +165,8 @@ const coreMocks = vi.hoisted(() => ({
   webdavDeleteFileVersioned: vi.fn(),
   cloudDeleteFile: vi.fn(),
   getInMemoryAppDataSnapshot: vi.fn(),
+  isSandboxMode: vi.fn(() => false),
+  isWorkspaceTransitionActive: vi.fn(() => false),
   useTaskStoreGetState: vi.fn(),
   useTaskStoreSetState: vi.fn(),
 }));
@@ -295,6 +297,8 @@ vi.mock('@mindwtr/core', async () => {
     webdavDeleteFileVersioned: coreMocks.webdavDeleteFileVersioned,
     cloudDeleteFile: coreMocks.cloudDeleteFile,
     getInMemoryAppDataSnapshot: coreMocks.getInMemoryAppDataSnapshot,
+    isSandboxMode: coreMocks.isSandboxMode,
+    isWorkspaceTransitionActive: coreMocks.isWorkspaceTransitionActive,
     useTaskStore: {
       getState: coreMocks.useTaskStoreGetState,
       setState: coreMocks.useTaskStoreSetState,
@@ -311,6 +315,8 @@ describe('mobile sync-service runtime', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    coreMocks.isSandboxMode.mockReturnValue(false);
+    coreMocks.isWorkspaceTransitionActive.mockReturnValue(false);
     (Platform as { OS: string }).OS = 'web';
 
     storeStateRef.current = {
@@ -438,6 +444,45 @@ describe('mobile sync-service runtime', () => {
 
     syncServiceModule.__mobileSyncTestUtils.reset();
     __resetSyncEncryptionStateForTests();
+  });
+
+  it('does not read personal sync configuration in sandbox', async () => {
+    coreMocks.isSandboxMode.mockReturnValue(true);
+
+    await expect(syncServiceModule.getMobileSyncConfigurationStatus()).resolves.toEqual({
+      backend: 'off',
+      configured: false,
+    });
+
+    expect(asyncStorageMocks.getItem).not.toHaveBeenCalled();
+    expect(dropboxAuthMocks.isDropboxConnected).not.toHaveBeenCalled();
+  });
+
+  it('blocks new sync admission while a workspace transition is active', async () => {
+    coreMocks.isWorkspaceTransitionActive.mockReturnValue(true);
+
+    await expect(syncServiceModule.performMobileSync(undefined, { manual: true })).resolves.toEqual({
+      success: true,
+      skipped: 'disabled',
+    });
+
+    expect(asyncStorageMocks.getItem).not.toHaveBeenCalled();
+    expect(coreMocks.performSyncCycle).not.toHaveBeenCalled();
+  });
+
+  it('waits for queued orchestrator work even when display activity is idle', async () => {
+    syncServiceModule.__mobileSyncTestUtils.queueFollowUpForTests();
+    let idleResolved = false;
+    const idle = syncServiceModule.waitForMobileSyncIdle().then(() => {
+      idleResolved = true;
+    });
+
+    await Promise.resolve();
+    expect(idleResolved).toBe(false);
+
+    syncServiceModule.__mobileSyncTestUtils.clearFollowUpForTests();
+    await idle;
+    expect(idleResolved).toBe(true);
   });
 
   it('performs no remote read or plaintext write when encryption state is unreadable', async () => {

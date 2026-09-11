@@ -317,6 +317,14 @@ export const SETTINGS_LABEL_KEYS = [
     'visible',
     'hidden',
     'manage',
+    'cancel',
+    'sandboxWorkspace',
+    'sandboxDescription',
+    'sandboxSwitching',
+    'sandboxSwitchFailed',
+    'sandboxConfirmTitle',
+    'sandboxConfirmDescription',
+    'sandboxEnter',
     'backup',
     'backupDesc',
     'importData',
@@ -697,6 +705,14 @@ export type SettingsLabels = Record<(typeof SETTINGS_LABEL_KEYS)[number], string
 // `settings.<key>` — either because the string is shared with another part
 // of the app (e.g. `back` -> `common.back`) or core spells it differently.
 export const labelKeyOverrides: Partial<Record<keyof SettingsLabels, string>> = {
+    cancel: 'common.cancel',
+    sandboxWorkspace: 'sandbox.open',
+    sandboxDescription: 'sandbox.description',
+    sandboxSwitching: 'sandbox.switching',
+    sandboxSwitchFailed: 'sandbox.switchFailed',
+    sandboxConfirmTitle: 'sandbox.confirmTitle',
+    sandboxConfirmDescription: 'sandbox.confirmDescription',
+    sandboxEnter: 'sandbox.enter',
     back: 'common.back',
     // Sidebar-view checkboxes reuse the sidebar's own labels so every locale
     // is covered without new strings.

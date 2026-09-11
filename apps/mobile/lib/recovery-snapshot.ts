@@ -2,6 +2,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import {
     countActiveRecords,
     flushPendingSave,
+    isSandboxMode,
     serializeBackupData,
     useTaskStore,
     type AppData,
@@ -30,6 +31,7 @@ const normalizeBaseUri = (value?: string | null): string | null => {
     return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
 };
 export const getSnapshotDirectory = (): Directory | null => {
+    if (isSandboxMode()) return null;
     const baseUri = normalizeBaseUri(Paths.document?.uri ?? FileSystem.documentDirectory);
     if (!baseUri) return null;
     return new Directory(`${baseUri}/${SNAPSHOT_DIR_NAME}`);
@@ -44,6 +46,7 @@ const buildSnapshotFileName = (date: Date = new Date(), collisionIndex = 0): str
     return `data.${datePart}T${safeTime}${collisionSuffix}.snapshot.json`;
 };
 export const listSnapshotEntries = (directory: Directory): Array<{ name: string; uri: string }> => {
+    if (isSandboxMode()) return [];
     if (!directory.exists) return [];
     return directory
         .list()
@@ -67,6 +70,7 @@ export const listSnapshotEntries = (directory: Directory): Array<{ name: string;
         .map(({ name, uri }) => ({ name, uri }));
 };
 export const pruneSnapshots = (directory: Directory): void => {
+    if (isSandboxMode()) return;
     const entries = listSnapshotEntries(directory);
     entries.slice(MAX_LOCAL_SNAPSHOTS).forEach((entry) => {
         try {
@@ -90,6 +94,7 @@ export const toCountExtra = (data: AppData): Record<string, string> => {
     };
 };
 export const saveCurrentDataSnapshot = async (data: AppData): Promise<string> => {
+    if (isSandboxMode()) throw new Error('Unavailable in sandbox');
     void logInfo('Recovery snapshot started', {
         scope: 'transfer',
         extra: {
@@ -141,6 +146,7 @@ export const saveCurrentDataSnapshot = async (data: AppData): Promise<string> =>
     return fileName;
 };
 export const createMobileRecoverySnapshot = async (): Promise<string> => {
+    if (isSandboxMode()) throw new Error('Unavailable in sandbox');
     await flushPendingSave();
     const localSnapshotChangeAt = getLocalChangeAt();
     const currentData = await mobileStorage.getData();

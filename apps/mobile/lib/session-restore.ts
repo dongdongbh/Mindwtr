@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 import { shouldRestoreLastView } from '@mindwtr/core';
 
 // Device-local UI-session state (P14): which screen was open and when it was

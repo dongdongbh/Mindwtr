@@ -50,6 +50,8 @@ export const allowedEnglishMirrorTerms = [
 
 export const allowedEnglishMirrorKeysByLocale: Record<string, readonly string[]> = {
     de: [
+        // "Sandbox" is also the localized workspace name in these UI dictionaries.
+        'sandbox.label',
         // German shares these labels with English identically: loanwords and
         // internationalisms already standard in German UI copy ("Status", "Details",
         // "Version", "System", "Port", "Standard", "Optional", "Parallel", "Routine",
@@ -102,7 +104,11 @@ export const allowedEnglishMirrorKeysByLocale: Record<string, readonly string[]>
         'settings.speechProviderParakeet',
     ],
     it: [
+        'sandbox.label',
         'keybindings.style.standard',
+    ],
+    nl: [
+        'sandbox.label',
     ],
     ko: [
         // Korean UI writes the e-ink theme in Latin.

@@ -31,6 +31,7 @@ type UseRootLayoutStartupParams = {
     isExpoGo: boolean;
     isFossBuild: boolean;
     requestSync: (minIntervalMs?: number) => void;
+    sandboxMode?: boolean;
     storageInitError: Error | null;
 };
 
@@ -74,6 +75,7 @@ export function useRootLayoutStartup({
     isExpoGo,
     isFossBuild,
     requestSync,
+    sandboxMode = false,
     storageInitError,
 }: UseRootLayoutStartupParams) {
     const [dataReady, setDataReady] = useState(false);
@@ -116,18 +118,20 @@ export function useRootLayoutStartup({
                     await store.fetchData({ silent: true });
                     canonicalFetchCompleted = true;
                 });
-                void measureStartupPhase('js.store.backup_snapshot.read', async () =>
-                    getMobileStartupSnapshotFromBackup()
-                ).then((startupSnapshot) => {
-                    if (cancelled || canonicalFetchCompleted || !hasRenderableStartupSnapshot(startupSnapshot)) {
-                        return;
-                    }
-                    applyStartupSnapshotToStore(startupSnapshot);
-                    setDataReady(true);
-                    markStartupPhase('js.store.backup_snapshot.applied');
-                }).catch((error) => {
-                    void logError(error, { scope: 'app', extra: { message: 'Failed to read startup backup snapshot' } });
-                });
+                if (!sandboxMode) {
+                    void measureStartupPhase('js.store.backup_snapshot.read', async () =>
+                        getMobileStartupSnapshotFromBackup()
+                    ).then((startupSnapshot) => {
+                        if (cancelled || canonicalFetchCompleted || !hasRenderableStartupSnapshot(startupSnapshot)) {
+                            return;
+                        }
+                        applyStartupSnapshotToStore(startupSnapshot);
+                        setDataReady(true);
+                        markStartupPhase('js.store.backup_snapshot.applied');
+                    }).catch((error) => {
+                        void logError(error, { scope: 'app', extra: { message: 'Failed to read startup backup snapshot' } });
+                    });
+                }
                 await fetchPromise;
                 if (cancelled) return;
                 const loadedStore = useTaskStore.getState();
@@ -138,6 +142,16 @@ export function useRootLayoutStartup({
                 markStartupPhase('js.store.fetch_data.applied');
                 if (!startupContextLogged.current) {
                     startupContextLogged.current = true;
+                    if (sandboxMode) {
+                        void logInfo('Sandbox workspace bootstrapped', {
+                            scope: 'sandbox',
+                            force: true,
+                            extra: {
+                                releaseCheck: '1.3.0/sandbox-workspace',
+                                workspace: 'sandbox',
+                            },
+                        }).catch(() => {});
+                    } else {
                     const rawBackend = await AsyncStorage.getItem(SYNC_BACKEND_KEY);
                     const syncBackend = coerceSupportedBackend(resolveBackend(rawBackend), supportsNativeICloudSync());
                     const analyticsContext = await getMobileStartupAnalyticsContext(
@@ -173,8 +187,9 @@ export function useRootLayoutStartup({
                             },
                         }).catch(() => {});
                     }
+                    }
                 }
-                if (analyticsHeartbeatUrl) {
+                if (!sandboxMode && analyticsHeartbeatUrl) {
                     try {
                         await measureStartupPhase('js.analytics.heartbeat', async () => {
                             await sendMobileDailyHeartbeat(
@@ -192,24 +207,26 @@ export function useRootLayoutStartup({
                         // Keep analytics heartbeat failures silent on mobile.
                     }
                 }
-                if (hasActiveMobileNotificationFeature(loadedStore.settings)) {
+                if (!sandboxMode && hasActiveMobileNotificationFeature(loadedStore.settings)) {
                     startMobileNotifications().catch((error) => {
                         void logError(error, { scope: 'app' });
                     });
                 }
-                updateMobileWidgetFromStore().catch((error) => {
-                    void logError(error, { scope: 'app' });
-                });
-                if (widgetRefreshTimer.current) {
-                    clearTimeout(widgetRefreshTimer.current);
-                }
-                widgetRefreshTimer.current = setTimeout(() => {
-                    if (cancelled) return;
+                if (!sandboxMode) {
                     updateMobileWidgetFromStore().catch((error) => {
                         void logError(error, { scope: 'app' });
                     });
-                }, 800);
-                if (!cancelled) {
+                    if (widgetRefreshTimer.current) {
+                        clearTimeout(widgetRefreshTimer.current);
+                    }
+                    widgetRefreshTimer.current = setTimeout(() => {
+                        if (cancelled) return;
+                        updateMobileWidgetFromStore().catch((error) => {
+                            void logError(error, { scope: 'app' });
+                        });
+                    }, 800);
+                }
+                if (!cancelled && !sandboxMode) {
                     requestSync(0);
                 }
                 markStartupPhase('js.data_load.attempt_success', { attempt: loadAttempts.current });
@@ -255,7 +272,7 @@ export function useRootLayoutStartup({
                 widgetRefreshTimer.current = null;
             }
         };
-    }, [analyticsHeartbeatUrl, analyticsHeartbeatChannel, appVersion, isExpoGo, isFossBuild, requestSync, storageInitError]);
+    }, [analyticsHeartbeatUrl, analyticsHeartbeatChannel, appVersion, isExpoGo, isFossBuild, requestSync, sandboxMode, storageInitError]);
 
     return { dataReady, canonicalDataReady };
 }

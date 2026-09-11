@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+    acquireWorkspaceTransitionLock,
     flushPendingSave,
     runDataTransferTransactionWithoutSnapshot,
     setStorageAdapter,
@@ -11,6 +12,7 @@ import {
     createLocalDataWatcherController,
     markLocalSqliteWrite,
     markLocalWrite,
+    resumeAfterWorkspaceTransitionFailure,
     start,
     stop,
 } from './local-data-watcher';
@@ -198,6 +200,66 @@ afterEach(async () => {
 });
 
 describe('local-data-watcher', () => {
+    it('replays JSON and SQLite events after a failed workspace transition releases its lease', async () => {
+        const readDataJson = vi.fn(async () => externalData);
+        const readStorageSnapshot = vi.fn(async () => externalData);
+        __localDataWatcherTestUtils.setDependenciesForTests({ readDataJson, readStorageSnapshot });
+        const release = acquireWorkspaceTransitionLock();
+        expect(release).not.toBeNull();
+        try {
+            await __localDataWatcherTestUtils.triggerChangeForTests();
+            await __localDataWatcherTestUtils.triggerSqliteChangeForTests();
+            expect(readDataJson).not.toHaveBeenCalled();
+            expect(readStorageSnapshot).not.toHaveBeenCalled();
+        } finally {
+            release?.();
+        }
+        resumeAfterWorkspaceTransitionFailure();
+        await __localDataWatcherTestUtils.waitForPendingMergeForTests();
+        await __localDataWatcherTestUtils.waitForPendingSqliteRefreshForTests();
+        expect(readDataJson).toHaveBeenCalledOnce();
+        expect(readStorageSnapshot).toHaveBeenCalledOnce();
+    });
+
+    it('replays a pre-existing debounced watcher event that fires under the transition lease', async () => {
+        let onDataChange: ((event: { paths?: string[] }) => void) | null = null;
+        let debounceCallback: (() => void) | null = null;
+        const readDataJson = vi.fn(async () => externalData);
+        const controller = createLocalDataWatcherController({
+            readDataJson,
+            readStorageSnapshot: async () => externalData,
+            persistMergedData: async (data) => data,
+            watchFile: async (_path, callback) => {
+                onDataChange = callback;
+                return () => undefined;
+            },
+            schedule: ((callback: TimerHandler) => {
+                debounceCallback = typeof callback === 'function' ? callback as () => void : () => undefined;
+                return 1 as unknown as ReturnType<typeof setTimeout>;
+            }) as unknown as typeof setTimeout,
+            cancelSchedule: vi.fn() as unknown as typeof clearTimeout,
+            logInfo: () => undefined,
+            logWarn: () => undefined,
+        });
+        await controller.start('/tmp/mindwtr/data.json');
+        (onDataChange as ((event: { paths?: string[] }) => void) | null)?.({
+            paths: ['/tmp/mindwtr/data.json'],
+        });
+        await Promise.resolve();
+        expect(debounceCallback).not.toBeNull();
+
+        const release = acquireWorkspaceTransitionLock();
+        expect(release).not.toBeNull();
+        (debounceCallback as (() => void) | null)?.();
+        await controller.testUtils.waitForPendingMergeForTests();
+        expect(readDataJson).not.toHaveBeenCalled();
+        release?.();
+        controller.resumeAfterWorkspaceTransitionFailure();
+        await controller.testUtils.waitForPendingMergeForTests();
+        expect(readDataJson).toHaveBeenCalledOnce();
+        controller.stop();
+    });
+
     it('reuses property ordering for repeated task shapes while marking a local write', () => {
         const data: AppData = {
             ...emptyData(),

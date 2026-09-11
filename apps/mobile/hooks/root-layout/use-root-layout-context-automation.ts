@@ -11,6 +11,7 @@ type ResolveText = (key: string, fallback: string) => string;
 
 type UseRootLayoutContextAutomationParams = {
   dataReady: boolean;
+  disabled?: boolean;
   incomingUrl: string | null;
   incomingUrlKey: number;
   returnToBackground?: () => void;
@@ -21,6 +22,7 @@ export { __resetContextAutomationDedupeForTests };
 
 export function useRootLayoutContextAutomation({
   dataReady,
+  disabled = false,
   incomingUrl,
   incomingUrlKey,
   returnToBackground,
@@ -31,7 +33,7 @@ export function useRootLayoutContextAutomation({
   const lastHandledKey = useRef<number>(0);
 
   useEffect(() => {
-    if (!dataReady) return;
+    if (!dataReady || disabled) return;
     if (!incomingUrl) return;
     if (lastHandledKey.current === incomingUrlKey) return;
 
@@ -49,5 +51,5 @@ export function useRootLayoutContextAutomation({
     void handleContextAutomationPayload(payload, resolveText).finally(() => {
       returnToBackground?.();
     });
-  }, [dataReady, incomingUrl, incomingUrlKey, resolveText, returnToBackground]);
+  }, [dataReady, disabled, incomingUrl, incomingUrlKey, resolveText, returnToBackground]);
 }

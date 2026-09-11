@@ -20,16 +20,18 @@ const WATCH_NUMERIC_BRIDGE_RELEASE_CHECK = 'v1.3.0/watch-numeric-bridge';
 const WATCH_PUBLICATION_COALESCE_MS = 120;
 
 export function useRootLayoutWatch({
-  dataReady,
+    dataReady,
+    disabled = false,
   language,
   onPendingCapture,
 }: {
-  dataReady: boolean;
+    dataReady: boolean;
+    disabled?: boolean;
   language: Language;
   onPendingCapture: () => void;
 }) {
-  useEffect(() => {
-    if (!dataReady || !isWatchConnectivityAvailable()) return;
+    useEffect(() => {
+        if (!dataReady || disabled || !isWatchConnectivityAvailable()) return;
     let active = true;
     let activated = false;
     let activationPromise: Promise<void> | null = null;
@@ -167,5 +169,5 @@ export function useRootLayoutWatch({
       unsubscribeStore();
       unsubscribePomodoro();
     };
-  }, [dataReady, language, onPendingCapture]);
+  }, [dataReady, disabled, language, onPendingCapture]);
 }

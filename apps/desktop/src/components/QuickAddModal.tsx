@@ -9,6 +9,7 @@ import {
     useTaskStore,
     buildTaskUpdatesFromSpeechResult,
     flushPendingSave,
+    isSandboxMode,
     findSelectableProjectByTitleAndArea,
     getQuickAddProjectInitialProps,
     buildQuickAddParseOptions,
@@ -284,6 +285,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     }, [pastedImageAttachments]);
 
     const cleanupPastedImageAttachments = useCallback((attachments: PastedImageAttachment[]) => {
+        if (isSandboxMode()) return;
         attachments.forEach(({ path }) => {
             remove(path).catch((error) => {
                 void logWarn('Pasted image cleanup failed', {
@@ -361,7 +363,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     }, [refreshStandaloneData]);
 
     useEffect(() => {
-        if (!isTauriRuntime()) return;
+        if (isSandboxMode() || !isTauriRuntime()) return;
 
         let unlisten: (() => void) | undefined;
         const nativeTarget = standaloneWindow ? QUICK_ADD_NATIVE_TARGET_WINDOW : QUICK_ADD_NATIVE_TARGET_MAIN;
@@ -426,7 +428,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
 
     useEffect(() => {
         if (!isOpen) return;
-        const nextMode = forcedCaptureMode ?? (settings?.gtd?.defaultCaptureMethod === 'audio' ? 'audio' : 'text');
+        const nextMode = isSandboxMode() ? 'text' : forcedCaptureMode ?? (settings?.gtd?.defaultCaptureMethod === 'audio' ? 'audio' : 'text');
         setCaptureMode(nextMode);
         setRecordingError(null);
     }, [forcedCaptureMode, isOpen, settings?.gtd?.defaultCaptureMethod]);
@@ -504,6 +506,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     }, [hideStandaloneWindow, resetPastedImageAttachments]);
 
     const createPastedImageAttachment = useCallback(async (file: File): Promise<PastedImageAttachment> => {
+        if (isSandboxMode()) throw new Error(t('sandbox.unavailable'));
         const now = new Date();
         const nowIso = now.toISOString();
         const displayTitle = `${tFallback(t, 'quickAdd.pastedImageTitle', 'Screenshot')} ${safeFormatDate(now, 'Pp')}`;
@@ -529,6 +532,10 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     }, [t]);
 
     const attachPastedImageFiles = useCallback((imageFiles: File[]) => {
+        if (isSandboxMode()) {
+            setPastedImageError(t('sandbox.unavailable'));
+            return;
+        }
         setPastedImageError(null);
         imageFiles.forEach((file) => {
             setPastingImageCount((count) => count + 1);
@@ -560,6 +567,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     // WebKit's clipboard permission request (#690). Anywhere the paste event
     // already carried the image or any text, this never runs.
     const attachImagesFromAsyncClipboard = useCallback(async () => {
+        if (isSandboxMode()) return;
         if (typeof navigator === 'undefined' || !navigator.clipboard?.read) return;
         let clipboardFiles: File[];
         try {
@@ -611,6 +619,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     }, [attachImagesFromAsyncClipboard, attachPastedImageFiles]);
 
     const handleTextFileImport = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+        if (isSandboxMode()) return;
         const file = event.target.files?.[0];
         event.target.value = '';
         if (!file) return;
@@ -630,6 +639,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     }, [t]);
 
     const startRecording = useCallback((): Promise<void> => {
+        if (isSandboxMode()) return Promise.resolve();
         if (recordingBusy || isRecording || recordingStartOwnerRef.current !== null) return Promise.resolve();
         const session = activeSubmissionSessionRef.current;
         if (session === null || !submissionCoordinatorRef.current.isCurrent(session)) return Promise.resolve();
@@ -1067,7 +1077,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         setIsSubmitting(true);
         try {
             try {
-                await createDesktopRecoverySnapshot();
+                if (!isSandboxMode()) await createDesktopRecoverySnapshot();
             } catch (error) {
                 reportError('Failed to create a recovery snapshot before bulk quick add', error);
                 setBulkQuickAddError(tFallback(t, 'quickAdd.bulkCreateError', 'Could not create all tasks.'));
@@ -1221,7 +1231,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                         <button
                             type="button"
                             onClick={() => setCaptureMode('audio')}
-                            disabled={captureModeLocked}
+                            disabled={isSandboxMode() || captureModeLocked}
+                            title={isSandboxMode() ? t('sandbox.unavailable') : undefined}
                             className={cn(
                                 'px-3 py-1 text-xs rounded-md transition-colors',
                                 captureMode === 'audio' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
@@ -1353,6 +1364,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                 className="sr-only"
                                 tabIndex={-1}
                                 type="file"
+                                disabled={isSandboxMode()}
                                 accept=".txt,text/plain"
                                 onChange={(event) => {
                                     void handleTextFileImport(event);
@@ -1361,7 +1373,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             <button
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
-                                disabled={isSubmitting}
+                                disabled={isSandboxMode() || isSubmitting}
+                                title={isSandboxMode() ? t('sandbox.unavailable') : undefined}
                                 className="px-3 py-1.5 rounded-md text-sm border border-border bg-background hover:bg-muted/60"
                             >
                                 {tFallback(t, 'quickAdd.bulkImportTextFile', 'Import .txt')}

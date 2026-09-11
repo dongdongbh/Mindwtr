@@ -31,6 +31,7 @@ export function MenuItem({
     showIndicator,
     indicatorColor,
     indicatorAccessibilityLabel,
+    disabled = false,
 }: {
     title: string;
     description?: string;
@@ -40,6 +41,7 @@ export function MenuItem({
     showIndicator?: boolean;
     indicatorColor?: string;
     indicatorAccessibilityLabel?: string;
+    disabled?: boolean;
 }) {
     const tc = useThemeColors();
     const accessibilityLabel = [
@@ -52,13 +54,16 @@ export function MenuItem({
         <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel={accessibilityLabel}
+            accessibilityState={{ disabled }}
             activeOpacity={0.72}
+            disabled={disabled}
             style={[
                 styles.menuItem,
                 Icon || description ? styles.menuItemDetailed : null,
                 {
                     borderBottomColor: tc.border,
                     borderBottomWidth: isLast ? 0 : 1,
+                    opacity: disabled ? 0.5 : 1,
                 },
             ]}
             onPress={onPress}

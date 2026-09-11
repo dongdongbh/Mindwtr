@@ -1,4 +1,5 @@
 import type { OnboardingTopic, SyncBackend } from '@mindwtr/core';
+import { getWorkspaceCache } from './workspace-cache';
 
 export const MINDWTR_DESKTOP_ONBOARDING_EVENT = 'mindwtr:desktop-onboarding';
 const DESKTOP_ONBOARDING_HANDOFF_HINT_KEY_PREFIX = 'mindwtr:desktop:onboarding-handoff-hint:v1:';
@@ -56,7 +57,7 @@ function getDesktopOnboardingHintKey(hint: DesktopOnboardingHint): string {
 export function isDesktopOnboardingHintDismissed(hint: DesktopOnboardingHint): boolean {
     if (typeof window === 'undefined') return false;
     try {
-        return window.localStorage.getItem(getDesktopOnboardingHintKey(hint)) === 'dismissed';
+        return getWorkspaceCache()?.getItem(getDesktopOnboardingHintKey(hint)) === 'dismissed';
     } catch {
         return false;
     }
@@ -73,7 +74,7 @@ export function shouldShowInboxProjectHint(dismissed: boolean): boolean {
 export function dismissDesktopOnboardingHint(hint: DesktopOnboardingHint): void {
     if (typeof window === 'undefined') return;
     try {
-        window.localStorage.setItem(getDesktopOnboardingHintKey(hint), 'dismissed');
+        getWorkspaceCache()?.setItem(getDesktopOnboardingHintKey(hint), 'dismissed');
     } catch {
         // Onboarding hints are convenience UI; storage failures should not block the settings page.
     }

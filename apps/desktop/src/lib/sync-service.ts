@@ -42,6 +42,7 @@ import {
     runDataTransferTransactionWithoutSnapshot,
     runSerializedSyncDocumentOperation,
     runSerializedSyncDocumentWriteOperation,
+    createSyncDocumentWriteAdmission,
     createSyncBackendIO,
     acquireSyncRemoteMutationFence,
     createDropboxSyncRemoteMutationFencePort,
@@ -66,6 +67,8 @@ import {
     withRetry,
     isRetryableError,
     isRetryableWebdavReadError,
+    isSandboxMode,
+    isWorkspaceTransitionActive,
     appendSyncHistory,
     createSyncOrchestrator,
     createSerializedAsyncQueue,
@@ -326,15 +329,35 @@ let syncServiceDependencies: SyncServiceDependencies = {
 const isTauriRuntimeEnv = () => syncServiceDependencies.isTauriRuntime();
 const getStoreState = () => syncServiceDependencies.getStoreState();
 const syncRestoreQueue = createSerializedAsyncQueue();
-const runSyncRestoreExclusive = <T>(operation: () => Promise<T>): Promise<T> => (
-    syncRestoreQueue.run(operation)
-);
+let pendingSyncServiceOperations = 0;
+const syncServiceActivityListeners = new Set<() => void>();
+const notifySyncServiceActivity = () => {
+    syncServiceActivityListeners.forEach((listener) => listener());
+};
+const subscribeSyncServiceActivity = (listener: () => void): (() => void) => {
+    syncServiceActivityListeners.add(listener);
+    return () => syncServiceActivityListeners.delete(listener);
+};
+const runSyncRestoreExclusive = <T>(operation: () => Promise<T>): Promise<T> => {
+    pendingSyncServiceOperations += 1;
+    notifySyncServiceActivity();
+    return syncRestoreQueue.run(operation).finally(() => {
+        pendingSyncServiceOperations = Math.max(0, pendingSyncServiceOperations - 1);
+        notifySyncServiceActivity();
+    });
+};
 const runSyncDocumentExclusive = <T>(operation: () => Promise<T>): Promise<T> => (
     runSyncRestoreExclusive(() => runSerializedSyncDocumentOperation(operation))
 );
-const runSyncDocumentWriteExclusive = <T>(operation: () => Promise<T>): Promise<T> => (
-    runSyncRestoreExclusive(() => runSerializedSyncDocumentWriteOperation(operation))
-);
+const runSyncDocumentWriteExclusive = <T>(operation: () => Promise<T>): Promise<T> => {
+    let admission: ReturnType<typeof createSyncDocumentWriteAdmission>;
+    try {
+        admission = createSyncDocumentWriteAdmission();
+    } catch (error) {
+        return Promise.reject(error);
+    }
+    return runSyncRestoreExclusive(() => runSerializedSyncDocumentWriteOperation(operation, admission));
+};
 
 const resolveSyncText = (key: string, fallback: string): string => resolveI18nText(
     getTranslator(getStoreState().settings?.language ?? 'en'),
@@ -1043,6 +1066,7 @@ const ACTIVATION_PROBE_IDLE_WAIT_MS = 90_000;
 const SYNC_BACKEND_HINT_KEY = 'mindwtr-last-known-sync-backend';
 const SYNC_BACKEND_VALUES: readonly SyncBackend[] = ['off', 'file', 'webdav', 'cloud', 'cloudkit'];
 const readSyncBackendHint = (): SyncBackend | null => {
+    if (isSandboxMode()) return null;
     try {
         const value = window.localStorage.getItem(SYNC_BACKEND_HINT_KEY);
         return (SYNC_BACKEND_VALUES as readonly string[]).includes(value ?? '') ? value as SyncBackend : null;
@@ -1051,6 +1075,7 @@ const readSyncBackendHint = (): SyncBackend | null => {
     }
 };
 const writeSyncBackendHint = (backend: SyncBackend): void => {
+    if (isSandboxMode()) return;
     try {
         window.localStorage.setItem(SYNC_BACKEND_HINT_KEY, backend);
     } catch {
@@ -1065,6 +1090,7 @@ const writeSyncBackendHint = (backend: SyncBackend): void => {
 const CLOUD_PROVIDER_HINT_KEY = 'mindwtr-last-known-cloud-provider';
 const CLOUD_PROVIDER_VALUES: readonly CloudProvider[] = ['selfhosted', 'dropbox'];
 const readCloudProviderHint = (): CloudProvider | null => {
+    if (isSandboxMode()) return null;
     try {
         const value = window.localStorage.getItem(CLOUD_PROVIDER_HINT_KEY);
         return (CLOUD_PROVIDER_VALUES as readonly string[]).includes(value ?? '') ? value as CloudProvider : null;
@@ -1073,6 +1099,7 @@ const readCloudProviderHint = (): CloudProvider | null => {
     }
 };
 const writeCloudProviderHint = (provider: CloudProvider): void => {
+    if (isSandboxMode()) return;
     try {
         window.localStorage.setItem(CLOUD_PROVIDER_HINT_KEY, provider);
     } catch {
@@ -3406,8 +3433,10 @@ export class SyncService {
     static async restoreDataSnapshot(snapshotFileName: string): Promise<{ success: boolean; error?: string }> {
         if (!isTauriRuntimeEnv()) return { success: false, error: 'Desktop runtime is required.' };
         try {
+            const writeAdmission = createSyncDocumentWriteAdmission();
             await runSyncRestoreExclusive(() => runDataTransferTransactionWithoutSnapshot({
                 operation: 'restoreDataSnapshot',
+                writeAdmission,
                 flushPendingSave: syncServiceDependencies.flushPendingSave,
                 getCurrentChangeAt: () => getStoreState().lastDataChangeAt,
                 readCurrentData: () => invokeSyncNative<AppData>('get_data'),
@@ -3436,41 +3465,51 @@ export class SyncService {
      *  data-change-triggered auto sync is usually running when the user presses
      *  Save, and an immediate "requeued" answer dropped the backend switch behind
      *  an info toast every single time. */
-    private static waitForSyncIdle(timeoutMs: number): Promise<boolean> {
-        const isIdle = () => {
-            const state = SyncService.syncOrchestrator.getState();
-            return !state.inFlight && !state.queued;
-        };
-        if (isIdle()) return Promise.resolve(true);
+    static isSyncIdle(): boolean {
+        const state = SyncService.syncOrchestrator.getState();
+        return !state.inFlight && !state.queued && pendingSyncServiceOperations === 0;
+    }
+
+    static waitForSyncIdle(timeoutMs: number): Promise<boolean> {
+        if (SyncService.isSyncIdle()) return Promise.resolve(true);
         return new Promise((resolve) => {
             let settled = false;
             const finish = (idle: boolean) => {
                 if (settled) return;
                 settled = true;
                 clearTimeout(timer);
-                unsubscribe();
+                unsubscribeStatus();
+                unsubscribeActivity();
                 resolve(idle);
             };
             const timer = setTimeout(() => finish(false), timeoutMs);
             // The status listener fires from inside the cycle, before the
             // orchestrator clears its own in-flight slot in a later microtask;
             // re-check after yielding so the orchestrator's view is settled.
-            const unsubscribe = SyncService.subscribeSyncStatus(() => {
+            const checkAfterYield = () => {
                 if (settled) return;
                 setTimeout(() => {
-                    if (isIdle()) finish(true);
+                    if (SyncService.isSyncIdle()) finish(true);
                 }, 0);
-            });
+            };
+            const unsubscribeStatus = SyncService.subscribeSyncStatus(checkAfterYield);
+            const unsubscribeActivity = subscribeSyncServiceActivity(checkAfterYield);
         });
     }
 
     static async performSync(options: SyncRunOptions = {}): Promise<SyncRunResult> {
+        if (isWorkspaceTransitionActive()) {
+            return { success: true, skipped: 'disabled' };
+        }
         let wasInFlight = SyncService.syncOrchestrator.getState().inFlight;
         if (wasInFlight && options.activationProbe) {
             // A candidate must be proven by the call that will commit it, so it
             // cannot ride the active cycle. Wait for that cycle (and any queued
             // follow-up) to finish, then prove the candidate on a clean run.
             const idle = await SyncService.waitForSyncIdle(ACTIVATION_PROBE_IDLE_WAIT_MS);
+            if (isWorkspaceTransitionActive()) {
+                return { success: true, skipped: 'disabled' };
+            }
             wasInFlight = SyncService.syncOrchestrator.getState().inFlight;
             if (!idle || wasInFlight) {
                 return { success: true, skipped: 'requeued' };
@@ -3478,6 +3517,9 @@ export class SyncService {
         }
         if (wasInFlight) {
             SyncService.queuedSyncOptions = options;
+        }
+        if (isWorkspaceTransitionActive()) {
+            return { success: true, skipped: 'disabled' };
         }
         const result = SyncService.syncOrchestrator.run(options);
         if (wasInFlight && options.configOverride) {
@@ -3800,6 +3842,9 @@ export const __syncServiceTestUtils = {
     },
     runSyncDocumentExclusiveForTests<T>(operation: () => Promise<T>) {
         return runSyncDocumentExclusive(operation);
+    },
+    runSyncDocumentWriteExclusiveForTests<T>(operation: () => Promise<T>) {
+        return runSyncDocumentWriteExclusive(operation);
     },
     clearWebdavDownloadBackoff() {
         clearAttachmentSyncState();

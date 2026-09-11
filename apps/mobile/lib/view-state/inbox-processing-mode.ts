@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 
 // Which Inbox-processing presentation this device uses. Deliberately NOT the
 // synced `settings.gtd.inboxProcessing.defaultMode`: that one stays desktop-only

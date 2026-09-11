@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTaskStore, type Attachment, type Project } from '@mindwtr/core';
+import { isSandboxMode, useTaskStore, type Attachment, type Project } from '@mindwtr/core';
 import { importPickedFileAttachment } from '../../../lib/attachment-import';
 import { openAttachmentTarget } from '../../../lib/open-attachment-target';
 import { isTauriRuntime } from '../../../lib/runtime';
@@ -18,6 +18,7 @@ export function useProjectAttachmentActions({
     readOnly = false,
     updateProject,
 }: UseProjectAttachmentActionsParams) {
+    const sandboxMode = isSandboxMode();
     const selectedProjectRef = useRef(selectedProject);
     selectedProjectRef.current = selectedProject;
     const readOnlyRef = useRef(readOnly);
@@ -44,6 +45,10 @@ export function useProjectAttachmentActions({
     }, []);
 
     const openAttachment = useCallback(async (attachment: Attachment) => {
+        if (sandboxMode) {
+            setAttachmentError(t('sandbox.unavailable'));
+            return;
+        }
         try {
             await openAttachmentTarget(
                 attachment.uri,
@@ -57,9 +62,13 @@ export function useProjectAttachmentActions({
             const message = error instanceof Error ? error.message : String(error);
             setAttachmentError(message || t('attachments.fileNotSupported'));
         }
-    }, [t]);
+    }, [sandboxMode, t]);
 
     const addProjectFileAttachment = useCallback(async () => {
+        if (sandboxMode) {
+            setAttachmentError(t('sandbox.unavailable'));
+            return;
+        }
         const projectAtStart = getMutableProject();
         if (!projectAtStart) return;
         if (isProjectAttachmentBusy) return;
@@ -88,13 +97,17 @@ export function useProjectAttachmentActions({
         } finally {
             setIsProjectAttachmentBusy(false);
         }
-    }, [getMutableProject, isProjectAttachmentBusy, t, updateProject]);
+    }, [getMutableProject, isProjectAttachmentBusy, sandboxMode, t, updateProject]);
 
     const addProjectLinkAttachment = useCallback(() => {
+        if (sandboxMode) {
+            setAttachmentError(t('sandbox.unavailable'));
+            return;
+        }
         if (!getMutableProject()) return;
         setAttachmentError(null);
         setShowLinkPrompt(true);
-    }, [getMutableProject]);
+    }, [getMutableProject, sandboxMode, t]);
 
     const removeProjectAttachment = useCallback((id: string) => {
         const current = getMutableProject();

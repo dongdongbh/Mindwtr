@@ -5,6 +5,7 @@ import {
     buildTaskUpdatesFromSpeechResult,
     findSelectableProjectByTitleAndArea,
     generateUUID,
+    isSandboxMode,
     normalizeLinkAttachmentInput,
     planAttachmentDraftSettlement,
     translateWithFallback,
@@ -84,7 +85,11 @@ export function useTaskEditAttachments({
 }: UseTaskEditAttachmentsParams) {
     const attachmentsRef = React.useRef(attachments);
     attachmentsRef.current = attachments;
+    const showSandboxUnavailable = React.useCallback(() => {
+        Alert.alert(t('attachments.title'), t('sandbox.unavailable'));
+    }, [t]);
     const settleDraftAttachments = React.useCallback((input: AttachmentDraftSettlementInput) => {
+        if (isSandboxMode()) return;
         for (const candidate of planAttachmentDraftSettlement(input)) {
             void deleteManagedAttachmentFile(candidate.attachment);
         }
@@ -138,6 +143,10 @@ export function useTaskEditAttachments({
     }, [t]);
 
     const addFileAttachment = React.useCallback(async () => {
+        if (isSandboxMode()) {
+            showSandboxUnavailable();
+            return;
+        }
         const result = await DocumentPicker.getDocumentAsync({
             copyToCacheDirectory: false,
             multiple: false,
@@ -181,9 +190,13 @@ export function useTaskEditAttachments({
             return;
         }
         setAttachments((current) => [...(current || []), cached]);
-    }, [resolveValidationMessage, setAttachments, t]);
+    }, [resolveValidationMessage, setAttachments, showSandboxUnavailable, t]);
 
     const addImageAttachment = React.useCallback(async () => {
+        if (isSandboxMode()) {
+            showSandboxUnavailable();
+            return;
+        }
         let imagePicker: typeof import('expo-image-picker') | null = null;
         try {
             imagePicker = await import('expo-image-picker');
@@ -244,16 +257,24 @@ export function useTaskEditAttachments({
             return;
         }
         setAttachments((current) => [...(current || []), cached]);
-    }, [resolveValidationMessage, setAttachments, t]);
+    }, [resolveValidationMessage, setAttachments, showSandboxUnavailable, t]);
 
     const openAddLinkAttachment = React.useCallback(() => {
+        if (isSandboxMode()) {
+            showSandboxUnavailable();
+            return;
+        }
         setEditingLinkAttachmentId(null);
         setLinkInput('');
         setLinkInputTouched(false);
         setLinkModalVisible(true);
-    }, []);
+    }, [showSandboxUnavailable]);
 
     const editLinkAttachment = React.useCallback((attachment: Attachment) => {
+        if (isSandboxMode()) {
+            showSandboxUnavailable();
+            return;
+        }
         if (attachment.kind !== 'link') return;
         setEditingLinkAttachmentId(attachment.id);
         setLinkInput(
@@ -263,9 +284,13 @@ export function useTaskEditAttachments({
         );
         setLinkInputTouched(false);
         setLinkModalVisible(true);
-    }, []);
+    }, [showSandboxUnavailable]);
 
     const confirmAddLink = React.useCallback(() => {
+        if (isSandboxMode()) {
+            showSandboxUnavailable();
+            return;
+        }
         if (!linkInput.trim()) {
             setLinkInputTouched(true);
             return;
@@ -309,7 +334,7 @@ export function useTaskEditAttachments({
         setLinkInputTouched(false);
         setEditingLinkAttachmentId(null);
         setLinkModalVisible(false);
-    }, [editingLinkAttachmentId, linkInput, setAttachments, t]);
+    }, [editingLinkAttachmentId, linkInput, setAttachments, showSandboxUnavailable, t]);
 
     const closeLinkModal = React.useCallback(() => {
         setLinkModalVisible(false);
@@ -342,6 +367,10 @@ export function useTaskEditAttachments({
     }, [audioPlayer]);
 
     const openAudioAttachment = React.useCallback(async (attachment: Attachment) => {
+        if (isSandboxMode()) {
+            showSandboxUnavailable();
+            return;
+        }
         setAudioAttachment(attachment);
         setAudioModalVisible(true);
         setAudioLoading(true);
@@ -394,7 +423,7 @@ export function useTaskEditAttachments({
         } finally {
             setAudioLoading(false);
         }
-    }, [audioPlayer, t, unloadAudio]);
+    }, [audioPlayer, showSandboxUnavailable, t, unloadAudio]);
 
     const closeAudioModal = React.useCallback(() => {
         setAudioModalVisible(false);
@@ -410,6 +439,7 @@ export function useTaskEditAttachments({
     }, []);
 
     const toggleAudioPlayback = React.useCallback(async () => {
+        if (isSandboxMode()) return;
         if (!audioStatus?.isLoaded || !audioLoadedRef.current) return;
         try {
             if (audioStatus.playing) {
@@ -433,6 +463,10 @@ export function useTaskEditAttachments({
     }, [audioPlayer, audioStatus]);
 
     const retryAudioTranscription = React.useCallback(async () => {
+        if (isSandboxMode()) {
+            showSandboxUnavailable();
+            return;
+        }
         const currentAttachment = audioAttachment;
         if (!currentAttachment || currentAttachment.kind !== 'file' || !currentAttachment.uri || !taskId || audioTranscribing) {
             return;
@@ -551,7 +585,7 @@ export function useTaskEditAttachments({
         } finally {
             if (isRetryUiOwnerCurrent()) setAudioTranscribing(false);
         }
-    }, [audioAttachment, audioTranscribing, closeAudioModal, getLiveMutableTask, resolveText, setDraftField, taskId, unloadAudio]);
+    }, [audioAttachment, audioTranscribing, closeAudioModal, getLiveMutableTask, resolveText, setDraftField, showSandboxUnavailable, taskId, unloadAudio]);
 
     const currentAttachmentForIdentity = React.useCallback((
         attachmentId: string,
@@ -637,9 +671,13 @@ export function useTaskEditAttachments({
     }, [t]);
 
     const downloadAttachment = React.useCallback(async (attachment: Attachment) => {
+        if (isSandboxMode()) {
+            showSandboxUnavailable();
+            return;
+        }
         const resolution = await resolveAttachment(attachment);
         showAttachmentResolutionError(resolution);
-    }, [resolveAttachment, showAttachmentResolutionError]);
+    }, [resolveAttachment, showAttachmentResolutionError, showSandboxUnavailable]);
 
     const isImageAttachment = React.useCallback((attachment: Attachment) => {
         const mime = attachment.mimeType?.toLowerCase();
@@ -648,6 +686,10 @@ export function useTaskEditAttachments({
     }, []);
 
     const openAttachment = React.useCallback(async (attachment: Attachment) => {
+        if (isSandboxMode()) {
+            showSandboxUnavailable();
+            return;
+        }
         const resolution = await resolveAttachment(attachment);
         if (resolution.status !== 'available') {
             showAttachmentResolutionError(resolution);
@@ -688,7 +730,7 @@ export function useTaskEditAttachments({
         } else {
             Linking.openURL(resolved.uri).catch((error) => logTaskError('Failed to open attachment URL', error));
         }
-    }, [isAudioAttachment, isImageAttachment, openAudioAttachment, resolveAttachment, showAttachmentResolutionError, t]);
+    }, [isAudioAttachment, isImageAttachment, openAudioAttachment, resolveAttachment, showAttachmentResolutionError, showSandboxUnavailable, t]);
 
     const removeAttachment = React.useCallback((id: string) => {
         const now = new Date().toISOString();

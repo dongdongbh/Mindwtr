@@ -16,6 +16,7 @@ import {
     type PomodoroSessionHistory,
     type PomodoroState,
 } from '@mindwtr/core';
+import { getWorkspaceCache } from '../lib/workspace-cache';
 
 export const DESKTOP_POMODORO_SESSION_STORAGE_KEY = 'mindwtr:pomodoro:session:v1';
 export const DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY = 'mindwtr:pomodoro:collapsed:v1';
@@ -131,7 +132,7 @@ const parseStoredPomodoroSnapshot = (value: unknown, nowMs: number): PomodoroSna
 const readStoredPomodoroSnapshot = (nowMs: number): PomodoroSnapshot => {
     if (typeof window === 'undefined') return createInitialSnapshot(nowMs);
     try {
-        const raw = window.localStorage.getItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY);
+        const raw = getWorkspaceCache()?.getItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY);
         if (!raw) return createInitialSnapshot(nowMs);
         return parseStoredPomodoroSnapshot(JSON.parse(raw) as unknown, nowMs);
     } catch {
@@ -142,7 +143,7 @@ const readStoredPomodoroSnapshot = (nowMs: number): PomodoroSnapshot => {
 const saveStoredPomodoroSnapshot = (snapshot: PomodoroSnapshot) => {
     if (typeof window === 'undefined') return;
     try {
-        window.localStorage.setItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY, JSON.stringify({
+        getWorkspaceCache()?.setItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY, JSON.stringify({
             durations: snapshot.durations,
             timerState: snapshot.timerState,
             selectedTaskId: snapshot.selectedTaskId,
@@ -174,7 +175,7 @@ const isCountdownTickOnly = (prev: PomodoroSnapshot, next: PomodoroSnapshot): bo
 const readStoredCollapsed = (): boolean => {
     if (typeof window === 'undefined') return false;
     try {
-        return window.localStorage.getItem(DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY) === 'true';
+        return getWorkspaceCache()?.getItem(DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY) === 'true';
     } catch {
         return false;
     }
@@ -183,7 +184,7 @@ const readStoredCollapsed = (): boolean => {
 const saveStoredCollapsed = (collapsed: boolean) => {
     if (typeof window === 'undefined') return;
     try {
-        window.localStorage.setItem(DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY, collapsed ? 'true' : 'false');
+        getWorkspaceCache()?.setItem(DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY, collapsed ? 'true' : 'false');
     } catch {
         // Collapse preference is device-local convenience; storage failures should not block the panel.
     }
