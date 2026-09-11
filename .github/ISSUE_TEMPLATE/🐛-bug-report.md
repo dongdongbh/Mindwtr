@@ -77,19 +77,10 @@ For recordings without your private tasks, use **Settings → Data → Open sand
 
 For detailed instructions, please see the [Diagnostics and Logs docs](https://docs.mindwtr.app/data-sync/diagnostics-logs).
 
-**Desktop:**
-1. Go to **Settings → Data**.
-2. Toggle **Debug logging** to ON.
+1. Go to **Settings → Data** and find **Diagnostics**.
+2. Turn on **Debug logging**.
 3. Reproduce the issue.
-4. In **Settings → Data → Diagnostics**, find the **Log file path**.
-5. Attach the log file here.
-   * *Note: You can also clear old logs from this screen.*
-
-**Mobile:**
-1. Go to **Settings → Data** and scroll to Diagnostics.
-2. Toggle **Debug logging** to ON.
-3. Reproduce the issue.
-4. Tap **Share log** to export the file and attach it here.
+4. Return to **Diagnostics** and attach the log here: use **Share log** on mobile, or the file at **Log file path** on desktop.
 
 *Note: Logs are local-only and redact common credentials.*
 </details>
