@@ -56,6 +56,24 @@ describe('ios-widgets-and-shortcuts', () => {
     expect(intentsSource).not.toContain('store.pendingActions().contains');
   });
 
+  it('selects one Tasks configuration at launch while preserving the installed widget kind', () => {
+    const widgetsDir = path.resolve(__dirname, '..', 'widgets-ios');
+    const tasksSource = fs.readFileSync(path.join(widgetsDir, 'MindwtrTasksWidget.swift'), 'utf8');
+    const bundleSource = fs.readFileSync(path.join(widgetsDir, 'MindwtrWidgetsBundle.swift'), 'utf8');
+    const configurations = tasksSource.slice(tasksSource.indexOf('struct MindwtrTasksWidget: Widget'));
+    const [modern, legacy] = configurations.split('struct MindwtrLegacyTasksWidget: Widget');
+    expect(modern).toContain('AppIntentConfiguration(');
+    expect(modern).not.toContain('StaticConfiguration(');
+    expect(legacy).toContain('StaticConfiguration(');
+    for (const configuration of [modern, legacy]) {
+      expect(configuration).toContain('let kind: String = mindwtrWidgetKind');
+      expect(configuration).not.toContain('if #available');
+    }
+    expect(bundleSource).toContain('enum MindwtrWidgetsEntryPoint');
+    expect(bundleSource).toMatch(/if #available\(iOSApplicationExtension 17\.0, iOS 17\.0, \*\) \{\s+MindwtrWidgetsBundle\.main\(\)\s+\} else \{\s+MindwtrLegacyWidgetsBundle\.main\(\)/);
+    expect(bundleSource.match(/MindwtrCompactWidget\(\)/g)).toHaveLength(2);
+  });
+
   it('ships a separate flat Compact gallery kind without chooser or inline completion', () => {
     const widgetsDir = path.resolve(__dirname, '..', 'widgets-ios');
     const compactSource = fs.readFileSync(

@@ -832,28 +832,34 @@ func hexColor(_ hex: String) -> Color {
     )
 }
 
+@available(iOSApplicationExtension 17.0, iOS 17.0, *)
 struct MindwtrTasksWidget: Widget {
     let kind: String = mindwtrWidgetKind
 
     var body: some WidgetConfiguration {
-        if #available(iOSApplicationExtension 17.0, iOS 17.0, *) {
-            AppIntentConfiguration(
-                kind: kind,
-                intent: MindwtrTasksWidgetConfigurationIntent.self,
-                provider: MindwtrTasksWidgetAppIntentProvider()
-            ) { entry in
-                MindwtrTasksWidgetView(entry: entry)
-            }
-            .configurationDisplayName("Mindwtr")
-            .description("Focus tasks and quick capture")
-            .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
-        } else {
-            StaticConfiguration(kind: kind, provider: MindwtrTasksWidgetProvider()) { entry in
-                MindwtrTasksWidgetView(entry: entry)
-            }
-            .configurationDisplayName("Mindwtr")
-            .description("Focus tasks and quick capture")
-            .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
+        AppIntentConfiguration(
+            kind: kind,
+            intent: MindwtrTasksWidgetConfigurationIntent.self,
+            provider: MindwtrTasksWidgetAppIntentProvider()
+        ) { entry in
+            MindwtrTasksWidgetView(entry: entry)
         }
+        .configurationDisplayName("Mindwtr")
+        .description("Focus tasks and quick capture")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
+    }
+}
+
+struct MindwtrLegacyTasksWidget: Widget {
+    // Preserve installed widgets when upgrading from the static configuration.
+    let kind: String = mindwtrWidgetKind
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: MindwtrTasksWidgetProvider()) { entry in
+            MindwtrTasksWidgetView(entry: entry)
+        }
+        .configurationDisplayName("Mindwtr")
+        .description("Focus tasks and quick capture")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
     }
 }

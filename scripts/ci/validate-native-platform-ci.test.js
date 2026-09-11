@@ -118,6 +118,21 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   );
 });
 
+test("native CI typechecks all maintained widgets before the expensive host build", () => {
+  const workflow = parse(readFileSync(".github/workflows/native-platform-ci.yml", "utf8"));
+  const steps = workflow.jobs["ios-native"].steps;
+  const index = steps.findIndex((step) => step.name === "Typecheck iOS widgets at the minimum deployment target");
+  expect(index).toBeGreaterThan(-1);
+  expect(index).toBeLessThan(steps.findIndex((step) => step.name === "Generate iOS native project"));
+  const command = steps[index].run;
+  expect(command).toContain("xcrun swiftc");
+  expect(command).toContain("-typecheck");
+  expect(command).toContain("-application-extension");
+  expect(command).toContain("-apple-ios15.1-simulator");
+  expect(command).toContain("apps/mobile/widgets-ios/*.swift");
+  expect(command).toContain("apps/mobile/modules/ios-widget/ios/MindwtrWidgetActionStore.swift");
+});
+
 test("attachment installer native CI collects the recovery suites", () => {
   const androidTests = readFileSync(
     "apps/mobile/modules/attachment-file-installer/android/src/test/java/tech/dongdongbh/mindwtr/attachmentfileinstaller/AttachmentFileInstallerCoreTest.kt",

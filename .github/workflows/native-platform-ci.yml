@@ -465,6 +465,18 @@ jobs:
 
           echo "Using iPhoneOS SDK ${IOS_SDK_VERSION}"
 
+      - name: Typecheck iOS widgets at the minimum deployment target
+        run: |
+          xcrun swiftc \
+            -typecheck \
+            -parse-as-library \
+            -swift-version 5 \
+            -application-extension \
+            -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+            -target "$(uname -m)-apple-ios15.1-simulator" \
+            apps/mobile/widgets-ios/*.swift \
+            apps/mobile/modules/ios-widget/ios/MindwtrWidgetActionStore.swift
+
       - name: Typecheck Watch receiver against the iOS SDK
         run: |
           xcrun swiftc \
