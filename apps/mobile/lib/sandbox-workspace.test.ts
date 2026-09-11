@@ -393,7 +393,7 @@ describe('mobile sandbox workspace transition', () => {
             {
                 scope: 'sandbox',
                 extra: {
-                    releaseCheck: '1.3.0/sandbox-workspace',
+                    releaseCheck: 'v1.3.0/sandbox-workspace',
                     stage: 'entry-idle',
                 },
             },

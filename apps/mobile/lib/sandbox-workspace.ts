@@ -323,7 +323,7 @@ export async function reloadIntoMobileSandbox(
             void logInfo('Sandbox workspace entry reached idle boundary', {
                 scope: 'sandbox',
                 extra: {
-                    releaseCheck: '1.3.0/sandbox-workspace',
+                    releaseCheck: 'v1.3.0/sandbox-workspace',
                     stage: 'entry-idle',
                 },
             });

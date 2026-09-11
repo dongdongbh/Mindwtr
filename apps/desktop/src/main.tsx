@@ -197,7 +197,7 @@ async function bootstrap() {
             scope: 'sandbox',
             force: true,
             extra: {
-                releaseCheck: '1.3.0/sandbox-workspace',
+                releaseCheck: 'v1.3.0/sandbox-workspace',
                 workspace: 'sandbox',
             },
         });
