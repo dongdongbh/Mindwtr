@@ -6,11 +6,17 @@
 
 English | [中文](./README_zh.md)
 
-**Get everything out of your head.** Mindwtr™ is a free, open-source to-do app built on the Getting Things Done (GTD) method: it captures every task and idea in seconds, then shows you the one next thing to do. No account, no subscription, and your data stays on your device.
+**Get everything out of your head.**
 
-_Mindwtr = "mind like water": the calm you get when nothing is rattling around in your head._
+Mindwtr™ is a free, open-source to-do app built around Getting Things Done (GTD). Capture tasks and ideas, turn them into clear next steps, and decide what to do today.
 
-[Getting Started](https://docs.mindwtr.app/start/getting-started) · [FAQ](https://docs.mindwtr.app/start/faq) · [Docs](https://docs.mindwtr.app/) · [Data & Sync](https://docs.mindwtr.app/data-sync/) · [Cloud Deployment](https://docs.mindwtr.app/data-sync/cloud-deployment) · [MCP Server](https://docs.mindwtr.app/power-users/mcp)
+**Works offline · No account required · No subscription**
+
+20,000+ users · Windows, macOS, Linux, iPhone, iPad, and Android
+
+[**Download Mindwtr**](https://mindwtr.app/#download) · [Highlights](#highlights) · [Getting Started](https://docs.mindwtr.app/start/getting-started) · [Docs](https://docs.mindwtr.app/)
+
+_Mindwtr = "mind like water": write down what's on your mind so you can give your attention to what's in front of you._
 
 [![CI](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml/badge.svg)](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml)
 [![GitHub license](https://img.shields.io/github/license/dongdongbh/Mindwtr?color=brightgreen)](LICENSE)
@@ -75,139 +81,41 @@ _Mindwtr = "mind like water": the calm you get when nothing is rattling around i
 
 <div align="center">
   <video src="https://github.com/user-attachments/assets/3682cee5-06fb-40cf-993c-0be383fa6ba5" controls playsinline width="900" aria-label="Try Mindwtr"></video>
-  <p><i>Local-First GTD on desktop &amp; mobile</i></p>
+  <p><i>Capture, organize, and focus on desktop &amp; mobile</i></p>
 </div>
-
-## Sound familiar?
-
-- **"I'll remember it." You won't.** One hotkey, type it, forget it safely. That's capture.
-- **Your to-do list has 80 items, so you avoid it.** Focus shows only the few things you can do right now.
-- **"Plan Mom's birthday" has been stuck for weeks.** Turn it into a project of small steps, so the next one is always obvious.
-- **You asked a coworker for something and you both forgot.** Waiting For tracks it so you remember to follow up.
-- **"Learn guitar someday" guilt-trips you from the list.** Park it in Someday/Maybe: kept, not nagging.
-- **Sunday night, everything feels out of control.** A guided weekly review puts you back in charge.
 
 ## How it works
 
-Your head is for having ideas, not for holding them (David Allen, who wrote the book on this). Mindwtr holds them for you:
+Start with whatever is on your mind, from "plan Mom's birthday" to "learn guitar someday." Mindwtr guides you through what to do with it. You don't need to learn GTD first.
 
-1. **Dump it.** A task, an idea, a worry: type it (or speak it) and it lands in your Inbox. Global hotkey on desktop, widget and share sheet on your phone.
-2. **Sort it.** A short guided pass over the Inbox. Takes two minutes? Do it now. Has a date? Schedule it. Waiting on someone else? Track it. Just a maybe? Shelve it for someday.
-3. **Do it.** Open Focus and see only what you can act on right now. Everything else stays out of sight.
-4. **Reset weekly.** A guided review catches loose ends, so the list stays trustworthy and your head stays clear.
+1. **Capture it.** Send tasks and ideas to your Inbox with a desktop shortcut, phone widget, or share sheet.
+2. **Choose a next step.** Break a bigger plan into actions, track promises in Waiting For, and keep future ideas in Someday/Maybe.
+3. **Pick something to do.** Open Focus for today's schedule and your next actions. Filter by where you are or the tools you have with you.
+4. **Review each week.** Follow the guided review to check your projects, follow up on waiting items, and catch loose ends.
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/1c685f99-87a5-44c1-9fdd-d228a66de67c" controls playsinline width="900" aria-label="GTD in Mindwtr"></video>
 </p>
 
-If you know GTD: that is Capture, Clarify, Organize, Engage, and Reflect, end to end. If you don't, no problem: Mindwtr walks you through each step, and [GTD in 15 minutes](https://hamberg.no/gtd) is a friendly introduction whenever you're curious.
+[All videos on the website](https://docs.mindwtr.app/start/videos) · [YouTube channel](https://www.youtube.com/@mindwtr)
 
-[Explore the interactive GTD flowchart](https://docs.mindwtr.app/assets/diagrams/gtd-workflow)
+For more about the method, read [GTD in 15 minutes](https://hamberg.no/gtd) or [explore the interactive GTD flowchart](https://docs.mindwtr.app/assets/diagrams/gtd-workflow).
 
-## Philosophy
+## Highlights
 
-**Don't show me a cockpit when I just want to ride a bike.**
+- **GTD from capture to review.** Work through your Inbox, plan projects, and follow a guided weekly review to keep both your next steps and longer-term plans in view.
+- **Your data stays yours.** Keep tasks on your device, work offline, and export a backup. Sync is optional: choose [iCloud, Dropbox, a shared folder, WebDAV, or your own server](https://docs.mindwtr.app/data-sync/).
+- **The same workflow on your phone and computer.** Use the full GTD workflow on Windows, macOS, Linux, iPhone, iPad, and Android, with 20 language options.
+- **Bring your existing tasks.** [Import from Todoist, TickTick, OmniFocus, and more](https://docs.mindwtr.app/import/) so you can start with the plans you've already made.
+- **Add the tools you need.** Plan with a calendar, set up recurring tasks, and keep notes and attachments with your work. AI assistance is off by default and yours to enable.
 
-Mindwtr is simple by default, powerful when you need it, and forgiving when life gets messy:
+Mindwtr is built for your personal tasks. Start with a simple list and use more options as you need them. There are no streaks or productivity scores to keep up with.
 
-- Advanced options stay hidden until they matter.
-- Fewer fields, fewer knobs, fewer distractions.
-- Clarity beats clutter: we say no to feature creep.
-- Come back after two weeks away and you get a manageable next step, not a guilt trip. No streaks, no productivity scores.
-
-## Features
-
-<details>
-<summary>See all features</summary>
-
-- The full GTD loop, guided: capture, sort, do, review.
-- Focus view puts today's schedule and your next actions on one screen.
-- Your data lives on your device. Sync is optional, and you pick where: iCloud on Apple devices, Dropbox, a shared folder, your own server, or WebDAV.
-- WebDAV servers must return strong ETags and enforce conditional writes. During connection setup, Mindwtr verifies create-only writes, exact replacements, stale-write rejection, and conditional cleanup; providers that cannot prevent one device from overwriting another device’s generation are refused.
-- Projects with sections, areas, and manual task ordering for bigger plans.
-- Import tasks from your Obsidian notes, with links back to the source (desktop).
-- Optional AI helper: connect your own OpenAI, Gemini, or Claude account, or run a private AI on your own computer. Off by default.
-- Apps for Windows, macOS, Linux, iPhone, and Android, plus a web app that works offline.
-- For developers: a local REST API, a CLI, and the [`mindwtr-mcp`](https://www.npmjs.com/package/mindwtr-mcp) server so AI assistants can manage your tasks.
-
-[![MCP Toplist](https://mcptoplist.com/badge/io.github.dongdongbh%2Fmindwtr.svg)](https://mcptoplist.com/server/io.github.dongdongbh%2Fmindwtr)
-
-### GTD Workflow
-
-- **Capture** - Quick add tasks from anywhere (global hotkey popup, tray, share sheet, voice)
-- **Clarify** - Guided inbox processing with 2-minute rule
-- **Organize** - Projects, sections, contexts, and status lists
-- **Reflect** - Weekly review wizard with reminders
-- **Engage** - Context-filtered next actions
-- **AI Assist (Optional)** - Clarify, break down, and review with your own AI account (OpenAI, Gemini, Claude) or a local/self-hosted OpenAI-compatible model
-
-### Views
-
-- 📥 **Inbox** - Capture zone with processing wizard
-- 🎯 **Focus** - Agenda (time-based) + Next Actions in one view
-- 📁 **Projects** - Multi-step outcomes with sections, areas, and manual task ordering
-- 🏷️ **Contexts** - Tag tasks by where or how you get them done; nested contexts like @work/meetings also match @work
-- ⏳ **Waiting For** - Delegated items
-- 💭 **Someday/Maybe** - Deferred ideas
-- 📅 **Calendar** - Time-based planning with adjustable mobile week density
-- 📊 **Timeline** - Dated tasks and projects as bars from start to due date, colored by project, with day/week/month zoom (desktop, optional)
-- 📋 **Board** - Kanban-style drag-and-drop
-- 📝 **Review** - Daily + weekly review workflows
-- 📦 **Archived** - Hidden history, searchable when needed
-
-### Productivity Features
-
-- 🔍 **Global Search** - Search all areas globally with operators (`status:`, `context:`, `assigned:`, `location:`, `where:`, `id:`, `-id:`, `due:<=7d`)
-- 📦 **Bulk Actions** - Multi-select, batch move/tag/delete
-- 📎 **Attachments** - Files and links on tasks
-- ✏️ **Markdown Notes** - Rich text descriptions with preview
-- 🗂️ **Project States** - Active, Waiting, Someday, Archived
-- ♾️ **Fluid Recurrence** - Next date is calculated after completion
-- ♻️ **Reusable Lists** - Duplicate tasks or reset checklists
-- ✅ **Checklist Mode** - Fast list-style checking for checklist tasks
-- ✅ **Audio Capture** - Quick voice capture with automatic transcription and task creation
-- 🧭 **Copilot Suggestions** - Optional context/tag/time hints while typing
-- 🍅 **Pomodoro Focus (Optional)** - 15/3, 25/5, 50/10 timer panel in Focus view with one optional custom preset
-- 🔔 **Notifications** - Separate start and due reminders (snooze on mobile)
-- 📊 **Daily Digest** - Morning briefing + evening review
-- 📅 **Weekly Review** - Customizable weekly reminder
-
-### Data & Sync
-
-- 🔄 **Sync Options** - See the [Data & Sync docs](https://docs.mindwtr.app/data-sync/) for supported backends and setup
-- 🍎 **iCloud Sync** - Built-in sync on supported iPhone, iPad, and macOS builds (CloudKit)
-- ☁️ **Dropbox Sync (Optional)** - Sign in with Dropbox and sync through a private app folder (store builds; not in FOSS builds)
-- 📤 **Export/Backup** - Export data to JSON
-- ♻️ **Restore from Backup** - Replace local data from a validated Mindwtr backup with a recovery snapshot first
-- 📥 **TickTick + Todoist + DGT GTD + OmniFocus + Apple Reminders + CSV Import** - Import TickTick CSV/ZIP, Todoist CSV/ZIP, DGT GTD JSON/ZIP, OmniFocus exports, incomplete Apple Reminders, or any app via a documented generic CSV format into Mindwtr
-- 🔗 **Obsidian Integration** - Desktop vault task import with deep links back to source notes
-- 🗓️ **External Calendars (System + ICS)** - Mobile reads system calendars and pushes dated tasks; macOS desktop reads Apple Calendar and can push dated tasks; desktop/web also support ICS subscriptions and task creation from events
-
-### Automation
-
-- 🔌 **CLI** - Add, list, complete, search from terminal by running the repo helper
-- 🌐 **REST API** - Optional desktop localhost API server for token-authenticated scripting
-- 🌍 **Web App** - Runs in your browser, works offline (PWA)
-- 🧠 **MCP Server** - Lets AI assistants read and manage your tasks (a local Model Context Protocol server), available as [`mindwtr-mcp`](https://www.npmjs.com/package/mindwtr-mcp) and in the [MCP Registry](https://registry.modelcontextprotocol.io/)
-
-Desktop builds can start the local REST API from **Settings -> Advanced** on `127.0.0.1` with default port `3456` and a generated bearer token. The CLI remains a repo helper; the stdio MCP server can be installed from npm with `npm install -g mindwtr-mcp` or launched by MCP clients with `npx -y mindwtr-mcp`.
-
-### Cross-Platform
-
-- 🖥️ **Desktop** - Tauri v2 (macOS, Linux, Windows)
-- 📱 **Mobile** - React Native/Expo (iOS via App Store/TestFlight, Android) with in-app tips for gestures and app shortcuts
-- 📲 **Android Widget** - Home screen focus/next widget
-- ⌚ **Apple Watch Companion** - Capture Inbox items by voice or text, complete or defer Focus tasks, and control a linked Pomodoro timer from your wrist; included starting with the next stable iOS release
-- ⌨️ **Keyboard Shortcuts** - Standard (Gmail-style), Vim, and Emacs presets
-- 🎨 **Themes** - Light, Dark, OLED, Nord, Catppuccin Macchiato, Dracula, Sepia, E-ink, and Material 3
-- 🌍 **i18n** - English, Vietnamese, Chinese (Simplified), Chinese (Traditional), Spanish, Hindi, Arabic, German, Russian, Japanese, French, Portuguese (Brazil), Polish, Korean, Czech, Italian, Turkish, Dutch, Persian, Swedish
-- 🐳 **Docker** - Run the PWA + self-hosted sync server with Docker
-
-</details>
+[**Explore all features →**](https://mindwtr.app/features)
 
 ## Why Mindwtr (Quick Comparison)
 
-Mindwtr is for people who want the full GTD method in one app, with data they own and no lock-in. Here is a brief, respectful comparison with mainstream task apps and GTD-focused alternatives.
+Mindwtr is for people who want the full GTD method in one app, with data they own and no lock-in. Here is how it compares with a few other to-do apps.
 
 | Capability                                                              | Mindwtr | Todoist | TickTick | Everdo | NirvanaHQ |
 | ----------------------------------------------------------------------- | ------- | ------- | -------- | ------ | --------- |
@@ -223,6 +131,8 @@ Mindwtr is for people who want the full GTD method in one app, with data they ow
 Legend: `✅` = yes, `❌` = no, `⚠️` = partial/limited support.
 
 _This comparison is based on the current public capabilities of each product. If any entry is outdated, feel free to open an issue or PR with sources._
+
+[Full comparison and sources →](https://mindwtr.app/compare)
 
 ## Installation
 
@@ -256,6 +166,12 @@ For APT/RPM repo setup, source builds, portable ZIPs, mobile store variants, and
 
 </details>
 
+## Developers & automation
+
+Want to connect other tools? Explore the [local API](https://docs.mindwtr.app/power-users/local-api), the [MCP server](https://docs.mindwtr.app/power-users/mcp), or [host the web app and sync server yourself](https://docs.mindwtr.app/data-sync/cloud-deployment). These are optional.
+
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.dongdongbh%2Fmindwtr.svg)](https://mcptoplist.com/server/io.github.dongdongbh%2Fmindwtr)
+
 ## Community
 
 Mindwtr is shaped by its users and contributors. Thank you for helping improve it.
@@ -268,25 +184,13 @@ You can help in several ways:
 
 1. **Spread the word:** Share Mindwtr with friends and communities, and support it on [Product Hunt](https://www.producthunt.com/products/mindwtr) and [AlternativeTo](https://alternativeto.net/software/mindwtr/).
 2. **Leave store reviews:** A good rating/review on the [App Store](https://apps.apple.com/app/mindwtr/id6758597144), [Google Play](https://play.google.com/store/apps/details?id=tech.dongdongbh.mindwtr), or [Microsoft Store](https://apps.microsoft.com/detail/9n0v5b0b6frx?ocid=webpdpshare) helps a lot.
-3. **Star and share:** Star the repo and post about Mindwtr on [X](https://twitter.com/intent/tweet?text=I%20like%20Mindwtr%20https%3A%2F%2Fgithub.com%2Fdongdongbh%2FMindwtr), [Reddit](https://www.reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fdongdongbh%2FMindwtr&title=I%20like%20Mindwtr), or [LinkedIn](https://www.linkedin.com/shareArticle?mini=true&url=https%3A%2F%2Fgithub.com%2Fdongdongbh%2FMindwtr&title=I%20like%20Mindwtr).
+3. **Star and share:** Star ⭐ the repo and post about Mindwtr on [X](https://twitter.com/intent/tweet?text=I%20like%20Mindwtr%20https%3A%2F%2Fgithub.com%2Fdongdongbh%2FMindwtr), [Reddit](https://www.reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fdongdongbh%2FMindwtr&title=I%20like%20Mindwtr), or [LinkedIn](https://www.linkedin.com/shareArticle?mini=true&url=https%3A%2F%2Fgithub.com%2Fdongdongbh%2FMindwtr&title=I%20like%20Mindwtr).
 4. **Report bugs and request features:** Open issues on [GitHub Issues](https://github.com/dongdongbh/Mindwtr/issues).
 5. **Join the community chat:** Come to [Discord](https://discord.gg/gc4h5t58PR).
 6. **Help with translations:** Contribute locale updates in [`packages/core/src/i18n/locales/`](packages/core/src/i18n/locales/).
 7. **Contribute code/docs:** Open a pull request and follow the [contribution guide](docs/CONTRIBUTING.md) and commit conventions.
 8. **Pick and build:** Community members are welcome to pick any open issue and submit a PR.
 9. **Sponsor the project:** Support ongoing development via [GitHub Sponsors](https://github.com/sponsors/dongdongbh) or [Ko-fi](https://ko-fi.com/D1D01T20WK).
-
-## More videos
-
-The introduction and GTD walkthrough are embedded above. Explore more with English captions, either directly on the website or on YouTube:
-
-| Video | Website | YouTube |
-| --- | --- | --- |
-| Feature tour | [Watch](https://mindwtr.app/features#features-video) | [Watch](https://youtu.be/oDU8vZXfSoM) |
-| Desktop quick tour | [Watch](https://docs.mindwtr.app/start/videos#desktop) | [Watch](https://youtu.be/pSLajUzSZ2Q) |
-| Mobile quick tour | [Watch](https://docs.mindwtr.app/start/videos#mobile) | [Watch](https://youtu.be/l-aBufpt0c0) |
-
-[All videos on the website](https://docs.mindwtr.app/start/videos) · [Mindwtr Intro playlist](https://www.youtube.com/playlist?list=PLHqy3tAh5WlE) · [Mindwtr App Demos playlist](https://www.youtube.com/playlist?list=PLLwV6zeTfB_k)
 
 ## Star History
 
