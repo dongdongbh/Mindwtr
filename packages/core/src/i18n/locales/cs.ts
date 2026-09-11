@@ -942,6 +942,7 @@ export const csOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'Nový kontext…',
         'process.remaining': 'položek zbývá',
         'process.btn': 'Zpracovat schránku',
+        'process.similarTasks': 'Podobné úkoly',
         'process.modeGuided': 'S průvodcem',
         'process.modeQuick': 'Rychlý',
         'process.quickDesc': 'Projděte detaily, zvolte výsledek a pokračujte rovnou na další položku.',

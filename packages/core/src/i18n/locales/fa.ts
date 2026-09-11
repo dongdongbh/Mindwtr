@@ -984,6 +984,7 @@ export const faOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'زمینه جدید...',
         'process.remaining': 'مورد باقی‌مانده',
         'process.btn': 'پردازش صندوق ورودی',
+        'process.similarTasks': 'کارهای مشابه',
         'process.modeGuided': 'راهنمایی‌شده',
         'process.modeQuick': 'سریع',
         'process.quickDesc': 'جزئیات را بررسی کنید، نتیجه را انتخاب کنید و مستقیم به مورد بعدی بروید.',

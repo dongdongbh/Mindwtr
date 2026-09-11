@@ -729,6 +729,7 @@ export const ruOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'Новый контекст...',
         'process.remaining': 'оставшиеся предметы',
         'process.btn': 'Обработка входящих сообщений',
+        'process.similarTasks': 'Похожие задачи',
         'process.modeGuided': 'Пошаговый',
         'process.modeQuick': 'Быстрый',
         'process.quickDesc': 'Проверьте детали, выберите результат и сразу переходите к следующему элементу.',

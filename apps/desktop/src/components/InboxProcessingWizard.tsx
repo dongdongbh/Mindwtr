@@ -29,6 +29,7 @@ import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
 import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
 import { PriorityFlag } from './Task/PriorityFlag';
+import { InboxSimilarTasks } from './InboxSimilarTasks';
 
 export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'reference' | 'someday' | 'project' | 'delegate';
 
@@ -42,6 +43,7 @@ export type InboxProcessingWizardProps = {
     /** The task fields being clarified, and the one write path into them. */
     draft: TaskDraft;
     setField: TaskDraftSetter;
+    similarTasks: readonly Task[];
     visibility: InboxProcessingVisibility;
     options: InboxProcessingOptionLists;
     setIsProcessing: (value: boolean) => void;
@@ -116,6 +118,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     processingStep,
     draft,
     setField,
+    similarTasks,
     visibility,
     options,
     setIsProcessing,
@@ -463,6 +466,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
                             />
                         </div>
+                        <InboxSimilarTasks t={t} tasks={similarTasks} projects={projects} />
                         <div className="space-y-1">
                             <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.descriptionLabel')}</label>
                             <textarea

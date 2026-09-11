@@ -1014,6 +1014,7 @@ export const jaOverrides: Record<string, string> = {
         'process.newContextPlaceholder': '新しいコンテキスト…',
         'process.remaining': '件が残っています',
         'process.btn': 'インボックスを処理',
+        'process.similarTasks': '似ているタスク',
         'process.modeGuided': 'ガイド付き',
         'process.modeQuick': 'クイック',
         'process.quickDesc': '内容を確認し、行き先を選んで、そのまま次の項目へ進みます。',

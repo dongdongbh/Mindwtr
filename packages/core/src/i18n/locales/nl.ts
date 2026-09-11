@@ -187,6 +187,7 @@ export const nlOverrides: Record<string, string> = {
         'priority.high': 'Hoog',
         'taskEdit.editTask': 'Taak bewerken',
         'task.aria.startTime': 'Begintijd',
+        'process.similarTasks': 'Vergelijkbare taken',
         'process.modeGuided': 'Begeleid',
         'process.modeQuick': 'Snel',
         'process.quickDesc': 'Controleer de details, kies het resultaat en ga direct door naar het volgende item.',

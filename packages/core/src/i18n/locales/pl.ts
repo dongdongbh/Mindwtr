@@ -727,6 +727,7 @@ export const plOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'Nowy kontekst...',
         'process.remaining': 'pozostało pozycji',
         'process.btn': 'Przetwarzaj skrzynkę odbiorczą',
+        'process.similarTasks': 'Podobne zadania',
         'process.modeGuided': 'Prowadzony',
         'process.modeQuick': 'Szybki',
         'process.quickDesc': 'Sprawdź szczegóły, wybierz wynik i od razu przejdź do następnego elementu.',

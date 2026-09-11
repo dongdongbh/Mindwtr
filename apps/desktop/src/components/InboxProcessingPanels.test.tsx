@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/react';
-import { createTaskDraft, setTaskDraftField, type Task, type TaskDraft } from '@mindwtr/core';
+import { createTaskDraft, setTaskDraftField, type Project, type Task, type TaskDraft } from '@mindwtr/core';
 
 import { LanguageProvider } from '../contexts/language-context';
 import { InboxProcessingQuickPanel, type InboxProcessingQuickPanelProps } from './InboxProcessingQuickPanel';
@@ -19,6 +19,25 @@ const processingTask: Task = {
     status: 'inbox',
     contexts: [],
     tags: [],
+    createdAt: '2026-07-30T00:00:00.000Z',
+    updatedAt: '2026-07-30T00:00:00.000Z',
+};
+
+const similarTask: Task = {
+    ...processingTask,
+    id: 'task-similar',
+    title: 'Plan the product launch with a title long enough to wrap instead of truncating',
+    status: 'done',
+    projectId: 'project-launch',
+};
+
+const similarProject: Project = {
+    id: 'project-launch',
+    title: 'Launch project',
+    status: 'active',
+    color: '#2563eb',
+    order: 0,
+    tagIds: [],
     createdAt: '2026-07-30T00:00:00.000Z',
     updatedAt: '2026-07-30T00:00:00.000Z',
 };
@@ -93,6 +112,7 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
             remainingCount={1}
             draft={draft}
             setField={setField}
+            similarTasks={[]}
             visibility={visibility}
             options={options}
             processingMode="quick"
@@ -145,6 +165,7 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrid
             processingStep={processingStep}
             draft={draft}
             setField={setField}
+            similarTasks={[]}
             visibility={visibility}
             options={options}
             setIsProcessing={noop}
@@ -207,6 +228,38 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrid
         </LanguageProvider>
     );
 }
+
+describe('Inbox processing similar-task hint', () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    it.each([
+        ['guided', () => render(<WizardHarness
+            similarTasks={[similarTask]}
+            options={{ ...options, projects: [similarProject] }}
+        />)],
+        ['quick', () => render(<QuickPanelHarness
+            similarTasks={[similarTask]}
+            options={{ ...options, projects: [similarProject] }}
+        />)],
+    ] as const)('shows the read-only hint below the title in %s mode', (_mode, renderPanel) => {
+        const view = renderPanel();
+        const hint = view.getByRole('region', { name: 'process.similarTasks' });
+
+        expect(hint).toHaveTextContent(similarTask.title);
+        expect(hint).toHaveTextContent('status.done');
+        expect(hint).toHaveTextContent(similarProject.title);
+        expect(view.getByDisplayValue(processingTask.title)).toBeEnabled();
+    });
+
+    it.each([
+        ['guided', () => render(<WizardHarness />)],
+        ['quick', () => render(<QuickPanelHarness />)],
+    ] as const)('does not render an empty hint in %s mode', (_mode, renderPanel) => {
+        expect(renderPanel().queryByRole('region', { name: 'process.similarTasks' })).toBeNull();
+    });
+});
 
 describe('InboxProcessingQuickPanel draft editing', () => {
     afterEach(() => {

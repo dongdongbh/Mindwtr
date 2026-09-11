@@ -798,6 +798,7 @@ export const arOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'سياق جديد...',
         'process.remaining': 'العناصر المتبقية',
         'process.btn': 'علبة الوارد للعملية',
+        'process.similarTasks': 'مهام مشابهة',
         'process.modeGuided': 'موجّه',
         'process.modeQuick': 'سريع',
         'process.quickDesc': 'راجع التفاصيل، واختر النتيجة، ثم انتقل مباشرة إلى العنصر التالي.',

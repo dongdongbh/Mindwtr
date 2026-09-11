@@ -1007,6 +1007,7 @@ export const en: Record<string, string> = {
         'process.newContextPlaceholder': 'New context...',
         'process.remaining': 'items remaining',
         'process.btn': 'Process Inbox',
+        'process.similarTasks': 'Similar tasks',
         'process.modeGuided': 'Guided',
         'process.modeQuick': 'Quick',
         'process.quickDesc': 'Review the details, choose the outcome, and move straight to the next item.',

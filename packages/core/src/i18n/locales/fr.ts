@@ -875,6 +875,7 @@ export const frOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'Nouveau contexte…',
         'process.remaining': 'éléments restants',
         'process.btn': 'Traiter la Boîte de réception',
+        'process.similarTasks': 'Tâches similaires',
         'process.modeGuided': 'Guidé',
         'process.modeQuick': 'Rapide',
         'process.quickDesc': 'Vérifiez les détails, choisissez le résultat et passez directement à l’élément suivant.',

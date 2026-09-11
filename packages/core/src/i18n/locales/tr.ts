@@ -736,6 +736,7 @@ export const trOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'Yeni bağlam...',
         'process.remaining': 'kalan öğeler',
         'process.btn': 'Gelen Kutusunu İşle',
+        'process.similarTasks': 'Benzer görevler',
         'process.modeGuided': 'Rehberli',
         'process.modeQuick': 'Hızlı',
         'process.quickDesc': 'Ayrıntıları gözden geçirin, sonucu seçin ve doğrudan sonraki öğeye geçin.',

@@ -27,6 +27,7 @@ import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
 import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
 import { PriorityFlag } from './Task/PriorityFlag';
+import { InboxSimilarTasks } from './InboxSimilarTasks';
 
 type QuickActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference' | 'incubate';
 type QuickTwoMinuteChoice = 'yes' | 'no';
@@ -39,6 +40,7 @@ export type InboxProcessingQuickPanelProps = {
     /** The task fields being clarified, and the one write path into them. */
     draft: TaskDraft;
     setField: TaskDraftSetter;
+    similarTasks: readonly Task[];
     visibility: InboxProcessingVisibility;
     options: InboxProcessingOptionLists;
     settings?: AppData['settings'];
@@ -111,6 +113,7 @@ export function InboxProcessingQuickPanel({
     remainingCount,
     draft,
     setField,
+    similarTasks,
     visibility,
     options,
     settings,
@@ -485,6 +488,7 @@ export function InboxProcessingQuickPanel({
                             className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
                         />
                     </div>
+                    <InboxSimilarTasks t={t} tasks={similarTasks} projects={projects} />
                     <div className="space-y-1">
                         <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.descriptionLabel')}</label>
                         <textarea

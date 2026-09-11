@@ -961,6 +961,7 @@ export const zhHans: Record<string, string> = {
         'process.newContextPlaceholder': '新情境...',
         'process.remaining': '项剩余',
         'process.btn': '处理收集箱',
+        'process.similarTasks': '相似任务',
         'process.modeGuided': '引导式',
         'process.modeQuick': '快速',
         'process.quickDesc': '检查详情，选择处理结果，然后直接进入下一项。',

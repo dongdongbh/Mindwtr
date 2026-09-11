@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Area, Project, Task } from '@mindwtr/core';
+import { useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
 import { useInboxProcessingController } from './useInboxProcessingController';
 
 type InboxControllerOptions = Parameters<typeof useInboxProcessingController>[0];
@@ -16,6 +16,10 @@ const makeTask = (id: string, status: Task['status'] = 'inbox'): Task => ({
     createdAt: '2026-07-15T00:00:00.000Z',
     updatedAt: '2026-07-15T00:00:00.000Z',
 } as Task);
+
+afterEach(() => {
+    useTaskStore.setState({ _allTasks: [] });
+});
 
 describe('useInboxProcessingController session reconciliation', () => {
     it('advances when the current task leaves Inbox and closes when none remain', async () => {
@@ -66,6 +70,79 @@ describe('useInboxProcessingController session reconciliation', () => {
             expect(result.current.isProcessing).toBe(false);
         });
         expect(setProcessingSpy).toHaveBeenLastCalledWith(false);
+    });
+
+    it('matches against the full store and refreshes for draft, task, and store changes without writes', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const deleteTask = vi.fn(async () => ({ success: true }));
+        const planTask = { ...makeTask('plan'), title: 'Plan launch' };
+        const donePlan = { ...makeTask('done-plan', 'done'), title: 'Plan launch' };
+        const venueTask = { ...makeTask('venue'), title: 'Book venue' };
+        const archivedVenue = { ...makeTask('archived-venue', 'archived'), title: 'Book venue' };
+        const initialTasks = [planTask, donePlan, venueTask, archivedVenue];
+        useTaskStore.setState({ _allTasks: initialTasks });
+        const { result, rerender } = renderHook(
+            ({ tasks }: { tasks: Task[] }) => {
+                const [isProcessing, setIsProcessing] = useState(true);
+                return useInboxProcessingController({
+                    t: (key) => key,
+                    tasks,
+                    projects: [],
+                    areas: [],
+                    settings: {},
+                    addProject: async () => null,
+                    addTask: async () => ({ success: true }),
+                    updateTask,
+                    deleteTask,
+                    allContexts: [],
+                    allTags: [],
+                    isProcessing,
+                    setIsProcessing,
+                });
+            },
+            { initialProps: { tasks: initialTasks } },
+        );
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('plan');
+        });
+        expect(result.current.wizardProps.similarTasks.map((task) => task.id)).toEqual(['done-plan']);
+
+        act(() => {
+            result.current.wizardProps.setField('title', 'A wholly different title');
+        });
+        expect(result.current.wizardProps.similarTasks).toEqual([]);
+
+        const venueSessionTasks: Task[] = [
+            { ...planTask, status: 'next' },
+            donePlan,
+            venueTask,
+            archivedVenue,
+        ];
+        act(() => {
+            useTaskStore.setState({ _allTasks: venueSessionTasks });
+        });
+        rerender({ tasks: venueSessionTasks });
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('venue');
+        });
+        expect(result.current.wizardProps.similarTasks.map((task) => task.id)).toEqual(['archived-venue']);
+
+        const updatedStoreTasks: Task[] = [
+            { ...planTask, status: 'next' },
+            donePlan,
+            venueTask,
+            { ...archivedVenue, title: 'Reserve venue' },
+        ];
+        act(() => {
+            useTaskStore.setState({ _allTasks: updatedStoreTasks });
+        });
+        rerender({ tasks: updatedStoreTasks });
+        await waitFor(() => {
+            expect(result.current.wizardProps.similarTasks).toEqual([]);
+        });
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(deleteTask).not.toHaveBeenCalled();
     });
 });
 

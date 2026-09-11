@@ -816,6 +816,7 @@ export const itOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'Nuovo contesto...',
         'process.remaining': 'elementi rimanenti',
         'process.btn': 'Elabora Entrata',
+        'process.similarTasks': 'Attività simili',
         'process.modeGuided': 'Guidata',
         'process.modeQuick': 'Rapida',
         'process.quickDesc': 'Rivedi i dettagli, scegli l\'esito e passa direttamente all\'elemento successivo.',

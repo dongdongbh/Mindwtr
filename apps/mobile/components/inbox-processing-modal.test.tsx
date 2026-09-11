@@ -29,6 +29,10 @@ vi.mock('expo-haptics', () => ({
 }));
 
 const reducedMotionMock = vi.hoisted(() => ({ value: false }));
+const similarityMocks = vi.hoisted(() => ({
+  createIndex: vi.fn(),
+  find: vi.fn(),
+}));
 
 vi.mock('@/hooks/use-reduced-motion', () => ({
   useReducedMotion: () => reducedMotionMock.value,
@@ -38,6 +42,10 @@ const clarifyTask = vi.fn();
 const showToast = vi.fn();
 const dismissToast = vi.fn();
 const translate = (key: string) => ({
+  'process.similarTasks': 'Similar tasks',
+  'status.archived': 'Archived',
+  'status.done': 'Done',
+  'status.next': 'Next',
   'taskEdit.dateOnly': 'Date only',
   'viewSections.add': 'New section…',
   'viewSections.nameHint': 'Section name',
@@ -93,6 +101,7 @@ const homeProject = {
 };
 const storeState = {
   tasks: [{ ...baseInboxTask }] as any[],
+  _allTasks: [{ ...baseInboxTask }] as any[],
   projects: [] as any[],
   areas: [] as any[],
   settings: mockSettings,
@@ -121,6 +130,8 @@ const flattenStyle = (style: unknown): Record<string, any> => {
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mindwtr/core')>();
+  similarityMocks.createIndex.mockImplementation(actual.createTaskSimilarityIndex);
+  similarityMocks.find.mockImplementation(actual.findSimilarTasks);
   const formatDateOnly = (value: Date | string) => {
     const date = value instanceof Date ? value : new Date(value);
     return [
@@ -151,6 +162,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
       }
       return Array.from(usage.values());
     }),
+    createTaskSimilarityIndex: similarityMocks.createIndex,
     createAIProvider: vi.fn(() => ({
       clarifyTask,
     })),
@@ -165,6 +177,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
       && project.status !== 'completed'
       && (!selectedAreaId || project.areaId === selectedAreaId)
     ))),
+    findSimilarTasks: similarityMocks.find,
     QUICK_DATE_PRESETS: ['today', 'tomorrow', 'in_3_days', 'next_week', 'next_month', 'no_date'],
     getQuickDate: vi.fn((preset: string) => {
       const today = new Date(2025, 0, 1);
@@ -330,6 +343,7 @@ describe('InboxProcessingModal', () => {
     mockSettings.ai = {};
     mockSettings.filters = undefined;
     storeState.tasks = [{ ...baseInboxTask }];
+    storeState._allTasks = storeState.tasks;
     storeState.projects = [];
     storeState.areas = [];
     updateTask.mockReset();
@@ -346,6 +360,8 @@ describe('InboxProcessingModal', () => {
     asyncStorageMock.setItem.mockReset();
     asyncStorageMock.setItem.mockResolvedValue(undefined);
     reducedMotionMock.value = false;
+    similarityMocks.createIndex.mockClear();
+    similarityMocks.find.mockClear();
     addProject.mockClear();
     addTask.mockReset();
     addTask.mockResolvedValue({ success: true });
@@ -614,6 +630,148 @@ describe('InboxProcessingModal', () => {
       placeholder: 'taskEdit.titleLabel',
       accessibilityLabel: 'taskEdit.titleLabel',
     }).props.value).toBe('Inbox task');
+  });
+
+  it('shows a localized, read-only match from the full task store without rebuilding on title edits', async () => {
+    storeState.tasks = [{ ...baseInboxTask, title: 'Plan quarterly offsite' }];
+    storeState._allTasks = [
+      { ...baseInboxTask, title: 'Plan quarterly offsite' },
+      ...Array.from({ length: 205 }, (_, index) => ({
+        ...baseInboxTask,
+        id: `done-${index}`,
+        title: `Completed item ${index}`,
+        status: 'done',
+      })),
+      {
+        ...baseInboxTask,
+        id: 'matching-done-task',
+        title: 'Plan quarterly offsite',
+        status: 'done',
+        projectId: workProject.id,
+      },
+      {
+        ...baseInboxTask,
+        id: 'matching-archived-task',
+        title: 'Plan quarterly offsite',
+        status: 'archived',
+      },
+    ];
+    storeState.projects = [{ ...workProject, title: 'Planning' }];
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+
+    const root = tree!.root;
+    expect(root.findAllByProps({ accessibilityLabel: 'Similar tasks' }).length).toBeGreaterThan(0);
+    expect(findNodesWithText(root, 'Plan quarterly offsite').length).toBeGreaterThan(0);
+    expect(findNodesWithText(root, 'Done • Planning').length).toBeGreaterThan(0);
+    expect(findNodesWithText(root, 'Archived').length).toBeGreaterThan(0);
+    expect(findNodesWithText(root, 'taskEdit.aiClarify')).toHaveLength(0);
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(deleteTask).not.toHaveBeenCalled();
+    expect(addTask).not.toHaveBeenCalled();
+    expect(similarityMocks.createIndex).toHaveBeenCalledTimes(1);
+    expect(similarityMocks.createIndex).toHaveBeenCalledWith(storeState._allTasks);
+
+    act(() => {
+      findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.onChangeText('Unrelated draft');
+    });
+
+    expect(root.findAllByProps({ accessibilityLabel: 'Similar tasks' })).toHaveLength(0);
+    expect(similarityMocks.createIndex).toHaveBeenCalledTimes(1);
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('updates the quick-mode hint when skipping to another task and leaves normal processing usable', async () => {
+    asyncStorageMock.getItem.mockResolvedValue('quick');
+    storeState.tasks = [
+      { ...baseInboxTask, id: 'inbox-a', title: 'First capture' },
+      {
+        ...baseInboxTask,
+        id: 'inbox-b',
+        title: 'Second capture',
+        createdAt: '2025-01-02T00:00:00.000Z',
+      },
+    ];
+    storeState._allTasks = [
+      ...storeState.tasks,
+      { ...baseInboxTask, id: 'done-a', title: 'First capture', status: 'done' },
+      { ...baseInboxTask, id: 'done-b', title: 'Second capture', status: 'done' },
+    ];
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+
+    const root = tree!.root;
+    expect(findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.value).toBe('First capture');
+    expect(findNodesWithText(root, 'First capture').length).toBeGreaterThan(0);
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(deleteTask).not.toHaveBeenCalled();
+    expect(addTask).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.findByProps({ accessibilityLabel: 'Skip', accessibilityRole: 'button' }).props.onPress();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.value).toBe('Second capture');
+    expect(findNodesWithText(root, 'First capture')).toHaveLength(0);
+    expect(findNodesWithText(root, 'Second capture').length).toBeGreaterThan(0);
+    expect(updateTask).toHaveBeenCalledTimes(1);
+    expect(updateTask.mock.calls[0][0]).toBe('inbox-a');
+    expect(updateTask.mock.calls[0][1]).not.toHaveProperty('status');
+    expect(deleteTask).not.toHaveBeenCalled();
+    expect(addTask).not.toHaveBeenCalled();
+
+    await act(async () => {
+      findPressableWithText(root, 'inbox.illDoIt').props.onPress();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(updateTask).toHaveBeenCalledTimes(2);
+    expect(updateTask).toHaveBeenLastCalledWith('inbox-b', expect.objectContaining({ status: 'next' }));
+  });
+
+  it('refreshes matches when store data changes and does no similarity work while closed', async () => {
+    storeState.tasks = [
+      { ...baseInboxTask, title: 'Renew passport' },
+    ];
+    storeState._allTasks = [
+      ...storeState.tasks,
+      { ...baseInboxTask, id: 'done-passport', title: 'Renew passport', status: 'done' },
+    ];
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible={false} onClose={onClose} />);
+    });
+    expect(similarityMocks.createIndex).not.toHaveBeenCalled();
+    expect(similarityMocks.find).not.toHaveBeenCalled();
+
+    act(() => {
+      tree!.update(<InboxProcessingModal visible onClose={onClose} />);
+    });
+    await flushAsyncActions();
+    expect(tree!.root.findAllByProps({ accessibilityLabel: 'Similar tasks' }).length).toBeGreaterThan(0);
+
+    storeState.tasks = [{ ...baseInboxTask, title: 'Renew passport' }];
+    storeState._allTasks = storeState.tasks;
+    act(() => {
+      tree!.update(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    expect(tree!.root.findAllByProps({ accessibilityLabel: 'Similar tasks' })).toHaveLength(0);
+    expect(similarityMocks.createIndex).toHaveBeenCalledTimes(2);
+    expect(updateTask).not.toHaveBeenCalled();
   });
 
   it('steps back to the previous question and clears the answer it derived', () => {

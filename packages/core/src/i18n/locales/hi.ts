@@ -728,6 +728,7 @@ export const hiOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'नया सन्दर्भ...',
         'process.remaining': 'आइटम शेष',
         'process.btn': 'प्रक्रिया इनबॉक्स',
+        'process.similarTasks': 'मिलते-जुलते कार्य',
         'process.modeGuided': 'मार्गदर्शित',
         'process.modeQuick': 'त्वरित',
         'process.quickDesc': 'विवरण देखें, परिणाम चुनें, और सीधे अगले आइटम पर जाएं।',

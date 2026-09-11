@@ -527,6 +527,25 @@ export const styles = StyleSheet.create({
     padding: 0,
     minHeight: 24,
   },
+  similarTasksSection: {
+    marginTop: 8,
+    gap: 6,
+  },
+  similarTasksHeading: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  similarTaskRow: {
+    gap: 1,
+  },
+  similarTaskTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  similarTaskMeta: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
   anchorActionsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

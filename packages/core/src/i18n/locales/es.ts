@@ -966,6 +966,7 @@ export const esOverrides: Record<string, string> = {
 'process.newContextPlaceholder': "Nuevo contexto...",
 'process.remaining': "capturas pendientes",
 'process.btn': "Procesar Bandeja",
+'process.similarTasks': "Tareas similares",
 'process.modeGuided': "Guiado",
 'process.modeQuick': "Rápido",
 'process.quickDesc': "Revisa los detalles, elige el resultado y pasa directamente al siguiente elemento.",

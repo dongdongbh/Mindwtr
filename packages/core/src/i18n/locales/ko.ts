@@ -980,6 +980,7 @@ export const koOverrides: Record<string, string> = {
         'process.newContextPlaceholder': '새 상황 추가...',
         'process.remaining': '남은 항목',
         'process.btn': '수집함 처리',
+        'process.similarTasks': '비슷한 작업',
         'process.modeGuided': '안내형',
         'process.modeQuick': '빠른',
         'process.quickDesc': '세부 내용을 확인하고 결과를 선택한 뒤 바로 다음 항목으로 넘어가세요.',

@@ -969,6 +969,7 @@ export const viOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'Ngữ cảnh mới...',
         'process.remaining': 'mục còn lại',
         'process.btn': 'Xử lý Hộp thư đến',
+        'process.similarTasks': 'Công việc tương tự',
         'process.modeGuided': 'Có hướng dẫn',
         'process.modeQuick': 'Nhanh',
         'process.quickDesc': 'Xem lại chi tiết, chọn kết quả và chuyển ngay sang mục tiếp theo.',

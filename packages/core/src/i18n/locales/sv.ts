@@ -984,6 +984,7 @@ export const svOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'Ny kontext...',
         'process.remaining': 'poster kvar',
         'process.btn': 'Bearbeta inkorgen',
+        'process.similarTasks': 'Liknande uppgifter',
         'process.modeGuided': 'Guidad',
         'process.modeQuick': 'Snabb',
         'process.quickDesc': 'Granska detaljerna, välj resultatet och gå direkt vidare till nästa post.',

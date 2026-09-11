@@ -787,6 +787,7 @@ export const deOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'Neuer Kontext …',
         'process.remaining': 'Elemente verbleiben',
         'process.btn': 'Eingang verarbeiten',
+        'process.similarTasks': 'Ähnliche Aufgaben',
         'process.modeGuided': 'Geführt',
         'process.modeQuick': 'Schnell',
         'process.quickDesc': 'Überprüfe die Details, wähle das Ergebnis und wechsle direkt zum nächsten Element.',

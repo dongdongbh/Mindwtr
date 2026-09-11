@@ -753,6 +753,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
           titleInputRef={controller.titleInputRef}
           processingTitle={controller.processingTitle}
           setProcessingTitle={controller.setProcessingTitle}
+          similarTasks={controller.similarTasks}
+          similarTaskProjectTitles={controller.similarTaskProjectTitles}
           convertToProject={step === 'file' && convertToProject}
           processingDescription={controller.processingDescription}
           setProcessingDescription={controller.setProcessingDescription}

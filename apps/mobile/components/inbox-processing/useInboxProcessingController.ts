@@ -15,7 +15,9 @@ import {
   DEFAULT_PROJECT_COLOR,
   collectTaskTokenUsage,
   createAIProvider,
+  createTaskSimilarityIndex,
   filterProjectsBySelectedArea,
+  findSimilarTasks,
   formatAIErrorAlertBody,
   getProjectChoiceState,
   getProcessInboxCurrentCandidate,
@@ -125,7 +127,19 @@ export function useInboxProcessingController({
   visible,
   onClose,
 }: InboxProcessingControllerParams) {
-  const { tasks, projects, areas, people, settings, updateTask, deleteTask, restoreTask, addProject, addTask } = useTaskStore();
+  const {
+    tasks,
+    _allTasks: allTasks,
+    projects,
+    areas,
+    people,
+    settings,
+    updateTask,
+    deleteTask,
+    restoreTask,
+    addProject,
+    addTask,
+  } = useTaskStore();
   const { t, language } = useLanguage();
   const { showToast } = useToast();
   const router = useRouter();
@@ -250,6 +264,25 @@ export function useInboxProcessingController({
     () => getProcessInboxCurrentCandidate(processingSession, inboxTasks),
     [inboxTasks, processingSession],
   );
+  const taskSimilarityIndex = useMemo(
+    () => visible ? createTaskSimilarityIndex(allTasks) : null,
+    [allTasks, visible],
+  );
+  const similarTasks = useMemo(
+    () => visible && currentTask && taskSimilarityIndex
+      ? findSimilarTasks(taskSimilarityIndex, processingTitle, currentTask.id)
+      : [],
+    [currentTask, processingTitle, taskSimilarityIndex, visible],
+  );
+  const similarTaskProjectTitles = useMemo(() => {
+    if (!visible || similarTasks.length === 0) return new Map<string, string>();
+    const projectIds = new Set(similarTasks.map((task) => task.projectId).filter(Boolean));
+    const titles = new Map<string, string>();
+    for (const project of projects) {
+      if (projectIds.has(project.id)) titles.set(project.id, project.title);
+    }
+    return titles;
+  }, [projects, similarTasks, visible]);
   const isReturningItem = Boolean(currentTask && isProcessInboxReturningTask(currentTask));
   const totalCount = inboxTasks.length;
   const processedCount = totalCount - processingQueue.length;
@@ -1382,6 +1415,8 @@ export function useInboxProcessingController({
     setShowReviewDatePicker,
     setShowStartDatePicker,
     setShowAdvancedOptions,
+    similarTaskProjectTitles,
+    similarTasks,
     toggleAdvancedOptions,
     showDelegateDatePicker,
     showAreaField,

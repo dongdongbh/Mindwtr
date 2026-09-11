@@ -4,9 +4,11 @@ import {
     addBreadcrumb,
     buildQuickAddParseOptions,
     commitProcessInboxWorkflowEvent,
+    createTaskSimilarityIndex,
     DEFAULT_PROJECT_COLOR,
     enterProcessInboxStep,
     getPersonOptionNames,
+    findSimilarTasks,
     goBackProcessInboxStep,
     isSelectableProjectForTaskAssignment,
     isProcessInboxReturningTask,
@@ -88,6 +90,7 @@ export function useInboxProcessingController({
 }: UseInboxProcessingControllerParams): UseInboxProcessingControllerResult {
     const showToast = useUiStore((state) => state.showToast);
     const projectConversionInFlightRef = useRef(false);
+    const allTasks = useTaskStore((state) => state._allTasks);
     const people = useTaskStore((state) => state.people);
     const addPerson = useTaskStore((state) => state.addPerson);
     const personOptions = useMemo(() => getPersonOptionNames(people, tasks), [people, tasks]);
@@ -186,6 +189,15 @@ export function useInboxProcessingController({
     // lists, keyed on the text so callbacks keep their identity between edits.
     const selectedContexts = useMemo(() => parseContextsInput(draft.contexts), [draft.contexts]);
     const selectedTags = useMemo(() => parseTagsInput(draft.tags), [draft.tags]);
+    const similarityIndex = useMemo(
+        () => (isProcessing ? createTaskSimilarityIndex(allTasks) : null),
+        [allTasks, isProcessing],
+    );
+    const similarTasks = useMemo(() => (
+        isProcessing && processingTask && similarityIndex
+            ? findSimilarTasks(similarityIndex, draft.title, processingTask.id)
+            : []
+    ), [draft.title, isProcessing, processingTask, similarityIndex]);
 
     useEffect(() => {
         if (isProcessing) return;
@@ -892,6 +904,7 @@ export function useInboxProcessingController({
             remainingCount: remainingInboxCount,
             draft,
             setField,
+            similarTasks,
             visibility,
             options,
             settings,
@@ -937,6 +950,7 @@ export function useInboxProcessingController({
         processingStep,
         draft,
         setField,
+        similarTasks,
         visibility,
         options,
         setIsProcessing,

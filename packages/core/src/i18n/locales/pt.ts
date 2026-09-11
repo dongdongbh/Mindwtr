@@ -767,6 +767,7 @@ export const ptOverrides: Record<string, string> = {
         'process.newContextPlaceholder': 'Novo contexto...',
         'process.remaining': 'itens restantes',
         'process.btn': 'Caixa de entrada do processo',
+        'process.similarTasks': 'Tarefas semelhantes',
         'process.modeGuided': 'Guiado',
         'process.modeQuick': 'Rápido',
         'process.quickDesc': 'Revise os detalhes, escolha o resultado e siga direto para o próximo item.',

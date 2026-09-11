@@ -2,10 +2,11 @@ import React from 'react';
 import type { RefObject } from 'react';
 import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { ChevronDown, ChevronUp, Hourglass, Sparkles } from 'lucide-react-native';
-import { stripMarkdown, tFallback } from '@mindwtr/core';
+import { stripMarkdown, tFallback, type Task } from '@mindwtr/core';
 
 import { styles } from '../inbox-processing-modal.styles';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
+import { SimilarTasksHint } from './SimilarTasksHint';
 
 const NOTE_PREVIEW_LIMIT = 200;
 
@@ -15,6 +16,8 @@ type Props = {
   titleInputRef: RefObject<TextInput>;
   processingTitle: string;
   setProcessingTitle: (v: string) => void;
+  similarTasks: readonly Task[];
+  similarTaskProjectTitles: ReadonlyMap<string, string>;
   convertToProject: boolean;
   processingDescription: string;
   setProcessingDescription: (v: string) => void;
@@ -42,6 +45,8 @@ export function InboxCaptureCard({
   titleInputRef,
   processingTitle,
   setProcessingTitle,
+  similarTasks,
+  similarTaskProjectTitles,
   convertToProject,
   processingDescription,
   setProcessingDescription,
@@ -81,6 +86,13 @@ export function InboxCaptureCard({
         onBlur={() => setProcessingTitleFocused(false)}
         selection={processingTitleFocused ? undefined : { start: 0, end: 0 }}
         multiline
+      />
+
+      <SimilarTasksHint
+        t={t}
+        tc={tc}
+        tasks={similarTasks}
+        projectTitles={similarTaskProjectTitles}
       />
 
       {!notesOpen && notePreview ? (
