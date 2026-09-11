@@ -1874,6 +1874,8 @@ export const svOverrides: Record<string, string> = {
         'settings.feedbackUnavailable': 'Feedback är inte konfigurerat i den här versionen.',
         'settings.feedbackUnavailableDesc': 'Du kan fortfarande rapportera buggar och önska funktioner med GitHubs ärendemallar.',
         'settings.feedbackOpenGitHubIssue': 'Öppna GitHub-ärende',
+        'settings.feedbackGitHubDesc': "Vi rekommenderar GitHub för feedback. Inlägg är offentliga.",
+        'settings.feedbackOpenGitHubDiscussion': "Starta en diskussion på GitHub",
         'settings.feedbackRequired': 'Lägg till ett kort meddelande först.',
         'settings.feedbackInvalidEmail': 'Ange en giltig e-postadress eller lämna tomt.',
         'settings.checkForUpdates': 'Sök efter uppdateringar',

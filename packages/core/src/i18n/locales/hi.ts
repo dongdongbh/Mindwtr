@@ -1,5 +1,7 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const hiOverrides: Record<string, string> = {
+        'settings.feedbackGitHubDesc': "फ़ीडबैक के लिए GitHub का सुझाव दिया जाता है। पोस्ट सार्वजनिक होती हैं।",
+        'settings.feedbackOpenGitHubDiscussion': "GitHub पर चर्चा शुरू करें",
         'settings.aiAdvanced': "उन्नत",
         'settings.aiRequestTimeout': "अनुरोध की समय सीमा",
         'settings.aiRequestTimeoutDesc': "AI के उत्तर की प्रतीक्षा का समय। धीमे स्थानीय मॉडल के लिए इसे बढ़ाएँ। समय सीमा समाप्त होने या रद्द होने पर अनुरोध अपने आप दोबारा नहीं भेजा जाता।",

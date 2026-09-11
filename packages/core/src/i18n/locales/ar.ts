@@ -1,5 +1,7 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const arOverrides: Record<string, string> = {
+        'settings.feedbackGitHubDesc': "نوصي باستخدام GitHub لإرسال الملاحظات. المنشورات عامة.",
+        'settings.feedbackOpenGitHubDiscussion': "بدء مناقشة على GitHub",
         'settings.aiAdvanced': "متقدم",
         'settings.aiRequestTimeout': "مهلة الطلب",
         'settings.aiRequestTimeoutDesc': "مدة انتظار رد الذكاء الاصطناعي. زدها للنماذج المحلية البطيئة. لا تُعاد تلقائيًا الطلبات الملغاة أو التي انتهت مهلتها.",

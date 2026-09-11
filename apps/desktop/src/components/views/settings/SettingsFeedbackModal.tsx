@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Bug, Lightbulb, MessageSquare, Send, X } from 'lucide-react';
+import { Bug, ExternalLink, Lightbulb, MessageSquare, Send, X } from 'lucide-react';
 
 import { FEEDBACK_CATEGORIES, type FeedbackCategory } from '@mindwtr/core';
 import { cn } from '../../../lib/utils';
@@ -43,6 +43,8 @@ type Labels = {
     feedbackUnavailable: string;
     feedbackUnavailableDesc: string;
     feedbackOpenGitHubIssue: string;
+    feedbackGitHubDesc: string;
+    feedbackOpenGitHubDiscussion: string;
     feedbackRequired: string;
     feedbackInvalidEmail: string;
     close: string;
@@ -60,7 +62,7 @@ type SettingsFeedbackModalProps = {
     isConfigured: boolean;
     t: Labels;
     onClose: () => void;
-    onOpenIssue?: () => void;
+    onOpenGitHub?: (category: FeedbackCategory) => void;
     onSubmit: (input: FeedbackSubmitInput) => Promise<void>;
 };
 
@@ -88,7 +90,7 @@ export function SettingsFeedbackModal({
     isConfigured,
     isOpen,
     onClose,
-    onOpenIssue,
+    onOpenGitHub,
     onSubmit,
     t,
 }: SettingsFeedbackModalProps) {
@@ -223,6 +225,19 @@ export function SettingsFeedbackModal({
                 </DialogBody>
             ) : (
                 <DialogBody className="space-y-4 p-4">
+                    {onOpenGitHub && (
+                        <div className="border-b border-border pb-3">
+                            <button
+                                type="button"
+                                className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary underline underline-offset-4 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                onClick={() => onOpenGitHub(category)}
+                            >
+                                {category === 'other' ? t.feedbackOpenGitHubDiscussion : t.feedbackOpenGitHubIssue}
+                                <ExternalLink className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            </button>
+                            <p className="text-xs leading-5 text-muted-foreground">{t.feedbackGitHubDesc}</p>
+                        </div>
+                    )}
                     <div className="space-y-2">
                         <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                             {t.feedbackCategory}
@@ -336,15 +351,6 @@ export function SettingsFeedbackModal({
                         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                             <div className="font-medium">{t.feedbackUnavailable}</div>
                             <div className="mt-1 text-xs leading-5">{t.feedbackUnavailableDesc}</div>
-                            {onOpenIssue && (
-                                <button
-                                    type="button"
-                                    className="mt-2 text-xs font-medium text-primary underline underline-offset-2"
-                                    onClick={onOpenIssue}
-                                >
-                                    {t.feedbackOpenGitHubIssue}
-                                </button>
-                            )}
                         </div>
                     )}
 

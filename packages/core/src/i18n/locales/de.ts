@@ -2141,6 +2141,8 @@ export const deOverrides: Record<string, string> = {
         'settings.feedbackMessagePlaceholderFeature': 'Was versuchst Du zu tun, was steht Dir im Weg und was würde helfen?',
         'settings.feedbackMessagePlaceholderOther': 'Erzähle uns, was Dich beschäftigt.',
         'settings.feedbackOpenGitHubIssue': 'GitHub-Issue öffnen',
+        'settings.feedbackGitHubDesc': "Für Feedback empfehlen wir GitHub. Beiträge sind öffentlich.",
+        'settings.feedbackOpenGitHubDiscussion': "GitHub-Diskussion starten",
         'settings.feedbackPrivacy': 'Damit werden Deine Nachricht, die App-Version, die Plattform sowie Diagnosedaten gesendet – Letztere nur, wenn Du sie einbeziehst. Eine Antwort-E-Mail wird nur gesendet, wenn Du eine angibst. Aufgabeninhalte werden nicht angehängt.',
         'settings.feedbackRequired': 'Gib zuerst eine kurze Nachricht ein.',
         'settings.feedbackSending': 'Sende…',

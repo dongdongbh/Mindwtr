@@ -557,12 +557,18 @@ export const styles = StyleSheet.create({
         lineHeight: 18,
         marginTop: 4,
     },
+    feedbackGitHubOption: {
+        borderBottomWidth: 1,
+        paddingBottom: 12,
+    },
     feedbackNoticeLink: {
         alignSelf: 'flex-start',
-        marginTop: 8,
+        minHeight: 44,
+        justifyContent: 'center',
     },
     feedbackNoticeLinkText: {
-        fontSize: 12,
+        fontSize: 14,
+        lineHeight: 20,
         fontWeight: '700',
         textDecorationLine: 'underline',
     },

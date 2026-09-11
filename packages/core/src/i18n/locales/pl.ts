@@ -1,5 +1,7 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const plOverrides: Record<string, string> = {
+        'settings.feedbackGitHubDesc': "Zalecamy przesyłanie opinii przez GitHub. Wpisy są publiczne.",
+        'settings.feedbackOpenGitHubDiscussion': "Rozpocznij dyskusję na GitHubie",
         'settings.aiAdvanced': "Zaawansowane",
         'settings.aiRequestTimeout': "Limit czasu żądania",
         'settings.aiRequestTimeoutDesc': "Czas oczekiwania na odpowiedź AI. Zwiększ go dla wolnych modeli lokalnych. Anulowane żądania i żądania po przekroczeniu limitu czasu nie są ponawiane automatycznie.",

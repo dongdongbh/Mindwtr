@@ -79,6 +79,8 @@ const tr = (key: string) => ({
   'settings.feedbackUnavailable': 'Feedback is not configured in this build.',
   'settings.feedbackUnavailableDesc': 'Use GitHub issue templates instead.',
   'settings.feedbackOpenGitHubIssue': 'Open GitHub issue',
+  'settings.feedbackOpenGitHubDiscussion': 'Open GitHub discussion',
+  'settings.feedbackGitHubDesc': 'GitHub is recommended for feedback. Posts are public.',
 }[key] ?? key);
 
 const findTouchableByText = (tree: ReturnType<typeof create>, label: string) => {
@@ -184,8 +186,38 @@ describe('FeedbackSettingsModal', () => {
     }));
   });
 
+  it.each([
+    ['bug', 'Bug report', 'Open GitHub issue'],
+    ['feature', 'Feature request', 'Open GitHub issue'],
+    ['other', 'Other', 'Open GitHub discussion'],
+  ])('opens GitHub for %s without submitting or clearing the draft', (category, categoryLabel, linkLabel) => {
+    const onOpenGitHub = vi.fn();
+    const onClose = vi.fn();
+    const onSubmit = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FeedbackSettingsModal visible isConfigured tr={tr} onClose={onClose} onOpenGitHub={onOpenGitHub} onSubmit={onSubmit} />);
+    });
+    act(() => {
+      tree.root.findAllByType(TextInput)[0].props.onChangeText('Keep this draft');
+    });
+    act(() => {
+      findTouchableByText(tree, categoryLabel).props.onPress();
+    });
+    act(() => {
+      const link = findTouchableByText(tree, linkLabel);
+      expect(link.props.accessibilityRole).toBe('link');
+      link.props.onPress();
+    });
+
+    expect(onOpenGitHub).toHaveBeenCalledExactlyOnceWith(category);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(tree.root.findAllByType(TextInput)[0].props.value).toBe('Keep this draft');
+  });
+
   it('routes unconfigured builds to GitHub issues', () => {
-    const onOpenIssue = vi.fn();
+    const onOpenGitHub = vi.fn();
     let tree!: ReturnType<typeof create>;
 
     act(() => {
@@ -195,7 +227,7 @@ describe('FeedbackSettingsModal', () => {
           isConfigured={false}
           tr={tr}
           onClose={vi.fn()}
-          onOpenIssue={onOpenIssue}
+          onOpenGitHub={onOpenGitHub}
           onSubmit={vi.fn()}
         />,
       );
@@ -206,6 +238,6 @@ describe('FeedbackSettingsModal', () => {
       findTouchableByText(tree, 'Open GitHub issue').props.onPress();
     });
 
-    expect(onOpenIssue).toHaveBeenCalled();
+    expect(onOpenGitHub).toHaveBeenCalled();
   });
 });

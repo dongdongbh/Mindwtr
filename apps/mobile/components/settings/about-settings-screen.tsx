@@ -477,7 +477,9 @@ export function AboutSettingsScreen({
                 isConfigured={Boolean(feedbackEndpointUrl)}
                 tr={tr}
                 onClose={() => setFeedbackOpen(false)}
-                onOpenIssue={() => openLink(GITHUB_ISSUES_URL)}
+                onOpenGitHub={(category) => openLink(category === 'other'
+                    ? 'https://github.com/dongdongbh/Mindwtr/discussions/new'
+                    : GITHUB_ISSUES_URL)}
                 onSubmit={handleSubmitFeedback}
             />
         </SafeAreaView>

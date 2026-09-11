@@ -1,5 +1,7 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const ruOverrides: Record<string, string> = {
+        'settings.feedbackGitHubDesc': "Для обратной связи рекомендуем GitHub. Публикации общедоступны.",
+        'settings.feedbackOpenGitHubDiscussion': "Начать обсуждение на GitHub",
         'settings.aiAdvanced': "Дополнительно",
         'settings.aiRequestTimeout': "Время ожидания запроса",
         'settings.aiRequestTimeoutDesc': "Как долго ждать ответ ИИ. Увеличьте время для медленных локальных моделей. Отменённые запросы и запросы с истёкшим временем ожидания не повторяются автоматически.",

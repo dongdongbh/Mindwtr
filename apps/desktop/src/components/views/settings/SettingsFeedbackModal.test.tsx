@@ -11,7 +11,7 @@ const renderFeedbackModal = (props?: Partial<Parameters<typeof SettingsFeedbackM
         isConfigured: true,
         isOpen: true,
         onClose: vi.fn(),
-        onOpenIssue: vi.fn(),
+        onOpenGitHub: vi.fn(),
         onSubmit: vi.fn().mockResolvedValue(undefined),
         t,
     };
@@ -51,14 +51,36 @@ describe('SettingsFeedbackModal', () => {
         });
     });
 
+    it.each([
+        ['bug', t.feedbackCategoryBug, t.feedbackOpenGitHubIssue],
+        ['feature', t.feedbackCategoryFeature, t.feedbackOpenGitHubIssue],
+        ['other', t.feedbackCategoryOther, t.feedbackOpenGitHubDiscussion],
+    ])('opens GitHub for %s without submitting or clearing the draft', (category, categoryLabel, linkLabel) => {
+        const onOpenGitHub = vi.fn();
+        const onClose = vi.fn();
+        const onSubmit = vi.fn();
+        renderFeedbackModal({ onOpenGitHub, onClose, onSubmit });
+        const message = screen.getByRole('textbox', { name: t.feedbackMessage });
+        fireEvent.change(message, { target: { value: 'Keep this draft' } });
+
+        fireEvent.click(screen.getByRole('button', { name: categoryLabel }));
+        expect(screen.getByText(t.feedbackGitHubDesc)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: linkLabel }));
+
+        expect(onOpenGitHub).toHaveBeenCalledExactlyOnceWith(category);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(onSubmit).not.toHaveBeenCalled();
+        expect(message).toHaveValue('Keep this draft');
+    });
+
     it('routes unconfigured builds to GitHub issues', () => {
-        const onOpenIssue = vi.fn();
-        renderFeedbackModal({ isConfigured: false, onOpenIssue });
+        const onOpenGitHub = vi.fn();
+        renderFeedbackModal({ isConfigured: false, onOpenGitHub });
 
         expect(screen.getByText(t.feedbackUnavailableDesc)).toBeInTheDocument();
         expect(screen.getByRole('button', { name: t.feedbackSubmit })).toBeDisabled();
         fireEvent.click(screen.getByRole('button', { name: t.feedbackOpenGitHubIssue }));
 
-        expect(onOpenIssue).toHaveBeenCalled();
+        expect(onOpenGitHub).toHaveBeenCalled();
     });
 });

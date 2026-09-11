@@ -32,7 +32,7 @@ type FeedbackSettingsModalProps = {
     isConfigured: boolean;
     tr: (key: string) => string;
     onClose: () => void;
-    onOpenIssue?: () => void;
+    onOpenGitHub?: (category: FeedbackCategory) => void;
     onSubmit: (input: FeedbackSubmitInput) => Promise<void>;
 };
 
@@ -59,7 +59,7 @@ type FeedbackLocation = typeof feedbackLocations[number];
 export function FeedbackSettingsModal({
     isConfigured,
     onClose,
-    onOpenIssue,
+    onOpenGitHub,
     onSubmit,
     tr,
     visible,
@@ -205,6 +205,22 @@ export function FeedbackSettingsModal({
                                 showsVerticalScrollIndicator
                                 {...androidScrollViewFocusProps}
                             >
+                                {onOpenGitHub ? (
+                                    <View style={[styles.feedbackGitHubOption, { borderBottomColor: tc.border }]}>
+                                        <TouchableOpacity
+                                            accessibilityRole="link"
+                                            onPress={() => onOpenGitHub(category)}
+                                            style={styles.feedbackNoticeLink}
+                                        >
+                                            <Text style={[styles.feedbackNoticeLinkText, { color: tc.tint }]}>
+                                                {tr(category === 'other' ? 'settings.feedbackOpenGitHubDiscussion' : 'settings.feedbackOpenGitHubIssue')}
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <Text style={[styles.feedbackNoticeDescription, { color: tc.secondaryText }]}>
+                                            {tr('settings.feedbackGitHubDesc')}
+                                        </Text>
+                                    </View>
+                                ) : null}
                                 <Text style={[styles.feedbackFieldLabel, { color: tc.secondaryText }]}>
                                     {tr('settings.feedbackCategory')}
                                 </Text>
@@ -358,17 +374,6 @@ export function FeedbackSettingsModal({
                                         <Text style={[styles.feedbackNoticeDescription, { color: tc.danger }]}>
                                             {tr('settings.feedbackUnavailableDesc')}
                                         </Text>
-                                        {onOpenIssue ? (
-                                            <TouchableOpacity
-                                                accessibilityRole="button"
-                                                onPress={onOpenIssue}
-                                                style={styles.feedbackNoticeLink}
-                                            >
-                                                <Text style={[styles.feedbackNoticeLinkText, { color: tc.tint }]}>
-                                                    {tr('settings.feedbackOpenGitHubIssue')}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        ) : null}
                                     </View>
                                 ) : null}
 

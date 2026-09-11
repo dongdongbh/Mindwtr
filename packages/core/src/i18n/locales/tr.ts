@@ -1,5 +1,7 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const trOverrides: Record<string, string> = {
+        'settings.feedbackGitHubDesc': "Geri bildirim için GitHub önerilir. Gönderiler herkese açıktır.",
+        'settings.feedbackOpenGitHubDiscussion': "GitHub'da tartışma başlat",
         'settings.aiAdvanced': "Gelişmiş",
         'settings.aiRequestTimeout': "İstek zaman aşımı",
         'settings.aiRequestTimeoutDesc': "Yapay zekâ yanıtının ne kadar bekleneceği. Yavaş yerel modeller için artırın. İptal edilen veya zaman aşımına uğrayan istekler otomatik olarak yeniden denenmez.",

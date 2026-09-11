@@ -1766,6 +1766,8 @@ export const zhHant: Record<string, string> = {
         'settings.feedbackUnavailable': '此版本未配置反饋通道。',
         'settings.feedbackUnavailableDesc': '你仍可透過 GitHub issue 模板提交錯誤報告或功能請求。',
         'settings.feedbackOpenGitHubIssue': '打開 GitHub issue',
+        'settings.feedbackGitHubDesc': "建議透過 GitHub 提供意見回饋。發布的內容公開可見。",
+        'settings.feedbackOpenGitHubDiscussion': "發起 GitHub 討論",
         'settings.feedbackRequired': '請先填寫簡短內容。',
         'settings.feedbackInvalidEmail': '請輸入有效郵箱，或留空。',
         'settings.checkForUpdates': '檢查更新',

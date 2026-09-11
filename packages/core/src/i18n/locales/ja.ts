@@ -1913,6 +1913,8 @@ export const jaOverrides: Record<string, string> = {
         'settings.feedbackUnavailable': 'このビルドではフィードバック送信が設定されていません。',
         'settings.feedbackUnavailableDesc': 'GitHub の issue テンプレートからも、不具合の報告や機能の要望を送れます。',
         'settings.feedbackOpenGitHubIssue': 'GitHub の issue を開く',
+        'settings.feedbackGitHubDesc': "フィードバックには GitHub をおすすめします。投稿は公開されます。",
+        'settings.feedbackOpenGitHubDiscussion': "GitHub でディスカッションを開始",
         'settings.feedbackRequired': 'まず短くても本文を入力してください。',
         'settings.feedbackInvalidEmail': '正しいメールアドレスを入力するか、空のままにしてください。',
         'settings.checkForUpdates': '更新を確認',

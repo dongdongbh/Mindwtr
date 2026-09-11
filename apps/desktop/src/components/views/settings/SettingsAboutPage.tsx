@@ -51,6 +51,8 @@ type Labels = {
     feedbackUnavailable: string;
     feedbackUnavailableDesc: string;
     feedbackOpenGitHubIssue: string;
+    feedbackGitHubDesc: string;
+    feedbackOpenGitHubDiscussion: string;
     feedbackRequired: string;
     feedbackInvalidEmail: string;
     close: string;
@@ -206,7 +208,9 @@ export function SettingsAboutPage({
                 isConfigured={feedbackConfigured}
                 isOpen={feedbackOpen}
                 onClose={() => setFeedbackOpen(false)}
-                onOpenIssue={() => onOpenLink('https://github.com/dongdongbh/Mindwtr/issues/new/choose')}
+                onOpenGitHub={(category) => onOpenLink(category === 'other'
+                    ? 'https://github.com/dongdongbh/Mindwtr/discussions/new'
+                    : 'https://github.com/dongdongbh/Mindwtr/issues/new/choose')}
                 onSubmit={onSubmitFeedback}
                 t={t}
             />

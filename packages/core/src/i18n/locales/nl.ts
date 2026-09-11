@@ -251,6 +251,8 @@ export const nlOverrides: Record<string, string> = {
         'settings.feedbackUnavailable': 'Feedback is niet geconfigureerd in deze build.',
         'settings.feedbackUnavailableDesc': 'Je kunt fouten en functieverzoeken nog steeds melden met de GitHub-issuesjablonen.',
         'settings.feedbackOpenGitHubIssue': 'GitHub-issue openen',
+        'settings.feedbackGitHubDesc': "We raden GitHub aan voor feedback. Berichten zijn openbaar.",
+        'settings.feedbackOpenGitHubDiscussion': "GitHub-discussie starten",
         'settings.feedbackRequired': 'Voeg eerst een kort bericht toe.',
         'settings.feedbackInvalidEmail': 'Voer een geldig e-mailadres in of laat dit leeg.',
         'settings.notifications': 'Meldingen',

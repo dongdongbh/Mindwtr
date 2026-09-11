@@ -652,6 +652,8 @@ export const SETTINGS_LABEL_KEYS = [
     'feedbackUnavailable',
     'feedbackUnavailableDesc',
     'feedbackOpenGitHubIssue',
+    'feedbackGitHubDesc',
+    'feedbackOpenGitHubDiscussion',
     'feedbackRequired',
     'feedbackInvalidEmail',
     'checkForUpdates',
