@@ -81,6 +81,14 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(iosJob).toContain("-sdk watchsimulator");
   expect(iosJob).toContain('MINDWTR_WATCH_ENABLED: "true"');
   expect(iosJob).toContain("swift test --package-path apps/mobile/modules/watch-connectivity");
+  expect(iosJob).toContain("swift test --package-path apps/mobile/modules/ios-widget");
+  expect(workflow.match(/- "apps\/mobile\/modules\/ios-widget\/Package\.swift"/g)).toHaveLength(2);
+  expect(workflow.match(/- "apps\/mobile\/modules\/ios-widget\/tests\/\*\*"/g)).toHaveLength(2);
+  expect(workflow).toContain("apps/mobile/modules/ios-widget/Package.swift|apps/mobile/modules/ios-widget/tests/*|");
+  const widgetActionStore = readFileSync("apps/mobile/modules/ios-widget/ios/MindwtrWidgetActionStore.swift", "utf8");
+  expect(widgetActionStore).not.toContain("Darwin.flock(");
+  expect(widgetActionStore).not.toContain("Glibc.flock(");
+  expect(widgetActionStore).toContain("func cancel(id: String) throws -> Bool");
   expect(iosJob).toContain("name: Run Watch outbox retry tests");
   expect(iosJob).toContain("swift test --package-path apps/mobile/targets/watch");
   expect(iosJob).toContain("name: Validate generated Watch Xcode project");

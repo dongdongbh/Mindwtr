@@ -67,6 +67,9 @@ describe('widget-data', () => {
         expect(payload.items.map((item) => item.title)).toEqual(['Focused 1', 'Focused 2', 'Focused 3']);
         // Widget rows open the task itself (Android row tap, #1173 seam).
         expect(payload.items.map((item) => item.openUri)).toEqual(['mindwtr://open?task=1', 'mindwtr://open?task=2', 'mindwtr://open?task=3']);
+        expect(payload.items[0].completionToken).toBe(JSON.stringify(['1', 0, now, 'next']));
+        expect(payload.completeLabel).toBe('Mark Done');
+        expect(payload.undoLabel).toBe('Undo');
         expect(payload.inboxCount).toBe(1);
         expect(payload.subtitle).toBe('Inbox: 1 · +1 More');
     });

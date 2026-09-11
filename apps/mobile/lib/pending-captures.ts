@@ -438,12 +438,12 @@ async function assembleCaptureTask(
 
 // At-least-once: a task already done, archived, deleted or unknown is a no-op and the
 // file still goes away. The success line is the phase-2 release check.
-async function applyPendingCompletion(
+export async function applyPendingCompletion(
     completion: PendingCompletion,
     { updateTask, tasks, getTasks }: Pick<IngestDeps, 'updateTask' | 'tasks' | 'getTasks'>,
 ): Promise<'completed' | 'already-done' | 'terminal' | 'missing' | null> {
     const task = (getTasks?.() ?? tasks).find((candidate) => candidate.id === completion.taskId);
-    const outcome = !task || task.deletedAt
+    const outcome = !task || task.deletedAt || task.purgedAt
         ? 'missing'
         : task.status === 'done'
             ? 'already-done'

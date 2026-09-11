@@ -14,6 +14,7 @@ import {
     IOS_SHORTCUTS_SNAPSHOT_KEY,
     IOS_WIDGET_APP_GROUP,
     IOS_WIDGET_KIND,
+    IOS_WIDGET_COMPACT_KIND,
     IOS_WIDGET_LOCK_KIND,
     IOS_WIDGET_PAYLOAD_KEY,
     IOS_WIDGET_PAYLOAD_KEY_EXTRA_LARGE,
@@ -25,7 +26,7 @@ import {
     type TasksWidgetPayload,
     WIDGET_LANGUAGE_KEY,
 } from './widget-data';
-import { WIDGET_FIXED_LIST_IDS } from './widget-lists';
+import { buildWidgetSavedFilterOptions, WIDGET_FIXED_LIST_IDS, WIDGET_SAVED_FILTER_LIST_PREFIX } from './widget-lists';
 import { focusWidgetFilterKey, getFocusWidgetFilter } from './focus-widget-filter';
 import { logError, logInfo, logWarn } from './app-log';
 import { getLocalDayKey } from '@/hooks/use-local-day-key';
@@ -101,6 +102,14 @@ function buildPayloadFromData(
         // Only the lists placed Android widgets asked for are built (#1173);
         // folding them in here also puts them in the render fingerprint.
         ...(Platform.OS === 'android' && AndroidWidget.isSupported() ? { listIds: androidWidgetListIds() } : {}),
+        // Edit Widget can switch lists while the app is not running. Carry the
+        // bounded chooser's lists in each family snapshot, not just Focus.
+        ...(Platform.OS === 'ios' ? {
+            listIds: [
+                ...WIDGET_FIXED_LIST_IDS,
+                ...buildWidgetSavedFilterOptions(data).map(({ id }) => `${WIDGET_SAVED_FILTER_LIST_PREFIX}${id}`),
+            ],
+        } : {}),
     });
 }
 
@@ -243,10 +252,21 @@ async function updateIosWidgetPayloadsFromData(data: AppData, language: Language
         }
         if (typeof widgetApi.reloadTimelines === 'function') {
             widgetApi.reloadTimelines(IOS_WIDGET_KIND);
+            widgetApi.reloadTimelines(IOS_WIDGET_COMPACT_KIND);
             widgetApi.reloadTimelines(IOS_WIDGET_LOCK_KIND);
         } else if (typeof widgetApi.reloadAllTimelines === 'function') {
             widgetApi.reloadAllTimelines();
         }
+        const payload = payloadEntries[0][1];
+        void logInfo('iOS Focus widget payload published', {
+            scope: 'widget',
+            extra: {
+                releaseCheck: 'v1.3.0/ios-focus-widget',
+                focusItems: String(payload.sections.find((section) => section.key === 'focus')?.items.length ?? 0),
+                todayItems: String(payload.sections.find((section) => section.key === 'schedule')?.items.length ?? 0),
+                totalItems: String(payload.items.length),
+            },
+        });
         return true;
     } catch (error) {
         if (__DEV__) {
@@ -261,10 +281,10 @@ async function updateIosWidgetPayloadsFromData(data: AppData, language: Language
 }
 
 // Separate from the widget payload write above (#980 correction): the
-// snapshot changes on edits the widget never shows (a Waiting/Someday/Inbox
-// task, a project task outside the widget's own top-N slice), so it needs
+// snapshot changes on edits the widget never shows (for example project
+// metadata outside the widget's own top-N slice), so it needs
 // its own change-skip gate. Sharing one fingerprint would either miss those
-// snapshot-only changes or re-run the widget's five setItem calls plus two
+// snapshot-only changes or re-run the widget's five setItem calls plus three
 // reloadTimelines on every one of them, which is exactly what #766 added a
 // cache to avoid.
 async function updateIosShortcutsSnapshotFromData(snapshot: ShortcutsSnapshot): Promise<boolean> {

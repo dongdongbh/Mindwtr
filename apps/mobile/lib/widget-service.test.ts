@@ -318,13 +318,31 @@ describe('widget-service', () => {
         expect(payloadByKey.get('mindwtr-ios-widget-payload-large')?.items).toHaveLength(12);
         expect(payloadByKey.get('mindwtr-ios-widget-payload-extra-large')?.items).toHaveLength(24);
         expect(payloadByKey.get('mindwtr-ios-widget-payload')?.items).toHaveLength(12);
+        expect(Object.keys(payloadByKey.get('mindwtr-ios-widget-payload')?.lists)).toEqual(['focus', 'inbox', 'next', 'waiting', 'someday']);
+        expect(payloadByKey.get('mindwtr-ios-widget-payload-small')?.lists.focus.items).toHaveLength(3);
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrTasksWidget');
+        expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrCompactWidget');
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrFocusLockWidget');
 
         const snapshot = payloadByKey.get('mindwtr-ios-shortcuts-snapshot');
         expect(snapshot.lists.next.length).toBeGreaterThan(0);
         expect(snapshot.lists.inbox).toEqual([]);
         expect(typeof snapshot.generatedAt).toBe('string');
+    });
+
+    it('publishes bounded saved-filter lists for the iOS Edit Widget picker', async () => {
+        mockPlatform.OS = 'ios';
+        const data = buildData(10);
+        data.settings.savedFilters = [{
+            id: 'focused', name: 'My list', view: 'next', criteria: {},
+            createdAt: '2026-09-11T12:00:00Z', updatedAt: '2026-09-11T12:00:00Z',
+        }];
+        expect(await updateMobileWidgetFromData(data)).toBe(true);
+        const payload = JSON.parse(mockIosWidgetSetItem.mock.calls.find(([key]) => key === 'mindwtr-ios-widget-payload-small')![1]);
+        expect(payload.savedFilters).toEqual([{ id: 'focused', name: 'My list' }]);
+        expect(payload.lists['filter:focused'].items).toHaveLength(3);
+        expect(payload.lists['filter:focused'].title).toBe('My list');
+        expect(payload.lists['filter:focused'].items.every((item: { completionToken?: string }) => !!item.completionToken)).toBe(true);
     });
 
     it('refreshes only the iOS shortcuts snapshot when a change is invisible to the widget, skipping widget writes and reload (#980 correction)', async () => {
@@ -336,25 +354,25 @@ describe('widget-service', () => {
         mockIosWidgetSetItem.mockClear();
         mockIosWidgetReloadTimelines.mockClear();
 
-        // A change outside the widget's own visible slice (a waiting-list task,
-        // never rendered on the widget) must still refresh the snapshot -- the
-        // snapshot has its own fingerprint, independent of the widget's.
-        const withWaitingTask: AppData = {
+        // A deferred, unstarred Next task is outside the curated widget lists,
+        // but still rides the independently fingerprinted Shortcuts snapshot.
+        const withDeferredTask: AppData = {
             ...data,
             tasks: [
                 ...data.tasks,
                 {
-                    id: 'waiting-1',
-                    title: 'Waiting on reply',
-                    status: 'waiting',
+                    id: 'deferred-1',
+                    title: 'Later task',
+                    status: 'next',
                     tags: [],
                     contexts: [],
+                    startTime: '2099-01-01',
                     createdAt: new Date().toISOString(),
                     updatedAt: new Date().toISOString(),
                 },
             ],
         };
-        await updateMobileWidgetFromData(withWaitingTask);
+        await updateMobileWidgetFromData(withDeferredTask);
 
         // Only the snapshot key was written -- the widget's own fingerprint
         // didn't change, so its five setItem calls and reloadTimelines must be
@@ -363,7 +381,7 @@ describe('widget-service', () => {
         expect(mockIosWidgetReloadTimelines).not.toHaveBeenCalled();
         const [key, value] = mockIosWidgetSetItem.mock.calls[0] as [string, string];
         expect(key).toBe('mindwtr-ios-shortcuts-snapshot');
-        expect(JSON.parse(value).lists.waiting).toHaveLength(1);
+        expect(JSON.parse(value).lists.next).toHaveLength(3);
     });
 
     it('refreshes only the widget payloads when a change is invisible to the snapshot, skipping the snapshot write (#980 correction)', async () => {

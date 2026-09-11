@@ -12,6 +12,8 @@ const {
 const TARGET_NAME = 'MindwtrWidgets';
 const WIDGETS_FOLDER = 'widgets-ios';
 const APP_INTENTS_FOLDER = 'ios-app-intents';
+const IOS_WIDGET_MODULE_FOLDER = path.join('modules', 'ios-widget', 'ios');
+const SHARED_WIDGET_ACTION_STORE = 'MindwtrWidgetActionStore.swift';
 const APP_GROUP = 'group.tech.dongdongbh.mindwtr';
 const SHORTCUT_URL_KEY = 'url';
 const SIRI_CAPTURE_SHORTCUTS_PROVIDER = 'MindwtrSiriCaptureShortcuts';
@@ -68,6 +70,20 @@ const copyRecursive = (sourceDir, targetDir) => {
   }
 };
 
+const copySharedWidgetActionStore = (projectRoot, targetDir) => {
+  const sourcePath = path.join(
+    projectRoot,
+    IOS_WIDGET_MODULE_FOLDER,
+    SHARED_WIDGET_ACTION_STORE
+  );
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`[ios-widgets-and-shortcuts] Missing shared widget action store: ${sourcePath}`);
+  }
+  fs.mkdirSync(targetDir, { recursive: true });
+  fs.copyFileSync(sourcePath, path.join(targetDir, SHARED_WIDGET_ACTION_STORE));
+  return SHARED_WIDGET_ACTION_STORE;
+};
+
 const collectWidgetFiles = (targetDir) => {
   const widgetFiles = {
     swiftFiles: [],
@@ -115,6 +131,15 @@ const ensureSourceFileInTarget = (xcodeProject, { filePath, groupKey, targetUuid
   xcodeProject.addSourceFile(filePath, { target: targetUuid }, groupKey);
   return true;
 };
+
+const ensureWidgetSwiftSourcesInTarget = (
+  xcodeProject,
+  { swiftFiles, groupKey, targetUuid }
+) => swiftFiles.filter((fileName) => ensureSourceFileInTarget(xcodeProject, {
+  filePath: `${TARGET_NAME}/${fileName}`,
+  groupKey,
+  targetUuid,
+}));
 
 const addSiriShortcutsRegistrationToAppDelegate = (contents) => {
   const registrationCall = `${SIRI_CAPTURE_SHORTCUTS_PROVIDER}.updateAppShortcutParameters()`;
@@ -256,12 +281,26 @@ const addWidgetTargetToXcode = (config) =>
       throw new Error(`[ios-widgets-and-shortcuts] Missing widgets template folder: ${sourceWidgetsDir}`);
     }
     copyRecursive(sourceWidgetsDir, targetWidgetsDir);
+    copySharedWidgetActionStore(projectRoot, targetWidgetsDir);
+
+    const widgetFiles = collectWidgetFiles(targetWidgetsDir);
 
     const nativeTargets = xcodeProject.pbxNativeTargetSection();
     for (const [key, value] of Object.entries(nativeTargets)) {
       if (key.endsWith('_comment')) continue;
       const name = String(value.name || '').replace(/"/g, '');
       if (name === TARGET_NAME) {
+        const widgetGroupKey =
+          xcodeProject.findPBXGroupKey({ name: TARGET_NAME })
+          || xcodeProject.findPBXGroupKey({ path: TARGET_NAME });
+        if (!widgetGroupKey) {
+          throw new Error(`[ios-widgets-and-shortcuts] Could not find widget iOS group: ${TARGET_NAME}`);
+        }
+        ensureWidgetSwiftSourcesInTarget(xcodeProject, {
+          swiftFiles: widgetFiles.swiftFiles,
+          groupKey: widgetGroupKey,
+          targetUuid: key,
+        });
         return cfg;
       }
     }
@@ -271,8 +310,6 @@ const addWidgetTargetToXcode = (config) =>
     const deploymentTarget = '15.1';
     const currentProjectVersion = cfg.ios?.buildNumber || '1';
     const marketingVersion = cfg.version || '1.0.0';
-
-    const widgetFiles = collectWidgetFiles(targetWidgetsDir);
 
     const targetUuid = xcodeProject.generateUuid();
     const xCConfigurationList = xcodeProject.addXCConfigurationList(
@@ -479,9 +516,13 @@ function withIosWidgetsAndShortcuts(config) {
 module.exports = withIosWidgetsAndShortcuts;
 module.exports.__testables = {
   APP_INTENTS_FOLDER,
+  IOS_WIDGET_MODULE_FOLDER,
+  SHARED_WIDGET_ACTION_STORE,
   SIRI_CAPTURE_SHORTCUTS_PROVIDER,
   SPOTLIGHT_INDEXER,
   addSiriShortcutsRegistrationToAppDelegate,
   collectSwiftFiles,
+  copySharedWidgetActionStore,
   ensureSourceFileInTarget,
+  ensureWidgetSwiftSourcesInTarget,
 };

@@ -1,6 +1,6 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   const allTasks = [{ id: 'deleted-capture', deletedAt: '2026-09-08T00:00:00.000Z' }];
@@ -22,9 +22,22 @@ const mocks = vi.hoisted(() => {
     ingestPendingCaptures: vi.fn<typeof import('@/lib/pending-captures').ingestPendingCaptures>(async () => 0),
     transcribePendingAudio: vi.fn(),
     applyWatchCommand: vi.fn(),
+    ingestIosWidgetCompletions: vi.fn(async () => 0),
+    getNextPendingCompletionAt: vi.fn<() => Promise<number | null>>(async () => null),
+    refreshWidgets: vi.fn(async () => true),
+    flushIosWidgetCompletionSave: vi.fn(async () => undefined),
+    appState: 'active',
+    listeners: new Set<(state: string) => void>(),
   };
 });
 
+vi.mock('react-native', () => ({ AppState: {
+  get currentState() { return mocks.appState; },
+  addEventListener: (_event: string, listener: (state: string) => void) => {
+    mocks.listeners.add(listener);
+    return { remove: () => mocks.listeners.delete(listener) };
+  },
+} }));
 vi.mock('@mindwtr/core', () => ({
   flushPendingSave: mocks.flushPendingSave,
   useTaskStore: { getState: () => mocks.state },
@@ -32,6 +45,12 @@ vi.mock('@mindwtr/core', () => ({
 vi.mock('@/lib/pending-captures', () => ({
   ingestPendingCaptures: mocks.ingestPendingCaptures,
 }));
+vi.mock('@/lib/ios-widget-completions', () => ({
+  ingestIosWidgetCompletions: mocks.ingestIosWidgetCompletions,
+  flushIosWidgetCompletionSave: mocks.flushIosWidgetCompletionSave,
+}));
+vi.mock('../../modules/ios-widget', () => ({ getNextPendingCompletionAt: mocks.getNextPendingCompletionAt }));
+vi.mock('@/lib/widget-service', () => ({ updateMobileWidgetFromStore: mocks.refreshWidgets }));
 vi.mock('@/lib/watch-audio', () => ({
   transcribePendingAudio: mocks.transcribePendingAudio,
 }));
@@ -51,7 +70,11 @@ function Harness({ dataReady = true, disabled = false }: { dataReady?: boolean; 
 describe('useRootLayoutPendingCaptures', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getNextPendingCompletionAt.mockResolvedValue(null);
+    mocks.appState = 'active';
+    mocks.listeners.clear();
   });
+  afterEach(() => vi.useRealTimers());
 
   it('drains with the neutral audio transcriber and fresh tasks including tombstones', async () => {
     let tree!: renderer.ReactTestRenderer;
@@ -65,6 +88,11 @@ describe('useRootLayoutPendingCaptures', () => {
     expect(deps.transcribeAudio).toBe(mocks.transcribePendingAudio);
     expect(deps.getTasks?.()).toBe(mocks.allTasks);
     expect(deps.flushPendingSave).toBe(mocks.flushPendingSave);
+    expect(mocks.ingestIosWidgetCompletions).toHaveBeenCalledWith(expect.objectContaining({
+      updateTask: mocks.state.updateTask,
+      flushPendingSave: mocks.flushIosWidgetCompletionSave,
+      refreshWidgets: mocks.refreshWidgets,
+    }));
 
     act(() => tree.unmount());
   });
@@ -76,6 +104,7 @@ describe('useRootLayoutPendingCaptures', () => {
     });
 
     expect(mocks.ingestPendingCaptures).not.toHaveBeenCalled();
+    expect(mocks.ingestIosWidgetCompletions).not.toHaveBeenCalled();
     act(() => tree.unmount());
   });
 
@@ -86,6 +115,63 @@ describe('useRootLayoutPendingCaptures', () => {
     });
 
     expect(mocks.ingestPendingCaptures).not.toHaveBeenCalled();
+    expect(mocks.getNextPendingCompletionAt).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('drains once after the undo grace period, then stops scheduling', async () => {
+    vi.useFakeTimers();
+    mocks.getNextPendingCompletionAt.mockResolvedValueOnce(Date.now() + 3000);
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<Harness />); });
+    expect(mocks.ingestIosWidgetCompletions).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2999); });
+    expect(mocks.ingestIosWidgetCompletions).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(mocks.ingestIosWidgetCompletions).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => tree.unmount());
+  });
+
+  it('cancels the grace timer on unmount or sandbox entry', async () => {
+    vi.useFakeTimers();
+    mocks.getNextPendingCompletionAt.mockResolvedValue(Date.now() + 3000);
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<Harness />); });
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => tree.update(<Harness disabled />));
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(mocks.ingestIosWidgetCompletions).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  it('cancels the grace timer in background and drains on the next foreground', async () => {
+    vi.useFakeTimers();
+    mocks.getNextPendingCompletionAt.mockResolvedValueOnce(Date.now() + 3000);
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<Harness />); });
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => { mocks.listeners.forEach((listener) => listener('background')); });
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(mocks.ingestIosWidgetCompletions).toHaveBeenCalledTimes(1);
+    await act(async () => { mocks.listeners.forEach((listener) => listener('active')); });
+    expect(mocks.ingestIosWidgetCompletions).toHaveBeenCalledTimes(2);
+    act(() => tree.unmount());
+  });
+
+  it('does not schedule a timer when backgrounded while the native deadline read is pending', async () => {
+    vi.useFakeTimers();
+    let resolveDeadline!: (value: number) => void;
+    mocks.getNextPendingCompletionAt.mockImplementationOnce(() => new Promise((resolve) => { resolveDeadline = resolve; }));
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<Harness />); });
+    await act(async () => {
+      mocks.listeners.forEach((listener) => listener('background'));
+      resolveDeadline(Date.now() + 3000);
+    });
+    expect(vi.getTimerCount()).toBe(0);
     act(() => tree.unmount());
   });
 });

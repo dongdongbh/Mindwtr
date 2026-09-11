@@ -1,19 +1,150 @@
 import { describe, expect, it } from 'vitest';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const plugin = require('./ios-widgets-and-shortcuts');
 
 const {
   APP_INTENTS_FOLDER,
+  IOS_WIDGET_MODULE_FOLDER,
+  SHARED_WIDGET_ACTION_STORE,
   SIRI_CAPTURE_SHORTCUTS_PROVIDER,
   SPOTLIGHT_INDEXER,
   addSiriShortcutsRegistrationToAppDelegate,
   collectSwiftFiles,
+  copySharedWidgetActionStore,
   ensureSourceFileInTarget,
+  ensureWidgetSwiftSourcesInTarget,
 } = plugin.__testables;
 
 describe('ios-widgets-and-shortcuts', () => {
+  it('ships the rich configurable Tasks widget with legacy payload and iOS 15 fallbacks', () => {
+    const widgetsDir = path.resolve(__dirname, '..', 'widgets-ios');
+    const tasksSource = fs.readFileSync(
+      path.join(widgetsDir, 'MindwtrTasksWidget.swift'),
+      'utf8'
+    );
+    const intentsSource = fs.readFileSync(
+      path.join(widgetsDir, 'MindwtrTasksWidgetIntents.swift'),
+      'utf8'
+    );
+
+    expect(tasksSource).toContain('let sections: [MindwtrWidgetSection]?');
+    expect(tasksSource).toContain('let lists: [String: MindwtrWidgetListPayload]?');
+    expect(tasksSource).toContain('let listTitles: [String: String]?');
+    expect(tasksSource).toContain('let completionToken: String?');
+    expect(tasksSource).toContain('let completeLabel: String?');
+    expect(tasksSource).toContain('nonEmpty(completeLabel) ?? "Complete"');
+    expect(tasksSource).toContain('pendingAction: pendingAction(for: item.id)');
+    expect(tasksSource).toContain('.strikethrough(pendingAction != nil)');
+    expect(tasksSource).toContain('item.openUri ?? payload.focusUri');
+    expect(tasksSource).toContain('widgetFamily != .systemSmall');
+    expect(tasksSource).toContain('.mindwtrSmallWidgetURL(widgetFamily == .systemSmall');
+    expect(tasksSource).toContain('StaticConfiguration(kind: kind');
+    expect(tasksSource).toContain('if #available(iOSApplicationExtension 17.0, iOS 17.0, *)');
+    expect(tasksSource).toContain('AppIntentConfiguration(');
+
+    expect(intentsSource).toContain('struct MindwtrTasksWidgetConfigurationIntent: WidgetConfigurationIntent');
+    expect(intentsSource).toContain('struct MindwtrTasksWidgetAppIntentProvider: AppIntentTimelineProvider');
+    for (const listId of ['focus', 'inbox', 'next', 'waiting', 'someday']) {
+      expect(intentsSource).toContain(`"${listId}"`);
+    }
+    expect(intentsSource).toContain('payload.savedFilters ?? []');
+    expect(intentsSource).toContain('MindwtrTasksWidgetSnapshotStore.contains(');
+    expect(intentsSource).toContain('guard try store.cancel(id: actionId) else {');
+    expect(intentsSource).not.toContain('store.pendingActions().contains');
+  });
+
+  it('ships a separate flat Compact gallery kind without chooser or inline completion', () => {
+    const widgetsDir = path.resolve(__dirname, '..', 'widgets-ios');
+    const compactSource = fs.readFileSync(
+      path.join(widgetsDir, 'MindwtrCompactWidget.swift'),
+      'utf8'
+    );
+    const bundleSource = fs.readFileSync(
+      path.join(widgetsDir, 'MindwtrWidgetsBundle.swift'),
+      'utf8'
+    );
+
+    expect(compactSource).toContain('let mindwtrCompactWidgetKind = "MindwtrCompactWidget"');
+    expect(compactSource).toContain('sections.flatMap(\\.items)');
+    expect(compactSource).toContain('.configurationDisplayName("Compact")');
+    expect(compactSource).not.toContain('Button(intent:');
+    expect(compactSource).not.toContain('WidgetConfigurationIntent');
+    expect(compactSource).toContain('widgetFamily != .systemSmall');
+    expect(compactSource).toContain('Link(destination: safeMindwtrURL(payload.focusUri))');
+    expect(compactSource).toContain('.mindwtrCompactWidgetURL(widgetFamily == .systemSmall');
+    expect(bundleSource).toContain('MindwtrCompactWidget()');
+  });
+
+  it('drops rows that do not fit without presenting a false empty state at large text sizes', () => {
+    const widgetsDir = path.resolve(__dirname, '..', 'widgets-ios');
+    const tasksSource = fs.readFileSync(
+      path.join(widgetsDir, 'MindwtrTasksWidget.swift'),
+      'utf8'
+    );
+    const compactSource = fs.readFileSync(
+      path.join(widgetsDir, 'MindwtrCompactWidget.swift'),
+      'utf8'
+    );
+
+    expect(tasksSource).toContain('let hasSourceTasks = !sourceSections(for: payload).isEmpty');
+    expect(tasksSource).toContain('if !hasSourceTasks {');
+    expect(tasksSource).toContain('let fittingRows = max(0, Int(floor(');
+    expect(tasksSource).not.toContain('fittingRows = 1');
+    expect(tasksSource).toContain('availableHeight - metrics.padding * 2 - metrics.headerHeight - metrics.sectionSpacing');
+
+    expect(compactSource).toContain('let sourceItems = focusItems(payload)');
+    expect(compactSource).toContain('if sourceItems.isEmpty {');
+    expect(compactSource).toContain('} else if !items.isEmpty {');
+    expect(compactSource).toContain('(available + metrics.rowSpacing) / (metrics.rowHeight + metrics.rowSpacing)');
+  });
+
+  it('copies the canonical action store and registers every new Swift source only in the widget target', () => {
+    const mobileRoot = path.resolve(__dirname, '..');
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mindwtr-ios-widget-'));
+    try {
+      const copied = copySharedWidgetActionStore(mobileRoot, temporaryRoot);
+      expect(copied).toBe(SHARED_WIDGET_ACTION_STORE);
+      expect(fs.readFileSync(path.join(temporaryRoot, copied), 'utf8')).toBe(
+        fs.readFileSync(
+          path.join(mobileRoot, IOS_WIDGET_MODULE_FOLDER, SHARED_WIDGET_ACTION_STORE),
+          'utf8'
+        )
+      );
+
+      const calls = [];
+      const xcodeProject = {
+        hasFile: () => false,
+        addSourceFile: (...args) => calls.push(args),
+      };
+      const added = ensureWidgetSwiftSourcesInTarget(xcodeProject, {
+        swiftFiles: [
+          'MindwtrTasksWidget.swift',
+          'MindwtrTasksWidgetIntents.swift',
+          SHARED_WIDGET_ACTION_STORE,
+        ],
+        groupKey: 'WIDGET_GROUP',
+        targetUuid: 'WIDGET_TARGET',
+      });
+
+      expect(added).toEqual([
+        'MindwtrTasksWidget.swift',
+        'MindwtrTasksWidgetIntents.swift',
+        SHARED_WIDGET_ACTION_STORE,
+      ]);
+      expect(calls).toEqual([
+        ['MindwtrWidgets/MindwtrTasksWidget.swift', { target: 'WIDGET_TARGET' }, 'WIDGET_GROUP'],
+        ['MindwtrWidgets/MindwtrTasksWidgetIntents.swift', { target: 'WIDGET_TARGET' }, 'WIDGET_GROUP'],
+        [`MindwtrWidgets/${SHARED_WIDGET_ACTION_STORE}`, { target: 'WIDGET_TARGET' }, 'WIDGET_GROUP'],
+      ]);
+      expect(calls.some(([, options]) => options.target !== 'WIDGET_TARGET')).toBe(false);
+    } finally {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('ships App Intents sources for Siri Inbox capture and v1 Shortcuts actions', () => {
     const sourceDir = path.resolve(__dirname, '..', APP_INTENTS_FOLDER);
     const source = fs.readFileSync(

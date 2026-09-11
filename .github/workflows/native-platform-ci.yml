@@ -19,6 +19,8 @@ on:
       - "apps/mobile/modules/cloudkit-sync/tests/**"
       - "apps/mobile/modules/watch-connectivity/Package.swift"
       - "apps/mobile/modules/watch-connectivity/tests/**"
+      - "apps/mobile/modules/ios-widget/Package.swift"
+      - "apps/mobile/modules/ios-widget/tests/**"
       - "apps/mobile/plugins/**"
       - "apps/mobile/app.config.ts"
       - "apps/mobile/app.json"
@@ -47,6 +49,8 @@ on:
       - "apps/mobile/modules/cloudkit-sync/tests/**"
       - "apps/mobile/modules/watch-connectivity/Package.swift"
       - "apps/mobile/modules/watch-connectivity/tests/**"
+      - "apps/mobile/modules/ios-widget/Package.swift"
+      - "apps/mobile/modules/ios-widget/tests/**"
       - "apps/mobile/plugins/**"
       - "apps/mobile/app.config.ts"
       - "apps/mobile/app.json"
@@ -136,7 +140,7 @@ jobs:
                 ;;
             esac
             case "$path" in
-              apps/mobile/ios-app-intents/*|apps/mobile/widgets-ios/*|apps/mobile/targets/watch/*|apps/mobile/modules/*/ios/*|apps/mobile/modules/*/expo-module.config.json|apps/mobile/modules/cloudkit-sync/Package.swift|apps/mobile/modules/cloudkit-sync/tests/*|apps/mobile/modules/watch-connectivity/Package.swift|apps/mobile/modules/watch-connectivity/tests/*|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-ruby.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/mobile/ios-app-intents/*|apps/mobile/widgets-ios/*|apps/mobile/targets/watch/*|apps/mobile/modules/*/ios/*|apps/mobile/modules/*/expo-module.config.json|apps/mobile/modules/cloudkit-sync/Package.swift|apps/mobile/modules/cloudkit-sync/tests/*|apps/mobile/modules/watch-connectivity/Package.swift|apps/mobile/modules/watch-connectivity/tests/*|apps/mobile/modules/ios-widget/Package.swift|apps/mobile/modules/ios-widget/tests/*|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-ruby.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 ios=true
                 ;;
             esac
@@ -486,6 +490,9 @@ jobs:
 
       - name: Run Watch payload and receipt recovery tests
         run: swift test --package-path apps/mobile/modules/watch-connectivity
+
+      - name: Test iOS widget durable action queue
+        run: swift test --package-path apps/mobile/modules/ios-widget
 
       - name: Run Watch outbox retry tests
         run: swift test --package-path apps/mobile/targets/watch

@@ -1,0 +1,8 @@
+{
+  "platforms": ["ios"],
+  "ios": {
+    "podspecPath": "ios/MindwtrIosWidget.podspec",
+    "swiftModuleName": "MindwtrIosWidget",
+    "modules": ["MindwtrIosWidgetModule"]
+  }
+}

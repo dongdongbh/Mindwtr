@@ -33,6 +33,7 @@ import {
 import { THEME_PRESETS, type ThemePresetName } from '../constants/theme-presets';
 import { buildFocusTaskSections, deriveFocusTaskLists } from './focus-sections';
 import { NO_FOCUS_WIDGET_FILTER, type FocusWidgetFilter } from './focus-widget-filter';
+import { buildWidgetCompletionToken } from './widget-completion-token';
 import {
     buildWidgetSavedFilterOptions,
     buildWidgetTaskList,
@@ -59,6 +60,7 @@ export const SHORTCUTS_SNAPSHOT_ITEM_CAP = 50;
 // how many entities get handed to Spotlight indexing per launch.
 export const SHORTCUTS_SNAPSHOT_PROJECT_CAP = 50;
 export const IOS_WIDGET_KIND = 'MindwtrTasksWidget';
+export const IOS_WIDGET_COMPACT_KIND = 'MindwtrCompactWidget';
 export const IOS_WIDGET_LOCK_KIND = 'MindwtrFocusLockWidget';
 export const WIDGET_FOCUS_URI = 'mindwtr:///focus';
 export const WIDGET_QUICK_CAPTURE_URI = 'mindwtr:///capture-quick?mode=text';
@@ -68,12 +70,13 @@ export type WidgetSystemColorScheme = 'light' | 'dark' | null | undefined;
 
 export interface WidgetTaskItem {
     id: string;
+    completionToken?: string;
     title: string;
     statusLabel: string;
     dueLabel: string | null;
     dueEmphasis: boolean;
     // Deep link that opens this task (the app routes mindwtr://open?task=<id>);
-    // the Android widget rows use it, iOS may ignore it.
+    // shared by Android and iOS widget rows.
     openUri: string;
     // Priority heat-ramp hex (core TASK_PRIORITY_COLORS); null when the task has
     // none or the Priorities feature is off.
@@ -151,7 +154,7 @@ export interface TasksWidgetPayload {
     items: WidgetTaskItem[];
     // The calm default from the Focus screen (#1173): Today's Focus + Today,
     // empty sections dropped, with `maxItems` shared across the two sections.
-    // `items` stays for the iOS widget and the QuickCapture kind.
+    // `items` stays for flat/legacy widget layouts and the QuickCapture kind.
     sections: WidgetTaskSection[];
     // The lists placed widgets asked for (always `focus`), keyed by list id.
     lists: Record<string, WidgetListPayload>;
@@ -161,6 +164,8 @@ export interface TasksWidgetPayload {
     savedFilters: WidgetSavedFilterOption[];
     emptyMessage: string;
     captureLabel: string;
+    completeLabel: string;
+    undoLabel: string;
     focusUri: string;
     quickCaptureUri: string;
     themeMode?: string;
@@ -487,6 +492,7 @@ export function buildWidgetPayload(
             : undefined;
         return {
             id: task.id,
+            completionToken: buildWidgetCompletionToken(task),
             title: task.title,
             statusLabel: tr[`status.${task.status}`] || task.status,
             ...computeDueLabel(task.dueDate, tr, language, startOfToday, endOfToday),
@@ -610,6 +616,8 @@ export function buildWidgetPayload(
         savedFilters: buildWidgetSavedFilterOptions(data),
         emptyMessage: tr['list.noTasks'] ?? 'No tasks found',
         captureLabel: tr['widget.capture'] ?? 'Quick capture',
+        completeLabel: tr['review.markDone'] ?? 'Mark Done',
+        undoLabel: tr['common.undo'] ?? 'Undo',
         focusUri: WIDGET_FOCUS_URI,
         quickCaptureUri: WIDGET_QUICK_CAPTURE_URI,
         themeMode: typeof data.settings?.theme === 'string' ? data.settings.theme : 'system',
