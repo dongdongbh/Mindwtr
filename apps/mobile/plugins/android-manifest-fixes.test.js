@@ -12,6 +12,7 @@ const {
     removeContextIntentFilters,
     setProfileable,
     mergeToolsRemove,
+    ensureConfigChange,
 } = plugin.__testables;
 
 describe('android-manifest-fixes', () => {
@@ -21,6 +22,13 @@ describe('android-manifest-fixes', () => {
     expect(mergeToolsRemove(`${attribute}, ${attribute}`, attribute)).toBe(attribute);
     expect(mergeToolsRemove(['android:theme', attribute], attribute)).toBe(`android:theme,${attribute}`);
     expect(mergeToolsRemove(mergeToolsRemove('android:theme', attribute), attribute)).toBe(`android:theme,${attribute}`);
+  });
+  it('preserves config change handling while adding fold-size transitions idempotently', () => {
+    const existing = 'keyboard|orientation|screenSize|screenLayout';
+    const updated = ensureConfigChange(existing, 'smallestScreenSize');
+
+    expect(updated).toBe('keyboard|orientation|screenSize|screenLayout|smallestScreenSize');
+    expect(ensureConfigChange(updated, 'smallestScreenSize')).toBe(updated);
   });
   it('moves context automation custom actions from MainActivity to a receiver', () => {
     const mainActivity = {

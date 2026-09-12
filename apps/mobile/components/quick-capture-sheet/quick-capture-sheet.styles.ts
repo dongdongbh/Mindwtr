@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 
 export const styles = StyleSheet.create({
   modalRoot: {
@@ -38,6 +38,14 @@ export const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     minWidth: 0,
+  },
+  closeButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: -6,
   },
   input: {
     flex: 1,
@@ -296,7 +304,7 @@ export const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 999,
     minWidth: 104,
-    minHeight: 40,
+    minHeight: Platform.OS === 'android' ? 48 : 40,
     flexShrink: 0,
     justifyContent: 'center',
   },

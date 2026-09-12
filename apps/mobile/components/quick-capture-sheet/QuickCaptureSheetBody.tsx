@@ -9,6 +9,7 @@ import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CompactText, CompactTextInput } from '@/components/compact-text';
 import { ThemedAlertHost } from '@/components/themed-alert';
 import { SandboxWorkspaceCue } from '@/components/sandbox-workspace-cue';
+import { AdaptiveModalSurface } from '@/components/adaptive-modal-surface';
 import { QuickDateChips } from '../QuickDateChips';
 import { FocusStarIcon, FOCUS_STAR_COLOR } from '../FocusStarIcon';
 import { styles } from './quick-capture-sheet.styles';
@@ -254,7 +255,9 @@ export function QuickCaptureSheetBody({
           accessibilityElementsHidden={contentAccessibilityHidden}
           importantForAccessibility={contentAccessibilityHidden ? 'no-hide-descendants' : 'auto'}
         >
-          <View
+          <AdaptiveModalSurface
+            variant="sheet"
+            testID="quick-capture-adaptive-surface"
             style={[
               styles.sheet,
               {
@@ -275,8 +278,11 @@ export function QuickCaptureSheetBody({
               <TouchableOpacity
                 onPress={handleClose}
                 disabled={saving}
+                accessibilityRole="button"
                 accessibilityLabel={t('common.close')}
                 accessibilityState={{ busy: saving, disabled: saving }}
+                hitSlop={{ top: 4, right: 4, bottom: 4, left: 4 }}
+                style={styles.closeButton}
               >
                 <X size={18} color={tc.secondaryText} />
               </TouchableOpacity>
@@ -652,7 +658,7 @@ export function QuickCaptureSheetBody({
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
+          </AdaptiveModalSurface>
           {/* Toasts fired from inside the sheet (e.g. the speech-not-configured notice)
               render behind the native modal window without a viewport here, so the user
               only saw them after closing the sheet (#886, #834). It sits inside the

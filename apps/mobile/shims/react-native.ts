@@ -1,7 +1,10 @@
 import React from 'react';
 
-const createHostComponent = (name: string) => (props: any) =>
-  React.createElement(name, props, props.children);
+const createHostComponent = (name: string) => {
+  const HostComponent = (props: any) => React.createElement(name, props, props.children);
+  HostComponent.displayName = name;
+  return HostComponent;
+};
 
 const renderHostChild = (child: any, key: string) => {
   if (child == null || child === false) return null;
@@ -122,6 +125,10 @@ export const Animated = {
 };
 
 export const Platform = { OS: 'web', select: (options: any) => options?.web ?? options?.default };
+export const I18nManager = { isRTL: false };
+export const BackHandler = {
+  addEventListener: (..._args: any[]) => ({ remove: () => undefined }),
+};
 
 export const AppRegistry = {
   registerHeadlessTask: () => undefined,
@@ -132,8 +139,14 @@ export const NativeModules = {
 };
 
 export const Dimensions = {
-  get: () => ({ width: 390, height: 844 }),
+  get: (_dimension?: 'window' | 'screen') => ({ width: 390, height: 844 }),
 };
+
+export const useWindowDimensions = () => ({
+  ...Dimensions.get('window'),
+  fontScale: 1,
+  scale: 1,
+});
 
 export const Keyboard = {
   addListener: () => ({ remove: () => {} }),

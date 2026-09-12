@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
 import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
-import { View, Text, TextInput, TouchableOpacity, FlatList, Dimensions, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, Platform, useWindowDimensions } from 'react-native';
 import type { GettingStartedAction } from '@/components/GettingStartedActions';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AREA_PRESET_COLORS, Attachment, DEFAULT_PROJECT_COLOR, getProjectSectionsForView, Project, shallow, Task, type Section, type TaskSortBy, useTaskStore } from '@mindwtr/core';
@@ -43,6 +43,7 @@ import { useProjectNotesEditor } from '@/components/projects-screen/use-project-
 import { TaskEditModal } from '@/components/task-edit-modal';
 import type { TaskEditTab } from '@/components/task-edit/use-task-edit-state';
 import { useProjectFiltering } from '@/hooks/use-project-filtering';
+import { useAndroidActivitySession } from '@/hooks/use-android-activity-session';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useQuickCapture } from '../../contexts/quick-capture-context';
 import { useLanguage } from '../../contexts/language-context';
@@ -56,6 +57,14 @@ import { consumePendingCaptureTaskOpen, openContextsScreen, openProjectScreen } 
 import { CompactText, CompactTextInput } from '@/components/compact-text';
 
 type ProjectTaskSortBy = TaskSortBy;
+type ProjectSelectionActivityState = { projectId: string };
+
+const isProjectSelectionActivityStateShape = (value: unknown): value is ProjectSelectionActivityState => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.projectId === 'string' && candidate.projectId.length > 0;
+};
+
 const EMPTY_PROJECT_TASKS: Task[] = [];
 function resolveTaskRouteTab(value?: string | string[]): TaskEditTab {
   const routeValue = Array.isArray(value) ? value[0] : value;
@@ -120,6 +129,7 @@ export default function ProjectsScreen() {
   const [newProjectTitle, setNewProjectTitle] = useState('');
   const [newProjectAreaId, setNewProjectAreaId] = useState('');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [projectActivityRecoveryEnabled, setProjectActivityRecoveryEnabled] = useState(true);
   const [projectTaskSortBy, setProjectTaskSortBy] = useState<ProjectTaskSortBy>('default');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [taskModalDefaultTab, setTaskModalDefaultTab] = useState<TaskEditTab>('view');
@@ -200,7 +210,7 @@ export default function ProjectsScreen() {
   }, [t]);
   const [showTagFilter, setShowTagFilter] = useState(false);
   const [tagDraft, setTagDraft] = useState('');
-  const windowHeight = Dimensions.get('window').height;
+  const { height: windowHeight } = useWindowDimensions();
   const pickerCardMaxHeight = Math.min(windowHeight * 0.8, 560);
   const areaListMaxHeight = Math.min(windowHeight * 0.4, 280);
   const areaManagerListMaxHeight = Math.min(windowHeight * 0.45, 320);
@@ -326,11 +336,29 @@ export default function ProjectsScreen() {
   }, [selectedProjectIsArchived]);
 
   const openProject = useCallback((project: Project) => {
+    setProjectActivityRecoveryEnabled(true);
     setSelectedProject(project);
     setProjectTaskSortBy(project.taskSortBy ?? 'default');
     resetProjectNotesUi();
     resetProjectAttachmentUi();
   }, [resetProjectAttachmentUi, resetProjectNotesUi]);
+  const validateProjectSelectionActivityState = useCallback((value: unknown): value is ProjectSelectionActivityState => {
+    if (!isProjectSelectionActivityStateShape(value)) return false;
+    return projects.some((project) => project.id === value.projectId && !project.deletedAt);
+  }, [projects]);
+  const restoreProjectSelection = useCallback((recovered: ProjectSelectionActivityState) => {
+    const project = projects.find((candidate) => (
+      candidate.id === recovered.projectId && !candidate.deletedAt
+    ));
+    if (project) openProject(project);
+  }, [openProject, projects]);
+  const { clear: clearProjectSelectionActivity } = useAndroidActivitySession({
+    enabled: projectActivityRecoveryEnabled,
+    ownerId: `projects-screen:${pathname}`,
+    value: selectedProject ? { projectId: selectedProject.id } : null,
+    validate: validateProjectSelectionActivityState,
+    onRestore: restoreProjectSelection,
+  });
 
   // Keep the open project's sort in step with the store, so a sort chosen on
   // another device (arriving via sync) reorders the already-open detail view.
@@ -433,6 +461,8 @@ export default function ProjectsScreen() {
     void Promise.resolve(deleteProject(projectIdToDelete))
       .then(() => {
         if (selectedProject?.id === projectIdToDelete) {
+          clearProjectSelectionActivity();
+          setProjectActivityRecoveryEnabled(false);
           setSelectedProject(null);
         }
         showToast({
@@ -463,6 +493,7 @@ export default function ProjectsScreen() {
         });
       });
   }, [
+    clearProjectSelectionActivity,
     deleteProject,
     logProjectError,
     resolveText,
@@ -717,6 +748,8 @@ export default function ProjectsScreen() {
   );
 
   const closeProjectDetail = (navigateBack = true) => {
+    clearProjectSelectionActivity();
+    setProjectActivityRecoveryEnabled(false);
     commitSelectedProjectNotes();
     persistSelectedProjectEdits(selectedProject);
     setSelectedProject(null);

@@ -72,6 +72,11 @@ export type RecordingState =
 type UseQuickCaptureAudioParams = {
   addTask: (title: string, props?: Partial<Task>) => Promise<{ success: boolean; id?: string }>;
   autoRecord?: boolean;
+  beginActivitySubmission: (
+    recoveryAttachments: Attachment[],
+    fallbackValue?: string,
+    additionalOwnedAttachmentUris?: string[],
+  ) => number;
   buildTaskProps: (fallbackTitle: string, extraProps?: Partial<Task>) => Promise<BuildTaskPropsResult>;
   getActiveSubmissionSession: () => CaptureSessionId | null;
   handleClose: () => void;
@@ -80,9 +85,19 @@ type UseQuickCaptureAudioParams = {
   onSubmissionBusyChange: (busy: boolean) => void;
   onWarn: (message: string, error?: unknown) => void;
   settings: AppSettings;
+  settleActivitySubmission: (
+    submissionId: number,
+    options: { durableSucceeded: boolean; keepEditing: boolean; sessionCurrent: boolean },
+  ) => boolean;
   submissionCoordinator: CaptureSessionCoordinator;
   submissionKey?: string | number;
   t: (key: string) => string;
+  updateActivitySubmission: (
+    submissionId: number,
+    recoveryAttachments: Attachment[],
+    fallbackValue?: string,
+    additionalOwnedAttachmentUris?: string[],
+  ) => boolean;
   updateSpeechSettings: (next: Partial<SpeechSettings>) => void;
   visible: boolean;
 };
@@ -179,6 +194,7 @@ const cacheAudioAttachmentOrThrow = async (attachment: Attachment): Promise<Atta
 export function useQuickCaptureAudio({
   addTask,
   autoRecord,
+  beginActivitySubmission,
   buildTaskProps,
   getActiveSubmissionSession,
   handleClose,
@@ -187,9 +203,11 @@ export function useQuickCaptureAudio({
   onSubmissionBusyChange,
   onWarn,
   settings,
+  settleActivitySubmission,
   submissionCoordinator,
   submissionKey,
   t,
+  updateActivitySubmission,
   updateSpeechSettings,
   visible,
 }: UseQuickCaptureAudioParams) {
@@ -612,6 +630,9 @@ export function useQuickCaptureAudio({
     const currentRecording = activeRecordingRef.current ?? recording;
     if (!currentRecording) return;
     const ownedSubmissionFiles = new Map<string, File>();
+    let activitySubmissionId: number | null = null;
+    let durableSucceeded = false;
+    let recoveryAttachments: Attachment[] = [];
     let submissionFilesAdopted = false;
     const trackSubmissionFile = (file: File): File => {
       if (file.uri) ownedSubmissionFiles.set(file.uri, new File(file.uri));
@@ -620,8 +641,9 @@ export function useQuickCaptureAudio({
     const forgetSubmissionFile = (uri: string) => {
       ownedSubmissionFiles.delete(uri);
     };
-    const cleanupAbandonedSubmissionFiles = (reason: string) => {
-      for (const file of ownedSubmissionFiles.values()) {
+    const cleanupAbandonedSubmissionFiles = (reason: string, retainedUris = new Set<string>()) => {
+      for (const [uri, file] of ownedSubmissionFiles) {
+        if (retainedUris.has(uri)) continue;
         safeDeleteFile(file, reason);
       }
       ownedSubmissionFiles.clear();
@@ -655,8 +677,6 @@ export function useQuickCaptureAudio({
           forgetSubmissionFile(finalFile.uri);
           return;
         }
-        if (!isSubmissionCurrent()) return;
-
         let fileInfo: { exists?: boolean; size?: number } | null = null;
         try {
           fileInfo = finalFile.info();
@@ -666,6 +686,25 @@ export function useQuickCaptureAudio({
         const now = new Date();
         const nowIso = now.toISOString();
         const displayTitle = `${t('quickAdd.audioNoteTitle')} ${safeFormatDate(now, 'Pp')}`;
+        const recoveryAudioAttachment: Attachment = {
+          id: generateUUID(),
+          kind: 'file',
+          title: displayTitle,
+          uri: finalFile.uri,
+          mimeType: getCaptureMimeType('.wav'),
+          size: fileInfo?.exists && fileInfo.size ? fileInfo.size : undefined,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          localStatus: 'available',
+        };
+        recoveryAttachments = [...(initialAttachments ?? []), recoveryAudioAttachment];
+        activitySubmissionId = beginActivitySubmission(
+          recoveryAttachments,
+          displayTitle,
+          [recoveryAudioAttachment.uri],
+        );
+        if (!isSubmissionCurrent()) return;
+
         const currentSettings = selectQuickCaptureSettings(settings, useTaskStore.getState().settings);
         const speech = currentSettings.ai?.speechToText;
         const speechRuntime = resolveSpeechToTextRuntimeSettings(speech);
@@ -717,17 +756,7 @@ export function useQuickCaptureAudio({
           : speechReady;
         const saveAudioAttachments = currentSettings.gtd?.saveAudioAttachments !== false || !canTranscribeSpeech;
 
-        let attachment: Attachment | null = saveAudioAttachments ? {
-          id: generateUUID(),
-          kind: 'file',
-          title: displayTitle,
-          uri: finalFile.uri,
-          mimeType: getCaptureMimeType('.wav'),
-          size: fileInfo?.exists && fileInfo.size ? fileInfo.size : undefined,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-          localStatus: 'available',
-        } : null;
+        let attachment: Attachment | null = saveAudioAttachments ? recoveryAudioAttachment : null;
         if (attachment) {
           try {
             attachment = await cacheAudioAttachmentOrThrow(attachment);
@@ -737,6 +766,16 @@ export function useQuickCaptureAudio({
             throw error;
           }
         }
+        recoveryAttachments = [
+          ...(initialAttachments ?? []),
+          attachment ?? recoveryAudioAttachment,
+        ];
+        updateActivitySubmission(
+          activitySubmissionId,
+          recoveryAttachments,
+          displayTitle,
+          [(attachment ?? recoveryAudioAttachment).uri],
+        );
         if (!isSubmissionCurrent()) return;
 
         const attachments = [...(initialAttachments ?? [])];
@@ -750,12 +789,12 @@ export function useQuickCaptureAudio({
         if (!title.trim()) return;
 
         const addTaskResult = await addTask(title, props);
-        if (addTaskResult.success && addTaskResult.id) submissionFilesAdopted = true;
-        if (!isSubmissionCurrent()) return;
-        handleClose();
-
+        durableSucceeded = Boolean(addTaskResult.success && addTaskResult.id);
+        if (durableSucceeded) submissionFilesAdopted = true;
         if (!addTaskResult.success || !addTaskResult.id) return;
+        if (isSubmissionCurrent()) handleClose();
         const taskId = addTaskResult.id;
+        const shouldCleanupSource = !attachment || attachment.uri !== finalFile.uri;
 
         if (canTranscribeSpeech) {
           const timeZone = typeof Intl === 'object' && typeof Intl.DateTimeFormat === 'function'
@@ -789,7 +828,7 @@ export function useQuickCaptureAudio({
               })
               .catch((error) => onWarn('Speech-to-text failed', error))
               .finally(() => {
-                if (!saveAudioAttachments) {
+                if (shouldCleanupSource) {
                   safeDeleteFile(finalFile, 'whisper_realtime_cleanup');
                 }
               });
@@ -827,12 +866,12 @@ export function useQuickCaptureAudio({
                 .catch((realtimeError) => onWarn('Speech-to-text failed', realtimeError));
             })
             .finally(() => {
-              if (!saveAudioAttachments) {
+              if (shouldCleanupSource) {
                 safeDeleteFile(finalFile, 'whisper_cleanup');
               }
             });
         } else {
-          if (!saveAudioAttachments) {
+          if (shouldCleanupSource) {
             safeDeleteFile(finalFile, 'whisper_skip_cleanup');
           }
         }
@@ -859,14 +898,32 @@ export function useQuickCaptureAudio({
         forgetSubmissionFile(uri);
         return;
       }
-      if (!isSubmissionCurrent()) return;
-
       const now = new Date();
       const timestamp = safeFormatDate(now, 'yyyyMMdd-HHmmss');
       const extension = getCaptureFileExtension(uri);
+      const fileName = `mindwtr-audio-${timestamp}-${generateUUID()}${extension}`;
+      const nowIso = now.toISOString();
+      const displayTitle = `${t('quickAdd.audioNoteTitle')} ${safeFormatDate(now, 'Pp')}`;
+      let recoveryAudioAttachment: Attachment = {
+        id: generateUUID(),
+        kind: 'file',
+        title: displayTitle,
+        uri: sourceFile.uri,
+        mimeType: getCaptureMimeType(extension),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        localStatus: 'available',
+      };
+      recoveryAttachments = [...(initialAttachments ?? []), recoveryAudioAttachment];
+      activitySubmissionId = beginActivitySubmission(
+        recoveryAttachments,
+        displayTitle,
+        [recoveryAudioAttachment.uri],
+      );
+      if (!isSubmissionCurrent()) return;
+
       const shouldRelocateRecording = Platform.OS !== 'ios';
       const directory = shouldRelocateRecording ? await ensureAudioDirectory() : null;
-      const fileName = `mindwtr-audio-${timestamp}-${generateUUID()}${extension}`;
       const destinationFile = directory ? new File(buildCaptureFileUri(directory.uri, fileName)) : null;
       let captureCandidates: (File | null)[] = [sourceFile];
 
@@ -901,8 +958,18 @@ export function useQuickCaptureAudio({
       const finalFile = verifiedCapture.file;
       trackSubmissionFile(finalFile);
       const fileInfo = verifiedCapture.info;
-      const nowIso = now.toISOString();
-      const displayTitle = `${t('quickAdd.audioNoteTitle')} ${safeFormatDate(now, 'Pp')}`;
+      recoveryAudioAttachment = {
+        ...recoveryAudioAttachment,
+        uri: finalFile.uri,
+        size: fileInfo?.exists && fileInfo.size ? fileInfo.size : undefined,
+      };
+      recoveryAttachments = [...(initialAttachments ?? []), recoveryAudioAttachment];
+      updateActivitySubmission(
+        activitySubmissionId,
+        recoveryAttachments,
+        displayTitle,
+        [recoveryAudioAttachment.uri],
+      );
       const currentSettings = selectQuickCaptureSettings(settings, useTaskStore.getState().settings);
       const speech = currentSettings.ai?.speechToText;
       const speechRuntime = resolveSpeechToTextRuntimeSettings(speech);
@@ -940,17 +1007,7 @@ export function useQuickCaptureAudio({
       const canTranscribeSpeech = provider === 'whisper' ? Boolean(localWhisperInput) : speechReady;
       const saveAudioAttachments = currentSettings.gtd?.saveAudioAttachments !== false || !canTranscribeSpeech;
 
-      let attachment: Attachment | null = saveAudioAttachments ? {
-        id: generateUUID(),
-        kind: 'file',
-        title: displayTitle,
-        uri: audioUri,
-        mimeType: getCaptureMimeType(extension),
-        size: fileInfo?.exists && fileInfo.size ? fileInfo.size : undefined,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        localStatus: 'available',
-      } : null;
+      let attachment: Attachment | null = saveAudioAttachments ? recoveryAudioAttachment : null;
       if (attachment) {
         try {
           attachment = await cacheAudioAttachmentOrThrow(attachment);
@@ -960,6 +1017,16 @@ export function useQuickCaptureAudio({
           throw error;
         }
       }
+      recoveryAttachments = [
+        ...(initialAttachments ?? []),
+        attachment ?? recoveryAudioAttachment,
+      ];
+      updateActivitySubmission(
+        activitySubmissionId,
+        recoveryAttachments,
+        displayTitle,
+        [(attachment ?? recoveryAudioAttachment).uri],
+      );
       if (!isSubmissionCurrent()) return;
 
       const attachments = [...(initialAttachments ?? [])];
@@ -973,12 +1040,12 @@ export function useQuickCaptureAudio({
       if (!title.trim()) return;
 
       const addTaskResult = await addTask(title, props);
-      if (addTaskResult.success && addTaskResult.id) submissionFilesAdopted = true;
-      if (!isSubmissionCurrent()) return;
-      handleClose();
-
+      durableSucceeded = Boolean(addTaskResult.success && addTaskResult.id);
+      if (durableSucceeded) submissionFilesAdopted = true;
       if (!addTaskResult.success || !addTaskResult.id) return;
+      if (isSubmissionCurrent()) handleClose();
       const taskId = addTaskResult.id;
+      const shouldCleanupSource = !attachment || attachment.uri !== finalFile.uri;
 
       if (canTranscribeSpeech) {
         const timeZone = typeof Intl === 'object' && typeof Intl.DateTimeFormat === 'function'
@@ -1000,7 +1067,7 @@ export function useQuickCaptureAudio({
         } satisfies SpeechToTextConfig;
         const speechPromise = provider === 'whisper' && localWhisperInput
           ? runWhisperLocalTranscription(localWhisperInput, speechConfig)
-          : processAudioCapture(audioUri, speechConfig);
+          : processAudioCapture(stripFileScheme(attachment?.uri ?? audioUri), speechConfig);
         void speechPromise
           .then(async (result) => {
             const applyResult = await applySpeechResult(taskId, result);
@@ -1013,12 +1080,12 @@ export function useQuickCaptureAudio({
           })
           .catch((error) => onWarn('Speech-to-text failed', error))
           .finally(() => {
-            if (!saveAudioAttachments) {
+            if (shouldCleanupSource) {
               safeDeleteFile(finalFile, 'expo_cleanup');
             }
           });
       } else {
-        if (!saveAudioAttachments) {
+        if (shouldCleanupSource) {
           safeDeleteFile(finalFile, 'expo_skip_cleanup');
         }
       }
@@ -1027,14 +1094,30 @@ export function useQuickCaptureAudio({
       onError('Failed to save recording', error);
       Alert.alert(t('quickAdd.audioErrorTitle'), t('quickAdd.audioErrorBody'));
     } finally {
-      if (!submissionFilesAdopted && !isSubmissionCurrent()) {
-        cleanupAbandonedSubmissionFiles('stale_audio_submission');
+      const sessionCurrent = submissionSession === null
+        ? isSubmissionCurrent()
+        : submissionCoordinator.finishSubmission(submissionSession);
+      let activitySubmissionManaged = false;
+      if (activitySubmissionId !== null) {
+        activitySubmissionManaged = settleActivitySubmission(activitySubmissionId, {
+          durableSucceeded,
+          keepEditing: !durableSucceeded,
+          sessionCurrent,
+        });
+      }
+      if (!submissionFilesAdopted) {
+        cleanupAbandonedSubmissionFiles(
+          'stale_audio_submission',
+          activitySubmissionManaged
+            ? new Set(recoveryAttachments.map((attachment) => attachment.uri))
+            : undefined,
+        );
       }
       if (submissionSession === null) {
-        if (captureSurfaceSession === null || submissionCoordinator.isCurrent(captureSurfaceSession)) {
+        if (sessionCurrent) {
           setRecordingBusy(false);
         }
-      } else if (submissionCoordinator.finishSubmission(submissionSession)) {
+      } else if (sessionCurrent) {
         setRecordingBusy(false);
         onSubmissionBusyChange(false);
       }
@@ -1042,6 +1125,7 @@ export function useQuickCaptureAudio({
   }, [
     addTask,
     applySpeechResult,
+    beginActivitySubmission,
     buildTaskProps,
     discardEmptySpeechTask,
     ensureAudioDirectory,
@@ -1057,10 +1141,12 @@ export function useQuickCaptureAudio({
     resolveWhisperModelAsync,
     safeDeleteFile,
     settings,
+    settleActivitySubmission,
     showToast,
     stripFileScheme,
     submissionCoordinator,
     t,
+    updateActivitySubmission,
   ]);
 
   useEffect(() => {

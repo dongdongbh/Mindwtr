@@ -24,4 +24,11 @@ describe('quick capture sheet styles', () => {
       textAlign: 'center',
     });
   });
+
+  it('gives the quick-capture close action a comfortable touch target', () => {
+    expect(flattenStyle(styles.closeButton)).toMatchObject({
+      height: 48,
+      width: 48,
+    });
+  });
 });

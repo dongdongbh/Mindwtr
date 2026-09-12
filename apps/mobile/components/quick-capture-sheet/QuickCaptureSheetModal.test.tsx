@@ -318,6 +318,7 @@ describe('Quick capture modal composition', () => {
     const backdrop = tree.root.find(
       (node) => node.props.accessibilityRole === 'button'
         && node.props.accessibilityLabel === 'common.close'
+        && node.props.accessibilityElementsHidden === true
     );
     expect(backdrop.props.accessibilityElementsHidden).toBe(true);
     expect(backdrop.props.importantForAccessibility).toBe('no-hide-descendants');

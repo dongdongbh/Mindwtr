@@ -11,7 +11,12 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
     },
 }));
 
-import { persistLastRoute, readRestorableRoute, setSessionRestoreOpenProject } from './session-restore';
+import {
+    persistLastRoute,
+    readRestorableRoute,
+    sanitizeAndroidActivityNavigationState,
+    setSessionRestoreOpenProject,
+} from './session-restore';
 
 describe('mobile session restore', () => {
     beforeEach(() => {
@@ -80,5 +85,59 @@ describe('mobile session restore', () => {
         expect(await readRestorableRoute()).toBeNull();
         memoryStore.set('mindwtr:session:lastRoute', 'not json');
         expect(await readRestorableRoute()).toBeNull();
+    });
+
+    it('preserves regular navigation history while excluding routed capture and one-shot params', () => {
+        const sanitized = sanitizeAndroidActivityNavigationState({
+            stale: false,
+            type: 'stack',
+            key: 'root',
+            index: 2,
+            routeNames: ['index', '(drawer)', 'capture-modal'],
+            routes: [
+                { key: 'index-1', name: 'index' },
+                {
+                    key: 'drawer-1',
+                    name: '(drawer)',
+                    state: {
+                        stale: false,
+                        type: 'drawer',
+                        key: 'drawer',
+                        index: 1,
+                        routeNames: ['focus', 'projects-screen'],
+                        routes: [
+                            { key: 'focus-1', name: 'focus' },
+                            {
+                                key: 'projects-1',
+                                name: 'projects-screen',
+                                params: { projectId: 'p1', openToken: 'once' },
+                            },
+                        ],
+                    },
+                },
+                {
+                    key: 'capture-1',
+                    name: 'capture-modal',
+                    params: { initialValue: 'private draft', returnTo: '/projects' },
+                },
+            ],
+        });
+
+        expect(sanitized?.routes.map((route) => route.name)).toEqual(['(drawer)']);
+        expect(sanitized?.index).toBe(0);
+        expect(sanitized?.routes[0]?.state?.routes[1]?.params).toEqual({ projectId: 'p1' });
+    });
+
+    it('rejects malformed or unbounded navigation states', () => {
+        expect(sanitizeAndroidActivityNavigationState(undefined)).toBeNull();
+        expect(sanitizeAndroidActivityNavigationState({ routes: [] } as never)).toBeNull();
+        expect(sanitizeAndroidActivityNavigationState({
+            stale: false,
+            type: 'stack',
+            key: 'root',
+            index: 0,
+            routeNames: [],
+            routes: Array.from({ length: 65 }, (_, index) => ({ key: `route-${index}`, name: 'screen' })),
+        })).toBeNull();
     });
 });

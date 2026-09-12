@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, Modal, Animated, Platform } from 'react-native';
+import { View, Text, TextInput, Modal, Animated, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Task,
     TaskEditorFieldId,
@@ -28,6 +28,9 @@ import { Task,
 import { taskDraftToUpdatePatch } from '@mindwtr/core/task-draft';
 import { useLanguage } from '../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useAdaptiveWindow } from '@/components/adaptive-window-context';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { AdaptiveModalSurface } from './adaptive-modal-surface';
 import { ToastViewport, useToast } from '@/contexts/toast-context';
 import { ExpandedMarkdownEditor } from './expanded-markdown-editor';
 import { KeyboardAccessoryHost } from './keyboard-accessory-host';
@@ -61,15 +64,82 @@ import { useTaskEditPager } from './task-edit/use-task-edit-pager';
 import { useTaskEditPreview } from './task-edit/use-task-edit-preview';
 import {
     useTaskEditState,
+    type TaskEditActivityInputRecovery,
 } from './task-edit/use-task-edit-state';
 import { useTaskEditDerivedState } from './task-edit/use-task-edit-derived-state';
 import { useTaskTokenSuggestions } from './task-edit/use-task-token-suggestions';
 import { createSomedaySection } from '../lib/someday-section-actions';
+import { logInfo } from '../lib/app-log';
 import { SandboxWorkspaceCue } from './sandbox-workspace-cue';
 
 
 const EMPTY_COPILOT_TAGS: string[] = [];
 const EMPTY_COPILOT_PARTS: CopilotPart[] = [];
+
+type RecoveredInputSchedule = (callback: () => void, attempt: number) => () => void;
+
+const scheduleRecoveredInputAttempt: RecoveredInputSchedule = (callback, attempt) => {
+    if (attempt === 0 && typeof requestAnimationFrame === 'function') {
+        const frame = requestAnimationFrame(callback);
+        return () => cancelAnimationFrame(frame);
+    }
+    const timeout = setTimeout(callback, attempt * 80);
+    return () => clearTimeout(timeout);
+};
+
+export const restoreRecoveredTaskEditInput = ({
+    acknowledge,
+    descriptionInputRef,
+    editTab,
+    recoveredInput,
+    schedule = scheduleRecoveredInputAttempt,
+    titleInputRef,
+}: {
+    acknowledge: () => void;
+    descriptionInputRef: React.RefObject<TextInput | null>;
+    editTab: 'task' | 'view';
+    recoveredInput: TaskEditActivityInputRecovery | null;
+    schedule?: RecoveredInputSchedule;
+    titleInputRef: React.RefObject<TextInput | null>;
+}) => {
+    if (!recoveredInput || editTab !== 'task') return () => {};
+    let cancelled = false;
+    let cancelScheduled = () => {};
+    let attempt = 0;
+    const restore = () => {
+        if (cancelled) return;
+        const input = recoveredInput.field === 'title'
+            ? titleInputRef.current
+            : descriptionInputRef.current;
+        if (input) {
+            input.focus();
+            input.setNativeProps({ selection: recoveredInput.selection });
+            if (typeof input.isFocused !== 'function' || input.isFocused()) {
+                void logInfo('Android activity editor input restored', {
+                    scope: 'task-edit',
+                    extra: {
+                        releaseCheck: 'v1.3.0/android-activity-session-recovery',
+                        outcome: 'focused',
+                        surface: recoveredInput.field,
+                    },
+                });
+                acknowledge();
+                return;
+            }
+        }
+        attempt += 1;
+        if (attempt > 2) {
+            acknowledge();
+            return;
+        }
+        cancelScheduled = schedule(restore, attempt);
+    };
+    cancelScheduled = schedule(restore, attempt);
+    return () => {
+        cancelled = true;
+        cancelScheduled();
+    };
+};
 
 interface TaskEditModalProps {
     visible: boolean;
@@ -153,6 +223,9 @@ function TaskEditModalInner({
     // Already identity-stable: resolveThemeTokens caches its result on the theme,
     // so this only changes when a colour actually does (#766).
     const tc = useThemeColors();
+    const adaptiveWindow = useAdaptiveWindow();
+    const reducedMotion = useReducedMotion();
+    const constrainEditorSurface = adaptiveWindow.isExpanded || Boolean(adaptiveWindow.activeFeature);
     const resolvedFeatureFlags = resolveFeatureFlags(settings);
     const prioritiesEnabled = resolvedFeatureFlags.priorities;
     const timeEstimatesEnabled = resolvedFeatureFlags.timeEstimates;
@@ -180,6 +253,7 @@ function TaskEditModalInner({
     }), [showToast, t]);
     const {
         aiModal,
+        acknowledgeRecoveredActivityInput,
         contextInputDraft,
         customWeekdays,
         descriptionDebounceRef,
@@ -191,6 +265,7 @@ function TaskEditModalInner({
         isTagInputFocused,
         pendingDueDate,
         pendingStartDate,
+        recoveredActivityInput,
         setAiModal,
         setAttachments,
         setChecklist,
@@ -218,6 +293,8 @@ function TaskEditModalInner({
         showSectionPicker,
         tagInputDraft,
         taskEditDraft,
+        trackActivityInputFocus,
+        trackActivityInputSelection,
         draftLifecycle,
         titleDebounceRef,
         titleDraft,
@@ -523,6 +600,7 @@ function TaskEditModalInner({
         [people, tasks, waitingAssignmentInput]
     );
     const [isTitleInputFocused, setIsTitleInputFocused] = useState(false);
+    const [isModalShown, setIsModalShown] = useState(false);
 
     const toggleCustomMonthDay = useCallback((day: number) => {
         setCustomMonthDays((current) => {
@@ -584,6 +662,7 @@ function TaskEditModalInner({
     }, [customInterval, customMode, customOrdinal, customWeekday, customMonthDays, recurrenceRRuleValue, recurrenceStrategyValue, setDraftField]);
 
     const [isMarkdownOverlayOpen, setIsMarkdownOverlayOpen] = useState(false);
+    const titleInputRef = useRef<TextInput>(null);
     const {
         containerWidth,
         handleContainerLayout,
@@ -605,6 +684,7 @@ function TaskEditModalInner({
         if (!visible) {
             setIsMarkdownOverlayOpen(false);
             setIsTitleInputFocused(false);
+            setIsModalShown(false);
         }
     }, [visible]);
 
@@ -619,6 +699,41 @@ function TaskEditModalInner({
         onMarkdownOverlayVisibilityChange: setIsMarkdownOverlayOpen,
         onInputFocusTracked: handleInputFocus,
     });
+    const setDescriptionInputFocused = descriptionEditor.setIsDescriptionInputFocused;
+    const setDescriptionSelection = descriptionEditor.setDescriptionSelection;
+    const setDescriptionInputFocusedWithActivityTracking = useCallback<React.Dispatch<React.SetStateAction<boolean>>>((next) => {
+        setDescriptionInputFocused((current) => {
+            const focused = typeof next === 'function' ? next(current) : next;
+            trackActivityInputFocus('description', focused);
+            return focused;
+        });
+    }, [setDescriptionInputFocused, trackActivityInputFocus]);
+    const setDescriptionSelectionWithActivityTracking = useCallback((selection: { start: number; end: number }) => {
+        setDescriptionSelection(selection);
+        trackActivityInputSelection('description', selection);
+    }, [setDescriptionSelection, trackActivityInputSelection]);
+
+    useEffect(() => restoreRecoveredTaskEditInput({
+        acknowledge: acknowledgeRecoveredActivityInput,
+        descriptionInputRef: descriptionEditor.descriptionInputRef,
+        editTab,
+        recoveredInput: visible && isModalShown ? recoveredActivityInput : null,
+        titleInputRef,
+    }), [
+        acknowledgeRecoveredActivityInput,
+        descriptionEditor.descriptionInputRef,
+        editTab,
+        isModalShown,
+        recoveredActivityInput,
+        visible,
+    ]);
+    const handleTitleInputFocusChange = useCallback((focused: boolean) => {
+        setIsTitleInputFocused(focused);
+        trackActivityInputFocus('title', focused);
+    }, [trackActivityInputFocus]);
+    const handleTitleSelectionChange = useCallback((selection: { start: number; end: number }) => {
+        trackActivityInputSelection('title', selection);
+    }, [trackActivityInputSelection]);
 
     const updateContextInput = useCallback((text: string) => {
         setContextInputDraft(text);
@@ -795,10 +910,10 @@ function TaskEditModalInner({
         descriptionInputRef: descriptionEditor.descriptionInputRef,
         descriptionSelection: descriptionEditor.descriptionSelection,
         descriptionSelectionRestorePending: descriptionEditor.descriptionSelectionRestorePending,
-        setDescriptionSelection: descriptionEditor.setDescriptionSelection,
+        setDescriptionSelection: setDescriptionSelectionWithActivityTracking,
         descriptionToolbarInteractionUntilRef,
         isDescriptionInputFocused: descriptionEditor.isDescriptionInputFocused,
-        setIsDescriptionInputFocused: descriptionEditor.setIsDescriptionInputFocused,
+        setIsDescriptionInputFocused: setDescriptionInputFocusedWithActivityTracking,
         handleDescriptionChange: descriptionEditor.handleDescriptionChange,
         handleDescriptionKeyPress: descriptionEditor.handleDescriptionKeyPress,
         applyDescriptionResult: descriptionEditor.applyDescriptionResult,
@@ -893,8 +1008,8 @@ function TaskEditModalInner({
         descriptionEditor.handleDescriptionKeyPress,
         descriptionEditor.isDescriptionInputFocused,
         descriptionEditor.openDescriptionExpandedEditor,
-        descriptionEditor.setDescriptionSelection,
-        descriptionEditor.setIsDescriptionInputFocused,
+        setDescriptionSelectionWithActivityTracking,
+        setDescriptionInputFocusedWithActivityTracking,
         descriptionToolbarInteractionUntilRef,
         downloadAttachment,
         taskEditDraft?.draft,
@@ -980,15 +1095,21 @@ function TaskEditModalInner({
         <>
         <Modal
             visible={visible}
-            animationType="slide"
+            animationType={reducedMotion ? 'none' : (adaptiveWindow.isExpanded ? 'fade' : 'slide')}
             presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
             allowSwipeDismissal
+            onShow={() => setIsModalShown(true)}
             onRequestClose={readOnly ? onClose : handleAttemptClose}
         >
-            <KeyboardAccessoryHost>
+            <KeyboardAccessoryHost backgroundColor={tc.bg}>
+                <AdaptiveModalSurface
+                    variant="editor"
+                    style={[styles.container, { backgroundColor: tc.bg }]}
+                    testID="task-edit-adaptive-surface"
+                >
                 <SafeAreaView
                     style={[styles.container, { backgroundColor: tc.bg }]}
-                    edges={['top']}
+                    edges={constrainEditorSurface ? [] : ['top']}
                 >
                     <SandboxWorkspaceCue />
                     <TaskEditHeader
@@ -1117,9 +1238,11 @@ function TaskEditModalInner({
                                 containerWidth={containerWidth}
                                 textDirectionStyle={textDirectionStyle}
                                 titleDraft={titleDraft}
+                                titleInputRef={titleInputRef}
                                 onTitleDraftChange={handleTitleDraftChange}
+                                onTitleSelectionChange={handleTitleSelectionChange}
                                 onInputFocusTracked={handleInputFocus}
-                                onTitleInputFocusChange={setIsTitleInputFocused}
+                                onTitleInputFocusChange={handleTitleInputFocusChange}
                                 registerScrollToEnd={registerScrollTaskFormToEnd}
                                 formResetKey={`${task.id}:${visible ? 'open' : 'closed'}`}
                                 suspendKeyboardHandling={isMarkdownOverlayOpen}
@@ -1252,6 +1375,7 @@ function TaskEditModalInner({
                     </>
                     )}
                 </SafeAreaView>
+                </AdaptiveModalSurface>
             </KeyboardAccessoryHost>
             <ToastViewport />
             {/* Last child so the alert covers the header and the toasts (#940). */}

@@ -2,7 +2,7 @@ import { Link, Tabs, useRouter } from 'expo-router';
 import { CommonActions } from '@react-navigation/native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Search, Inbox, Calendar, Circle, ClipboardCheck, Folder, Menu, Mic, Plus, Target } from 'lucide-react-native';
-import { Animated, Dimensions, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, type ViewStyle } from 'react-native';
+import { Animated, BackHandler, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -11,16 +11,22 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { MobileAreaSwitcher } from '@/components/mobile-area-switcher';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useMobileSyncBadge } from '@/hooks/use-mobile-sync-badge';
+import { useAdaptiveWindow } from '@/components/adaptive-window-context';
+import type { AdaptiveWindowLayout } from '@/lib/adaptive-window';
+import { useAndroidActivitySession } from '@/hooks/use-android-activity-session';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useThemeTokens } from '@/hooks/use-theme-tokens';
 import { MOBILE_HOME_TAB_ROUTE } from '@/lib/home-route';
 import { useLanguage } from '../../../contexts/language-context';
-import { QuickCaptureSheet } from '@/components/quick-capture-sheet';
+import {
+  QuickCaptureSheet,
+  subscribeQuickCaptureSubmissionFailure,
+} from '@/components/quick-capture-sheet';
 import { beginCaptureProfile, endCaptureProfile } from '@/lib/capture-profiler';
 import { QuickCaptureProvider, useQuickCapture, type QuickCaptureOptions } from '../../../contexts/quick-capture-context';
 import { useToastBottomOffset } from '../../../contexts/toast-context';
-import { getDefaultTaskAreaMode, useTaskStore, type MobileQuickAccessView, type SavedSearch, type Task } from '@mindwtr/core';
+import { getDefaultTaskAreaMode, isSandboxMode, useTaskStore, type MobileQuickAccessView, type SavedSearch, type Task } from '@mindwtr/core';
 import {
   coerceMobileQuickAccessView,
   MOBILE_QUICK_ACCESS_STACK_ROUTE,
@@ -31,7 +37,25 @@ import { COMPACT_NAV_TEXT_MAX_SCALE } from '@/constants/text-scale';
 type IconSymbolName = Parameters<typeof IconSymbol>[0]['name'];
 type Translate = (key: string) => string;
 
+type TabCaptureActivityState = {
+  initialValue: string;
+  initialProps: Partial<Task> | null;
+};
+
+const isTabCaptureActivityState = (value: unknown): value is TabCaptureActivityState => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.initialValue === 'string'
+    && candidate.initialValue.length <= 100_000
+    && (
+      candidate.initialProps === null
+      || (typeof candidate.initialProps === 'object' && !Array.isArray(candidate.initialProps))
+    );
+};
+
 const CAPTURE_BUTTON_LIFT = 4;
+const TAB_CAPTURE_ACTIVITY_OWNER_SUFFIX = 'tabs:quick-capture';
+const TAB_CAPTURE_DRAFT_ACTIVITY_OWNER_SUFFIX = 'tabs:quick-capture-draft';
 
 type MoreDestination = {
   id: string;
@@ -46,6 +70,39 @@ type MoreDestination = {
 function compactSlashLabel(label: string) {
   return label.split('/')[0]?.trim() || label;
 }
+
+export const resolveMoreMenuFrameStyle = (
+  adaptiveWindow: AdaptiveWindowLayout,
+  tabBarHeight: number,
+): ViewStyle | null => {
+  if (!adaptiveWindow.isExpanded && !adaptiveWindow.activeFeature) return null;
+  const frame = adaptiveWindow.navigationActionFrame;
+  const overlayBottomInset = adaptiveWindow.isExpanded ? 0 : tabBarHeight;
+  const overlayBottom = Math.max(0, adaptiveWindow.height - overlayBottomInset);
+  const frameBottom = Math.min(overlayBottom, frame.y + frame.height);
+  const availableTop = Math.min(frameBottom, frame.y + 12);
+  const availableBottom = Math.max(availableTop, frameBottom - 12);
+  const width = Math.max(0, Math.min(420, frame.width - 24));
+  const minLeft = frame.x + 12;
+  const maxLeft = Math.max(minLeft, frame.x + frame.width - width - 12);
+  const triggerPlacement = adaptiveWindow.isExpanded
+    ? adaptiveWindow.navigationPlacement
+    : adaptiveWindow.navigationPlacement === 'left' ? 'right' : 'left';
+  const preferredLeft = triggerPlacement === 'left'
+    ? frame.x + adaptiveWindow.navigationWidth + 12
+    : frame.x + frame.width - adaptiveWindow.navigationWidth - width - 12;
+
+  return {
+    bottom: Math.max(12, overlayBottom - availableBottom),
+    left: Math.max(minLeft, Math.min(maxLeft, preferredLeft)),
+    maxHeight: Math.max(0, availableBottom - availableTop),
+    right: undefined,
+    top: undefined,
+    width,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+  };
+};
 
 function MoreSheetTile({
   item,
@@ -157,9 +214,12 @@ function MoreNavigationSheet({
   quickAccessView: MobileQuickAccessView;
 }) {
   const reducedMotion = useReducedMotion();
-  const sheetTranslateY = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+  const adaptiveWindow = useAdaptiveWindow();
+  const sheetTranslateY = useRef(new Animated.Value(adaptiveWindow.height)).current;
   const lastCloseRequestIdRef = useRef(closeRequestId);
-  const hiddenTranslateY = Dimensions.get('window').height;
+  const wasVisibleRef = useRef(false);
+  const hiddenTranslateY = adaptiveWindow.height;
+  const constrainedSheetStyle = resolveMoreMenuFrameStyle(adaptiveWindow, tabBarHeight);
   const iconColors = {
     board: '#4F8CF7',
     review: '#22C55E',
@@ -216,6 +276,14 @@ function MoreNavigationSheet({
   const closeSheet = useCallback(() => {
     animateClosed();
   }, [animateClosed]);
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !visible) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeSheet();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [closeSheet, visible]);
   const settleSheetGesture = useCallback((gestureState: { dy: number; vy: number }) => {
     if (gestureState.dy > 72 || (gestureState.dy > 24 && gestureState.vy > 0.75)) {
       closeSheet();
@@ -236,8 +304,19 @@ function MoreNavigationSheet({
   }), [settleSheetGesture, sheetTranslateY]);
 
   useEffect(() => {
-    if (visible) animateOpen();
-  }, [animateOpen, visible]);
+    if (!visible) {
+      wasVisibleRef.current = false;
+      return;
+    }
+    if (!wasVisibleRef.current) {
+      wasVisibleRef.current = true;
+      animateOpen();
+      return;
+    }
+    // A live resize must update the hiding distance and bounds without replaying
+    // the entrance animation or leaving the menu at a cached screen position.
+    sheetTranslateY.setValue(0);
+  }, [animateOpen, hiddenTranslateY, sheetTranslateY, visible]);
 
   useEffect(() => {
     if (lastCloseRequestIdRef.current === closeRequestId) return;
@@ -281,7 +360,10 @@ function MoreNavigationSheet({
 
   return (
     <>
-      <View pointerEvents="box-none" style={[styles.moreOverlayContainer, { bottom: tabBarHeight }]}>
+      <View
+        pointerEvents="box-none"
+        style={[styles.moreOverlayContainer, { bottom: adaptiveWindow.isExpanded ? 0 : tabBarHeight }]}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('common.close')}
@@ -298,6 +380,7 @@ function MoreNavigationSheet({
               bottom: 0,
               transform: [{ translateY: sheetTranslateY }],
             },
+            constrainedSheetStyle,
           ]}
           {...sheetPanResponder.panHandlers}
         >
@@ -386,6 +469,12 @@ function NativeTabBar({
   menuSyncIndicatorColor,
   moreSheetVisible,
   quickAccessTabRoute,
+  expanded,
+  navigationPlacement,
+  navigationWidth,
+  expandedBottomInset,
+  expandedNavigationFrame,
+  compactNavigationFrame,
 }: BottomTabBarProps & {
   iconTint: string;
   inactiveTint: string;
@@ -407,6 +496,12 @@ function NativeTabBar({
   menuSyncIndicatorColor?: string;
   moreSheetVisible: boolean;
   quickAccessTabRoute: string;
+  expanded: boolean;
+  navigationPlacement: 'left' | 'right';
+  navigationWidth: number;
+  expandedBottomInset: number;
+  expandedNavigationFrame?: { y: number; height: number };
+  compactNavigationFrame?: { x: number; width: number };
 }) {
   const longPressRef = useRef(false);
   const visibleTabNames = new Set(['inbox', 'focus', 'capture', quickAccessTabRoute, 'menu']);
@@ -416,12 +511,20 @@ function NativeTabBar({
     <View
       style={[
         styles.nativeTabBar,
+        expanded ? styles.nativeTabRail : styles.nativeTabBarCompact,
         {
           backgroundColor: tc.cardBg,
-          borderTopColor: tc.border,
-          height: tabBarHeight,
-          paddingBottom: tabBarBottomInset,
-          marginBottom: tabBarBottomOffset,
+          borderTopColor: expanded ? 'transparent' : tc.border,
+          borderLeftColor: navigationPlacement === 'right' ? tc.border : 'transparent',
+          borderRightColor: navigationPlacement === 'left' ? tc.border : 'transparent',
+          height: expanded ? (expandedNavigationFrame?.height ?? '100%') : tabBarHeight,
+          width: expanded ? navigationWidth : (compactNavigationFrame?.width ?? '100%'),
+          marginLeft: expanded ? 0 : compactNavigationFrame?.x,
+          marginTop: expanded ? (expandedNavigationFrame?.y ?? 0) : 0,
+          paddingBottom: expanded
+            ? 16 + (expandedNavigationFrame ? 0 : expandedBottomInset)
+            : tabBarBottomInset,
+          marginBottom: expanded ? 0 : tabBarBottomOffset,
         },
       ]}
     >
@@ -455,9 +558,10 @@ function NativeTabBar({
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={[
                 styles.nativeTabItem,
+                expanded && styles.nativeTabItemExpanded,
                 {
                   paddingTop: iconLift,
-                  transform: [{ translateY: tabItemTopOffset - CAPTURE_BUTTON_LIFT }],
+                  transform: [{ translateY: expanded ? 0 : tabItemTopOffset - CAPTURE_BUTTON_LIFT }],
                 },
               ]}
             >
@@ -516,7 +620,8 @@ function NativeTabBar({
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={[
               styles.nativeTabItem,
-              { paddingTop: iconLift, transform: [{ translateY: tabItemTopOffset }] },
+              expanded && styles.nativeTabItemExpanded,
+              { paddingTop: iconLift, transform: [{ translateY: expanded ? 0 : tabItemTopOffset }] },
             ]}
           >
             <View style={styles.nativeTabIconWrap}>
@@ -560,6 +665,7 @@ export default function TabLayout() {
   const { t } = useLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const adaptiveWindow = useAdaptiveWindow();
   // The root layout's provider, which presents capture as a pushed route.
   const { openQuickCapture: openRouteQuickCapture } = useQuickCapture();
   const settings = useTaskStore((state) => state.settings);
@@ -577,7 +683,7 @@ export default function TabLayout() {
   const tabBarHeight = 66 + tabBarBottomInset;
   const iconLift = 0;
   // Undo toasts must sit above the tab bar, not on top of it (#1044).
-  useToastBottomOffset(tabBarHeight + tabBarBottomOffset);
+  useToastBottomOffset(adaptiveWindow.isExpanded ? 0 : tabBarHeight + tabBarBottomOffset);
   const [captureState, setCaptureState] = useState<{
     visible: boolean;
     openRequestId: number;
@@ -593,7 +699,64 @@ export default function TabLayout() {
   });
   const [moreSheetVisible, setMoreSheetVisible] = useState(false);
   const [moreSheetCloseRequestId, setMoreSheetCloseRequestId] = useState(0);
+  const [tabCaptureRecoveryEnabled, setTabCaptureRecoveryEnabled] = useState(true);
+  const [queuedCaptureFailureOwner, setQueuedCaptureFailureOwner] = useState<string | null>(null);
+  const captureStateRef = useRef(captureState);
+  captureStateRef.current = captureState;
+  const workspaceActivityScope = isSandboxMode() ? 'sandbox' : 'personal';
+  const tabCaptureActivityOwner = `${workspaceActivityScope}:${TAB_CAPTURE_ACTIVITY_OWNER_SUFFIX}`;
+  const tabCaptureDraftActivityOwner = `${workspaceActivityScope}:${TAB_CAPTURE_DRAFT_ACTIVITY_OWNER_SUFFIX}`;
   const longPressRef = useRef(false);
+  const restoreTabCapture = useCallback((recovered: TabCaptureActivityState) => {
+    setTabCaptureRecoveryEnabled(true);
+    beginCaptureProfile();
+    setCaptureState((current) => ({
+      visible: true,
+      openRequestId: current.openRequestId + 1,
+      initialValue: recovered.initialValue,
+      initialProps: recovered.initialProps,
+      // A recreation must not restart a recording or duplicate an intent-owned
+      // capture. The recovered sheet returns as an editable text draft.
+      autoRecord: false,
+    }));
+  }, []);
+  const tabCaptureActivityValue = useMemo<TabCaptureActivityState | null>(() => (
+    captureState.visible ? {
+      initialValue: captureState.initialValue ?? '',
+      initialProps: captureState.initialProps ?? null,
+    } : null
+  ), [captureState.initialProps, captureState.initialValue, captureState.visible]);
+  const {
+    clear: clearTabCaptureActivity,
+    rearm: rearmTabCaptureActivity,
+  } = useAndroidActivitySession({
+    enabled: tabCaptureRecoveryEnabled,
+    ownerId: tabCaptureActivityOwner,
+    value: tabCaptureActivityValue,
+    validate: isTabCaptureActivityState,
+    onRestore: restoreTabCapture,
+  });
+  useEffect(() => {
+    setQueuedCaptureFailureOwner(null);
+    return subscribeQuickCaptureSubmissionFailure(
+      tabCaptureDraftActivityOwner,
+      () => {
+      if (captureStateRef.current.visible) {
+        setQueuedCaptureFailureOwner(tabCaptureDraftActivityOwner);
+        return;
+      }
+      setTabCaptureRecoveryEnabled(true);
+      beginCaptureProfile();
+      setCaptureState((current) => ({
+        visible: true,
+        openRequestId: current.openRequestId + 1,
+        initialValue: '',
+        initialProps: null,
+        autoRecord: false,
+      }));
+    },
+    );
+  }, [tabCaptureDraftActivityOwner]);
   const withSelectedArea = useCallback((initialProps?: Partial<Task> | null): Partial<Task> | undefined => {
     const nextInitialProps = initialProps ? { ...initialProps } : {};
     const hasProject = typeof nextInitialProps.projectId === 'string' && nextInitialProps.projectId.trim().length > 0;
@@ -605,6 +768,7 @@ export default function TabLayout() {
   }, [defaultAreaMode, selectedAreaIdForNewTasks]);
 
   const openQuickCapture = useCallback((options?: QuickCaptureOptions) => {
+    setTabCaptureRecoveryEnabled(true);
     // A capture that promises to return somewhere (project quick add, #938)
     // needs a real route change: its caller dismisses UI and restores it on
     // the focus event when capture pops. The tab sheet opens in place — no
@@ -625,7 +789,22 @@ export default function TabLayout() {
   }, [openRouteQuickCapture, withSelectedArea]);
 
   const closeQuickCapture = useCallback(() => {
+    clearTabCaptureActivity();
+    setTabCaptureRecoveryEnabled(false);
     endCaptureProfile();
+    if (queuedCaptureFailureOwner === tabCaptureDraftActivityOwner) {
+      setQueuedCaptureFailureOwner(null);
+      setTabCaptureRecoveryEnabled(true);
+      beginCaptureProfile();
+      setCaptureState((prev) => ({
+        visible: true,
+        openRequestId: prev.openRequestId + 1,
+        initialValue: '',
+        initialProps: null,
+        autoRecord: false,
+      }));
+      return;
+    }
     setCaptureState((prev) => ({
       visible: false,
       openRequestId: prev.openRequestId,
@@ -633,7 +812,13 @@ export default function TabLayout() {
       initialProps: null,
       autoRecord: false,
     }));
-  }, []);
+  }, [clearTabCaptureActivity, queuedCaptureFailureOwner, tabCaptureDraftActivityOwner]);
+  const handleCaptureSubmissionStart = useCallback(() => {
+    clearTabCaptureActivity();
+  }, [clearTabCaptureActivity]);
+  const handleCaptureSubmissionSettled = useCallback(() => {
+    rearmTabCaptureActivity();
+  }, [rearmTabCaptureActivity]);
   const closeMoreSheet = useCallback(() => setMoreSheetVisible(false), []);
   const toggleMoreSheet = useCallback(() => {
     if (moreSheetVisible) {
@@ -690,12 +875,33 @@ export default function TabLayout() {
             menuSyncIndicatorColor={syncBadgeColor}
             moreSheetVisible={moreSheetVisible}
             quickAccessTabRoute={quickAccessTabRoute}
+            expanded={adaptiveWindow.isExpanded}
+            navigationPlacement={adaptiveWindow.navigationPlacement}
+            navigationWidth={adaptiveWindow.navigationWidth}
+            expandedBottomInset={Math.max(0, insets.bottom)}
+            expandedNavigationFrame={
+              adaptiveWindow.isExpanded && adaptiveWindow.activeFeature?.orientation === 'horizontal'
+                ? {
+                    y: adaptiveWindow.navigationFrame.y,
+                    height: adaptiveWindow.navigationFrame.height,
+                  }
+                : undefined
+            }
+            compactNavigationFrame={
+              !adaptiveWindow.isExpanded && adaptiveWindow.activeFeature?.orientation === 'vertical'
+                ? {
+                    x: adaptiveWindow.foregroundFrame.x,
+                    width: adaptiveWindow.foregroundFrame.width,
+                  }
+                : undefined
+            }
           />
         )}
         screenOptions={({ route }) => ({
         tabBarActiveTintColor: iconTint,
         tabBarInactiveTintColor: inactiveTint,
         tabBarShowLabel: false,
+        tabBarPosition: adaptiveWindow.isExpanded ? adaptiveWindow.navigationPlacement : 'bottom',
         headerShown: true,
         headerTitleAlign: 'center',
         headerShadowVisible: false,
@@ -877,6 +1083,9 @@ export default function TabLayout() {
         initialValue={captureState.initialValue}
         initialProps={captureState.initialProps ?? undefined}
         autoRecord={captureState.autoRecord}
+        activitySessionOwnerId={tabCaptureDraftActivityOwner}
+        onSubmissionStart={handleCaptureSubmissionStart}
+        onSubmissionSettled={handleCaptureSubmissionSettled}
         onClose={closeQuickCapture}
       />
     )}
@@ -897,10 +1106,19 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   nativeTabBar: {
-    flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth,
     alignItems: 'stretch',
     overflow: 'visible',
+  },
+  nativeTabBarCompact: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  nativeTabRail: {
+    flexDirection: 'column',
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 8,
   },
   nativeTabItem: {
     flex: 1,
@@ -908,6 +1126,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: 0,
     paddingHorizontal: 2,
+  },
+  nativeTabItemExpanded: {
+    flex: 0,
+    minHeight: 64,
+    width: '100%',
   },
   nativeTabIconWrap: {
     position: 'relative',

@@ -8,6 +8,7 @@ import {
     Text,
     TextInput,
     View,
+    useWindowDimensions,
     type LayoutChangeEvent,
 } from 'react-native';
 import { FontAwesome, Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,7 @@ import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 import { KeyboardAccessoryPortal } from './keyboard-accessory-host';
 import { markdownFormatToolbarStyles as styles } from './markdown-format-toolbar.styles';
+import { useAdaptiveWindow } from './adaptive-window-context';
 
 const TOOLBAR_MIN_BUTTON_SIZE = 32;
 const TOOLBAR_MAX_BUTTON_SIZE = 40;
@@ -32,11 +34,6 @@ const MIN_RESIZED_WINDOW_DELTA = 48;
 const RESIZED_WINDOW_TOLERANCE = 32;
 const ANDROID_KEYBOARD_EDGE_GAP = 0;
 const ANDROID_STALE_KEYBOARD_METRICS_MAX_INSET = 96;
-
-const getWindowWidth = () => {
-    const width = Dimensions.get('window').width;
-    return Number.isFinite(width) && width > 0 ? width : 390;
-};
 
 const getKeyboardMetricsInset = () => {
     const metrics = typeof Keyboard.metrics === 'function' ? Keyboard.metrics() : undefined;
@@ -136,7 +133,14 @@ export function MarkdownFormatToolbar({
     onInteractionStart,
     placement = 'keyboard',
 }: MarkdownFormatToolbarProps) {
-    const [windowWidth, setWindowWidth] = React.useState(getWindowWidth);
+    const { width: windowWidth } = useWindowDimensions();
+    const adaptiveWindow = useAdaptiveWindow();
+    const constrainToolbar = adaptiveWindow.isExpanded || Boolean(adaptiveWindow.activeFeature);
+    const toolbarWidth = constrainToolbar
+        ? Math.min(860, adaptiveWindow.foregroundFrame.width)
+        : windowWidth;
+    const toolbarLeft = adaptiveWindow.foregroundFrame.x
+        + Math.max(0, (adaptiveWindow.foregroundFrame.width - toolbarWidth) / 2);
     const [keyboardToolbarState, setKeyboardToolbarState] = React.useState<KeyboardToolbarState>(() => {
         if (placement === 'inline') {
             return {
@@ -156,34 +160,16 @@ export function MarkdownFormatToolbar({
     const lastKeyboardSnapshotRef = React.useRef<KeyboardInsetSnapshot | null>(null);
     const suppressPressUntilRef = React.useRef(0);
 
-    React.useEffect(() => {
-        const dimensions = Dimensions as typeof Dimensions & {
-            addEventListener?: (
-                type: 'change',
-                handler: (event: { window?: { width?: number } }) => void,
-            ) => { remove?: () => void } | undefined;
-        };
-        if (typeof dimensions.addEventListener !== 'function') return;
-        const subscription = dimensions.addEventListener('change', (event) => {
-            const nextWidth = event.window?.width;
-            if (Number.isFinite(nextWidth) && nextWidth > 0) {
-                setWindowWidth(nextWidth);
-            }
-        });
-        return () => {
-            subscription?.remove?.();
-        };
-    }, []);
     const buttonSize = React.useMemo(() => {
         const buttonCount = MARKDOWN_TOOLBAR_ACTIONS.length + 1;
         const gapsWidth = TOOLBAR_ACTION_GAP * Math.max(0, MARKDOWN_TOOLBAR_ACTIONS.length - 1);
         const availableWidth = Math.max(
             0,
-            windowWidth - TOOLBAR_OUTER_PADDING - TOOLBAR_FIXED_CHROME - gapsWidth,
+            toolbarWidth - TOOLBAR_OUTER_PADDING - TOOLBAR_FIXED_CHROME - gapsWidth,
         );
         const fittedSize = Math.floor(availableWidth / buttonCount);
         return Math.max(TOOLBAR_MIN_BUTTON_SIZE, Math.min(TOOLBAR_MAX_BUTTON_SIZE, fittedSize));
-    }, [windowWidth]);
+    }, [toolbarWidth]);
     const iconSize = Math.max(18, Math.min(22, Math.round(buttonSize * 0.58)));
     const fontSize = Math.max(12, Math.min(14, Math.round(buttonSize * 0.36)));
     const adaptiveButtonStyle = React.useMemo(() => ({
@@ -476,6 +462,11 @@ export function MarkdownFormatToolbar({
                                 bottom: keyboardToolbarState.bottomOffset + (Platform.OS === 'android' ? ANDROID_KEYBOARD_EDGE_GAP : 0),
                                 backgroundColor: tc.bg,
                                 borderTopColor: tc.border,
+                                ...(constrainToolbar ? {
+                                    left: toolbarLeft,
+                                    right: undefined,
+                                    width: toolbarWidth,
+                                } : {}),
                             },
                         ]}
                     >

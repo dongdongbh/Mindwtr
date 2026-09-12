@@ -5,7 +5,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } fro
 import * as Application from 'expo-application';
 import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
-import { Stack, useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
+import { Stack, useGlobalSearchParams, useNavigationContainerRef, usePathname, useRouter } from 'expo-router';
 import 'react-native-reanimated';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -88,7 +88,8 @@ import {
 } from '@/lib/mobile-onboarding-events';
 import { SYNC_BACKEND_KEY } from '@/lib/sync-constants';
 import { coerceSupportedBackend, resolveBackend, type SyncBackend } from '@/lib/sync-service-utils';
-import { persistLastRoute } from '@/lib/session-restore';
+import { persistLastRoute, sanitizeAndroidActivityNavigationState } from '@/lib/session-restore';
+import { useAndroidActivitySession } from '@/hooks/use-android-activity-session';
 
 // Blurred screens stay mounted, so every store change re-rendered every list in
 // the stack: a #766 log showed three project task lists (tab route + two pushed
@@ -351,6 +352,7 @@ function RootLayoutContent() {
 function RootLayoutContentInner() {
   const sandboxMode = isSandboxMode();
   const router = useRouter();
+  const navigationRef = useNavigationContainerRef();
   const pathname = usePathname();
   const { url: incomingUrl, key: incomingUrlKey } = useIncomingUrl();
   const { isDark, isReady: themeReady } = useTheme();
@@ -390,6 +392,9 @@ function RootLayoutContentInner() {
     Platform.OS === 'android' ? 'unknown' : 'play-store'
   );
   const [testAnnouncement, setTestAnnouncement] = useState<AppAnnouncement | null>(null);
+  const [recoveredActivityNavigationState, setRecoveredActivityNavigationState] = useState<ReturnType<
+    typeof sanitizeAndroidActivityNavigationState
+  >>(null);
   // Prompt state read once at startup so the descriptors below can answer
   // `isEligible` synchronously; null until it lands (or if the read failed).
   const [promptStateSnapshot, setPromptStateSnapshot] = useState<UserPromptState | null>(null);
@@ -454,6 +459,77 @@ function RootLayoutContentInner() {
   const isShellReady = themeReady && languageReady;
   const isFirstPaintReady = isShellReady && dataReady;
   const startupReadiness = useMemo(() => ({ canonicalDataReady, pathname }), [canonicalDataReady, pathname]);
+  const lastActivityNavigationStateRef = useRef<ReturnType<typeof sanitizeAndroidActivityNavigationState>>(null);
+  const captureActivityNavigationState = useCallback(() => {
+    if (!navigationRef.isReady()) return lastActivityNavigationStateRef.current;
+    try {
+      const state = sanitizeAndroidActivityNavigationState(navigationRef.getRootState());
+      if (state) lastActivityNavigationStateRef.current = state;
+      return state ?? lastActivityNavigationStateRef.current;
+    } catch {
+      return lastActivityNavigationStateRef.current;
+    }
+  }, [navigationRef]);
+  const restoreActivityNavigationState = useCallback((value: unknown) => {
+    setRecoveredActivityNavigationState(sanitizeAndroidActivityNavigationState(value as never));
+  }, []);
+  useAndroidActivitySession({
+    enabled: Platform.OS === 'android',
+    getValue: captureActivityNavigationState,
+    onRestore: restoreActivityNavigationState,
+    ownerId: `root-navigation:${sandboxMode ? 'sandbox' : 'personal'}`,
+    validate: (value): value is NonNullable<typeof recoveredActivityNavigationState> => (
+      sanitizeAndroidActivityNavigationState(value as never) !== null
+    ),
+  });
+
+  useEffect(() => {
+    const captureReadyState = () => {
+      captureActivityNavigationState();
+    };
+    captureReadyState();
+    return navigationRef.addListener('state', captureReadyState);
+  }, [captureActivityNavigationState, navigationRef]);
+
+  useEffect(() => {
+    if (!isFirstPaintReady || !recoveredActivityNavigationState) return undefined;
+    // A freshly delivered URL/share owns startup routing. The recovered root
+    // never replays or displaces an external one-shot action.
+    if (incomingUrlKey > 0 || hasShareIntent) {
+      setRecoveredActivityNavigationState(null);
+      return undefined;
+    }
+
+    let applied = false;
+    const applyRecoveredState = () => {
+      if (applied || !navigationRef.isReady()) return;
+      applied = true;
+      try {
+        navigationRef.resetRoot(recoveredActivityNavigationState);
+        void logInfo('Android activity navigation restored', {
+          scope: 'navigation',
+          extra: {
+            releaseCheck: 'v1.3.0/android-activity-session-recovery',
+            outcome: 'restored',
+            surface: 'navigation',
+          },
+        });
+      } catch {
+        // Optional same-process recovery fails back to Expo Router startup.
+      }
+      setRecoveredActivityNavigationState(null);
+    };
+    applyRecoveredState();
+    if (applied) return undefined;
+    const unsubscribe = navigationRef.addListener('state', applyRecoveredState);
+    return unsubscribe;
+  }, [
+    hasShareIntent,
+    incomingUrlKey,
+    isFirstPaintReady,
+    navigationRef,
+    recoveredActivityNavigationState,
+  ]);
 
   useRootLayoutNotificationOpenHandler({
     appReady: isFirstPaintReady,

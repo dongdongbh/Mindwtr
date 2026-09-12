@@ -7,12 +7,27 @@ import { useTaskEditState } from './use-task-edit-state';
 
 const flushPendingSaveMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const logInfoMock = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
+const nativeActivityState = vi.hoisted(() => ({
+    current: null as null | { activityId: number; isChangingConfigurations: boolean },
+    destroyed: new Map<number, { activityId: number; isChangingConfigurations: boolean }>(),
+}));
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@mindwtr/core')>();
     return { ...actual, flushPendingSave: flushPendingSaveMock };
 });
 vi.mock('../../lib/app-log', () => ({ logInfo: logInfoMock }));
+vi.mock('react-native', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('react-native')>();
+    return { ...actual, Platform: { ...actual.Platform, OS: 'android' } };
+});
+vi.mock('@/modules/android-window-layout', () => ({
+    getAndroidActivitySession: (activityId?: number) => (
+        activityId === undefined
+            ? nativeActivityState.current
+            : nativeActivityState.destroyed.get(activityId) ?? null
+    ),
+}));
 
 const task: Task = {
     id: 'task-1',
@@ -30,6 +45,8 @@ describe('useTaskEditState', () => {
         flushPendingSaveMock.mockResolvedValue(undefined);
         logInfoMock.mockReset();
         logInfoMock.mockResolvedValue(null);
+        nativeActivityState.current = null;
+        nativeActivityState.destroyed.clear();
     });
 
     it('can synchronize a persisted field without marking the draft dirty', () => {
@@ -692,6 +709,85 @@ describe('useTaskEditState', () => {
         renderer.act(() => state.setAttachments([added]));
         renderer.act(() => tree.unmount());
 
+        expect(settleAttachmentDraft).toHaveBeenCalledWith({
+            baselineAttachments: undefined,
+            draftAttachments: [added],
+            committedAttachments: undefined,
+        });
+    });
+
+    it('restores the full unfinished draft and preserves attachment ownership across Activity recreation', () => {
+        let state!: ReturnType<typeof useTaskEditState>;
+        const settleAttachmentDraft = vi.fn();
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose: vi.fn(),
+                onSave: vi.fn(),
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                settleAttachmentDraft,
+                sections: [],
+                task,
+                tasks: [task],
+                visible: true,
+            });
+            return null;
+        }
+
+        nativeActivityState.current = { activityId: 101, isChangingConfigurations: false };
+        let firstTree!: renderer.ReactTestRenderer;
+        renderer.act(() => { firstTree = renderer.create(React.createElement(Probe)); });
+        const added = {
+            id: 'activity-draft',
+            kind: 'file' as const,
+            title: 'draft.txt',
+            uri: 'file:///documents/attachments/activity-draft.txt',
+            createdAt: '2026-09-11T00:00:00.000Z',
+            updatedAt: '2026-09-11T00:00:00.000Z',
+        };
+        renderer.act(() => {
+            state.titleDraftRef.current = 'Fold-resilient title';
+            state.setTitleDraft('Fold-resilient title');
+            state.setDraftField('title', 'Fold-resilient title');
+            state.descriptionDraftRef.current = 'Still editing';
+            state.setDescriptionDraft('Still editing');
+            state.setDraftField('description', 'Still editing');
+            state.setAttachments([added]);
+            state.setEditTab('task');
+            state.trackActivityInputFocus('title', true);
+            state.trackActivityInputSelection('title', { start: 5, end: 14 });
+        });
+
+        nativeActivityState.destroyed.set(101, {
+            activityId: 101,
+            isChangingConfigurations: true,
+        });
+        // The replacement can already be foreground when Fabric tears down the
+        // old surface; source-id lookup must still classify Activity 101.
+        nativeActivityState.current = { activityId: 102, isChangingConfigurations: false };
+        // Native TextInput can emit blur while the old React surface is being
+        // detached. That teardown blur must not erase the active editor field.
+        renderer.act(() => { state.trackActivityInputFocus('title', false); });
+        renderer.act(() => { firstTree.unmount(); });
+        expect(settleAttachmentDraft).not.toHaveBeenCalled();
+
+        let replacementTree!: renderer.ReactTestRenderer;
+        renderer.act(() => { replacementTree = renderer.create(React.createElement(Probe)); });
+        expect(state.titleDraft).toBe('Fold-resilient title');
+        expect(state.descriptionDraft).toBe('Still editing');
+        expect(state.editTab).toBe('task');
+        expect(state.taskEditDraft?.attachments).toEqual([added]);
+        expect(state.isDirtyRef.current).toBe(true);
+        expect(state.recoveredActivityInput).toEqual({
+            field: 'title',
+            selection: { start: 5, end: 14 },
+        });
+
+        renderer.act(() => { state.acknowledgeRecoveredActivityInput(); });
+        expect(state.recoveredActivityInput).toBeNull();
+
+        renderer.act(() => { replacementTree.unmount(); });
         expect(settleAttachmentDraft).toHaveBeenCalledWith({
             baselineAttachments: undefined,
             draftAttachments: [added],

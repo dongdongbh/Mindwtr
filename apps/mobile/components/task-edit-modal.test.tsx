@@ -10,7 +10,7 @@ import {
   type Task,
 } from '@mindwtr/core';
 
-import { TaskEditModal } from './task-edit-modal';
+import { restoreRecoveredTaskEditInput, TaskEditModal } from './task-edit-modal';
 import { TaskEditCustomRecurrenceModal } from './task-edit/TaskEditCustomRecurrenceModal';
 import { MarkdownFormatToolbar } from './markdown-format-toolbar';
 import { syncTaskEditPagerPosition } from './task-edit/task-edit-modal.utils';
@@ -180,6 +180,92 @@ describe('TaskEditModal', () => {
       taskEditStore.current._allSections = [];
       taskEditStore.current._allTasks = [];
     }
+  });
+
+  it('does not focus an editor field without recovered Activity input state', () => {
+    const titleInput = { focus: vi.fn(), setNativeProps: vi.fn() };
+    const descriptionInput = { focus: vi.fn(), setNativeProps: vi.fn() };
+    const schedule = vi.fn((callback: () => void) => {
+      callback();
+      return vi.fn();
+    });
+
+    restoreRecoveredTaskEditInput({
+      acknowledge: vi.fn(),
+      descriptionInputRef: { current: descriptionInput } as any,
+      editTab: 'task',
+      recoveredInput: null,
+      schedule,
+      titleInputRef: { current: titleInput } as any,
+    });
+
+    expect(schedule).not.toHaveBeenCalled();
+    expect(titleInput.focus).not.toHaveBeenCalled();
+    expect(descriptionInput.focus).not.toHaveBeenCalled();
+  });
+
+  it.each(['title', 'description'] as const)(
+    'restores %s focus and selection after Activity recreation',
+    (field) => {
+      const titleInput = { focus: vi.fn(), setNativeProps: vi.fn() };
+      const descriptionInput = { focus: vi.fn(), setNativeProps: vi.fn() };
+      const acknowledge = vi.fn();
+
+      restoreRecoveredTaskEditInput({
+        acknowledge,
+        descriptionInputRef: { current: descriptionInput } as any,
+        editTab: 'task',
+        recoveredInput: { field, selection: { start: 2, end: 5 } },
+        schedule: (callback) => {
+          callback();
+          return vi.fn();
+        },
+        titleInputRef: { current: titleInput } as any,
+      });
+
+      const restoredInput = field === 'title' ? titleInput : descriptionInput;
+      const untouchedInput = field === 'title' ? descriptionInput : titleInput;
+      expect(restoredInput.focus).toHaveBeenCalledOnce();
+      expect(restoredInput.setNativeProps).toHaveBeenCalledWith({ selection: { start: 2, end: 5 } });
+      expect(untouchedInput.focus).not.toHaveBeenCalled();
+      expect(acknowledge).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('retries when the native input exists before the replacement modal can accept focus', () => {
+    let acceptsFocus = false;
+    const focus = vi.fn(() => {
+      acceptsFocus = focus.mock.calls.length >= 2;
+    });
+    const titleInput = {
+      focus,
+      isFocused: vi.fn(() => acceptsFocus),
+      setNativeProps: vi.fn(),
+    };
+    const scheduled: (() => void)[] = [];
+    const acknowledge = vi.fn();
+
+    restoreRecoveredTaskEditInput({
+      acknowledge,
+      descriptionInputRef: { current: null },
+      editTab: 'task',
+      recoveredInput: { field: 'title', selection: { start: 2, end: 5 } },
+      schedule: (callback) => {
+        scheduled.push(callback);
+        return vi.fn();
+      },
+      titleInputRef: { current: titleInput } as any,
+    });
+
+    scheduled.shift()?.();
+    expect(focus).toHaveBeenCalledOnce();
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(scheduled).toHaveLength(1);
+
+    scheduled.shift()?.();
+    expect(focus).toHaveBeenCalledTimes(2);
+    expect(titleInput.setNativeProps).toHaveBeenLastCalledWith({ selection: { start: 2, end: 5 } });
+    expect(acknowledge).toHaveBeenCalledOnce();
   });
 
   it('renders without crashing', () => {

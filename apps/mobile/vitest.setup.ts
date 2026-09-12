@@ -36,6 +36,12 @@ testGlobal.cancelAnimationFrame = testGlobal.cancelAnimationFrame ?? ((id: numbe
   clearTimeout(id);
 });
 
+// Native modules are optional by default in node renders. Tests that exercise a
+// module wrapper replace this with their own hoisted implementation.
+vi.mock('expo-modules-core', () => ({
+  requireOptionalNativeModule: vi.fn(() => null),
+}));
+
 // Unavailable by default so code under test exercises the AsyncStorage
 // fallback; secure-config tests override this with their own mock.
 vi.mock('expo-secure-store', () => ({

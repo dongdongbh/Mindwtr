@@ -163,6 +163,11 @@ const mergeToolsRemove = (existing, attribute) => [...new Set(
     .flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean),
 )].join(',');
 
+const ensureConfigChange = (existing, configChange) => [...new Set(
+  `${existing ?? ''}|${configChange}`
+    .split('|').map((value) => value.trim()).filter(Boolean),
+)].join('|');
+
 module.exports = function withAndroidManifestFixes(config) {
   const withBackupRuleFiles = withDangerousMod(config, [
     'android',
@@ -225,6 +230,10 @@ module.exports = function withAndroidManifestFixes(config) {
         // Explicitly allow both portrait and landscape on tablets/Chromebooks.
         activity.$['android:screenOrientation'] = 'fullUser';
         activity.$['android:resizeableActivity'] = 'true';
+        activity.$['android:configChanges'] = ensureConfigChange(
+          activity.$['android:configChanges'],
+          'smallestScreenSize',
+        );
         removeContextIntentFilters(activity);
         didUpdateMainActivity = true;
       }
@@ -242,6 +251,7 @@ module.exports = function withAndroidManifestFixes(config) {
           'android:name': MAIN_ACTIVITY,
           'android:screenOrientation': 'fullUser',
           'android:resizeableActivity': 'true',
+          'android:configChanges': 'keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize',
           'tools:node': 'merge',
         },
       });
@@ -308,6 +318,7 @@ module.exports = function withAndroidManifestFixes(config) {
 
 module.exports.__testables = {
   mergeToolsRemove,
+    ensureConfigChange,
     BACKUP_RULES_XML,
     DATA_EXTRACTION_RULES_XML,
     buildContextIntentFilter,

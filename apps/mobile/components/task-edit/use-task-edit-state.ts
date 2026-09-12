@@ -4,6 +4,7 @@ import {
     flushPendingSave,
     type Attachment,
     type AttachmentDraftSettlementInput,
+    type MarkdownSelection,
     type RecurrenceWeekday,
     type Task,
 } from '@mindwtr/core';
@@ -26,9 +27,63 @@ import {
     isActionFailure,
 } from '../store-action-result';
 import { logInfo } from '../../lib/app-log';
+import { useAndroidActivitySession } from '../../hooks/use-android-activity-session';
+import { isAndroidActivityChangingConfigurations } from '../../lib/android-activity-session';
 
 export type TaskEditTab = 'task' | 'view';
+export type TaskEditActivityInputField = 'description' | 'title';
+export type TaskEditActivityInputRecovery = {
+    field: TaskEditActivityInputField;
+    selection: MarkdownSelection;
+};
 const NOOP_ATTACHMENT_DRAFT_SETTLEMENT = () => {};
+
+type TaskEditActivitySession = {
+    activeInput: TaskEditActivityInputRecovery | null;
+    contextInputDraft: string;
+    descriptionDraft: string;
+    editTab: TaskEditTab;
+    isContextInputFocused: boolean;
+    isDirty: boolean;
+    isTagInputFocused: boolean;
+    tagInputDraft: string;
+    taskEditDraft: TaskEditDraft;
+    taskId: string;
+    titleDraft: string;
+};
+
+const isTaskEditActivityInputRecovery = (value: unknown): value is TaskEditActivityInputRecovery => {
+    if (!value || typeof value !== 'object') return false;
+    const input = value as Partial<TaskEditActivityInputRecovery>;
+    const selection = input.selection as Partial<MarkdownSelection> | undefined;
+    return (input.field === 'description' || input.field === 'title')
+        && !!selection
+        && Number.isSafeInteger(selection.start)
+        && Number.isSafeInteger(selection.end)
+        && (selection.start ?? -1) >= 0
+        && (selection.end ?? -1) >= 0;
+};
+
+const isTaskEditActivitySession = (value: unknown): value is TaskEditActivitySession => {
+    if (!value || typeof value !== 'object') return false;
+    const snapshot = value as Partial<TaskEditActivitySession>;
+    const editDraft = snapshot.taskEditDraft as Partial<TaskEditDraft> | undefined;
+    return (snapshot.activeInput === null || isTaskEditActivityInputRecovery(snapshot.activeInput))
+        && typeof snapshot.taskId === 'string'
+        && typeof snapshot.titleDraft === 'string'
+        && typeof snapshot.descriptionDraft === 'string'
+        && typeof snapshot.contextInputDraft === 'string'
+        && typeof snapshot.tagInputDraft === 'string'
+        && (snapshot.editTab === 'task' || snapshot.editTab === 'view')
+        && typeof snapshot.isContextInputFocused === 'boolean'
+        && typeof snapshot.isTagInputFocused === 'boolean'
+        && typeof snapshot.isDirty === 'boolean'
+        && !!editDraft
+        && typeof editDraft.draft === 'object'
+        && editDraft.draft !== null
+        && (editDraft.checklist === undefined || Array.isArray(editDraft.checklist))
+        && (editDraft.attachments === undefined || Array.isArray(editDraft.attachments));
+};
 
 export type SetTaskEditDraftValue<T> = (
     value: T | ((current: T) => T),
@@ -138,6 +193,137 @@ export function useTaskEditState({
     const [customWeekdays, setCustomWeekdays] = React.useState<RecurrenceWeekday[]>([]);
     const [isAIWorking, setIsAIWorking] = React.useState(false);
     const [aiModal, setAiModal] = React.useState<{ title: string; message?: string; actions: { label: string; variant?: 'primary' | 'secondary'; onPress: () => void }[] } | null>(null);
+    const activityInputRef = React.useRef<TaskEditActivityInputRecovery | null>(null);
+    const activitySourceIdRef = React.useRef<number | null>(null);
+    const [recoveredActivityInput, setRecoveredActivityInput] = React.useState<TaskEditActivityInputRecovery | null>(null);
+
+    const getActivityInputTextLength = React.useCallback((field: TaskEditActivityInputField) => (
+        field === 'title' ? titleDraftRef.current.length : descriptionDraftRef.current.length
+    ), []);
+    const clampActivityInputSelection = React.useCallback((
+        field: TaskEditActivityInputField,
+        selection: MarkdownSelection,
+    ): MarkdownSelection => {
+        const textLength = getActivityInputTextLength(field);
+        const start = Math.max(0, Math.min(selection.start, textLength));
+        const end = Math.max(start, Math.min(selection.end, textLength));
+        return { start, end };
+    }, [getActivityInputTextLength]);
+    const trackActivityInputFocus = React.useCallback((
+        field: TaskEditActivityInputField,
+        focused: boolean,
+    ) => {
+        if (!focused) {
+            if (isAndroidActivityChangingConfigurations(activitySourceIdRef.current)) return;
+            if (activityInputRef.current?.field === field) activityInputRef.current = null;
+            return;
+        }
+        const textLength = getActivityInputTextLength(field);
+        activityInputRef.current = {
+            field,
+            selection: { start: textLength, end: textLength },
+        };
+    }, [getActivityInputTextLength]);
+    const trackActivityInputSelection = React.useCallback((
+        field: TaskEditActivityInputField,
+        selection: MarkdownSelection,
+    ) => {
+        if (activityInputRef.current?.field !== field) return;
+        activityInputRef.current = {
+            field,
+            selection: clampActivityInputSelection(field, selection),
+        };
+    }, [clampActivityInputSelection]);
+    const acknowledgeRecoveredActivityInput = React.useCallback(() => {
+        setRecoveredActivityInput(null);
+    }, []);
+
+    const recoverableLiveTask = React.useMemo(() => {
+        if (!liveTask?.id || liveTask.deletedAt) return null;
+        return tasks.find((item) => item.id === liveTask.id && !item.deletedAt) ?? null;
+    }, [liveTask, tasks]);
+    const taskEditActivitySession = React.useMemo<TaskEditActivitySession | null>(() => {
+        if (!recoverableLiveTask || !taskEditDraft) return null;
+        return {
+            activeInput: activityInputRef.current,
+            contextInputDraft,
+            descriptionDraft,
+            editTab,
+            isContextInputFocused,
+            isDirty: isDirtyRef.current,
+            isTagInputFocused,
+            tagInputDraft,
+            taskEditDraft,
+            taskId: recoverableLiveTask.id,
+            titleDraft,
+        };
+    }, [
+        contextInputDraft,
+        descriptionDraft,
+        editTab,
+        isContextInputFocused,
+        isTagInputFocused,
+        recoverableLiveTask,
+        tagInputDraft,
+        taskEditDraft,
+        titleDraft,
+    ]);
+    const taskEditActivitySessionRef = React.useRef(taskEditActivitySession);
+    taskEditActivitySessionRef.current = taskEditActivitySession;
+    const getTaskEditActivitySession = React.useCallback((): TaskEditActivitySession | null => {
+        const snapshot = taskEditActivitySessionRef.current;
+        if (!snapshot) return null;
+        const activeInput = activityInputRef.current;
+        return {
+            ...snapshot,
+            activeInput: activeInput ? {
+                field: activeInput.field,
+                selection: { ...activeInput.selection },
+            } : null,
+        };
+    }, []);
+    const restoreTaskEditActivitySession = React.useCallback((snapshot: TaskEditActivitySession) => {
+        if (!visible || !recoverableLiveTask || snapshot.taskId !== recoverableLiveTask.id) return;
+        taskEditDraftRef.current = snapshot.taskEditDraft;
+        setTaskEditDraftState(snapshot.taskEditDraft);
+        baseTaskRef.current = recoverableLiveTask;
+        attachmentDraftSettledRef.current = false;
+        isDirtyRef.current = snapshot.isDirty;
+        titleDraftRef.current = snapshot.titleDraft;
+        setTitleDraft(snapshot.titleDraft);
+        descriptionDraftRef.current = snapshot.descriptionDraft;
+        setDescriptionDraft(snapshot.descriptionDraft);
+        setContextInputDraft(snapshot.contextInputDraft);
+        setTagInputDraft(snapshot.tagInputDraft);
+        setIsContextInputFocused(snapshot.isContextInputFocused);
+        setIsTagInputFocused(snapshot.isTagInputFocused);
+        setEditTab(snapshot.editTab);
+        const restoredInput = snapshot.editTab === 'task' && snapshot.activeInput
+            ? {
+                field: snapshot.activeInput.field,
+                selection: clampActivityInputSelection(
+                    snapshot.activeInput.field,
+                    snapshot.activeInput.selection,
+                ),
+            }
+            : null;
+        activityInputRef.current = restoredInput;
+        setRecoveredActivityInput(restoredInput);
+        setCustomWeekdays(getRecurrenceByDayValue(recoverableLiveTask.recurrence));
+        resetCopilotStateRef.current();
+    }, [clampActivityInputSelection, recoverableLiveTask, resetCopilotStateRef, visible]);
+    const {
+        clear: clearTaskEditActivitySession,
+        sourceActivityId: taskEditSourceActivityId,
+    } = useAndroidActivitySession({
+        enabled: visible && !!recoverableLiveTask,
+        getValue: getTaskEditActivitySession,
+        onRestore: restoreTaskEditActivitySession,
+        ownerId: `task-edit:${liveTask?.id ?? 'none'}`,
+        validate: isTaskEditActivitySession,
+        value: taskEditActivitySession,
+    });
+    activitySourceIdRef.current = taskEditSourceActivityId;
 
     const clearPendingTextChanges = React.useCallback(() => {
         if (titleDebounceRef.current) {
@@ -171,8 +357,9 @@ export function useTaskEditState({
     settleCurrentAttachmentDraftRef.current = settleCurrentAttachmentDraft;
 
     React.useEffect(() => () => {
+        if (isAndroidActivityChangingConfigurations(taskEditSourceActivityId)) return;
         settleCurrentAttachmentDraftRef.current(baseTaskRef.current?.attachments);
-    }, []);
+    }, [taskEditSourceActivityId]);
 
     const writePatch = React.useCallback((taskId: string, updates: Partial<Task>): boolean | Promise<boolean> => {
         // This prop boundary intentionally retains its synchronous branch:
@@ -266,6 +453,7 @@ export function useTaskEditState({
                 },
             });
         }
+        clearTaskEditActivitySession();
         settleCurrentAttachmentDraft(saveDraftState.attachments ?? currentTask.attachments);
         onClose();
         return true;
@@ -277,6 +465,7 @@ export function useTaskEditState({
         sections,
         settleCurrentAttachmentDraft,
         taskEditDraft,
+        clearTaskEditActivitySession,
         writePatch,
     ]);
 
@@ -284,10 +473,11 @@ export function useTaskEditState({
 
     const discardDraft = React.useCallback(() => {
         clearPendingTextChanges();
+        clearTaskEditActivitySession();
         const currentTask = baseTaskRef.current ?? liveTask;
         settleCurrentAttachmentDraft(currentTask?.attachments);
         onClose();
-    }, [clearPendingTextChanges, liveTask, onClose, settleCurrentAttachmentDraft]);
+    }, [clearPendingTextChanges, clearTaskEditActivitySession, liveTask, onClose, settleCurrentAttachmentDraft]);
 
     const hasPendingChanges = React.useCallback(() => {
         const currentTask = baseTaskRef.current ?? liveTask;
@@ -373,6 +563,8 @@ export function useTaskEditState({
 
     React.useEffect(() => {
         if (!visible) {
+            activityInputRef.current = null;
+            setRecoveredActivityInput(null);
             const currentTask = baseTaskRef.current ?? liveTask;
             settleCurrentAttachmentDraft(currentTask?.attachments);
             setTaskEditDraftState(null);
@@ -402,6 +594,8 @@ export function useTaskEditState({
             const updatedChanged = baseTaskRef.current?.updatedAt !== liveTask.updatedAt;
             if (taskChanged || (!isDirtyRef.current && updatedChanged)) {
                 if (taskChanged) {
+                    activityInputRef.current = null;
+                    setRecoveredActivityInput(null);
                     settleCurrentAttachmentDraft(baseTaskRef.current?.attachments);
                 }
                 setCustomWeekdays(byDay);
@@ -428,6 +622,8 @@ export function useTaskEditState({
                 resetCopilotStateRef.current();
             }
         } else {
+            activityInputRef.current = null;
+            setRecoveredActivityInput(null);
             setTaskEditDraftState(null);
             baseTaskRef.current = null;
             isDirtyRef.current = false;
@@ -497,6 +693,7 @@ export function useTaskEditState({
 
     return {
         aiModal,
+        acknowledgeRecoveredActivityInput,
         contextInputDraft,
         customWeekdays,
         descriptionDebounceRef,
@@ -510,6 +707,7 @@ export function useTaskEditState({
         liveTask,
         pendingDueDate,
         pendingStartDate,
+        recoveredActivityInput,
         setAiModal,
         setAttachments,
         setChecklist,
@@ -537,6 +735,8 @@ export function useTaskEditState({
         showSectionPicker,
         tagInputDraft,
         taskEditDraft,
+        trackActivityInputFocus,
+        trackActivityInputSelection,
         draftLifecycle,
         titleDebounceRef,
         titleDraft,

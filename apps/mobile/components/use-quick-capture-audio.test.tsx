@@ -219,12 +219,15 @@ const deferred = <T,>() => {
 describe('useQuickCaptureAudio', () => {
   let latest: ReturnType<typeof useQuickCaptureAudio> | null = null;
   const addTask = vi.fn();
+  const beginActivitySubmission = vi.fn();
   const buildTaskProps = vi.fn();
   const handleClose = vi.fn();
   const onError = vi.fn();
   const onWarn = vi.fn();
   const updateSpeechSettings = vi.fn();
   const onSubmissionBusyChange = vi.fn();
+  const settleActivitySubmission = vi.fn();
+  const updateActivitySubmission = vi.fn();
   let submissionCoordinator = new CaptureSessionCoordinator();
   let activeSubmissionSession: CaptureSessionId | null = null;
 
@@ -258,25 +261,30 @@ describe('useQuickCaptureAudio', () => {
   function Harness({
     autoRecord = false,
     getSession = () => activeSubmissionSession,
+    settingsOverride = settings,
     submissionKey = 1,
   }: {
     autoRecord?: boolean;
     getSession?: () => CaptureSessionId | null;
+    settingsOverride?: Parameters<typeof useQuickCaptureAudio>[0]['settings'];
     submissionKey?: number;
   }) {
     latest = useQuickCaptureAudio({
       addTask,
       autoRecord,
+      beginActivitySubmission,
       buildTaskProps,
       getActiveSubmissionSession: getSession,
       handleClose,
       onError,
       onWarn,
-      settings,
+      settings: settingsOverride,
+      settleActivitySubmission,
       submissionCoordinator,
       submissionKey,
       t: (key: string) => key,
       onSubmissionBusyChange,
+      updateActivitySubmission,
       updateSpeechSettings,
       visible: true,
     });
@@ -293,16 +301,19 @@ describe('useQuickCaptureAudio', () => {
     latest = useQuickCaptureAudio({
       addTask,
       autoRecord,
+      beginActivitySubmission,
       buildTaskProps,
       getActiveSubmissionSession: () => activeSubmissionSession,
       handleClose,
       onError,
       onWarn,
       settings: unconfiguredSettings,
+      settleActivitySubmission,
       submissionCoordinator,
       submissionKey,
       t: (key: string) => key,
       onSubmissionBusyChange,
+      updateActivitySubmission,
       updateSpeechSettings,
       visible: true,
     });
@@ -311,6 +322,9 @@ describe('useQuickCaptureAudio', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    beginActivitySubmission.mockReturnValue(101);
+    settleActivitySubmission.mockReturnValue(false);
+    updateActivitySubmission.mockReturnValue(true);
     latest = null;
     submissionCoordinator = new CaptureSessionCoordinator();
     activeSubmissionSession = submissionCoordinator.beginSession();
@@ -386,7 +400,8 @@ describe('useQuickCaptureAudio', () => {
     // so this line asserted behaviour the app does not have.
     expect(storeMocks.updateTask).toHaveBeenCalledWith('task-1', { title: 'Buy milk' });
     expect(handleClose).toHaveBeenCalledOnce();
-    expect(fileMocks.delete).not.toHaveBeenCalled();
+    expect(fileMocks.delete).toHaveBeenCalledWith(expect.stringMatching(/^file:\/\/\/document\/audio-captures\//));
+    expect(fileMocks.delete).not.toHaveBeenCalledWith(expect.stringMatching(/^file:\/\/\/document\/attachments\//));
   });
 
   it('shows a notice and never starts the recorder when speech-to-text is unconfigured', async () => {
@@ -773,7 +788,7 @@ describe('useQuickCaptureAudio', () => {
     expect(addTask).not.toHaveBeenCalled();
   });
 
-  it('does not delete an Expo recording adopted by a valid saved capture', async () => {
+  it('deletes the Expo source after a valid save while keeping the managed attachment', async () => {
     speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
     await act(async () => {
       create(<Harness />);
@@ -791,7 +806,221 @@ describe('useQuickCaptureAudio', () => {
 
     expect(addTask).toHaveBeenCalledTimes(1);
     expect(audioMocks.release).toHaveBeenCalledTimes(1);
-    expect(fileMocks.delete).not.toHaveBeenCalled();
+    expect(fileMocks.delete).toHaveBeenCalledWith('file:///recording.m4a');
+    expect(fileMocks.delete).not.toHaveBeenCalledWith(expect.stringMatching(/^file:\/\/\/document\/attachments\//));
+  });
+
+  it('hands a deferred audio failure to verified Activity recovery without replaying the save', async () => {
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
+    const pendingAdd = deferred<{ success: boolean; id?: string }>();
+    addTask.mockImplementation(() => {
+      expect(beginActivitySubmission).toHaveBeenCalledOnce();
+      return pendingAdd.promise;
+    });
+    settleActivitySubmission.mockReturnValue(true);
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+
+    let stopRun!: Promise<void>;
+    await act(async () => {
+      stopRun = latest!.stopRecording({ saveTask: true });
+      await flushPromises();
+    });
+    expect(addTask).toHaveBeenCalledOnce();
+    expect(beginActivitySubmission).toHaveBeenCalledWith(
+      [expect.objectContaining({
+        kind: 'file',
+        uri: 'file:///recording.m4a',
+      })],
+      'quickAdd.audioNoteTitle 06/29/2026, 9:00 AM',
+      ['file:///recording.m4a'],
+    );
+    expect(updateActivitySubmission).toHaveBeenLastCalledWith(
+      101,
+      [expect.objectContaining({
+        uri: expect.stringMatching(/^file:\/\/\/document\/attachments\/capture-\d+\.wav$/),
+      })],
+      'quickAdd.audioNoteTitle 06/29/2026, 9:00 AM',
+      [expect.stringMatching(/^file:\/\/\/document\/attachments\/capture-\d+\.wav$/)],
+    );
+    const retainedAttachmentUri = updateActivitySubmission.mock.calls.at(-1)?.[1]?.[0]?.uri;
+
+    const sourceSession = activeSubmissionSession!;
+    submissionCoordinator.invalidateSession(sourceSession);
+    act(() => tree.unmount());
+    await act(async () => {
+      pendingAdd.resolve({ success: false });
+      await stopRun;
+      await flushPromises();
+    });
+
+    expect(settleActivitySubmission).toHaveBeenCalledOnce();
+    expect(settleActivitySubmission).toHaveBeenCalledWith(101, {
+      durableSucceeded: false,
+      keepEditing: true,
+      sessionCurrent: false,
+    });
+    expect(handleClose).not.toHaveBeenCalled();
+    expect(addTask).toHaveBeenCalledOnce();
+    expect(fileMocks.delete).toHaveBeenCalledWith('file:///recording.m4a');
+    expect(fileMocks.delete).not.toHaveBeenCalledWith(retainedAttachmentUri);
+  });
+
+  it('transfers stopped audio before a deferred pre-write step can outlive its Activity', async () => {
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
+    settleActivitySubmission.mockReturnValue(true);
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+    const pendingModel = deferred<{
+      exists: boolean;
+      path: string;
+      uri: string;
+      size: number;
+    }>();
+    speechMocks.ensureWhisperModelPathForConfigAsync.mockReturnValueOnce(pendingModel.promise);
+
+    let stopRun!: Promise<void>;
+    await act(async () => {
+      stopRun = latest!.stopRecording({ saveTask: true });
+      await flushPromises();
+    });
+    expect(beginActivitySubmission).toHaveBeenCalledWith(
+      [expect.objectContaining({ uri: 'file:///recording.m4a' })],
+      'quickAdd.audioNoteTitle 06/29/2026, 9:00 AM',
+      ['file:///recording.m4a'],
+    );
+    const sourceSession = activeSubmissionSession!;
+    submissionCoordinator.invalidateSession(sourceSession);
+    act(() => tree.unmount());
+
+    await act(async () => {
+      pendingModel.resolve({
+        exists: true,
+        path: '/document/whisper-models/after-rotation.bin',
+        uri: 'file:///document/whisper-models/after-rotation.bin',
+        size: 77704715,
+      });
+      await stopRun;
+      await flushPromises();
+    });
+
+    expect(addTask).not.toHaveBeenCalled();
+    expect(settleActivitySubmission).toHaveBeenCalledWith(101, {
+      durableSucceeded: false,
+      keepEditing: true,
+      sessionCurrent: false,
+    });
+    expect(fileMocks.delete).not.toHaveBeenCalledWith('file:///recording.m4a');
+  });
+
+  it('keeps validated audio editable when the current task title resolves empty', async () => {
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
+    settleActivitySubmission.mockReturnValue(true);
+    buildTaskProps.mockResolvedValue({ title: '', props: {}, invalidDateCommands: [] });
+    await act(async () => {
+      create(<Harness />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.stopRecording({ saveTask: true });
+      await flushPromises();
+    });
+
+    expect(addTask).not.toHaveBeenCalled();
+    expect(settleActivitySubmission).toHaveBeenCalledWith(101, {
+      durableSucceeded: false,
+      keepEditing: true,
+      sessionCurrent: true,
+    });
+    const managedAttachmentUri = updateActivitySubmission.mock.calls.at(-1)?.[1]?.[0]?.uri;
+    expect(fileMocks.delete).toHaveBeenCalledWith('file:///recording.m4a');
+    expect(fileMocks.delete).not.toHaveBeenCalledWith(managedAttachmentUri);
+  });
+
+  it('finishes deferred audio transcription once after the submitting Activity is replaced', async () => {
+    const settingsWithoutAudioAttachments = {
+      ...settings,
+      gtd: { saveAudioAttachments: false },
+    };
+    storeMocks.state.settings = settingsWithoutAudioAttachments;
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
+    const pendingTranscription = deferred<string>();
+    speechMocks.transcribeLocalWhisper.mockReturnValue(pendingTranscription.promise);
+    const pendingAdd = deferred<{ success: boolean; id?: string }>();
+    addTask.mockImplementation(async (title: string, props?: Record<string, unknown>) => {
+      const result = await pendingAdd.promise;
+      if (result.success && result.id) {
+        storeMocks.state.tasks.push({ id: result.id, title, ...(props ?? {}) });
+      }
+      return result;
+    });
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Harness settingsOverride={settingsWithoutAudioAttachments} />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+
+    let stopRun!: Promise<void>;
+    await act(async () => {
+      stopRun = latest!.stopRecording({ saveTask: true });
+      await flushPromises();
+    });
+    expect(addTask).toHaveBeenCalledOnce();
+    const sourceSession = activeSubmissionSession!;
+    submissionCoordinator.invalidateSession(sourceSession);
+    act(() => tree.unmount());
+
+    await act(async () => {
+      pendingAdd.resolve({ success: true, id: 'audio-after-rotation' });
+      await stopRun;
+      await flushPromises();
+    });
+    await act(async () => {
+      pendingTranscription.resolve('Captured after rotation');
+      await pendingTranscription.promise;
+      await flushPromises();
+      await flushPromises();
+    });
+
+    expect(addTask).toHaveBeenCalledOnce();
+    expect(handleClose).not.toHaveBeenCalled();
+    expect(settleActivitySubmission).toHaveBeenCalledWith(101, {
+      durableSucceeded: true,
+      keepEditing: false,
+      sessionCurrent: false,
+    });
+    expect(speechMocks.transcribeLocalWhisper).toHaveBeenCalledOnce();
+    expect(storeMocks.state.tasks).toEqual([
+      expect.objectContaining({ id: 'audio-after-rotation' }),
+    ]);
+    expect(onWarn).not.toHaveBeenCalledWith('Speech-to-text failed', expect.anything());
+    expect(storeMocks.updateTask).toHaveBeenCalledWith(
+      'audio-after-rotation',
+      { title: 'Captured after rotation' },
+    );
+    expect(fileMocks.delete).toHaveBeenCalledWith('file:///recording.m4a');
   });
 
   it('waits for active recording A cancellation before reopened capture B starts', async () => {

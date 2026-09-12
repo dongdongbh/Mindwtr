@@ -3,10 +3,18 @@ import { Alert, Keyboard, Platform } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { QuickCaptureSheet } from './quick-capture-sheet';
+import {
+  QuickCaptureSheet,
+  subscribeQuickCaptureSubmissionFailure,
+} from './quick-capture-sheet';
+import { ANDROID_ACTIVITY_SESSION_TTL_MS } from '@/lib/android-activity-session';
 
 const selectedAreaIdForNewTasksMock = vi.hoisted(() => ({ current: undefined as string | null | undefined }));
 const audioHookMock = vi.hoisted(() => ({ params: null as Record<string, any> | null }));
+const activityConfigurationMock = vi.hoisted(() => ({ changing: false, sourceActivityId: 41 }));
+const clearActivitySessionMock = vi.hoisted(() => vi.fn());
+const rearmActivitySessionMock = vi.hoisted(() => vi.fn());
+const recoveryFileDeleteMock = vi.hoisted(() => vi.fn());
 
 const {
   addTask,
@@ -162,12 +170,43 @@ vi.mock('expo-document-picker', () => ({
 }));
 
 vi.mock('expo-file-system', () => ({
+  File: class MockFile {
+    uri: string;
+
+    constructor(uri: string) {
+      this.uri = uri;
+    }
+
+    info() {
+      return { exists: true, isDirectory: false };
+    }
+
+    delete() {
+      recoveryFileDeleteMock(this.uri);
+    }
+  },
   readAsStringAsync: fileSystemReadAsStringAsync,
 }));
 
 vi.mock('../lib/recovery-snapshot', () => ({
   createMobileRecoverySnapshot,
 }));
+
+vi.mock('@/hooks/use-android-activity-session', () => ({
+  useAndroidActivitySession: () => ({
+    clear: clearActivitySessionMock,
+    rearm: rearmActivitySessionMock,
+    sourceActivityId: activityConfigurationMock.sourceActivityId,
+  }),
+}));
+
+vi.mock('@/lib/android-activity-session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/android-activity-session')>();
+  return {
+    ...actual,
+    isAndroidActivityChangingConfigurations: () => activityConfigurationMock.changing,
+  };
+});
 
 vi.mock('react-native', async () => {
   const actual = await vi.importActual<typeof import('react-native')>('react-native');
@@ -299,6 +338,11 @@ describe('QuickCaptureSheet save handling', () => {
     fileSystemReadAsStringAsync.mockReset();
     createMobileRecoverySnapshot.mockReset();
     createMobileRecoverySnapshot.mockResolvedValue('data.snapshot.json');
+    activityConfigurationMock.changing = false;
+    activityConfigurationMock.sourceActivityId = 41;
+    clearActivitySessionMock.mockReset();
+    rearmActivitySessionMock.mockReset();
+    recoveryFileDeleteMock.mockReset();
     parseQuickAdd.mockReset();
     parseQuickAdd.mockImplementation((input: string) => ({
       title: input,
@@ -804,6 +848,622 @@ describe('QuickCaptureSheet save handling', () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(reopenedBody.props.value).toBe('Second capture');
     expect(reopenedBody.props.saving).toBe(false);
+  });
+
+  it('does not restore or replay a deferred capture that succeeds after Activity teardown', async () => {
+    let resolveAddTask: ((value: unknown) => void) | null = null;
+    const onSubmissionStart = vi.fn();
+    addTask.mockImplementation(() => new Promise((resolve) => {
+      expect(onSubmissionStart).toHaveBeenCalledOnce();
+      resolveAddTask = resolve;
+    }));
+    const recoveryRequested = vi.fn();
+    const unsubscribe = subscribeQuickCaptureSubmissionFailure(
+      'test:successful-pending-capture',
+      recoveryRequested,
+    );
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <QuickCaptureSheet
+          visible
+          openRequestId={1}
+          initialValue="Saved exactly once"
+          activitySessionOwnerId="test:successful-pending-capture"
+          onSubmissionStart={onSubmissionStart}
+          onClose={vi.fn()}
+        />
+      );
+      await Promise.resolve();
+    });
+    const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+    if (!body) throw new Error('QuickCaptureSheetBody not found');
+
+    await act(async () => {
+      body.props.handleSave();
+      await Promise.resolve();
+    });
+    expect(onSubmissionStart).toHaveBeenCalledOnce();
+    expect(addTask).toHaveBeenCalledOnce();
+
+    act(() => tree.unmount());
+    expect(recoveryRequested).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveAddTask?.({ success: true, id: 'task-once' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(addTask).toHaveBeenCalledOnce();
+    expect(recoveryRequested).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('returns a rejected deferred capture to the replacement Activity without replaying it', async () => {
+    await withPlatform('android', async () => {
+    activityConfigurationMock.changing = true;
+    let resolveAddTask: ((value: unknown) => void) | null = null;
+    addTask.mockImplementation(() => new Promise((resolve) => {
+      resolveAddTask = resolve;
+    }));
+    const recoveryRequested = vi.fn();
+    const ownerId = 'test:failed-pending-capture';
+    const unsubscribe = subscribeQuickCaptureSubmissionFailure(ownerId, recoveryRequested);
+
+    let oldTree!: ReturnType<typeof create>;
+    await act(async () => {
+      oldTree = create(
+        <QuickCaptureSheet
+          visible
+          openRequestId={1}
+          initialValue="Keep this failed draft"
+          activitySessionOwnerId={ownerId}
+          onClose={vi.fn()}
+        />
+      );
+      await Promise.resolve();
+    });
+    const oldBody = oldTree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+    if (!oldBody) throw new Error('QuickCaptureSheetBody not found');
+    await act(async () => {
+      oldBody.props.handleSave();
+      await Promise.resolve();
+    });
+    act(() => oldTree.unmount());
+
+    await act(async () => {
+      resolveAddTask?.({ success: false, error: 'offline' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(recoveryRequested).toHaveBeenCalledOnce();
+    expect(addTask).toHaveBeenCalledOnce();
+
+    let replacementTree!: ReturnType<typeof create>;
+    await act(async () => {
+      replacementTree = create(
+        <QuickCaptureSheet
+          visible
+          openRequestId={1}
+          initialValue=""
+          activitySessionOwnerId={ownerId}
+          onClose={vi.fn()}
+        />
+      );
+      await Promise.resolve();
+    });
+    const replacementBody = replacementTree.root.findAll(
+      (node) => String(node.type) === 'QuickCaptureSheetBody',
+    )[0];
+    if (!replacementBody) throw new Error('replacement QuickCaptureSheetBody not found');
+    expect(replacementBody.props.value).toBe('Keep this failed draft');
+    expect(replacementBody.props.saving).toBe(false);
+    expect(addTask).toHaveBeenCalledOnce();
+
+    act(() => replacementTree.unmount());
+    unsubscribe();
+    });
+  });
+
+  it('restores a failed audio draft and attachment after verified Activity replacement', async () => {
+    await withPlatform('android', async () => {
+      activityConfigurationMock.changing = true;
+      const ownerId = 'test:failed-audio-pending-capture';
+      const recoveryRequested = vi.fn();
+      const unsubscribe = subscribeQuickCaptureSubmissionFailure(ownerId, recoveryRequested);
+      const recoveryAttachment = {
+        id: 'audio-recovery-1',
+        kind: 'file' as const,
+        title: 'Audio note',
+        uri: 'file:///document/attachments/audio-recovery-1.wav',
+        mimeType: 'audio/wav',
+        createdAt: '2026-09-11T12:00:00.000Z',
+        updatedAt: '2026-09-11T12:00:00.000Z',
+        localStatus: 'available' as const,
+      };
+      const initialAttachment = {
+        ...recoveryAttachment,
+        id: 'preexisting-attachment',
+        title: 'Preexisting attachment',
+        uri: 'file:///document/attachments/preexisting.wav',
+      };
+
+      let oldTree!: ReturnType<typeof create>;
+      await act(async () => {
+        oldTree = create(
+          <QuickCaptureSheet
+            visible
+            openRequestId={1}
+            initialValue=""
+            initialProps={{ attachments: [initialAttachment] }}
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      const audioA = audioHookMock.params;
+      if (!audioA) throw new Error('audio hook params unavailable');
+      const sourceSession = audioA.getActiveSubmissionSession();
+      expect(sourceSession).not.toBeNull();
+      expect(audioA.submissionCoordinator.tryBeginSubmission(sourceSession)).toBe(true);
+      const submissionId = audioA.beginActivitySubmission(
+        [initialAttachment, recoveryAttachment],
+        'Audio note 9/11/2026, 8:00 AM',
+        [recoveryAttachment.uri],
+      );
+      act(() => oldTree.unmount());
+
+      expect(audioA.settleActivitySubmission(submissionId, {
+        durableSucceeded: false,
+        keepEditing: true,
+        sessionCurrent: false,
+      })).toBe(true);
+      expect(recoveryRequested).toHaveBeenCalledOnce();
+
+      let replacementTree!: ReturnType<typeof create>;
+      await act(async () => {
+        replacementTree = create(
+          <QuickCaptureSheet
+            visible
+            openRequestId={1}
+            initialValue=""
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      const replacementBody = replacementTree.root.findByType('QuickCaptureSheetBody' as any);
+      expect(replacementBody.props.value).toBe('Audio note 9/11/2026, 8:00 AM');
+      expect(audioHookMock.params?.initialAttachments).toEqual([initialAttachment, recoveryAttachment]);
+      expect(addTask).not.toHaveBeenCalled();
+
+      await act(async () => {
+        replacementBody.props.handleClose();
+        await Promise.resolve();
+      });
+      expect(recoveryFileDeleteMock).toHaveBeenCalledWith(recoveryAttachment.uri);
+      expect(recoveryFileDeleteMock).not.toHaveBeenCalledWith(initialAttachment.uri);
+
+      act(() => replacementTree.unmount());
+      unsubscribe();
+    });
+  });
+
+  it('hands a restored audio attachment to a successful retry without deleting it', async () => {
+    await withPlatform('android', async () => {
+      activityConfigurationMock.changing = true;
+      addTask.mockResolvedValue({ success: true, id: 'retried-audio-task' });
+      const ownerId = 'test:retried-audio-pending-capture';
+      const recoveryAttachment = {
+        id: 'audio-retry-1',
+        kind: 'file' as const,
+        title: 'Audio retry',
+        uri: 'file:///document/attachments/audio-retry-1.wav',
+        mimeType: 'audio/wav',
+        createdAt: '2026-09-11T12:00:00.000Z',
+        updatedAt: '2026-09-11T12:00:00.000Z',
+        localStatus: 'available' as const,
+      };
+
+      let oldTree!: ReturnType<typeof create>;
+      await act(async () => {
+        oldTree = create(
+          <QuickCaptureSheet
+            visible
+            openRequestId={1}
+            initialValue=""
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      const audioA = audioHookMock.params;
+      if (!audioA) throw new Error('audio hook params unavailable');
+      const sourceSession = audioA.getActiveSubmissionSession();
+      expect(audioA.submissionCoordinator.tryBeginSubmission(sourceSession)).toBe(true);
+      const submissionId = audioA.beginActivitySubmission(
+        [recoveryAttachment],
+        'Retry this audio note',
+        [recoveryAttachment.uri],
+      );
+      act(() => oldTree.unmount());
+      expect(audioA.settleActivitySubmission(submissionId, {
+        durableSucceeded: false,
+        keepEditing: true,
+        sessionCurrent: false,
+      })).toBe(true);
+
+      let replacementTree!: ReturnType<typeof create>;
+      await act(async () => {
+        replacementTree = create(
+          <QuickCaptureSheet
+            visible
+            openRequestId={1}
+            initialValue=""
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      const replacementBody = replacementTree.root.findByType('QuickCaptureSheetBody' as any);
+      await act(async () => {
+        await replacementBody.props.handleSave();
+        await Promise.resolve();
+      });
+
+      expect(addTask).toHaveBeenCalledOnce();
+      expect(addTask.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+        attachments: [recoveryAttachment],
+      }));
+      expect(recoveryFileDeleteMock).not.toHaveBeenCalledWith(recoveryAttachment.uri);
+      act(() => replacementTree.unmount());
+    });
+  });
+
+  it('cleans a recovery-owned audio attachment when its failed submission expires', async () => {
+    await withPlatform('android', async () => {
+      activityConfigurationMock.changing = true;
+      const createdAt = 1_800_000_000_000;
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(createdAt);
+      const ownerId = 'test:expired-audio-pending-capture';
+      const recoveryAttachment = {
+        id: 'audio-expired-1',
+        kind: 'file' as const,
+        title: 'Expired audio',
+        uri: 'file:///document/attachments/audio-expired-1.wav',
+        createdAt: '2026-09-11T12:00:00.000Z',
+        updatedAt: '2026-09-11T12:00:00.000Z',
+      };
+      let tree!: ReturnType<typeof create>;
+      await act(async () => {
+        tree = create(
+          <QuickCaptureSheet
+            visible
+            openRequestId={1}
+            initialValue=""
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      const audioA = audioHookMock.params;
+      if (!audioA) throw new Error('audio hook params unavailable');
+      const sourceSession = audioA.getActiveSubmissionSession();
+      expect(audioA.submissionCoordinator.tryBeginSubmission(sourceSession)).toBe(true);
+      const submissionId = audioA.beginActivitySubmission(
+        [recoveryAttachment],
+        'Expired audio',
+        [recoveryAttachment.uri],
+      );
+      act(() => tree.unmount());
+      expect(audioA.settleActivitySubmission(submissionId, {
+        durableSucceeded: false,
+        keepEditing: true,
+        sessionCurrent: false,
+      })).toBe(true);
+
+      nowSpy.mockReturnValue(createdAt + ANDROID_ACTIVITY_SESSION_TTL_MS + 1);
+      const unsubscribe = subscribeQuickCaptureSubmissionFailure('test:prune-expired-audio', vi.fn());
+      expect(recoveryFileDeleteMock).toHaveBeenCalledWith(recoveryAttachment.uri);
+      unsubscribe();
+    });
+  });
+
+  it('never evicts a pending audio write when the recovery queue reaches its failed-entry cap', async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <QuickCaptureSheet
+          visible
+          openRequestId={1}
+          initialValue=""
+          activitySessionOwnerId="test:pending-audio-cap"
+          onClose={vi.fn()}
+        />
+      );
+      await Promise.resolve();
+    });
+    const audio = audioHookMock.params;
+    if (!audio) throw new Error('audio hook params unavailable');
+    const submissionIds = Array.from({ length: 17 }, (_, index) => {
+      const uri = `file:///document/attachments/pending-${index}.wav`;
+      return audio.beginActivitySubmission(
+        [{
+          id: `pending-${index}`,
+          kind: 'file' as const,
+          title: `Pending ${index}`,
+          uri,
+          createdAt: '2026-09-11T12:00:00.000Z',
+          updatedAt: '2026-09-11T12:00:00.000Z',
+        }],
+        `Pending ${index}`,
+        [uri],
+      );
+    });
+
+    expect(recoveryFileDeleteMock).not.toHaveBeenCalled();
+    for (const submissionId of submissionIds) {
+      expect(audio.settleActivitySubmission(submissionId, {
+        durableSucceeded: true,
+        keepEditing: false,
+        sessionCurrent: false,
+      })).toBe(true);
+    }
+    expect(recoveryFileDeleteMock).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('reoffers two failed audio submissions for one owner one at a time', async () => {
+    await withPlatform('android', async () => {
+      activityConfigurationMock.changing = true;
+      const ownerId = 'test:two-failed-audio-captures';
+      const recoveryRequested = vi.fn();
+      const unsubscribe = subscribeQuickCaptureSubmissionFailure(ownerId, recoveryRequested);
+      const makeAttachment = (suffix: string) => ({
+        id: `audio-${suffix}`,
+        kind: 'file' as const,
+        title: `Audio ${suffix}`,
+        uri: `file:///document/attachments/audio-${suffix}.wav`,
+        createdAt: '2026-09-11T12:00:00.000Z',
+        updatedAt: '2026-09-11T12:00:00.000Z',
+      });
+      const attachmentA = makeAttachment('a');
+      const attachmentB = makeAttachment('b');
+      let oldTree!: ReturnType<typeof create>;
+      await act(async () => {
+        oldTree = create(
+          <QuickCaptureSheet
+            visible
+            openRequestId={1}
+            initialValue=""
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      const audioA = audioHookMock.params;
+      if (!audioA) throw new Error('audio hook params unavailable');
+      const submissionA = audioA.beginActivitySubmission(
+        [attachmentA],
+        'Failed audio A',
+        [attachmentA.uri],
+      );
+      const submissionB = audioA.beginActivitySubmission(
+        [attachmentB],
+        'Failed audio B',
+        [attachmentB.uri],
+      );
+      act(() => oldTree.unmount());
+      expect(audioA.settleActivitySubmission(submissionA, {
+        durableSucceeded: false,
+        keepEditing: true,
+        sessionCurrent: false,
+      })).toBe(true);
+      expect(audioA.settleActivitySubmission(submissionB, {
+        durableSucceeded: false,
+        keepEditing: true,
+        sessionCurrent: false,
+      })).toBe(true);
+      expect(recoveryRequested).toHaveBeenCalledTimes(2);
+
+      const onClose = vi.fn();
+      let replacementTree!: ReturnType<typeof create>;
+      await act(async () => {
+        replacementTree = create(
+          <QuickCaptureSheet
+            visible
+            openRequestId={1}
+            initialValue=""
+            activitySessionOwnerId={ownerId}
+            onClose={onClose}
+          />
+        );
+        await Promise.resolve();
+      });
+      let body = replacementTree.root.findByType('QuickCaptureSheetBody' as any);
+      expect(body.props.value).toBe('Failed audio A');
+      expect(audioHookMock.params?.initialAttachments).toEqual([attachmentA]);
+      expect(recoveryRequested).toHaveBeenCalledTimes(3);
+      await act(async () => {
+        body.props.handleClose();
+        await Promise.resolve();
+      });
+      expect(recoveryFileDeleteMock).toHaveBeenCalledWith(attachmentA.uri);
+
+      await act(async () => {
+        replacementTree.update(
+          <QuickCaptureSheet
+            visible
+            openRequestId={2}
+            initialValue=""
+            activitySessionOwnerId={ownerId}
+            onClose={onClose}
+          />
+        );
+        await Promise.resolve();
+      });
+      body = replacementTree.root.findByType('QuickCaptureSheetBody' as any);
+      expect(body.props.value).toBe('Failed audio B');
+      expect(audioHookMock.params?.initialAttachments).toEqual([attachmentB]);
+      await act(async () => {
+        body.props.handleClose();
+        await Promise.resolve();
+      });
+      expect(recoveryFileDeleteMock).toHaveBeenCalledWith(attachmentB.uri);
+
+      await act(async () => {
+        replacementTree.update(
+          <QuickCaptureSheet
+            visible
+            openRequestId={3}
+            initialValue="Fresh C"
+            activitySessionOwnerId={ownerId}
+            onClose={onClose}
+          />
+        );
+        await Promise.resolve();
+      });
+      expect(replacementTree.root.findByType('QuickCaptureSheetBody' as any).props.value)
+        .toBe('Fresh C');
+      act(() => replacementTree.unmount());
+      unsubscribe();
+    });
+  });
+
+  it('discards a deferred failure after an ordinary unmount', async () => {
+    await withPlatform('android', async () => {
+      let resolveAddTask: ((value: unknown) => void) | null = null;
+      addTask.mockImplementation(() => new Promise((resolve) => {
+        resolveAddTask = resolve;
+      }));
+      const recoveryRequested = vi.fn();
+      const ownerId = 'test:ordinary-unmount-capture';
+      const unsubscribe = subscribeQuickCaptureSubmissionFailure(ownerId, recoveryRequested);
+      let tree!: ReturnType<typeof create>;
+      await act(async () => {
+        tree = create(
+          <QuickCaptureSheet
+            visible
+            openRequestId={1}
+            initialValue="Do not restore after navigation"
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+      if (!body) throw new Error('QuickCaptureSheetBody not found');
+      await act(async () => {
+        body.props.handleSave();
+        await Promise.resolve();
+      });
+      act(() => tree.unmount());
+      await act(async () => {
+        resolveAddTask?.({ success: false, error: 'offline' });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(recoveryRequested).not.toHaveBeenCalled();
+      unsubscribe();
+    });
+  });
+
+  it('queues a late failed capture without overwriting a newer draft and consumes it once', async () => {
+    await withPlatform('android', async () => {
+      activityConfigurationMock.changing = true;
+      let resolveAddTask: ((value: unknown) => void) | null = null;
+      addTask.mockImplementation(() => new Promise((resolve) => {
+        resolveAddTask = resolve;
+      }));
+      const recoveryRequested = vi.fn();
+      const ownerId = 'test:queued-failed-capture';
+      const unsubscribe = subscribeQuickCaptureSubmissionFailure(ownerId, recoveryRequested);
+
+      let oldTree!: ReturnType<typeof create>;
+      await act(async () => {
+        oldTree = create(
+          <QuickCaptureSheet
+            visible
+            openRequestId={1}
+            initialValue="Older failed A"
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      const oldBody = oldTree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+      if (!oldBody) throw new Error('QuickCaptureSheetBody not found');
+      await act(async () => {
+        oldBody.props.handleSave();
+        await Promise.resolve();
+      });
+      act(() => oldTree.unmount());
+
+      let replacementTree!: ReturnType<typeof create>;
+      await act(async () => {
+        replacementTree = create(
+          <QuickCaptureSheet
+            visible
+            openRequestId={1}
+            initialValue="Newer draft B"
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      await act(async () => {
+        resolveAddTask?.({ success: false, error: 'offline' });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(recoveryRequested).toHaveBeenCalledOnce();
+      expect(replacementTree.root.findByType('QuickCaptureSheetBody' as any).props.value)
+        .toBe('Newer draft B');
+
+      await act(async () => {
+        replacementTree.update(
+          <QuickCaptureSheet
+            visible
+            openRequestId={2}
+            initialValue=""
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      expect(replacementTree.root.findByType('QuickCaptureSheetBody' as any).props.value)
+        .toBe('Older failed A');
+      expect(addTask).toHaveBeenCalledOnce();
+
+      await act(async () => {
+        replacementTree.update(
+          <QuickCaptureSheet
+            visible
+            openRequestId={3}
+            initialValue="Fresh draft C"
+            activitySessionOwnerId={ownerId}
+            onClose={vi.fn()}
+          />
+        );
+        await Promise.resolve();
+      });
+      expect(replacementTree.root.findByType('QuickCaptureSheetBody' as any).props.value)
+        .toBe('Fresh draft C');
+
+      act(() => replacementTree.unmount());
+      unsubscribe();
+    });
   });
 
   it('blocks dismissal while audio owns the session and preserves reopened capture B', async () => {

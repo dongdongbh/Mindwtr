@@ -88,6 +88,7 @@ import {
 } from '@/hooks/use-task-filter-selections';
 import { usePruneSelectionToVisible, useTaskListSelection } from './use-task-list-selection';
 import { useLocalDayKey } from '@/hooks/use-local-day-key';
+import { useAndroidActivitySession } from '@/hooks/use-android-activity-session';
 import { DONE_TASK_LIST_SORT_OPTIONS, TASK_LIST_SORT_OPTIONS } from '@mindwtr/core';
 import { resolveTaskListSortBy } from '@/lib/task-list-sort';
 import { DONE_LIST_GROUP_OPTIONS } from '@/lib/view-state/done-list-view-state';
@@ -104,6 +105,40 @@ const PROJECT_REORDER_ANIMATION_CONFIG = {
 } as const;
 const SLOW_TASK_LIST_DERIVE_MS = 250;
 const SLOW_TASK_LIST_COMMIT_MS = 500;
+
+type TaskListActivitySession = {
+  editingTaskId: string | null;
+  scrollOffset: number;
+};
+
+const isTaskListActivitySession = (value: unknown): value is TaskListActivitySession => {
+  if (!value || typeof value !== 'object') return false;
+  const snapshot = value as Partial<TaskListActivitySession>;
+  return (snapshot.editingTaskId === null || typeof snapshot.editingTaskId === 'string')
+    && typeof snapshot.scrollOffset === 'number'
+    && Number.isFinite(snapshot.scrollOffset)
+    && snapshot.scrollOffset >= 0;
+};
+
+const hashTaskListScope = (scope: string, seed: number): string => {
+  let hash = seed >>> 0;
+  for (let index = 0; index < scope.length; index += 1) {
+    hash ^= scope.charCodeAt(index);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return hash.toString(36);
+};
+
+export function buildTaskListActivitySessionOwnerId(options: {
+  explicitScope?: string;
+  projectId?: string;
+  statusFilter: TaskStatus | 'all';
+  title: string;
+}): string {
+  const scope = options.explicitScope
+    ?? `${options.statusFilter}\u0000${options.projectId ?? ''}\u0000${options.title}`;
+  return `task-list:${hashTaskListScope(scope, 2166136261)}-${hashTaskListScope(scope, 2246822519)}`;
+}
 
 export type TaskListGroupBy = TaskGroupBy;
 
@@ -183,6 +218,8 @@ interface TaskListChromeProps {
 
 /** Which interactions this instance is allowed to offer at all. */
 interface TaskListCapabilityProps {
+  /** Stable semantic scope for Activity-remount recovery when a screen mounts peer lists with identical titles. */
+  activitySessionScope?: string;
   defaultEditTab?: 'task' | 'view';
   enableBulkActions?: boolean;
   enableInboxBulkOrganize?: boolean;
@@ -228,6 +265,7 @@ function TaskListComponent({
   listRef,
   onListScroll,
   project,
+  activitySessionScope,
 }: TaskListProps) {
   const {
     id: projectId,
@@ -790,8 +828,14 @@ function TaskListComponent({
   // internal handle too so this component can scroll a freshly added row into
   // view without stealing the parent's ref.
   const internalListRef = useRef<FlatList<ListItem> | null>(null);
+  const taskListScrollOffsetRef = useRef(0);
+  const pendingActivityScrollOffsetRef = useRef<number | null>(null);
   const setListRef = useCallback((node: FlatList<ListItem> | null) => {
     internalListRef.current = node;
+    if (node && pendingActivityScrollOffsetRef.current !== null) {
+      node.scrollToOffset({ offset: pendingActivityScrollOffsetRef.current, animated: false });
+      pendingActivityScrollOffsetRef.current = null;
+    }
     if (typeof listRef === 'function') {
       listRef(node);
     } else if (listRef) {
@@ -802,6 +846,38 @@ function TaskListComponent({
   projectReorderFlatItemsRef.current = projectReorderFlatItems;
   const lastDroppedProjectReorderItemsRef = useRef<ProjectReorderFlatItem<Task>[] | null>(null);
   const projectReorderScrollOffsetRef = useRef(0);
+  const taskListActivitySessionOwnerId = useMemo(() => buildTaskListActivitySessionOwnerId({
+    explicitScope: activitySessionScope,
+    projectId,
+    statusFilter,
+    title,
+  }), [activitySessionScope, projectId, statusFilter, title]);
+  const restoreTaskListActivitySession = useCallback((snapshot: TaskListActivitySession) => {
+    if (snapshot.editingTaskId) {
+      const restoredTask = tasksById[snapshot.editingTaskId];
+      if (restoredTask && !restoredTask.deletedAt) {
+        setEditingTask(restoredTask);
+        setIsModalVisible(true);
+      }
+    }
+    taskListScrollOffsetRef.current = snapshot.scrollOffset;
+    if (internalListRef.current) {
+      internalListRef.current.scrollToOffset({ offset: snapshot.scrollOffset, animated: false });
+    } else {
+      pendingActivityScrollOffsetRef.current = snapshot.scrollOffset;
+    }
+  }, [tasksById]);
+  const { clear: clearTaskListActivitySession } = useAndroidActivitySession({
+    getValue: () => ({
+      editingTaskId: isModalVisible ? editingTask?.id ?? null : null,
+      scrollOffset: projectReorderMode
+        ? projectReorderScrollOffsetRef.current
+        : taskListScrollOffsetRef.current,
+    }),
+    onRestore: restoreTaskListActivitySession,
+    ownerId: taskListActivitySessionOwnerId,
+    validate: isTaskListActivitySession,
+  });
   const listViewabilityConfig = useRef({ itemVisiblePercentThreshold: 10 }).current;
   const handleListViewableItemsChanged = useRef((info: { viewableItems: { item?: unknown }[] }) => {
     const firstTask = info.viewableItems.find((entry) => {
@@ -815,6 +891,10 @@ function TaskListComponent({
   const handleProjectReorderScrollOffsetChange = useCallback((offset: number) => {
     projectReorderScrollOffsetRef.current = offset;
   }, []);
+  const handleTaskListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    taskListScrollOffsetRef.current = Math.max(0, event.nativeEvent.contentOffset.y);
+    onListScroll?.(event);
+  }, [onListScroll]);
   const handleReorderScrollToIndexFailed = useCallback((info: { index: number; averageItemLength: number }) => {
     const estimate = (info.averageItemLength || PROJECT_REORDER_ITEM_HEIGHT) * info.index;
     reorderListRef.current?.scrollToOffset({ offset: estimate, animated: false });
@@ -1142,6 +1222,7 @@ function TaskListComponent({
       listItemCount: listItemCountForDiagnostics,
     });
     const result = state.updateTask(taskId, updates);
+    clearTaskListActivitySession();
     setIsModalVisible(false);
     setEditingTask(null);
     void Promise.resolve(result).finally(() => {
@@ -1152,7 +1233,13 @@ function TaskListComponent({
     // The editor closes above, so the save result has to reach `reportSaveResult`
     // or a `{ success: false }` write reads as saved.
     return result;
-  }, [listItemCountForDiagnostics, performanceRoute, projectId]);
+  }, [clearTaskListActivitySession, listItemCountForDiagnostics, performanceRoute, projectId]);
+
+  const handleCloseTaskEdit = useCallback(() => {
+    clearTaskListActivitySession();
+    setIsModalVisible(false);
+    setEditingTask(null);
+  }, [clearTaskListActivitySession]);
 
   const sortOptions = statusFilter === 'done'
     ? DONE_TASK_LIST_SORT_OPTIONS
@@ -1554,8 +1641,8 @@ function TaskListComponent({
           viewabilityConfig={listViewabilityConfig}
           onViewableItemsChanged={handleListViewableItemsChanged}
           onScrollToIndexFailed={handleListScrollToIndexFailed}
-          onScroll={onListScroll}
-          scrollEventThrottle={onListScroll ? 16 : undefined}
+          onScroll={handleTaskListScroll}
+          scrollEventThrottle={onListScroll ? 16 : 100}
           style={styles.list}
           contentContainerStyle={listContentStyle}
           keyboardDismissMode="on-drag"
@@ -1692,13 +1779,14 @@ function TaskListComponent({
           visible={isModalVisible}
           task={editingTask}
           readOnly={projectReadOnly}
-          onClose={() => setIsModalVisible(false)}
+          onClose={handleCloseTaskEdit}
           onSave={onSaveTask}
           defaultTab={defaultEditTab}
           onProjectNavigate={projectId ? undefined : openProjectScreen}
           onContextNavigate={openContextsScreen}
           onTagNavigate={openContextsScreen}
           onFocusMode={(taskId) => {
+            clearTaskListActivitySession();
             setIsModalVisible(false);
             router.push(`/check-focus?id=${taskId}`);
           }}

@@ -64,7 +64,9 @@ type TaskEditFormTabProps = {
     containerWidth: number;
     textDirectionStyle: Record<string, any>;
     titleDraft: string;
+    titleInputRef?: React.RefObject<TextInput | null>;
     onTitleDraftChange: (text: string) => void;
+    onTitleSelectionChange?: (selection: { start: number; end: number }) => void;
     onInputFocusTracked?: (targetInput?: number | string) => void;
     onTitleInputFocusChange?: (focused: boolean) => void;
     registerScrollToEnd?: (handler: ((targetInput?: number | string) => void) | null) => void;
@@ -114,7 +116,9 @@ function TaskEditFormTabComponent({
     containerWidth,
     textDirectionStyle,
     titleDraft,
+    titleInputRef,
     onTitleDraftChange,
+    onTitleSelectionChange,
     onInputFocusTracked,
     onTitleInputFocusChange,
     registerScrollToEnd,
@@ -398,6 +402,7 @@ function TaskEditFormTabComponent({
                                 </TouchableOpacity>
                             </View>
                             <TextInput
+                            ref={titleInputRef}
                             style={[styles.input, inputStyle, textDirectionStyle, styles.titleInput]}
                             value={titleDraft}
                             onChangeText={(text) => onTitleDraftChange(text.replace(/[\r\n]+/g, ' '))}
@@ -412,6 +417,7 @@ function TaskEditFormTabComponent({
                                 setTitleFocused(false);
                                 onTitleInputFocusChange?.(false);
                             }}
+                            onSelectionChange={(event) => onTitleSelectionChange?.(event.nativeEvent.selection)}
                             selection={titleFocused ? undefined : { start: 0, end: 0 }}
                         />
                     </View>

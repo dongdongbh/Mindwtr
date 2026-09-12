@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
   Platform,
@@ -43,6 +43,7 @@ import {
   type CaptureAssemblyInput,
   type CaptureSessionId,
   type CaptureTransactionOptions,
+  type Attachment,
   type Task,
   type TaskPriority,
   useTaskStore,
@@ -70,10 +71,213 @@ import { QuickCaptureSheetBody } from './quick-capture-sheet/QuickCaptureSheetBo
 import { QuickCaptureSheetPickers } from './quick-capture-sheet/QuickCaptureSheetPickers';
 import { useQuickCaptureAudio } from './use-quick-capture-audio';
 import { useAndroidQuickCaptureExpand } from './quick-capture-sheet/useAndroidQuickCaptureExpand';
+import { useAndroidActivitySession } from '@/hooks/use-android-activity-session';
+import {
+  ANDROID_ACTIVITY_SESSION_TTL_MS,
+  isAndroidActivityChangingConfigurations,
+} from '@/lib/android-activity-session';
 
 const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 const ANDROID_OPTIONS_EXPAND_FALLBACK_MS = 500;
 const BULK_PREVIEW_LINE_LIMIT = 5;
+
+type QuickCaptureActivityState = {
+  value: string;
+  noteValue: string;
+  dueDate: string | null;
+  dueDateHasTime: boolean;
+  startTime: string | null;
+  contextTags: string[];
+  projectId: string | null;
+  selectedAreaId: string | null;
+  priority: TaskPriority | null;
+  optionsExpanded: boolean;
+  addAnother: boolean;
+  focusNewTask: boolean;
+  recoveryAttachments: Attachment[];
+  recoveryOwnedAttachmentUris: string[];
+};
+
+type QuickCaptureActivitySubmission = {
+  createdAt: number;
+  draft: QuickCaptureActivityState;
+  id: number;
+  ownerId: string;
+  status: 'pending' | 'failed';
+};
+
+const MAX_ACTIVITY_SUBMISSIONS = 16;
+const activitySubmissions = new Map<number, QuickCaptureActivitySubmission>();
+const activitySubmissionFailureListeners = new Map<string, Set<() => void>>();
+let nextActivitySubmissionId = 1;
+
+const cloneQuickCaptureActivityState = (
+  draft: QuickCaptureActivityState,
+): QuickCaptureActivityState => ({
+  ...draft,
+  contextTags: [...draft.contextTags],
+  recoveryAttachments: draft.recoveryAttachments.map((attachment) => ({ ...attachment })),
+  recoveryOwnedAttachmentUris: [...draft.recoveryOwnedAttachmentUris],
+});
+
+const cleanupOwnedRecoveryAttachments = (uris: string[]) => {
+  for (const uri of new Set(uris)) {
+    try {
+      const file = new FileSystem.File(uri);
+      const info = file.info() as { exists?: boolean; isDirectory?: boolean };
+      if (info.exists && !info.isDirectory) file.delete();
+    } catch (error) {
+      logCaptureWarn('Failed to clean up discarded quick capture audio', error);
+    }
+  }
+};
+
+const pruneFailedActivitySubmissions = () => {
+  const now = Date.now();
+  for (const [id, submission] of activitySubmissions) {
+    if (submission.status === 'failed'
+        && now - submission.createdAt > ANDROID_ACTIVITY_SESSION_TTL_MS) {
+      cleanupOwnedRecoveryAttachments(submission.draft.recoveryOwnedAttachmentUris);
+      activitySubmissions.delete(id);
+    }
+  }
+};
+
+const hasFailedActivitySubmission = (ownerId: string) => {
+  pruneFailedActivitySubmissions();
+  return [...activitySubmissions.values()].some((submission) => (
+    submission.ownerId === ownerId && submission.status === 'failed'
+  ));
+};
+
+/**
+ * Watches for a durable capture failure that settled after the Activity which
+ * submitted it was destroyed. The replacement opens an editor, then the sheet
+ * consumes the failed draft without replaying the write.
+ */
+export const subscribeQuickCaptureSubmissionFailure = (
+  ownerId: string,
+  listener: () => void,
+) => {
+  const listeners = activitySubmissionFailureListeners.get(ownerId) ?? new Set<() => void>();
+  listeners.add(listener);
+  activitySubmissionFailureListeners.set(ownerId, listeners);
+  if (hasFailedActivitySubmission(ownerId)) listener();
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) activitySubmissionFailureListeners.delete(ownerId);
+  };
+};
+
+const beginQuickCaptureActivitySubmission = (
+  ownerId: string,
+  draft: QuickCaptureActivityState,
+) => {
+  pruneFailedActivitySubmissions();
+  while (activitySubmissions.size >= MAX_ACTIVITY_SUBMISSIONS) {
+    const oldestFailed = [...activitySubmissions.entries()].find(([, submission]) => (
+      submission.status === 'failed'
+    ));
+    if (!oldestFailed) break;
+    cleanupOwnedRecoveryAttachments(oldestFailed[1].draft.recoveryOwnedAttachmentUris);
+    activitySubmissions.delete(oldestFailed[0]);
+  }
+  const id = nextActivitySubmissionId;
+  nextActivitySubmissionId += 1;
+  activitySubmissions.set(id, {
+    createdAt: Date.now(),
+    draft: cloneQuickCaptureActivityState(draft),
+    id,
+    ownerId,
+    status: 'pending',
+  });
+  return id;
+};
+
+const updateQuickCaptureActivitySubmission = (
+  id: number,
+  draft: QuickCaptureActivityState,
+) => {
+  const submission = activitySubmissions.get(id);
+  if (!submission || submission.status !== 'pending') return false;
+  submission.draft = cloneQuickCaptureActivityState(draft);
+  return true;
+};
+
+const settleQuickCaptureActivitySubmission = (
+  id: number,
+  outcome: 'discard' | 'editing' | 'failed' | 'succeeded',
+) => {
+  const submission = activitySubmissions.get(id);
+  if (!submission) return null;
+  const draft = cloneQuickCaptureActivityState(submission.draft);
+  if (outcome !== 'failed') {
+    if (outcome === 'discard') {
+      cleanupOwnedRecoveryAttachments(draft.recoveryOwnedAttachmentUris);
+    }
+    activitySubmissions.delete(id);
+    return { draft, retained: false };
+  }
+  submission.createdAt = Date.now();
+  submission.status = 'failed';
+  activitySubmissionFailureListeners.get(submission.ownerId)?.forEach((listener) => listener());
+  return { draft, retained: true };
+};
+
+const takeFailedQuickCaptureActivitySubmission = (ownerId: string) => {
+  pruneFailedActivitySubmissions();
+  const failed = [...activitySubmissions.values()].find((submission) => (
+    submission.ownerId === ownerId && submission.status === 'failed'
+  ));
+  if (!failed) return null;
+  activitySubmissions.delete(failed.id);
+  const draft = cloneQuickCaptureActivityState(failed.draft);
+  if (hasFailedActivitySubmission(ownerId)) {
+    activitySubmissionFailureListeners.get(ownerId)?.forEach((listener) => listener());
+  }
+  return draft;
+};
+
+const isNullableString = (value: unknown): value is string | null => (
+  value === null || typeof value === 'string'
+);
+
+const isRecoverableAttachment = (value: unknown): value is Attachment => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.id === 'string'
+    && (candidate.kind === 'file' || candidate.kind === 'link')
+    && typeof candidate.title === 'string'
+    && typeof candidate.uri === 'string'
+    && typeof candidate.createdAt === 'string'
+    && typeof candidate.updatedAt === 'string';
+};
+
+const isQuickCaptureActivityState = (value: unknown): value is QuickCaptureActivityState => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.value === 'string'
+    && candidate.value.length <= 100_000
+    && typeof candidate.noteValue === 'string'
+    && candidate.noteValue.length <= 500_000
+    && isNullableString(candidate.dueDate)
+    && typeof candidate.dueDateHasTime === 'boolean'
+    && isNullableString(candidate.startTime)
+    && Array.isArray(candidate.contextTags)
+    && candidate.contextTags.every((item) => typeof item === 'string')
+    && isNullableString(candidate.projectId)
+    && isNullableString(candidate.selectedAreaId)
+    && (candidate.priority === null || PRIORITY_OPTIONS.includes(candidate.priority as TaskPriority))
+    && typeof candidate.optionsExpanded === 'boolean'
+    && typeof candidate.addAnother === 'boolean'
+    && typeof candidate.focusNewTask === 'boolean'
+    && Array.isArray(candidate.recoveryAttachments)
+    && candidate.recoveryAttachments.length <= 100
+    && candidate.recoveryAttachments.every(isRecoverableAttachment)
+    && Array.isArray(candidate.recoveryOwnedAttachmentUris)
+    && candidate.recoveryOwnedAttachmentUris.length <= 100
+    && candidate.recoveryOwnedAttachmentUris.every((item) => typeof item === 'string');
+};
 
 const logCaptureWarn = (message: string, error?: unknown) => {
   void logWarn(message, { scope: 'capture', extra: buildCaptureExtra(undefined, error) });
@@ -156,6 +360,9 @@ export function QuickCaptureSheet({
   initialProps,
   initialValue,
   autoRecord,
+  activitySessionOwnerId = 'quick-capture:route-draft',
+  onSubmissionStart,
+  onSubmissionSettled,
 }: {
   visible: boolean;
   openRequestId?: number;
@@ -163,6 +370,9 @@ export function QuickCaptureSheet({
   initialProps?: Partial<Task>;
   initialValue?: string;
   autoRecord?: boolean;
+  activitySessionOwnerId?: string;
+  onSubmissionStart?: () => void;
+  onSubmissionSettled?: () => void;
 }) {
   const { addTask, addTasks, addProject, addArea, updateSettings, projects, settings, areas, getFocusedCount, setHighlightTask } = useTaskStore((state) => ({
     addTask: state.addTask,
@@ -195,6 +405,8 @@ export function QuickCaptureSheet({
   const contextInputRef = useRef<TextInput>(null);
   const submissionCoordinatorRef = useRef(new CaptureSessionCoordinator());
   const activeSubmissionSessionRef = useRef<CaptureSessionId | null>(null);
+  const activeActivitySubmissionRef = useRef<number | null>(null);
+  const rearmAfterDraftResetRef = useRef(false);
   const { priorities: prioritiesEnabled } = resolveFeatureFlags(settings);
   const { selectedAreaIdForNewTasks } = useMobileAreaFilter();
   const defaultAreaMode = getDefaultTaskAreaMode(settings);
@@ -229,6 +441,8 @@ export function QuickCaptureSheet({
   const [quickAddParseOptions, setQuickAddParseOptions] = useState(readQuickAddParseOptions);
   // Note (task description) captured from the expanded More panel (#1118).
   const [noteValue, setNoteValue] = useState('');
+  const [recoveryAttachments, setRecoveryAttachments] = useState<Attachment[]>([]);
+  const [recoveryOwnedAttachmentUris, setRecoveryOwnedAttachmentUris] = useState<string[]>([]);
   const [pendingBulkLines, setPendingBulkLines] = useState<string[] | null>(null);
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [dueDateHasTime, setDueDateHasTime] = useState(false);
@@ -259,6 +473,7 @@ export function QuickCaptureSheet({
   const [addAnother, setAddAnother] = useState(false);
   const [focusNewTask, setFocusNewTask] = useState(false);
   const projectsRef = useRef(projects);
+  const restoredActivitySessionRef = useRef(false);
   const contextOptionsLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contextOptionsRequestRef = useRef(0);
   const initialFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -268,6 +483,180 @@ export function QuickCaptureSheet({
     tFallback(t, 'agenda.maxFocusItems', 'Max {{count}} focus item(s)'),
     focusTaskLimit,
   );
+  const captureInitialAttachments = useMemo(() => {
+    const merged = new Map<string, Attachment>();
+    for (const attachment of initialProps?.attachments ?? []) {
+      merged.set(attachment.id || attachment.uri, attachment);
+    }
+    for (const attachment of recoveryAttachments) {
+      merged.set(attachment.id || attachment.uri, attachment);
+    }
+    return [...merged.values()];
+  }, [initialProps?.attachments, recoveryAttachments]);
+  const captureInitialProps = useMemo<Partial<Task> | undefined>(() => (
+    recoveryAttachments.length > 0
+      ? { ...initialProps, attachments: captureInitialAttachments }
+      : initialProps
+  ), [captureInitialAttachments, initialProps, recoveryAttachments.length]);
+
+  const activitySessionValue = useMemo<QuickCaptureActivityState>(() => ({
+    value,
+    noteValue,
+    dueDate: dueDate?.toISOString() ?? null,
+    dueDateHasTime,
+    startTime: startTime?.toISOString() ?? null,
+    contextTags,
+    projectId,
+    selectedAreaId,
+    priority,
+    optionsExpanded,
+    addAnother,
+    focusNewTask,
+    recoveryAttachments,
+    recoveryOwnedAttachmentUris,
+  }), [
+    addAnother,
+    contextTags,
+    dueDate,
+    dueDateHasTime,
+    focusNewTask,
+    noteValue,
+    optionsExpanded,
+    priority,
+    projectId,
+    recoveryAttachments,
+    recoveryOwnedAttachmentUris,
+    selectedAreaId,
+    startTime,
+    value,
+  ]);
+  const restoreActivitySession = useCallback((recovered: QuickCaptureActivityState) => {
+    restoredActivitySessionRef.current = true;
+    setQuickAddParseOptions(readQuickAddParseOptions());
+    setValue(recovered.value);
+    setNoteValue(recovered.noteValue);
+    setDueDate(recovered.dueDate ? safeParseDate(recovered.dueDate) : null);
+    setDueDateHasTime(recovered.dueDateHasTime);
+    setStartTime(recovered.startTime ? safeParseDate(recovered.startTime) : null);
+    setContextTags(recovered.contextTags);
+    setContextOptions(recovered.contextTags);
+    const restoredProjectId = recovered.projectId && projectsRef.current.some((project) => (
+      project.id === recovered.projectId && isSelectableProjectForTaskAssignment(project)
+    )) ? recovered.projectId : null;
+    setProjectId(restoredProjectId);
+    setSelectedAreaId(restoredProjectId ? null : recovered.selectedAreaId);
+    setPriority(recovered.priority);
+    setOptionsExpanded(recovered.optionsExpanded);
+    setAddAnother(recovered.addAnother);
+    setFocusNewTask(recovered.focusNewTask);
+    setRecoveryAttachments(recovered.recoveryAttachments);
+    setRecoveryOwnedAttachmentUris(recovered.recoveryOwnedAttachmentUris);
+    setAndroidKeyboardAvoidingEnabled(true);
+  }, []);
+  const {
+    clear: clearActivitySession,
+    rearm: rearmActivitySession,
+    sourceActivityId,
+  } = useAndroidActivitySession({
+    ownerId: activitySessionOwnerId,
+    value: visible ? activitySessionValue : null,
+    validate: isQuickCaptureActivityState,
+    onRestore: restoreActivitySession,
+  });
+
+  useLayoutEffect(() => {
+    const failedDraft = takeFailedQuickCaptureActivitySubmission(activitySessionOwnerId);
+    if (failedDraft) restoreActivitySession(failedDraft);
+  }, [activitySessionOwnerId, openRequestId, restoreActivitySession]);
+
+  const buildActivitySubmissionDraft = useCallback((
+    attachments = captureInitialAttachments,
+    fallbackValue?: string,
+    additionalOwnedAttachmentUris: string[] = [],
+  ): QuickCaptureActivityState => ({
+    ...activitySessionValue,
+    value: activitySessionValue.value.trim()
+      ? activitySessionValue.value
+      : (fallbackValue ?? activitySessionValue.value),
+    recoveryAttachments: attachments.map((attachment) => ({ ...attachment })),
+    recoveryOwnedAttachmentUris: Array.from(new Set([
+      ...recoveryOwnedAttachmentUris,
+      ...additionalOwnedAttachmentUris,
+    ])),
+  }), [activitySessionValue, captureInitialAttachments, recoveryOwnedAttachmentUris]);
+
+  const beginActivitySubmission = useCallback((
+    attachments = captureInitialAttachments,
+    fallbackValue?: string,
+    additionalOwnedAttachmentUris: string[] = [],
+  ) => {
+    clearActivitySession();
+    onSubmissionStart?.();
+    const submissionId = beginQuickCaptureActivitySubmission(
+      activitySessionOwnerId,
+      buildActivitySubmissionDraft(attachments, fallbackValue, additionalOwnedAttachmentUris),
+    );
+    activeActivitySubmissionRef.current = submissionId;
+    return submissionId;
+  }, [activitySessionOwnerId, buildActivitySubmissionDraft, captureInitialAttachments, clearActivitySession, onSubmissionStart]);
+
+  const updateActivitySubmission = useCallback((
+    submissionId: number,
+    attachments: Attachment[],
+    fallbackValue?: string,
+    additionalOwnedAttachmentUris: string[] = [],
+  ) => updateQuickCaptureActivitySubmission(
+    submissionId,
+    buildActivitySubmissionDraft(attachments, fallbackValue, additionalOwnedAttachmentUris),
+  ), [buildActivitySubmissionDraft]);
+
+  const settleActivitySubmission = useCallback((
+    submissionId: number,
+    options: { durableSucceeded: boolean; keepEditing: boolean; sessionCurrent: boolean },
+  ) => {
+    if (activeActivitySubmissionRef.current === submissionId) {
+      activeActivitySubmissionRef.current = null;
+    }
+    const settled = settleQuickCaptureActivitySubmission(
+      submissionId,
+      options.durableSucceeded
+        ? 'succeeded'
+        : options.sessionCurrent
+          ? 'editing'
+          : Platform.OS === 'android'
+              && sourceActivityId !== null
+              && isAndroidActivityChangingConfigurations(sourceActivityId)
+            ? 'failed'
+            : 'discard',
+    );
+    if (options.sessionCurrent && options.keepEditing) {
+      if (options.durableSucceeded) {
+        // Add-another has already committed the previous draft. Wait until the
+        // reset state renders so the hook cannot retain the stale saved value.
+        rearmAfterDraftResetRef.current = true;
+      } else {
+        if (!value.trim() && settled?.draft.value) {
+          setValue(settled.draft.value);
+        }
+        if (settled?.draft.recoveryAttachments.length) {
+          setRecoveryAttachments(settled.draft.recoveryAttachments);
+        }
+        if (settled?.draft.recoveryOwnedAttachmentUris.length) {
+          setRecoveryOwnedAttachmentUris(settled.draft.recoveryOwnedAttachmentUris);
+        }
+        rearmActivitySession();
+        onSubmissionSettled?.();
+      }
+    }
+    return Boolean(settled);
+  }, [onSubmissionSettled, rearmActivitySession, sourceActivityId, value]);
+
+  useLayoutEffect(() => {
+    if (!rearmAfterDraftResetRef.current) return;
+    rearmAfterDraftResetRef.current = false;
+    rearmActivitySession();
+    onSubmissionSettled?.();
+  }, [activitySessionValue, onSubmissionSettled, rearmActivitySession]);
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -465,6 +854,8 @@ export function QuickCaptureSheet({
     setPendingStartDate(null);
     setFocusNewTask(Boolean(initialProps?.isFocusedToday));
     setAddAnother(Boolean(options?.keepAddAnother));
+    setRecoveryAttachments([]);
+    setRecoveryOwnedAttachmentUris([]);
   }, [clearAndroidOptionsExpand, clearContextOptionsLoad, defaultAreaId, initialProps, initialValue]);
 
   useEffect(() => () => {
@@ -491,7 +882,11 @@ export function QuickCaptureSheet({
 
   useEffect(() => {
     if (!visible) return;
-    resetDraftState();
+    if (restoredActivitySessionRef.current) {
+      restoredActivitySessionRef.current = false;
+    } else {
+      resetDraftState();
+    }
     // The "Add another" switch is a sticky device preference: capture bursts
     // (Enter chains into the next task) should survive closing the sheet
     // instead of resetting to one-shot mode every open (#819).
@@ -557,7 +952,7 @@ export function QuickCaptureSheet({
       rawInput: trimmed,
       fallbackTitle,
       projects: currentProjects,
-      initialProps,
+      initialProps: captureInitialProps,
       extraProps,
       selectedAreaId,
       starNewTask: focusNewTask && canFocusNewTask,
@@ -585,7 +980,7 @@ export function QuickCaptureSheet({
       },
     };
     return { input, options };
-  }, [areas, canFocusNewTask, contextTags, focusNewTask, initialProps, noteValue, pickedDueDate, prioritiesEnabled, priority, projectId, projects, quickAddParseOptions, selectedAreaId, startTime, suppressDetectedDate]);
+  }, [areas, canFocusNewTask, captureInitialProps, contextTags, focusNewTask, noteValue, pickedDueDate, prioritiesEnabled, priority, projectId, projects, quickAddParseOptions, selectedAreaId, startTime, suppressDetectedDate]);
 
   const buildTaskPropsForInput = useCallback(async (inputValue: string, fallbackTitle: string, extraProps?: Partial<Task>) => {
     const request = buildCaptureRequestForInput(inputValue, fallbackTitle, extraProps);
@@ -593,7 +988,7 @@ export function QuickCaptureSheet({
     if (!prepared.success) {
       return {
         title: '',
-        props: { status: 'inbox' as const, ...initialProps, ...extraProps },
+        props: { status: 'inbox' as const, ...captureInitialProps, ...extraProps },
         invalidDateCommands: prepared.reason === 'invalid-date-command'
           ? prepared.invalidDateCommands
           : undefined,
@@ -604,7 +999,7 @@ export function QuickCaptureSheet({
       props: prepared.props,
       invalidDateCommands: prepared.invalidDateCommands,
     };
-  }, [addProject, buildCaptureRequestForInput, initialProps]);
+  }, [addProject, buildCaptureRequestForInput, captureInitialProps]);
 
   const buildTaskProps = useCallback((fallbackTitle: string, extraProps?: Partial<Task>) => (
     buildTaskPropsForInput(value, fallbackTitle, extraProps)
@@ -640,9 +1035,15 @@ export function QuickCaptureSheet({
     setPendingStartDate(null);
     setAddAnother(false);
     setFocusNewTask(false);
+    setRecoveryAttachments([]);
+    setRecoveryOwnedAttachmentUris([]);
   }, [clearAndroidOptionsExpand, clearContextOptionsLoad, defaultAreaId]);
 
-  const finalizeClose = useCallback(() => {
+  const finalizeClose = useCallback((options?: { recoveryAttachmentsAdopted?: boolean }) => {
+    clearActivitySession();
+    if (!options?.recoveryAttachmentsAdopted) {
+      cleanupOwnedRecoveryAttachments(recoveryOwnedAttachmentUris);
+    }
     const session = activeSubmissionSessionRef.current;
     if (session !== null) submissionCoordinatorRef.current.invalidateSession(session);
     activeSubmissionSessionRef.current = null;
@@ -650,7 +1051,7 @@ export function QuickCaptureSheet({
     clearInitialFocusTimer();
     resetState();
     onClose();
-  }, [clearInitialFocusTimer, onClose, resetState]);
+  }, [clearActivitySession, clearInitialFocusTimer, onClose, recoveryOwnedAttachmentUris, resetState]);
 
   const getActiveSubmissionSession = useCallback(
     () => activeSubmissionSessionRef.current,
@@ -667,16 +1068,19 @@ export function QuickCaptureSheet({
     addTask,
     autoRecord,
     buildTaskProps,
+    beginActivitySubmission,
     getActiveSubmissionSession,
-    handleClose: finalizeClose,
-    initialAttachments: initialProps?.attachments,
+    handleClose: () => finalizeClose({ recoveryAttachmentsAdopted: true }),
+    initialAttachments: captureInitialAttachments,
     onError: logCaptureError,
     onSubmissionBusyChange: setSaving,
     onWarn: logCaptureWarn,
     settings,
+    settleActivitySubmission,
     submissionCoordinator: submissionCoordinatorRef.current,
     submissionKey: openRequestId,
     t,
+    updateActivitySubmission,
     updateSpeechSettings,
     visible,
   });
@@ -725,6 +1129,8 @@ export function QuickCaptureSheet({
   const createBulkTasks = useCallback(async (lines: string[]) => {
     const session = activeSubmissionSessionRef.current;
     if (session === null || !submissionCoordinatorRef.current.tryBeginSubmission(session)) return;
+    const activitySubmissionId = beginActivitySubmission();
+    let durableSucceeded = false;
     setSaving(true);
     try {
       try {
@@ -740,7 +1146,7 @@ export function QuickCaptureSheet({
         return;
       }
       if (!submissionCoordinatorRef.current.isCurrent(session)) return;
-      const taskInputs: Array<{ title: string; initialProps: Partial<Task> }> = [];
+      const taskInputs: { title: string; initialProps: Partial<Task> }[] = [];
       let currentProjects = projects;
       for (const line of lines) {
         const request = buildCaptureRequestForInput(line, line.trim(), undefined, currentProjects);
@@ -755,15 +1161,32 @@ export function QuickCaptureSheet({
         if (prepared.createdProject) currentProjects = [...currentProjects, prepared.createdProject];
       }
       const result = await addTasks(taskInputs);
+      durableSucceeded = !(result && typeof result === 'object' && result.success === false);
       if (!submissionCoordinatorRef.current.isCurrent(session)) return;
-      if (result && typeof result === 'object' && result.success === false) return;
-      finalizeClose();
+      if (!durableSucceeded) return;
+      finalizeClose({ recoveryAttachmentsAdopted: true });
+    } catch (error) {
+      if (submissionCoordinatorRef.current.isCurrent(session)) {
+        logCaptureError('Failed to create tasks from bulk capture', error);
+        showToast({
+          title: t('common.notice'),
+          message: tFallback(t, 'quickAdd.bulkCreateError', 'Could not create all tasks.'),
+          tone: 'warning',
+          durationMs: 4200,
+        });
+      }
     } finally {
-      if (submissionCoordinatorRef.current.finishSubmission(session)) {
+      const sessionCurrent = submissionCoordinatorRef.current.finishSubmission(session);
+      settleActivitySubmission(activitySubmissionId, {
+        durableSucceeded,
+        keepEditing: !durableSucceeded,
+        sessionCurrent,
+      });
+      if (sessionCurrent) {
         setSaving(false);
       }
     }
-  }, [addProject, addTasks, buildCaptureRequestForInput, finalizeClose, projects, showToast, t]);
+  }, [addProject, addTasks, beginActivitySubmission, buildCaptureRequestForInput, finalizeClose, projects, settleActivitySubmission, showToast, t]);
 
   // Confirm inside this sheet rather than through Alert. The sheet is a native
   // Modal, and an alert raised while it is presented is a second native
@@ -794,13 +1217,17 @@ export function QuickCaptureSheet({
     }
     const session = activeSubmissionSessionRef.current;
     if (session === null || !submissionCoordinatorRef.current.tryBeginSubmission(session)) return;
+    const activitySubmissionId = beginActivitySubmission();
+    let durableSucceeded = false;
+    let keepEditing = false;
     setSaving(true);
     try {
       const result = await createTaskFromInput(value.trim());
+      durableSucceeded = Boolean(result);
       if (!submissionCoordinatorRef.current.isCurrent(session) || !result) return;
 
       if (openAfterSave) {
-        finalizeClose();
+        finalizeClose({ recoveryAttachmentsAdopted: true });
         if (result.createdTaskId) {
           openTaskScreen(result.createdTaskId, result.props.projectId, 'task');
         }
@@ -808,6 +1235,7 @@ export function QuickCaptureSheet({
       }
 
       if (addAnother) {
+        keepEditing = true;
         resetDraftState({ keepAddAnother: true, value: '' });
         setTimeout(() => inputRef.current?.focus(), 80);
         return;
@@ -822,13 +1250,19 @@ export function QuickCaptureSheet({
         setHighlightTask(result.createdTaskId);
       }
 
-      finalizeClose();
+      finalizeClose({ recoveryAttachmentsAdopted: true });
     } finally {
-      if (submissionCoordinatorRef.current.finishSubmission(session)) {
+      const sessionCurrent = submissionCoordinatorRef.current.finishSubmission(session);
+      settleActivitySubmission(activitySubmissionId, {
+        durableSucceeded,
+        keepEditing: keepEditing || !durableSucceeded,
+        sessionCurrent,
+      });
+      if (sessionCurrent) {
         setSaving(false);
       }
     }
-  }, [addAnother, confirmBulkQuickAdd, createTaskFromInput, finalizeClose, initialProps?.projectId, resetDraftState, setHighlightTask, value]);
+  }, [addAnother, beginActivitySubmission, confirmBulkQuickAdd, createTaskFromInput, finalizeClose, initialProps?.projectId, resetDraftState, setHighlightTask, settleActivitySubmission, value]);
 
   const selectedProject = projectId ? projects.find((project) => project.id === projectId) : null;
   const dueLabel = dueDate ? safeFormatDate(dueDate, dueDateHasTime ? 'Pp' : 'P') : t('taskEdit.dueDateLabel');

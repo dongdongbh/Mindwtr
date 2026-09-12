@@ -6,7 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Index from '../app/index';
 import { unstable_settings as drawerLayoutSettings } from '../app/(drawer)/_layout';
-import TabLayout from '../app/(drawer)/(tabs)/_layout';
+import TabLayout, { resolveMoreMenuFrameStyle } from '../app/(drawer)/(tabs)/_layout';
+import { resolveAdaptiveWindow } from '../lib/adaptive-window';
 
 const mockRouterPush = vi.hoisted(() => vi.fn());
 const mockRouteQuickCapture = vi.hoisted(() => vi.fn());
@@ -34,6 +35,27 @@ const mockThemeTokens = vi.hoisted(() => ({
   },
 }));
 const mockUseTaskStore = vi.hoisted(() => vi.fn());
+const mockCaptureFailureSubscription = vi.hoisted(() => ({ listener: null as null | (() => void) }));
+const mockSubscribeCaptureFailure = vi.hoisted(() => vi.fn((_ownerId: string, listener: () => void) => {
+  mockCaptureFailureSubscription.listener = listener;
+  return () => {
+    mockCaptureFailureSubscription.listener = null;
+  };
+}));
+const sandboxModeMock = vi.hoisted(() => ({ current: false }));
+const safeAreaMock = vi.hoisted(() => ({ top: 0, right: 0, bottom: 0, left: 0 }));
+const adaptiveWindowMock = vi.hoisted(() => ({
+  current: {
+    activeFeature: null as null | { orientation: 'horizontal' | 'vertical' },
+    foregroundFrame: { x: 0, y: 0, width: 390, height: 844 },
+    height: 844,
+    isExpanded: false,
+    navigationActionFrame: { x: 0, y: 0, width: 390, height: 844 },
+    navigationFrame: { x: 0, y: 0, width: 390, height: 844 },
+    navigationPlacement: 'left' as 'left' | 'right',
+    navigationWidth: 88,
+  },
+}));
 
 vi.mock('expo-router', () => {
   function RedirectMock(props: { href: unknown; withAnchor?: boolean }) {
@@ -106,7 +128,10 @@ vi.mock('@react-navigation/elements', () => ({
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const { mockCore } = await import('../test-support/mock-core');
   // This suite drives the store hook itself, so it supplies its own.
-  return mockCore(importOriginal, () => ({}), { useTaskStore: mockUseTaskStore });
+  return mockCore(importOriginal, () => ({}), {
+    isSandboxMode: () => sandboxModeMock.current,
+    useTaskStore: mockUseTaskStore,
+  });
 });
 
 vi.mock('@/components/haptic-tab', () => ({
@@ -123,6 +148,11 @@ vi.mock('@/components/mobile-area-switcher', () => ({
 
 vi.mock('@/components/quick-capture-sheet', () => ({
   QuickCaptureSheet: (props: any) => React.createElement('QuickCaptureSheet', props),
+  subscribeQuickCaptureSubmissionFailure: mockSubscribeCaptureFailure,
+}));
+
+vi.mock('@/components/adaptive-window-context', () => ({
+  useAdaptiveWindow: () => adaptiveWindowMock.current,
 }));
 
 vi.mock('@/hooks/use-mobile-area-filter', () => ({
@@ -193,7 +223,7 @@ vi.mock('../contexts/quick-capture-context', () => ({
 }));
 
 vi.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+  useSafeAreaInsets: () => safeAreaMock,
 }));
 
 const getAddTaskButton = (tree: ReturnType<typeof create>) => {
@@ -364,6 +394,7 @@ const getMoreSheetMenu = (tree: ReturnType<typeof create>) => {
 
 describe('mobile tab quick capture', () => {
   beforeEach(() => {
+    safeAreaMock.bottom = 0;
     mockRouterPush.mockClear();
     mockRouteQuickCapture.mockClear();
     tabProviderValue.current = null;
@@ -379,6 +410,19 @@ describe('mobile tab quick capture', () => {
     mockTaskSettings.savedSearches = [];
     selectedAreaIdForNewTasksMock.current = null;
     mockThemeTokens.value = { isMaterial: false, roles: null, shape: { large: 16 } };
+    mockSubscribeCaptureFailure.mockClear();
+    mockCaptureFailureSubscription.listener = null;
+    sandboxModeMock.current = false;
+    adaptiveWindowMock.current = {
+      activeFeature: null,
+      foregroundFrame: { x: 0, y: 0, width: 390, height: 844 },
+      height: 844,
+      isExpanded: false,
+      navigationActionFrame: { x: 0, y: 0, width: 390, height: 844 },
+      navigationFrame: { x: 0, y: 0, width: 390, height: 844 },
+      navigationPlacement: 'left',
+      navigationWidth: 88,
+    };
   });
 
   it('subscribes the tab navigator only to settings', () => {
@@ -425,6 +469,64 @@ describe('mobile tab quick capture', () => {
     sheets = getQuickCaptureSheets(tree);
     expect(sheets).toHaveLength(1);
     expect(sheets[0]?.props.visible).toBe(true);
+  });
+
+  it('scopes capture recovery and late-failure ownership to the active workspace', () => {
+    let personalTree!: ReturnType<typeof create>;
+    act(() => {
+      personalTree = create(<TabLayout />);
+    });
+    expect(mockSubscribeCaptureFailure).toHaveBeenLastCalledWith(
+      'personal:tabs:quick-capture-draft',
+      expect.any(Function),
+    );
+    act(() => {
+      getAddTaskButton(personalTree).props.onPress();
+    });
+    expect(getQuickCaptureSheets(personalTree)[0]?.props.activitySessionOwnerId)
+      .toBe('personal:tabs:quick-capture-draft');
+    act(() => personalTree.unmount());
+
+    sandboxModeMock.current = true;
+    let sandboxTree!: ReturnType<typeof create>;
+    act(() => {
+      sandboxTree = create(<TabLayout />);
+    });
+    expect(mockSubscribeCaptureFailure).toHaveBeenLastCalledWith(
+      'sandbox:tabs:quick-capture-draft',
+      expect.any(Function),
+    );
+    act(() => {
+      getAddTaskButton(sandboxTree).props.onPress();
+    });
+    expect(getQuickCaptureSheets(sandboxTree)[0]?.props.activitySessionOwnerId)
+      .toBe('sandbox:tabs:quick-capture-draft');
+  });
+
+  it('keeps a newer capture visible and reoffers a queued late failure after it closes', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TabLayout />);
+    });
+    act(() => {
+      tabProviderValue.current?.openQuickCapture({ initialValue: 'Newer draft B' });
+    });
+    const newerSheet = getQuickCaptureSheets(tree)[0];
+    expect(newerSheet?.props.initialValue).toBe('Newer draft B');
+    const newerRequestId = newerSheet?.props.openRequestId;
+
+    act(() => {
+      mockCaptureFailureSubscription.listener?.();
+    });
+    expect(getQuickCaptureSheets(tree)[0]?.props.initialValue).toBe('Newer draft B');
+
+    act(() => {
+      getQuickCaptureSheets(tree)[0]?.props.onClose();
+    });
+    const queuedFailureSheet = getQuickCaptureSheets(tree)[0];
+    expect(queuedFailureSheet).toBeTruthy();
+    expect(queuedFailureSheet?.props.initialValue).toBe('');
+    expect(queuedFailureSheet?.props.openRequestId).toBeGreaterThan(newerRequestId);
   });
 
   it('routes a returnTo capture through the root capture screen instead of the tab sheet', () => {
@@ -578,6 +680,105 @@ describe('mobile tab quick capture', () => {
 
     const transform = flattenStyle(getAddTaskButton(tree).props.style).transform as { translateY: number }[];
     expect(transform[0]?.translateY).toBe(-6);
+  });
+
+  it('keeps the bottom rail action above Android taskbar and navigation insets', () => {
+    safeAreaMock.bottom = 56;
+    adaptiveWindowMock.current = resolveAdaptiveWindow({
+      width: 852, height: 883, platform: 'android', insets: safeAreaMock,
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<TabLayout />); });
+    const rail = tree.root.findAll((node) => {
+      const style = flattenStyle(node.props.style);
+      return String(node.type) === 'View' && style.flexDirection === 'column' && style.width === 88;
+    })[0];
+    if (!rail) throw new Error('expanded rail not found');
+    const style = flattenStyle(rail.props.style);
+    // The full-height rail extends under system bars; every action must end
+    // above the taskbar, with its normal 16 dp breathing room still intact.
+    expect(style.paddingBottom).toBe(72);
+    expect(883 - Number(style.paddingBottom)).toBeLessThan(883 - safeAreaMock.bottom);
+  });
+
+  it('contains an expanded tabletop rail inside its eligible foreground pane', () => {
+    safeAreaMock.bottom = 56;
+    adaptiveWindowMock.current = {
+      activeFeature: { orientation: 'horizontal' },
+      foregroundFrame: { x: 0, y: 416, width: 1000, height: 584 },
+      height: 1000,
+      isExpanded: true,
+      navigationActionFrame: { x: 0, y: 416, width: 1000, height: 584 },
+      navigationFrame: { x: 0, y: 416, width: 1000, height: 584 },
+      navigationPlacement: 'left',
+      navigationWidth: 88,
+    };
+    let tree!: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<TabLayout />);
+    });
+
+    const rail = tree.root.findAll((node) => {
+      if (String(node.type) !== 'View') return false;
+      const style = flattenStyle(node.props.style);
+      return style.flexDirection === 'column' && style.width === 88;
+    })[0];
+    if (!rail) throw new Error('expanded rail not found');
+    expect(flattenStyle(rail.props.style)).toMatchObject({
+      height: 584,
+      justifyContent: 'flex-end',
+      marginTop: 416,
+      paddingBottom: 16,
+    });
+  });
+
+  it('keeps the cover-screen menu as a bottom sheet and anchors wide menus near their trigger', () => {
+    const cover = resolveAdaptiveWindow({ width: 412, height: 915, platform: 'android' });
+    expect(resolveMoreMenuFrameStyle(cover, 66)).toBeNull();
+
+    const wideLtr = resolveAdaptiveWindow({ width: 1000, height: 700, platform: 'android' });
+    expect(resolveMoreMenuFrameStyle(wideLtr, 66)).toMatchObject({
+      bottom: 12,
+      left: 100,
+      maxHeight: 676,
+      width: 420,
+    });
+
+    const wideRtl = resolveAdaptiveWindow({
+      width: 1000,
+      height: 700,
+      isRtl: true,
+      platform: 'android',
+    });
+    expect(resolveMoreMenuFrameStyle(wideRtl, 66)).toMatchObject({ left: 480 });
+  });
+
+  it('bottom-anchors the tabletop menu inside the same pane as compact navigation', () => {
+    const tabletop = resolveAdaptiveWindow({
+      width: 841,
+      height: 674,
+      platform: 'android',
+      nativeSnapshot: {
+        width: 841,
+        height: 674,
+        features: [{
+          bounds: { left: 0, top: 333, right: 841, bottom: 341 },
+          orientation: 'horizontal',
+          state: 'half-opened',
+          isSeparating: true,
+          occlusionType: 'full',
+        }],
+      },
+    });
+
+    expect(tabletop.mode).toBe('compact');
+    expect(resolveMoreMenuFrameStyle(tabletop, 66)).toMatchObject({
+      bottom: 12,
+      left: 321,
+      maxHeight: 235,
+      width: 420,
+    });
   });
 
   it('boosts the capture FAB to the high-emphasis M3 primary role under Material', () => {
