@@ -1,7 +1,9 @@
 import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getTranslationsSync, loadTranslations } from '@mindwtr/core';
 
 import { SyncStatusSection } from './SyncStatusSection';
+import { buildSettingsLabels, getEnglishSettingsLabels } from '../labels';
 
 const labels = new Proxy<Record<string, string>>({}, {
     get: (_target, key) => String(key),
@@ -12,6 +14,13 @@ const labelsWith = (overrides: Record<string, string>) => new Proxy(overrides, {
 });
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const mergeStats = {
+    tasks: { mergedTotal: 3, conflicts: 0, conflictIds: [], maxClockSkewMs: 0, timestampAdjustments: 0 },
+    projects: { mergedTotal: 2, conflicts: 0, conflictIds: [], maxClockSkewMs: 0, timestampAdjustments: 0 },
+    sections: { mergedTotal: 0, conflicts: 0, conflictIds: [], maxClockSkewMs: 0, timestampAdjustments: 0 },
+    areas: { mergedTotal: 0, conflicts: 0, conflictIds: [], maxClockSkewMs: 0, timestampAdjustments: 0 },
+};
 
 function renderStatus(syncLastResultAt: string, overrides: Record<string, unknown> = {}) {
     return render(
@@ -106,6 +115,25 @@ describe('SyncStatusSection', () => {
         expect(historyEntry).toHaveTextContent('Kind: manual');
         expect(historyEntry).toHaveTextContent('Info: uploaded 2 records');
         expect(queryByText(/Backend:|Type:|Details:/)).not.toBeInTheDocument();
+    });
+
+    it('localizes task and project nouns in the last-sync summary', async () => {
+        const englishRender = renderStatus(new Date().toISOString(), {
+            lastSyncStats: mergeStats,
+            t: getEnglishSettingsLabels(),
+        });
+        expect(englishRender.container).toHaveTextContent(/Tasks\s+3\s+\/\s*Projects\s+2/);
+        englishRender.unmount();
+
+        await loadTranslations('zh');
+        const translations = getTranslationsSync('zh');
+        const chineseLabels = buildSettingsLabels((key) => translations[key] ?? key);
+        const chineseRender = renderStatus(new Date().toISOString(), {
+            lastSyncStats: mergeStats,
+            t: chineseLabels,
+        });
+        expect(chineseRender.container).toHaveTextContent(/任务\s+3\s+\/\s*项目\s+2/);
+        expect(chineseRender.container).not.toHaveTextContent(/Tasks|Projects/);
     });
 
     it('shows GTD settings sync enabled by default and preserves an explicit opt-out', () => {

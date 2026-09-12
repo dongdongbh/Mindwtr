@@ -146,6 +146,8 @@ export type SettingsSyncLabels = {
     lastSyncConflict: string;
     lastSyncError: string;
     lastSyncConflicts: string;
+    tasks: string;
+    projects: string;
     lastSyncSkew: string;
     lastSyncAdjusted: string;
     lastSyncConflictIds: string;

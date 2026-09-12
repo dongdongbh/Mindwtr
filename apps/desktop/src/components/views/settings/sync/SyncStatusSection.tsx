@@ -249,8 +249,8 @@ export function SyncStatusSection({
                     </div>
                     {lastSyncStats && (
                         <div>
-                            {t.lastSyncConflicts}: {conflictCount} • Tasks {lastSyncStats.tasks.mergedTotal} /
-                            Projects {lastSyncStats.projects.mergedTotal}
+                            {t.lastSyncConflicts}: {conflictCount} • {t.tasks} {lastSyncStats.tasks.mergedTotal} /
+                            {t.projects} {lastSyncStats.projects.mergedTotal}
                         </div>
                     )}
                     {lastSyncStats && maxClockSkewMs > 0 && (

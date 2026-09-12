@@ -593,6 +593,8 @@ export const SETTINGS_LABEL_KEYS = [
     'lastSyncError',
     'lastSyncConflict',
     'lastSyncConflicts',
+    'tasks',
+    'projects',
     'lastSyncSkew',
     'lastSyncAdjusted',
     'lastSyncConflictIds',
@@ -728,6 +730,8 @@ export const labelKeyOverrides: Partial<Record<keyof SettingsLabels, string>> = 
     navDone: 'nav.done',
     navArchived: 'nav.archived',
     navTrash: 'nav.trash',
+    tasks: 'calendar.tasks',
+    projects: 'projects.title',
     settingsSaveFailed: 'settings.feedback.saveFailed',
     pomodoroAutoStartNotice: 'settings.gtdMobile.pomodoroWillNowAdvancePhasesAutomatically',
     // "Auto" is already translated for text direction; the feed color picker
