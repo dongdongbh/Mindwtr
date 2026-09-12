@@ -266,6 +266,8 @@ export const csOverrides: Record<string, string> = {
         'list.groupByNone': 'Bez seskupení',
         'list.groupByContext': 'Kontext',
         'list.groupByArea': 'Oblast',
+        'reference.includeArchivedProjects': 'Zahrnout archivované projekty',
+        'reference.convertToAction': 'Převést na další akci',
         'reference.empty': 'Zatím nic neuloženo',
         'reference.emptyHint': 'Referenční materiály uchovávají informace, které se mohou hodit později — žádná akce není potřeba.',
         'status.inbox': 'Schránka',

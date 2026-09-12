@@ -167,6 +167,8 @@ export const nlOverrides: Record<string, string> = {
         'list.hideDetails': 'Details verbergen',
         'list.density': 'Dichtheid',
         'list.densityComfortable': 'Comfortabel',
+        'reference.includeArchivedProjects': 'Gearchiveerde projecten opnemen',
+        'reference.convertToAction': 'Omzetten naar actie',
         'reference.empty': 'Nog geen referentie-items.',
         'status.todo': 'Te doen',
         'status.next': 'Volgende',

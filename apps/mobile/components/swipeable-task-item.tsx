@@ -567,7 +567,32 @@ function SwipeableTaskItemInner({
         </AppPressable>
     );
 
-    const accessibilityLabel = [
+    const referenceProject = isReference && task.projectId
+        ? projects.find((candidate) => candidate.id === task.projectId)
+        : undefined;
+    const referenceAreaId = task.areaId || referenceProject?.areaId;
+    const referenceArea = isReference && referenceAreaId
+        ? areas.find((candidate) => candidate.id === referenceAreaId)
+        : undefined;
+    const visibleAttachmentCount = isReference
+        ? (task.attachments ?? []).filter((attachment) => !attachment.deletedAt).length
+        : 0;
+    const accessibilityLabel = isReference ? [
+        task.title,
+        referenceProject
+            ? `${tFallback(t, 'taskEdit.projectLabel', 'Project')}: ${referenceProject.title}`
+            : null,
+        referenceArea
+            ? `${tFallback(t, 'taskEdit.areaLabel', 'Area')}: ${referenceArea.name}`
+            : null,
+        task.assignedTo
+            ? `${tFallback(t, 'taskEdit.assignedTo', 'Assigned To')}: ${task.assignedTo}`
+            : null,
+        ...(task.tags ?? []),
+        visibleAttachmentCount > 0
+            ? `${tFallback(t, 'attachments.title', 'Attachments')}: ${visibleAttachmentCount}`
+            : null,
+    ].filter(Boolean).join('. ') : [
         task.title,
         `${tFallback(t, 'taskEdit.statusLabel', 'Status')}: ${t(`status.${task.status}`)}`,
         (() => {
@@ -705,7 +730,7 @@ function SwipeableTaskItemInner({
             hideChecklistProgress={hideChecklistProgress || isReference}
             hideContexts={hideContexts}
             hideProjectMeta={hideProjectMeta}
-            hideStatusBadge={hideStatusBadge}
+            hideStatusBadge={hideStatusBadge || isReference}
             hideDetails={hideDetails}
             statusBadgeAsIcon={statusBadgeAsIcon}
             isDark={isDark}

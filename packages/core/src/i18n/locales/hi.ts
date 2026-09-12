@@ -187,6 +187,8 @@ export const hiOverrides: Record<string, string> = {
         'list.densityComfortable': 'आरामदायक',
         'list.densityCompact': 'सघन',
         'list.densityCondensed': 'अति सघन',
+        'reference.includeArchivedProjects': 'संग्रहीत प्रोजेक्ट शामिल करें',
+        'reference.convertToAction': 'कार्रवाई में बदलें',
         'reference.empty': 'अभी तक कोई संदर्भ आइटम नहीं.',
         'status.inbox': 'इनबॉक्स',
         'status.todo': 'करने के लिए',

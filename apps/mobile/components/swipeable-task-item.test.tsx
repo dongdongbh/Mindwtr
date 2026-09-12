@@ -84,6 +84,10 @@ const translate = vi.hoisted(() => {
     'task.select': 'Select task',
     'task.deselect': 'Deselect task',
     'taskEdit.statusLabel': 'Status',
+    'taskEdit.projectLabel': 'Project',
+    'taskEdit.areaLabel': 'Area',
+    'taskEdit.assignedTo': 'Assigned To',
+    'attachments.title': 'Attachments',
     'taskEdit.priorityLabel': 'Priority',
     'priority.low': 'Low',
     'priority.medium': 'Medium',
@@ -204,10 +208,12 @@ vi.mock('lucide-react-native', () => ({
   History: (props: any) => React.createElement('History', props),
   Hourglass: (props: any) => React.createElement('Hourglass', props),
   ListChecks: (props: any) => React.createElement('ListChecks', props),
+  Paperclip: (props: any) => React.createElement('Paperclip', props),
   Repeat: (props: any) => React.createElement('Repeat', props),
   RotateCcw: (props: any) => React.createElement('RotateCcw', props),
   Star: (props: any) => React.createElement('Star', props),
   Trash2: (props: any) => React.createElement('Trash2', props),
+  UserRound: (props: any) => React.createElement('UserRound', props),
 }));
 
 describe('SwipeableTaskItem', () => {
@@ -2305,6 +2311,91 @@ it('can keep the focus star without adding a redundant focus outline', () => {
 
     expect(() => tree.root.find((node) => node.props.accessibilityLabel === 'checklist.progress')).toThrow();
     expect(() => tree.root.find((node) => node.props.accessibilityLabel === 'Book van')).toThrow();
+  });
+
+  it('renders references as memo rows with useful metadata and no task-only chrome', () => {
+    storeState.projects = [{
+      id: 'project-1',
+      title: 'Finished launch',
+      status: 'archived',
+      areaId: 'area-1',
+    }];
+    storeState.areas = [{ id: 'area-1', name: 'Work', color: '#3b82f6' }];
+    storeState.settings = {
+      features: { priorities: true, timeEstimates: true, pomodoro: true },
+      appearance: { showTaskAge: true },
+      gtd: { pomodoro: { linkTask: true } },
+    } as any;
+    getChecklistProgress.mockReturnValue({ completed: 0, total: 1, percent: 0 });
+
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(
+        <SwipeableTaskItem
+          task={{
+            id: 'reference-1',
+            title: 'Launch research',
+            description: 'A useful memo with a linked source',
+            status: 'reference',
+            projectId: 'project-1',
+            assignedTo: 'Alex',
+            tags: ['#research'],
+            contexts: ['@hidden-context'],
+            priority: 'urgent',
+            startTime: '2026-09-12T09:00:00.000Z',
+            dueDate: '2026-09-13T09:00:00.000Z',
+            recurrence: { rule: 'daily' },
+            timeEstimate: '1hr',
+            timeSpentMinutes: 15,
+            checklist: [{ id: 'step-1', title: 'Hidden checklist item', isCompleted: false }],
+            attachments: [
+              { id: 'file-1', kind: 'file', title: 'brief.pdf', uri: 'file:///brief.pdf', createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' },
+              { id: 'link-1', kind: 'link', title: 'Source', uri: 'https://example.com', createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' },
+              { id: 'deleted-file', kind: 'file', title: 'Old', uri: 'file:///old', createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z', deletedAt: '2026-09-02T00:00:00.000Z' },
+            ],
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-09-01T00:00:00.000Z',
+          } as any}
+          isDark={false}
+          tc={{
+            taskItemBg: '#111111',
+            border: '#222222',
+            text: '#ffffff',
+            secondaryText: '#999999',
+            tint: '#3b82f6',
+            warning: '#f59e0b',
+          } as any}
+          onPress={vi.fn()}
+          onStatusChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+    });
+
+    expect(hasText(tree, 'Finished launch')).toBe(true);
+    expect(hasText(tree, 'Work')).toBe(true);
+    expect(hasText(tree, 'Alex')).toBe(true);
+    expect(hasText(tree, '#research')).toBe(true);
+    expect(tree.root.findByProps({ accessibilityLabel: 'Attachments: 2' })).toBeTruthy();
+    expect(tree.root.find((node) => node.props.markdown === 'A useful memo with a linked source').props.numberOfLines).toBe(3);
+
+    expect(tree.root.findAllByProps({ testID: 'task-priority-strip' })).toHaveLength(0);
+    expect(tree.root.findAll((node) => String(node.props.accessibilityLabel ?? '').startsWith('Change status.'))).toHaveLength(0);
+    expect(hasText(tree, '@hidden-context')).toBe(false);
+    expect(hasText(tree, 'Hidden checklist item')).toBe(false);
+    expect(hasText(tree, 'Daily')).toBe(false);
+    expect(hasText(tree, '1h')).toBe(false);
+    expect(tree.root.findByProps({ accessibilityLabel: 'Next action' })).toBeTruthy();
+
+    const row = tree.root.find((node) => (
+      node.props.accessibilityRole === 'button'
+      && String(node.props.accessibilityLabel ?? '').startsWith('Launch research')
+    ));
+    expect(row.props.accessibilityLabel).toContain('Project: Finished launch');
+    expect(row.props.accessibilityLabel).toContain('Area: Work');
+    expect(row.props.accessibilityLabel).toContain('Assigned To: Alex');
+    expect(row.props.accessibilityLabel).not.toContain('Status:');
+    expect(row.props.accessibilityLabel).not.toContain('Priority:');
   });
 
   it('flushes checklist updates using the full task set, not only visible tasks', () => {

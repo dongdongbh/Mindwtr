@@ -200,6 +200,8 @@ export const esOverrides: Record<string, string> = {
 'list.groupByContext': "Contexto",
 'list.groupByArea': "Área",
 'list.groupByProject': "Proyecto",
+'reference.includeArchivedProjects': 'Incluir proyectos archivados',
+'reference.convertToAction': 'Convertir en acción',
 'reference.empty': "Aún no has archivado nada",
 'reference.emptyHint': "Referencia guarda información que quizá quieras después. No requiere ninguna acción.",
 'status.inbox': "Bandeja",

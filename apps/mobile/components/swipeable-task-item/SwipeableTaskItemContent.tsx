@@ -1,6 +1,6 @@
 import React, { type ReactNode, useMemo, useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
-import { CircleDot, History, Hourglass, ListChecks, Repeat } from 'lucide-react-native';
+import { CircleDot, History, Hourglass, ListChecks, Paperclip, Repeat, UserRound } from 'lucide-react-native';
 import { useThemeTokens } from '../../hooks/use-theme-tokens';
 import { useStatusColors } from '../../hooks/use-status-colors';
 import {
@@ -127,17 +127,22 @@ export function SwipeableTaskItemContent({
     task,
     tc,
 }: SwipeableTaskItemContentProps) {
-    const { project, projectColor, section } = useMemo(() => {
+    const { area, project, projectColor, section } = useMemo(() => {
         const activeProject = task.projectId ? projects.find((item) => item.id === task.projectId) : undefined;
         const projectArea = activeProject?.areaId
             ? areas.find((area) => area.id === activeProject.areaId)
             : undefined;
+        const taskArea = task.areaId
+            ? areas.find((candidate) => candidate.id === task.areaId)
+            : undefined;
         return {
+            area: taskArea ?? projectArea,
             project: activeProject,
             projectColor: projectArea?.color,
             section: task.sectionId ? sectionById.get(task.sectionId) : undefined,
         };
-    }, [areas, projects, sectionById, task.projectId, task.sectionId]);
+    }, [areas, projects, sectionById, task.areaId, task.projectId, task.sectionId]);
+    const isReference = task.status === 'reference';
 
     // Draft text lives here, not in useSwipeableChecklist: it must never reach the
     // pending-checklist flush, so an unsubmitted line is discarded with the row.
@@ -278,7 +283,20 @@ export function SwipeableTaskItemContent({
         );
     }
 
-    if (projectDeadlineLabel) {
+    if (isReference && area) {
+        addMetaPart(
+            <CompactText
+                key="area"
+                style={[styles.metaText, { color: tc.secondaryText }]}
+                numberOfLines={2}
+            >
+                {area.name}
+            </CompactText>,
+            'area'
+        );
+    }
+
+    if (!isReference && projectDeadlineLabel) {
         addMetaPart(
             <CompactText
                 key="project-deadline"
@@ -291,7 +309,7 @@ export function SwipeableTaskItemContent({
         );
     }
 
-    if (!hideContexts && task.contexts?.length) {
+    if (!isReference && !hideContexts && task.contexts?.length) {
         const context = task.contexts[0];
         const moreContexts = task.contexts.length - 1;
         addMetaPart(
@@ -317,6 +335,26 @@ export function SwipeableTaskItemContent({
                 ),
             }),
             'context'
+        );
+    }
+
+    if (isReference && task.assignedTo?.trim()) {
+        addMetaPart(
+            renderMetaItem({
+                key: 'assigned-to',
+                children: (
+                    <>
+                        <UserRound size={12} color={tc.secondaryText} strokeWidth={2} />
+                        <CompactText
+                            style={[styles.metaText, { color: tc.secondaryText }]}
+                            numberOfLines={2}
+                        >
+                            {task.assignedTo.trim()}
+                        </CompactText>
+                    </>
+                ),
+            }),
+            'assigned-to'
         );
     }
 
@@ -349,7 +387,7 @@ export function SwipeableTaskItemContent({
         );
     }
 
-    if (terminalTimestamp) {
+    if (!isReference && terminalTimestamp) {
         addMetaPart(
             renderMetaItem({
                 key: terminalTimestamp.key,
@@ -369,7 +407,7 @@ export function SwipeableTaskItemContent({
         );
     }
 
-    if (dueLabel) {
+    if (!isReference && dueLabel) {
         addMetaPart(
             <CompactText
                 key="due"
@@ -381,7 +419,7 @@ export function SwipeableTaskItemContent({
         );
     }
 
-    if (startLabel) {
+    if (!isReference && startLabel) {
         addMetaPart(
             <CompactText
                 key="start"
@@ -393,7 +431,7 @@ export function SwipeableTaskItemContent({
         );
     }
 
-    if (dateIssueLabel) {
+    if (!isReference && dateIssueLabel) {
         addMetaPart(
             <CompactText
                 key="date-issue"
@@ -406,7 +444,7 @@ export function SwipeableTaskItemContent({
         );
     }
 
-    if (recurrenceLabel) {
+    if (!isReference && recurrenceLabel) {
         addMetaPart(
             renderMetaItem({
                 key: 'recurrence',
@@ -427,7 +465,7 @@ export function SwipeableTaskItemContent({
         );
     }
 
-    if (timeEstimateLabel) {
+    if (!isReference && timeEstimateLabel) {
         addMetaPart(
             <Text key="estimate" style={[styles.metaText, { color: tc.secondaryText }]}>
                 {timeEstimateLabel}
@@ -437,7 +475,7 @@ export function SwipeableTaskItemContent({
     }
 
     const timeSpentLabel = formatTimeSpentLabel(task.timeSpentMinutes);
-    if (timeSpentLabel) {
+    if (!isReference && timeSpentLabel) {
         addMetaPart(
             renderMetaItem({
                 key: 'time-spent',
@@ -478,6 +516,27 @@ export function SwipeableTaskItemContent({
         );
     }
 
+    const visibleAttachmentCount = (task.attachments ?? []).filter((attachment) => !attachment.deletedAt).length;
+    if (isReference && visibleAttachmentCount > 0) {
+        addMetaPart(
+            renderMetaItem({
+                key: 'attachments',
+                children: (
+                    <>
+                        <Paperclip size={12} color={tc.secondaryText} strokeWidth={2} />
+                        <CompactText
+                            style={[styles.metaText, { color: tc.secondaryText }]}
+                            accessibilityLabel={`${tFallback(t, 'attachments.title', 'Attachments')}: ${visibleAttachmentCount}`}
+                        >
+                            {visibleAttachmentCount}
+                        </CompactText>
+                    </>
+                ),
+            }),
+            'attachments'
+        );
+    }
+
     const { isMaterial, shape } = useThemeTokens();
 
     return (
@@ -511,7 +570,7 @@ export function SwipeableTaskItemContent({
             accessibilityActions={accessibilityActions}
             onAccessibilityAction={onAccessibilityAction}
         >
-            {task.priority && (
+            {!isReference && task.priority && (
                 <View
                     style={[styles.priorityStrip, { backgroundColor: TASK_PRIORITY_COLORS[task.priority] }]}
                     testID="task-priority-strip"
@@ -571,7 +630,7 @@ export function SwipeableTaskItemContent({
                         tc={tc}
                         direction={textDirection}
                         style={[styles.taskDescription, { color: tc.secondaryText }]}
-                        numberOfLines={1}
+                        numberOfLines={isReference ? 3 : 1}
                     />
                 ) : null}
                 {!hideDetails && metaParts.length > 0 && (

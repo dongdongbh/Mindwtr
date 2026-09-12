@@ -187,6 +187,8 @@ export const ruOverrides: Record<string, string> = {
         'list.densityComfortable': 'Комфортный',
         'list.densityCompact': 'Компактный',
         'list.densityCondensed': 'Плотный',
+        'reference.includeArchivedProjects': 'Включить архивные проекты',
+        'reference.convertToAction': 'Преобразовать в действие',
         'reference.empty': 'Справочных материалов пока нет.',
         'status.inbox': 'Входящие',
         'status.todo': 'Тодо',

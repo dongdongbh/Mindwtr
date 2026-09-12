@@ -130,6 +130,56 @@ describe('useTaskEditState', () => {
         expect(onClose).toHaveBeenCalledOnce();
     });
 
+    it('saves a Reference text edit without erasing hidden task fields or memo metadata', async () => {
+        const referenceTask: Task = {
+            ...task,
+            status: 'reference',
+            description: 'Reference body',
+            assignedTo: 'Alex',
+            tags: ['#research'],
+            contexts: ['@private'],
+            location: 'Archive room',
+            priority: 'high',
+            energyLevel: 'low',
+            timeEstimate: '1hr',
+            startTime: '2026-09-12T09:00:00.000Z',
+            dueDate: '2026-09-13T09:00:00.000Z',
+            reviewAt: '2026-09-14T09:00:00.000Z',
+            recurrence: { rule: 'daily' },
+            checklist: [{ id: 'step-1', title: 'Preserved detail', isCompleted: false }],
+        };
+        let state!: ReturnType<typeof useTaskEditState>;
+        const onSave = vi.fn().mockResolvedValue({ success: true });
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose: vi.fn(),
+                onSave,
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                sections: [],
+                task: referenceTask,
+                tasks: [referenceTask],
+                visible: true,
+            });
+            return null;
+        }
+
+        renderer.act(() => {
+            renderer.create(React.createElement(Probe));
+        });
+        renderer.act(() => {
+            state.titleDraftRef.current = 'Edited reference';
+            state.setTitleDraft('Edited reference');
+            state.setDraftField('title', 'Edited reference');
+        });
+        await renderer.act(async () => {
+            expect(await state.draftLifecycle.save()).toBe(true);
+        });
+
+        expect(onSave).toHaveBeenCalledWith(referenceTask.id, { title: 'Edited reference' });
+    });
+
     it('preserves the complete draft in one cancellation write without completing a recurring task', async () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-09-09T14:30:00.000Z'));

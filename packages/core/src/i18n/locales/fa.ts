@@ -205,6 +205,8 @@ export const faOverrides: Record<string, string> = {
         'list.groupByContext': 'زمینه',
         'list.groupByArea': 'حوزه',
         'list.groupByProject': 'پروژه',
+        'reference.includeArchivedProjects': 'شامل پروژه‌های بایگانی‌شده',
+        'reference.convertToAction': 'تبدیل به اقدام',
         'reference.empty': 'هنوز چیزی بایگانی نشده',
         'reference.emptyHint': 'مرجع اطلاعاتی را نگه می‌دارد که ممکن است بعداً لازم شوند — نیازی به اقدام نیست.',
 

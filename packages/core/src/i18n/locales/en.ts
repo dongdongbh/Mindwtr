@@ -213,6 +213,8 @@ export const en: Record<string, string> = {
         'list.groupByContext': 'Context',
         'list.groupByArea': 'Area',
         'list.groupByProject': 'Project',
+        'reference.includeArchivedProjects': 'Include archived projects',
+        'reference.convertToAction': 'Convert to action',
         'reference.empty': 'Nothing filed yet',
         'reference.emptyHint': 'Reference holds info you might want later — no action required.',
 

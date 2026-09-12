@@ -169,6 +169,8 @@ export const arOverrides: Record<string, string> = {
         'list.densityComfortable': 'مريح',
         'list.densityCompact': 'مدمج',
         'list.densityCondensed': 'مضغوط',
+        'reference.includeArchivedProjects': 'تضمين المشاريع المؤرشفة',
+        'reference.convertToAction': 'تحويل إلى إجراء',
         'reference.empty': 'لا توجد عناصر مرجعية حتى الآن.',
         'reference.emptyHint': 'احفظ المعلومات المرجعية هنا عندما لا تحتاج إلى إجراء.',
         'energyLevel.low': 'طاقة منخفضة',

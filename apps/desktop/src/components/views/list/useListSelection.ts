@@ -34,6 +34,7 @@ type UseListSelectionOptions = {
         updates: Array<{ id: string; updates: Partial<Task> }>
     ) => Promise<unknown> | unknown;
     filteredTasks: Task[];
+    selectableTaskIds?: string[];
     highlightTaskId: string | null;
     isProcessing: boolean;
     registerTaskListScope: (scope: TaskListScope | null) => void;
@@ -94,6 +95,7 @@ export function useListSelection({
     batchMoveTasks,
     batchUpdateTasks,
     filteredTasks,
+    selectableTaskIds,
     highlightTaskId,
     isProcessing,
     registerTaskListScope,
@@ -129,6 +131,7 @@ export function useListSelection({
     }, []);
 
     const filteredTaskIds = useMemo(() => filteredTasks.map((task) => task.id), [filteredTasks]);
+    const selectionTaskIds = selectableTaskIds ?? filteredTaskIds;
     const {
         activeAction,
         allVisibleTasksSelected,
@@ -147,7 +150,7 @@ export function useListSelection({
         toggleMultiSelect,
         toggleSelectionMode,
         updateSelectedTaskTokens,
-    } = useTaskSelection(filteredTaskIds, {
+    } = useTaskSelection(selectionTaskIds, {
         batchDeleteTasks,
         batchMoveTasks,
         batchUpdateTasks,

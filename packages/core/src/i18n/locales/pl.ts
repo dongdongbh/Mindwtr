@@ -190,6 +190,8 @@ export const plOverrides: Record<string, string> = {
         'list.densityComfortable': 'Wygodny',
         'list.densityCompact': 'Kompaktowy',
         'list.densityCondensed': 'Zagęszczony',
+        'reference.includeArchivedProjects': 'Uwzględnij zarchiwizowane projekty',
+        'reference.convertToAction': 'Przekształć w działanie',
         'reference.empty': 'Nie ma jeszcze żadnych elementów referencyjnych.',
         'status.inbox': 'Skrzynka odbiorcza',
         'status.todo': 'Do zrobienia',

@@ -5,6 +5,7 @@ import { buildProjectOrderMap,
     buildQuickAddParseOptions,
     buildQuickAddPreviewEntries,
     compareTasksByProjectThenOrder,
+    createReferenceSearchPredicate,
     createTaskFilterPredicate,
     DEFAULT_AREA_COLOR,
     formatTimeEstimateLabel,
@@ -13,6 +14,7 @@ import { buildProjectOrderMap,
     getWaitingPerson,
     hasActiveFilterCriteria,
     isTaskInActiveProject,
+    isReferenceInVisibleProject,
     parseQuickAdd,
     getDefaultTaskAreaMode,
     getPersonOptionNames,
@@ -185,7 +187,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         density === 'condensed' ? 'condensed' : density === 'compact' ? 'compact' : 'comfortable';
     // Memoized: the resolved selection is an object, and a fresh identity on
     // every render would invalidate every list memo downstream.
-    const { areaById, projectById: metadataProjectMap, resolvedAreaFilter } = useAreaVisibility();
+    const { areaById, resolvedAreaFilter } = useAreaVisibility();
     const [newTaskTitle, setNewTaskTitle] = useState('');
     const [quickAddSyntaxOpen, setQuickAddSyntaxOpen] = useState(false);
     const [mindSweepOpen, setMindSweepOpen] = useState(false);
@@ -223,6 +225,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const queryCacheRef = useRef<Map<string, Task[]>>(new Map());
     const [selectedWaitingPerson, setSelectedWaitingPerson] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
+    const [includeArchivedReferenceProjects, setIncludeArchivedReferenceProjects] = useState(false);
     const addInputRef = useRef<HTMLInputElement>(null);
     const listScrollRef = useRef<HTMLDivElement>(null);
     const { collapsedGroups, setCollapsedGroups } = useCollapsedGroupsViewState(
@@ -230,37 +233,79 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         LIST_AXES,
     );
     const { priorities: prioritiesEnabled, timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
+    const isReferenceView = statusFilter === 'reference';
+    const {
+        allContexts,
+        allTags,
+        projectMap,
+        sequentialProjectFirstTasks,
+        tasksById,
+        tokenCounts,
+        nextCount,
+    } = useListViewOptimizations(
+        tasks,
+        baseTasks,
+        statusFilter,
+        perf,
+        includeArchivedReferenceProjects,
+    );
     const undoNotificationsEnabled = settings?.undoNotificationsEnabled !== false;
     const showQuickDone = statusFilter !== 'done' && statusFilter !== 'archived';
     const readOnly = statusFilter === 'done';
     const showViewFilterInput = statusFilter !== 'inbox';
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+    const referenceSearchPredicate = useMemo(
+        () => createReferenceSearchPredicate(searchQuery),
+        [searchQuery],
+    );
     const listFilterableTasks = useMemo(() => {
         const allowDeferredProjectTasks = statusFilter === 'done' || statusFilter === 'archived';
         return baseTasks.filter((task) => {
             if (task.deletedAt) return false;
             if (statusFilter !== 'all' && task.status !== statusFilter) return false;
-            if (!allowDeferredProjectTasks && !isTaskInActiveProject(task, metadataProjectMap)) return false;
-            if (!taskMatchesAreaFilterSelection(task, resolvedAreaFilter, metadataProjectMap, areaById)) return false;
+            if (isReferenceView) {
+                if (!isReferenceInVisibleProject(task, projectMap, includeArchivedReferenceProjects)) return false;
+            } else if (!allowDeferredProjectTasks && !isTaskInActiveProject(task, projectMap)) return false;
+            if (!taskMatchesAreaFilterSelection(task, resolvedAreaFilter, projectMap, areaById)) return false;
             return true;
         });
-    }, [baseTasks, areaById, metadataProjectMap, resolvedAreaFilter, statusFilter]);
+    }, [
+        areaById,
+        baseTasks,
+        includeArchivedReferenceProjects,
+        isReferenceView,
+        projectMap,
+        resolvedAreaFilter,
+        statusFilter,
+    ]);
     const metadataFilterVisibility = useMemo(() => getTaskMetadataFilterVisibility(listFilterableTasks, {
         prioritiesEnabled,
         timeEstimatesEnabled,
     }), [listFilterableTasks, prioritiesEnabled, timeEstimatesEnabled]);
-    const showPriorityFilters = metadataFilterVisibility.priority;
-    const showTimeEstimateFilters = metadataFilterVisibility.timeEstimate;
+    const showPriorityFilters = !isReferenceView && metadataFilterVisibility.priority;
+    const showTimeEstimateFilters = !isReferenceView && metadataFilterVisibility.timeEstimate;
     const activePriorities = showPriorityFilters ? selectedPriorities : EMPTY_PRIORITIES;
     const activeTimeEstimates = showTimeEstimateFilters ? selectedTimeEstimates : EMPTY_ESTIMATES;
+    const activeSelectedTokens = useMemo(
+        () => isReferenceView ? selectedTokens.filter((token) => token.trim().startsWith('#')) : selectedTokens,
+        [isReferenceView, selectedTokens],
+    );
+    const activeExcludedTokens = useMemo(
+        () => isReferenceView ? excludedTokens.filter((token) => token.trim().startsWith('#')) : excludedTokens,
+        [excludedTokens, isReferenceView],
+    );
     const activeListFilterCriteria = useMemo<FilterCriteria>(() => ({
         ...listFilterCriteria,
+        contexts: isReferenceView ? undefined : listFilterCriteria.contexts,
+        excludedContexts: isReferenceView ? undefined : listFilterCriteria.excludedContexts,
+        contextMatchMode: isReferenceView ? undefined : listFilterCriteria.contextMatchMode,
         priority: showPriorityFilters ? activePriorities : undefined,
         timeEstimates: showTimeEstimateFilters ? activeTimeEstimates : undefined,
         timeEstimateRange: showTimeEstimateFilters ? listFilterCriteria.timeEstimateRange : undefined,
     }), [
         activePriorities,
         activeTimeEstimates,
+        isReferenceView,
         listFilterCriteria,
         showPriorityFilters,
         showTimeEstimateFilters,
@@ -284,16 +329,12 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
 
     const [isProcessing, setIsProcessing] = useState(false);
     const [bulkOrganizeOpen, setBulkOrganizeOpen] = useState(false);
-    const {
-        allContexts,
-        allTags,
-        projectMap,
-        sequentialProjectFirstTasks,
-        tasksById,
-        tokenCounts,
-        nextCount,
-    } = useListViewOptimizations(tasks, baseTasks, statusFilter, perf);
-    const allTokens = Array.from(new Set([...allContexts, ...allTags])).sort();
+    const allTokens = useMemo(
+        () => isReferenceView
+            ? Array.from(new Set(listFilterableTasks.flatMap((task) => task.tags))).sort()
+            : Array.from(new Set([...allContexts, ...allTags])).sort(),
+        [allContexts, allTags, isReferenceView, listFilterableTasks],
+    );
     const personOptionNames = useMemo(
         () => getPersonOptionNames(people, tasks),
         [people, tasks],
@@ -375,6 +416,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
 
     useEffect(() => {
         setSearchQuery('');
+        setIncludeArchivedReferenceProjects(false);
     }, [statusFilter]);
 
     // The derived `projectMap` on purpose, not the hook's: it carries
@@ -420,12 +462,14 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         resolvedAreaFilter,
         selectedWaitingPerson,
         normalizedSearchQuery,
+        includeArchivedReferenceProjects,
     }), [
         statusFilter,
         activeListFilterCriteria,
         resolvedAreaFilter,
         selectedWaitingPerson,
         normalizedSearchQuery,
+        includeArchivedReferenceProjects,
     ]);
     const deferredFilterFeedbackKey = useDeferredValue(filterFeedbackKey);
     const isFiltering = deferredFilterFeedbackKey !== filterFeedbackKey;
@@ -442,6 +486,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         resolvedAreaFilter,
         areaById,
         selectedWaitingPerson,
+        includeArchivedReferenceProjects,
     }), [
         baseTasks,
         statusFilter,
@@ -454,6 +499,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         resolvedAreaFilter,
         areaById,
         selectedWaitingPerson,
+        includeArchivedReferenceProjects,
     ]);
     const deferredFilterInputs = useDeferredValue(filterInputs);
     const nextVisibilityEnabled = statusFilter === 'next';
@@ -479,7 +525,13 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
 
                 if (deferredFilterInputs.statusFilter !== 'all' && t.status !== deferredFilterInputs.statusFilter) return false;
                 // Respect statusFilter (handled above).
-                if (!allowDeferredProjectTasks && !isTaskInActiveProject(t, deferredFilterInputs.projectMap)) return false;
+                if (deferredFilterInputs.statusFilter === 'reference') {
+                    if (!isReferenceInVisibleProject(
+                        t,
+                        deferredFilterInputs.projectMap,
+                        deferredFilterInputs.includeArchivedReferenceProjects,
+                    )) return false;
+                } else if (!allowDeferredProjectTasks && !isTaskInActiveProject(t, deferredFilterInputs.projectMap)) return false;
                 if (!taskMatchesAreaFilterSelection(
                     t,
                     deferredFilterInputs.resolvedAreaFilter,
@@ -502,8 +554,12 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                     const person = getWaitingPerson(t);
                     if (!person || person.toLowerCase() !== deferredFilterInputs.selectedWaitingPerson.toLowerCase()) return false;
                 }
-                if (showViewFilterInput && normalizedSearchQuery && !t.title.toLowerCase().includes(normalizedSearchQuery)) {
-                    return false;
+                if (showViewFilterInput && normalizedSearchQuery) {
+                    if (deferredFilterInputs.statusFilter === 'reference') {
+                        if (!referenceSearchPredicate(t)) return false;
+                    } else if (!t.title.toLowerCase().includes(normalizedSearchQuery)) {
+                        return false;
+                    }
                 }
 
                 // A task you cannot start yet is not a next action — it is a
@@ -529,7 +585,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
 
             return sortTasksBy(filtered, deferredFilterInputs.sortBy);
         });
-    }, [deferredFilterInputs, nextVisibilityDayKey, nextVisibilityTick, normalizedSearchQuery, showViewFilterInput]);
+    }, [deferredFilterInputs, nextVisibilityDayKey, nextVisibilityTick, normalizedSearchQuery, referenceSearchPredicate, showViewFilterInput]);
     const activeNextGroupBy: NextGroupBy = statusFilter !== 'reference' && statusFilter !== 'done' && statusFilter !== 'someday'
         ? nextGroupBy as NextGroupBy
         : 'none';
@@ -670,6 +726,14 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             : index;
         rowVirtualizer.scrollToIndex(virtualIndex, { align });
     }, [visibleTasks, isListGrouping, firstGroupedRowIndexByTaskId, rowVirtualizer]);
+    const isHistoricalReferenceTask = useCallback((task: Task) => (
+        isReferenceView
+        && Boolean(task.projectId && projectMap.get(task.projectId)?.status === 'archived')
+    ), [isReferenceView, projectMap]);
+    const selectableTaskIds = useMemo(
+        () => visibleTasks.filter((task) => !isHistoricalReferenceTask(task)).map((task) => task.id),
+        [isHistoricalReferenceTask, visibleTasks],
+    );
     const {
         contextPromptMode,
         contextPromptOpen,
@@ -710,6 +774,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         batchMoveTasks,
         batchUpdateTasks,
         filteredTasks: visibleTasks,
+        selectableTaskIds,
         highlightTaskId,
         isProcessing,
         registerTaskListScope,
@@ -719,12 +784,13 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             statusFilter,
             prioritiesEnabled ? '1' : '0',
             timeEstimatesEnabled ? '1' : '0',
-            selectedTokens.join('|'),
-            excludedTokens.join('|'),
+            activeSelectedTokens.join('|'),
+            activeExcludedTokens.join('|'),
             selectedPriorities.join('|'),
             selectedTimeEstimates.join('|'),
             selectedWaitingPerson,
             activeNextGroupBy,
+            includeArchivedReferenceProjects ? 'archived-projects' : 'active-projects',
         ].join('::'),
         setHighlightTask,
         shouldVirtualize,
@@ -821,12 +887,10 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         }
     };
 
-    // Inbox added per #956: the filter criteria are shared across views, so a
-    // selection made in Someday kept narrowing the Inbox with nothing in the
-    // toolbar to show what was active or clear it. Deliberately not a blanket
-    // pass over every surface (#863) — Reference is still on the old list and
-    // has the same gap.
-    const showFilters = ['next', 'all', 'done', 'waiting', 'someday', 'inbox'].includes(statusFilter);
+    // Inbox added per #956 because it shares these criteria. Reference also
+    // exposes the panel because its archived-project visibility option lives
+    // alongside them.
+    const showFilters = ['next', 'all', 'done', 'waiting', 'someday', 'inbox', 'reference'].includes(statusFilter);
     const isInbox = statusFilter === 'inbox';
     const isNextView = statusFilter === 'next';
     const isWaitingView = statusFilter === 'waiting';
@@ -845,11 +909,12 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const formatEstimate = (value: TimeEstimate) => formatTimeEstimateLabel(value, { t });
     const filterSummary = [
         ...(normalizedSearchQuery ? [`${t('common.search')}: ${searchQuery.trim()}`] : []),
-        ...selectedTokens,
-        ...excludedTokens.map((token) => `${resolveText('filters.excluded', 'Excluded')}: ${token}`),
+        ...activeSelectedTokens,
+        ...activeExcludedTokens.map((token) => `${resolveText('filters.excluded', 'Excluded')}: ${token}`),
         ...(showPriorityFilters ? selectedPriorities.map((priority) => t(`priority.${priority}`)) : []),
         ...(showTimeEstimateFilters ? selectedTimeEstimates.map(formatEstimate) : []),
         ...(selectedWaitingPerson ? [`${t('process.delegateWhoLabel')}: ${selectedWaitingPerson}`] : []),
+        ...(isReferenceView && includeArchivedReferenceProjects ? [t('reference.includeArchivedProjects')] : []),
     ];
     const hasFilters = filterSummary.length > 0;
     const filterSummaryLabel = filterSummary.slice(0, 3).join(', ');
@@ -921,6 +986,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     })();
     const renderListTask = useCallback((task: Task) => {
         const index = taskIndexById.get(task.id) ?? 0;
+        const isHistoricalReference = isHistoricalReferenceTask(task);
         return (
             <StoreTaskItem
                 key={task.id}
@@ -935,10 +1001,12 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                 readOnly={readOnly}
                 compactMetaEnabled={showListDetails}
                 showProjectBadgeInActions={false}
+                interactionDisabled={isHistoricalReference}
             />
         );
     }, [
         handleSelectIndex,
+        isHistoricalReferenceTask,
         multiSelectedIds,
         readOnly,
         selectedIndex,
@@ -1020,7 +1088,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                         <div className="space-y-3">
                             <BulkSelectionToolbar
                                 selectionCount={selectedIdsArray.length}
-                                totalCount={filteredTasks.length}
+                                totalCount={selectableTaskIds.length}
                                 allSelected={allVisibleTasksSelected}
                                 onSelectAll={selectAllVisibleTasks}
                                 onClearSelection={clearTaskSelection}
@@ -1170,10 +1238,13 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                         <ListFiltersPanel
                             t={t}
                             hasFilters={hasFilters}
-                            onClearFilters={clearFilters}
+                            onClearFilters={() => {
+                                clearFilters();
+                                setIncludeArchivedReferenceProjects(false);
+                            }}
                             allTokens={allTokens}
-                            selectedTokens={selectedTokens}
-                            excludedTokens={excludedTokens}
+                            selectedTokens={activeSelectedTokens}
+                            excludedTokens={activeExcludedTokens}
                             tokenCounts={tokenCounts}
                             onToggleToken={toggleTokenFilter}
                             showPriorityFilters={showPriorityFilters}
@@ -1185,6 +1256,11 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                             selectedTimeEstimates={selectedTimeEstimates}
                             onToggleEstimate={toggleTimeFilter}
                             formatEstimate={formatEstimate}
+                            showIncludeArchivedProjects={isReferenceView}
+                            includeArchivedProjects={includeArchivedReferenceProjects}
+                            onToggleIncludeArchivedProjects={() => {
+                                setIncludeArchivedReferenceProjects((include) => !include);
+                            }}
                         />
                     )}
 

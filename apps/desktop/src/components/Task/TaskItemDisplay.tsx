@@ -170,7 +170,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const ageLabel = getTaskAgeLabel(task.createdAt, language);
     const isBareFileReference = useBareFileReferenceCheck();
     const showCompactMeta = compactMetaEnabled && !isViewOpen;
-    const collapsedPriorityAccessibilityLabel = !compactMetaEnabled
+    const collapsedPriorityAccessibilityLabel = !isReference
+        && !compactMetaEnabled
         && !isViewOpen
         && prioritiesEnabled
         && task.priority
@@ -183,7 +184,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     // The age badge nudges about work that has been sitting unfinished, so it stays
     // off completed rows — archived as well as done, which Archive started showing
     // when its rows became the shared read-only row (#968).
-    const showAgeBadge = showTaskAge
+    const showAgeBadge = !isReference
+        && showTaskAge
         && !isTaskFinished(task)
         && Boolean(ageLabel);
     const taskIsCancelled = isTaskCancelled(task);
@@ -205,26 +207,28 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     // carries no information the fallback row's date context doesn't already
     // give, so it stays out.
     const hasTimedStart = Boolean(task.startTime && hasTimeComponent(task.startTime));
-    const hasMetadata = Boolean(
-        (showProjectBadgeInMetadata && project)
-        || area
-        || projectDeadlineLabel
-        || appearsAtLabel
-        || completionLabel
-        || task.startTime
-        || task.dueDate
-        || dateIssueLabel
-        || task.location
-        || recurrencePreviewLabel
-        || (prioritiesEnabled && task.priority)
-        || (!isReference && task.energyLevel)
-        || task.assignedTo
-        || (task.contexts?.length ?? 0) > 0
-        || task.tags.length > 0
-        || checklistProgress
-        || showAgeBadge
-        || (timeEstimatesEnabled && task.timeEstimate)
-    );
+    const hasMetadata = isReference
+        ? Boolean((showProjectBadgeInMetadata && project) || area || task.assignedTo || task.tags.length > 0)
+        : Boolean(
+            (showProjectBadgeInMetadata && project)
+            || area
+            || projectDeadlineLabel
+            || appearsAtLabel
+            || completionLabel
+            || task.startTime
+            || task.dueDate
+            || dateIssueLabel
+            || task.location
+            || recurrencePreviewLabel
+            || (prioritiesEnabled && task.priority)
+            || task.energyLevel
+            || task.assignedTo
+            || (task.contexts?.length ?? 0) > 0
+            || task.tags.length > 0
+            || checklistProgress
+            || showAgeBadge
+            || (timeEstimatesEnabled && task.timeEstimate)
+        );
     const resolvedDirection = resolveTaskTextDirection(task);
     const isRtl = resolvedDirection === 'rtl';
     const hoverHintText = showHoverHint
@@ -399,7 +403,8 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
         );
     };
 
-    const showQuickDoneButton = showQuickDone
+    const showQuickDoneButton = !isReference
+        && showQuickDone
         && !selectionMode
         && !readOnly
         && isTaskActionable(task);
@@ -478,24 +483,24 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const renderMetadataRow = (className?: string) => (
         <div className={cn("flex flex-wrap items-center text-xs", className)}>
             {showProjectBadgeInMetadata && renderProjectBadge()}
-            {!appearsAtDuplicatesStart && renderAppearsAtMetadataBadge()}
-            {renderProjectDeadlineMetadataBadge()}
-            {!project && area && (
+            {!isReference && !appearsAtDuplicatesStart && renderAppearsAtMetadataBadge()}
+            {!isReference && renderProjectDeadlineMetadataBadge()}
+            {(isReference || !project) && area && (
                 <MetadataBadge
                     variant="project"
                     label={area.name}
                     dotColor={area.color || DEFAULT_AREA_COLOR}
                 />
             )}
-            {renderCompletionMetadataBadge()}
-            {task.startTime && (
+            {!isReference && renderCompletionMetadataBadge()}
+            {!isReference && task.startTime && (
                 <MetadataBadge
                     variant="info"
                     icon={ArrowRight}
                     label={safeFormatDate(task.startTime, hasTimeComponent(task.startTime) ? 'Pp' : 'P')}
                 />
             )}
-            {task.dueDate && (
+            {!isReference && task.dueDate && (
                 <div className="flex items-center gap-2">
                     <MetadataBadge
                         variant="info"
@@ -512,7 +517,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     )}
                 </div>
             )}
-            {dateIssueLabel && (
+            {!isReference && dateIssueLabel && (
                 <MetadataBadge
                     variant="info"
                     icon={AlertTriangle}
@@ -520,21 +525,21 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     className="text-warning"
                 />
             )}
-            {task.location && (
+            {!isReference && task.location && (
                 <MetadataBadge
                     variant="info"
                     icon={MapPin}
                     label={task.location}
                 />
             )}
-            {recurrencePreviewLabel && (
+            {!isReference && recurrencePreviewLabel && (
                 <MetadataBadge
                     variant="info"
                     icon={Repeat}
                     label={recurrencePreviewLabel}
                 />
             )}
-            {prioritiesEnabled && task.priority && (
+            {!isReference && prioritiesEnabled && task.priority && (
                 <MetadataBadge
                     variant="priority"
                     label={t(`priority.${task.priority}`)}
@@ -553,7 +558,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     label={`${t('taskEdit.assignedTo')}: ${task.assignedTo}`}
                 />
             )}
-            {task.contexts?.length > 0 && (
+            {!isReference && task.contexts?.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
                     {task.contexts.map((ctx) => renderContextBadge(ctx))}
                 </div>
@@ -579,7 +584,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     </div>
                 </div>
             )}
-            {showAgeBadge && (
+            {!isReference && showAgeBadge && (
                 <MetadataBadge
                     variant="age"
                     icon={Clock}
@@ -592,14 +597,14 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     )}
                 />
             )}
-            {timeEstimatesEnabled && task.timeEstimate && (
+            {!isReference && timeEstimatesEnabled && task.timeEstimate && (
                 <MetadataBadge
                     variant="estimate"
                     icon={Timer}
                     label={formatTimeEstimate(task.timeEstimate)}
                 />
             )}
-            {timeSpentEnabled && formatTimeSpentLabel(task.timeSpentMinutes) && (
+            {!isReference && timeSpentEnabled && formatTimeSpentLabel(task.timeSpentMinutes) && (
                 <MetadataBadge
                     variant="estimate"
                     icon={History}
@@ -619,7 +624,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const overlayDragHandle = actionsOverlay && !!dragHandle;
     const overlayQuickDone = actionsOverlay && showQuickDoneButton;
     const inlineLeftControls = !actionsOverlay && (showQuickDoneButton || dragHandle);
-    const showActionTags = !actionsOverlay && !isViewOpen && task.tags.length > 0;
+    const showActionTags = !isReference && !actionsOverlay && !isViewOpen && task.tags.length > 0;
 
     // Someday tasks promote to Next instead of completing — the natural
     // transition when an item unblocks, matching the mobile swipe action.
@@ -670,7 +675,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
               * offset by a hair against one that has it, in any density.
               * `start-0` keeps it on the leading edge under RTL.
               */}
-            {prioritiesEnabled && task.priority && (
+            {!isReference && prioritiesEnabled && task.priority && (
                 <span
                     aria-hidden="true"
                     data-priority-strip={task.priority}
@@ -799,7 +804,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                         </div>
                     </button>
                     )}
-                    {showCompactMeta && descriptionPreview && (
+                    {(showCompactMeta || isReference) && !isViewOpen && descriptionPreview && (
                         <div
                             className={cn(
                                 "task-item-display__description-preview mt-0.5 truncate text-xs font-normal text-muted-foreground",
@@ -811,12 +816,12 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             <InlineMarkdown markdown={descriptionPreview} interactiveLinks={false} />
                         </div>
                     )}
-                    {showCompactMeta && hasMetadata && renderMetadataRow(cn(
+                    {(showCompactMeta || isReference) && !isViewOpen && hasMetadata && renderMetadataRow(cn(
                         "gap-2 text-muted-foreground",
                         dense ? "mt-0.5" : "mt-1",
                         (overlayDragHandle || overlayQuickDone) && "pl-12"
                     ))}
-                    {!showCompactMeta && !isViewOpen && (completionLabel || projectDeadlineLabel || appearsAtLabel || hasTimedStart) && (
+                    {!isReference && !showCompactMeta && !isViewOpen && (completionLabel || projectDeadlineLabel || appearsAtLabel || hasTimedStart) && (
                         <div className={cn(
                             "flex flex-wrap items-center gap-2 text-xs text-muted-foreground",
                             dense ? "mt-0.5" : "mt-1",
@@ -1008,12 +1013,12 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             )}
                         </div>
                     )}
-                    {showProjectBadgeInActions && project && (
+                    {!isReference && showProjectBadgeInActions && project && (
                         <div className="hidden md:flex items-center max-w-[180px]">
                             {renderProjectBadge()}
                         </div>
                     )}
-                    {pomodoroQuickStart && (
+                    {!isReference && pomodoroQuickStart && (
                         <button
                             type="button"
                             onClick={(event) => {
@@ -1032,7 +1037,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             )}
                         </button>
                     )}
-                    {focusToggle && (
+                    {!isReference && focusToggle && (
                         <button
                             type="button"
                             onClick={(event) => {
@@ -1106,7 +1111,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                         </>
                     )) : (
                         <>
-                            {showStatusSelect && (
+                            {!isReference && showStatusSelect && (
                                 <select
                                     value={task.status}
                                     aria-label={t('task.aria.status')}

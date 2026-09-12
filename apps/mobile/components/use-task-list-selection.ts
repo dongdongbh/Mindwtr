@@ -7,8 +7,10 @@ import {
   tFallback,
   updateRangeSelection,
   type BulkOrganizeTaskUpdateInput,
+  type StoreActionResult,
+  type Task,
+  type TaskStatus,
 } from '@mindwtr/core';
-import type { StoreActionResult, Task, TaskStatus } from '@mindwtr/core';
 import { logError } from '../lib/app-log';
 import { getBulkActionFailureMessage } from './task-list-utils';
 import { useToast } from '../contexts/toast-context';
@@ -17,6 +19,7 @@ type UseTaskListSelectionParams = {
   batchDeleteTasks: (ids: string[]) => Promise<void | StoreActionResult>;
   batchMoveTasks: (ids: string[], status: TaskStatus) => Promise<void | StoreActionResult>;
   batchUpdateTasks: (updates: { id: string; updates: Partial<Task> }[]) => Promise<void | StoreActionResult>;
+  canSelectTaskId?: (taskId: string) => boolean;
   restoreActionLabel: string;
   restoreTask: (id: string) => Promise<void | StoreActionResult>;
   t: (key: string) => string;
@@ -61,6 +64,7 @@ export function useTaskListSelection({
   batchDeleteTasks,
   batchMoveTasks,
   batchUpdateTasks,
+  canSelectTaskId,
   restoreActionLabel,
   restoreTask,
   t,
@@ -77,7 +81,10 @@ export function useTaskListSelection({
   const [rangeSelectMode, setRangeSelectMode] = useState(false);
   const rangeSelectionAnchorIdRef = useRef<string | null>(null);
 
-  const selectedIdsArray = useMemo(() => Array.from(multiSelectedIds), [multiSelectedIds]);
+  const selectedIdsArray = useMemo(
+    () => Array.from(multiSelectedIds).filter((taskId) => canSelectTaskId?.(taskId) ?? true),
+    [canSelectTaskId, multiSelectedIds],
+  );
   const hasSelection = selectedIdsArray.length > 0;
 
   const exitSelectionMode = useCallback(() => {
@@ -113,20 +120,27 @@ export function useTaskListSelection({
   }, [bulkActionLoading, hasSelection]);
 
   const toggleMultiSelect = useCallback((taskId: string, options: ToggleMultiSelectOptions = {}) => {
+    if (canSelectTaskId && !canSelectTaskId(taskId)) return;
     if (!selectionMode) setSelectionMode(true);
     setMultiSelectedIds((prev) => {
+      const selectableIds = canSelectTaskId
+        ? new Set(Array.from(prev).filter(canSelectTaskId))
+        : prev;
+      const visibleIds = canSelectTaskId
+        ? (options.visibleTaskIds ?? []).filter(canSelectTaskId)
+        : (options.visibleTaskIds ?? []);
       const result = updateRangeSelection({
         anchorId: rangeSelectionAnchorIdRef.current,
         range: rangeSelectMode,
-        selectedIds: prev,
+        selectedIds: selectableIds,
         targetId: taskId,
-        visibleIds: options.visibleTaskIds ?? [],
+        visibleIds,
       });
       rangeSelectionAnchorIdRef.current = result.anchorId;
       return result.selectedIds;
     });
     if (rangeSelectMode) setRangeSelectMode(false);
-  }, [rangeSelectMode, selectionMode]);
+  }, [canSelectTaskId, rangeSelectMode, selectionMode]);
 
   const handleBatchMove = useCallback(async (newStatus: TaskStatus) => {
     if (!hasSelection || bulkActionLoading) return;

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { type Task, type TaskStatus, useTaskStore, isTaskInActiveProject, getSequentialFirstTaskIds, isSequentialChainStatus } from '@mindwtr/core';
+import { type Task, type TaskStatus, useTaskStore, isReferenceInVisibleProject, isTaskInActiveProject, getSequentialFirstTaskIds, isSequentialChainStatus } from '@mindwtr/core';
 import { useConditionalMemo } from './useConditionalMemo';
 import { useProgressiveComputation } from './useProgressiveComputation';
 
@@ -13,6 +13,7 @@ export function useListViewOptimizations(
     baseTasks: Task[],
     statusFilter: TaskStatus | 'all',
     perf?: ListViewPerf,
+    includeArchivedReferenceProjects = false,
 ) {
     const perfRef = useRef<ListViewPerf | undefined>(perf);
     useEffect(() => {
@@ -63,12 +64,18 @@ export function useListViewOptimizations(
                     .filter((task) => {
                         if (task.deletedAt) return false;
                         if (statusFilter !== 'all' && task.status !== statusFilter) return false;
-                        if (!allowDeferredProjectTasks && !isTaskInActiveProject(task, projectMap)) return false;
+                        if (statusFilter === 'reference') {
+                            if (!isReferenceInVisibleProject(task, projectMap, includeArchivedReferenceProjects)) return false;
+                        } else if (!allowDeferredProjectTasks && !isTaskInActiveProject(task, projectMap)) return false;
                         if (hideProjectTasksInDeferredList && task.projectId && projectMap.get(task.projectId)) return false;
                         return true;
                     })
                     .forEach((task) => {
-                        const tokens = new Set([...(task.contexts || []), ...(task.tags || [])]);
+                        const tokens = new Set(
+                            statusFilter === 'reference'
+                                ? task.tags
+                                : [...(task.contexts || []), ...(task.tags || [])],
+                        );
                         tokens.forEach((token) => {
                             counts[token] = (counts[token] || 0) + 1;
                         });
@@ -77,7 +84,7 @@ export function useListViewOptimizations(
             };
             return perfApi?.measure ? perfApi.measure('tokenCounts', compute) : compute();
         },
-        [tasks, statusFilter, projectMap],
+        [tasks, statusFilter, projectMap, includeArchivedReferenceProjects],
         {},
         'low',
     );

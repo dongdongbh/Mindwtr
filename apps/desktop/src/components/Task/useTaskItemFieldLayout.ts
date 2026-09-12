@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 import type { AppData, Task, TaskDraft, TaskEditorFieldId } from '@mindwtr/core';
 import {
     DEFAULT_TASK_EDITOR_HIDDEN,
+    REFERENCE_HIDDEN_TASK_FIELDS,
     TASK_EDITOR_FIXED_FIELDS,
     getTaskEditorSectionAssignments,
     getTaskEditorSectionOpenDefaults,
@@ -80,16 +81,10 @@ export function useTaskItemFieldLayout({
         return next;
     }, [savedHidden, prioritiesEnabled, timeEstimatesEnabled, taskEditorOrder]);
     const isReference = editStatus === 'reference';
-    const referenceHiddenFields = useMemo(() => new Set<TaskEditorFieldId>([
-        'startTime',
-        'dueDate',
-        'reviewAt',
-        'recurrence',
-        'priority',
-        'energyLevel',
-        'timeEstimate',
-        'checklist',
-    ]), []);
+    const referenceHiddenFields = useMemo(
+        () => new Set<TaskEditorFieldId>(REFERENCE_HIDDEN_TASK_FIELDS),
+        [],
+    );
 
     const hasValue = useCallback((fieldId: TaskEditorFieldId) => {
         switch (fieldId) {

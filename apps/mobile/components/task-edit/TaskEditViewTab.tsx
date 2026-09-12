@@ -147,7 +147,7 @@ function TaskEditViewTabComponent({
   const section = sections.find((item) => item.id === mergedTask.sectionId);
   const title = String(mergedTask.title || '').trim();
   const description = String(mergedTask.description || '').trim();
-  const area = areas.find((a) => a.id === mergedTask.areaId);
+  const area = areas.find((a) => a.id === (mergedTask.areaId || project?.areaId));
   const checklist = mergedTask.checklist || [];
 
   const statusLabel = isTaskCancelled(mergedTask as Task)
@@ -201,7 +201,7 @@ function TaskEditViewTabComponent({
           </Text>
         </View>
       ) : null}
-      {showStatusField && statusLabel ? (
+      {!isReference && showStatusField && statusLabel ? (
         <View style={[styles.viewRow, { backgroundColor: tc.inputBg, borderColor: tc.border }]}>
           <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{t('taskEdit.statusLabel')}</Text>
           {!readOnly && onStatusUpdate && mergedTask.status ? (
@@ -225,7 +225,7 @@ function TaskEditViewTabComponent({
         project?.title ? `Open project ${project.title}` : undefined
       )}
       {project?.id ? renderViewRow(t('taskEdit.sectionLabel'), section?.title) : null}
-      {!project?.id ? renderViewRow(t('taskEdit.areaLabel'), area?.name) : null}
+      {!project?.id || isReference ? renderViewRow(t('taskEdit.areaLabel'), area?.name) : null}
       {!isReference ? renderViewRow(t('taskEdit.startDateLabel'), mergedTask.startTime ? formatDate(mergedTask.startTime) : undefined) : null}
       {!isReference ? renderViewRow(t('taskEdit.dueDateLabel'), mergedTask.dueDate ? formatDueDate(mergedTask.dueDate) : undefined) : null}
       {!isReference && hasReminderHandoffSchedule && mergedTask.suppressMindwtrReminders === true
@@ -236,7 +236,7 @@ function TaskEditViewTabComponent({
         : null}
       {!isReference ? renderViewRow(t('taskEdit.reviewDateLabel'), mergedTask.reviewAt ? formatDate(mergedTask.reviewAt) : undefined) : null}
       {!isReference && timeEstimatesEnabled ? renderViewRow(t('taskEdit.timeEstimateLabel'), timeEstimateLabel) : null}
-      {mergedTask.contexts?.length ? (
+      {!isReference && mergedTask.contexts?.length ? (
         <View style={styles.viewSection}>
           <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{t('taskEdit.contextsLabel')}</Text>
           {renderViewPills(mergedTask.contexts, onContextPress, 'context')}
@@ -248,7 +248,7 @@ function TaskEditViewTabComponent({
           {renderViewPills(mergedTask.tags, onTagPress, 'tag')}
         </View>
       ) : null}
-      {mergedTask.location ? renderViewRow(t('taskEdit.locationLabel'), mergedTask.location) : null}
+      {!isReference && mergedTask.location ? renderViewRow(t('taskEdit.locationLabel'), mergedTask.location) : null}
       {!isReference && recurrencePreviewLabel ? renderViewRow(t('taskEdit.recurrenceLabel'), recurrencePreviewLabel) : null}
       {description ? (
         <View style={styles.viewSection}>

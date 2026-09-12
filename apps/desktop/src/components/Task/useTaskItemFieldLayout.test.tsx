@@ -221,16 +221,17 @@ describe('useTaskItemFieldLayout', () => {
             draft: { status: 'reference' },
         })));
 
-        expect(result.current.basicFields).toContain('status');
+        expect(result.current.basicFields).not.toContain('status');
         expect(result.current.basicFields).not.toContain('dueDate');
         expect(result.current.schedulingFields).toEqual([]);
-        expect(result.current.basicFields).toContain('contexts');
+        expect(result.current.basicFields).not.toContain('contexts');
         expect(result.current.organizationFields).toContain('tags');
         expect(result.current.organizationFields).not.toContain('priority');
         expect(result.current.organizationFields).not.toContain('timeEstimate');
         expect(result.current.detailsFields).toContain('description');
         expect(result.current.detailsFields).toContain('attachments');
         expect(result.current.detailsFields).not.toContain('checklist');
+        expect(result.current.detailsFields).not.toContain('location');
     });
 
     it('uses the draft status rather than the persisted task status for field visibility', () => {

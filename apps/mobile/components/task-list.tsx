@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { View, FlatList, Text, RefreshControl, Modal, Pressable, TouchableOpacity, useWindowDimensions, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { View, FlatList, Text, RefreshControl, Modal, Pressable, Switch, TouchableOpacity, useWindowDimensions, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { router } from 'expo-router';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, GripVertical } from 'lucide-react-native';
 import DraggableFlatList, { type DragEndParams, type RenderItemParams } from 'react-native-draggable-flatlist';
@@ -20,6 +20,12 @@ import {
   isTaskInActiveProject,
   getTaskMetadataFilterVisibility,
   getProjectSectionsForView,
+  createReferenceSearchPredicate,
+  isReferenceInVisibleProject,
+  SAVED_FILTER_NO_PROJECT_ID,
+  taskMatchesAreaFilterSelection,
+  DONE_TASK_LIST_SORT_OPTIONS,
+  TASK_LIST_SORT_OPTIONS,
 } from '@mindwtr/core';
 
 import { TaskEditModal } from './task-edit-modal';
@@ -43,7 +49,6 @@ import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useToast } from '@/contexts/toast-context';
 import { PullSyncIndicator } from '@/components/PullSyncIndicator';
 import { useManualPullSync } from '@/hooks/use-manual-pull-sync';
-import { taskMatchesAreaFilterSelection } from '@mindwtr/core';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { logError, logInfo } from '../lib/app-log';
 import {
@@ -89,7 +94,6 @@ import {
 import { usePruneSelectionToVisible, useTaskListSelection } from './use-task-list-selection';
 import { useLocalDayKey } from '@/hooks/use-local-day-key';
 import { useAndroidActivitySession } from '@/hooks/use-android-activity-session';
-import { DONE_TASK_LIST_SORT_OPTIONS, TASK_LIST_SORT_OPTIONS } from '@mindwtr/core';
 import { resolveTaskListSortBy } from '@/lib/task-list-sort';
 import { DONE_LIST_GROUP_OPTIONS } from '@/lib/view-state/done-list-view-state';
 import { useCollapsedTaskGroups } from '@/lib/view-state/task-group-collapse-state';
@@ -290,6 +294,7 @@ function TaskListComponent({
   const {
     tasks,
     projects,
+    allProjects,
     sections,
     allSections,
     areas,
@@ -315,6 +320,7 @@ function TaskListComponent({
     // the main list to one project's tasks (#1000).
     allVisibleTasks: state.tasks,
     projects: state.projects,
+    allProjects: state._allProjects ?? state.projects,
     sections: state.sections,
     allSections: state._allSections,
     areas: state.areas,
@@ -341,6 +347,7 @@ function TaskListComponent({
   const [bulkOrganizeVisible, setBulkOrganizeVisible] = useState(false);
   const [internalProjectReorderMode, setInternalProjectReorderMode] = useState(false);
   const [completedTasksCollapsed, setCompletedTasksCollapsed] = useState(true);
+  const [includeArchivedReferenceProjects, setIncludeArchivedReferenceProjects] = useState(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reduceMotion = useReducedMotion();
   // Tracks the highlightTaskId we already scrolled to, so an id is centred once
@@ -367,6 +374,18 @@ function TaskListComponent({
       return acc;
     }, {} as Record<string, Task>);
   }, [tasks]);
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+  const allProjectById = useMemo(() => new Map(allProjects.map((project) => [project.id, project])), [allProjects]);
+  const isTaskReadOnly = useCallback((task: Task) => {
+    if (projectReadOnly) return true;
+    if (!task.projectId) return false;
+    const owningProject = allProjectById.get(task.projectId);
+    return Boolean(owningProject?.deletedAt || owningProject?.status === 'archived');
+  }, [allProjectById, projectReadOnly]);
+  const canSelectTaskId = useCallback((taskId: string) => {
+    const task = tasksById[taskId];
+    return task ? !isTaskReadOnly(task) : true;
+  }, [isTaskReadOnly, tasksById]);
   const {
     bulkActionLabel,
     bulkActionLoading,
@@ -399,6 +418,7 @@ function TaskListComponent({
     restoreTask,
     t,
     tasksById,
+    canSelectTaskId,
   });
 
   const sortBy = resolveTaskListSortBy({
@@ -458,7 +478,6 @@ function TaskListComponent({
   const canBulkOrganizeInbox = enableInboxBulkOrganize && statusFilter === 'inbox';
   const canBulkOrganizeProject = enableProjectBulkOrganize && Boolean(projectId);
   const canBulkOrganizeSelection = canBulkOrganizeInbox || canBulkOrganizeProject;
-  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
   const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
 
   // Track the last-seen signal so a remount (e.g. toggling reorder mode swaps the
@@ -515,19 +534,63 @@ function TaskListComponent({
       if (statusFilter === 'all' && !includeDone && task.status === 'done') return false;
       const matchesStatus = statusFilter === 'all' ? true : task.status === statusFilter;
       const matchesProject = projectId ? task.projectId === projectId : true;
-      if (!projectId && !isTaskInActiveProject(task, projectById)) return false;
-      if (!taskMatchesAreaFilterSelection(task, resolvedAreaFilter, projectById, areaById)) return false;
+      if (!projectId) {
+        if (statusFilter === 'reference') {
+          if (!isReferenceInVisibleProject(task, allProjectById, includeArchivedReferenceProjects)) return false;
+        } else if (!isTaskInActiveProject(task, projectById)) {
+          return false;
+        }
+      }
+      const areaProjectLookup = statusFilter === 'reference' ? allProjectById : projectById;
+      if (!taskMatchesAreaFilterSelection(task, resolvedAreaFilter, areaProjectLookup, areaById)) return false;
       return matchesStatus && matchesProject;
     });
-  }, [areaById, includeDone, projectById, projectId, resolvedAreaFilter, statusFilter, tasks]);
-  const metadataFilterVisibility = useMemo(() => getTaskMetadataFilterVisibility(filterableTasks, {
-    prioritiesEnabled,
-    timeEstimatesEnabled: timeEstimateFiltersEnabled,
-  }), [filterableTasks, prioritiesEnabled, timeEstimateFiltersEnabled]);
+  }, [allProjectById, areaById, includeArchivedReferenceProjects, includeDone, projectById, projectId, resolvedAreaFilter, statusFilter, tasks]);
+  const referenceProjectFilterOptions = useMemo(() => {
+    if (statusFilter !== 'reference') return undefined;
+    const usedProjectIds = new Set(
+      filterableTasks.map((task) => task.projectId).filter((id): id is string => Boolean(id)),
+    );
+    const noProjectOption = filterableTasks.some((task) => !task.projectId)
+      ? [{ id: SAVED_FILTER_NO_PROJECT_ID, title: tFallback(t, 'taskEdit.noProjectOption', 'No project') }]
+      : [];
+    const projectOptions = allProjects
+      .filter((candidate) => usedProjectIds.has(candidate.id) && !candidate.deletedAt && !candidate.purgedAt)
+      .sort((left, right) => {
+        const leftOrder = Number.isFinite(left.order) ? left.order : Number.POSITIVE_INFINITY;
+        const rightOrder = Number.isFinite(right.order) ? right.order : Number.POSITIVE_INFINITY;
+        if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+        return left.title.localeCompare(right.title);
+      })
+      .map((candidate) => ({ id: candidate.id, title: candidate.title }));
+    return [...noProjectOption, ...projectOptions];
+  }, [allProjects, filterableTasks, statusFilter, t]);
+  const referenceProjectFilterOptionIds = useMemo(
+    () => referenceProjectFilterOptions?.map((option) => option.id),
+    [referenceProjectFilterOptions],
+  );
+  const getReferenceProjectFilterLabel = useCallback((candidateId: string) => (
+    candidateId === SAVED_FILTER_NO_PROJECT_ID
+      ? tFallback(t, 'taskEdit.noProjectOption', 'No project')
+      : allProjectById.get(candidateId)?.title
+  ), [allProjectById, t]);
+  const metadataFilterVisibility = useMemo(() => {
+    if (statusFilter === 'reference') {
+      return { energyLevel: false, location: false, priority: false, timeEstimate: false };
+    }
+    return getTaskMetadataFilterVisibility(filterableTasks, {
+      prioritiesEnabled,
+      timeEstimatesEnabled: timeEstimateFiltersEnabled,
+    });
+  }, [filterableTasks, prioritiesEnabled, statusFilter, timeEstimateFiltersEnabled]);
+  const resetReferenceFilters = useCallback(() => setIncludeArchivedReferenceProjects(false), []);
   const selections = useTaskFilterSelections({
     view: 'list',
     t,
     visibility: metadataFilterVisibility,
+    retainProjects: referenceProjectFilterOptionIds,
+    getProjectLabel: statusFilter === 'reference' ? getReferenceProjectFilterLabel : undefined,
+    onClear: resetReferenceFilters,
   });
   const { criteria: filterCriteria, searchQuery: filterSearchQuery } = selections;
   const timeEstimateFilterOptions = useMemo(
@@ -538,18 +601,33 @@ function TaskListComponent({
   // open; until then the selected ones are all the chips anyone can see.
   const tokenFilterOptions = useMemo(() => {
     if (!filtersVisible) return Array.from(new Set([...selections.tokens, ...selections.excludedTokens]));
-    return getUsedTaskTokens(filterableTasks, (task) => [...(task.contexts ?? []), ...(task.tags ?? [])]);
-  }, [filterableTasks, filtersVisible, selections.tokens, selections.excludedTokens]);
+    return getUsedTaskTokens(
+      filterableTasks,
+      statusFilter === 'reference'
+        ? (task) => task.tags ?? []
+        : (task) => [...(task.contexts ?? []), ...(task.tags ?? [])],
+    );
+  }, [filterableTasks, filtersVisible, selections.tokens, selections.excludedTokens, statusFilter]);
+  const archivedReferenceFilterActive = statusFilter === 'reference' && includeArchivedReferenceProjects;
   const activeTaskFilterCount = selections.activeCount;
   const hasActiveTaskFilters = selections.hasActive;
-  const totalFilterActiveCount = activeTaskFilterCount;
-  const hasAnyActiveFilters = hasActiveTaskFilters;
+  const totalFilterActiveCount = activeTaskFilterCount + (archivedReferenceFilterActive ? 1 : 0);
+  const hasAnyActiveFilters = hasActiveTaskFilters || archivedReferenceFilterActive;
   useEffect(() => {
     onFilterStateChange?.({ activeCount: totalFilterActiveCount, hasActive: hasAnyActiveFilters });
   }, [hasAnyActiveFilters, onFilterStateChange, totalFilterActiveCount]);
   const activeFilterChips = useMemo<TaskListActiveFilterChip[]>(
-    () => selections.chips,
-    [selections.chips],
+    () => archivedReferenceFilterActive
+      ? [
+          ...selections.chips,
+          {
+            id: 'reference:include-archived-projects',
+            label: t('reference.includeArchivedProjects'),
+            onPress: () => setIncludeArchivedReferenceProjects(false),
+          },
+        ]
+      : selections.chips,
+    [archivedReferenceFilterActive, selections.chips, t],
   );
   const clearAllFilters = selections.clear;
   const filteredEmptyMessage = hasActiveTaskFilters
@@ -564,10 +642,19 @@ function TaskListComponent({
   const filteredEmptyAction = hasActiveTaskFilters ? clearAllFilters : onEmptyAction;
 
   // Memoize filtered and sorted tasks for performance
+  const referenceSearchPredicate = useMemo(
+    () => createReferenceSearchPredicate(statusFilter === 'reference' ? filterSearchQuery : ''),
+    [filterSearchQuery, statusFilter],
+  );
   const filteredTasks = useMemo(() => {
-    const filterSelections = { criteria: filterCriteria, searchQuery: filterSearchQuery };
-    return filterableTasks.filter((task) => taskMatchesFilterSelections(task, filterSelections));
-  }, [filterCriteria, filterSearchQuery, filterableTasks]);
+    const filterSelections = {
+      criteria: filterCriteria,
+      searchQuery: statusFilter === 'reference' ? '' : filterSearchQuery,
+    };
+    return filterableTasks.filter((task) => (
+      referenceSearchPredicate(task) && taskMatchesFilterSelections(task, filterSelections)
+    ));
+  }, [filterCriteria, filterSearchQuery, filterableTasks, referenceSearchPredicate, statusFilter]);
 
   // Reference tasks render as their own pile below the list, matching desktop's
   // ProjectWorkspace: the project's own references plus references whose tags
@@ -727,7 +814,11 @@ function TaskListComponent({
     () => Array.from(new Set(listItems.flatMap((item) => (item.type === 'task' ? [item.task.id] : [])))),
     [listItems],
   );
-  usePruneSelectionToVisible(setMultiSelectedIds, orderedTaskIds);
+  const selectableOrderedTaskIds = useMemo(
+    () => orderedTaskIds.filter(canSelectTaskId),
+    [canSelectTaskId, orderedTaskIds],
+  );
+  usePruneSelectionToVisible(setMultiSelectedIds, selectableOrderedTaskIds);
   const performanceRoute = useMemo(
     () => resolveMobilePerformanceRoute({ projectId, statusFilter }),
     [projectId, statusFilter],
@@ -1209,6 +1300,7 @@ function TaskListComponent({
   }, []);
 
   const onSaveTask = useCallback((taskId: string, updates: Partial<Task>) => {
+    if (projectReadOnly) return { success: false };
     const state = useTaskStore.getState();
     const liveTask = state._allTasks?.find((task) => task.id === taskId);
     const owningProjectId = liveTask?.projectId ?? projectId;
@@ -1233,13 +1325,17 @@ function TaskListComponent({
     // The editor closes above, so the save result has to reach `reportSaveResult`
     // or a `{ success: false }` write reads as saved.
     return result;
-  }, [clearTaskListActivitySession, listItemCountForDiagnostics, performanceRoute, projectId]);
+  }, [clearTaskListActivitySession, listItemCountForDiagnostics, performanceRoute, projectId, projectReadOnly]);
 
   const handleCloseTaskEdit = useCallback(() => {
     clearTaskListActivitySession();
     setIsModalVisible(false);
     setEditingTask(null);
   }, [clearTaskListActivitySession]);
+  const editingTaskReadOnly = useMemo(
+    () => Boolean(editingTask && isTaskReadOnly(editingTask)),
+    [editingTask, isTaskReadOnly],
+  );
 
   const sortOptions = statusFilter === 'done'
     ? DONE_TASK_LIST_SORT_OPTIONS
@@ -1265,39 +1361,45 @@ function TaskListComponent({
   }, [listItemCountForDiagnostics, performanceRoute, updateTask]);
 
   // The row handlers are rebuilt on every render because they close over the
-  // current list (orderedTaskIds above all), so rows reach them through one
-  // object that never changes identity and reads the latest closures from a ref
-  // (#766). A row that captured an old orderedTaskIds would break range select.
+  // current list (selectableOrderedTaskIds above all), so rows reach them through
+  // one object that never changes identity and reads the latest closures from a
+  // ref (#766). A row that captured old ids would break range select.
   const rowActionSourcesRef = useRef({
     deleteTask,
     handleEditTask,
     handleTaskStatusChange,
-    orderedTaskIds,
+    orderedTaskIds: selectableOrderedTaskIds,
     toggleMultiSelect,
   });
   rowActionSourcesRef.current = {
     deleteTask,
     handleEditTask,
     handleTaskStatusChange,
-    orderedTaskIds,
+    orderedTaskIds: selectableOrderedTaskIds,
     toggleMultiSelect,
   };
   const rowActions = useMemo<TaskRowActions>(() => ({
     edit: (task) => rowActionSourcesRef.current.handleEditTask(task),
-    changeStatus: projectReadOnly
-      ? () => undefined
-      : (task, status) => rowActionSourcesRef.current.handleTaskStatusChange(task.id, status),
-    remove: projectReadOnly ? () => undefined : (task) => rowActionSourcesRef.current.deleteTask(task.id),
+    changeStatus: (task, status) => {
+      if (isTaskReadOnly(task)) return undefined;
+      return rowActionSourcesRef.current.handleTaskStatusChange(task.id, status);
+    },
+    remove: (task) => {
+      if (isTaskReadOnly(task)) return undefined;
+      return rowActionSourcesRef.current.deleteTask(task.id);
+    },
     toggleSelect: effectiveBulkActions
       ? (task) => {
+        if (isTaskReadOnly(task)) return;
         const sources = rowActionSourcesRef.current;
         sources.toggleMultiSelect(task.id, { visibleTaskIds: sources.orderedTaskIds });
       }
       : undefined,
-  }), [effectiveBulkActions, projectReadOnly]);
+  }), [effectiveBulkActions, isTaskReadOnly]);
 
   const renderTask = useCallback(({ item }: { item: Task }) => {
     const sequenceCue = getTaskSequenceCue?.(item);
+    const itemReadOnly = isTaskReadOnly(item);
 
     return (
       <ErrorBoundary>
@@ -1307,14 +1409,14 @@ function TaskListComponent({
           hideProjectMeta={Boolean(projectId)}
           isDark={isDark}
           isHighlighted={item.id === highlightTaskId}
-          interactionDisabled={projectReadOnly}
-          allowInspectionWhenDisabled={projectReadOnly}
-          isMultiSelected={effectiveBulkActions && multiSelectedIds.has(item.id)}
+          interactionDisabled={itemReadOnly}
+          allowInspectionWhenDisabled={itemReadOnly}
+          isMultiSelected={!itemReadOnly && effectiveBulkActions && multiSelectedIds.has(item.id)}
           onProjectPress={projectId ? undefined : openProjectScreen}
           onContextPress={openContextsScreen}
           onTagPress={openContextsScreen}
           rowContext={rowContext}
-          selectionMode={effectiveBulkActions ? selectionMode : false}
+          selectionMode={!itemReadOnly && effectiveBulkActions ? selectionMode : false}
           sequenceCue={sequenceCue}
           sequenceLabel={sequenceCue ? sequenceCueLabels?.[sequenceCue] : undefined}
           statusBadgeAsIcon={statusBadgeAsIconForList}
@@ -1337,7 +1439,7 @@ function TaskListComponent({
     projectId,
     sequenceCueLabels,
     rowContext,
-    projectReadOnly,
+    isTaskReadOnly,
   ]);
 
   const getProjectReorderItemLayout = useCallback((_: ArrayLike<ProjectReorderFlatItem<Task>> | null | undefined, index: number) => ({
@@ -1552,11 +1654,28 @@ function TaskListComponent({
         selections={selections}
         options={{
           tokens: tokenFilterOptions,
+          projects: referenceProjectFilterOptions,
           timeEstimates: timeEstimateFilterOptions,
           visibility: metadataFilterVisibility,
         }}
+        hasAdditionalActiveFilters={archivedReferenceFilterActive}
         themeColors={themeColors}
         t={t}
+        topContent={statusFilter === 'reference' ? (
+          <View style={styles.referenceArchiveToggleRow}>
+            <Text style={[styles.referenceArchiveToggleLabel, { color: themeColors.text }]}>
+              {t('reference.includeArchivedProjects')}
+            </Text>
+            <Switch
+              accessibilityLabel={t('reference.includeArchivedProjects')}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: includeArchivedReferenceProjects }}
+              onValueChange={setIncludeArchivedReferenceProjects}
+              trackColor={{ false: themeColors.border, true: themeColors.tint }}
+              value={includeArchivedReferenceProjects}
+            />
+          </View>
+        ) : undefined}
       />
 
       {shouldRenderInlineBulkBar && bulkBarProps ? (
@@ -1778,7 +1897,7 @@ function TaskListComponent({
         <TaskEditModal
           visible={isModalVisible}
           task={editingTask}
-          readOnly={projectReadOnly}
+          readOnly={editingTaskReadOnly}
           onClose={handleCloseTaskEdit}
           onSave={onSaveTask}
           defaultTab={defaultEditTab}

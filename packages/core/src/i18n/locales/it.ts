@@ -216,6 +216,8 @@ export const itOverrides: Record<string, string> = {
         'list.groupBy': 'Raggruppa',
         'list.groupByNone': 'Nessun raggruppamento',
         'list.groupByContext': 'Contesto',
+        'reference.includeArchivedProjects': 'Includi progetti archiviati',
+        'reference.convertToAction': 'Converti in azione',
         'reference.empty': 'Nessun elemento salvato',
         'reference.emptyHint': 'Il materiale di riferimento contiene informazioni che potrebbero servirti in futuro: nessuna azione richiesta.',
 

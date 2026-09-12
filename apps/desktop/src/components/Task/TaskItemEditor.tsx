@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type DragEvent, type FormEvent, type ReactNode } from 'react';
 import { ContextualHelp } from '../ContextualHelp';
-import { Check, Folder, HelpCircle, Layers, MapPin, Trash2 } from 'lucide-react';
+import { ArrowRight, Check, Folder, HelpCircle, Layers, MapPin, Trash2 } from 'lucide-react';
 import {
     filterProjectsBySelectedArea,
     resolveAutoTextDirection,
@@ -528,6 +528,16 @@ export function TaskItemEditor({
                         </div>
                     )}
                 </div>
+                {editStatus === 'reference' && (
+                    <button
+                        type="button"
+                        onClick={() => setField('status', 'next')}
+                        className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                    >
+                        <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                        {t('reference.convertToAction')}
+                    </button>
+                )}
                 {onDeleteTask && (
                     <button
                         type="button"

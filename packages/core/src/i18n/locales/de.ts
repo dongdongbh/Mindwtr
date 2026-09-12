@@ -210,6 +210,8 @@ export const deOverrides: Record<string, string> = {
         'list.densityComfortable': 'Komfortabel',
         'list.densityCompact': 'Kompakt',
         'list.densityCondensed': 'Verdichtet',
+        'reference.includeArchivedProjects': 'Archivierte Projekte einbeziehen',
+        'reference.convertToAction': 'In nächste Aktion umwandeln',
         'reference.empty': 'Noch keine Referenzeinträge.',
         
         // Status Labels

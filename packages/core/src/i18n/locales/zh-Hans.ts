@@ -257,6 +257,8 @@ export const zhHans: Record<string, string> = {
         'list.groupByNone': '不分组',
         'list.groupByContext': '情境',
         'list.groupByArea': '领域',
+        'reference.includeArchivedProjects': '包含已归档项目',
+        'reference.convertToAction': '转换为行动',
         'reference.empty': '暂无参考资料。',
         'reference.emptyHint': '参考资料包含你日后可能需要的信息 —— 无需采取任何行动。',
         'status.inbox': '收集箱',

@@ -204,3 +204,112 @@ describe('useTaskListSelection handleBatchRemoveTags', () => {
     expect(hookRef.hasSelection).toBe(true);
   });
 });
+
+describe('useTaskListSelection selection boundaries', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const selectableTasks = {
+    a: makeTask('a'),
+    archived: makeTask('archived'),
+    b: makeTask('b'),
+  };
+
+  it('excludes denied tasks from direct and range selection', () => {
+    renderer.act(() => {
+      renderer.create(
+        <Harness
+          {...baseParams({
+            tasksById: selectableTasks,
+            canSelectTaskId: (taskId) => taskId !== 'archived',
+          })}
+        />,
+      );
+    });
+
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('archived');
+    });
+    expect(hookRef.selectionMode).toBe(false);
+    expect(hookRef.selectedIdsArray).toEqual([]);
+
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('a', { visibleTaskIds: ['a', 'archived', 'b'] });
+    });
+    renderer.act(() => {
+      hookRef.toggleRangeSelectMode();
+    });
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('b', { visibleTaskIds: ['a', 'archived', 'b'] });
+    });
+
+    expect(hookRef.selectedIdsArray).toEqual(['a', 'b']);
+    expect(hookRef.multiSelectedIds.has('archived')).toBe(false);
+  });
+
+  it('drops a task that becomes denied before a bulk status write', async () => {
+    const batchMoveTasks = vi.fn(async () => ({ success: true } as StoreActionResult));
+    const params = baseParams({ batchMoveTasks, tasksById: selectableTasks });
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(<Harness {...params} canSelectTaskId={() => true} />);
+    });
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('a');
+      hookRef.toggleMultiSelect('archived');
+    });
+    renderer.act(() => {
+      tree.update(<Harness {...params} canSelectTaskId={(taskId) => taskId !== 'archived'} />);
+    });
+
+    expect(hookRef.selectedIdsArray).toEqual(['a']);
+    await renderer.act(async () => {
+      await hookRef.handleBatchMove('next');
+    });
+    expect(batchMoveTasks).toHaveBeenCalledWith(['a'], 'next');
+  });
+
+  it('drops a task that becomes denied before a bulk tag write', async () => {
+    const batchUpdateTasks = vi.fn(async () => ({ success: true } as StoreActionResult));
+    const params = baseParams({ batchUpdateTasks, tasksById: selectableTasks });
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(<Harness {...params} canSelectTaskId={() => true} />);
+    });
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('a');
+      hookRef.toggleMultiSelect('archived');
+      hookRef.setTagInput('#kept-safe');
+    });
+    renderer.act(() => {
+      tree.update(<Harness {...params} canSelectTaskId={(taskId) => taskId !== 'archived'} />);
+    });
+
+    await renderer.act(async () => {
+      await hookRef.handleBatchAddTag();
+    });
+    expect(batchUpdateTasks).toHaveBeenCalledWith([
+      { id: 'a', updates: { tags: ['#kept-safe'] } },
+    ]);
+  });
+
+  it('drops a task that becomes denied before a bulk delete', async () => {
+    const batchDeleteTasks = vi.fn(async () => ({ success: true } as StoreActionResult));
+    const params = baseParams({ batchDeleteTasks, tasksById: selectableTasks });
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(<Harness {...params} canSelectTaskId={() => true} />);
+    });
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('a');
+      hookRef.toggleMultiSelect('archived');
+    });
+    renderer.act(() => {
+      tree.update(<Harness {...params} canSelectTaskId={(taskId) => taskId !== 'archived'} />);
+    });
+
+    await confirmDelete();
+    expect(batchDeleteTasks).toHaveBeenCalledWith(['a']);
+  });
+});

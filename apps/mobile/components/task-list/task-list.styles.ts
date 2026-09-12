@@ -658,4 +658,16 @@ export const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#f9f9f9',
   },
+  referenceArchiveToggleRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  referenceArchiveToggleLabel: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '500',
+  },
 });

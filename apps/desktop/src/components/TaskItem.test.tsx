@@ -189,6 +189,51 @@ describe('TaskItem', () => {
         expect(getByDisplayValue('Test Task')).toBeInTheDocument();
     });
 
+    it('saves an edited Reference without erasing fields hidden by its editor', async () => {
+        const referenceTask: Task = {
+            ...mockTask,
+            id: 'reference-preserved-fields',
+            title: 'Vendor notes',
+            status: 'reference',
+            assignedTo: 'Ada',
+            tags: ['#vendor'],
+            contexts: ['@phone'],
+            location: 'Office',
+            priority: 'high',
+        };
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                tasks: [referenceTask],
+                _allTasks: [referenceTask],
+                _tasksById: new Map([[referenceTask.id, referenceTask]]),
+            }));
+        });
+        const view = render(
+            <LanguageProvider>
+                <TaskItem task={referenceTask} />
+            </LanguageProvider>
+        );
+
+        fireEvent.click(view.getAllByRole('button', { name: /edit/i })[0]);
+        fireEvent.change(view.getByDisplayValue('Vendor notes'), {
+            target: { value: 'Updated vendor notes' },
+        });
+        fireEvent.click(view.getByRole('button', { name: 'Save' }));
+
+        await waitFor(() => {
+            const saved = useTaskStore.getState()._allTasks.find((task) => task.id === referenceTask.id);
+            expect(saved).toMatchObject({
+                title: 'Updated vendor notes',
+                status: 'reference',
+                assignedTo: 'Ada',
+                tags: ['#vendor'],
+                contexts: ['@phone'],
+                location: 'Office',
+            });
+        });
+    });
+
     it('opens the editor in a modal when the setting uses pop-up presentation', async () => {
         act(() => {
             useTaskStore.setState({

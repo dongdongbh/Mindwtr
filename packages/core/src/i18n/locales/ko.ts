@@ -263,6 +263,8 @@ export const koOverrides: Record<string, string> = {
         'list.groupByNone': '그룹 없음',
         'list.groupByContext': '상황',
         'list.groupByArea': '영역',
+        'reference.includeArchivedProjects': '보관된 프로젝트 포함',
+        'reference.convertToAction': '다음 행동으로 전환',
         'reference.empty': '아직 참조 항목이 없습니다.',
         'reference.emptyHint': '참조에는 나중에 필요할 수 있는 정보를 보관합니다 — 행동이 필요하지 않습니다.',
 

@@ -82,6 +82,7 @@ export * from './recurrence';
 export * from './recurrence-constants';
 export * from './review-utils';
 export * from './project-utils';
+export * from './reference';
 export * from './project-grouping';
 export * from './focus-utils';
 export * from './undo-task-completion';

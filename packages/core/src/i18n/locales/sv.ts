@@ -205,6 +205,8 @@ export const svOverrides: Record<string, string> = {
         'list.groupByContext': 'Kontext',
         'list.groupByArea': 'Område',
         'list.groupByProject': 'Projekt',
+        'reference.includeArchivedProjects': 'Inkludera arkiverade projekt',
+        'reference.convertToAction': 'Omvandla till handling',
         'reference.empty': 'Inget arkiverat än',
         'reference.emptyHint': 'Referens sparar information du kanske vill ha senare — ingen åtgärd krävs.',
 

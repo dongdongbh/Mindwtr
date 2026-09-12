@@ -223,6 +223,8 @@ export const jaOverrides: Record<string, string> = {
         'list.groupByContext': 'コンテキスト',
         'list.groupByArea': 'エリア',
         'list.groupByProject': 'プロジェクト',
+        'reference.includeArchivedProjects': 'アーカイブ済みプロジェクトを含める',
+        'reference.convertToAction': 'アクションに変換',
         'reference.empty': '資料はまだありません',
         'reference.emptyHint': '「資料」は、行動は不要でも後から見返すかもしれない情報の置き場です。',
 

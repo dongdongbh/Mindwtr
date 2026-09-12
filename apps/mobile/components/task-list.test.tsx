@@ -9,6 +9,8 @@ const setHighlightTaskMock = vi.hoisted(() => vi.fn());
 const taskEditModalPropsSpy = vi.hoisted(() => vi.fn());
 const bulkOrganizeModalPropsSpy = vi.hoisted(() => vi.fn());
 const taskListHeaderPropsSpy = vi.hoisted(() => vi.fn());
+const taskFilterSheetPropsSpy = vi.hoisted(() => vi.fn());
+const taskListSelectionParamsSpy = vi.hoisted(() => vi.fn());
 const flatListPropsSpy = vi.hoisted(() => vi.fn());
 const flatListScrollToIndexMock = vi.hoisted(() => vi.fn());
 const flatListScrollToOffsetMock = vi.hoisted(() => vi.fn());
@@ -75,6 +77,7 @@ const storeState = vi.hoisted(() => ({
   tasks: [] as Task[],
   _allTasks: [] as Task[],
   projects: [projectFixture as Project],
+  _allProjects: [projectFixture as Project],
   sections: [],
   _allSections: [],
   areas: [] as Area[],
@@ -125,6 +128,7 @@ vi.mock('react-native', () => ({
   RefreshControl: () => null,
   ScrollView: ({ children, ...props }: any) => React.createElement('ScrollView', props, children),
   StyleSheet: { create: (styles: unknown) => styles },
+  Switch: (props: any) => React.createElement('Switch', props),
   Text: ({ children, ...props }: any) => React.createElement('Text', props, children),
   // TokenPickerModal's search field.
   TextInput: () => React.createElement('TextInput'),
@@ -278,7 +282,10 @@ vi.mock('../lib/app-log', () => ({
 }));
 
 vi.mock('./use-task-list-selection', () => ({
-  useTaskListSelection: () => taskListSelectionState.current,
+  useTaskListSelection: (params: unknown) => {
+    taskListSelectionParamsSpy(params);
+    return taskListSelectionState.current;
+  },
   usePruneSelectionToVisible: () => undefined,
 }));
 
@@ -324,7 +331,10 @@ const resetTaskListSelectionState = () => {
 };
 
 vi.mock('./task-filter-sheet', () => ({
-  TaskFilterSheet: () => null,
+  TaskFilterSheet: (props: any) => {
+    taskFilterSheetPropsSpy(props);
+    return null;
+  },
 }));
 
 vi.mock('./task-list/TaskListHeader', () => ({
@@ -354,6 +364,7 @@ describe('TaskList', () => {
     storeState._allTasks = [];
     storeState.areas = [];
     storeState.projects = [projectFixture as Project];
+    storeState._allProjects = [projectFixture as Project];
     storeState.sections = [];
     storeState._allSections = [];
     storeState.highlightTaskId = null;
@@ -414,6 +425,186 @@ describe('TaskList', () => {
     } finally {
       storeState.projects = [projectFixture as Project];
     }
+  });
+
+  it('includes archived-project references on demand and drops stale archived project selections', async () => {
+    taskListSelectionState.current = {
+      ...taskListSelectionState.current,
+      selectionMode: true,
+    };
+    const archivedProject: Project = {
+      ...project,
+      id: 'project-archived',
+      title: 'Finished launch',
+      status: 'archived',
+      order: 1,
+    };
+    const deletedProject: Project = {
+      ...project,
+      id: 'project-deleted',
+      title: 'Deleted launch',
+      deletedAt: '2026-09-10T00:00:00.000Z',
+      order: 2,
+    };
+    const activeReference = makeTask('ref-active', 'Current notes', { status: 'reference' });
+    const archivedReference = makeTask('ref-archived', 'Historical notes', {
+      status: 'reference',
+      projectId: archivedProject.id,
+    });
+    const deletedProjectReference = makeTask('ref-deleted-project', 'Deleted project notes', {
+      status: 'reference',
+      projectId: deletedProject.id,
+    });
+    const deletedReference = makeTask('ref-deleted', 'Deleted note', {
+      status: 'reference',
+      deletedAt: '2026-09-10T00:00:00.000Z',
+    });
+    storeState.tasks = [activeReference, archivedReference, deletedProjectReference, deletedReference];
+    storeState._allTasks = storeState.tasks;
+    storeState.projects = [project, archivedProject];
+    storeState._allProjects = [project, archivedProject, deletedProject];
+
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <TaskList
+          enableBulkActions
+          showHeader={false}
+          statusFilter="reference"
+          title="Reference"
+        />,
+      );
+    });
+
+    const visibleTaskIds = () => (flatListPropsSpy.mock.calls.at(-1)?.[0].data as { type: string; task?: Task }[])
+      .filter((item) => item.type === 'task')
+      .map((item) => item.task!.id);
+    const latestFilterSheetProps = () => taskFilterSheetPropsSpy.mock.calls.at(-1)?.[0];
+    const archiveSwitch = () => React.Children.toArray(latestFilterSheetProps().topContent.props.children)
+      .find((child) => React.isValidElement(child) && typeof (child.props as any).onValueChange === 'function') as React.ReactElement<any>;
+
+    expect(visibleTaskIds()).toEqual(['ref-active']);
+    expect(latestFilterSheetProps().options.projects).toEqual([
+      { id: project.id, title: project.title },
+    ]);
+
+    await act(async () => {
+      archiveSwitch().props.onValueChange(true);
+    });
+    expect(visibleTaskIds()).toEqual(['ref-active', 'ref-archived']);
+    expect(latestFilterSheetProps().options.projects).toEqual([
+      { id: project.id, title: project.title },
+      { id: archivedProject.id, title: archivedProject.title },
+    ]);
+    expect(latestFilterSheetProps().hasAdditionalActiveFilters).toBe(true);
+
+    const referenceRows = tree.root.findAllByType('SwipeableTaskItem' as unknown as React.ElementType);
+    const activeRow = referenceRows.find((row) => row.props.task.id === activeReference.id)!;
+    const archivedRow = referenceRows.find((row) => row.props.task.id === archivedReference.id)!;
+    expect(activeRow.props.interactionDisabled).toBe(false);
+    expect(activeRow.props.selectionMode).toBe(true);
+    expect(archivedRow.props.interactionDisabled).toBe(true);
+    expect(archivedRow.props.allowInspectionWhenDisabled).toBe(true);
+    expect(archivedRow.props.selectionMode).toBe(false);
+    const canSelectTaskId = taskListSelectionParamsSpy.mock.calls.at(-1)?.[0].canSelectTaskId;
+    expect(canSelectTaskId(activeReference.id)).toBe(true);
+    expect(canSelectTaskId(archivedReference.id)).toBe(false);
+
+    act(() => {
+      archivedRow.props.actions.changeStatus(archivedReference, 'next');
+      archivedRow.props.actions.remove(archivedReference);
+      archivedRow.props.actions.toggleSelect(archivedReference);
+      archivedRow.props.actions.edit(archivedReference);
+    });
+    expect(updateTaskMock).not.toHaveBeenCalled();
+    expect(storeState.deleteTask).not.toHaveBeenCalled();
+    expect(taskListSelectionState.current.toggleMultiSelect).not.toHaveBeenCalled();
+    const editor = taskEditModalPropsSpy.mock.calls.at(-1)?.[0];
+    expect(editor).toEqual(expect.objectContaining({
+      visible: true,
+      readOnly: true,
+      task: archivedReference,
+    }));
+    act(() => {
+      editor.onSave(archivedReference.id, { title: 'Should not write' });
+    });
+    expect(updateTaskMock).not.toHaveBeenCalled();
+
+    act(() => {
+      activeRow.props.actions.toggleSelect(activeReference);
+    });
+    expect(taskListSelectionState.current.toggleMultiSelect).toHaveBeenCalledWith(
+      activeReference.id,
+      { visibleTaskIds: [activeReference.id] },
+    );
+
+    await act(async () => {
+      latestFilterSheetProps().selections.toggleProject(archivedProject.id);
+    });
+    expect(visibleTaskIds()).toEqual(['ref-archived']);
+
+    await act(async () => {
+      archiveSwitch().props.onValueChange(false);
+    });
+    expect(latestFilterSheetProps().selections.projects).toEqual([]);
+    expect(visibleTaskIds()).toEqual(['ref-active']);
+    expect(latestFilterSheetProps().options.projects).toEqual([
+      { id: project.id, title: project.title },
+    ]);
+
+    act(() => tree.unmount());
+  });
+
+  it('uses all-term substring search only in the Reference list', async () => {
+    const referenceMatch = makeTask('ref-match', 'Keystone 1', {
+      status: 'reference',
+      projectId: undefined,
+      description: 'Appendix 2',
+    });
+    const referenceMiss = makeTask('ref-miss', 'Keystone 1', {
+      status: 'reference',
+      projectId: undefined,
+      description: 'Appendix',
+    });
+    storeState.tasks = [referenceMatch, referenceMiss];
+    storeState._allTasks = storeState.tasks;
+
+    let referenceTree!: ReturnType<typeof create>;
+    await act(async () => {
+      referenceTree = create(
+        <TaskList showHeader={false} statusFilter="reference" title="Reference" />,
+      );
+    });
+    await act(async () => {
+      taskFilterSheetPropsSpy.mock.calls.at(-1)?.[0].selections.setSearchQuery('ke 1 2');
+    });
+    const referenceIds = (flatListPropsSpy.mock.calls.at(-1)?.[0].data as { type: string; task?: Task }[])
+      .filter((item) => item.type === 'task')
+      .map((item) => item.task!.id);
+    expect(referenceIds).toEqual(['ref-match']);
+    act(() => referenceTree.unmount());
+
+    const inboxTask = makeTask('inbox-match-by-terms-only', 'Keystone 1', {
+      status: 'inbox',
+      projectId: undefined,
+      description: 'Appendix 2',
+    });
+    storeState.tasks = [inboxTask];
+    storeState._allTasks = storeState.tasks;
+    let inboxTree!: ReturnType<typeof create>;
+    await act(async () => {
+      inboxTree = create(
+        <TaskList showHeader={false} statusFilter="inbox" title="Inbox" />,
+      );
+    });
+    await act(async () => {
+      taskFilterSheetPropsSpy.mock.calls.at(-1)?.[0].selections.setSearchQuery('ke 1 2');
+    });
+    const inboxIds = (flatListPropsSpy.mock.calls.at(-1)?.[0].data as { type: string; task?: Task }[])
+      .filter((item) => item.type === 'task')
+      .map((item) => item.task!.id);
+    expect(inboxIds).toEqual([]);
+    act(() => inboxTree.unmount());
   });
 
   it('shows only project-archive-owned sections in read-only project history', async () => {

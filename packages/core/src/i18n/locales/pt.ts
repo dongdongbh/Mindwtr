@@ -174,6 +174,8 @@ export const ptOverrides: Record<string, string> = {
         'list.densityCompact': 'Compacto',
         'list.densityCondensed': 'Condensado',
         'list.groupByArea': 'Área',
+        'reference.includeArchivedProjects': 'Incluir projetos arquivados',
+        'reference.convertToAction': 'Converter em ação',
         'reference.empty': 'Ainda não há itens de referência.',
         'reference.emptyHint': 'Guarde notas, links e materiais de apoio aqui.',
 

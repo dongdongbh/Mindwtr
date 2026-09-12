@@ -191,6 +191,8 @@ export const trOverrides: Record<string, string> = {
         'list.densityComfortable': 'Rahat',
         'list.densityCompact': 'Kompakt',
         'list.densityCondensed': 'Yoğun',
+        'reference.includeArchivedProjects': 'Arşivlenmiş projeleri dahil et',
+        'reference.convertToAction': 'Eyleme dönüştür',
         'reference.empty': 'Henüz referans öğesi yok.',
         'status.inbox': 'Gelen kutusu',
         'status.todo': 'Yapılacaklar',

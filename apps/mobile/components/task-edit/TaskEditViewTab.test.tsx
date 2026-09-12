@@ -569,4 +569,104 @@ describe('TaskEditViewTab', () => {
 
     expect(tree.root.findAllByType(MockTaskStatusBadge)).toHaveLength(0);
   });
+
+  it('shows Reference content and metadata while hiding task-only fields', () => {
+    const labels: Record<string, string> = {
+      'taskEdit.titleLabel': 'Title',
+      'taskEdit.statusLabel': 'Status',
+      'taskEdit.priorityLabel': 'Priority',
+      'taskEdit.energyLevel': 'Energy',
+      'taskEdit.assignedTo': 'Assigned To',
+      'taskEdit.projectLabel': 'Project',
+      'taskEdit.sectionLabel': 'Section',
+      'taskEdit.areaLabel': 'Area',
+      'taskEdit.startDateLabel': 'Start',
+      'taskEdit.dueDateLabel': 'Due',
+      'taskEdit.reviewDateLabel': 'Review',
+      'taskEdit.timeEstimateLabel': 'Estimate',
+      'taskEdit.contextsLabel': 'Contexts',
+      'taskEdit.tagsLabel': 'Tags',
+      'taskEdit.locationLabel': 'Location',
+      'taskEdit.recurrenceLabel': 'Recurrence',
+      'taskEdit.descriptionLabel': 'Description',
+      'taskEdit.checklist': 'Checklist',
+      'attachments.title': 'Attachments',
+      'status.reference': 'Reference',
+      'priority.high': 'High',
+      'energyLevel.low': 'Low',
+    };
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(
+        <TaskEditViewTab
+          t={(key) => labels[key] ?? key}
+          tc={{
+            text: '#fff', secondaryText: '#aaa', inputBg: '#111', border: '#222',
+            cardBg: '#000', tint: '#3b82f6',
+          } as any}
+          styles={taskEditStyles as any}
+          mergedTask={{
+            id: 'reference-1',
+            title: 'Launch research',
+            description: 'Reference body',
+            status: 'reference',
+            projectId: 'project-1',
+            sectionId: 'section-1',
+            assignedTo: 'Alex',
+            tags: ['#research'],
+            contexts: ['@private'],
+            location: 'Archive room',
+            priority: 'high',
+            energyLevel: 'low',
+            timeEstimate: '1hr',
+            startTime: '2026-09-12T09:00:00.000Z',
+            dueDate: '2026-09-13T09:00:00.000Z',
+            reviewAt: '2026-09-14T09:00:00.000Z',
+            recurrence: { rule: 'daily' },
+            checklist: [{ id: 'step-1', title: 'Hidden checklist item', isCompleted: false }],
+            createdAt: '2026-04-01T00:00:00.000Z',
+            updatedAt: '2026-04-01T00:00:00.000Z',
+          }}
+          projects={[{
+            id: 'project-1', title: 'Finished launch', status: 'archived', color: '#3b82f6',
+            order: 0, tagIds: [], areaId: 'area-1', createdAt: '2026-04-01T00:00:00.000Z',
+            updatedAt: '2026-04-01T00:00:00.000Z',
+          }]}
+          sections={[{
+            id: 'section-1', projectId: 'project-1', title: 'Sources', order: 0,
+            createdAt: '2026-04-01T00:00:00.000Z', updatedAt: '2026-04-01T00:00:00.000Z',
+          }]}
+          areas={[{
+            id: 'area-1', name: 'Work', color: '#3b82f6', order: 0,
+            createdAt: '2026-04-01T00:00:00.000Z', updatedAt: '2026-04-01T00:00:00.000Z',
+          }]}
+          prioritiesEnabled
+          timeEstimatesEnabled
+          formatTimeEstimateLabel={(value) => String(value)}
+          formatDate={(value) => value}
+          formatDueDate={(value) => value}
+          getRecurrenceRuleValue={() => 'daily'}
+          getRecurrenceStrategyValue={() => 'strict'}
+          applyChecklistUpdate={vi.fn()}
+          visibleAttachments={[{
+            id: 'link-1', kind: 'link', title: 'Source link', uri: 'https://example.com',
+            createdAt: '2026-04-01T00:00:00.000Z', updatedAt: '2026-04-01T00:00:00.000Z',
+          }]}
+          openAttachment={vi.fn()}
+          isImageAttachment={() => false}
+          textDirectionStyle={{}}
+          resolvedDirection="ltr"
+          showStatusField
+          onStatusUpdate={vi.fn()}
+        />
+      );
+    });
+
+    ['Launch research', 'Assigned To', 'Alex', 'Finished launch', 'Sources', 'Area', 'Work', 'Tags', '#research', 'Description', 'Attachments', 'Source link']
+      .forEach((text) => expect(tree.root.findAllByProps({ children: text }).length).toBeGreaterThan(0));
+    expect(tree.root.find((node) => node.props.markdown === 'Reference body')).toBeTruthy();
+    ['Status', 'Priority', 'Energy', 'Start', 'Due', 'Review', 'Estimate', 'Contexts', '@private', 'Location', 'Archive room', 'Recurrence', 'Checklist', 'Hidden checklist item']
+      .forEach((text) => expect(tree.root.findAllByProps({ children: text })).toHaveLength(0));
+    expect(tree.root.findAllByType(MockTaskStatusBadge)).toHaveLength(0);
+  });
 });

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/react';
 import type { ComponentProps } from 'react';
-import type { Project, Task } from '@mindwtr/core';
+import type { Area, Project, Task } from '@mindwtr/core';
 import { hasTimeComponent, safeFormatDate, useTaskStore } from '@mindwtr/core';
 
 import { LanguageProvider } from '../../contexts/language-context';
@@ -26,6 +26,15 @@ const baseProject: Project = {
     order: 0,
     status: 'active',
     tagIds: [],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+};
+
+const baseArea: Area = {
+    id: 'area-1',
+    name: 'Client work',
+    color: '#14b8a6',
+    order: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
 };
@@ -1402,6 +1411,81 @@ describe('TaskItemDisplay', () => {
 
         expect(queryByText('0/1')).not.toBeInTheDocument();
         expect(queryByText('Reference step')).not.toBeInTheDocument();
+    });
+
+    it('renders Reference as a memo summary without task-only metadata or controls', () => {
+        const referenceTask: Task = {
+            ...baseTask,
+            title: 'Vendor notes',
+            status: 'reference',
+            description: '**Support hours**\nCall before visiting',
+            projectId: baseProject.id,
+            assignedTo: 'Ada',
+            tags: ['#vendor'],
+            contexts: ['@phone'],
+            startTime: '2026-05-10T09:00:00.000Z',
+            dueDate: '2026-05-11T09:00:00.000Z',
+            reviewAt: '2026-05-12T09:00:00.000Z',
+            recurrence: 'daily',
+            priority: 'urgent',
+            energyLevel: 'high',
+            timeEstimate: '30min',
+            timeSpentMinutes: 45,
+            location: 'Office',
+        };
+
+        const { container, getByText, queryByRole, queryByText } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={referenceTask}
+                    project={baseProject}
+                    area={baseArea}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView: vi.fn(),
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule="daily"
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled
+                    timeEstimatesEnabled
+                    timeSpentEnabled
+                    isStagnant={false}
+                    showQuickDone
+                    showStatusSelect
+                    compactMetaEnabled={false}
+                    readOnly={false}
+                    t={(key: string) => ({
+                        'taskEdit.assignedTo': 'Assigned to',
+                        'priority.urgent': 'Urgent',
+                        'energyLevel.high': 'High energy',
+                    }[key] ?? key)}
+                />
+            </LanguageProvider>
+        );
+
+        expect(getByText('Support hours').tagName).toBe('STRONG');
+        expect(getByText('Project Alpha')).toBeInTheDocument();
+        expect(getByText('Client work')).toBeInTheDocument();
+        expect(getByText('Assigned to: Ada')).toBeInTheDocument();
+        expect(getByText('#vendor')).toBeInTheDocument();
+        expect(container.querySelector('[data-priority-strip]')).toBeNull();
+        expect(queryByRole('combobox', { name: 'task.aria.status' })).not.toBeInTheDocument();
+        expect(queryByText('@phone')).not.toBeInTheDocument();
+        expect(queryByText('Office')).not.toBeInTheDocument();
+        expect(queryByText('Urgent')).not.toBeInTheDocument();
+        expect(queryByText('High energy')).not.toBeInTheDocument();
+        expect(queryByText('30m')).not.toBeInTheDocument();
+        expect(queryByText('45m')).not.toBeInTheDocument();
+        expect(queryByText(safeFormatDate(referenceTask.startTime, 'Pp'))).not.toBeInTheDocument();
+        expect(queryByText(safeFormatDate(referenceTask.dueDate, 'Pp'))).not.toBeInTheDocument();
     });
 
     it('keeps the completion timestamp clickable on read-only done rows', () => {

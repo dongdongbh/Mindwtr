@@ -150,6 +150,8 @@ type TaskFilterSheetProps = {
    * save-filter dialog), so stepping into it does not remount the modal.
    */
   overlay?: React.ReactNode;
+  /** View-local controls that participate in Clear without entering filter criteria. */
+  hasAdditionalActiveFilters?: boolean;
 };
 
 export function TaskFilterSheet({
@@ -162,6 +164,7 @@ export function TaskFilterSheet({
   headerActions,
   topContent,
   overlay,
+  hasAdditionalActiveFilters = false,
 }: TaskFilterSheetProps) {
   const resolveText = (key: string, fallback: string) => tFallback(t, key, fallback);
   const { visibility } = options;
@@ -227,7 +230,7 @@ export function TaskFilterSheet({
             </Text>
             <View style={styles.sheetHeaderActions}>
               {headerActions}
-              {selections.hasActive ? (
+              {selections.hasActive || hasAdditionalActiveFilters ? (
                 <TouchableOpacity accessibilityRole="button" onPress={selections.clear} style={styles.sheetTextButton}>
                   <Text style={[styles.sheetTextButtonText, { color: themeColors.tint }]}>
                     {resolveText('filters.clear', 'Clear')}

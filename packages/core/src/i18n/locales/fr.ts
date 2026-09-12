@@ -176,6 +176,8 @@ export const frOverrides: Record<string, string> = {
         'list.groupByNone': 'Aucun regroupement',
         'list.groupByContext': 'Contexte',
         'list.groupByArea': 'Domaine',
+        'reference.includeArchivedProjects': 'Inclure les projets archivés',
+        'reference.convertToAction': 'Convertir en action',
         'reference.empty': 'Aucun élément de référence pour l’instant.',
         'reference.emptyHint': 'Gardez ici les notes, liens et documents que vous souhaitez garder pour plus tard - Pas d’action requise.',
 

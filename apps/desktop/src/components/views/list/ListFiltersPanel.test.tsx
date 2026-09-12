@@ -11,6 +11,7 @@ const translations: Record<string, string> = {
     'filters.label': 'Filters',
     'filters.priority': 'Priority',
     'filters.timeEstimate': 'Time estimate',
+    'reference.includeArchivedProjects': 'Include archived projects',
     'priority.urgent': 'Urgent priority',
 };
 
@@ -31,6 +32,9 @@ const createProps = (overrides: Partial<Parameters<typeof ListFiltersPanel>[0]> 
     excludedTokens: [],
     showPriorityFilters: false,
     showTimeEstimateFilters: false,
+    showIncludeArchivedProjects: false,
+    includeArchivedProjects: false,
+    onToggleIncludeArchivedProjects: vi.fn(),
     t,
     timeEstimateOptions: ['30min'],
     tokenCounts: { '@home': 1 },
@@ -75,5 +79,14 @@ describe('ListFiltersPanel', () => {
         expect(excluded).toHaveAttribute('aria-pressed', 'mixed');
         expect(excluded).toHaveClass('line-through');
         expect(excluded).toHaveClass('border-destructive');
+    });
+
+    it('renders the Reference archive toggle as an accessible checkbox', () => {
+        render(<ListFiltersPanel {...createProps({
+            showIncludeArchivedProjects: true,
+            includeArchivedProjects: true,
+        })} />);
+
+        expect(screen.getByRole('checkbox', { name: 'Include archived projects' })).toBeChecked();
     });
 });

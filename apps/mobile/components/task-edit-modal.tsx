@@ -777,6 +777,9 @@ function TaskEditModalInner({
         }
         setDraftField('status', status);
     }, [setDraftField, task?.assignedTo, task?.status, taskEditDraft?.draft.assignedTo, taskEditDraft?.draft.status]);
+    const handleConvertToAction = useCallback(() => {
+        requestStatusChange('next');
+    }, [requestStatusChange]);
     const requestBackdatedCompletion = useCallback(() => {
         setCompletedAtPickerVisible(true);
     }, []);
@@ -1127,6 +1130,8 @@ function TaskEditModalInner({
                         onDelete={handleDeleteTask}
                         onConvertToReference={handleConvertToReference}
                         showConvertToReference={!isReference}
+                        onConvertToAction={handleConvertToAction}
+                        showConvertToAction={isReference}
                         onConvertToSection={handleConvertToSection}
                         showConvertToSection={hasProject}
                         readOnly={readOnly}

@@ -96,11 +96,15 @@ export function useTaskSelection(
     const anchorIdRef = useRef<string | null>(null);
     const activeActionRef = useRef<TaskSelectionAction | null>(null);
 
-    const selectedIdsArray = useMemo(() => Array.from(multiSelectedIds), [multiSelectedIds]);
-    const selectedVisibleCount = useMemo(
-        () => visibleIds.filter((id) => multiSelectedIds.has(id)).length,
-        [multiSelectedIds, visibleIds],
+    const visibleIdSet = useMemo(() => new Set(visibleIds), [visibleIds]);
+    // Derive action inputs from the current selectable collection immediately.
+    // The effect below also prunes state, but it runs after render; intersecting
+    // here closes the window where a newly read-only row could reach a bulk write.
+    const selectedIdsArray = useMemo(
+        () => Array.from(multiSelectedIds).filter((id) => visibleIdSet.has(id)),
+        [multiSelectedIds, visibleIdSet],
     );
+    const selectedVisibleCount = selectedIdsArray.length;
     const allVisibleTasksSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
     const { exportSelectedTasks, isExporting } = useSelectedTasksCsvExport(selectedIdsArray, {
         showToast,
@@ -108,15 +112,14 @@ export function useTaskSelection(
     });
 
     useEffect(() => {
-        const visible = new Set(visibleIds);
         setMultiSelectedIds((previous) => {
-            const next = new Set(Array.from(previous).filter((id) => visible.has(id)));
+            const next = new Set(Array.from(previous).filter((id) => visibleIdSet.has(id)));
             return next.size === previous.size ? previous : next;
         });
-        if (anchorIdRef.current && !visible.has(anchorIdRef.current)) {
+        if (anchorIdRef.current && !visibleIdSet.has(anchorIdRef.current)) {
             anchorIdRef.current = null;
         }
-    }, [visibleIds]);
+    }, [visibleIdSet]);
 
     const exitSelectionMode = useCallback(() => {
         setSelectionMode(false);
@@ -133,6 +136,7 @@ export function useTaskSelection(
     }, [exitSelectionMode, selectionMode]);
 
     const toggleMultiSelect = useCallback((taskId: string, options: RangeSelectionOptions = {}) => {
+        if (!visibleIdSet.has(taskId)) return;
         setMultiSelectedIds((previous) => {
             const result = updateRangeSelection({
                 anchorId: anchorIdRef.current,
@@ -145,7 +149,7 @@ export function useTaskSelection(
             setSelectionMode(result.selectedIds.size > 0);
             return result.selectedIds;
         });
-    }, [visibleIds]);
+    }, [visibleIds, visibleIdSet]);
 
     const selectAllVisibleTasks = useCallback(() => {
         setSelectionMode(true);

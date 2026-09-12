@@ -22,6 +22,9 @@ interface ListFiltersPanelProps {
     selectedTimeEstimates: TimeEstimate[];
     onToggleEstimate: (estimate: TimeEstimate) => void;
     formatEstimate: (estimate: TimeEstimate) => string;
+    showIncludeArchivedProjects?: boolean;
+    includeArchivedProjects?: boolean;
+    onToggleIncludeArchivedProjects?: () => void;
 }
 
 export function ListFiltersPanel({
@@ -42,6 +45,9 @@ export function ListFiltersPanel({
     selectedTimeEstimates,
     onToggleEstimate,
     formatEstimate,
+    showIncludeArchivedProjects = false,
+    includeArchivedProjects = false,
+    onToggleIncludeArchivedProjects,
 }: ListFiltersPanelProps) {
     const excludedStateLabel = tFallback(t, 'filters.excluded', 'Excluded');
     return (
@@ -62,6 +68,17 @@ export function ListFiltersPanel({
                 )}
             </div>
             <div className="space-y-4">
+                {showIncludeArchivedProjects && (
+                    <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm text-foreground focus-within:ring-2 focus-within:ring-primary/40">
+                        <input
+                            type="checkbox"
+                            checked={includeArchivedProjects}
+                            onChange={onToggleIncludeArchivedProjects}
+                            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                        />
+                        <span>{t('reference.includeArchivedProjects')}</span>
+                    </label>
+                )}
                 <div className="space-y-2">
                     <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('filters.contexts')}</div>
                     <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">

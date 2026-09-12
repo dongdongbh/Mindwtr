@@ -12,6 +12,7 @@ vi.mock('../../contexts/language-context', () => ({
     'common.more': 'More',
     'task.createProjectFromTask': 'Create project',
     'task.cancel': 'Cancel task',
+    'reference.convertToAction': 'Convert to action',
   }[key] ?? key) }),
 }));
 
@@ -88,5 +89,30 @@ describe('TaskEditHeader', () => {
     act(() => cancelButton.props.onPress());
 
     expect(onCancelTask).toHaveBeenCalledOnce();
+  });
+
+  it('offers a Reference-to-action conversion in the existing More menu', () => {
+    const onConvertToAction = vi.fn();
+    let tree!: renderer.ReactTestRenderer;
+
+    act(() => {
+      tree = renderer.create(
+        <TaskEditHeader
+          onDone={vi.fn()}
+          onClose={vi.fn()}
+          onShare={vi.fn()}
+          onDuplicate={vi.fn()}
+          onDelete={vi.fn()}
+          onConvertToAction={onConvertToAction}
+          showConvertToAction
+        />,
+      );
+    });
+
+    act(() => tree.root.findByProps({ accessibilityLabel: 'More' }).props.onPress());
+    const convertButton = tree.root.findByProps({ accessibilityLabel: 'Convert to action' });
+    act(() => convertButton.props.onPress());
+
+    expect(onConvertToAction).toHaveBeenCalledOnce();
   });
 });

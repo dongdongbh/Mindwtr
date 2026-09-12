@@ -88,6 +88,7 @@ const translations: Record<string, string> = {
     'viewSections.noSection': 'No section',
     'viewSections.somedaySection': 'Someday section',
     'status.done': 'Done',
+    'reference.convertToAction': 'Convert to action',
 };
 
 const t = (key: string) => translations[key] ?? key;
@@ -303,6 +304,25 @@ describe('TaskItemEditor', () => {
         fireEvent.click(doneButton);
 
         expect(onMarkDone).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers a secondary conversion path when Reference hides the status field', () => {
+        const setField = vi.fn();
+        const referenceTask: Task = {
+            ...baseTask,
+            status: 'reference',
+        };
+        const { getByRole } = render(
+            <TaskItemEditor
+                {...baseProps}
+                draft={createTaskDraft(referenceTask)}
+                setField={setField}
+            />
+        );
+
+        fireEvent.click(getByRole('button', { name: 'Convert to action' }));
+
+        expect(setField).toHaveBeenCalledWith('status', 'next');
     });
 
     it('requests a completion time when the title-row done action is right-clicked', () => {

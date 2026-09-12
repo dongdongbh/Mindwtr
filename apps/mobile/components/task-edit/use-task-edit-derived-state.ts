@@ -10,6 +10,7 @@ import {
     isTaskEditorSectionFieldVisible,
     normalizeTaskEditorOrder,
     parseRRuleString,
+    REFERENCE_HIDDEN_TASK_FIELDS,
     safeParseDate,
     TASK_EDITOR_FIXED_FIELDS,
     type AppData,
@@ -35,17 +36,8 @@ import type { PickerOption } from './TaskEditFieldRenderer.types';
 const DEFAULT_TIME_ESTIMATE_PRESETS: TimeEstimate[] = ['5min', '10min', '30min', '1hr', '2hr', '3hr', '4hr', '4hr+'];
 const ALL_TIME_ESTIMATES: TimeEstimate[] = ['5min', '10min', '15min', '30min', '1hr', '2hr', '3hr', '4hr', '4hr+'];
 const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
-const ENERGY_LEVEL_OPTIONS: Array<NonNullable<Task['energyLevel']>> = ['low', 'medium', 'high'];
-const REFERENCE_HIDDEN_FIELDS = new Set<TaskEditorFieldId>([
-    'startTime',
-    'dueDate',
-    'reviewAt',
-    'recurrence',
-    'priority',
-    'energyLevel',
-    'timeEstimate',
-    'checklist',
-]);
+const ENERGY_LEVEL_OPTIONS: NonNullable<Task['energyLevel']>[] = ['low', 'medium', 'high'];
+const REFERENCE_HIDDEN_FIELDS = new Set<TaskEditorFieldId>(REFERENCE_HIDDEN_TASK_FIELDS);
 
 type UseTaskEditDerivedStateArgs = {
     task: Task | null;

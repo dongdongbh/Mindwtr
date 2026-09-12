@@ -1523,7 +1523,7 @@ export const TaskItem = memo(function TaskItem({
                 )}
             >
                 <div className={cn("flex items-start", isCondensed ? "gap-1.5" : isCompact ? "gap-2" : "gap-3")}>
-                    {selectionMode && (
+                    {selectionMode && !interactionDisabled && (
                         <input
                             type="checkbox"
                             data-task-selection-checkbox
@@ -1552,7 +1552,7 @@ export const TaskItem = memo(function TaskItem({
                                 section={storeSection}
                                 area={taskArea}
                                 projectColor={projectColor}
-                                selectionMode={selectionMode}
+                                selectionMode={selectionMode && !interactionDisabled}
                                 isViewOpen={isTaskExpanded}
                                 quickActionsOpen={Boolean(quickActionMenu)}
                                 actions={displayActions}

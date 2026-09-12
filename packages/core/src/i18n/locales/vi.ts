@@ -264,6 +264,8 @@ export const viOverrides: Record<string, string> = {
         'list.groupByNone': 'Không nhóm',
         'list.groupByContext': 'Ngữ cảnh',
         'list.groupByArea': 'Khu vực',
+        'reference.includeArchivedProjects': 'Bao gồm dự án đã lưu trữ',
+        'reference.convertToAction': 'Chuyển thành hành động',
         'reference.empty': 'Chưa có gì được lưu',
         'reference.emptyHint': 'Tham khảo lưu thông tin bạn có thể cần sau — không cần hành động.',
 

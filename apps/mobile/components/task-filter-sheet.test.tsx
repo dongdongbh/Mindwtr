@@ -58,10 +58,14 @@ function renderSheet({
   view = 'list',
   options,
   topContent,
+  hasAdditionalActiveFilters = false,
+  onClear,
 }: {
   view?: TaskFilterView;
   options?: Partial<TaskFilterSheetOptions>;
   topContent?: React.ReactNode;
+  hasAdditionalActiveFilters?: boolean;
+  onClear?: () => void;
 } = {}) {
   const handle: { current: TaskFilterSelections } = { current: null as never };
   const sheetOptions: TaskFilterSheetOptions = {
@@ -71,7 +75,7 @@ function renderSheet({
     ...options,
   };
   function Harness() {
-    handle.current = useTaskFilterSelections({ view, t, visibility: sheetOptions.visibility });
+    handle.current = useTaskFilterSelections({ view, t, visibility: sheetOptions.visibility, onClear });
     return (
       <TaskFilterSheet
         visible
@@ -81,6 +85,7 @@ function renderSheet({
         themeColors={themeColors}
         t={t}
         topContent={topContent}
+        hasAdditionalActiveFilters={hasAdditionalActiveFilters}
       />
     );
   }
@@ -254,6 +259,17 @@ describe('TaskFilterSheet', () => {
     });
     expect(handle.current.tokens).toEqual([]);
     expect(hasText('Clear')).toBe(false);
+  });
+
+  it('offers Clear for a view-local filter and runs the shared reset', () => {
+    const onClear = vi.fn();
+    renderSheet({ hasAdditionalActiveFilters: true, onClear });
+
+    expect(hasText('Clear')).toBe(true);
+    act(() => {
+      findButtonByText('Clear').props.onPress();
+    });
+    expect(onClear).toHaveBeenCalledOnce();
   });
 
   it('renders no priority flag on non-priority chips', () => {

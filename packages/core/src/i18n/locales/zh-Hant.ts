@@ -257,6 +257,8 @@ export const zhHant: Record<string, string> = {
         'list.groupByNone': '不分組',
         'list.groupByContext': '情境',
         'list.groupByArea': '領域',
+        'reference.includeArchivedProjects': '包含已封存專案',
+        'reference.convertToAction': '轉換為行動',
         'reference.empty': '暫無參考資料。',
         'reference.emptyHint': '參考資料包含你日後可能需要的訊息 —— 無需採取任何行動。',
         'status.inbox': '收集箱',

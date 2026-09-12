@@ -1,7 +1,7 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_TASK_EDITOR_HIDDEN, DEFAULT_TASK_EDITOR_ORDER, type AppData, type Section, type Task } from '@mindwtr/core';
+import { DEFAULT_TASK_EDITOR_HIDDEN, DEFAULT_TASK_EDITOR_ORDER, REFERENCE_HIDDEN_TASK_FIELDS, type AppData, type Section, type Task } from '@mindwtr/core';
 import { createTaskDraft, setTaskDraftField } from '@mindwtr/core/task-draft';
 
 import { useTaskEditDerivedState } from './use-task-edit-derived-state';
@@ -384,5 +384,65 @@ describe('useTaskEditDerivedState', () => {
         expect(derived?.schedulingFields).toEqual([]);
         expect(derived?.organizationFields).toEqual([]);
         expect(derived?.detailsFields).toEqual([]);
+    });
+
+    it('uses the shared Reference field contract while retaining memo metadata fields', () => {
+        let derived: ReturnType<typeof useTaskEditDerivedState> | undefined;
+        const referenceTask: Task = {
+            ...baseTask,
+            status: 'reference',
+            projectId: 'project-1',
+            areaId: 'area-1',
+            assignedTo: 'Alex',
+            description: 'Reference body',
+            tags: ['#research'],
+            contexts: ['@private'],
+            location: 'Archive room',
+            priority: 'high',
+            energyLevel: 'low',
+            timeEstimate: '1hr',
+            startTime: '2026-09-12T09:00:00.000Z',
+            dueDate: '2026-09-13T09:00:00.000Z',
+            reviewAt: '2026-09-14T09:00:00.000Z',
+            recurrence: { rule: 'daily' },
+            checklist: [{ id: 'step-1', title: 'Old action detail', isCompleted: false }],
+        };
+
+        function Probe() {
+            derived = useTaskEditDerivedState({
+                task: referenceTask,
+                checklist: referenceTask.checklist,
+                draft: createTaskDraft(referenceTask),
+                settings: { gtd: { taskEditor: { hidden: [] } } },
+                projects: [],
+                sections: [],
+                prioritiesEnabled: true,
+                timeEstimatesEnabled: true,
+                contextInputDraft: '@private',
+                descriptionDraft: 'Reference body',
+                tagInputDraft: '#research',
+                visibleAttachmentsLength: 1,
+                t: (key) => key,
+            });
+            return null;
+        }
+
+        renderer.act(() => {
+            renderer.create(React.createElement(Probe));
+        });
+
+        const visibleFields = [
+            ...(derived?.basicFields ?? []),
+            ...(derived?.schedulingFields ?? []),
+            ...(derived?.organizationFields ?? []),
+            ...(derived?.detailsFields ?? []),
+        ];
+        expect(visibleFields).toEqual(expect.arrayContaining([
+            'description', 'project', 'area', 'assignedTo', 'tags', 'attachments',
+        ]));
+        REFERENCE_HIDDEN_TASK_FIELDS.forEach((fieldId) => {
+            expect(visibleFields).not.toContain(fieldId);
+        });
+        expect(derived?.showStatusField).toBe(false);
     });
 });

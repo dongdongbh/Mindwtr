@@ -1,5 +1,5 @@
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
-import type { Task } from '@mindwtr/core';
+import type { Project, Task } from '@mindwtr/core';
 import { useTaskStore } from '@mindwtr/core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -613,11 +613,245 @@ describe('ListView', () => {
       lastDataChangeAt: 1,
     });
 
-    const { getByRole, queryByText } = renderListView('reference', 'Reference');
+    const { getAllByText, getByRole, queryByText } = renderListView('reference', 'Reference');
 
     expect(getByRole('combobox', { name: 'Group' })).toHaveTextContent('Area');
-    expect(queryByText('Work')).toBeInTheDocument();
+    expect(getAllByText('Work').length).toBeGreaterThanOrEqual(1);
     expect(queryByText('No Area')).toBeInTheDocument();
+  });
+
+  it('searches Reference title and description by every whitespace-separated term', async () => {
+    useTaskStore.setState({
+      _allTasks: [
+        makeTask('1', {
+          title: 'Printer handbook',
+          description: 'Default admin password',
+          status: 'reference',
+        }),
+        makeTask('2', {
+          title: 'Printer warranty',
+          description: 'Renewal details',
+          status: 'reference',
+        }),
+      ],
+      lastDataChangeAt: 1,
+    });
+    useUiStore.setState((state) => ({
+      ...state,
+      listOptions: { ...state.listOptions, referenceGroupBy: 'none' },
+    }));
+
+    const view = renderListView('reference', 'Reference');
+    fireEvent.change(view.getByRole('textbox', { name: /Search/ }), {
+      target: { value: 'printer ADMIN' },
+    });
+
+    await waitFor(() => {
+      expect(view.getByText('Printer handbook')).toBeInTheDocument();
+      expect(view.queryByText('Printer warranty')).not.toBeInTheDocument();
+    });
+  });
+
+  it('keeps non-Reference local search limited to the title', async () => {
+    useTaskStore.setState({
+      _allTasks: [makeTask('1', { title: 'Printer handbook', description: 'Default admin password' })],
+      lastDataChangeAt: 1,
+    });
+
+    const view = renderListView('next', 'Next');
+    fireEvent.change(view.getByRole('textbox', { name: /Search/ }), {
+      target: { value: 'admin' },
+    });
+
+    await waitFor(() => {
+      expect(view.queryByText('Printer handbook')).not.toBeInTheDocument();
+    });
+  });
+
+  it('includes archived-project references only when requested and excludes tombstones', async () => {
+    const batchMoveTasks = vi.fn(async () => ({ success: true }));
+    const activeProject: Project = {
+      id: 'project-active',
+      title: 'Active project',
+      status: 'active',
+      color: '#2563eb',
+      order: 0,
+      tagIds: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const archivedProject: Project = {
+      ...activeProject,
+      id: 'project-archived',
+      title: 'Archived project',
+      status: 'archived',
+      cancelledAt: now,
+    };
+    const deletedProject: Project = {
+      ...archivedProject,
+      id: 'project-deleted',
+      title: 'Deleted project',
+      deletedAt: now,
+    };
+    useTaskStore.setState({
+      _allProjects: [activeProject, archivedProject, deletedProject],
+      _allTasks: [
+        makeTask('active', { title: 'Active note', status: 'reference', projectId: activeProject.id, tags: ['#active'] }),
+        makeTask('archived', { title: 'Historical note', status: 'reference', projectId: archivedProject.id, tags: ['#history'] }),
+        makeTask('deleted-project', { title: 'Deleted project note', status: 'reference', projectId: deletedProject.id }),
+        makeTask('deleted-task', { title: 'Deleted task note', status: 'reference', deletedAt: now }),
+        makeTask('purged-task', { title: 'Purged task note', status: 'reference', purgedAt: now }),
+      ],
+      batchMoveTasks,
+      lastDataChangeAt: 1,
+    });
+    useUiStore.setState((state) => ({
+      ...state,
+      listFilters: { ...state.listFilters, open: true },
+      listOptions: { ...state.listOptions, referenceGroupBy: 'none' },
+    }));
+
+    const view = renderListView('reference', 'Reference');
+    const includeArchived = view.getByRole('checkbox', { name: 'Include archived projects' });
+
+    expect(includeArchived).not.toBeChecked();
+    expect(view.getByText('Active note')).toBeInTheDocument();
+    expect(view.queryByText('Historical note')).not.toBeInTheDocument();
+    expect(view.queryByRole('button', { name: /^#history/ })).not.toBeInTheDocument();
+
+    fireEvent.click(includeArchived);
+
+    await waitFor(() => {
+      expect(view.getByText('Historical note')).toBeInTheDocument();
+      expect(view.getByRole('button', { name: /^#history/ })).toBeInTheDocument();
+    });
+    expect(view.queryByText('Deleted project note')).not.toBeInTheDocument();
+    expect(view.queryByText('Deleted task note')).not.toBeInTheDocument();
+    expect(view.queryByText('Purged task note')).not.toBeInTheDocument();
+
+    fireEvent.click(view.getByRole('button', { name: 'Select' }));
+    const activeRow = view.getByText('Active note').closest('[data-task-id]') as HTMLElement;
+    const historicalRow = view.getByText('Historical note').closest('[data-task-id]') as HTMLElement;
+    expect(within(activeRow).getByRole('checkbox', { name: 'Select task' })).not.toBeChecked();
+    expect(within(historicalRow).queryByRole('checkbox', { name: 'Select task' })).not.toBeInTheDocument();
+    expect(within(historicalRow).getByRole('button', { name: /Toggle task details/ })).not.toBeDisabled();
+
+    fireEvent.click(view.getByRole('button', { name: 'Select All' }));
+    expect(within(activeRow).getByRole('checkbox', { name: 'Select task' })).toBeChecked();
+    fireEvent.change(view.getByRole('combobox', { name: 'Move to' }), {
+      target: { value: 'next' },
+    });
+
+    await waitFor(() => {
+      expect(batchMoveTasks).toHaveBeenCalledWith(['active'], 'next');
+    });
+    expect(useTaskStore.getState()._allTasks.find((task) => task.id === 'archived')).toMatchObject({
+      status: 'reference',
+      projectId: archivedProject.id,
+    });
+    expect(useTaskStore.getState()._allProjects.find((project) => project.id === archivedProject.id)).toMatchObject({
+      status: 'archived',
+    });
+
+    fireEvent.click(includeArchived);
+
+    await waitFor(() => {
+      expect(view.queryByText('Historical note')).not.toBeInTheDocument();
+      expect(view.queryByRole('checkbox', { name: 'Select task' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('drops a selected Reference when its project becomes archived while the row stays visible', async () => {
+    const activeProject: Project = {
+      id: 'project-active',
+      title: 'Active project',
+      status: 'active',
+      color: '#2563eb',
+      order: 0,
+      tagIds: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    useTaskStore.setState({
+      _allProjects: [activeProject],
+      _allTasks: [makeTask('reference', {
+        title: 'Changing project note',
+        status: 'reference',
+        projectId: activeProject.id,
+      })],
+      lastDataChangeAt: 1,
+    });
+    useUiStore.setState((state) => ({
+      ...state,
+      listFilters: { ...state.listFilters, open: true },
+      listOptions: { ...state.listOptions, referenceGroupBy: 'none' },
+    }));
+
+    const view = renderListView('reference', 'Reference');
+    fireEvent.click(view.getByRole('checkbox', { name: 'Include archived projects' }));
+    fireEvent.click(view.getByRole('button', { name: 'Select' }));
+    fireEvent.click(view.getByRole('checkbox', { name: 'Select task' }));
+    expect(view.getByRole('combobox', { name: 'Move to' })).toBeInTheDocument();
+
+    act(() => {
+      useTaskStore.setState({
+        _allProjects: [{ ...activeProject, status: 'archived', updatedAt: new Date().toISOString() }],
+        lastDataChangeAt: 2,
+      });
+    });
+
+    await waitFor(() => {
+      expect(view.getByText('Changing project note')).toBeInTheDocument();
+      expect(view.queryByRole('checkbox', { name: 'Select task' })).not.toBeInTheDocument();
+      expect(view.queryByRole('combobox', { name: 'Move to' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('masks context criteria in Reference without clearing them or disabling tag filters', async () => {
+    useTaskStore.setState({
+      _allTasks: [
+        makeTask('kept', {
+          title: 'Tagged reference',
+          status: 'reference',
+          contexts: ['@blocked'],
+          tags: ['#reading'],
+        }),
+        makeTask('filtered', {
+          title: 'Other reference',
+          status: 'reference',
+          contexts: ['@other'],
+          tags: ['#other'],
+        }),
+      ],
+      lastDataChangeAt: 1,
+    });
+    useUiStore.setState((state) => ({
+      ...state,
+      listFilters: {
+        criteria: {
+          contexts: ['@missing'],
+          excludedContexts: ['@blocked'],
+          tags: ['#reading'],
+        },
+        open: true,
+      },
+      listOptions: { ...state.listOptions, referenceGroupBy: 'none' },
+    }));
+
+    const view = renderListView('reference', 'Reference');
+
+    await waitFor(() => {
+      expect(view.getByText('Tagged reference')).toBeInTheDocument();
+      expect(view.queryByText('Other reference')).not.toBeInTheDocument();
+    });
+    expect(view.queryByText('@missing')).not.toBeInTheDocument();
+    expect(view.queryByText('@blocked')).not.toBeInTheDocument();
+    expect(view.getByRole('button', { name: '#reading' })).toHaveAttribute('aria-pressed', 'true');
+    expect(useUiStore.getState().listFilters.criteria).toMatchObject({
+      contexts: ['@missing'],
+      excludedContexts: ['@blocked'],
+      tags: ['#reading'],
+    });
   });
 
   it('virtualizes grouped rows beyond the threshold even with fewer unique tasks', () => {
@@ -661,8 +895,8 @@ describe('ListView', () => {
 
     const { getAllByText, queryByText } = renderListView('reference', 'Reference');
 
-    expect(queryByText('#alpha')).toBeInTheDocument();
-    expect(queryByText('#beta')).toBeInTheDocument();
+    expect(getAllByText('#alpha').length).toBeGreaterThanOrEqual(1);
+    expect(getAllByText('#beta').length).toBeGreaterThanOrEqual(1);
     expect(queryByText('No tags')).toBeInTheDocument();
     expect(getAllByText('Dual-tag reference')).toHaveLength(2);
   });
@@ -1349,19 +1583,12 @@ describe('ListView', () => {
     ['someday', 'Someday'],
     // The shared criteria narrow the Inbox too, so it must expose them (#956).
     ['inbox', 'Inbox'],
+    // Reference adds its archive-visibility option to the shared filter panel.
+    ['reference', 'Reference'],
   ] as const)('offers a Filters toggle in the %s toolbar', (statusFilter, title) => {
     const { getByRole } = renderListView(statusFilter, title);
 
     expect(getByRole('button', { name: 'Filters' })).toBeInTheDocument();
-  });
-
-  // Reference deliberately stays off the toolbar for now (#863: no blanket pass).
-  it.each([
-    ['reference', 'Reference'],
-  ] as const)('does not offer a Filters toggle in the %s toolbar', (statusFilter, title) => {
-    const { queryByRole } = renderListView(statusFilter, title);
-
-    expect(queryByRole('button', { name: 'Filters' })).not.toBeInTheDocument();
   });
 
   it('toggles the completed-list filter panel from the toolbar button', async () => {
