@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type DragEvent, type FormEvent, type ReactNode } from 'react';
 import { ContextualHelp } from '../ContextualHelp';
-import { Check, ChevronDown, ChevronRight, Folder, HelpCircle, Layers, MapPin, Trash2 } from 'lucide-react';
+import { Check, Folder, HelpCircle, Layers, MapPin, Trash2 } from 'lucide-react';
 import {
     filterProjectsBySelectedArea,
     resolveAutoTextDirection,
@@ -32,6 +32,7 @@ import { findAttachmentsSection } from './task-item-helpers';
 import { FocusStarIcon } from '../FocusStarIcon';
 import { TaskEditorAiMenu, TaskEditorAiPanels } from './TaskEditorAiPanels';
 import type { useTaskItemAi } from './useTaskItemAi';
+import { TaskEditorSection } from './TaskEditorSection';
 
 interface TaskItemEditorProps {
     t: (key: string) => string;
@@ -169,9 +170,9 @@ export function TaskItemEditor({
     const sortedAreas = [...areas].sort((a, b) => compareLabels(a.name, b.name));
     const projectFilterAreaId = editAreaId || undefined;
     const filteredProjects = filterProjectsBySelectedArea(sortedProjects, projectFilterAreaId);
-    const [schedulingOpen, setSchedulingOpen] = useState(sectionOpenDefaults.scheduling);
-    const [organizationOpen, setOrganizationOpen] = useState(sectionOpenDefaults.organization);
-    const [detailsOpen, setDetailsOpen] = useState(sectionOpenDefaults.details);
+    const [schedulingOpen, setSchedulingOpen] = useState(() => sectionOpenDefaults.scheduling || sectionCounts.scheduling > 0);
+    const [organizationOpen, setOrganizationOpen] = useState(() => sectionOpenDefaults.organization || sectionCounts.organization > 0);
+    const [detailsOpen, setDetailsOpen] = useState(() => sectionOpenDefaults.details || sectionCounts.details > 0);
 
     // Attachments can live in any of the three collapsible sections (user
     // configurable layout); a dropped file needs to expand whichever one
@@ -466,87 +467,44 @@ export function TaskItemEditor({
                 {(schedulingFields.length > 0 || detailsFields.length > 0) && (
                     <ContextualHelp topic={schedulingOpen && schedulingFields.length > 0 ? 'scheduling' : 'details'} t={t} />
                 )}
-                {schedulingFields.length > 0 && (
-                    <div className="border-t border-border pt-3">
-                        <button
-                            type="button"
-                            onClick={() => setSchedulingOpen((prev) => !prev)}
-                            className="w-full flex items-center justify-between text-xs uppercase tracking-wide text-muted-foreground font-semibold"
-                            aria-expanded={schedulingOpen}
+                <div>
+                    {schedulingFields.length > 0 && (
+                        <TaskEditorSection
+                            title={t('taskEdit.scheduling')}
+                            count={sectionCounts.scheduling}
+                            open={schedulingOpen}
+                            onToggle={() => setSchedulingOpen((prev) => !prev)}
                         >
-                            <span className="flex items-center gap-2">
-                                {t('taskEdit.scheduling')}
-                                {sectionCounts.scheduling > 0 && (
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                                        {sectionCounts.scheduling}
-                                    </span>
-                                )}
-                            </span>
-                            {schedulingOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                        </button>
-                        {schedulingOpen && (
-                            <div className="mt-3 space-y-3">
-                                {schedulingFields.map((fieldId) => (
-                                    <div key={fieldId} ref={fieldId === 'attachments' ? attachmentsFieldRef : undefined}>{renderField(fieldId)}</div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )}
-                {organizationFields.length > 0 && (
-                    <div className="border-t border-border pt-3">
-                        <button
-                            type="button"
-                            onClick={() => setOrganizationOpen((prev) => !prev)}
-                            className="w-full flex items-center justify-between text-xs uppercase tracking-wide text-muted-foreground font-semibold"
-                            aria-expanded={organizationOpen}
+                            {schedulingFields.map((fieldId) => (
+                                <div key={fieldId} ref={fieldId === 'attachments' ? attachmentsFieldRef : undefined}>{renderField(fieldId)}</div>
+                            ))}
+                        </TaskEditorSection>
+                    )}
+                    {organizationFields.length > 0 && (
+                        <TaskEditorSection
+                            title={t('taskEdit.organization')}
+                            count={sectionCounts.organization}
+                            open={organizationOpen}
+                            onToggle={() => setOrganizationOpen((prev) => !prev)}
                         >
-                            <span className="flex items-center gap-2">
-                                {t('taskEdit.organization')}
-                                {sectionCounts.organization > 0 && (
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                                        {sectionCounts.organization}
-                                    </span>
-                                )}
-                            </span>
-                            {organizationOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                        </button>
-                        {organizationOpen && (
-                            <div className="mt-3 space-y-3">
-                                {organizationFields.map((fieldId) => (
-                                    <div key={fieldId} ref={fieldId === 'attachments' ? attachmentsFieldRef : undefined}>{renderField(fieldId)}</div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )}
-                {detailsFields.length > 0 && (
-                    <div className="border-t border-border pt-3">
-                        <button
-                            type="button"
-                            onClick={() => setDetailsOpen((prev) => !prev)}
-                            className="w-full flex items-center justify-between text-xs uppercase tracking-wide text-muted-foreground font-semibold"
-                            aria-expanded={detailsOpen}
+                            {organizationFields.map((fieldId) => (
+                                <div key={fieldId} ref={fieldId === 'attachments' ? attachmentsFieldRef : undefined}>{renderField(fieldId)}</div>
+                            ))}
+                        </TaskEditorSection>
+                    )}
+                    {detailsFields.length > 0 && (
+                        <TaskEditorSection
+                            title={t('taskEdit.details')}
+                            count={sectionCounts.details}
+                            open={detailsOpen}
+                            onToggle={() => setDetailsOpen((prev) => !prev)}
                         >
-                            <span className="flex items-center gap-2">
-                                {t('taskEdit.details')}
-                                {sectionCounts.details > 0 && (
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                                        {sectionCounts.details}
-                                    </span>
-                                )}
-                            </span>
-                            {detailsOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                        </button>
-                        {detailsOpen && (
-                            <div className="mt-3 space-y-3">
-                                {detailsFields.map((fieldId) => (
-                                    <div key={fieldId} ref={fieldId === 'attachments' ? attachmentsFieldRef : undefined}>{renderField(fieldId)}</div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )}
+                            {detailsFields.map((fieldId) => (
+                                <div key={fieldId} ref={fieldId === 'attachments' ? attachmentsFieldRef : undefined}>{renderField(fieldId)}</div>
+                            ))}
+                        </TaskEditorSection>
+                    )}
+                </div>
             </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-1">

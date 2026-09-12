@@ -124,9 +124,9 @@ const baseProps: Parameters<typeof TaskItemEditor>[0] = {
     organizationFields: ['contexts'],
     detailsFields: ['description'],
     sectionCounts: {
-        scheduling: 1,
-        organization: 1,
-        details: 1,
+        scheduling: 0,
+        organization: 0,
+        details: 0,
     },
     sectionOpenDefaults: {
         basic: true,
@@ -208,17 +208,44 @@ describe('TaskItemEditor', () => {
         });
     });
 
-    it('keeps optional sections collapsed when their defaults are off', () => {
+    it('keeps empty optional sections collapsed when their defaults are off', () => {
         const { getByRole, queryByText } = render(<TaskItemEditor {...baseProps} />);
 
-        expect(getByRole('button', { name: /Scheduling/i })).toHaveAttribute('aria-expanded', 'false');
-        expect(getByRole('button', { name: /Organization/i })).toHaveAttribute('aria-expanded', 'false');
+        expect(getByRole('button', { name: /^Scheduling/i })).toHaveAttribute('aria-expanded', 'false');
+        expect(getByRole('button', { name: /^Organization/i })).toHaveAttribute('aria-expanded', 'false');
         expect(getByRole('button', { name: /^Details/i })).toHaveAttribute('aria-expanded', 'false');
 
         expect(queryByText('field:recurrence')).not.toBeInTheDocument();
         expect(queryByText('field:contexts')).not.toBeInTheDocument();
         expect(queryByText('field:description')).not.toBeInTheDocument();
         expect(queryByText('Location')).not.toBeInTheDocument();
+    });
+
+    it('opens populated sections and honors open defaults for empty sections', () => {
+        const { getByRole, getByText } = render(
+            <TaskItemEditor
+                {...baseProps}
+                sectionCounts={{ scheduling: 1, organization: 0, details: 1 }}
+                sectionOpenDefaults={{ ...baseProps.sectionOpenDefaults, organization: true }}
+            />
+        );
+
+        for (const name of [/^Scheduling/i, /^Organization/i, /^Details/i]) {
+            expect(getByRole('button', { name })).toHaveAttribute('aria-expanded', 'true');
+        }
+        for (const field of ['recurrence', 'contexts', 'description']) {
+            expect(getByText(`field:${field}`)).toBeVisible();
+        }
+    });
+
+    it('keeps manual section choices for the rest of the editing session', () => {
+        const props = { ...baseProps, sectionCounts: { scheduling: 1, organization: 0, details: 0 } };
+        const { getByRole, rerender } = render(<TaskItemEditor {...props} />);
+        fireEvent.click(getByRole('button', { name: /^Scheduling/i }));
+        rerender(<TaskItemEditor {...props} sectionCounts={{ scheduling: 2, organization: 1, details: 0 }} />);
+
+        expect(getByRole('button', { name: /^Scheduling/i })).toHaveAttribute('aria-expanded', 'false');
+        expect(getByRole('button', { name: /^Organization/i })).toHaveAttribute('aria-expanded', 'false');
     });
 
     it('does not render optional sections that have no fields', () => {
@@ -232,8 +259,8 @@ describe('TaskItemEditor', () => {
             />
         );
 
-        expect(queryByRole('button', { name: /Scheduling/i })).not.toBeInTheDocument();
-        expect(getByRole('button', { name: /Organization/i })).toBeInTheDocument();
+        expect(queryByRole('button', { name: /^Scheduling/i })).not.toBeInTheDocument();
+        expect(getByRole('button', { name: /^Organization/i })).toBeInTheDocument();
         expect(queryByRole('button', { name: /Details/i })).not.toBeInTheDocument();
     });
 
