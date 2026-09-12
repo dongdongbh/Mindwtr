@@ -1,4 +1,4 @@
-import { afterEach, expect } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 import { cleanup } from '@testing-library/react';
 import * as matchers from 'vitest-axe/matchers';
@@ -20,6 +20,16 @@ if (typeof window.cancelAnimationFrame !== 'function') {
     Object.defineProperty(window, 'cancelAnimationFrame', {
         writable: true,
         value: (id: number) => window.clearTimeout(id),
+    });
+}
+
+// jsdom has no layout/scrolling implementation. Editor section expansion calls
+// this from an animation frame, including in tests outside the section suite.
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+        configurable: true,
+        writable: true,
+        value: vi.fn(),
     });
 }
 
