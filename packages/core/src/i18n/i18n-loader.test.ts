@@ -29,7 +29,7 @@ describe('i18n-loader sync fallback', () => {
         const zhHant = await loadTranslations('zh-Hant');
 
         expect(zhHans['search.scopeHint']).toBe('任务、项目和人员');
-        expect(zhHant['search.scopeHint']).toBe('任務、項目和人員');
+        expect(zhHant['search.scopeHint']).toBe('任務、專案和人員');
     });
 
     it('includes common notice copy for toast titles', async () => {
