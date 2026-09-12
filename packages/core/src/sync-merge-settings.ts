@@ -30,6 +30,8 @@ import { chooseDeterministicWinner } from './sync-signatures';
 import { DELETE_VS_LIVE_AMBIGUOUS_WINDOW_MS } from './sync-types';
 import { normalizeExternalCalendarColor } from './external-calendar-colors';
 import { AI_REQUEST_TIMEOUT_OPTIONS } from './ai-config';
+import { DEFAULT_TASK_EDITOR_HIDDEN } from './task-editor-layout';
+import { logInfo } from './logger';
 
 const parseSyncTimestamp = (value?: string): number => {
     if (!value) return NaN;
@@ -43,6 +45,19 @@ const isIncomingNewer = (localAt?: string, incomingAt?: string): boolean => {
     if (!Number.isFinite(incomingTime)) return false;
     if (!Number.isFinite(localTime)) return true;
     return incomingTime > localTime;
+};
+
+// The load migration materializes this exact shape without a user edit. Both
+// editors save an order when customizing visibility, including a reset back to
+// default visibility. Extra fields may carry newer-client intent: keep them.
+const isMigrationTaskEditorDefault = (value: Record<string, unknown>): boolean => {
+    const hidden = value.hidden;
+    return typeof value.defaultsVersion === 'number'
+        && value.defaultsVersion > 0
+        && Object.keys(value).every((field) => field === 'hidden' || field === 'defaultsVersion')
+        && Array.isArray(hidden)
+        && hidden.length === DEFAULT_TASK_EDITOR_HIDDEN.length
+        && DEFAULT_TASK_EDITOR_HIDDEN.every((field) => hidden.includes(field));
 };
 
 const getSavedFilterOperationTime = (filter: SavedFilter): number => {
@@ -788,6 +803,36 @@ export const mergeSettingsForSync = (
             (incomingValue.gtd ?? {}) as Record<string, unknown>,
             incomingWins,
         );
+        const localLayout = localValue.gtd?.taskEditor;
+        const incomingLayout = incomingValue.gtd?.taskEditor;
+        if (localSettings.syncPreferences?.gtd !== false
+            && isObjectRecord(localLayout) && isObjectRecord(incomingLayout)
+            && !isSameValue(localLayout, incomingLayout)) {
+            const localDefault = isMigrationTaskEditorDefault(localLayout);
+            const incomingDefault = isMigrationTaskEditorDefault(incomingLayout);
+            const localAt = localSettings.syncPreferencesUpdatedAt?.gtd;
+            const incomingAt = incomingSettings.syncPreferencesUpdatedAt?.gtd;
+            let resolvedLayout = mergedGtd.taskEditor;
+            let reason: string | undefined;
+            if (localDefault !== incomingDefault) {
+                resolvedLayout = localDefault ? incomingLayout : localLayout;
+                reason = 'explicit-layout';
+            } else if (!isIncomingNewer(localAt, incomingAt) && !isIncomingNewer(incomingAt, localAt)) {
+                // Legacy layouts predate GTD sync clocks. Local-wins on a tie
+                // made every client re-upload its own layout forever. Keep one
+                // whole layout deterministically without inventing a fresh clock
+                // that could outrank a real edit made on another device.
+                resolvedLayout = chooseDeterministicWinner(localLayout, incomingLayout);
+                reason = 'tied-clock';
+            }
+            mergedGtd.taskEditor = cloneSettingValue(resolvedLayout);
+            if (reason && !isSameValue(localLayout, resolvedLayout)) {
+                logInfo('Task editor layout sync conflict resolved', {
+                    scope: 'sync',
+                    context: { releaseCheck: 'v1.3.0/task-editor-upgrade-sync', reason },
+                });
+            }
+        }
         const mergedInboxProcessing = mergeRecordFields(
             (localValue.gtd?.inboxProcessing ?? {}) as Record<string, unknown>,
             (incomingValue.gtd?.inboxProcessing ?? {}) as Record<string, unknown>,
