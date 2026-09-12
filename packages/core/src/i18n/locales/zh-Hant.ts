@@ -671,7 +671,7 @@ export const zhHant: Record<string, string> = {
         'shortcuts.missingTitle': 'Mindwtr 無法從該快捷方式連結中讀取任務標題。',
         'projects.title': '專案',
         'projects.statusLabel': '狀態',
-        'projects.activeSection': '活躍專案',
+        'projects.activeSection': '啟用中的專案',
         'projects.noProjects': '暫無專案',
         'projects.noProjectsInArea': '當前領域暫無專案。',
         'projects.selectProject': '選擇一個專案查看任務',
