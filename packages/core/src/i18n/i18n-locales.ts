@@ -143,6 +143,18 @@ export const LOCALES = {
         // so new English UI copy cannot silently fall back in Spanish.
         translatedKeyFloor: 'all',
     },
+    hu: {
+        loadSync: () => require('./locales/hu') as typeof import('./locales/hu'),
+        loadAsync: () => import('./locales/hu'),
+        file: 'hu',
+        export: 'huOverrides',
+        mode: 'overrides',
+        native: 'Magyar',
+        nonLatin: false,
+        // Complete translation with every English key translated. Keep this at full parity
+        // so new English UI copy cannot silently fall back in Hungarian.
+        translatedKeyFloor: 'all',
+    },
     hi: {
         loadSync: () => require('./locales/hi') as typeof import('./locales/hi'),
         loadAsync: () => import('./locales/hi'),

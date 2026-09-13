@@ -4,7 +4,7 @@
 //
 // Every `starter.*` string, per language, already merged onto English the way
 // i18n-loader.ts merges an 'overrides' locale. getting-started-seed.ts reads these
-// ~39 keys instead of loading all 20 locale dictionaries, because it sits on
+// ~39 keys instead of loading all 21 locale dictionaries, because it sits on
 // every platform's cold path (store.ts -> store-settings.ts -> here).
 import type { Language } from './i18n-types';
 
@@ -213,6 +213,47 @@ export const STARTER_SEED_STRINGS: Record<Language, Record<string, string>> = {
         "starter.weeklyReview.check3": "Elige las próximas tareas y deja esperar el resto",
         "starter.weeklyReview.desc": "Un pequeño orden semanal mantiene tus listas fiables.",
         "starter.weeklyReview.title": "Haz tu primera revisión semanal",
+    },
+    "hu": {
+        "starter.focus.check1": "Nyissa meg a Fókuszt",
+        "starter.focus.check2": "Használja a csillagot a legfontosabb feladatai kiválasztásához",
+        "starter.focus.check3": "Halasszon el egy feladatot, hogy elrejtse, amíg szüksége nem lesz rá",
+        "starter.focus.desc": "Válassza ki azt a néhány dolgot, amit valóban meg fog csinálni ma.",
+        "starter.focus.title": "Csillagozzon meg akár 3 feladatot a Mai fókuszhoz",
+        "starter.import.check1": "Nyissa meg: Beállítások -> Adatok",
+        "starter.import.check2": "Importáljon Todoistot, DGT GTD-t, OmniFocust vagy egy biztonsági mentés fájlt",
+        "starter.import.check3": "Tekintse át az importált elemeket a Beérkezett elemek közül",
+        "starter.import.desc": "Hozza át a meglévő feladatait, mielőtt átrendezné őket a Mindwtr-ben.",
+        "starter.import.title": "Feladatok importálása egy másik alkalmazásból",
+        "starter.processInbox.check1": "Nyissa meg a Beérkezett elemeket",
+        "starter.processInbox.check2": "Koppintson a Beérkezett elemek feldolgozására",
+        "starter.processInbox.check3": "Döntse el a következő lépést egy minta elemhez, vagy tegye félre későbbre",
+        "starter.processInbox.desc": "Alakítson egy rögzített gondolatot egy kicsi, elvégezhető lépéssé.",
+        "starter.processInbox.title": "Kezdje itt: dolgozza fel az első beérkezett elemét",
+        "starter.projectNotes": "Ezek a kezdő lépések feladatok nem kötelezők. Törölje ezt a projektet bármikor, amikor úgy érzi, hogy a Mindwtr be van állítva.",
+        "starter.projectTitle": "Kezdő lépések",
+        "starter.quickCapture.check1": "Koppintson a rögzítés gombra",
+        "starter.quickCapture.check2": "Próbálja ki: Alex felhívása @phone /due:tomorrow",
+        "starter.quickCapture.check3": "Csak azoknak adjon dátumot, amiknek valódi határidejük van",
+        "starter.quickCapture.desc": "Írjon be egy gondolatot, és adjon hozzá részleteket közvetlenül a szövegben - nincs szükség űrlapokra.",
+        "starter.quickCapture.title": "Rögzítsen egy feladatot egy sorban",
+        "starter.sampleBuyMilk": "Tej vásárlása",
+        "starter.sampleReplySam": "Válasz Samnek",
+        "starter.simplify.check1": "Nyissa meg: Beállítások -> GTD -> Feladatszerkesztő elrendezése",
+        "starter.simplify.check2": "Rejtse el azokat a mezőket, amiket sosem használ",
+        "starter.simplify.check3": "Bármikor visszahozhatja őket - az elrejtés soha nem törli az adatokat",
+        "starter.simplify.desc": "Egyszerű listát szeretne? Csökkentse a feladatszerkesztőt csak a szükséges mezőkre.",
+        "starter.simplify.title": "Tegye sajátjává a Mindwtr-t: rejtse el, amit nem használ",
+        "starter.sync.check1": "Nyissa meg: Beállítások -> Szinkronizálás",
+        "starter.sync.check2": "Válasszon Dropboxot, iCloudot, WebDAV-ot, fájlszinkronizálást vagy önállóan üzemeltetettet",
+        "starter.sync.check3": "Futtassa a Kapcsolat tesztelését, ha elérhető, majd a Szinkronizálás most gombot",
+        "starter.sync.desc": "Válasszon egy szinkronizálási módot, ha azt szeretné, hogy az asztali és a mobil megossza az adatokat.",
+        "starter.sync.title": "Állítsa be a szinkronizálást az eszközei között",
+        "starter.weeklyReview.check1": "Nyissa meg az Áttekintést",
+        "starter.weeklyReview.check2": "Ürítse ki a Beérkezett elemeket",
+        "starter.weeklyReview.check3": "Válassza ki a következő néhány feladatot, a többit hagyja várni",
+        "starter.weeklyReview.desc": "Egy rövid heti rendrakás segít megbízhatóvá tenni a listáit.",
+        "starter.weeklyReview.title": "Végezze el az első heti áttekintését",
     },
     "hi": {
         "starter.focus.check1": "फ़ोकस खोलें",

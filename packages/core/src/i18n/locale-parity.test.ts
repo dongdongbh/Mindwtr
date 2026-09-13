@@ -7,6 +7,7 @@ import { esOverrides } from './locales/es';
 import { faOverrides } from './locales/fa';
 import { frOverrides } from './locales/fr';
 import { hiOverrides } from './locales/hi';
+import { huOverrides } from './locales/hu';
 import { itOverrides } from './locales/it';
 import { jaOverrides } from './locales/ja';
 import { koOverrides } from './locales/ko';
@@ -40,7 +41,7 @@ import { LOCALES, isEnglishResidueChecked, isMixedEnglishChecked, type Locale } 
 const translationsByLocale: Record<Locale, Record<string, string>> = {
     zh: zhHans, 'zh-Hant': zhHant,
     ar: arOverrides, cs: csOverrides, de: deOverrides, es: esOverrides, fa: faOverrides, fr: frOverrides,
-    hi: hiOverrides, it: itOverrides, ja: jaOverrides, ko: koOverrides, nl: nlOverrides,
+    hi: hiOverrides, hu: huOverrides, it: itOverrides, ja: jaOverrides, ko: koOverrides, nl: nlOverrides,
     pl: plOverrides, pt: ptOverrides, ru: ruOverrides, sv: svOverrides, tr: trOverrides, vi: viOverrides,
 };
 

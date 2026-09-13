@@ -6,6 +6,7 @@ import { en } from './i18n/locales/en';
 import { esOverrides } from './i18n/locales/es';
 import { faOverrides } from './i18n/locales/fa';
 import { frOverrides } from './i18n/locales/fr';
+import { huOverrides } from './i18n/locales/hu';
 import { itOverrides } from './i18n/locales/it';
 import { jaOverrides } from './i18n/locales/ja';
 import { koOverrides } from './i18n/locales/ko';
@@ -23,7 +24,7 @@ import { zhHant } from './i18n/locales/zh-Hant';
 // than English alone.
 const HELP_BY_LOCALE: Record<string, Record<string, string>> = {
     en, cs: csOverrides, de: deOverrides, es: esOverrides, fa: faOverrides, fr: frOverrides,
-    it: itOverrides, ja: jaOverrides, ko: koOverrides, nl: nlOverrides, pl: plOverrides,
+    hu: huOverrides, it: itOverrides, ja: jaOverrides, ko: koOverrides, nl: nlOverrides, pl: plOverrides,
     pt: ptOverrides, sv: svOverrides, tr: trOverrides, vi: viOverrides,
     zh: zhHans, 'zh-Hant': zhHant,
 };

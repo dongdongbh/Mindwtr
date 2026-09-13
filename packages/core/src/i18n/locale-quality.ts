@@ -175,6 +175,19 @@ export const allowedEnglishMirrorKeysByLocale: Record<string, readonly string[]>
         'taskEdit.tagsLabel',
         'taskEdit.timeSpentPlaceholder',
     ],
+    hu: [
+        // Hungarian shares these exactly with English: established IT loanwords spelled
+        // the same in both languages ("Platform", "Offline", "Port", "Proxy URL", "Bearer
+        // token"), and brand/product names kept in Latin ("E-Ink", "Apple Reminders").
+        'settings.eink',
+        'settings.platform',
+        'common.offline',
+        'settings.appleRemindersImport.appleReminders',
+        'settings.localApiPort',
+        'settings.emailCapturePort',
+        'settings.localApiToken',
+        'settings.networkProxyUrl',
+    ],
 };
 
 const translatableEnglishPattern = /[A-Za-z]{3,}/;
@@ -274,6 +287,9 @@ export const nativeEnglishHomographsByLocale: Record<string, readonly string[]> 
     tr: ['on', 'an', 'at', 'in', 'her', 'as'],
     // Swedish: i/in, under (during), all, is (ice), just, be (ask), for (fared).
     sv: ['in', 'under', 'all', 'is', 'just', 'be', 'for'],
+    // Hungarian: is (too/also, extremely common), be (separable-verb prefix meaning "in",
+    // as in "fejezte be" - finished).
+    hu: ['is', 'be'],
 };
 
 /**
