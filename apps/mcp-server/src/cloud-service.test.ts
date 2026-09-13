@@ -344,7 +344,7 @@ describe('cloud-backed MCP service', () => {
     expect(logs).toEqual([{
       message: 'MCP attachment link replacement committed',
       context: {
-        releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+        releaseCheck: 'v1.3.0/mcp-decoded-network-link-guard',
         backend: 'cloud',
         entity: 'task',
       },
@@ -543,8 +543,8 @@ describe('cloud-backed MCP service', () => {
     }
   });
 
-  test('rejects new or changed network-share links before a cloud PATCH', async () => {
-    const networkUri = '//host/share/file.txt';
+  for (const networkUri of ['//host/share/file.txt', 'file:///%2fhost/share/file.txt']) {
+  test(`rejects new or changed network-share links before a cloud PATCH: ${networkUri}`, async () => {
     const cases = [
       {
         attachments: [],
@@ -584,6 +584,7 @@ describe('cloud-backed MCP service', () => {
       expect(patchCount).toBe(0);
     }
   });
+  }
 
   test('keeps scalar task and project updates unconditional', async () => {
     const requests: Array<{ method: string; headers: Headers; body?: any }> = [];

@@ -6,6 +6,7 @@ import { WeeklyReviewGuideModal } from './WeeklyReviewModal';
 
 vi.mock('../../../contexts/language-context', () => ({
     useLanguage: () => ({
+        language: 'en',
         t: (key: string) => ({
             'review.title': 'Weekly Review',
             'review.inboxZero': 'Inbox Zero',
@@ -30,6 +31,7 @@ vi.mock('../../../contexts/language-context', () => ({
             'review.weekEstimatedTotal': 'Estimated: {{duration}}',
             'review.weekTrackedTotal': 'Tracked on those tasks: {{duration}}',
             'review.finish': 'Finish',
+            'shareCard.action': 'Share my reflection',
             'review.step': 'Step',
             'review.of': 'of',
             'mindSweep.title': 'Mind Sweep',
@@ -58,6 +60,14 @@ vi.mock('../../MindSweepModal', () => ({
 
 vi.mock('../../PromptModal', () => ({
     PromptModal: () => null,
+}));
+
+vi.mock('../../ShareCardDialog', () => ({
+    ShareCardDialog: ({ onClose, reviewDate }: { onClose: () => void; reviewDate: string }) => (
+        <div role="dialog" aria-label="My weekly reflection" data-review-date={reviewDate}>
+            <button type="button" onClick={onClose}>Close share</button>
+        </div>
+    ),
 }));
 
 const now = '2026-02-01T00:00:00.000Z';
@@ -103,6 +113,30 @@ describe('WeeklyReviewGuideModal', () => {
 
         expect(screen.getByRole('heading', { level: 2, name: 'Review Complete!' })).toBeInTheDocument();
         expect(screen.queryByText('This week')).not.toBeInTheDocument();
+    });
+
+    it('offers sharing only from the final reflection without finishing the review', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 8, 12, 12, 0, 0));
+        const onClose = vi.fn();
+        render(<WeeklyReviewGuideModal onClose={onClose} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Share my reflection' }));
+        expect(screen.getByRole('dialog', { name: 'My weekly reflection' })).toHaveAttribute(
+            'data-review-date',
+            'September 12, 2026',
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Close share' }));
+        expect(screen.queryByRole('dialog', { name: 'My weekly reflection' })).not.toBeInTheDocument();
+        expect(onClose).not.toHaveBeenCalled();
+
+        vi.setSystemTime(new Date(2026, 8, 13, 12, 0, 0));
+        fireEvent.click(screen.getByRole('button', { name: 'Share my reflection' }));
+        expect(screen.getByRole('dialog', { name: 'My weekly reflection' })).toHaveAttribute(
+            'data-review-date',
+            'September 12, 2026',
+        );
     });
 
     it('shows this week\'s completion, project, estimate, and tracked totals', () => {

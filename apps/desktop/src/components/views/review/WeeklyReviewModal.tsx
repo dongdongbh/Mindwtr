@@ -30,7 +30,7 @@ import {
     type TaskStatus,
     type AIProviderId,
 } from '@mindwtr/core';
-import { Archive, ArrowRight, Calendar, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, History, Layers, MapPin, RefreshCw, X, type LucideIcon } from 'lucide-react';
+import { Archive, ArrowRight, Calendar, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, History, Image as ImageIcon, Layers, MapPin, RefreshCw, X, type LucideIcon } from 'lucide-react';
 
 import { TaskItem } from '../../TaskItem';
 import { Dialog, DialogHeader } from '../../ui/Dialog';
@@ -43,6 +43,7 @@ import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../../lib/ai-confi
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 import { useUiStore } from '../../../store/ui-store';
 import { getWorkspaceCache } from '../../../lib/workspace-cache';
+import { ShareCardDialog } from '../../ShareCardDialog';
 
 type ReviewStep = 'inbox' | 'stale' | 'calendar' | 'waiting' | 'contexts' | 'projects' | 'someday' | 'completed';
 type ReviewStepDefinition = {
@@ -72,12 +73,29 @@ function SummaryRow({ good, text }: { good: boolean; text: string }) {
 }
 
 export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps) {
+    const { t, language } = useLanguage();
+    const [shareCardReviewDate] = useState(() => {
+        try {
+            return new Intl.DateTimeFormat(language, {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+            }).format(new Date());
+        } catch {
+            return new Intl.DateTimeFormat(undefined, {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+            }).format(new Date());
+        }
+    });
     const sandboxMode = isSandboxMode();
     const [isProcessing, setIsProcessing] = useState(false);
     const [expandedExternalDays, setExpandedExternalDays] = useState<Set<string>>(new Set());
     const [expandedContextGroups, setExpandedContextGroups] = useState<Set<string>>(new Set());
     const [showScheduledWaiting, setShowScheduledWaiting] = useState(false);
     const [showScheduledSomeday, setShowScheduledSomeday] = useState(false);
+    const [shareCardOpen, setShareCardOpen] = useState(false);
     const [projectTaskPrompt, setProjectTaskPrompt] = useState<{ projectId: string; projectTitle: string } | null>(null);
     const { tasks, projects, areas, settings, addProject, updateProject, updateTask, deleteTask, batchUpdateTasks } = useTaskStore(
         (state) => ({
@@ -116,7 +134,6 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     );
     const allContexts = useMemo(() => getUsedTaskTokens(activeTasks, (task) => task.contexts, { prefix: '@' }), [activeTasks]);
     const allTags = useMemo(() => getUsedTaskTokens(activeTasks, (task) => task.tags, { prefix: '#' }), [activeTasks]);
-    const { t } = useLanguage();
     const [aiSuggestions, setAiSuggestions] = useState<ReviewSuggestion[]>([]);
     const [aiSelectedIds, setAiSelectedIds] = useState<Set<string>>(new Set());
     const [aiLoading, setAiLoading] = useState(false);
@@ -242,6 +259,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.defaultPrevented || shareCardOpen) return;
             if (event.key === 'Escape') {
                 event.preventDefault();
                 onClose();
@@ -249,7 +267,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [onClose]);
+    }, [onClose, shareCardOpen]);
 
     useEffect(() => {
         if (sandboxMode) return;
@@ -1038,18 +1056,29 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                         <div className="mx-auto max-w-lg text-left">
                             {renderMindSweepNudge()}
                         </div>
-                        <button
-                            onClick={finishReview}
-                            className="bg-primary text-primary-foreground px-8 py-3 rounded-lg text-lg font-medium hover:bg-primary/90 transition-colors"
-                        >
-                            {t('review.finish')}
-                        </button>
+                        <div className="flex flex-wrap items-center justify-center gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setShareCardOpen(true)}
+                                className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-5 py-3 text-base font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                                <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                                {t('shareCard.action')}
+                            </button>
+                            <button
+                                onClick={finishReview}
+                                className="bg-primary text-primary-foreground px-8 py-3 rounded-lg text-lg font-medium hover:bg-primary/90 transition-colors"
+                            >
+                                {t('review.finish')}
+                            </button>
+                        </div>
                     </div>
                 );
         }
     };
 
     return (
+        <>
         <Dialog
             onClose={onClose}
             label={t('review.title')}
@@ -1128,5 +1157,13 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                 onConfirm={confirmProjectTaskPrompt}
             />
         </Dialog>
+        {shareCardOpen && (
+            <ShareCardDialog
+                onClose={() => setShareCardOpen(false)}
+                reviewDate={shareCardReviewDate}
+                t={t}
+            />
+        )}
+        </>
     );
 }

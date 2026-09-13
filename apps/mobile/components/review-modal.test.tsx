@@ -168,6 +168,10 @@ vi.mock('../contexts/quick-capture-context', () => ({
     useQuickCapture: () => ({ openQuickCapture: vi.fn() }),
 }));
 
+vi.mock('./share-card-modal', () => ({
+    ShareCardModal: () => null,
+}));
+
 vi.mock('@/hooks/use-theme-tokens', () => ({
     useThemeTokens: () => ({ isMaterial: false, roles: null, shape: { large: 16 } }),
 }));
@@ -245,6 +249,7 @@ vi.mock('lucide-react-native', () => {
         FolderOpen: icon('FolderOpen'),
         Lightbulb: icon('Lightbulb'),
         Play: icon('Play'),
+        Share2: icon('Share2'),
         CheckCircle2: icon('CheckCircle2'),
         PartyPopper: icon('PartyPopper'),
     };
@@ -482,6 +487,8 @@ describe('ReviewModal', () => {
         expect(stepList.props.contentContainerStyle).toEqual(
             expect.objectContaining({ paddingBottom: 16 }),
         );
+        expect(tree.root.findByProps({ accessibilityLabel: 'Back' }).props.disabled).toBe(true);
+        expect(tree.root.findByProps({ accessibilityLabel: 'Next' }).props.accessibilityRole).toBe('button');
     });
 
     it('does not let task chips navigate away mid-review', async () => {
@@ -540,6 +547,7 @@ describe('ReviewModal', () => {
         // Finish stays in the safe-area footer, outside the scrolling summary.
         expect(summary.findAllByProps({ accessibilityLabel: 'Finish' })).toHaveLength(0);
         expect(tree.root.findByProps({ accessibilityLabel: 'Finish' })).toBeDefined();
+        expect(tree.root.findByProps({ testID: 'review-share-card-button' })).toBeDefined();
     });
 
     it('shows this week\'s completion, project, estimate, and tracked totals', async () => {

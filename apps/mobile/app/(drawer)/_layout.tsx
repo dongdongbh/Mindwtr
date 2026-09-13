@@ -1,3 +1,4 @@
+import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { getHeaderTitle } from '@react-navigation/elements';
 import { Stack } from 'expo-router';
@@ -5,7 +6,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useLanguage } from '../../contexts/language-context';
-import { AdaptiveWindowProvider } from '@/hooks/use-adaptive-window';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 
 function DrawerHeader({
@@ -70,8 +70,7 @@ export default function AppLayout() {
   const backAccessibilityLabel = t('common.back');
 
   return (
-    <AdaptiveWindowProvider>
-      <Stack
+    <Stack
       screenOptions={{
         header: ({ navigation, route, options, back }) => (
           <DrawerHeader
@@ -110,8 +109,7 @@ export default function AppLayout() {
         }}
       />
       <Stack.Screen name="saved-search/[id]" options={{ title: t('search.title') }} />
-      </Stack>
-    </AdaptiveWindowProvider>
+    </Stack>
   );
 }
 

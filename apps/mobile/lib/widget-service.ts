@@ -11,6 +11,7 @@ import {
     buildAndroidTaskPeekLabels,
     buildShortcutsSnapshot,
     buildWidgetPayload,
+    createWidgetPayloadProjection,
     IOS_SHORTCUTS_SNAPSHOT_KEY,
     IOS_WIDGET_APP_GROUP,
     IOS_WIDGET_KIND,
@@ -24,9 +25,11 @@ import {
     resolveWidgetLanguage,
     type ShortcutsSnapshot,
     type TasksWidgetPayload,
+    type WidgetPayloadBuildOptions,
+    type WidgetPayloadProjection,
     WIDGET_LANGUAGE_KEY,
 } from './widget-data';
-import { buildWidgetSavedFilterOptions, WIDGET_FIXED_LIST_IDS, WIDGET_SAVED_FILTER_LIST_PREFIX } from './widget-lists';
+import { WIDGET_FIXED_LIST_IDS } from './widget-lists';
 import { focusWidgetFilterKey, getFocusWidgetFilter } from './focus-widget-filter';
 import { logError, logInfo, logWarn } from './app-log';
 import { getLocalDayKey } from '@/hooks/use-local-day-key';
@@ -88,14 +91,9 @@ function androidWidgetListIds(): string[] {
     return selections.length === 0 ? [] : [...WIDGET_FIXED_LIST_IDS, ...selections];
 }
 
-function buildPayloadFromData(
-    data: AppData,
-    language: Language,
-    maxItems?: number,
-): TasksWidgetPayload {
-    return buildWidgetPayload(data, language, {
+function widgetPayloadOptions(): Omit<WidgetPayloadBuildOptions, 'maxItems'> {
+    return {
         systemColorScheme: getSystemColorSchemeForWidget(),
-        maxItems,
         // The widget's Focus list shows what the Focus screen shows, so it
         // rides the screen's current filter and sort (#1173).
         focusFilter: getFocusWidgetFilter(),
@@ -105,12 +103,25 @@ function buildPayloadFromData(
         // Edit Widget can switch lists while the app is not running. Carry the
         // bounded chooser's lists in each family snapshot, not just Focus.
         ...(Platform.OS === 'ios' ? {
-            listIds: [
-                ...WIDGET_FIXED_LIST_IDS,
-                ...buildWidgetSavedFilterOptions(data).map(({ id }) => `${WIDGET_SAVED_FILTER_LIST_PREFIX}${id}`),
-            ],
+            listIds: WIDGET_FIXED_LIST_IDS,
+            includeSavedFilterLists: true,
         } : {}),
+    };
+}
+
+function buildPayloadFromData(
+    data: AppData,
+    language: Language,
+    maxItems?: number,
+): TasksWidgetPayload {
+    return buildWidgetPayload(data, language, {
+        ...widgetPayloadOptions(),
+        maxItems,
     });
+}
+
+function createPayloadProjectionFromData(data: AppData, language: Language): WidgetPayloadProjection {
+    return createWidgetPayloadProjection(data, language, widgetPayloadOptions());
 }
 
 // The native widget's task list scrolls (RemoteViewsService), so the payload
@@ -214,7 +225,7 @@ async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, langua
     }
 }
 
-async function updateIosWidgetPayloadsFromData(data: AppData, language: Language): Promise<boolean> {
+async function updateIosWidgetPayloads(projection: WidgetPayloadProjection): Promise<boolean> {
     if (Platform.OS !== 'ios') return false;
     const widgetApi = await getIosWidgetApi();
     if (!widgetApi) return false;
@@ -222,23 +233,23 @@ async function updateIosWidgetPayloadsFromData(data: AppData, language: Language
     const payloadEntries = [
         [
             IOS_WIDGET_PAYLOAD_KEY,
-            buildPayloadFromData(data, language, IOS_WIDGET_FAMILY_MAX_ITEMS.default),
+            projection.build(IOS_WIDGET_FAMILY_MAX_ITEMS.default),
         ],
         [
             IOS_WIDGET_PAYLOAD_KEY_SMALL,
-            buildPayloadFromData(data, language, IOS_WIDGET_FAMILY_MAX_ITEMS.small),
+            projection.build(IOS_WIDGET_FAMILY_MAX_ITEMS.small),
         ],
         [
             IOS_WIDGET_PAYLOAD_KEY_MEDIUM,
-            buildPayloadFromData(data, language, IOS_WIDGET_FAMILY_MAX_ITEMS.medium),
+            projection.build(IOS_WIDGET_FAMILY_MAX_ITEMS.medium),
         ],
         [
             IOS_WIDGET_PAYLOAD_KEY_LARGE,
-            buildPayloadFromData(data, language, IOS_WIDGET_FAMILY_MAX_ITEMS.large),
+            projection.build(IOS_WIDGET_FAMILY_MAX_ITEMS.large),
         ],
         [
             IOS_WIDGET_PAYLOAD_KEY_EXTRA_LARGE,
-            buildPayloadFromData(data, language, IOS_WIDGET_FAMILY_MAX_ITEMS.extraLarge),
+            projection.build(IOS_WIDGET_FAMILY_MAX_ITEMS.extraLarge),
         ],
     ] as const satisfies readonly [string, TasksWidgetPayload][];
 
@@ -257,6 +268,10 @@ async function updateIosWidgetPayloadsFromData(data: AppData, language: Language
         } else if (typeof widgetApi.reloadAllTimelines === 'function') {
             widgetApi.reloadAllTimelines();
         }
+        void logInfo('iOS widget family payloads published from one derivation', {
+            scope: 'widget',
+            extra: { releaseCheck: 'v1.3.0/widget-batch-derivation', count: 5 },
+        });
         const payload = payloadEntries[0][1];
         void logInfo('iOS Focus widget payload published', {
             scope: 'widget',
@@ -379,11 +394,16 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
     if (Platform.OS !== 'android' && Platform.OS !== 'ios') return false;
     await ensureLastRenderedWidgetFingerprintLoaded();
     const language = await resolvePayloadLanguage(data);
+    const iosProjection = Platform.OS === 'ios'
+        ? createPayloadProjectionFromData(data, language)
+        : null;
 
     // Gate 1: the widget's own payload fingerprint, exactly as before #980 --
     // this is the #766 skip and must not fire on changes the widget doesn't
     // show.
-    const fingerprintPayload = buildPayloadFromData(data, language, WIDGET_FINGERPRINT_MAX_ITEMS);
+    const fingerprintPayload = iosProjection
+        ? iosProjection.build(WIDGET_FINGERPRINT_MAX_ITEMS)
+        : buildPayloadFromData(data, language, WIDGET_FINGERPRINT_MAX_ITEMS);
     // Native capture reads only availability, never provider credentials or model paths.
     // Include it in the fingerprint so a setting-only change refreshes the dialog.
     const audioEnabled = data.settings.ai?.speechToText?.enabled === true;
@@ -397,7 +417,7 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
                 language,
                 audioEnabled,
             )
-            : await updateIosWidgetPayloadsFromData(data, language);
+            : await updateIosWidgetPayloads(iosProjection as WidgetPayloadProjection);
         if (widgetUpdated) {
             lastRenderedWidgetFingerprint = widgetFingerprint;
             // Awaited (still error-swallowed): the headless background-sync

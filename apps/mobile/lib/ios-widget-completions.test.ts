@@ -26,7 +26,8 @@ vi.mock('./file-system', () => ({
 vi.mock('./app-log', () => ({ logInfo: mocks.logInfo, logError: vi.fn(), logWarn: vi.fn() }));
 
 // eslint-disable-next-line import/first
-import { flushIosWidgetCompletionSave, ingestIosWidgetCompletions } from './ios-widget-completions';
+import { flushPendingTaskActionSave } from './pending-capture-persistence';
+import { ingestIosWidgetCompletions } from './ios-widget-completions';
 
 const task = (props: Partial<Task> = {}): Task => ({
     id: 'task-1', title: 'Private task text', status: 'next',
@@ -133,6 +134,11 @@ describe('iOS widget completion ingestion', () => {
         expect(mocks.claim).not.toHaveBeenCalled();
     });
 
+    it('defers the durable save callback in sandbox mode', async () => {
+        mocks.sandbox = true;
+        await expect(flushPendingTaskActionSave()).rejects.toThrow('deferred in sandbox');
+    });
+
     it('propagates a native claim failure for lifecycle retry without acknowledging anything', async () => {
         mocks.claim.mockRejectedValueOnce(new Error('corrupt queue'));
         await expect(ingestIosWidgetCompletions(depsFor([task()]))).rejects.toThrow('corrupt queue');
@@ -183,7 +189,7 @@ describe('iOS widget completion ingestion', () => {
         const updateTask = vi.fn(useTaskStore.getState().updateTask);
         const deps = {
             tasks: [], getTasks: () => useTaskStore.getState()._allTasks,
-            updateTask, flushPendingSave: flushIosWidgetCompletionSave, refreshWidgets: vi.fn(async () => true),
+            updateTask, flushPendingSave: flushPendingTaskActionSave, refreshWidgets: vi.fn(async () => true),
         };
         try {
             const first = ingestIosWidgetCompletions(deps);

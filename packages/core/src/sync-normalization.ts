@@ -2,6 +2,8 @@ import type { AppData, Area, Attachment, Person, Project, Section, Task } from '
 import { isSha256Hex } from './attachment-hash';
 import { normalizePersonName, normalizePersonNote, normalizePersonReferenceLink } from './people';
 import { normalizeProjectSequentialScope, normalizeProjectTaskSortBy } from './project-utils';
+import { normalizeProjectLifecycleFields } from './project-status';
+import { logInfo } from './logger';
 import { normalizeTaskForLoad } from './task-status';
 import { isTaskSectionProjectArchiveReference } from './store-helpers';
 import { SYNC_REPAIR_REV_BY } from './sync-types';
@@ -311,7 +313,14 @@ export const normalizeProjectForSyncMerge = (
         areaId: normalizeOptionalString(project.areaId),
         areaTitle: normalizeOptionalString(project.areaTitle),
     };
-    return sameShallowRecord(project, candidate) ? project : candidate;
+    const normalized = normalizeProjectLifecycleFields(candidate);
+    if (normalized !== candidate) {
+        logInfo('Project lifecycle normalized for sync', {
+            scope: 'sync',
+            context: { releaseCheck: 'v1.3.0/project-lifecycle-sync', count: 1 },
+        });
+    }
+    return sameShallowRecord(project, normalized) ? project : normalized;
 };
 
 export type SyncMergeArea = Omit<Area, 'order'> & {

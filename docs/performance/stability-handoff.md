@@ -1,12 +1,22 @@
 # Performance and stability handoff
 
-Updated September 9, 2026. Engineering handoff for future desktop and mobile
+Updated September 13, 2026. Engineering handoff for future desktop and mobile
 sessions, not a claim that the performance audit is complete.
 
-Implementation baseline: `3d67289a9` on `perf/native-contention`, plus this
-documentation commit. This handoff is intended to travel with the merge to
-`main`. At the next session, inspect current Git/CI state; this document does not
+Latest desktop control: `80dede27c78a4737d144bb4b81052cdc9b9a6406` on `main`.
+This handoff accompanies two accepted desktop commits: exact native capture
+readback (`0d6c2929a`) and shared token timestamp reuse. They were prepared in
+`perf/desktop-stability-20260912` for integration into `main`; the dated reports
+retain the pre-commit binary, source-map and runner identities. The earlier
+`3d67289a9` / `perf/native-contention` work remains historical evidence below.
+At the next session, inspect current Git/CI state; local test results here do not
 certify a later commit, release, or deployment.
+
+Publication follow-up: the first CI run (`34737920122`) passed the performance
+budgets but found a hard-coded lab path in the new SQLite test fixture. The test
+now uses the platform temporary directory and respects local `TMPDIR`. This
+test-only portability correction does not invalidate the native measurements;
+check its subsequent exact CI run before treating publication as verified.
 
 ## Start here
 
@@ -26,6 +36,33 @@ certify a later commit, release, or deployment.
 
 ## Completed changes and strength of evidence
 
+September 12 desktop continuation: the native capture runner now verifies the
+exact captured SQLite row through independent readback and retains structured
+reload evidence. See [capture readback validation](desktop-capture-readback-2026-09-12.md).
+This is a harness correctness improvement; no app speedup is established. The
+fresh native control initially failed its viewport gate while the graphical
+session was locked. After unlocking, exact capture/readback/reload smoke passed;
+the report records one corrected virtualized-reload harness assumption. The new
+schema-2 timed readback boundary requires fresh cohorts. Android work awaits device connection.
+
+The same continuation then removed duplicate context/tag timestamp parsing in
+the shared store derivation. See [desktop token timestamp derivation](desktop-token-timestamps-2026-09-12.md).
+The 10k work-count regression fell from 20,000 timestamp reads to 10,000 with
+identical derived results. Two native A/B/B/A sequences passed exact capture,
+SQLite readback and reload checks. Native speedup remains unestablished:
+render-probe Enter-to-DOM medians were 147.0 ms control and 150.5 ms candidate
+(six observations each), and automation-visible medians were higher for the
+candidate. Accept this as redundant-work reduction only. The sampled 277 ms
+control capture retains evidence of overlapping save serialization. Measurements
+used the patch in `perf/desktop-stability-20260912` before publication; consult
+Git history and exact CI runs for subsequent integration status.
+
+September12 review addendum: iOS widget publication now performs one full
+selection pass instead of six, with448 byte-identical old-source comparisons.
+See [widget publication derivation](widget-publication-2026-09.md), Plan084.
+Native iOS latency and WidgetKit rendering remain unmeasured; prior platform
+work and open hypotheses below are unchanged.
+
 The figures below are historical observations under each report's conditions,
 not universal performance promises. Follow the links for raw samples, build
 hashes, fixture sizes, safety tests, and limitations.
@@ -39,6 +76,7 @@ hashes, fixture sizes, safety tests, and limitations.
 | Native desktop capture persistence | Append only new tasks when the canonical result preserves all existing tasks and other entities/settings exactly; otherwise retain full replacement | [Append-only path](native-append-capture-2026-09.md). Isolated save median 1792 → 465 ms; small native A/B/B/A readback median 2532 → 1081 ms. Not a general differential writer; visibility did not initially improve. |
 | Desktop pre-save preparation | Structurally equal cloned snapshots skip fingerprint preparation, with the old fingerprint rule retained as mismatch fallback | [Baseline equality](storage-baseline-equality-2026-09.md), `552707a59`. Isolated 10k-task median 34.03 → 5.05 ms; deterministic zero-serialization and compatibility tests. Intermittent slow visible captures remained. |
 | Shared serialization / desktop self-write tracking | Reuse at most eight property-name layouts within a traversal; read values fresh and retain identical canonical bytes | [Property ordering](watcher-property-order-2026-09.md), `e744235c4`. Watcher regression 503 sorts → fewer than ten; isolated median 9.89 → 8.56 ms. No deferred snapshot or cross-call cache. |
+| Shared token statistics / desktop capture | Parse each eligible task's token timestamp once for both context and tag accumulators | [Timestamp derivation](desktop-token-timestamps-2026-09-12.md). Work-count regression 20k → 10k reads; old-source output/identity equivalence. Native capture speedup unestablished; 32 A/B/B/A runs including warm-ups passed exact readback/reload gates. Android native benefit unmeasured. |
 | Mobile quick-capture rendering | Stabilize the context value when its action callback is unchanged; propagate changed actions/options normally | [Capture context](capture-context-2026-09.md), `3d67289a9`. Regression reduces three consumer renders to one. All 20 phone keyboard checks and three sampled capture iterations passed; overall latency improvement is not established. |
 
 ## Measurement and stability safeguards added
@@ -85,7 +123,9 @@ hashes, fixture sizes, safety tests, and limitations.
   batches do not establish an overall speedup or regression.
 - **Desktop capture:** deterministic preparation costs are reduced, but rare
   long Enter-to-DOM samples and roughly one-second automation-inclusive durable
-  readback at 10k tasks still need current, phase-separated profiling. Earlier
+  readback at 10k tasks remain. September 12 fresh JSC sampling reproduced a
+  277 ms capture with save-serialization frames; the timestamp change did not
+  establish an overall speedup. Continue separating those save phases. Earlier
   large visibility differences did not consistently reproduce. Do not attribute
   all readback time to SQL or assume all rendering delays are fixed.
 - **Scrolling and Settings on Android:** 1k-task native baselines exist, with
@@ -119,6 +159,12 @@ boundaries with the same archived binaries across A/B/B/A. Reproduce a slow
 Distinguish event handling, DOM/paint opportunity, preparation, IPC, native
 transaction, recovery JSON, and independent readback. Change only the dominant
 reproducible cost; extend the existing differential tests before touching writes.
+
+September 12 completed the fresh schema-2 control and timestamp A/B/B/A pass;
+start from its retained slow sample and matching maps. The next bounded hypothesis
+is save serialization overlapping capture rendering, with IPC/transaction/recovery
+timing still to separate. Do not repeat the completed token-timestamp experiment
+as if its native speedup had been established.
 
 Acceptance: complete comparable reports, no input/keyboard regression, exact-once
 creation, durable readback and reload survival, and no weakened correctness gates.

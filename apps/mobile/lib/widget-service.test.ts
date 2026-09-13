@@ -1,7 +1,8 @@
-import { type AppData, loadTranslations } from '@mindwtr/core';
+import { type AppData, loadTranslations, resolveAreaFilterSelection } from '@mindwtr/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildWidgetPayload } from './widget-data';
+import { resetFocusWidgetFilter, setFocusWidgetFilter } from './focus-widget-filter';
 import { resetMobileWidgetRenderCache, updateMobileWidgetFromData, updateMobileWidgetFromStore } from './widget-service';
 
 const {
@@ -61,6 +62,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@mindwtr/core')>();
     return {
         ...actual,
+        resolveAreaFilterSelection: vi.fn(actual.resolveAreaFilterSelection),
         useTaskStore: { getState: mockUseTaskStoreGetState },
     };
 });
@@ -146,6 +148,8 @@ describe('widget-service', () => {
         // updateMobileWidgetFromStore (which overrides this per-test).
         mockUseTaskStoreGetState.mockReturnValue({ settings: {} });
         vi.mocked(buildWidgetPayload).mockClear();
+        vi.mocked(resolveAreaFilterSelection).mockClear();
+        resetFocusWidgetFilter();
         resetMobileWidgetRenderCache();
     });
 
@@ -304,8 +308,9 @@ describe('widget-service', () => {
     it('writes family-specific iOS payloads with per-size item budgets', async () => {
         mockPlatform.OS = 'ios';
         mockIosWidgetSetItem.mockResolvedValue(undefined);
+        const data = buildData(30);
 
-        const didUpdate = await updateMobileWidgetFromData(buildData(30));
+        const didUpdate = await updateMobileWidgetFromData(data);
 
         expect(didUpdate).toBe(true);
         expect(mockAndroidWidgetSetPayload).not.toHaveBeenCalled();
@@ -323,11 +328,126 @@ describe('widget-service', () => {
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrTasksWidget');
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrCompactWidget');
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrFocusLockWidget');
+        expect(mockLogInfo).toHaveBeenCalledWith('iOS widget family payloads published from one derivation', {
+            scope: 'widget',
+            extra: { releaseCheck: 'v1.3.0/widget-batch-derivation', count: 5 },
+        });
+        expect(JSON.stringify(mockLogInfo.mock.calls)).not.toContain('Focused 1');
+
+        const listIds = ['focus', 'inbox', 'next', 'waiting', 'someday'];
+        const expectedFamilies = new Map([
+            ['mindwtr-ios-widget-payload', 12],
+            ['mindwtr-ios-widget-payload-small', 3],
+            ['mindwtr-ios-widget-payload-medium', 5],
+            ['mindwtr-ios-widget-payload-large', 12],
+            ['mindwtr-ios-widget-payload-extra-large', 24],
+        ].map(([key, maxItems]) => [key, JSON.stringify(buildWidgetPayload(data, 'en', {
+            systemColorScheme: 'light',
+            maxItems: maxItems as number,
+            listIds,
+            includeSavedFilterLists: true,
+        }))]));
+        for (const [key, expected] of expectedFamilies) {
+            expect(mockIosWidgetSetItem.mock.calls.find(([writtenKey]) => writtenKey === key)?.[1]).toBe(expected);
+        }
 
         const snapshot = payloadByKey.get('mindwtr-ios-shortcuts-snapshot');
         expect(snapshot.lists.next.length).toBeGreaterThan(0);
         expect(snapshot.lists.inbox).toEqual([]);
         expect(typeof snapshot.generatedAt).toBe('string');
+    });
+
+    it('derives task selection once for an iOS family publication', async () => {
+        mockPlatform.OS = 'ios';
+        mockIosWidgetSetItem.mockResolvedValue(undefined);
+        const data = buildData(60);
+
+        expect(await updateMobileWidgetFromData(data)).toBe(true);
+
+        expect(mockIosWidgetSetItem).toHaveBeenCalledTimes(6);
+        expect(vi.mocked(resolveAreaFilterSelection)).toHaveBeenCalledTimes(1);
+
+        mockIosWidgetSetItem.mockClear();
+        vi.mocked(resolveAreaFilterSelection).mockClear();
+        expect(await updateMobileWidgetFromData({
+            ...data,
+            tasks: data.tasks.map((task) => ({ ...task })),
+        })).toBe(true);
+        expect(mockIosWidgetSetItem).not.toHaveBeenCalled();
+        expect(vi.mocked(resolveAreaFilterSelection)).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries all iOS families after a failed family write without republishing Shortcuts', async () => {
+        mockPlatform.OS = 'ios';
+        mockIosWidgetSetItem.mockRejectedValueOnce(new Error('widget host busy'));
+        const data = buildData(5);
+
+        expect(await updateMobileWidgetFromData(data)).toBe(false);
+        expect(mockIosWidgetSetItem.mock.calls.map(([key]) => key)).toEqual([
+            'mindwtr-ios-widget-payload',
+            'mindwtr-ios-shortcuts-snapshot',
+        ]);
+        expect(mockLogInfo).not.toHaveBeenCalledWith(
+            'iOS widget family payloads published from one derivation',
+            expect.anything(),
+        );
+
+        mockIosWidgetSetItem.mockClear();
+        expect(await updateMobileWidgetFromData(data)).toBe(true);
+        expect(mockIosWidgetSetItem).toHaveBeenCalledTimes(5);
+        expect(mockIosWidgetSetItem.mock.calls.map(([key]) => key))
+            .not.toContain('mindwtr-ios-shortcuts-snapshot');
+        expect(mockLogInfo).toHaveBeenCalledWith('iOS widget family payloads published from one derivation', {
+            scope: 'widget',
+            extra: { releaseCheck: 'v1.3.0/widget-batch-derivation', count: 5 },
+        });
+    });
+
+    it('invalidates the store-level iOS projection for language, day and Focus-filter changes', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-09-12T12:00:00-04:00'));
+        mockPlatform.OS = 'ios';
+        let language = 'en';
+        mockAsyncStorageGetItem.mockImplementation(async (key: string) => (
+            key === 'mindwtr-language' ? language : null
+        ));
+        const data = buildData(5);
+        const storeState = {
+            _allTasks: data.tasks,
+            _allProjects: [],
+            _allSections: [],
+            _allAreas: [],
+            tasks: data.tasks,
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+            lastDataChangeAt: 1,
+        };
+        mockUseTaskStoreGetState.mockReturnValue(storeState);
+
+        try {
+            expect(await updateMobileWidgetFromStore()).toBe(true);
+
+            mockIosWidgetSetItem.mockClear();
+            language = 'de';
+            await loadTranslations('de');
+            expect(await updateMobileWidgetFromStore()).toBe(true);
+            expect(mockIosWidgetSetItem).toHaveBeenCalledTimes(5);
+
+            mockIosWidgetSetItem.mockClear();
+            vi.setSystemTime(new Date('2026-09-13T12:00:00-04:00'));
+            expect(await updateMobileWidgetFromStore()).toBe(true);
+            expect(mockIosWidgetSetItem).toHaveBeenCalledTimes(5);
+
+            mockIosWidgetSetItem.mockClear();
+            setFocusWidgetFilter({ criteria: { contexts: ['@office'] }, sortBy: 'default' });
+            expect(await updateMobileWidgetFromStore()).toBe(true);
+            expect(mockIosWidgetSetItem).toHaveBeenCalledTimes(5);
+        } finally {
+            resetFocusWidgetFilter();
+            vi.useRealTimers();
+        }
     });
 
     it('publishes bounded saved-filter lists for the iOS Edit Widget picker', async () => {

@@ -14,6 +14,7 @@ import {
     Lightbulb,
     PartyPopper,
     Play,
+    Share2,
     Sparkles,
     Tag,
     X,
@@ -37,6 +38,7 @@ import {
 } from './review/useReviewModalController';
 import { styles } from './review-modal.styles';
 import { SandboxWorkspaceCue } from './sandbox-workspace-cue';
+import { ShareCardModal } from './share-card-modal';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 
 interface ReviewModalProps {
@@ -51,6 +53,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
     const filledButton = useFilledButtonColors();
     const [showInboxProcessing, setShowInboxProcessing] = useState(false);
     const [showMindSweep, setShowMindSweep] = useState(false);
+    const [showShareCard, setShowShareCard] = useState(false);
     const [showScheduledWaiting, setShowScheduledWaiting] = useState(false);
     const [showScheduledSomeday, setShowScheduledSomeday] = useState(false);
     const {
@@ -144,7 +147,10 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         if (!visible && showMindSweep) {
             setShowMindSweep(false);
         }
-    }, [showInboxProcessing, showMindSweep, visible]);
+        if (!visible && showShareCard) {
+            setShowShareCard(false);
+        }
+    }, [showInboxProcessing, showMindSweep, showShareCard, visible]);
 
     const renderSummaryRow = (good: boolean, text: string) => (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -929,6 +935,18 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                     {currentStep === 'completed' ? (
                         <View style={[styles.footer, { borderTopColor: tc.border }]}>
                             <TouchableOpacity
+                                style={[styles.shareButton, { borderColor: tc.border }]}
+                                onPress={() => setShowShareCard(true)}
+                                accessibilityRole="button"
+                                accessibilityLabel={t('shareCard.action')}
+                                testID="review-share-card-button"
+                            >
+                                <Share2 size={18} color={tc.text} strokeWidth={2} />
+                                <Text style={[styles.shareButtonText, { color: tc.text }]}>
+                                    {t('shareCard.action')}
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
                                 style={[styles.primaryButton, styles.finishButton, { backgroundColor: filledButton.backgroundColor }]}
                                 onPress={handleFinish}
                                 accessibilityRole="button"
@@ -945,11 +963,18 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                                 style={[styles.backButton, { opacity: canGoBack ? 1 : 0.5 }]}
                                 onPress={prevStep}
                                 disabled={!canGoBack}
+                                accessibilityRole="button"
+                                accessibilityLabel={labels.back}
                                 accessibilityState={{ disabled: !canGoBack }}
                             >
                                 <Text style={[styles.backButtonText, { color: tc.secondaryText }]}>← {labels.back}</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.primaryButton, { backgroundColor: filledButton.backgroundColor }]} onPress={nextStep}>
+                            <TouchableOpacity
+                                style={[styles.primaryButton, { backgroundColor: filledButton.backgroundColor }]}
+                                onPress={nextStep}
+                                accessibilityRole="button"
+                                accessibilityLabel={labels.next}
+                            >
                                 <Text style={[styles.primaryButtonText, { color: onFilled }]}>{labels.next} →</Text>
                             </TouchableOpacity>
                         </View>
@@ -965,6 +990,11 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                     onProjectNavigate={handleNavigateToProject}
                     onContextNavigate={handleNavigateToToken}
                     onTagNavigate={handleNavigateToToken}
+                />
+
+                <ShareCardModal
+                    visible={visible && showShareCard}
+                    onClose={() => setShowShareCard(false)}
                 />
 
                 <ErrorBoundary>

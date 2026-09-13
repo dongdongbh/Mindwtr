@@ -35,6 +35,7 @@ import {
     resolveSafeWatchAudioPath,
     type PendingCapture,
 } from './pending-captures';
+import { flushPendingTaskActionSave } from './pending-capture-persistence';
 
 // The capture-shaped tests read capture fields; narrow once here.
 const parseCapture = (raw: string) => parsePendingCapture(raw) as PendingCapture | null;
@@ -435,6 +436,265 @@ describe('ingestPendingCaptures', () => {
         const outcomes = (appLogMocks.logInfo.mock.calls as unknown as [string, { extra: { outcome: string } }][]).map(([, context]) => context.extra.outcome);
         expect(outcomes).toEqual(['completed', 'already-done', 'missing']);
     });
+
+    it('persists a recurring completion and its single follow-up before deleting a replayed native command', async () => {
+        vi.useFakeTimers();
+        const recurring = {
+            id: 'recurring-task',
+            title: 'Private recurring task',
+            status: 'next',
+            dueDate: '2026-09-11',
+            recurrence: { rule: 'daily' },
+            tags: [],
+            contexts: [],
+            createdAt: '2026-09-11T12:00:00.000Z',
+            updatedAt: '2026-09-11T12:00:00.000Z',
+        } as Task;
+        let persisted: AppData = {
+            tasks: [recurring], projects: [], sections: [], areas: [], people: [],
+            settings: { deviceId: 'native-command-test' },
+        };
+        let failSaves = true;
+        const storage: StorageAdapter = {
+            getData: vi.fn(async () => structuredClone(persisted)),
+            saveData: vi.fn(async (data) => {
+                if (failSaves) throw new Error('disk unavailable');
+                persisted = structuredClone(data);
+            }),
+        };
+        setStorageAdapter(storage);
+        useTaskStore.setState({
+            settings: persisted.settings,
+            persistenceFailure: null,
+            _allTasks: [recurring],
+            _allProjects: [],
+            _allSections: [],
+            _allAreas: [],
+            _allPeople: [],
+        });
+        oneFile('complete.json', {
+            kind: 'complete', id: 'complete-recurring', taskId: recurring.id,
+            source: 'apple-watch',
+        });
+        const updateTask = vi.fn(useTaskStore.getState().updateTask);
+        const deps = {
+            addTask: addTaskMock(),
+            updateTask,
+            addProject,
+            projects: [],
+            areas: [],
+            tasks: [],
+            getTasks: () => useTaskStore.getState()._allTasks,
+            people: [],
+            settings: persisted.settings,
+            flushPendingSave: flushPendingTaskActionSave,
+        };
+
+        try {
+            const firstIngest = ingestPendingCaptures(deps);
+            await vi.advanceTimersByTimeAsync(10_000);
+            await expect(firstIngest).resolves.toBe(0);
+            expect(storage.saveData).toHaveBeenCalledTimes(5);
+            expect(fileSystemMocks.deleteAsync).not.toHaveBeenCalled();
+
+            const optimistic = structuredClone(useTaskStore.getState()._allTasks);
+            expect(optimistic.find(({ id }) => id === recurring.id)?.status).toBe('done');
+            expect(optimistic.filter(({ status }) => status === 'next')).toHaveLength(1);
+
+            failSaves = false;
+            await expect(ingestPendingCaptures(deps)).resolves.toBe(1);
+
+            expect(updateTask).toHaveBeenCalledOnce();
+            expect(persisted.tasks).toEqual(optimistic);
+            expect(fileSystemMocks.deleteAsync).toHaveBeenCalledOnce();
+            expect(vi.mocked(storage.saveData).mock.invocationCallOrder.at(-1))
+                .toBeLessThan(fileSystemMocks.deleteAsync.mock.invocationCallOrder[0]);
+            expect(appLogMocks.logInfo).toHaveBeenCalledWith('Native command save recovered', {
+                scope: 'capture',
+                extra: {
+                    releaseCheck: 'v1.3.0/native-command-save-recovery',
+                    outcome: 'recovered',
+                },
+            });
+            expect(JSON.stringify(appLogMocks.logInfo.mock.calls)).not.toContain(recurring.title);
+
+            useTaskStore.setState({
+                settings: {},
+                persistenceFailure: null,
+                _allTasks: [],
+                _allProjects: [],
+                _allSections: [],
+                _allAreas: [],
+                _allPeople: [],
+            });
+            await useTaskStore.getState().fetchData({ silent: true });
+            const reloaded = useTaskStore.getState()._allTasks;
+            expect(reloaded.find(({ id }) => id === recurring.id)?.status).toBe('done');
+            expect(reloaded.filter(({ status }) => status === 'next')).toHaveLength(1);
+        } finally {
+            resetCoreForTests();
+            vi.useRealTimers();
+        }
+    }, 15_000);
+
+    it('persists a deferred start date before deleting a replayed native command', async () => {
+        vi.useFakeTimers();
+        const pendingTask = {
+            id: 'deferred-task',
+            title: 'Private deferred task',
+            status: 'next',
+            startTime: '2026-09-12',
+            tags: [],
+            contexts: [],
+            createdAt: '2026-09-11T12:00:00.000Z',
+            updatedAt: '2026-09-11T12:00:00.000Z',
+        } as Task;
+        let persisted: AppData = {
+            tasks: [pendingTask], projects: [], sections: [], areas: [], people: [],
+            settings: { deviceId: 'native-defer-test' },
+        };
+        let failSaves = true;
+        const storage: StorageAdapter = {
+            getData: vi.fn(async () => structuredClone(persisted)),
+            saveData: vi.fn(async (data) => {
+                if (failSaves) throw new Error('disk unavailable');
+                persisted = structuredClone(data);
+            }),
+        };
+        setStorageAdapter(storage);
+        useTaskStore.setState({
+            settings: persisted.settings,
+            persistenceFailure: null,
+            _allTasks: [pendingTask],
+            _allProjects: [],
+            _allSections: [],
+            _allAreas: [],
+            _allPeople: [],
+        });
+        oneFile('defer.json', {
+            kind: 'defer', id: 'defer-command', taskId: pendingTask.id,
+            startDate: '2026-09-20', source: 'apple-watch',
+        });
+        const updateTask = vi.fn(useTaskStore.getState().updateTask);
+        const deps = {
+            addTask: addTaskMock(),
+            updateTask,
+            addProject,
+            projects: [],
+            areas: [],
+            tasks: [],
+            getTasks: () => useTaskStore.getState()._allTasks,
+            people: [],
+            settings: persisted.settings,
+            flushPendingSave: flushPendingTaskActionSave,
+        };
+
+        try {
+            const firstIngest = ingestPendingCaptures(deps);
+            await vi.advanceTimersByTimeAsync(10_000);
+            await expect(firstIngest).resolves.toBe(0);
+            expect(storage.saveData).toHaveBeenCalledTimes(5);
+            expect(fileSystemMocks.deleteAsync).not.toHaveBeenCalled();
+
+            const optimistic = structuredClone(useTaskStore.getState()._allTasks);
+            expect(optimistic.find(({ id }) => id === pendingTask.id)?.startTime).toBe('2026-09-20');
+
+            failSaves = false;
+            await expect(ingestPendingCaptures(deps)).resolves.toBe(1);
+
+            expect(updateTask).toHaveBeenCalledOnce();
+            expect(persisted.tasks).toEqual(optimistic);
+            expect(fileSystemMocks.deleteAsync).toHaveBeenCalledOnce();
+            expect(vi.mocked(storage.saveData).mock.invocationCallOrder.at(-1))
+                .toBeLessThan(fileSystemMocks.deleteAsync.mock.invocationCallOrder[0]);
+
+            useTaskStore.setState({
+                settings: {},
+                persistenceFailure: null,
+                _allTasks: [],
+                _allProjects: [],
+                _allSections: [],
+                _allAreas: [],
+                _allPeople: [],
+            });
+            await useTaskStore.getState().fetchData({ silent: true });
+            expect(useTaskStore.getState()._allTasks.find(({ id }) => id === pendingTask.id)?.startTime)
+                .toBe('2026-09-20');
+        } finally {
+            resetCoreForTests();
+            vi.useRealTimers();
+        }
+    }, 15_000);
+
+    it('retains a replayed native command when explicit persistence recovery also fails', async () => {
+        vi.useFakeTimers();
+        const pendingTask = {
+            id: 'recovery-failure-task',
+            title: 'Private task',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            createdAt: '2026-09-11T12:00:00.000Z',
+            updatedAt: '2026-09-11T12:00:00.000Z',
+        } as Task;
+        const persisted: AppData = {
+            tasks: [pendingTask], projects: [], sections: [], areas: [], people: [],
+            settings: { deviceId: 'native-recovery-failure-test' },
+        };
+        const storage: StorageAdapter = {
+            getData: vi.fn(async () => structuredClone(persisted)),
+            saveData: vi.fn(async () => { throw new Error('disk unavailable'); }),
+        };
+        setStorageAdapter(storage);
+        useTaskStore.setState({
+            settings: persisted.settings,
+            persistenceFailure: null,
+            _allTasks: [pendingTask],
+            _allProjects: [],
+            _allSections: [],
+            _allAreas: [],
+            _allPeople: [],
+        });
+        oneFile('complete.json', {
+            kind: 'complete', id: 'failed-recovery-command', taskId: pendingTask.id,
+            source: 'apple-watch',
+        });
+        const updateTask = vi.fn(useTaskStore.getState().updateTask);
+        const deps = {
+            addTask: addTaskMock(),
+            updateTask,
+            addProject,
+            projects: [],
+            areas: [],
+            tasks: [],
+            getTasks: () => useTaskStore.getState()._allTasks,
+            people: [],
+            settings: persisted.settings,
+            flushPendingSave: flushPendingTaskActionSave,
+        };
+
+        try {
+            const firstIngest = ingestPendingCaptures(deps);
+            await vi.advanceTimersByTimeAsync(10_000);
+            await expect(firstIngest).resolves.toBe(0);
+            expect(useTaskStore.getState().persistenceFailure).not.toBeNull();
+
+            const failedRecovery = ingestPendingCaptures(deps);
+            await vi.advanceTimersByTimeAsync(10_000);
+            await expect(failedRecovery).resolves.toBe(0);
+
+            expect(updateTask).toHaveBeenCalledOnce();
+            expect(fileSystemMocks.deleteAsync).not.toHaveBeenCalled();
+            expect(useTaskStore.getState().persistenceFailure).not.toBeNull();
+            expect(appLogMocks.logInfo).not.toHaveBeenCalledWith(
+                'Native command save recovered',
+                expect.anything(),
+            );
+        } finally {
+            resetCoreForTests();
+            vi.useRealTimers();
+        }
+    }, 15_000);
 
     it.each([
         { label: 'archived', props: {} },

@@ -76,10 +76,22 @@ const isNetworkShareUri = (uri: string): boolean => {
 
   const normalized = uri.slice(scheme.length).replace(/\\/g, '/');
   const authority = /^\/\/([^/]*)/.exec(normalized);
-  if (!authority) return false;
-  const host = authority[1].toLowerCase();
-  return (host !== '' && host !== 'localhost')
-    || normalized.slice(authority[0].length).startsWith('//');
+  if (authority) {
+    const host = authority[1].toLowerCase();
+    if ((host !== '' && host !== 'localhost')
+      || normalized.slice(authority[0].length).startsWith('//')) return true;
+  }
+
+  // Match desktop stripFileScheme: URL parsing resolves dot segments, then one
+  // percent-decoding pass can expose leading UNC separators before open_path.
+  // Decode only file:// paths; encoded separators in ordinary links stay literal.
+  if (!/^file:\/\//i.test(uri)) return false;
+  try {
+    return /^[/\\]{2}/.test(decodeURIComponent(new URL(uri).pathname));
+  } catch {
+    // Desktop falls back to removing file:// when parsing/decoding fails.
+    return /^[/\\]{2}/.test(uri.replace(/^file:\/\//i, ''));
+  }
 };
 
 const normalizeInputs = (

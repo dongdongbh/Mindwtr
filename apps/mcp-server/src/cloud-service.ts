@@ -245,7 +245,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
             releaseCheck: 'v1.3.0/mcp-existing-network-link-preserved',
             count: applied.preservedNetworkLinkCount,
           } : {
-            releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+            releaseCheck: 'v1.3.0/mcp-decoded-network-link-guard',
           }),
           backend: 'cloud',
           entity: itemKey,

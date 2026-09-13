@@ -1,4 +1,4 @@
-import { flushPendingSave, isSandboxMode, useTaskStore } from '@mindwtr/core';
+import { isSandboxMode } from '@mindwtr/core';
 import { Platform } from 'react-native';
 
 import { acknowledgePendingCompletion, claimPendingCompletions } from '../modules/ios-widget';
@@ -10,17 +10,6 @@ type CompletionDeps = Parameters<typeof applyPendingCompletion>[1] & {
     flushPendingSave: () => Promise<void>;
     refreshWidgets: () => Promise<boolean>;
 };
-
-export async function flushIosWidgetCompletionSave(): Promise<void> {
-    if (isSandboxMode()) throw new Error('Widget completion save deferred in sandbox');
-    await flushPendingSave();
-    // Exhausted core retries leave an optimistic task in memory but no queued
-    // save. A later no-op completion must re-persist that snapshot before ack.
-    if (useTaskStore.getState().persistenceFailure) {
-        if (isSandboxMode()) throw new Error('Widget completion save deferred in sandbox');
-        await useTaskStore.getState().retryPersistence();
-    }
-}
 
 // The extension only owns an App Group outbox. The app claims it durably, then
 // applies the normal store command (including recurrence), flushes storage and

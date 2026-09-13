@@ -140,6 +140,12 @@ describe('applyLinkAttachments', () => {
       '\\/host\\share',
       'FILE://host/share',
       'file://localhost//host/share',
+      'file:///%2fhost/share/file.txt',
+      'file:///%5chost/share/file.txt',
+      'file:///%2F%2Fhost/share/file.txt',
+      'file://localhost/%5C%5Chost/share/file.txt',
+      'FILE:///%2f%5chost/share/file.txt',
+      'file:///local/%2e%2e/%2fhost/share/file.txt',
     ];
     for (const uri of rejected) {
       for (const input of [uri, `  ${uri}  `]) {
@@ -154,6 +160,7 @@ describe('applyLinkAttachments', () => {
       '\\\\host\\share\\file.txt',
       '//host/share/file.txt',
       'file://host/share/file.txt',
+      'file:///%2fhost/share/file.txt',
     ];
 
     for (const [index, uri] of networkUris.entries()) {
@@ -220,6 +227,19 @@ describe('applyLinkAttachments', () => {
       .toThrow(ValidationError);
   });
 
+  test('rejects encoded network links when changed or revived, but preserves exact live references', () => {
+    const uri = 'file:///%5c%5chost/share/file.txt';
+    const existing = link({ uri });
+    expect(applyLinkAttachments([existing], [{ id: existing.id, title: existing.title, uri }], NOW, makeId)[0])
+      .toBe(existing);
+    for (const current of [link(), link({ uri, deletedAt: NOW }), file({ uri })]) {
+      expect(() => applyLinkAttachments([current], [{ id: current.id, uri }], NOW, makeId))
+        .toThrow(ValidationError);
+    }
+    expect(() => applyLinkAttachments([existing], [{ id: existing.id, uri: `${uri}.changed` }], NOW, makeId))
+      .toThrow(ValidationError);
+  });
+
   test('preserves a network link and files while replacing safe links', () => {
     const existingFile = file();
     const network = link({ id: 'network-live', title: 'Share', uri: 'file://host/share/file.txt' });
@@ -245,6 +265,9 @@ describe('applyLinkAttachments', () => {
       'file:///C:/x',
       'file:///home/dd/plan.txt',
       'file://localhost/home/dd/plan.txt',
+      'file:///home/dd/my%20plan.txt',
+      'file:///C:/my%20plan.txt',
+      'file:///%252fhost/share/file.txt',
       'C:\\path\\to\\file.txt',
       '/absolute/path/file.txt',
       'relative/looking/path.txt',

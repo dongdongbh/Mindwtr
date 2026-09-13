@@ -18,10 +18,19 @@ On desktop, the app shows the exact local data path in **Settings -> Sync -> Loc
 
 ## Requirements
 
-- Node.js 18+ (for the MCP client that spawns the server)
+- Node.js 20+ to run the helper. Prefer Node.js 22+ for prebuilt SQLite binaries on supported platforms; Node 20 requires a native build toolchain.
 - npm package installs use better-sqlite3, a native SQLite addon. If no prebuilt binary is available for your platform, npm needs a working C/C++ build toolchain and Python for node-gyp.
 - Bun (recommended for development in this repo)
 - A local Mindwtr database (`mindwtr.db`) for local mode, or a self-hosted Mindwtr Cloud URL and bearer token for Cloud mode
+
+With **npm 12**, approve the SQLite dependency's install script; otherwise a successful install can still fail at startup with a missing native binding. For `npx` or global installs, allow only `better-sqlite3`:
+
+```bash
+npx --allow-scripts=better-sqlite3 -y mindwtr-mcp --db "/path/to/mindwtr.db"
+npm install -g --allow-scripts=better-sqlite3 mindwtr-mcp
+```
+
+In MCP client configurations using `npx`, add `"--allow-scripts=better-sqlite3"` before `"mindwtr-mcp"` in `args`. For an existing project-local install, run `npm install-scripts approve better-sqlite3`, then `npm rebuild better-sqlite3` from that project. Review the dependency before approving; do not enable all dependency scripts.
 
 Default database locations:
 - Linux: `~/.local/share/mindwtr/mindwtr.db`

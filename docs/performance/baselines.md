@@ -100,7 +100,10 @@ Measured example: [desktop Settings page transitions](desktop-settings-2026-09.m
 `bun run perf:native` drives the real release Tauri/WebKitGTK app through
 [Tauri WebDriver](https://tauri.app/develop/tests/webdriver/manual-setup/).
 It requires Linux, `tauri-driver`, `WebKitWebDriver`, `dbus-run-session`, `sqlite3`,
-and an available graphical session. Build a separate Benchmark executable first:
+and an unlocked graphical session. Confirm the session is unlocked before
+starting. A window-size command acknowledging success does not prove the requested
+geometry was applied; the runner checks the actual viewport. Build a separate
+Benchmark executable first:
 
 ```bash
 cd apps/desktop
@@ -164,16 +167,28 @@ Each wait is retained separately from the interaction timing.
 This boundary covers known local save work, not future scheduled work, other
 processes, sync, or every background job. It is not proof of whole-app quiescence.
 For older archived binaries without the hook, explicitly use
-`SAVE_QUEUE_MODE=early-session`. That mode retains the original v1 scenario;
-idle-boundary measurements use `portable-native-settings-capture-idle-v2` and
-must not be treated as a like-for-like speedup over v1 measurements.
+`SAVE_QUEUE_MODE=early-session` to omit save-idle observations. Current
+idle-boundary measurements use `portable-native-settings-capture-idle-v3`
+and early-session measurements use `portable-native-settings-capture-v2`.
+Schema 2 strengthens the timed independent readback from a total-row count to the
+exact captured task. Do not compare these cohorts with the older count-only
+idle-v2 or early-session-v1 timings as a like-for-like speedup.
 
 See [the save-queue boundary validation and local results](native-save-idle-2026-09.md).
 
 Capture must appear in the task list, be readable from SQLite through a separate
-read-only connection, and survive a WebView reload. The reader allows a bounded
-five-second SQLite busy wait; time spent waiting remains in the recorded duration.
-It never disables durability or modifies application storage settings.
+read-only connection, and survive a WebView reload. Before Enter, the independent
+reader verifies the fixture count and absence of the synthetic capture title. The
+timed endpoint requires exactly one live Inbox row with the visible capture's ID
+and exact title, plus the expected total count, from a consistent read snapshot.
+An unrelated inserted task cannot satisfy this gate. After reload, the same task
+must be visible and independently readable again. Reports retain before/after/
+reload row evidence and final canonical-readiness clocks; missing evidence fails
+report validation. See [the readback validation review](desktop-capture-readback-2026-09-12.md).
+
+The reader allows a bounded five-second SQLite busy wait; time spent waiting
+remains in the recorded duration. It never disables durability or modifies
+application storage settings.
 
 Reports retain raw samples, startup/import marks, fixture and executable hashes,
 WebDriver capabilities, viewport, source revision/dirty state, and failure evidence.

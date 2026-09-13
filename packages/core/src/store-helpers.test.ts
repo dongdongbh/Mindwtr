@@ -630,6 +630,95 @@ describe('getNextProjectOrder', () => {
 });
 
 describe('derived store state helpers', () => {
+    it('reads token timestamps once per eligible task and skips timestamp-free paths', () => {
+        let validUpdatedAtReads = 0;
+        let validCreatedAtReads = 0;
+        const valid = createTask('valid-token-timestamps', undefined, 0, {
+            contexts: ['@office'],
+            tags: ['#deep'],
+        });
+        Object.defineProperties(valid, {
+            updatedAt: {
+                get: () => {
+                    validUpdatedAtReads += 1;
+                    return '2026-01-05T00:00:00.000Z';
+                },
+            },
+            createdAt: {
+                get: () => {
+                    validCreatedAtReads += 1;
+                    return '2026-01-01T00:00:00.000Z';
+                },
+            },
+        });
+
+        let invalidUpdatedAtReads = 0;
+        let fallbackCreatedAtReads = 0;
+        const invalid = createTask('fallback-token-timestamps', undefined, 0, {
+            contexts: ['@home'],
+            tags: ['#admin'],
+        });
+        Object.defineProperties(invalid, {
+            updatedAt: {
+                get: () => {
+                    invalidUpdatedAtReads += 1;
+                    return 'invalid-date';
+                },
+            },
+            createdAt: {
+                get: () => {
+                    fallbackCreatedAtReads += 1;
+                    return '2026-01-02T00:00:00.000Z';
+                },
+            },
+        });
+
+        const withoutTokens = createTask('without-tokens', undefined);
+        Object.defineProperties(withoutTokens, {
+            updatedAt: { get: () => { throw new Error('Token-free tasks do not need recency'); } },
+            createdAt: { get: () => { throw new Error('Token-free tasks do not need recency'); } },
+        });
+        const deleted = createTask('deleted-token-timestamps', undefined, 0, {
+            contexts: ['@ghost'],
+            tags: ['#ghost'],
+            deletedAt: '2026-01-06T00:00:00.000Z',
+        });
+        Object.defineProperties(deleted, {
+            updatedAt: { get: () => { throw new Error('Deleted tasks do not need recency'); } },
+            createdAt: { get: () => { throw new Error('Deleted tasks do not need recency'); } },
+        });
+
+        const derived = computeTaskDerivedState([valid, invalid, withoutTokens, deleted]);
+
+        expect(validUpdatedAtReads).toBe(1);
+        expect(validCreatedAtReads).toBe(0);
+        expect(invalidUpdatedAtReads).toBe(1);
+        expect(fallbackCreatedAtReads).toBe(1);
+        expect(derived.contextTokenUsage.map((entry) => entry.token)).toEqual(['@office', '@home']);
+        expect(derived.tagTokenUsage.map((entry) => entry.token)).toEqual(['#deep', '#admin']);
+    });
+
+    it('bounds token timestamp reads to one per task in a 10k fixture', () => {
+        let updatedAtReads = 0;
+        const tasks = Array.from({ length: 10_000 }, (_, index) => {
+            const task = createTask(`timestamp-work-${index}`, undefined, 0, {
+                contexts: [`@context-${index % 20}`],
+                tags: [`#tag-${index % 20}`],
+            });
+            Object.defineProperty(task, 'updatedAt', {
+                get: () => {
+                    updatedAtReads += 1;
+                    return '2026-01-05T00:00:00.000Z';
+                },
+            });
+            return task;
+        });
+
+        computeTaskDerivedState(tasks);
+
+        expect(updatedAtReads).toBeLessThanOrEqual(tasks.length);
+    });
+
     it('counts only active focused-today tasks toward the focus limit', () => {
         const derived = computeTaskDerivedState([
             createTask('active-focused', 'project-1', 0, { status: 'next', isFocusedToday: true }),

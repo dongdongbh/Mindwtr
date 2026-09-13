@@ -152,6 +152,45 @@ const mergeSearchResults = (ftsResults: SearchResults, fallbackResults: SearchRe
 };
 
 /**
+ * FTS decides membership and ordering, while the live collections decide what a
+ * known entity looks like. An absent id can be an unloaded archive hit, so only
+ * an explicit live tombstone suppresses a cached result.
+ */
+const rehydrateSearchResults = (
+    ftsResults: SearchResults,
+    tasks: Task[],
+    projectById: ReadonlyMap<string, Project>,
+): SearchResults => {
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const currentTasks: SearchTaskResult[] = [];
+    for (const cachedTask of ftsResults.tasks) {
+        const currentTask = taskById.get(cachedTask.id);
+        if (!currentTask) {
+            currentTasks.push(cachedTask);
+        } else if (!currentTask.deletedAt) {
+            currentTasks.push(currentTask);
+        }
+    }
+
+    const currentProjects: SearchProjectResult[] = [];
+    for (const cachedProject of ftsResults.projects) {
+        const currentProject = projectById.get(cachedProject.id);
+        if (!currentProject) {
+            currentProjects.push(cachedProject);
+        } else if (!currentProject.deletedAt) {
+            currentProjects.push(currentProject);
+        }
+    }
+
+    return {
+        tasks: currentTasks,
+        projects: currentProjects,
+        limited: ftsResults.limited,
+        limit: ftsResults.limit,
+    };
+};
+
+/**
  * The single global-search pipeline for every platform: takes already-fetched
  * FTS results plus the raw collections and filter state, returns the rendered
  * result list. Pure - no storage adapter, no React, no platform imports.
@@ -202,17 +241,17 @@ export const computeGlobalSearchResults = ({
         ? filterOnlyResults
         : searchAll(tasks, projects, trimmedQuery);
     const ftsResultsAreCurrent = ftsQuery === undefined || ftsQuery === null || ftsQuery.trim() === trimmedQuery;
+    const projectById = new Map(projects.map((project) => [project.id, project]));
     const effectiveResults = trimmedQuery !== ''
         && ftsResults
         && ftsResultsAreCurrent
         && (ftsResults.tasks.length + ftsResults.projects.length) > 0
-        ? mergeSearchResults(ftsResults, fallbackResults)
+        ? mergeSearchResults(rehydrateSearchResults(ftsResults, tasks, projectById), fallbackResults)
         : fallbackResults;
 
     const hasStatusFilter = selectedStatuses.length > 0;
     const shouldBypassDefaultStatusHiding = hasPositiveTaskIdLookup(trimmedQuery);
     const normalizedLocationQuery = locationQuery.trim().toLowerCase();
-    const projectById = new Map(projects.map((project) => [project.id, project]));
     const areaById = new Map(areas.map((area) => [area.id, area]));
 
     const matchesArea = (areaId?: string | null) => {

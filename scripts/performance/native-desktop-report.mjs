@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { summarize } from './report.mjs';
 import { isNativeSaveIdle } from './native-save-idle.mjs';
+import { validateNativeCaptureEvidence } from './native-capture-storage.mjs';
 
 export function validateNativeReadiness(marks) {
   const read = name => {
@@ -38,6 +39,11 @@ export function summarizeNativeRun(samples, runs, initialHash, finalHash, saveQu
     for (const name of names) assert(Number.isFinite(sample[name]) && sample[name] >= 0, `Invalid ${name}`);
     assert(Number.isInteger(sample.countBefore) && sample.countBefore >= 0, 'Invalid native task count');
     assert.equal(sample.countAfter, sample.countBefore + 1, 'Capture not durable');
+    validateNativeCaptureEvidence(sample.captureEvidence, sample.countBefore);
+    const { localDataReadyMs, interactiveReadyMs } = sample.reloadReadiness ?? {};
+    assert(Number.isFinite(localDataReadyMs) && localDataReadyMs >= 0, 'Invalid reload local-data readiness');
+    assert(Number.isFinite(interactiveReadyMs) && interactiveReadyMs >= localDataReadyMs,
+      'Invalid reload interactive readiness');
     assert(sample.captureDurableAutomationMs >= sample.captureVisibleAutomationMs, 'Invalid capture timing order');
   }
   return { status: 'passed', sampleCount: samples.length,

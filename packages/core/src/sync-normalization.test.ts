@@ -94,6 +94,26 @@ describe('sync normalization', () => {
         expect(second.data).toEqual(first.data);
     });
 
+    it('converges an archived legacy Focus flag with the client-loaded project without revision churn', () => {
+        const legacy = { ...cancelledProject(), isFocused: true };
+        const loaded = { ...legacy, isFocused: false };
+        const remote = mockAppData([], [legacy]);
+        const client = mockAppData([], [loaded]);
+
+        const first = mergeAppDataWithStats(client, remote, { nowIso: NOW });
+        expect(first.stats.projects.conflicts).toBe(0);
+        expect(first.data.projects[0]).toMatchObject({
+            status: 'archived', isFocused: false, cancelledAt: cancellationTimestamp,
+            rev: 2, revBy: 'new-client', updatedAt: legacy.updatedAt,
+        });
+        expect(mergeAppData(remote, client, { nowIso: NOW })).toEqual(first.data);
+
+        const second = mergeAppDataWithStats(first.data, remote, { nowIso: NOW });
+        expect(second.stats.projects.conflicts).toBe(0);
+        expect(second.data).toEqual(first.data);
+        expect(normalizeProjectForSyncMerge(first.data.projects[0])).toBe(first.data.projects[0]);
+    });
+
     it('preserves cancellation against an older raw document omission when it has not made a newer edit', () => {
         const task = cancelledTask();
         const project = cancelledProject();

@@ -19,7 +19,7 @@ const normalizeToken = (value: string | null | undefined): string => String(valu
 const matchesPrefix = (token: string, prefix?: string): boolean =>
     prefix ? token.startsWith(prefix) : true;
 
-const getTaskTimestamp = (task: Task): number =>
+export const getTaskTokenUsageTimestamp = (task: Task): number =>
     safeParseDate(task.updatedAt)?.getTime()
     ?? safeParseDate(task.createdAt)?.getTime()
     ?? 0;
@@ -34,12 +34,12 @@ export const createTaskTokenUsageAccumulator = (options?: TaskTokenOptions) => {
     const usage = new Map<string, TaskTokenUsage>();
 
     return {
-        add: (task: Task, selector: TaskTokenSelector): void => {
+        add: (task: Task, selector: TaskTokenSelector, suppliedTimestamp?: number): void => {
             if (task.deletedAt) return;
             const tokens = selector(task) ?? [];
             if (tokens.length === 0) return;
 
-            const taskTimestamp = getTaskTimestamp(task);
+            const taskTimestamp = suppliedTimestamp ?? getTaskTokenUsageTimestamp(task);
             const seenInTask = new Set<string>();
 
             tokens.forEach((rawToken) => {

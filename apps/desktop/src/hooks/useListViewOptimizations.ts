@@ -2,6 +2,9 @@ import { useEffect, useRef } from 'react';
 import { type Task, type TaskStatus, useTaskStore, isReferenceInVisibleProject, isTaskInActiveProject, getSequentialFirstTaskIds, isSequentialChainStatus } from '@mindwtr/core';
 import { useConditionalMemo } from './useConditionalMemo';
 import { useProgressiveComputation } from './useProgressiveComputation';
+import { logInfo } from '../lib/app-log';
+
+let reportedTokenTimestampDerivation = false;
 
 export type ListViewPerf = {
     trackUseMemo?: () => void;
@@ -24,6 +27,13 @@ export function useListViewOptimizations(
     const derived = getDerivedState();
     const allContexts = derived.allContexts;
     const allTags = derived.allTags;
+    useEffect(() => {
+        if (reportedTokenTimestampDerivation || (allContexts.length === 0 && allTags.length === 0)) return;
+        reportedTokenTimestampDerivation = true;
+        void logInfo('List token statistics available from shared timestamp derivation', {
+            scope: 'perf', extra: { releaseCheck: 'v1.3.0/derived-token-timestamps' },
+        });
+    }, [allContexts, allTags]);
     const projectMap = derived.projectMap;
     const sequentialProjectIds = derived.sequentialProjectIds;
     const sequentialWithinSectionProjectIds = derived.sequentialWithinSectionProjectIds;

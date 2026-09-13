@@ -2,6 +2,7 @@ import { createNextRecurringTask, normalizeRecurrenceForLoad } from './recurrenc
 import { getTaskDateCoherenceIssues } from './task-date-coherence';
 import {
     createTaskTokenUsageAccumulator,
+    getTaskTokenUsageTimestamp,
     getUsedTaskTokensFromUsage,
 } from './task-token-usage';
 import { resolveRelativeStartUpdates } from './task-relative-start';
@@ -1125,8 +1126,13 @@ export const computeTaskDerivedState = (
                 projectTaskSummaryById.set(task.projectId, summary);
             }
         }
-        contextTokens.add(task, (candidate) => candidate.contexts);
-        tagTokens.add(task, (candidate) => candidate.tags);
+        const hasContextTokens = (task.contexts?.length ?? 0) > 0;
+        const hasTagTokens = (task.tags?.length ?? 0) > 0;
+        const taskTokenTimestamp = hasContextTokens || hasTagTokens
+            ? getTaskTokenUsageTimestamp(task)
+            : undefined;
+        contextTokens.add(task, (candidate) => candidate.contexts, taskTokenTimestamp);
+        tagTokens.add(task, (candidate) => candidate.tags, taskTokenTimestamp);
         (task.contexts ?? []).forEach((context) => {
             const contextTasks = tasksByContext.get(context) ?? [];
             contextTasks.push(task);

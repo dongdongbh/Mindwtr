@@ -8,7 +8,7 @@ import * as Linking from 'expo-linking';
 import { Stack, useGlobalSearchParams, useNavigationContainerRef, usePathname, useRouter } from 'expo-router';
 import 'react-native-reanimated';
 import * as SplashScreen from 'expo-splash-screen';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { enableFreeze } from 'react-native-screens';
 import { AppState, BackHandler, Platform, SafeAreaView, StatusBar, Text, View } from 'react-native';
@@ -53,6 +53,7 @@ import { markStartupPhase } from '../lib/startup-profiler';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { logError, logInfo, logWarn, setupGlobalErrorLogging } from '../lib/app-log';
 import { useThemeColors } from '../hooks/use-theme-colors';
+import { AdaptiveWindowProvider } from '@/hooks/use-adaptive-window';
 import { useRootLayoutContextAutomation } from '@/hooks/root-layout/use-root-layout-context-automation';
 import { useRootLayoutExternalCapture } from '@/hooks/root-layout/use-root-layout-external-capture';
 import { useRootLayoutPendingCaptures } from '@/hooks/root-layout/use-root-layout-pending-captures';
@@ -333,6 +334,10 @@ setSha256HexProvider(mobileSha256Hex);
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 markStartupPhase('js.root_layout.module_loaded');
 
+export function RootAdaptiveWindowHost({ children }: { children: React.ReactNode }) {
+  return <AdaptiveWindowProvider>{children}</AdaptiveWindowProvider>;
+}
+
 function RootLayoutContent() {
   const tc = useThemeColors();
 
@@ -341,7 +346,9 @@ function RootLayoutContent() {
       <ToastProvider>
         <ThemedAlertProvider>
           <ProjectNextActionPromptProvider>
-            <RootLayoutContentInner />
+            <RootAdaptiveWindowHost>
+              <RootLayoutContentInner />
+            </RootAdaptiveWindowHost>
           </ProjectNextActionPromptProvider>
         </ThemedAlertProvider>
       </ToastProvider>

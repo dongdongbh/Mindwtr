@@ -101,6 +101,7 @@ export const AppState = {
 export const AccessibilityInfo = {
   isReduceMotionEnabled: async () => false,
   addEventListener: () => ({ remove: () => {} }),
+  announceForAccessibility: (_announcement: string) => {},
 };
 
 export const Animated = {

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 
-import { flushPendingSave, useTaskStore } from '@mindwtr/core';
+import { useTaskStore } from '@mindwtr/core';
 
 import { logError } from '@/lib/app-log';
 import { ingestPendingCaptures } from '@/lib/pending-captures';
-import { flushIosWidgetCompletionSave, ingestIosWidgetCompletions } from '@/lib/ios-widget-completions';
+import { flushPendingTaskActionSave } from '@/lib/pending-capture-persistence';
+import { ingestIosWidgetCompletions } from '@/lib/ios-widget-completions';
 import { updateMobileWidgetFromStore } from '@/lib/widget-service';
 import { getNextPendingCompletionAt } from '../../modules/ios-widget';
 import { mobilePomodoroController } from '@/lib/pomodoro-controller';
@@ -47,7 +48,7 @@ export function useRootLayoutPendingCaptures({ dataReady, disabled = false }: { 
                     people,
                     settings,
                     getTasks: () => useTaskStore.getState()._allTasks,
-                    flushPendingSave,
+                    flushPendingSave: flushPendingTaskActionSave,
                     transcribeAudio: transcribePendingAudio,
                     applyPomodoroCommand: (command) => {
                         const pomodoroSettings = useTaskStore.getState().settings.gtd?.pomodoro;
@@ -64,7 +65,7 @@ export function useRootLayoutPendingCaptures({ dataReady, disabled = false }: { 
                         updateTask,
                         tasks,
                         getTasks: () => useTaskStore.getState()._allTasks,
-                        flushPendingSave: flushIosWidgetCompletionSave,
+                        flushPendingSave: flushPendingTaskActionSave,
                         refreshWidgets: updateMobileWidgetFromStore,
                     });
                 }

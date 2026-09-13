@@ -24,6 +24,7 @@ export * from './bulk-organize';
 export * from './bulk-organize-create';
 export * from './announcements';
 export * from './user-prompts';
+export * from './share-card';
 export * from './process-inbox-workflow';
 export * from './process-inbox-session';
 export * from './process-inbox-plan';
@@ -70,7 +71,16 @@ export * from './completion-grouping';
 export * from './filter-criteria';
 export * from './task-filter-selections';
 export * from './task-draft';
-export * from './task-token-usage';
+export {
+    type TaskTokenUsage,
+    createTaskTokenUsageAccumulator,
+    collectTaskTokenUsage,
+    getUsedTaskTokens,
+    getUsedTaskTokensFromUsage,
+    getFrequentTaskTokens,
+    getFrequentTaskTokensFromUsage,
+    getRecentTaskTokens,
+} from './task-token-usage';
 export * from './people';
 export * from './bulk-task-tokens';
 export * from './contexts';

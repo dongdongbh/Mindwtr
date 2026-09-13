@@ -13,15 +13,19 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // share-card-export (local PNG export adapters)
+    'cardKind', 'exportMethod', 'failureStage', 'errorType', 'nativeCode',
     // sandbox-workspace (desktop/mobile entry drain and immutable workspace bootstrap)
     'workspace', 'stage',
     // watcher-property-order reuses releaseCheck below.
     // storage-baseline-equality reuses releaseCheck below.
+    // derived-token-timestamps reuses releaseCheck below.
     // sqlite-snapshot-append reuses releaseCheck and count below.
     // sqlite-snapshot-statements reuses releaseCheck and count below.
     // ai-request-stop-once (desktop/mobile AI configuration adapters)
     'provider', 'timeoutMs',
     // sync-attachment-copy-elision reuses releaseCheck and count below.
+    // project-lifecycle-sync reuses releaseCheck and count below.
     // sync-signature-pruning reuses releaseCheck, elapsedMs, and count below.
     // pomodoro-alert-delivery reuses releaseCheck, reason, outcome, and count below.
     // settings-lazy-resources (desktop SettingsView)

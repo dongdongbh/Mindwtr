@@ -37,6 +37,7 @@ import { buildWidgetCompletionToken } from './widget-completion-token';
 import {
     buildWidgetSavedFilterOptions,
     buildWidgetTaskList,
+    WIDGET_SAVED_FILTER_LIST_PREFIX,
     widgetListTitles,
 } from './widget-lists';
 
@@ -416,17 +417,27 @@ const isDarkPreset = (preset: { bg: string }): boolean => {
     return (r * 299 + g * 587 + b * 114) / 1000 < 128;
 };
 
-export function buildWidgetPayload(
+export interface WidgetPayloadBuildOptions {
+    systemColorScheme?: WidgetSystemColorScheme;
+    maxItems?: number;
+    listIds?: readonly string[];
+    /** Include every bounded saved-filter list offered by the iOS chooser. */
+    includeSavedFilterLists?: boolean;
+    /** What the Focus screen is filtering and sorting by right now (#1173). */
+    focusFilter?: FocusWidgetFilter;
+}
+
+export interface WidgetPayloadProjection {
+    build: (maxItems?: number) => TasksWidgetPayload;
+}
+
+type WidgetPayloadProjectionOptions = Omit<WidgetPayloadBuildOptions, 'maxItems'>;
+
+export function createWidgetPayloadProjection(
     data: AppData,
     language: Language,
-    options?: {
-        systemColorScheme?: WidgetSystemColorScheme;
-        maxItems?: number;
-        listIds?: readonly string[];
-        /** What the Focus screen is filtering and sorting by right now (#1173). */
-        focusFilter?: FocusWidgetFilter;
-    }
-): TasksWidgetPayload {
+    options?: WidgetPayloadProjectionOptions,
+): WidgetPayloadProjection {
     void loadTranslations(language);
     const tr = getTranslationsSync(language);
     const tasks = data.tasks || [];
@@ -462,10 +473,6 @@ export function buildWidgetPayload(
 
     const widgetSort = resolveWidgetTaskSort(data);
 
-    const maxItems = Number.isFinite(options?.maxItems)
-        ? Math.max(1, Math.floor(options?.maxItems as number))
-        : 3;
-
     const prioritiesEnabled = resolveFeatureFlags(data.settings).priorities;
     const peekDescription = (task: Task): string | undefined => {
         const text = stripMarkdown(task.description ?? '').trim();
@@ -480,7 +487,10 @@ export function buildWidgetPayload(
         const day = formatRelativeDayLabel(start, tr, language, startOfToday, endOfToday);
         return hasTimeComponent(task.startTime) ? `${day} ${formatDueTime(start, language)}` : day;
     };
+    const itemById = new Map<string, WidgetTaskItem>();
     const toItem = (task: Task): WidgetTaskItem => {
+        const cached = itemById.get(task.id);
+        if (cached) return cached;
         const project = task.projectId ? projectById.get(task.projectId) : undefined;
         const area = task.areaId ? areaById.get(task.areaId) : undefined;
         const description = peekDescription(task);
@@ -490,7 +500,7 @@ export function buildWidgetPayload(
         const priorityLabel = prioritiesEnabled && task.priority
             ? tr[`priority.${task.priority}`] ?? task.priority
             : undefined;
-        return {
+        const item: WidgetTaskItem = {
             id: task.id,
             completionToken: buildWidgetCompletionToken(task),
             title: task.title,
@@ -506,6 +516,8 @@ export function buildWidgetPayload(
             ...(startLabel ? { startLabel } : {}),
             ...(priorityLabel ? { priorityLabel } : {}),
         };
+        itemById.set(task.id, item);
+        return item;
     };
     // The Focus screen's own pools through the shared derivation (#1173),
     // narrowed by exactly what the screen is filtering and sorting by. Today's
@@ -548,34 +560,25 @@ export function buildWidgetPayload(
     // Focus-screen sections remain available through their explicit widget
     // lists and must never become an implicit fallback here.
     const curatedTasks = [...lists.focusedTasks, ...lists.schedule];
-    const items = curatedTasks.slice(0, maxItems).map(toItem);
-    const hiddenTaskCount = Math.max(curatedTasks.length - items.length, 0);
-
-    let remaining = maxItems;
-    const sections: WidgetTaskSection[] = [];
     const curatedSections = buildFocusTaskSections(lists, (key) => tr[key])
         .filter((section) => section.key === 'focus' || section.key === 'schedule');
-    for (const section of curatedSections) {
-        if (remaining <= 0) break;
-        if (section.items.length === 0) continue;
-        const sectionItems = section.items.slice(0, remaining).map(toItem);
-        remaining -= sectionItems.length;
-        sections.push({
-            key: section.key,
-            title: section.title,
-            detail: section.key === 'schedule' ? formatDateLabel(now, language, 'short') : null,
-            items: sectionItems,
-        });
-    }
-
     const inboxCount = activeTasks.filter((task) => task.status === 'inbox').length;
-    const subtitleParts = [`${tr['nav.inbox'] ?? 'Inbox'}: ${inboxCount}`];
-    if (hiddenTaskCount > 0) {
-        subtitleParts.push(`+${hiddenTaskCount} ${tr['common.more'] ?? 'More'}`);
-    }
-
     const dateLabel = formatDateLabel(now, language, 'long');
     const listContext = { data, activeTasks, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr };
+    const listTitles = widgetListTitles(tr);
+    const savedFilters = buildWidgetSavedFilterOptions(data);
+    const taskLists = new Map<string, NonNullable<ReturnType<typeof buildWidgetTaskList>>>();
+    const requestedListIds = new Set(options?.listIds ?? []);
+    if (options?.includeSavedFilterLists) {
+        for (const { id } of savedFilters) requestedListIds.add(`${WIDGET_SAVED_FILTER_LIST_PREFIX}${id}`);
+    }
+    for (const listId of requestedListIds) {
+        if (listId === 'focus') continue;
+        const list = buildWidgetTaskList(listId, listContext);
+        if (list) taskLists.set(listId, list);
+    }
+    const scheduleById = new Map(lists.schedule.map((task) => [task.id, task]));
+
     // In a dated section the row's date is the header's date: hide it, show the
     // due time when there is one, keep an overdue date (it says the task slipped).
     const dropSameDayDue = (item: WidgetTaskItem, task: Task): WidgetTaskItem => {
@@ -584,45 +587,79 @@ export function buildWidgetPayload(
         if (!due || due < startOfToday || due > endOfToday) return item;
         return { ...item, dueLabel: hasTimeComponent(task.dueDate) ? formatDueTime(due, language) : null };
     };
-    for (const section of sections) {
-        if (section.key !== 'schedule') continue;
-        const byId = new Map(lists.schedule.map((task) => [task.id, task]));
-        section.items = section.items.map((item) => {
-            const task = byId.get(item.id);
-            return task ? dropSameDayDue(item, task) : item;
-        });
-    }
-    const listPayloads: Record<string, WidgetListPayload> = {
-        focus: { title: widgetListTitles(tr).focus, dateLabel, sections, items },
-    };
-    for (const listId of new Set(options?.listIds ?? [])) {
-        if (listId === 'focus') continue;
-        const list = buildWidgetTaskList(listId, listContext);
-        if (!list) continue;
-        listPayloads[listId] = { title: list.title, items: list.tasks.slice(0, maxItems).map(toItem) };
-    }
 
     return {
-        headerTitle: tr['agenda.todaysFocus'] ?? 'Today',
-        dateLabel,
-        subtitle: subtitleParts.join(' · '),
-        inboxLabel: tr['nav.inbox'] ?? 'Inbox',
-        inboxCount,
-        focusedCount: lists.focusedTasks.length,
-        items,
-        sections,
-        lists: listPayloads,
-        listTitles: widgetListTitles(tr),
-        savedFilters: buildWidgetSavedFilterOptions(data),
-        emptyMessage: tr['list.noTasks'] ?? 'No tasks found',
-        captureLabel: tr['widget.capture'] ?? 'Quick capture',
-        completeLabel: tr['review.markDone'] ?? 'Mark Done',
-        undoLabel: tr['common.undo'] ?? 'Undo',
-        focusUri: WIDGET_FOCUS_URI,
-        quickCaptureUri: WIDGET_QUICK_CAPTURE_URI,
-        themeMode: typeof data.settings?.theme === 'string' ? data.settings.theme : 'system',
-        palette,
+        build: (requestedMaxItems?: number): TasksWidgetPayload => {
+            const maxItems = Number.isFinite(requestedMaxItems)
+                ? Math.max(1, Math.floor(requestedMaxItems as number))
+                : 3;
+            const items = curatedTasks.slice(0, maxItems).map(toItem);
+            const hiddenTaskCount = Math.max(curatedTasks.length - items.length, 0);
+
+            let remaining = maxItems;
+            const sections: WidgetTaskSection[] = [];
+            for (const section of curatedSections) {
+                if (remaining <= 0) break;
+                if (section.items.length === 0) continue;
+                const sectionItems = section.items.slice(0, remaining).map(toItem);
+                remaining -= sectionItems.length;
+                sections.push({
+                    key: section.key,
+                    title: section.title,
+                    detail: section.key === 'schedule' ? formatDateLabel(now, language, 'short') : null,
+                    items: section.key === 'schedule'
+                        ? sectionItems.map((item) => {
+                            const task = scheduleById.get(item.id);
+                            return task ? dropSameDayDue(item, task) : item;
+                        })
+                        : sectionItems,
+                });
+            }
+
+            const subtitleParts = [`${tr['nav.inbox'] ?? 'Inbox'}: ${inboxCount}`];
+            if (hiddenTaskCount > 0) {
+                subtitleParts.push(`+${hiddenTaskCount} ${tr['common.more'] ?? 'More'}`);
+            }
+
+            const listPayloads: Record<string, WidgetListPayload> = {
+                focus: { title: listTitles.focus, dateLabel, sections, items },
+            };
+            for (const [listId, list] of taskLists) {
+                listPayloads[listId] = { title: list.title, items: list.tasks.slice(0, maxItems).map(toItem) };
+            }
+
+            return {
+                headerTitle: tr['agenda.todaysFocus'] ?? 'Today',
+                dateLabel,
+                subtitle: subtitleParts.join(' · '),
+                inboxLabel: tr['nav.inbox'] ?? 'Inbox',
+                inboxCount,
+                focusedCount: lists.focusedTasks.length,
+                items,
+                sections,
+                lists: listPayloads,
+                listTitles,
+                savedFilters,
+                emptyMessage: tr['list.noTasks'] ?? 'No tasks found',
+                captureLabel: tr['widget.capture'] ?? 'Quick capture',
+                completeLabel: tr['review.markDone'] ?? 'Mark Done',
+                undoLabel: tr['common.undo'] ?? 'Undo',
+                focusUri: WIDGET_FOCUS_URI,
+                quickCaptureUri: WIDGET_QUICK_CAPTURE_URI,
+                themeMode: typeof data.settings?.theme === 'string' ? data.settings.theme : 'system',
+                palette,
+            };
+        },
     };
+}
+
+export function buildWidgetPayload(
+    data: AppData,
+    language: Language,
+    options?: WidgetPayloadBuildOptions,
+): TasksWidgetPayload {
+    const { maxItems, ...projectionOptions } = options ?? {};
+    return createWidgetPayloadProjection(data, language, projectionOptions).build(maxItems);
 }
 
 const SHORTCUTS_SNAPSHOT_LISTS: readonly ShortcutsSnapshotListKey[] = ['inbox', 'focus', 'next', 'waiting', 'someday'];

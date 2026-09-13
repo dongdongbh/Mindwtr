@@ -231,6 +231,14 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
         };
     }
 
+    // Metro does not honor this workspace package's TypeScript subpath export.
+    if (moduleName === '@mindwtr/core/share-card') {
+        return {
+            filePath: path.resolve(workspaceRoot, 'packages/core/src/share-card.ts'),
+            type: 'sourceFile',
+        };
+    }
+
     // Handle @mindwtr/core workspace package
     if (moduleName === '@mindwtr/core' || moduleName.startsWith('@mindwtr/core/')) {
         const corePath = path.resolve(workspaceRoot, 'packages/core/src/index.ts');

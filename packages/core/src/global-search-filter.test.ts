@@ -160,6 +160,142 @@ describe('computeGlobalSearchResults', () => {
         expect(result.results.map((item) => item.item.id)).toEqual(['task-fts', 'task-work']);
     });
 
+    it('uses the current task title for a known full-text result', () => {
+        const currentTask = task('task-edited', 'QA0912 edit123');
+        const result = run({
+            query: 'QA0912',
+            tasks: [currentTask],
+            ftsResults: {
+                tasks: [task('task-edited', 'QA0912 edit')],
+                projects: [],
+            },
+            ftsQuery: 'QA0912',
+        });
+
+        expect(result.results).toHaveLength(1);
+        expect(result.results[0]?.item.title).toBe('QA0912 edit123');
+    });
+
+    it('uses current task and project metadata without reviving cleared optional fields', () => {
+        const currentTask: Task = {
+            ...task('task-current', 'Renamed current task', 'area-current'),
+            status: 'waiting',
+            tags: ['#current'],
+            contexts: ['@desk'],
+        };
+        const currentProject: Project = {
+            ...project('project-current', 'Renamed current project', 'area-current'),
+            status: 'waiting',
+        };
+        const result = run({
+            query: 'Needle cached',
+            tasks: [currentTask],
+            projects: [currentProject],
+            areas: [{ id: 'area-current' }],
+            selectedStatuses: ['waiting'],
+            selectedArea: 'area-current',
+            selectedTokens: ['#current', '@desk'],
+            hideFutureTasks: true,
+            duePreset: 'none',
+            ftsResults: {
+                tasks: [{
+                    ...task('task-current', 'Needle cached task', 'area-stale'),
+                    status: 'next',
+                    tags: ['#stale'],
+                    contexts: ['@stale'],
+                    projectId: 'project-stale',
+                    startTime: '2999-01-01T09:00:00.000Z',
+                    dueDate: '2999-01-02',
+                    location: 'Old office',
+                }],
+                projects: [{
+                    ...project('project-current', 'Needle cached project', 'area-stale'),
+                    status: 'active',
+                    cancelledAt: '2026-01-01T00:00:00.000Z',
+                }],
+            },
+            ftsQuery: 'Needle cached',
+        });
+
+        expect(result.results.map((item) => item.item.id)).toEqual(['project-current', 'task-current']);
+        expect(result.results.find((item) => item.type === 'task')?.item).toBe(currentTask);
+        expect(result.results.find((item) => item.type === 'project')?.item).toBe(currentProject);
+    });
+
+    it('applies default completed, reference, and archived hiding to current metadata', () => {
+        const result = run({
+            query: 'Needle cached',
+            tasks: [
+                { ...task('task-done', 'Renamed done task'), status: 'done' },
+                { ...task('task-reference', 'Renamed reference task'), status: 'reference' },
+            ],
+            projects: [{ ...project('project-archived', 'Renamed archived project'), status: 'archived' }],
+            includeReference: false,
+            ftsResults: {
+                tasks: [
+                    task('task-done', 'Needle cached done task'),
+                    task('task-reference', 'Needle cached reference task'),
+                ],
+                projects: [project('project-archived', 'Needle cached archived project')],
+            },
+            ftsQuery: 'Needle cached',
+        });
+
+        expect(result.results).toEqual([]);
+        expect(result.hiddenCompletedCount).toBe(2);
+    });
+
+    it('suppresses known tombstones even when completed results are included', () => {
+        const result = run({
+            query: 'Needle',
+            tasks: [{ ...task('task-deleted', 'Needle deleted task'), deletedAt: now }],
+            projects: [{ ...project('project-deleted', 'Needle deleted project'), deletedAt: now }],
+            includeCompleted: true,
+            ftsResults: {
+                tasks: [task('task-deleted', 'Needle cached task')],
+                projects: [project('project-deleted', 'Needle cached project')],
+            },
+            ftsQuery: 'Needle',
+        });
+
+        expect(result.results).toEqual([]);
+        expect(result.totalResults).toBe(0);
+    });
+
+    it('preserves full-text-only hits that are absent from the in-memory collections', () => {
+        const result = run({
+            query: 'Needle',
+            ftsResults: {
+                tasks: [task('task-unloaded', 'Needle unloaded archived task')],
+                projects: [project('project-unloaded', 'Needle unloaded project')],
+            },
+            ftsQuery: 'Needle',
+        });
+
+        expect(result.results.map((item) => item.item.id)).toEqual(['project-unloaded', 'task-unloaded']);
+    });
+
+    it('keeps a 200-result full-text source limit after rehydrating known hits', () => {
+        const currentTask = task('task-0', 'Renamed current task');
+        const ftsTasks = Array.from({ length: 200 }, (_, index) => task(`task-${index}`, `Needle task ${index}`));
+        const result = run({
+            query: 'Needle',
+            tasks: [currentTask],
+            ftsResults: {
+                tasks: ftsTasks,
+                projects: [],
+                limited: true,
+                limit: 200,
+            },
+            ftsQuery: 'Needle',
+        });
+
+        expect(result.results[0]?.item).toBe(currentTask);
+        expect(result.totalResults).toBe(200);
+        expect(result.totalResultsLabel).toBe('200+');
+        expect(result.isTruncated).toBe(true);
+    });
+
     it('surfaces source result limits in the truncation label', () => {
         const result = run({
             tasks: [task('task-work', 'Needle work task')],

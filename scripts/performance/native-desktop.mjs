@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { fixture } from './fixture.mjs';
 import { summarizeNativeRun, validateNativeReadiness } from './native-desktop-report.mjs';
 import { waitForNativeSaveIdle } from './native-save-idle.mjs';
+import { readNativeCaptureState, validateNativeCaptureBefore, isNativeCapturePersisted, validateNativeCaptureEvidence } from './native-capture-storage.mjs';
 import { installCaptureRenderProbe, validateCaptureRenderProbe, validateCaptureSampling } from './native-capture-probe.mjs';
 import { configureOwnedNativeWindow, findOwnedNativeWindow, installNativeViewportGuard, parseNativeViewport, validateNativeViewport } from './native-viewport.mjs';
 
@@ -113,10 +114,10 @@ for (const size of sizes) {
       script: 'const done=arguments[arguments.length-1]; window.__TAURI_INTERNALS__.invoke(arguments[0],arguments[1]).then(value=>done({value}),error=>done({error:String(error)}));',
       args: [command, args],
     }).then(result => { assert(!result.error, result.error); return result.value; });
-    const until = async work => {
+    const until = async (work, boundary = 'native UI') => {
       const start = Date.now();
       while (Date.now() - start < 30000) { if (await work()) return; await pause(25); }
-      throw new Error('Native UI readiness timed out');
+      throw new Error(`Native UI readiness timed out: ${boundary}`);
     };
     const visible = selector => execute('const el=document.querySelector(arguments[0]); return !!el && el.getClientRects().length>0;', selector);
     const click = async (using, value) => {
@@ -124,7 +125,7 @@ for (const size of sizes) {
       await request(`/session/${session}/element/${element['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
     };
     const ready = async () => {
-      await until(() => execute("return performance.getEntriesByName('mindwtr.interactive_ready').length === 1"));
+      await until(() => execute("return performance.getEntriesByName('mindwtr.interactive_ready').length === 1"), 'canonical interactive readiness');
       return validateNativeReadiness(await execute('return performance.getEntriesByType("mark").map(m=>({name:m.name,startTime:m.startTime}))'));
     };
     const sample = { run, status: 'running' };
@@ -143,7 +144,7 @@ for (const size of sizes) {
             JSON.parse(execFileSync('niri', ['msg', '--json', 'windows'], { encoding: 'utf8', timeout: 5000 })),
             app, pid => readlinkSync(`/proc/${pid}/exe`));
           return !!ownedWindow;
-        });
+        }, 'owned Benchmark window');
         configureOwnedNativeWindow(ownedWindow, requestedViewport, (...args) => {
           execFileSync('niri', ['msg', 'action', ...args], { timeout: 5000 });
         });
@@ -151,7 +152,7 @@ for (const size of sizes) {
           const actual = await execute('return {width:innerWidth,height:innerHeight,ratio:devicePixelRatio}');
           return actual.width === requestedViewport.width && actual.height === requestedViewport.height
             && actual.ratio === requestedViewport.ratio;
-        });
+        }, 'requested viewport (graphical session must be unlocked)');
       }
       // Onboarding suppresses the main-screen mark; dismiss it through its UI.
       await until(async () => {
@@ -205,20 +206,29 @@ for (const size of sizes) {
       const title = `Native benchmark capture ${run}`;
       await request(`/session/${session}/element/${input}/value`, { text: title });
       if (saveQueueMode === 'idle') sample.saveIdle.beforeCapture = await waitForSaves();
+      const database = join(profileDir, 'profile/data/mindwtr.db');
+      const readCapture = () => readNativeCaptureState(database, title);
+      const captureBefore = validateNativeCaptureBefore(readCapture(), size);
       if (renderProbe) await execute(`(${installCaptureRenderProbe.toString()})(arguments[0], arguments[1], arguments[2])`, captureSelector, title, sampleJS);
       const captureStart = performance.now();
       await request(`/session/${session}/element/${input}/value`, { text: '\uE007' });
-      await until(() => execute('return [...document.querySelectorAll("[data-task-id]")].some(el=>el.textContent.includes(arguments[0])&&el.getClientRects().length>0)', title));
+      let capturedId;
+      await until(async () => {
+        capturedId = await execute('return [...document.querySelectorAll("[data-task-id]")].find(el=>el.textContent.includes(arguments[0])&&el.getClientRects().length>0)?.getAttribute("data-task-id")', title);
+        return typeof capturedId === 'string' && capturedId.length > 0;
+      }, 'visible captured task identity');
       sample.captureVisibleAutomationMs = performance.now() - captureStart;
-      // Separate SQLite connection, not optimistic React state or data.json.
-      const database = join(profileDir, 'profile/data/mindwtr.db');
-      // A reader can briefly contend with a native schema/write transaction.
-      // Bound the normal SQLite busy wait instead of treating it as data loss.
-      const readCount = () => Number(execFileSync('sqlite3', ['-readonly', '-cmd', '.timeout 5000', database,
-        'SELECT count(*) FROM tasks;'], { encoding: 'utf8', timeout: 6000 }).trim());
-      await until(() => readCount() === size + 1);
+      const expectedCapture = {id: capturedId, title};
+      // One separate read-only SQLite snapshot must contain this exact capture,
+      // not merely an unrelated row that happens to increase the total count.
+      let captureAfter;
+      await until(() => {
+        captureAfter = readCapture();
+        return isNativeCapturePersisted(captureAfter, expectedCapture, size);
+      }, 'independent SQLite capture readback');
       sample.captureDurableAutomationMs = performance.now() - captureStart;
-      sample.countAfter = readCount();
+      sample.countAfter = captureAfter.taskCount;
+      sample.captureEvidence = {expected: expectedCapture, before: captureBefore, after: captureAfter};
       const persisted = await invoke('get_data');
       assert.equal(persisted.tasks.filter(task => task.title === title).length, 1, 'Capture content was not persisted exactly once');
       assert.equal(await invoke('get_sync_backend'), 'off', 'Native baseline requires sync off');
@@ -243,8 +253,23 @@ for (const size of sizes) {
       validateNativeViewport(await execute('return {width:innerWidth,height:innerHeight,ratio:devicePixelRatio}'), viewport);
       // A new WebView loads the canonical native store again after the capture.
       await request(`/session/${session}/refresh`, {});
-      await ready();
-      assert.equal((await invoke('get_data')).tasks.filter(task => task.title === title).length, 1, 'Capture did not survive reload');
+      sample.reloadReadiness = await ready();
+      assert.equal((await invoke('get_data')).tasks.filter(task => task.id === capturedId && task.title === title).length, 1, 'Capture did not survive reload');
+      await click('css selector', '[data-sidebar-item][data-view="inbox"]');
+      // The synthetic capture is appended at the bottom. Reload starts at the
+      // top, where virtualization correctly leaves that row unmounted.
+      await until(() => execute(`
+        const list = document.querySelector('[role="list"][aria-label="Task list"]');
+        if (!list) return false;
+        const found = [...list.querySelectorAll('[data-task-id]')].some(el =>
+          el.getAttribute('data-task-id') === arguments[0]
+          && el.textContent.includes(arguments[1]) && el.getClientRects().length > 0);
+        if (!found) list.scrollTop = list.scrollHeight;
+        return found;
+      `, capturedId, title), 'visible capture after reload');
+      sample.captureEvidence.reload = readCapture();
+      sample.captureEvidence.reloadVisible = true;
+      validateNativeCaptureEvidence(sample.captureEvidence, size);
       validateNativeViewport(await execute('return {width:innerWidth,height:innerHeight,ratio:devicePixelRatio}'), viewport);
       sample.status = 'passed';
     } catch (error) {
@@ -266,11 +291,11 @@ for (const size of sizes) {
     console.log(`${size}/${run}: ${sample.status}`);
     if (sample.status !== 'passed') break;
   }
-  const report = { schemaVersion: 1, status: 'failed', metadata: {
+  const report = { schemaVersion: 2, status: 'failed', metadata: {
     platform: 'desktop-native-linux', runtime: capabilities, os: release(), cpu: cpus()[0]?.model,
     device: process.env.DEVICE_LABEL, dataset: seed.id, buildType: 'release', binaryHash, sourceRevision, dirty,
     viewport, requestedViewport, windowMode: requestedViewport ? 'owned-niri-floating' : 'compositor-default',
-    scenario: saveQueueMode === 'idle' ? 'portable-native-settings-capture-idle-v2' : 'portable-native-settings-capture-v1',
+    scenario: saveQueueMode === 'idle' ? 'portable-native-settings-capture-idle-v3' : 'portable-native-settings-capture-v2',
     saveQueueMode, network: 'host-network-sync-off',
     profiling: [diagnostics ? 'settings-diagnostics-ipc-headers' : '', renderProbe ? 'capture-render-probe' : '', sampleJS ? 'jsc-capture-1000us' : ''].filter(Boolean).join('+') || 'none',
     capturedAt: new Date().toISOString(),

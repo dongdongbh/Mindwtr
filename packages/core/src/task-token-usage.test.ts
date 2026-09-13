@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectTaskTokenUsage, getFrequentTaskTokens, getRecentTaskTokens, getUsedTaskTokens, getUsedTaskTokensFromUsage } from './task-token-usage';
+import { collectTaskTokenUsage, createTaskTokenUsageAccumulator, getFrequentTaskTokens, getRecentTaskTokens, getUsedTaskTokens, getUsedTaskTokensFromUsage } from './task-token-usage';
 import type { Task } from './types';
 
 const buildTask = (overrides: Partial<Task>): Task => ({
@@ -14,6 +14,31 @@ const buildTask = (overrides: Partial<Task>): Task => ({
 });
 
 describe('task token usage', () => {
+    it('uses a supplied timestamp without weakening lazy timestamp reads', () => {
+        const accumulator = createTaskTokenUsageAccumulator({ prefix: '@' });
+        const deleted = buildTask({
+            id: 'deleted',
+            contexts: ['@ghost'],
+            deletedAt: '2026-03-02T00:00:00.000Z',
+        });
+        const empty = buildTask({ id: 'empty', contexts: [] });
+        const supplied = buildTask({ id: 'supplied', contexts: ['@work'] });
+        for (const task of [deleted, empty, supplied]) {
+            Object.defineProperties(task, {
+                updatedAt: { get: () => { throw new Error('Timestamp fallback should stay lazy'); } },
+                createdAt: { get: () => { throw new Error('Timestamp fallback should stay lazy'); } },
+            });
+        }
+
+        accumulator.add(deleted, (task) => task.contexts);
+        accumulator.add(empty, (task) => task.contexts);
+        accumulator.add(supplied, (task) => task.contexts, 0);
+
+        expect(accumulator.toUsage()).toEqual([
+            { token: '@work', count: 1, lastUsedAt: 0 },
+        ]);
+    });
+
     it('does not inspect timestamps when only token names are requested', () => {
         const task = buildTask({ id: 'names-only', contexts: ['@work', '@work'] });
         Object.defineProperty(task, 'updatedAt', { get() { throw new Error('Names do not need recency'); } });

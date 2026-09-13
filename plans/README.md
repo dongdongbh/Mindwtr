@@ -181,3 +181,15 @@ Selected against `57b257812`: product and integrity broad audits found no additi
 | 083 | calendar-push-mapping-inventory | P2 | S-M | DONE |
 
 Plan083 is both PERF-01 and the sole Strong architecture candidate; one implementation commit. No dependencies. Rejected: another shared UI draft lifecycle and another visibility controller would move platform lifetime decisions into wider interfaces without a reproduced remaining defect. Prior ADR/roadmap/dependency deferrals stay unchanged. A source comment suggests checking cancellation-alert presentation on iOS pageSheet during a device round; no current runtime evidence establishes a defect, so no implementation plan was created.
+
+## 2026-09-12 improve and architecture audit
+
+Reviewed against `43f40c2ea`, including explicit MCP validation, transports, durable writes, startup and packaged-client setup. Correctness/security/test coverage findings from the comprehensive pass are remediated separately; docs corrections cover package setup and stale engineering claims. The broad audit adds one supported performance/deepening candidate. All reviews use GPT-6 Astra xhigh; implementations use GPT-5.6 Sol or the leader. Automatic selection is authorized by the review-improve loop.
+
+| # | Plan | Priority | Effort | Status |
+|---|------|----------|--------|--------|
+| 084 | widget-publication-derivation | P2 | M | DONE |
+
+Plan084 is the sole new Strong architecture candidate and one finding/commit. No dependencies. Shared native-command persistence recovery also deepens an existing duplicated rule, already handled in comprehensive remediation; it is not a second refactor plan. The complete selected plan set is committed before phase-two implementation.
+
+Considered and rejected: whole native-queue unification, combining widget/Shortcuts caches, optional-capability wrapper consolidation, splitting native modules solely by size, new architecture registries, repeated UI lifecycle mega-interfaces, snapshot/CRDT migrations and roadmap expansion. Native CI already compiles app Kotlin and runs widget/Watch Swift package tests; missing local Swift is a validation limit, not a new tooling defect. Prior dependency migration/advisory decisions remain unless a fresh shipped-path audit supplies new evidence. No new DX or product-direction plan is selected.

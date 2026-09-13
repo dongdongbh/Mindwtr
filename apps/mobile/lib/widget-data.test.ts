@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AppData } from '@mindwtr/core';
-import { buildShortcutsSnapshot, buildWidgetPayload, resolveWidgetLanguage, SHORTCUTS_SNAPSHOT_ITEM_CAP, SHORTCUTS_SNAPSHOT_PROJECT_CAP, WIDGET_PEEK_DESCRIPTION_MAX, WIDGET_PEEK_TOKEN_MAX } from './widget-data';
+import { loadTranslations, type AppData } from '@mindwtr/core';
+import { buildShortcutsSnapshot, buildWidgetPayload, createWidgetPayloadProjection, resolveWidgetLanguage, SHORTCUTS_SNAPSHOT_ITEM_CAP, SHORTCUTS_SNAPSHOT_PROJECT_CAP, WIDGET_PEEK_DESCRIPTION_MAX, WIDGET_PEEK_TOKEN_MAX } from './widget-data';
 
 const baseData: AppData = {
     tasks: [],
@@ -295,6 +295,91 @@ describe('widget-data', () => {
         expect(payload.lists.focus.items.map((item) => item.id)).toEqual(payload.items.map((item) => item.id));
         expect(payload.lists.focus.sections).toBe(payload.sections);
         expect(payload.subtitle).toBe('Inbox: 0 · +1 More');
+    });
+
+    it('keeps every family projection byte-identical to the single-payload API', async () => {
+        await loadTranslations('de');
+        const now = new Date().toISOString();
+        const today = toDateOnly(new Date());
+        const todayAtNine = new Date();
+        todayAtNine.setHours(9, 0, 0, 0);
+        const activeProject = {
+            id: 'active-project', title: 'Launch', status: 'active' as const,
+            color: '#8b5cf6', order: 0, tagIds: [], createdAt: now, updatedAt: now,
+        };
+        const archivedProject = {
+            ...activeProject, id: 'archived-project', title: 'Archived', status: 'archived' as const,
+        };
+        const deletedProject = {
+            ...activeProject, id: 'deleted-project', title: 'Deleted', deletedAt: now,
+        };
+        const focused = Array.from({ length: 55 }, (_, index) => ({
+            id: `focus-${String(index).padStart(2, '0')}`,
+            title: `Focused ${String(index).padStart(2, '0')}`,
+            status: 'next' as const,
+            isFocusedToday: true,
+            projectId: activeProject.id,
+            contexts: ['@office'],
+            tags: ['#launch'],
+            startTime: index === 0 ? todayAtNine.toISOString() : undefined,
+            priority: index === 1 ? 'high' as const : undefined,
+            createdAt: now,
+            updatedAt: now,
+        }));
+        const dueToday = Array.from({ length: 10 }, (_, index) => ({
+            id: `today-${index}`,
+            title: `Today ${index}`,
+            status: 'next' as const,
+            dueDate: today,
+            contexts: ['@office'],
+            tags: [],
+            createdAt: now,
+            updatedAt: now,
+        }));
+        const data: AppData = {
+            ...baseData,
+            projects: [activeProject, archivedProject, deletedProject],
+            tasks: [
+                ...focused,
+                ...dueToday,
+                { id: 'archived-task', title: 'Archived task', status: 'archived', contexts: ['@office'], tags: [], createdAt: now, updatedAt: now },
+                { id: 'deleted-task', title: 'Deleted task', status: 'next', deletedAt: now, contexts: ['@office'], tags: [], createdAt: now, updatedAt: now },
+                { id: 'archived-project-task', title: 'Archived project task', status: 'next', projectId: archivedProject.id, contexts: ['@office'], tags: [], createdAt: now, updatedAt: now },
+                { id: 'deleted-project-task', title: 'Deleted project task', status: 'next', projectId: deletedProject.id, contexts: ['@office'], tags: [], createdAt: now, updatedAt: now },
+            ],
+            settings: {
+                theme: 'nord',
+                features: { priorities: true },
+                savedFilters: [{
+                    id: 'office', name: 'Office', view: 'focus',
+                    criteria: { contexts: ['@office'] }, sortBy: 'title',
+                    createdAt: now, updatedAt: now,
+                }],
+            } as AppData['settings'],
+        };
+        const options = {
+            systemColorScheme: 'dark' as const,
+            listIds: ['focus', 'inbox', 'next', 'waiting', 'someday', 'filter:office'],
+            focusFilter: { criteria: { contexts: ['@office'] }, sortBy: 'title' as const },
+        };
+        const caps = [3, 5, 12, 24, 50] as const;
+        const projection = createWidgetPayloadProjection(data, 'de', options);
+        const projected = caps.map((maxItems) => projection.build(maxItems));
+        const singles = caps.map((maxItems) => buildWidgetPayload(data, 'de', { ...options, maxItems }));
+
+        expect(projected.map((payload) => JSON.stringify(payload)))
+            .toEqual(singles.map((payload) => JSON.stringify(payload)));
+        expect(projected.map((payload) => payload.items.length)).toEqual([...caps]);
+        expect(projected.map((payload) => payload.subtitle)).toEqual([
+            'Eingang: 0 · +62 Mehr',
+            'Eingang: 0 · +60 Mehr',
+            'Eingang: 0 · +53 Mehr',
+            'Eingang: 0 · +41 Mehr',
+            'Eingang: 0 · +15 Mehr',
+        ]);
+        expect(projected[0].palette.background).toBe('#3B4252');
+        expect(JSON.stringify(projected)).not.toContain('Archived task');
+        expect(JSON.stringify(projected)).not.toContain('Deleted project task');
     });
 
     it('puts starred tasks first and counts them in focusedCount regardless of maxItems (#821)', () => {

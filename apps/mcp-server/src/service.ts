@@ -462,7 +462,7 @@ const logLocalAttachmentLinkReplacement = (
       releaseCheck: 'v1.3.0/mcp-existing-network-link-preserved',
       count: preservedNetworkLinkCount,
     } : {
-      releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+      releaseCheck: 'v1.3.0/mcp-decoded-network-link-guard',
     }),
     backend: 'local',
     entity,

@@ -18,14 +18,13 @@ const mocks = vi.hoisted(() => {
   return {
     allTasks,
     state,
-    flushPendingSave: vi.fn(async () => undefined),
+    flushPendingTaskActionSave: vi.fn(async () => undefined),
     ingestPendingCaptures: vi.fn<typeof import('@/lib/pending-captures').ingestPendingCaptures>(async () => 0),
     transcribePendingAudio: vi.fn(),
     applyWatchCommand: vi.fn(),
     ingestIosWidgetCompletions: vi.fn(async () => 0),
     getNextPendingCompletionAt: vi.fn<() => Promise<number | null>>(async () => null),
     refreshWidgets: vi.fn(async () => true),
-    flushIosWidgetCompletionSave: vi.fn(async () => undefined),
     appState: 'active',
     listeners: new Set<(state: string) => void>(),
   };
@@ -39,15 +38,16 @@ vi.mock('react-native', () => ({ AppState: {
   },
 } }));
 vi.mock('@mindwtr/core', () => ({
-  flushPendingSave: mocks.flushPendingSave,
   useTaskStore: { getState: () => mocks.state },
 }));
 vi.mock('@/lib/pending-captures', () => ({
   ingestPendingCaptures: mocks.ingestPendingCaptures,
 }));
+vi.mock('@/lib/pending-capture-persistence', () => ({
+  flushPendingTaskActionSave: mocks.flushPendingTaskActionSave,
+}));
 vi.mock('@/lib/ios-widget-completions', () => ({
   ingestIosWidgetCompletions: mocks.ingestIosWidgetCompletions,
-  flushIosWidgetCompletionSave: mocks.flushIosWidgetCompletionSave,
 }));
 vi.mock('../../modules/ios-widget', () => ({ getNextPendingCompletionAt: mocks.getNextPendingCompletionAt }));
 vi.mock('@/lib/widget-service', () => ({ updateMobileWidgetFromStore: mocks.refreshWidgets }));
@@ -87,10 +87,10 @@ describe('useRootLayoutPendingCaptures', () => {
     const deps = mocks.ingestPendingCaptures.mock.calls[0][0];
     expect(deps.transcribeAudio).toBe(mocks.transcribePendingAudio);
     expect(deps.getTasks?.()).toBe(mocks.allTasks);
-    expect(deps.flushPendingSave).toBe(mocks.flushPendingSave);
+    expect(deps.flushPendingSave).toBe(mocks.flushPendingTaskActionSave);
     expect(mocks.ingestIosWidgetCompletions).toHaveBeenCalledWith(expect.objectContaining({
       updateTask: mocks.state.updateTask,
-      flushPendingSave: mocks.flushIosWidgetCompletionSave,
+      flushPendingSave: mocks.flushPendingTaskActionSave,
       refreshWidgets: mocks.refreshWidgets,
     }));
 

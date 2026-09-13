@@ -463,7 +463,7 @@ describe('mcp service', () => {
     expect(logs).toEqual([{
       message: 'MCP attachment link replacement committed',
       context: {
-        releaseCheck: 'v1.2.8/mcp-attachment-link-guard',
+        releaseCheck: 'v1.3.0/mcp-decoded-network-link-guard',
         backend: 'local',
         entity: 'task',
       },
