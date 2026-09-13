@@ -300,6 +300,39 @@ test("tag-accepting release workflows queue by effective tag or shared Store fli
   }
 });
 
+test("Windows release jobs never reacquire the workflow lock and serialize Store flights", () => {
+  const windows = parse(readFileSync(".github/workflows/release-windows.yml", "utf8"));
+  const flight = parse(readFileSync(".github/workflows/release-msstore-flight.yml", "utf8"));
+  // These expressions use only boolean operators and format; evaluate the real
+  // YAML so equivalent spellings cannot hide a workflow/job lock collision.
+  const resolve = (group, inputs, github) => group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) =>
+    new Function("inputs", "github", "format", `return (${expression})`)(
+      inputs,
+      github,
+      (template, value) => template.replace("{0}", value),
+    ));
+  const workflowGroup = windows.concurrency.group;
+  const jobGroup = windows.jobs.standalone.concurrency.group;
+  for (const workflow of ["Release Windows", "Release", "Release RC"]) {
+    for (const tag of [undefined, "1.3.0-rc.2a"]) {
+      for (const run_msstore_flight of [undefined, false, true]) {
+        const inputs = { tag, run_msstore_flight };
+        const github = { workflow, ref_name: "main" };
+        const jobLock = resolve(jobGroup, inputs, github);
+        expect(jobLock.toLowerCase()).not.toBe(resolve(workflowGroup, inputs, github).toLowerCase());
+        if (run_msstore_flight) {
+          expect(jobLock).toBe(flight.concurrency.group);
+        } else {
+          expect(jobLock).not.toBe(flight.concurrency.group);
+          expect(jobLock).toContain(tag || github.ref_name);
+        }
+      }
+    }
+  }
+  expect(windows.jobs.standalone.concurrency["cancel-in-progress"]).toBe(false);
+  expect(flight.concurrency["cancel-in-progress"]).toBe(false);
+});
+
 test("stable release validates tags and committed versions before any build or publish", () => {
   const workflow = parse(readFileSync(".github/workflows/release.yml", "utf8"));
   const validate = workflow.jobs.validate;

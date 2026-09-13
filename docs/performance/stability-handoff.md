@@ -3,11 +3,14 @@
 Updated September 13, 2026. Engineering handoff for future desktop and mobile
 sessions, not a claim that the performance audit is complete.
 
-Latest desktop control: `80dede27c78a4737d144bb4b81052cdc9b9a6406` on `main`.
-This handoff accompanies two accepted desktop commits: exact native capture
-readback (`0d6c2929a`) and shared token timestamp reuse. They were prepared in
-`perf/desktop-stability-20260912` for integration into `main`; the dated reports
-retain the pre-commit binary, source-map and runner identities. The earlier
+Latest desktop continuation base: published `fc6b606c4` on `main`. Its app/core
+sources match the verified archived timestamp-candidate control; see the
+[September 13 invoke investigation](desktop-invoke-completion-2026-09-13.md).
+The September 12 original control was `80dede27c78a4737d144bb4b81052cdc9b9a6406`.
+The accepted desktop commits are exact native capture readback (`0d6c2929a`)
+and shared token timestamp reuse (`992934a56`), now merged and pushed to `main`.
+The portability follow-up is `e22327cc2`; the dated reports retain the pre-commit
+binary, source-map and runner identities. The earlier
 `3d67289a9` / `perf/native-contention` work remains historical evidence below.
 At the next session, inspect current Git/CI state; local test results here do not
 certify a later commit, release, or deployment.
@@ -15,8 +18,29 @@ certify a later commit, release, or deployment.
 Publication follow-up: the first CI run (`34737920122`) passed the performance
 budgets but found a hard-coded lab path in the new SQLite test fixture. The test
 now uses the platform temporary directory and respects local `TMPDIR`. This
-test-only portability correction does not invalidate the native measurements;
-check its subsequent exact CI run before treating publication as verified.
+test-only portability correction does not invalidate the native measurements.
+Replacement [CI run 34738227281](https://github.com/dongdongbh/Mindwtr/actions/runs/34738227281)
+completed successfully on `e22327cc2`, with local/remote main SHA parity verified.
+[Native Platform CI 34737920115](https://github.com/dongdongbh/Mindwtr/actions/runs/34737920115)
+also passed on `992934a56`; the follow-up changed only tests/docs.
+
+Android benchmark hardening and its handoff are now merged and pushed to `main`
+as `e2234c4fa5461de2a1afb4f22e816a1d82b128ea`. All jobs in
+[CI 34740710185](https://github.com/dongdongbh/Mindwtr/actions/runs/34740710185)
+passed, and local/remote main SHA parity was verified. The subsequent Android
+document-provider write fix was validated on `perf/android-capture-cost-20260913`
+in `/home/dd/worktrees/Mindwtr/android-stability-20260913` before publication.
+Its dated report retains the pre-commit build identities and local/native checks;
+the source is now committed, merged and pushed as
+`fc6b606c4554cb6d58792cce044f04cf958ca1cc`. All jobs in
+[CI 34742804799](https://github.com/dongdongbh/Mindwtr/actions/runs/34742804799)
+passed, with local/remote main SHA parity verified. The subsequent desktop
+completion-probe improvement is committed as `e282fa6e1`. It was validated on
+`perf/desktop-save-serialization-20260913` in the existing
+`/home/dd/worktrees/Mindwtr/desktop-stability-20260912` worktree.
+The dated report retains its pre-commit native build and runner identities.
+CI `34742804799` covers the Android fix; use the CI run for the current pushed
+`main` revision to establish integration status for the desktop continuation.
 
 ## Start here
 
@@ -36,6 +60,52 @@ check its subsequent exact CI run before treating publication as verified.
 
 ## Completed changes and strength of evidence
 
+September 13 desktop continuation: the opt-in completion probe separates public
+invoke entry, synchronous return and promise settlement in the capture's page
+clock. The ordinary bundle excludes its profiling transport. After two review
+corrections, 102 performance-tool tests, desktop checks and independent review
+passed. Ten fresh native cases passed with exact capture, SQLite readback,
+save-idle and reload checks. In five sampled captures, dispatch took 35–37ms and
+settlement followed 991–1091ms later. Dispatch occurred before DOM appearance in
+the two slower cases and afterward in the three faster cases. This establishes
+stronger attribution, not an app speedup or isolated SQL cost. See
+[native invoke completion](desktop-invoke-completion-2026-09-13.md) for exact
+builds/maps/runner identities, retained failures, clock limits and the clean
+control replacement. The lab ended unlocked with unchanged display outputs and
+no Benchmark processes; Android and normal app profiles were not accessed.
+
+September 13 next Android pass: two matched control batches set Newest before
+each preflight, passed 40/40 visible-IME checks and retained ten measured traces.
+Identical-build frame-duration p95 varied from 14.27 to 16.98 ms. Separate trace
+attribution located native modal premount and window-relayout cost; no capture
+optimization or speedup is accepted. See
+[matched capture control and native cost](android-capture-cost-2026-09-13.md).
+
+The earlier direct-export failure was reproduced twice, then fixed by skipping
+filesystem-path preparation for Android document-provider write URIs. On the
+same Downloads provider, candidate JSON and CSV exports matched reference bytes;
+all 1,034 TaskNotes ZIP entries matched with valid CRCs and timestamp-only metadata
+differences. Focused tests, typecheck, lint and independent review passed. See
+[document-provider backup writes](android-document-write-2026-09-13.md) for the
+red regression, exact APK/map identities, diagnostic marker, native readback,
+limitations and restored-device evidence. The fix is accepted; source and CI
+provenance are described above.
+
+September 13 Android continuation: the connected OnePlus device is available.
+The new runner requires the expected runner APK hash, coherent per-frame sample
+counts, a trace for every iteration, and exactly-one Inbox growth on capture-save.
+A real-device failure also replaced the obsolete Close/ViewGroup selector with a
+stable header test identifier.
+See [Android benchmark integrity](android-harness-integrity-2026-09-13.md) for the
+fresh fixture export, schema-5 control, validation and restored-device evidence.
+The completed native control retained 19 measured iterations/traces and passed
+60/60 visible-IME checks. Both cancellation batches preserved Inbox 234; save
+smoke grew it by the expected four tasks, then normal restore returned it to 234.
+Original APK hashes, Sync Off, and global device settings were verified after
+restoration. The accepted Android benchmark hardening establishes stronger
+measurement evidence, not an app speedup. The source commit retains the archived
+pre-commit binary and runner identities in the dated report.
+
 September 12 desktop continuation: the native capture runner now verifies the
 exact captured SQLite row through independent readback and retains structured
 reload evidence. See [capture readback validation](desktop-capture-readback-2026-09-12.md).
@@ -43,7 +113,7 @@ This is a harness correctness improvement; no app speedup is established. The
 fresh native control initially failed its viewport gate while the graphical
 session was locked. After unlocking, exact capture/readback/reload smoke passed;
 the report records one corrected virtualized-reload harness assumption. The new
-schema-2 timed readback boundary requires fresh cohorts. Android work awaits device connection.
+schema-2 timed readback boundary requires fresh cohorts. Android device work resumed September 13; see the current continuation below.
 
 The same continuation then removed duplicate context/tag timestamp parsing in
 the shared store derivation. See [desktop token timestamp derivation](desktop-token-timestamps-2026-09-12.md).
@@ -89,6 +159,10 @@ hashes, fixture sizes, safety tests, and limitations.
   opt-in JSC sampling locates pre-frame work. See
   [append visibility follow-up](native-append-capture-2026-09.md#capture-visibility-follow-up)
   and [native capture sampling](native-capture-sampling-2026-09.md).
+- `NATIVE_INVOKE_PROBE=1` adds bounded, allowlisted command completion records
+  through a profiling-only Mindwtr transport. It requires render/idle mode,
+  preserves Tauri internals and operation identity, and rejects lost ownership
+  or incomplete observations. [Completion validation](desktop-invoke-completion-2026-09-13.md).
 - On this dual-monitor niri workstation, `NATIVE_VIEWPORT=1200x800@2` targets
   only the verified Benchmark executable's window. Requested/actual dimensions,
   scale, and transient resizes are checked; other windows/display settings are
@@ -123,9 +197,11 @@ hashes, fixture sizes, safety tests, and limitations.
   batches do not establish an overall speedup or regression.
 - **Desktop capture:** deterministic preparation costs are reduced, but rare
   long Enter-to-DOM samples and roughly one-second automation-inclusive durable
-  readback at 10k tasks remain. September 12 fresh JSC sampling reproduced a
-  277 ms capture with save-serialization frames; the timestamp change did not
-  establish an overall speedup. Continue separating those save phases. Earlier
+  readback at 10k tasks remain. September 13 reproduced 256/303ms captures with
+  save preparation and synchronous public invoke dispatch before DOM appearance.
+  The roughly one-second post-return promise wait extends beyond DOM appearance
+  and is not synchronous JS blocking or isolated SQL time. No scheduling change
+  or overall speedup is established. Continue separating those save phases. Earlier
   large visibility differences did not consistently reproduce. Do not attribute
   all readback time to SQL or assume all rendering delays are fixed.
 - **Scrolling and Settings on Android:** 1k-task native baselines exist, with
@@ -144,8 +220,14 @@ personal data, accounts, or additional hardware.
 
 ### P1 — Matched native interaction measurements on both platforms
 
-**Android:** build sampling-disabled control/candidate Benchmark APKs from exact
-sources with identical dependencies. Keep startup/compilation settings identical;
+**Android:** the schema-5 control and matched Newest-before-preflight A/A series
+are complete. Start from the retained trace attribution, not another harness
+rewrite or repetition of those batches. A possible bounded experiment is reducing
+nonessential descendants in the initial 52-item native mount batch, after identifying
+which can move without visible popping, missing controls, accessibility or focus
+changes. Do not infer that design from the traces alone. For an accepted proposal,
+build sampling-disabled control/candidate Benchmark APKs from exact sources with
+identical dependencies. Keep startup/compilation settings identical;
 archive each APK and verify installed hashes. Use matched fixtures and an
 interleaved A/B/B/A protocol after the 20-check IME gate. Retain per-iteration
 frames, thermal/refresh conditions, and failures. Collect separate sampled traces
@@ -160,11 +242,15 @@ Distinguish event handling, DOM/paint opportunity, preparation, IPC, native
 transaction, recovery JSON, and independent readback. Change only the dominant
 reproducible cost; extend the existing differential tests before touching writes.
 
-September 12 completed the fresh schema-2 control and timestamp A/B/B/A pass;
-start from its retained slow sample and matching maps. The next bounded hypothesis
-is save serialization overlapping capture rendering, with IPC/transaction/recovery
-timing still to separate. Do not repeat the completed token-timestamp experiment
-as if its native speedup had been established.
+September 13 completed fresh sampled control attribution and the native invoke
+completion boundary. Start from those retained profiles and matching maps rather
+than repeating the completed control or token-timestamp experiment. The next
+bounded hypothesis is reducing synchronous save preparation or payload serialization
+with deterministic output-equivalence and write-safety regressions. The two slow
+captures also leave 31–68ms between invoke return and DOM appearance to attribute.
+Native transaction, recovery-copy and response-handling costs remain separate
+open boundaries; do not infer a scheduling design or revive the rejected deferred
+watcher cache from the observed overlap alone.
 
 Acceptance: complete comparable reports, no input/keyboard regression, exact-once
 creation, durable readback and reload survival, and no weakened correctness gates.
@@ -240,13 +326,19 @@ status of exact CI runs; do not call a running workflow green.
 
 ## Current local lab state and evidence
 
-At the last device session (not a promise of current state), only the separate
-Android Benchmark app was tested. Its synthetic Inbox contained 234 tasks;
-`mixed-v1-1000-cbfcca2e13cf76a5-plus34captures` is an operator label, not a newly
-exported full-content hash. Sync was Off. The normal app was untouched. The
-uninstrumented control APK was restored, hash checked, freshly launched to
-confirm the Inbox, then force-stopped. Reconfirm device availability, package,
-data, sync, thermal/refresh state, and identity before every new experiment.
+September 13 latest device restoration: only the separate Android Benchmark app
+and its runner were used. The current full control/candidate JSON contains 1,034
+live synthetic tasks, five tombstones and 20 projects; Inbox is 234. The older seed
+export had one tombstone, and the previous session's normal restore added four
+for its removed test captures. Do not treat the seed hash as the current full
+snapshot hash. No task save, import or restore occurred in the latest continuation.
+The [document-write report](android-document-write-2026-09-13.md) records current
+export and original/restored APK hashes. A fresh original-app launch confirmed
+the prior rows, Inbox 234, Newest sort, Sync Off and debug logging false. Both test
+packages were stopped. Initial/final display, keyboard, animation, radio and
+low-power settings match. Synthetic successful/failed exports, diagnostics and
+the earlier recovery snapshot remain. Production and Dev apps were untouched.
+Reconfirm state before the next experiment.
 
 Local evidence lives under `/home/dd/.cache/mindwtr-performance-tmp/`, especially
 `native-contention/`, `capture-storage-followup/`, `settings-first-open/`, and

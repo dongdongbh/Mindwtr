@@ -276,6 +276,7 @@ export function QuickCaptureSheetBody({
                 {t('nav.addTask')}
               </CompactText>
               <TouchableOpacity
+                testID="quick-capture-close"
                 onPress={handleClose}
                 disabled={saving}
                 accessibilityRole="button"

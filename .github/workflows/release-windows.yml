@@ -52,7 +52,8 @@ jobs:
     name: Windows Release
     timeout-minutes: 120
     concurrency:
-      group: ${{ inputs.run_msstore_flight && 'msstore-beta-flight' || format('release-windows-{0}', inputs.tag || github.ref_name) }}
+      # A job must not acquire its parent workflow's tag lock (#1197).
+      group: ${{ inputs.run_msstore_flight && 'msstore-beta-flight' || format('release-windows-build-{0}', inputs.tag || github.ref_name) }}
       cancel-in-progress: false
     env:
       VITE_DROPBOX_APP_KEY: ${{ vars.VITE_DROPBOX_APP_KEY || secrets.VITE_DROPBOX_APP_KEY }}

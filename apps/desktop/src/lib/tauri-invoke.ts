@@ -24,11 +24,48 @@ const assertSandboxNativeCommandAllowed = (command: string): void => {
  */
 export type NativeInvokeTransport = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
+type NativeInvokeProfilingTransport = {
+    schemaVersion: 1;
+    label: 'mindwtr-native-invoke-transport-v1';
+    invoke: NativeInvokeTransport;
+};
+
+declare global {
+    interface Window {
+        __mindwtrNativeInvokeTransport?: NativeInvokeProfilingTransport;
+    }
+}
+
+let nativeInvokeProfilingTransport: NativeInvokeProfilingTransport | undefined;
+
+const getNativeInvokeProfilingTransport = (invoke: NativeInvokeTransport): NativeInvokeProfilingTransport => {
+    if (!nativeInvokeProfilingTransport) {
+        if (window.__mindwtrNativeInvokeTransport) {
+            throw new Error('Native invoke profiling transport already exists.');
+        }
+        nativeInvokeProfilingTransport = {
+            schemaVersion: 1,
+            label: 'mindwtr-native-invoke-transport-v1',
+            invoke,
+        };
+        window.__mindwtrNativeInvokeTransport = nativeInvokeProfilingTransport;
+    } else if (window.__mindwtrNativeInvokeTransport !== nativeInvokeProfilingTransport) {
+        throw new Error('Native invoke profiling transport ownership changed.');
+    }
+    return nativeInvokeProfilingTransport;
+};
+
 const tauriTransport: NativeInvokeTransport = async <T>(
     command: string,
     args?: Record<string, unknown>,
 ): Promise<T> => {
     const { invoke } = await import('@tauri-apps/api/core');
+    if (import.meta.env.VITE_STARTUP_PROFILING === '1') {
+        const profilingTransport = getNativeInvokeProfilingTransport(invoke as NativeInvokeTransport);
+        return args === undefined
+            ? profilingTransport.invoke<T>(command)
+            : profilingTransport.invoke<T>(command, args);
+    }
     // An argument-less command stays argument-less on the wire.
     return args === undefined ? invoke<T>(command) : invoke<T>(command, args);
 };

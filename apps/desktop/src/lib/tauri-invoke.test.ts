@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readdirSync, readFileSync } from 'fs';
 import { join, relative, resolve } from 'path';
 
-const invokeMock = vi.hoisted(() => vi.fn(async () => {
+const invokeMock = vi.hoisted(() => vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => {
     throw new Error('no ipc');
 }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
@@ -29,6 +29,8 @@ beforeEach(() => {
 afterEach(() => {
     setNativeInvokeTransport(null);
     disableTauri();
+    delete (window as any).__mindwtrNativeInvokeTransport;
+    vi.unstubAllEnvs();
 });
 
 describe('invokeNative', () => {
@@ -176,5 +178,57 @@ describe('setNativeInvokeTransport', () => {
         // The real transport reaches @tauri-apps/api/core, which has no IPC
         // handler in jsdom; the point is only that the fake is gone.
         await expect(invokeNative<string>('get_thing')).rejects.toThrow();
+    });
+});
+
+describe('native invoke profiling transport', () => {
+    it('keeps the normal transport direct and does not expose a profiling hook', async () => {
+        vi.stubEnv('VITE_STARTUP_PROFILING', '0');
+        enableTauri();
+        invokeMock.mockResolvedValueOnce('normal');
+
+        await expect(invokeNative('get_thing')).resolves.toBe('normal');
+
+        expect(invokeMock).toHaveBeenCalledWith('get_thing');
+        expect((window as any).__mindwtrNativeInvokeTransport).toBeUndefined();
+    });
+
+    it('does not silently replace a profiling transport owned elsewhere', async () => {
+        vi.stubEnv('VITE_STARTUP_PROFILING', '1');
+        enableTauri();
+        (window as any).__mindwtrNativeInvokeTransport = { invoke: vi.fn() };
+
+        await expect(invokeNative('get_thing')).rejects.toThrow('profiling transport already exists');
+        expect(invokeMock).not.toHaveBeenCalled();
+    });
+
+    it('routes profiling calls through a writable hook without touching immutable Tauri internals', async () => {
+        vi.stubEnv('VITE_STARTUP_PROFILING', '1');
+        const immutableInvoke = vi.fn();
+        const internals = {} as Record<string, unknown>;
+        Object.defineProperty(internals, 'invoke', {
+            value: immutableInvoke,
+            writable: false,
+            configurable: false,
+        });
+        (window as any).__TAURI_INTERNALS__ = internals;
+        const descriptor = Object.getOwnPropertyDescriptor(internals, 'invoke');
+        invokeMock.mockResolvedValueOnce('original');
+
+        await expect(invokeNative('save_data', { revision: 7 })).resolves.toBe('original');
+        const profilingTransport = (window as any).__mindwtrNativeInvokeTransport;
+        expect(profilingTransport).toMatchObject({
+            schemaVersion: 1,
+            label: 'mindwtr-native-invoke-transport-v1',
+            invoke: invokeMock,
+        });
+        expect(Object.getOwnPropertyDescriptor(internals, 'invoke')).toEqual(descriptor);
+
+        const wrapped = vi.fn(async () => 'wrapped');
+        profilingTransport.invoke = wrapped;
+        await expect(invokeNative('save_task')).resolves.toBe('wrapped');
+        expect(wrapped.mock.calls[0]).toEqual(['save_task']);
+        expect(invokeMock).toHaveBeenCalledTimes(1);
+        expect(immutableInvoke).not.toHaveBeenCalled();
     });
 });

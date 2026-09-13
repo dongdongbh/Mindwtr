@@ -88,6 +88,12 @@ class MindwtrBenchmark {
         find(By.desc("Inbox"))
         assertFalse("Stale APK: main-page help must be absent", device.hasObject(By.desc("Help: Focus").pkg(TARGET)))
     }
+    private fun inboxCount(): Int {
+        val description = find(By.descStartsWith("Process Inbox (")).contentDescription
+        val match = Regex("""^Process Inbox \((\d+)\)$""").matchEntire(description)
+        return match?.groupValues?.get(1)?.toIntOrNull()
+            ?: error("Malformed Inbox count accessibility description: '$description'")
+    }
     private fun settleStartupNotice() {
         assertTrue("Startup notification notice obstructs interaction", device.wait(Until.gone(By.text("Notifications disabled").pkg(TARGET)), TIMEOUT))
     }
@@ -156,7 +162,7 @@ class MindwtrBenchmark {
             device.waitForIdle()
         }
         stage("close") {
-            find(By.desc("Close").clazz("android.view.ViewGroup")).click()
+            find(By.res("quick-capture-close").desc("Close")).click()
             assertTrue("Capture must close", device.wait(Until.gone(By.desc("Task title").pkg(TARGET)), TIMEOUT))
             find(By.desc("Add Task"))
             device.waitForIdle()
@@ -173,8 +179,24 @@ class MindwtrBenchmark {
         setupBlock = { startActivityAndWait(); ready(); tap("Inbox"); settleStartupNotice(); selectSort("Newest") },
     ) {
         val title = "Benchmark capture ${System.nanoTime()}"
+        val inboxBefore = inboxCount()
         stage("open") { tap("Add Task"); find(By.desc("Task title")) }
         stage("enterTitle") { find(By.desc("Task title")).text = title }
-        stage("save") { tap("Save"); find(By.descStartsWith(title)) }
+        stage("save") {
+            tap("Save")
+            assertTrue("Capture must close after save",
+                device.wait(Until.gone(By.desc("Task title").pkg(TARGET)), TIMEOUT))
+            val expectedInboxCount = inboxBefore + 1
+            assertTrue("Inbox count must advance exactly once from $inboxBefore to $expectedInboxCount",
+                device.wait(Until.hasObject(By.desc("Process Inbox ($expectedInboxCount)").pkg(TARGET)), TIMEOUT))
+            device.waitForIdle()
+            val inboxAfter = inboxCount()
+            assertTrue("Inbox count changed by more or less than one: before=$inboxBefore after=$inboxAfter",
+                inboxAfter == expectedInboxCount)
+            find(By.descStartsWith(title))
+            device.waitForIdle()
+            val titleRows = device.findObjects(By.descStartsWith(title).pkg(TARGET))
+            assertTrue("Expected exactly one saved task row for '$title', found ${titleRows.size}", titleRows.size == 1)
+        }
     }
 }

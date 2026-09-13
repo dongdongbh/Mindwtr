@@ -10,6 +10,11 @@ const modernFileSystemMock = vi.hoisted(() => {
   const directoryDeletes = vi.fn((uri: string) => {
     paths.delete(uri);
   });
+  const safFileCreates = vi.fn((parentUri: string, name: string, _mimeType: string) => {
+    const uri = `${parentUri}/document/${encodeURIComponent(name)}`;
+    paths.set(uri, 'file');
+    return uri;
+  });
   const fileCreates = vi.fn((uri: string, _options?: unknown) => {
     paths.set(uri, 'file');
   });
@@ -86,6 +91,10 @@ const modernFileSystemMock = vi.hoisted(() => {
       paths.delete(this.uri);
       paths.set(destination.uri, 'directory');
     }
+
+    createFile(name: string, mimeType: string) {
+      return new File(safFileCreates(this.uri, name, mimeType));
+    }
   }
 
   class File {
@@ -142,10 +151,15 @@ const modernFileSystemMock = vi.hoisted(() => {
   const Paths = {
     cache: { uri: 'file://cache/' },
     document: { uri: 'file://document/' },
-    info: vi.fn((uri: string) => ({
-      exists: paths.has(uri),
-      isDirectory: paths.get(uri) === 'directory',
-    })),
+    info: vi.fn((uri: string) => {
+      if (uri.startsWith('content://')) {
+        throw new Error('Unsupported URI scheme for path info');
+      }
+      return {
+        exists: paths.has(uri),
+        isDirectory: paths.get(uri) === 'directory',
+      };
+    }),
   };
 
   return {
@@ -154,6 +168,7 @@ const modernFileSystemMock = vi.hoisted(() => {
     Paths,
     directoryCreates,
     directoryDeletes,
+    safFileCreates,
     fileCreates,
     fileWrites,
     fileCopies,
@@ -163,6 +178,7 @@ const modernFileSystemMock = vi.hoisted(() => {
       paths.clear();
       directoryCreates.mockClear();
       directoryDeletes.mockClear();
+      safFileCreates.mockClear();
       fileCreates.mockClear();
       fileWrites.mockClear();
       fileCopies.mockClear();
@@ -187,6 +203,7 @@ const legacyFileSystemMock = vi.hoisted(() => ({
   deleteAsync: vi.fn(),
   copyAsync: vi.fn(),
   moveAsync: vi.fn(),
+  StorageAccessFramework: {},
 }));
 
 vi.mock('expo-file-system', () => modernFileSystemMock);
@@ -218,6 +235,61 @@ describe('file-system wrapper', () => {
     );
     expect(legacyFileSystemMock.writeAsStringAsync).not.toHaveBeenCalled();
     expect(modernFileSystemMock.__getPath(targetUri)).toBe('file');
+  });
+
+  it.each([
+    ['UTF8', '{"tasks":[]}', undefined, { encoding: 'utf8' }],
+    ['Base64', 'AQID', { encoding: 'base64' as const }, { encoding: 'base64' }],
+  ])('writes a created SAF document as %s without path preparation', async (_label, contents, options, expectedOptions) => {
+    const { StorageAccessFramework } = await import('./file-system');
+    const parentUri = 'content://com.android.providers.downloads.documents/tree/downloads';
+    const fileUri = await StorageAccessFramework.createFileAsync(
+      parentUri,
+      'Mindwtr Backup.json',
+      'application/json'
+    );
+    legacyFileSystemMock.writeAsStringAsync.mockRejectedValue(
+      new Error('Legacy SAF writer rejected Downloads document URI')
+    );
+
+    await StorageAccessFramework.writeAsStringAsync(fileUri, contents, options);
+
+    expect(fileUri).toBe(
+      'content://com.android.providers.downloads.documents/tree/downloads/document/Mindwtr%20Backup.json'
+    );
+    expect(modernFileSystemMock.safFileCreates).toHaveBeenCalledWith(
+      parentUri,
+      'Mindwtr Backup.json',
+      'application/json'
+    );
+    expect(modernFileSystemMock.fileWrites).toHaveBeenCalledWith(fileUri, contents, expectedOptions);
+    expect(modernFileSystemMock.Paths.info).not.toHaveBeenCalled();
+    expect(modernFileSystemMock.directoryCreates).not.toHaveBeenCalled();
+    expect(modernFileSystemMock.directoryDeletes).not.toHaveBeenCalled();
+    expect(modernFileSystemMock.fileCreates).not.toHaveBeenCalled();
+    expect(legacyFileSystemMock.writeAsStringAsync).not.toHaveBeenCalled();
+  });
+
+  it('keeps the existing legacy fallback when a native content write fails', async () => {
+    const { StorageAccessFramework } = await import('./file-system');
+    const fileUri = await StorageAccessFramework.createFileAsync(
+      'content://com.android.providers.downloads.documents/tree/downloads',
+      'Mindwtr Backup.json',
+      'application/json'
+    );
+    modernFileSystemMock.fileWrites.mockImplementationOnce(() => {
+      throw new Error('Native provider write failed');
+    });
+    legacyFileSystemMock.writeAsStringAsync.mockRejectedValueOnce(
+      new Error('Legacy SAF writer rejected Downloads document URI')
+    );
+
+    await expect(StorageAccessFramework.writeAsStringAsync(fileUri, '{}')).rejects.toThrow(
+      'Legacy SAF writer rejected Downloads document URI'
+    );
+
+    expect(legacyFileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(fileUri, '{}', {});
+    expect(modernFileSystemMock.fileWrites).toHaveBeenCalledWith(fileUri, '{}', { encoding: 'utf8' });
   });
 
   it('repairs stale directory targets before file copy and move', async () => {

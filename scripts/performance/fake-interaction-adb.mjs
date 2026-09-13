@@ -23,7 +23,8 @@ else if (command.startsWith('shell sha256sum ')) {
     || (process.env.FAKE_READINESS === 'runner-changed' && hashReads === 4)
     || (measurementChange === 'target' && command.includes('/target/'))
     || (measurementChange === 'runner' && command.includes('/runner/'));
-  console.log(`${(process.env.FAKE_STALE || changed ? 'b' : 'a').repeat(64)}  /data/app/synthetic/base.apk`);
+  const staleRunner = process.env.FAKE_STALE_RUNNER && command.includes('/runner/');
+  console.log(`${(process.env.FAKE_STALE || staleRunner || changed ? 'b' : 'a').repeat(64)}  /data/app/synthetic/base.apk`);
 }
 else if (command.startsWith('shell getprop ')) console.log('synthetic-device');
 else if (command.startsWith('shell dumpsys ')) console.log('synthetic snapshot');
@@ -54,19 +55,54 @@ else if (args[0] === 'pull') {
   }
   if (!process.env.FAKE_MISSING_REPORT) {
     const count = Number(process.env.RUNS ?? 1);
-    const values = Array.from({ length: process.env.FAKE_SHORT_SCALARS ? 1 : count }, () => 50);
+    const scalarValues = Array.from({ length: process.env.FAKE_SHORT_SCALARS ? 1 : count }, () => 50);
+    const frameCounts = Array.from({ length: process.env.FAKE_SHORT_SCALARS ? 1 : count }, () => 2);
     const memory = process.env.METRIC_MODE === 'memory';
+    const frameFault = process.env.FAKE_FRAME_FAULT;
+    const cpuRuns = Array.from({ length: count }, () => [0, 3]);
+    const overrunRuns = Array.from({ length: count }, () => [-5, 2]);
+    if (frameFault === 'fractional-count') frameCounts[0] = 1.5;
+    if (frameFault === 'zero-count') frameCounts[0] = 0;
+    if (frameFault === 'cpu-not-array') cpuRuns[0] = 'invalid';
+    if (frameFault === 'overrun-not-array') overrunRuns[0] = 'invalid';
+    if (frameFault === 'cpu-missing-entry') cpuRuns[0] = [0];
+    if (frameFault === 'overrun-missing-entry') overrunRuns[0] = [-5];
+    if (frameFault === 'unequal-lengths') overrunRuns[0] = [-5, 2, 4];
+    if (frameFault === 'cpu-negative') cpuRuns[0] = [-1, 3];
+    if (frameFault === 'cpu-nonfinite') cpuRuns[0] = [Number.NaN, 3];
+    if (frameFault === 'overrun-nonfinite') overrunRuns[0] = [-5, Number.POSITIVE_INFINITY];
+    const traceFault = process.env.FAKE_TRACE_FAULT;
+    const profilerOutputs = Array.from({ length: count }, (_, iteration) => ({
+      type: 'PerfettoTrace', label: `Trace Iteration ${iteration}`,
+      filename: `MindwtrBenchmark_${process.env.SCENARIO}_iter${String(iteration).padStart(3, '0')}_synthetic.perfetto-trace`,
+    }));
+    profilerOutputs.push({ type: 'StackSamplingTrace', label: 'Ancillary output', filename: 'ancillary.trace' });
+    if (traceFault === 'missing-index') profilerOutputs.splice(count - 1, 1);
+    if (traceFault === 'duplicate-index') profilerOutputs[1].label = 'Trace Iteration 0';
+    if (traceFault === 'noncanonical-index') profilerOutputs[0].label = 'Trace Iteration 00';
+    if (traceFault === 'duplicate-file') profilerOutputs[1].filename = profilerOutputs[0].filename;
+    if (traceFault === 'missing-file') profilerOutputs[count - 1].filename = `MindwtrBenchmark_${process.env.SCENARIO}_iter${String(count - 1).padStart(3, '0')}_missing.perfetto-trace`;
+    if (traceFault === 'empty-file') profilerOutputs[count - 1].filename = `MindwtrBenchmark_${process.env.SCENARIO}_iter${String(count - 1).padStart(3, '0')}_empty.perfetto-trace`;
+    if (traceFault === 'traversal') profilerOutputs[0].filename = '../MindwtrBenchmark_escape_iter000_synthetic.perfetto-trace';
+    if (traceFault === 'absolute') profilerOutputs[0].filename = '/sdcard/MindwtrBenchmark_escape_iter000_synthetic.perfetto-trace';
+    if (traceFault === 'wrong-convention') profilerOutputs[0].filename = 'wrong_iter000_synthetic.perfetto-trace';
+    if (traceFault === 'ancillary-only') profilerOutputs.splice(0, count);
     writeFileSync(join(args[2], 'synthetic-benchmarkData.json'), JSON.stringify({ benchmarks: [{ name: process.env.SCENARIO, repeatIterations: count,
       metrics: process.env.FAKE_MISSING_METRIC ? {} : memory
-        ? { memoryRssAnonLastKb: { runs: values }, memoryRssFileLastKb: { runs: values } }
+        ? { memoryRssAnonLastKb: { runs: scalarValues }, memoryRssFileLastKb: { runs: scalarValues } }
         : process.env.SCENARIO === 'coldStartup'
-          ? { timeToInitialDisplayMs: { runs: values }, timeToFullDisplayMs: { runs: values } }
-          : { frameCount: { runs: values } },
+          ? { timeToInitialDisplayMs: { runs: scalarValues }, timeToFullDisplayMs: { runs: scalarValues } }
+          : { frameCount: { runs: frameCounts } },
       sampledMetrics: memory ? {} : {
-        frameDurationCpuMs: { runs: Array.from({ length: count }, () => [2, 3]) },
-        frameOverrunMs: { runs: Array.from({ length: count }, () => [-5, -3]) },
+        frameDurationCpuMs: { runs: cpuRuns },
+        frameOverrunMs: { runs: overrunRuns },
       },
+      profilerOutputs,
     }] }));
-    writeFileSync(join(args[2], 'synthetic.perfetto-trace'), 'fake test trace');
+    for (const output of profilerOutputs.filter(item => item.type === 'PerfettoTrace')) {
+      if (output.filename.startsWith('/') || output.filename.includes('..') || output.filename.includes('missing')) continue;
+      writeFileSync(join(args[2], output.filename), output.filename.includes('empty') ? '' : 'fake test trace');
+    }
+    if (traceFault === 'ancillary-only') writeFileSync(join(args[2], 'arbitrary-ancillary.perfetto-trace'), 'not measurement evidence');
   }
 } else { console.error(`Unexpected fake adb call: ${command}`); process.exitCode = 1; }

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_IMPORT_SOURCE_LIMITS, getBackupSourceFileDiagnostic, MAX_BACKUP_SOURCE_BYTES, type AppData } from '@mindwtr/core';
 import type { ParsedTodoistProject } from '@mindwtr/core/todoist-import';
+import { Platform } from 'react-native';
 
 const emptyData: AppData = {
   tasks: [],
@@ -39,6 +40,15 @@ const fileSystemMocks = vi.hoisted(() => ({
   writeError: null as Error | null,
   getInfoAsync: vi.fn(),
   readAsStringAsync: vi.fn(),
+  writeAsStringAsync: vi.fn(),
+  requestDirectoryPermissionsAsync: vi.fn(),
+  createSafFileAsync: vi.fn(),
+  writeSafFileAsync: vi.fn(),
+}));
+
+const sharingMocks = vi.hoisted(() => ({
+  isAvailableAsync: vi.fn(),
+  shareAsync: vi.fn(),
 }));
 
 vi.mock('@mindwtr/core', async () => {
@@ -57,16 +67,22 @@ vi.mock('expo-document-picker', () => ({
 }));
 
 vi.mock('./file-system', () => ({
-  StorageAccessFramework: null,
+  StorageAccessFramework: {
+    requestDirectoryPermissionsAsync: fileSystemMocks.requestDirectoryPermissionsAsync,
+    createFileAsync: fileSystemMocks.createSafFileAsync,
+    writeAsStringAsync: fileSystemMocks.writeSafFileAsync,
+  },
   documentDirectory: 'file://document/',
   cacheDirectory: 'file://cache/',
   getInfoAsync: fileSystemMocks.getInfoAsync,
   readAsStringAsync: fileSystemMocks.readAsStringAsync,
-  writeAsStringAsync: vi.fn(),
+  writeAsStringAsync: fileSystemMocks.writeAsStringAsync,
   EncodingType: {
     Base64: 'base64',
   },
 }));
+
+vi.mock('expo-sharing', () => sharingMocks);
 
 vi.mock('expo-file-system', () => ({
   Paths: {
@@ -129,6 +145,7 @@ vi.mock('./app-log', () => ({
 
 import {
   createMobileRecoverySnapshot,
+  exportCurrentDataBackup,
   importTodoistData,
   inspectBackupDocument,
   inspectMindwtrCsvDocument,
@@ -153,12 +170,21 @@ const SNAPSHOT_FILE_NAME_PATTERN =
 
 describe('mobile data transfer', () => {
   beforeEach(() => {
+    Platform.OS = 'web';
     vi.clearAllMocks();
     fileSystemMocks.fileContents.clear();
     fileSystemMocks.fileWrites = [];
     fileSystemMocks.writeError = null;
     fileSystemMocks.readAsStringAsync.mockResolvedValue('');
     fileSystemMocks.getInfoAsync.mockResolvedValue({ exists: true, size: 1 });
+    fileSystemMocks.writeAsStringAsync.mockResolvedValue(undefined);
+    fileSystemMocks.requestDirectoryPermissionsAsync.mockResolvedValue({ granted: false });
+    fileSystemMocks.createSafFileAsync.mockResolvedValue(
+      'content://com.android.providers.downloads.documents/document/downloads%3AMindwtr%20Backup.json'
+    );
+    fileSystemMocks.writeSafFileAsync.mockResolvedValue(undefined);
+    sharingMocks.isAvailableAsync.mockResolvedValue(true);
+    sharingMocks.shareAsync.mockResolvedValue(undefined);
     storeStateRef.current = {
       lastDataChangeAt: 1,
       fetchData: vi.fn().mockResolvedValue(undefined),
@@ -167,6 +193,61 @@ describe('mobile data transfer', () => {
     coreMocks.useTaskStoreGetState.mockImplementation(() => storeStateRef.current);
     storageMocks.getData.mockResolvedValue(emptyData);
     storageMocks.saveData.mockResolvedValue(undefined);
+  });
+
+  it('marks only a completed Android SAF backup write for release confirmation', async () => {
+    Platform.OS = 'android';
+    const directoryUri = 'content://com.android.providers.downloads.documents/tree/downloads';
+    const fileUri =
+      'content://com.android.providers.downloads.documents/document/downloads%3AMindwtr%20Backup.json';
+    fileSystemMocks.requestDirectoryPermissionsAsync.mockResolvedValue({
+      granted: true,
+      directoryUri,
+    });
+    fileSystemMocks.createSafFileAsync.mockResolvedValue(fileUri);
+    let resolveWrite!: () => void;
+    fileSystemMocks.writeSafFileAsync.mockImplementationOnce(
+      () => new Promise<void>((resolve) => {
+        resolveWrite = resolve;
+      })
+    );
+
+    const exportPromise = exportCurrentDataBackup(emptyData);
+    await vi.waitFor(() => expect(fileSystemMocks.writeSafFileAsync).toHaveBeenCalledOnce());
+    expect(logMocks.logInfo).not.toHaveBeenCalledWith(
+      'Backup export complete',
+      expect.anything()
+    );
+    resolveWrite();
+    await exportPromise;
+
+    expect(fileSystemMocks.writeSafFileAsync).toHaveBeenCalledWith(
+      fileUri,
+      expect.any(String)
+    );
+    expect(logMocks.logInfo).toHaveBeenCalledWith(
+      'Backup export complete',
+      expect.objectContaining({
+        scope: 'transfer',
+        extra: expect.objectContaining({
+          operation: 'exportBackup',
+          source: 'local',
+          releaseCheck: 'v1.3.0/android-saf-backup-write',
+        }),
+      })
+    );
+    expect(sharingMocks.shareAsync).not.toHaveBeenCalled();
+  });
+
+  it('does not mark the share fallback as a completed SAF backup write', async () => {
+    Platform.OS = 'android';
+
+    await exportCurrentDataBackup(emptyData);
+
+    expect(fileSystemMocks.writeSafFileAsync).not.toHaveBeenCalled();
+    expect(sharingMocks.shareAsync).toHaveBeenCalledOnce();
+    const completion = logMocks.logInfo.mock.calls.find(([message]) => message === 'Backup export complete');
+    expect(completion?.[1]?.extra).not.toHaveProperty('releaseCheck');
   });
 
   it('aborts Todoist import without creating a snapshot when local data changes', async () => {

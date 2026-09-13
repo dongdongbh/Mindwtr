@@ -32,6 +32,28 @@ const validSample = (size: number) => ({
   captureEvidence: validCaptureEvidence(size),
   reloadReadiness: { localDataReadyMs: 100, interactiveReadyMs: 150 },
 });
+const idleObservation = { waitMs: 60, polls: 2, status: {
+  core: { queued: 0, immediate: 0, inFlight: false, retrying: false, failed: false, generation: 2 },
+  desktop: { pending: 0, generation: 2, failed: false, reconciliationPending: false },
+} };
+const validInvokeProbe = {
+  schemaVersion: 1,
+  label: 'native-invoke-completion-v1',
+  installedAtMs: 1,
+  stoppedAtMs: 12,
+  maxRecords: 64,
+  overflow: false,
+  pendingCount: 0,
+  records: [
+    { command: 'save_data', sequence: 1, startMs: 2, returnedMs: 5, settledMs: 9, outcome: 'fulfilled' },
+    { command: 'get_data', sequence: 2, startMs: 10, returnedMs: 10, settledMs: 11, outcome: 'fulfilled' },
+  ],
+};
+const validIdleSample = (size: number) => ({
+  ...validSample(size),
+  saveIdle: Object.fromEntries(['initialImport', 'beforeSettings', 'beforeCapture', 'afterCapture']
+    .map(boundary => [boundary, structuredClone(idleObservation)])),
+});
 
 describe('native desktop measurement contract', () => {
   it('does not confuse a visible shell with canonical interactive readiness', () => {
@@ -72,23 +94,43 @@ describe('native desktop measurement contract', () => {
   });
 
   it('requires every queue-idle boundary in idle reports', () => {
-    const observation = { waitMs: 60, polls: 2, status: {
-      core: { queued: 0, immediate: 0, inFlight: false, retrying: false, failed: false, generation: 2 },
-      desktop: { pending: 0, generation: 2, failed: false, reconciliationPending: false },
-    } };
-    const sample = { ...validSample(0),
-      saveIdle: Object.fromEntries(['initialImport', 'beforeSettings', 'beforeCapture', 'afterCapture']
-        .map(boundary => [boundary, observation])) };
+    const sample = validIdleSample(0);
     const summary = () => summarizeNativeRun([sample], 1, 'a'.repeat(64), 'a'.repeat(64), 'idle');
     expect(summary().status).toBe('passed');
-    observation.polls = 1;
+    sample.saveIdle.initialImport.polls = 1;
     expect(summary).toThrow();
-    observation.polls = 2;
-    observation.status.desktop.pending = 1;
+    sample.saveIdle.initialImport.polls = 2;
+    sample.saveIdle.initialImport.status.desktop.pending = 1;
     expect(summary).toThrow();
-    observation.status.desktop.pending = 0;
+    sample.saveIdle.initialImport.status.desktop.pending = 0;
     delete sample.saveIdle.afterCapture;
     expect(summary).toThrow();
+  });
+
+  it('requires and summarizes completion probes only for the explicit idle cohort', () => {
+    const sample = { ...validIdleSample(1000), invokeProbe: validInvokeProbe };
+    expect(summarizeNativeRun([sample], 1, 'a'.repeat(64), 'a'.repeat(64))).toEqual({
+      status: 'passed',
+      sampleCount: 1,
+      metrics: expect.any(Object),
+    });
+    expect(() => summarizeNativeRun([sample], 1, 'a'.repeat(64), 'a'.repeat(64), 'early-session', true)).toThrow();
+    const summary = summarizeNativeRun([sample], 1, 'a'.repeat(64), 'a'.repeat(64), 'idle', true);
+    expect(summary.invokeProbe).toEqual({
+      label: 'native-invoke-completion-v1',
+      callCount: 2,
+      commandCounts: { save_data: 1, save_task: 0, get_data: 1 },
+      metrics: {
+        syncReturnMs: { count: 2, medianMs: 1.5, p95Ms: null, minMs: 0, maxMs: 3 },
+        settlementWaitMs: { count: 2, medianMs: 2.5, p95Ms: null, minMs: 1, maxMs: 4 },
+        totalMs: { count: 2, medianMs: 4, p95Ms: null, minMs: 1, maxMs: 7 },
+      },
+    });
+
+    const { invokeProbe: _probe, ...missing } = sample;
+    expect(() => summarizeNativeRun([missing], 1, 'a'.repeat(64), 'a'.repeat(64), 'idle', true)).toThrow();
+    expect(() => summarizeNativeRun([{ ...sample, invokeProbe: { ...validInvokeProbe, overflow: true } }],
+      1, 'a'.repeat(64), 'a'.repeat(64), 'idle', true)).toThrow();
   });
 
   it('requires valid independent capture evidence in both save modes', () => {

@@ -19,7 +19,8 @@ for (const { scenario, mode, fault } of readinessCases) it(`gates ${scenario}/${
     chmodSync(adb, 0o700);
     const env = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: scenario, METRIC_MODE: mode, RUNS: '1',
       SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1', DEVICE_LABEL: 'synthetic', NETWORK: 'offline',
-      EXPECTED_APK_SHA256: 'a'.repeat(64), FAKE_ADB_LOG: join(directory, 'calls.log'), OUT_DIR: join(directory, 'output'),
+      EXPECTED_APK_SHA256: 'a'.repeat(64), EXPECTED_TEST_APK_SHA256: 'a'.repeat(64),
+      FAKE_ADB_LOG: join(directory, 'calls.log'), OUT_DIR: join(directory, 'output'),
       FAKE_READINESS: fault };
     const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], { env, encoding: 'utf8', timeout: 15000 });
     expect(result.status, result.stderr).toBe(fault ? 1 : 0);
@@ -63,7 +64,7 @@ for (const [scenario, mode] of [['settingsNavigation', 'timing'], ['captureOpenC
         chmodSync(adb, 0o700);
         const env = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: scenario,
           METRIC_MODE: mode, RUNS: '1', SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1',
-          DEVICE_LABEL: 'synthetic', NETWORK: 'offline', EXPECTED_APK_SHA256: 'a'.repeat(64),
+          DEVICE_LABEL: 'synthetic', NETWORK: 'offline', EXPECTED_APK_SHA256: 'a'.repeat(64), EXPECTED_TEST_APK_SHA256: 'a'.repeat(64),
           FAKE_ADB_LOG: join(directory, 'calls.log'), OUT_DIR: join(directory, 'output'), FAKE_MEASUREMENT_CHANGE: fault };
         const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], { env, encoding: 'utf8', timeout: 15000 });
         const changed = fault !== 'same-build-new-path';
@@ -74,7 +75,7 @@ for (const [scenario, mode] of [['settingsNavigation', 'timing'], ['captureOpenC
         expect(metadata.finalBuildIdentity.status).toBe(changed ? 'failed' : 'passed');
         if (fault === 'disconnected') expect(metadata.diagnosticsError).toBeDefined();
         expect(readFileSync(join(artifacts, 'instrumentation.txt'), 'utf8')).toContain('OK (1 test)');
-        expect(readdirSync(join(artifacts, 'native'))).toContain('synthetic.perfetto-trace');
+        expect(readdirSync(join(artifacts, 'native')).some(file => file.endsWith('.perfetto-trace'))).toBe(true);
         const calls = readFileSync(env.FAKE_ADB_LOG, 'utf8');
         expect(calls).not.toMatch(/pm clear|install |logcat -c/);
         if (scenario.startsWith('capture')) expect(metadata.readiness.status).toBe('passed');
@@ -113,7 +114,7 @@ it('requires a matching release APK, a passing test and collected native evidenc
       const output = join(directory, 'output');
       const env: Record<string, string | undefined> = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: 'coldStartup', METRIC_MODE: 'timing', RUNS: '1',
         SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1', DEVICE_LABEL: 'synthetic', NETWORK: 'offline',
-        EXPECTED_APK_SHA256: 'a'.repeat(64), FAKE_ADB_LOG: log, OUT_DIR: output };
+        EXPECTED_APK_SHA256: 'a'.repeat(64), EXPECTED_TEST_APK_SHA256: 'a'.repeat(64), FAKE_ADB_LOG: log, OUT_DIR: output };
       for (const name of ['FAKE_STALE', 'FAKE_DEBUGGABLE', 'FAKE_TEST_FAILURE', 'FAKE_MISSING_REPORT', 'FAKE_MISSING_METRIC']) delete env[name];
       if (condition) env[condition] = '1';
       const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], { env, encoding: 'utf8', timeout: 15000 });
@@ -125,6 +126,9 @@ it('requires a matching release APK, a passing test and collected native evidenc
       else {
         const metadata = JSON.parse(readFileSync(join(output, readdirSync(output)[0], 'metadata.json'), 'utf8'));
         expect(metadata.status).toBe(condition ? 'failed' : 'passed');
+        expect(metadata.schemaVersion).toBe(5);
+        expect(metadata.expectedApkHash).toBe('a'.repeat(64));
+        expect(metadata.expectedTestApkHash).toBe('a'.repeat(64));
         expect(metadata.testApkHash).toBe('a'.repeat(64));
       }
     } finally { rmSync(directory, { recursive: true, force: true }); }
@@ -145,7 +149,8 @@ it('isolates timing and memory and rejects the observed shortened scalar reports
         chmodSync(adb, 0o700);
         const env = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: scenario, RUNS: '5',
           METRIC_MODE: mode, SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1', DEVICE_LABEL: 'synthetic', NETWORK: 'offline',
-          EXPECTED_APK_SHA256: 'a'.repeat(64), FAKE_ADB_LOG: join(directory, 'calls.log'), OUT_DIR: join(directory, 'output'),
+          EXPECTED_APK_SHA256: 'a'.repeat(64), EXPECTED_TEST_APK_SHA256: 'a'.repeat(64),
+          FAKE_ADB_LOG: join(directory, 'calls.log'), OUT_DIR: join(directory, 'output'),
           FAKE_SHORT_SCALARS: shortened ? '1' : '' };
         const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], { env, encoding: 'utf8', timeout: 15000 });
         expect(result.status, result.stderr).toBe(shortened ? 1 : 0);
@@ -160,3 +165,84 @@ it('isolates timing and memory and rejects the observed shortened scalar reports
     }
   }
 }, 20000);
+
+it('requires a valid expected runner hash before any adb access', () => {
+  for (const expected of ['', 'not-a-sha256']) {
+    const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], {
+      env: { ...process.env, ADB_BIN: '/nonexistent-adb', ANDROID_SERIAL: 'synthetic', SCENARIO: 'settingsNavigation',
+        METRIC_MODE: 'timing', RUNS: '1', SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1',
+        DEVICE_LABEL: 'synthetic', NETWORK: 'offline', EXPECTED_APK_SHA256: 'a'.repeat(64),
+        EXPECTED_TEST_APK_SHA256: expected }, encoding: 'utf8',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('EXPECTED_TEST_APK_SHA256');
+    expect(result.stderr).not.toContain('spawnSync /nonexistent-adb');
+  }
+});
+
+it('rejects a stale runner before launch or instrumentation', () => {
+  const scratch = join(import.meta.dir, '../../build/performance-tools');
+  mkdirSync(scratch, { recursive: true });
+  const directory = mkdtempSync(join(scratch, 'initial-runner-test-'));
+  try {
+    const adb = join(directory, 'adb.mjs');
+    copyFileSync(join(import.meta.dir, 'fake-interaction-adb.mjs'), adb);
+    chmodSync(adb, 0o700);
+    const env = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: 'settingsNavigation',
+      METRIC_MODE: 'timing', RUNS: '1', SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1',
+      DEVICE_LABEL: 'synthetic', NETWORK: 'offline', EXPECTED_APK_SHA256: 'a'.repeat(64),
+      EXPECTED_TEST_APK_SHA256: 'a'.repeat(64), FAKE_ADB_LOG: join(directory, 'calls.log'),
+      OUT_DIR: join(directory, 'output'), FAKE_STALE_RUNNER: '1' };
+    const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], { env, encoding: 'utf8' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Installed runner APK is stale or different');
+    expect(readFileSync(env.FAKE_ADB_LOG, 'utf8')).not.toContain('am instrument');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+it('requires coherent per-frame timing samples and accepts zero CPU with signed overruns', () => {
+  const scratch = join(import.meta.dir, '../../build/performance-tools');
+  mkdirSync(scratch, { recursive: true });
+  const faults = ['', 'fractional-count', 'zero-count', 'cpu-not-array', 'overrun-not-array', 'cpu-missing-entry',
+    'overrun-missing-entry', 'unequal-lengths', 'cpu-negative', 'cpu-nonfinite', 'overrun-nonfinite'];
+  for (const fault of faults) {
+    const directory = mkdtempSync(join(scratch, 'frame-integrity-test-'));
+    try {
+      const adb = join(directory, 'adb.mjs');
+      copyFileSync(join(import.meta.dir, 'fake-interaction-adb.mjs'), adb);
+      chmodSync(adb, 0o700);
+      const env = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: 'settingsNavigation',
+        METRIC_MODE: 'timing', RUNS: '2', SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1',
+        DEVICE_LABEL: 'synthetic', NETWORK: 'offline', EXPECTED_APK_SHA256: 'a'.repeat(64),
+        EXPECTED_TEST_APK_SHA256: 'a'.repeat(64), FAKE_ADB_LOG: join(directory, 'calls.log'),
+        OUT_DIR: join(directory, 'output'), FAKE_FRAME_FAULT: fault };
+      const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], { env, encoding: 'utf8' });
+      expect(result.status, `${fault || 'valid'}: ${result.stderr}`).toBe(fault ? 1 : 0);
+      if (fault) expect(result.stderr).toContain('frame');
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+}, 60000);
+
+it('requires one safe retained Perfetto trace for every measured iteration', () => {
+  const scratch = join(import.meta.dir, '../../build/performance-tools');
+  mkdirSync(scratch, { recursive: true });
+  const faults = ['', 'missing-index', 'duplicate-index', 'noncanonical-index', 'duplicate-file', 'missing-file', 'empty-file',
+    'traversal', 'absolute', 'wrong-convention', 'ancillary-only'];
+  for (const fault of faults) {
+    const directory = mkdtempSync(join(scratch, 'trace-integrity-test-'));
+    try {
+      const adb = join(directory, 'adb.mjs');
+      copyFileSync(join(import.meta.dir, 'fake-interaction-adb.mjs'), adb);
+      chmodSync(adb, 0o700);
+      const env = { ...process.env, ADB_BIN: adb, ANDROID_SERIAL: 'synthetic', SCENARIO: 'settingsNavigation',
+        METRIC_MODE: 'timing', RUNS: '3', SYNTHETIC_DATA_CONFIRMED: '1', DATASET_ID: 'test-v1',
+        DEVICE_LABEL: 'synthetic', NETWORK: 'offline', EXPECTED_APK_SHA256: 'a'.repeat(64),
+        EXPECTED_TEST_APK_SHA256: 'a'.repeat(64), FAKE_ADB_LOG: join(directory, 'calls.log'),
+        OUT_DIR: join(directory, 'output'), FAKE_TRACE_FAULT: fault };
+      const result = spawnSync('node', [join(import.meta.dir, 'android-interactions.mjs')], { env, encoding: 'utf8' });
+      expect(result.status, `${fault || 'valid'}: ${result.stderr}`).toBe(fault ? 1 : 0);
+      if (fault === 'duplicate-file') expect(result.stderr).toContain('Duplicate Perfetto trace filename');
+      else if (fault) expect(result.stderr).toContain('Perfetto');
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+}, 60000);

@@ -502,6 +502,7 @@ export const exportCurrentDataBackup = async (data: AppData, format: 'json' | 'c
                         extra: {
                             operation: 'exportBackup',
                             source: 'local',
+                            releaseCheck: 'v1.3.0/android-saf-backup-write',
                             ...toCountExtra(data),
                         },
                     });

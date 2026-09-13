@@ -106,7 +106,7 @@ class CaptureKeyboardReadinessTest {
                     assertTrue("Focused title has no visible keyboard: $phase", waitForKeyboard(true))
                     assertEquals("Another app interrupted keyboard readiness", target, device.currentPackageName)
                     samples.put(JSONObject().put("iteration", iteration).put("kind", kind).put("keyboardVisible", true))
-                    find(By.desc("Close").clazz("android.view.ViewGroup")).click()
+                    find(By.res("quick-capture-close").desc("Close")).click()
                     assertTrue("Capture did not close", device.wait(Until.gone(By.desc("Task title").pkg(target)), 15_000L))
                     assertEquals("Cancelling changed the Inbox", inbox, find(By.descStartsWith("Process Inbox (")).contentDescription)
                 }

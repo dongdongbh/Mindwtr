@@ -219,6 +219,31 @@ label if both flags are enabled). Compare only matching diagnostic cohorts, neve
 these samples against uninstrumented baselines. The probe is runner-injected,
 never bundled into the application, and only observes synthetic benchmark tasks.
 
+To separate synchronous invoke dispatch from promise completion, add
+`NATIVE_INVOKE_PROBE=1` with `NATIVE_RENDER_PROBE=1` and `SAVE_QUEUE_MODE=idle`.
+This requires a fresh `VITE_STARTUP_PROFILING=1` Benchmark containing the versioned
+Mindwtr invoke transport; older archived binaries fail explicitly. Ordinary
+builds compile out that transport. The runner wraps the Mindwtr transport around
+the public Tauri API; it does not modify Tauri's protected internal functions.
+
+The probe uses the same page `performance.now()` clock as Enter, DOM appearance
+and frame opportunity. Each record contains only an allowlisted command
+(`save_data`, `save_task`, `get_data`), sequence, entry/return/settlement clocks and
+outcome. Entry-to-return measures synchronous public-invoke dispatch;
+return-to-settlement includes native work, response handling and callback delivery.
+Neither interval isolates SQL, recovery-file writing or hardware durability.
+The probe preserves the original operation and promise, installs after canonical
+fixture verification, and stops after the capture save-idle gate, before reload.
+Overflow beyond 64 calls, pending or failed observations, transport ownership
+loss or malformed evidence invalidates the sample. Exact capture readback and
+reload checks still apply.
+
+Reports add the independent `native-invoke-completion-v1` profiling label and
+retain the raw clocks. Compare only matching diagnostic cohorts; the existing
+`NATIVE_DIAGNOSTICS=1` fetch-header probe remains a different boundary. See
+[the native completion validation](desktop-invoke-completion-2026-09-13.md) for
+build identity, attribution and limits.
+
 Add `NATIVE_JSC_PROFILE=1` to that diagnostic command to retain JavaScriptCore
 stack samples from the isolated Linux WebView. It requires the render probe and
 labels reports additionally with `jsc-capture-1000us`. Only the child benchmark
@@ -384,19 +409,26 @@ fixture, disabled sync and an idle unlocked phone before running:
 ANDROID_SERIAL=<device> ADB_BIN=<absolute-adb-path> \
 SYNTHETIC_DATA_CONFIRMED=1 DATASET_ID=<fixture-id> DEVICE_LABEL=lab-phone NETWORK=online \
 EXPECTED_APK_SHA256=<sha256-of-built-app-release.apk> \
+EXPECTED_TEST_APK_SHA256=<sha256-of-built-macrobenchmark-release.apk> \
 SCENARIO=inboxScroll METRIC_MODE=timing RUNS=10 bun run perf:android-interactions
 ```
 
 Scenarios: `coldStartup` (native TTID/TTFD), `inboxScroll`, `settingsNavigation`, `captureOpenClose`, and
 `captureSave` (frame metrics). Run one scenario at a time. The target package is fixed to
 `tech.dongdongbh.mindwtr.benchmark`; the actual installed APK hash must match the supplied
-build hash. Non-debuggable/profileable checks and AndroidX device-quality checks are not
+build hash. The runner package is fixed to `tech.dongdongbh.mindwtr.macrobenchmark`,
+and its installed hash must match `EXPECTED_TEST_APK_SHA256` before any instrumentation.
+Both expected hashes are mandatory; use the same archived runner across comparison batches.
+Non-debuggable/profileable checks and AndroidX device-quality checks are not
 suppressed. Compilation uses partial compilation after three warm-up iterations, with
 baseline-profile installation disabled to make that condition explicit and repeatable.
 
 Use `captureOpenClose` for repeated same-fixture capture A/A and A/B measurements. It
 opens the normal sheet, waits for title focus and UI idle, then uses the header Close
-control. It asserts that the sheet disappears and the Inbox count is unchanged. No title
+control, identified by `quick-capture-close` plus its Close accessibility label.
+The backdrop also exposes Close, so class-only or label-only selectors are ambiguous.
+Rebuild the Benchmark app and runner together when adopting this selector.
+It asserts that the sheet disappears and the Inbox count is unchanged. No title
 is entered or saved. Its `benchmark.capture.open` and `.close` sections include automation
 waits, not app-only latency. This isolates modal/keyboard work from task persistence;
 retain `captureSave` as a separate end-to-end correctness and performance scenario.
@@ -413,7 +445,7 @@ connection. The restored 120 ms initial focus behavior is unchanged.
 Rebuild/install the runner APK if it predates `CaptureKeyboardReadinessTest`. A missing
 test, failed instrumentation, missing/malformed report, wrong APK/fixture, incomplete or
 duplicate samples, or hidden keyboard blocks measurement and returns nonzero. There is
-no skip switch. Metadata schema 4 records the preflight status; its log and native report
+no skip switch. Metadata schema 5 records the preflight status; its log and native report
 (plus failure screenshots when available) are retained separately under
 `readiness-instrumentation.txt` and `readiness/`. Preflight time is not a capture timing
 sample. It exercises the app before the existing compilation warm-ups, so keep this
@@ -433,6 +465,10 @@ change data during a run even if the APK bytes are identical.
 Measured example: [mobile Settings and scrolling](mobile-navigation-2026-09.md).
 
 Run `captureSave` last: warm-ups and measurements intentionally leave synthetic tasks in Inbox.
+Each save requires the title input to disappear, the Inbox count to increase by exactly one,
+and the generated title row to appear. Include all three compilation warm-ups when checking
+total fixture growth. These additional assertions change the automation-stage boundary;
+establish fresh capture-save cohorts rather than comparing their spans with older runners.
 Restore the fixture through the normal import workflow before comparable capture reruns.
 UI Automator fills the title directly; this is not a physical keyboard typing-latency test.
 Capture traces include runner-process `benchmark.capture.open`, `.enterTitle`, and `.save`
@@ -448,7 +484,13 @@ installed APK identity, fixture/condition labels and thermal state. `METRIC_MODE
 (default) collects only startup/frame metrics. Use a **separate invocation** with
 `METRIC_MODE=memory` to collect the last anonymous/file-backed RSS samples during each
 iteration. Those counters are neither allocation peaks nor additive PSS totals. Missing
-samples fail validation; they are never substituted with zero. The test-only module opts into AndroidX's
+samples fail validation; they are never substituted with zero. For non-startup timing,
+each iteration requires a positive integer frame count, matching CPU/overrun sample counts,
+nonnegative finite CPU durations, and finite signed overruns. Every measured iteration must
+also reference its own distinct, nonempty retained Perfetto trace in the selected benchmark's
+`profilerOutputs`; missing, duplicate, or unsafe trace references fail the batch.
+Schema 4 and earlier reports lack these completeness checks and expected-runner pinning.
+These requirements follow the pinned AndroidX 1.4.1 frame mapping and profiler output format. The test-only module opts into AndroidX's
 experimental [MemoryUsageMetric](https://developer.android.com/reference/kotlin/androidx/benchmark/macro/MemoryUsageMetric)
 API; normal app dependencies are unchanged. The post-run
 process diagnostic may say the process has stopped and is not used as a memory measurement.

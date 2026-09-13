@@ -12,6 +12,7 @@ import { summarizeNativeRun, validateNativeReadiness } from './native-desktop-re
 import { waitForNativeSaveIdle } from './native-save-idle.mjs';
 import { readNativeCaptureState, validateNativeCaptureBefore, isNativeCapturePersisted, validateNativeCaptureEvidence } from './native-capture-storage.mjs';
 import { installCaptureRenderProbe, validateCaptureRenderProbe, validateCaptureSampling } from './native-capture-probe.mjs';
+import { installNativeInvokeProbe, stopNativeInvokeProbe, validateNativeInvokeProbe } from './native-invoke-probe.mjs';
 import { configureOwnedNativeWindow, findOwnedNativeWindow, installNativeViewportGuard, parseNativeViewport, validateNativeViewport } from './native-viewport.mjs';
 
 assert.equal(process.platform, 'linux', 'Native desktop runner currently supports Linux only');
@@ -36,12 +37,16 @@ if (requestedViewport) assert(process.env.NIRI_SOCKET, 'Fixed native viewport cu
 const diagnostics = process.env.NATIVE_DIAGNOSTICS === '1';
 const renderProbe = process.env.NATIVE_RENDER_PROBE === '1';
 const sampleJS = process.env.NATIVE_JSC_PROFILE === '1';
+const nativeInvokeProbe = process.env.NATIVE_INVOKE_PROBE === '1';
 assert(!process.env.NATIVE_JSC_PROFILE || ['0', '1'].includes(process.env.NATIVE_JSC_PROFILE), 'NATIVE_JSC_PROFILE must be 0 or 1');
 assert(!sampleJS || renderProbe, 'NATIVE_JSC_PROFILE requires NATIVE_RENDER_PROBE=1');
 assert(!process.env.NATIVE_RENDER_PROBE || ['0', '1'].includes(process.env.NATIVE_RENDER_PROBE), 'NATIVE_RENDER_PROBE must be 0 or 1');
 const saveQueueMode = process.env.SAVE_QUEUE_MODE ?? 'idle';
 assert(['idle', 'early-session'].includes(saveQueueMode), 'SAVE_QUEUE_MODE must be idle or early-session');
 assert(!process.env.NATIVE_DIAGNOSTICS || ['0', '1'].includes(process.env.NATIVE_DIAGNOSTICS), 'NATIVE_DIAGNOSTICS must be 0 or 1');
+assert(!process.env.NATIVE_INVOKE_PROBE || ['0', '1'].includes(process.env.NATIVE_INVOKE_PROBE), 'NATIVE_INVOKE_PROBE must be 0 or 1');
+assert(!nativeInvokeProbe || saveQueueMode === 'idle', 'NATIVE_INVOKE_PROBE requires SAVE_QUEUE_MODE=idle');
+assert(!nativeInvokeProbe || renderProbe, 'NATIVE_INVOKE_PROBE requires NATIVE_RENDER_PROBE=1');
 const output = resolve(process.env.OUT_DIR ?? join(root, 'build/performance-native'));
 mkdirSync(output, { recursive: true });
 const directory = mkdtempSync(join(output, 'desktop-'));
@@ -176,6 +181,7 @@ for (const size of sizes) {
       assert.equal(canonical.tasks.length, size, 'Unexpected native fixture size');
       assert(canonical.tasks.every(task => task.id.startsWith('perf-task-')), 'Non-synthetic native data');
       sample.countBefore = canonical.tasks.length;
+      if (nativeInvokeProbe) await execute(`(${installNativeInvokeProbe.toString()})()`);
       if (saveQueueMode === 'idle') sample.saveIdle.beforeSettings = await waitForSaves();
       await execute('window.__MINDWTR_DIAGNOSTICS__=arguments[0]', diagnostics);
       if (diagnostics) await execute(`
@@ -235,6 +241,10 @@ for (const size of sizes) {
       assert.equal(hash(app), binaryHash, 'Launched binary changed during measurement');
       if (diagnostics) sample.ipc = await execute('return window.__nativeBenchmarkIpc');
       if (saveQueueMode === 'idle') sample.saveIdle.afterCapture = await waitForSaves();
+      if (nativeInvokeProbe) {
+        sample.invokeProbe = await execute(`return (${stopNativeInvokeProbe.toString()})()`);
+        sample.invokeProbeSummary = validateNativeInvokeProbe(sample.invokeProbe);
+      }
       if (renderProbe) {
         await until(() => execute('return Number.isFinite(window.__nativeCaptureRender?.frameMs)'));
         sample.renderProbe = await execute('return window.__nativeCaptureRender');
@@ -283,6 +293,9 @@ for (const size of sizes) {
         writeFileSync(join(profileDir, 'failure-state.json'), JSON.stringify(state, null, 2));
       }
     } finally {
+      if (session && nativeInvokeProbe) {
+        await execute(`return (${stopNativeInvokeProbe.toString()})()`).catch(() => null);
+      }
       if (session) await request(`/session/${session}`, undefined, 'DELETE').catch(() => {});
       stopDriver(driver);
       writeFileSync(join(profileDir, 'sample.json'), JSON.stringify(sample, null, 2));
@@ -297,13 +310,15 @@ for (const size of sizes) {
     viewport, requestedViewport, windowMode: requestedViewport ? 'owned-niri-floating' : 'compositor-default',
     scenario: saveQueueMode === 'idle' ? 'portable-native-settings-capture-idle-v3' : 'portable-native-settings-capture-v2',
     saveQueueMode, network: 'host-network-sync-off',
-    profiling: [diagnostics ? 'settings-diagnostics-ipc-headers' : '', renderProbe ? 'capture-render-probe' : '', sampleJS ? 'jsc-capture-1000us' : ''].filter(Boolean).join('+') || 'none',
+    profiling: [diagnostics ? 'settings-diagnostics-ipc-headers' : '', renderProbe ? 'capture-render-probe' : '',
+      sampleJS ? 'jsc-capture-1000us' : '', nativeInvokeProbe ? 'native-invoke-completion-v1' : ''].filter(Boolean).join('+') || 'none',
     capturedAt: new Date().toISOString(),
   }, samples, warnings: ['Portable Linux Tauri with an isolated session bus; does not measure OS keyring access or macOS/Windows.',
     'Automation latency includes WebDriver dispatch/polling. SQLite readback is not a hardware power-loss test.',
     'Initial import and subsequent warm-database WebView readiness are separate; neither is native process TTID.',
+    ...(nativeInvokeProbe ? ['Native invoke elapsed time spans the JS/native bridge; it does not isolate SQL time or prove hardware durability.'] : []),
     'Desktop viewport must remain unchanged. Fewer than 100 samples cannot establish a p95 release gate.'] };
-  try { Object.assign(report, summarizeNativeRun(samples, runs, binaryHash, hash(binary), saveQueueMode)); }
+  try { Object.assign(report, summarizeNativeRun(samples, runs, binaryHash, hash(binary), saveQueueMode, nativeInvokeProbe)); }
   catch (error) { report.error = String(error); failed = true; }
   writeFileSync(join(directory, `${size}-report.json`), JSON.stringify(report, null, 2));
   if (failed) break;

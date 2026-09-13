@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { summarize } from './report.mjs';
 import { isNativeSaveIdle } from './native-save-idle.mjs';
 import { validateNativeCaptureEvidence } from './native-capture-storage.mjs';
+import { validateNativeInvokeProbe } from './native-invoke-probe.mjs';
 
 export function validateNativeReadiness(marks) {
   const read = name => {
@@ -17,14 +18,18 @@ export function validateNativeReadiness(marks) {
   return { localDataReadyMs, interactiveReadyMs };
 }
 
-export function summarizeNativeRun(samples, runs, initialHash, finalHash, saveQueueMode = 'early-session') {
+export function summarizeNativeRun(samples, runs, initialHash, finalHash, saveQueueMode = 'early-session', invokeProbeEnabled = false) {
   assert(['idle', 'early-session'].includes(saveQueueMode), 'Invalid save-queue mode');
+  assert.equal(typeof invokeProbeEnabled, 'boolean', 'Invalid native invoke probe flag');
+  if (invokeProbeEnabled) assert.equal(saveQueueMode, 'idle', 'Native invoke probe requires idle save mode');
   assert(Number.isInteger(runs) && runs > 0 && runs <= 100, 'Invalid native run count');
   assert(typeof initialHash === 'string' && /^[a-f0-9]{64}$/.test(initialHash), 'Invalid native binary identity');
   assert.equal(initialHash, finalHash, 'Native binary changed during measurement');
   assert.equal(samples.length, runs, 'Incomplete native samples');
   const names = ['settingsOpenAutomationMs', 'integrationsOpenAutomationMs',
     'captureVisibleAutomationMs', 'captureDurableAutomationMs'];
+  const invokeRecords = [];
+  const invokeCommandCounts = { save_data: 0, save_task: 0, get_data: 0 };
   for (const sample of samples) {
     assert.equal(sample.status, 'passed', 'Invalid native sample');
     if (saveQueueMode === 'idle') {
@@ -45,7 +50,25 @@ export function summarizeNativeRun(samples, runs, initialHash, finalHash, saveQu
     assert(Number.isFinite(interactiveReadyMs) && interactiveReadyMs >= localDataReadyMs,
       'Invalid reload interactive readiness');
     assert(sample.captureDurableAutomationMs >= sample.captureVisibleAutomationMs, 'Invalid capture timing order');
+    if (invokeProbeEnabled) {
+      const summary = validateNativeInvokeProbe(sample.invokeProbe);
+      invokeRecords.push(...sample.invokeProbe.records);
+      for (const command of Object.keys(invokeCommandCounts)) {
+        invokeCommandCounts[command] += summary.commandCounts[command];
+      }
+    }
   }
-  return { status: 'passed', sampleCount: samples.length,
+  const result = { status: 'passed', sampleCount: samples.length,
     metrics: Object.fromEntries(names.map(name => [name, summarize(samples.map(sample => sample[name]))])) };
+  if (invokeProbeEnabled) result.invokeProbe = {
+    label: 'native-invoke-completion-v1',
+    callCount: invokeRecords.length,
+    commandCounts: invokeCommandCounts,
+    metrics: {
+      syncReturnMs: summarize(invokeRecords.map(record => record.returnedMs - record.startMs)),
+      settlementWaitMs: summarize(invokeRecords.map(record => record.settledMs - record.returnedMs)),
+      totalMs: summarize(invokeRecords.map(record => record.settledMs - record.startMs)),
+    },
+  };
+  return result;
 }

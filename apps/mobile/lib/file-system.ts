@@ -167,7 +167,9 @@ export const writeAsStringAsync = async (uri: string, contents: string, options:
   withLegacyFallback(
     canUseModernApi()
       ? () => {
-          prepareFileTarget(uri);
+          if (!uri.startsWith('content://')) {
+            prepareFileTarget(uri);
+          }
           const file = new ModernFile(uri);
           if (!file.exists) {
             file.create({ overwrite: true });
