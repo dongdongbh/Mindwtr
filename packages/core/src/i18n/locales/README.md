@@ -6,7 +6,7 @@ Mindwtr keeps translations under this folder so community contributions are easy
 - `zh-Hans.ts`, `zh-Hant.ts`: full Chinese dictionaries.
 - Every other `*.ts`: an override dictionary. A key the file does not translate falls back to English on screen.
 
-Each locale carries a `translatedKeyFloor` in `i18n-locales.ts`, and CI enforces it. It is an absolute **number of keys**, not a percentage: deleting a translation always fails the gate, and adding a new English string never does. Raise a floor when real translation work lands; never lower it. A floor of `'all'` means every key in `en.ts` has to be translated. The Chinese files carry it because they are full dictionaries; `es`, `fa`, `ja` and `sv` carry it because they are maintained at full parity even though they load as override dictionaries.
+Each locale carries a `translatedKeyFloor` in `i18n-locales.ts`, and CI enforces it. It is an absolute **number of keys**, not a percentage: deleting a translation always fails the gate, and adding a new English string never does. Raise a floor when real translation work lands; never lower it. A floor of `'all'` means every key in `en.ts` has to be translated. The Chinese files carry it because they are full dictionaries; `es`, `fa`, `hu`, `ja` and `sv` carry it because they are maintained at full parity even though they load as override dictionaries.
 
 ## What an untranslated string shows
 
@@ -16,7 +16,7 @@ A key a locale has not translated renders as the English copy, not as anything m
 
 1. Open the language file (for example `vi.ts` for Vietnamese or `fr.ts` for French).
 2. Add or update keys in `<lang>Overrides`. Keep the keys in the same order as `en.ts`, and keep the file's existing line format. Do not reformat lines you did not translate; a reformat hides your real changes in a 2,500-line diff.
-3. For a new language, start with one entry in `i18n-locales.ts`. `Language`, `SUPPORTED_LANGUAGES`, the loader's dispatch, both apps' language pickers, and the parity rosters all derive from that table. Four places still need a manual entry: `DATE_LOCALE_BY_LANGUAGE` and `LOCALE_TAG_BY_LANGUAGE` in `date.ts`, `translationsByLocale` in `locale-parity.test.ts`, and the locale's mirrored-English allow-list in `locale-quality.ts` if it needs one.
+3. For a new language, start with one entry in `i18n-locales.ts`. `Language`, `SUPPORTED_LANGUAGES`, the loader's dispatch, both apps' language pickers, and the parity rosters all derive from that table. Also add entries to `DATE_LOCALE_BY_LANGUAGE` and `LOCALE_TAG_BY_LANGUAGE` in `date.ts`, `translationsByLocale` in `locale-parity.test.ts`, and `compactWidgetLocales` in `apps/mobile/plugins/android-widget-locales.js`. The widget entry supplies the Android launcher's Compact picker label and description. Add a mirrored-English allow-list in `locale-quality.ts` if the locale needs one.
 4. If you touched any `starter.*` string, regenerate the seed table. `starter-seed-strings.ts` is generated and must not be hand-edited; `bun run i18n:check` fails with "starter-seed-strings.ts: out of date" until you run:
 
 ```bash
@@ -31,7 +31,8 @@ From the repo root:
 
 ```bash
 bun run i18n:check                                  # key parity, seed drift, and the string checks listed below
-cd packages/core && bunx vitest run src/i18n        # the same checks as tests, plus the key floors and loader tests
+(cd packages/core && bunx vitest run src/i18n)      # the same checks as tests, plus the key floors and loader tests
+(cd apps/mobile && bunx vitest run plugins/android-widget.test.js) # native picker locale coverage
 bun run typecheck:core
 bun run lint:core
 ```
