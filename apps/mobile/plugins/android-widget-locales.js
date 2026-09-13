@@ -9,6 +9,7 @@ const compactWidgetLocales = {
   fa: ['فشرده', 'فهرست تمرکز ساده با ثبت سریع'],
   fr: ['Compact', 'Une liste de tâches prioritaires avec saisie rapide'],
   hi: ['संक्षिप्त', 'त्वरित कैप्चर के साथ एक सरल फ़ोकस सूची'],
+  hu: ['Kompakt', 'Egyszerű fókuszlista gyors rögzítéssel'],
   it: ['Compatto', 'Un semplice elenco di attività in evidenza con acquisizione rapida'],
   ja: ['コンパクト', 'クイックキャプチャ付きのシンプルなフォーカスリスト'],
   ko: ['간결', '빠른 추가가 있는 간단한 집중 목록'],
