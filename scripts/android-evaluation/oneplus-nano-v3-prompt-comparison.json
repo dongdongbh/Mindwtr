@@ -1,0 +1,209 @@
+{
+  "date": "2026-09-15",
+  "device": "OnePlus CPH2655",
+  "androidApi": 36,
+  "model": "nano-v3",
+  "sdk": "com.google.mlkit:genai-prompt:1.0.0-beta4",
+  "airplaneMode": true,
+  "wifiEnabled": false,
+  "activeDefaultNetwork": null,
+  "temperature": 0.2,
+  "topK": 10,
+  "maxOutputTokens": 512,
+  "seed": null,
+  "scope": "Four synthetic native requests per prompt variant; not a complete quality benchmark",
+  "variants": [
+    {
+      "cases": [
+        {
+          "id": "no-association",
+          "title": "Email the dentist about an appointment",
+          "description": "",
+          "candidates": [
+            {
+              "kind": "project",
+              "id": "trip",
+              "label": "Summer trip to the coast"
+            },
+            {
+              "kind": "project",
+              "id": "health",
+              "label": "Health"
+            }
+          ]
+        },
+        {
+          "id": "explicit-project",
+          "title": "Email the dentist",
+          "description": "Put this in the Health project.",
+          "candidates": [
+            {
+              "kind": "project",
+              "id": "trip",
+              "label": "Summer trip to the coast"
+            },
+            {
+              "kind": "project",
+              "id": "health",
+              "label": "Health"
+            }
+          ]
+        },
+        {
+          "id": "vague",
+          "title": "Life admin",
+          "description": "Not sure what needs doing.",
+          "candidates": [
+            {
+              "kind": "project",
+              "id": "trip",
+              "label": "Summer trip to the coast"
+            },
+            {
+              "kind": "project",
+              "id": "health",
+              "label": "Health"
+            }
+          ]
+        },
+        {
+          "id": "uncertain-date",
+          "title": "Send the form",
+          "description": "Maybe 04/05; I need to check the date.",
+          "candidates": [
+            {
+              "kind": "project",
+              "id": "trip",
+              "label": "Summer trip to the coast"
+            },
+            {
+              "kind": "project",
+              "id": "health",
+              "label": "Health"
+            }
+          ]
+        }
+      ],
+      "phase": "baseline",
+      "results": [
+        {
+          "elapsedMs": 3224,
+          "id": "no-association",
+          "value": "```json\n{\n  \"cleanedTitle\": \"Email dentist about appointment\",\n  \"projectIds\": [\n    \"trip\",\n    \"health\"\n  ]\n}\n```"
+        },
+        {
+          "elapsedMs": 2214,
+          "id": "explicit-project",
+          "value": "```json\n{\n  \"cleanedTitle\": \"Email the dentist\",\n  \"projectIds\": [\n    \"health\"\n  ]\n}\n```"
+        },
+        {
+          "elapsedMs": 1405,
+          "id": "vague",
+          "value": "```json\n{\n  \"cleanedTitle\": \"Life admin\"\n}\n```"
+        },
+        {
+          "elapsedMs": 2190,
+          "id": "uncertain-date",
+          "value": "```json\n{\n  \"cleanedTitle\": \"Send the form\",\n  \"projectIds\": [\n    \"trip\"\n  ]\n}\n```"
+        }
+      ],
+      "state": "finished"
+    },
+    {
+      "cases": [
+        {
+          "id": "no-association",
+          "title": "Email the dentist about an appointment",
+          "description": "",
+          "candidates": [
+            {
+              "kind": "project",
+              "id": "trip",
+              "label": "Summer trip to the coast"
+            },
+            {
+              "kind": "project",
+              "id": "health",
+              "label": "Health"
+            }
+          ]
+        },
+        {
+          "id": "explicit-project",
+          "title": "Email the dentist",
+          "description": "Put this in the Health project.",
+          "candidates": [
+            {
+              "kind": "project",
+              "id": "trip",
+              "label": "Summer trip to the coast"
+            },
+            {
+              "kind": "project",
+              "id": "health",
+              "label": "Health"
+            }
+          ]
+        },
+        {
+          "id": "vague",
+          "title": "Life admin",
+          "description": "Not sure what needs doing.",
+          "candidates": [
+            {
+              "kind": "project",
+              "id": "trip",
+              "label": "Summer trip to the coast"
+            },
+            {
+              "kind": "project",
+              "id": "health",
+              "label": "Health"
+            }
+          ]
+        },
+        {
+          "id": "uncertain-date",
+          "title": "Send the form",
+          "description": "Maybe 04/05; I need to check the date.",
+          "candidates": [
+            {
+              "kind": "project",
+              "id": "trip",
+              "label": "Summer trip to the coast"
+            },
+            {
+              "kind": "project",
+              "id": "health",
+              "label": "Health"
+            }
+          ]
+        }
+      ],
+      "phase": "refined",
+      "results": [
+        {
+          "elapsedMs": 3204,
+          "id": "no-association",
+          "value": "```json\n{\n  \"cleanedTitle\": \"Email the dentist about an appointment\",\n  \"projectIds\": [\n    \"trip\"\n  ],\n  \"areaIds\": [],\n  \"contextIds\": [],\n  \"tagIds\": [],\n  \"status\": \"next\"\n}\n```"
+        },
+        {
+          "elapsedMs": 2136,
+          "id": "explicit-project",
+          "value": "```json\n{\n  \"cleanedTitle\": \"Email the dentist\",\n  \"projectIds\": [\n    \"health\"\n  ]\n}\n```"
+        },
+        {
+          "elapsedMs": 2460,
+          "id": "vague",
+          "value": "```json\n{\n  \"cleanedTitle\": \"Life admin\",\n  \"status\": \"next\",\n  \"projectIds\": [\n    \"trip\"\n  ]\n}\n```"
+        },
+        {
+          "elapsedMs": 2488,
+          "id": "uncertain-date",
+          "value": "```json\n{\n  \"cleanedTitle\": \"Send the form\",\n  \"status\": \"next\",\n  \"projectIds\": [\n    \"trip\"\n  ]\n}\n```"
+        }
+      ],
+      "state": "finished"
+    }
+  ]
+}

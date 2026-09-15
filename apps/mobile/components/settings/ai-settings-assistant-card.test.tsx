@@ -46,6 +46,10 @@ const baseProps: Parameters<typeof AiSettingsAssistantCard>[0] = {
     appleClarificationAvailability: '',
     appleClarificationBackend: 'configured',
     appleClarificationVisible: false,
+    nanoClarificationCanDownload: false,
+    nanoClarificationDownloadError: '',
+    nanoClarificationDownloadState: 'idle',
+    nanoClarificationVisible: false,
     aiReasoningEffort: 'medium',
     aiRequestTimeoutSeconds: 30,
     aiThinkingBudget: 0,
@@ -62,6 +66,7 @@ const baseProps: Parameters<typeof AiSettingsAssistantCard>[0] = {
     onAiModelChange: vi.fn(),
     onAiProviderChange: vi.fn(),
     onAppleClarificationBackendChange: vi.fn(),
+    onNanoClarificationDownload: vi.fn(),
     onAiReasoningEffortChange: vi.fn(),
     onAiRequestTimeoutSecondsChange: vi.fn(),
     onAiThinkingBudgetChange: vi.fn(),
@@ -109,6 +114,25 @@ describe('AiSettingsAssistantCard request timeout', () => {
         expect(texts(tree)).toContain('Available on this device. Requests stay on device.');
         await press(tree, 'On-device');
         expect(onChange).toHaveBeenCalledWith('on-device');
+    });
+
+    it('explains Nano metrics and starts model download only from the explicit button', async () => {
+        const onDownload = vi.fn();
+        const tree = await renderCard({
+            ...baseProps,
+            appleClarificationAvailability: 'The on-device model must be downloaded before Nano clarification can run.',
+            nanoClarificationCanDownload: true,
+            nanoClarificationVisible: true,
+            onNanoClarificationDownload: onDownload,
+            t: (key) => key === 'settings.speechOfflineDownload' ? 'Download' : key,
+        });
+
+        expect(texts(tree)).toContain(
+            'Gemini Nano processes task content on this device. Model setup uses the network and device storage. Google ML Kit sends performance and utilization metrics to Google.',
+        );
+        expect(onDownload).not.toHaveBeenCalled();
+        await press(tree, 'Download');
+        expect(onDownload).toHaveBeenCalledTimes(1);
     });
 
     it('keeps Advanced collapsed and offers every supported duration', async () => {

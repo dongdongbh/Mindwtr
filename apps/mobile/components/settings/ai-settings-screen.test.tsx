@@ -1,11 +1,12 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
+import { Platform } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getModelOptions, type AppData } from '@mindwtr/core';
 
 import { AISettingsScreen } from './ai-settings-screen';
 
-const constantsState = vi.hoisted(() => ({ isFossBuild: false }));
+const constantsState = vi.hoisted(() => ({ isFossBuild: false, nanoClarificationPrototypeEnabled: false }));
 const storeState = vi.hoisted(() => ({
     settings: {} as AppData['settings'],
     updateSettings: vi.fn(async () => undefined),
@@ -13,6 +14,15 @@ const storeState = vi.hoisted(() => ({
 const coreMocks = vi.hoisted(() => ({ fetchProviderModelsCached: vi.fn() }));
 const aiConfigMocks = vi.hoisted(() => ({ loadAIKey: vi.fn(), saveAIKey: vi.fn() }));
 const captured = vi.hoisted(() => ({ assistant: [] as Record<string, any>[] }));
+const storageMocks = vi.hoisted(() => ({
+    getItem: vi.fn(async () => null),
+    setItem: vi.fn(async () => undefined),
+    removeItem: vi.fn(async () => undefined),
+}));
+const nanoMocks = vi.hoisted(() => ({
+    capability: vi.fn(),
+    download: vi.fn(),
+}));
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
     const { mockCore } = await import('../../test-support/mock-core');
@@ -24,18 +34,29 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
 vi.mock('expo-constants', () => ({
     default: {
         get expoConfig() {
-            return { extra: { isFossBuild: constantsState.isFossBuild } };
+            return {
+                extra: {
+                    isFossBuild: constantsState.isFossBuild,
+                    nanoClarificationPrototypeEnabled: constantsState.nanoClarificationPrototypeEnabled,
+                },
+            };
         },
         appOwnership: 'standalone',
     },
 }));
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
-    default: {
-        getItem: vi.fn(async () => null),
-        setItem: vi.fn(async () => undefined),
-    },
+    default: storageMocks,
 }));
+
+vi.mock('@/lib/nano-clarification', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@/lib/nano-clarification')>();
+    return {
+        ...actual,
+        getNanoClarificationCapability: nanoMocks.capability,
+        downloadNanoClarificationModel: nanoMocks.download,
+    };
+});
 
 vi.mock('@/lib/ai-config', () => ({
     loadAIKey: aiConfigMocks.loadAIKey,
@@ -117,6 +138,10 @@ const renderScreen = async (settings: AppData['settings']) => {
 };
 
 const localWhisperSpeech = { provider: 'whisper' as const, model: 'whisper-tiny' };
+const originalPlatformOs = Platform.OS;
+const setPlatform = (os: typeof Platform.OS) => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: os });
+};
 
 describe('AISettingsScreen live model lists', () => {
     beforeEach(() => {
@@ -124,6 +149,16 @@ describe('AISettingsScreen live model lists', () => {
         vi.useFakeTimers();
         captured.assistant.length = 0;
         constantsState.isFossBuild = false;
+        constantsState.nanoClarificationPrototypeEnabled = false;
+        storageMocks.getItem.mockReset().mockResolvedValue(null);
+        storageMocks.setItem.mockReset().mockResolvedValue(undefined);
+        storageMocks.removeItem.mockReset().mockResolvedValue(undefined);
+        nanoMocks.capability.mockReset().mockResolvedValue({
+            available: true,
+            reason: 'available',
+            supportedOperations: ['inbox_clarification'],
+        });
+        nanoMocks.download.mockReset();
         aiConfigMocks.loadAIKey.mockResolvedValue('sk-test');
         aiConfigMocks.saveAIKey.mockResolvedValue(undefined);
         coreMocks.fetchProviderModelsCached.mockResolvedValue([]);
@@ -131,6 +166,103 @@ describe('AISettingsScreen live model lists', () => {
 
     afterEach(() => {
         vi.useRealTimers();
+        setPlatform(originalPlatformOs);
+    });
+
+    it('keeps Nano opt-in local and downloads its model only after the explicit action', async () => {
+        setPlatform('android');
+        constantsState.nanoClarificationPrototypeEnabled = true;
+        nanoMocks.capability.mockResolvedValue({
+            available: false,
+            reason: 'downloadable',
+            supportedOperations: [],
+        });
+        nanoMocks.download.mockResolvedValue({
+            available: true,
+            reason: 'available',
+            supportedOperations: ['inbox_clarification'],
+        });
+
+        const latest = await renderScreen({ ai: { provider: 'openai', speechToText: localWhisperSpeech } });
+        expect(latest().nanoClarificationVisible).toBe(true);
+        expect(latest().nanoClarificationCanDownload).toBe(true);
+        expect(nanoMocks.download).not.toHaveBeenCalled();
+
+        await act(async () => {
+            latest().onAppleClarificationBackendChange('on-device');
+            await Promise.resolve();
+        });
+        expect(storageMocks.setItem).toHaveBeenCalledWith(
+            'mindwtr:nanoClarificationBackend:v1',
+            'on-device',
+        );
+
+        await act(async () => {
+            latest().onNanoClarificationDownload();
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+        expect(nanoMocks.download).toHaveBeenCalledTimes(1);
+        expect(latest().nanoClarificationDownloadState).toBe('success');
+        expect(latest().nanoClarificationCanDownload).toBe(false);
+        expect(latest().appleClarificationAvailability).toBe('Available on this device. Requests stay on device.');
+    });
+
+    it.each([
+        ['busy', 'The on-device model is busy. Try again in a moment.'],
+        ['quota_exceeded', 'The on-device inference limit was reached. Try again later.'],
+    ])('does not offer model download when Nano capability is %s', async (reason, message) => {
+        setPlatform('android');
+        constantsState.nanoClarificationPrototypeEnabled = true;
+        nanoMocks.capability.mockResolvedValue({
+            available: false,
+            reason,
+            supportedOperations: [],
+        });
+
+        const latest = await renderScreen({ ai: { provider: 'openai', speechToText: localWhisperSpeech } });
+        expect(latest().appleClarificationAvailability).toBe(message);
+        expect(latest().nanoClarificationCanDownload).toBe(false);
+
+        await act(async () => {
+            latest().onNanoClarificationDownload();
+            await Promise.resolve();
+        });
+        expect(nanoMocks.download).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['busy', 'The on-device model is busy. Try again in a moment.'],
+        ['quota_exceeded', 'The on-device inference limit was reached. Try again later.'],
+    ])('removes the download action when an explicit download resolves to %s', async (reason, message) => {
+        setPlatform('android');
+        constantsState.nanoClarificationPrototypeEnabled = true;
+        nanoMocks.capability.mockResolvedValue({
+            available: false,
+            reason: 'downloadable',
+            supportedOperations: [],
+        });
+        nanoMocks.download.mockResolvedValue({
+            available: false,
+            reason,
+            supportedOperations: [],
+        });
+
+        const latest = await renderScreen({ ai: { provider: 'openai', speechToText: localWhisperSpeech } });
+        await act(async () => {
+            latest().onNanoClarificationDownload();
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+        expect(nanoMocks.download).toHaveBeenCalledTimes(1);
+        expect(latest().appleClarificationAvailability).toBe(message);
+        expect(latest().nanoClarificationCanDownload).toBe(false);
+
+        await act(async () => {
+            latest().onNanoClarificationDownload();
+            await Promise.resolve();
+        });
+        expect(nanoMocks.download).toHaveBeenCalledTimes(1);
     });
 
     it('offers the fetched chat models with the selected models first', async () => {

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  AppState,
   Dimensions,
+  Platform,
   Share,
   type TextStyle,
 } from 'react-native';
@@ -67,19 +69,34 @@ import { readAppleClarificationBackend } from '../../lib/apple-clarification-pre
 import {
   APPLE_CLARIFICATION_RELEASE_CHECK,
   AppleClarificationCancelledError,
-  areAppleClarificationAssociationsCurrent,
-  buildAppleClarificationCandidates,
-  consumeAppleClarificationApply,
-  createAppleClarificationLease,
   describeAppleClarificationUnavailableReason,
   getAppleClarificationCapability,
-  isAppleClarificationLeaseCurrent,
   isAppleClarificationPrototypeEnabled,
   reportAppleClarificationOutcome,
   requestAppleInboxClarification,
-  type AppleClarificationDraftSnapshot,
-  type AppleClarificationSuggestion,
 } from '../../lib/apple-foundation-models';
+import { readNanoClarificationBackend } from '../../lib/nano-clarification-preference';
+import {
+  NANO_CLARIFICATION_RELEASE_CHECK,
+  NanoClarificationCancelledError,
+  NanoClarificationError,
+  describeNanoClarificationUnavailableReason,
+  getNanoClarificationCapability,
+  isNanoClarificationPrototypeEnabled,
+  reportNanoClarificationOutcome,
+  requestNanoInboxClarification,
+} from '../../lib/nano-clarification';
+import {
+  OnDeviceClarificationInputError,
+  OnDeviceClarificationOutputError,
+  areOnDeviceClarificationAssociationsCurrent,
+  buildOnDeviceClarificationCandidates,
+  consumeOnDeviceClarificationApply,
+  createOnDeviceClarificationLease,
+  isOnDeviceClarificationLeaseCurrent,
+  type OnDeviceClarificationDraftSnapshot,
+  type OnDeviceClarificationSuggestion,
+} from '../../lib/on-device-clarification';
 import { createSomedaySection as persistSomedaySection } from '../../lib/someday-section-actions';
 import {
   getActionFailureMessage,
@@ -199,15 +216,16 @@ export function useInboxProcessingController({
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [showReviewDatePicker, setShowReviewDatePicker] = useState(false);
   const [isAIWorking, setIsAIWorking] = useState(false);
-  const [appleClarificationBackend, setAppleClarificationBackend] = useState<'configured' | 'on-device'>('configured');
+  const [onDeviceClarificationBackend, setOnDeviceClarificationBackend] = useState<'configured' | 'on-device'>('configured');
   const [aiModal, setAiModal] = useState<{ title: string; message?: string; actions: AIResponseAction[] } | null>(null);
   const [selectedContexts, setSelectedContexts] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPriority, setSelectedPriority] = useState<TaskPriority | undefined>(undefined);
   const [selectedSomedaySectionId, setSelectedSomedaySectionId] = useState<string | undefined>(undefined);
   const dirtyScheduleFieldsRef = useRef(new Set<'startTime' | 'dueDate' | 'reviewAt'>());
-  const activeAppleClarificationRef = useRef<AbortController | null>(null);
-  const consumedAppleClarificationRequestsRef = useRef(new Set<string>());
+  const activeOnDeviceClarificationRef = useRef<AbortController | null>(null);
+  const readyOnDeviceClarificationRequestRef = useRef<string | null>(null);
+  const consumedOnDeviceClarificationRequestsRef = useRef(new Set<string>());
 
   const titleInputRef = useRef<any>(null);
   const processingScrollRef = useRef<any>(null);
@@ -236,8 +254,14 @@ export function useInboxProcessingController({
   const aiEnabled = settings?.ai?.enabled === true;
   const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
   const appleClarificationPrototypeEnabled = isAppleClarificationPrototypeEnabled();
-  const aiClarifyEnabled = appleClarificationBackend === 'on-device'
-    ? appleClarificationPrototypeEnabled
+  const nanoClarificationPrototypeEnabled = isNanoClarificationPrototypeEnabled();
+  const onDeviceClarificationKind = Platform.OS === 'ios' && appleClarificationPrototypeEnabled
+    ? 'apple'
+    : Platform.OS === 'android' && nanoClarificationPrototypeEnabled
+      ? 'nano'
+      : null;
+  const aiClarifyEnabled = onDeviceClarificationBackend === 'on-device'
+    ? onDeviceClarificationKind !== null
     : aiEnabled;
   const showProjectSection = processInboxPlan.showProjectStep;
   const showContextSection = showContextsField || showTagsField;
@@ -396,7 +420,7 @@ export function useInboxProcessingController({
     [selectedTags, suggestionTerms, tagSuggestionPool],
   );
 
-  const appleClarificationDraft = useMemo<AppleClarificationDraftSnapshot | null>(() => currentTask ? ({
+  const onDeviceClarificationDraft = useMemo<OnDeviceClarificationDraftSnapshot | null>(() => currentTask ? ({
     taskId: currentTask.id,
     revision: `${currentTask.rev ?? ''}:${currentTask.revBy ?? ''}:${currentTask.updatedAt}`,
     title: processingTitle,
@@ -426,17 +450,23 @@ export function useInboxProcessingController({
     selectedProjectId,
     selectedTags,
   ]);
-  const appleClarificationDraftRef = useRef<AppleClarificationDraftSnapshot | null>(null);
-  appleClarificationDraftRef.current = appleClarificationDraft;
+  const onDeviceClarificationDraftRef = useRef<OnDeviceClarificationDraftSnapshot | null>(null);
+  onDeviceClarificationDraftRef.current = onDeviceClarificationDraft;
+  const onDeviceClarificationDraftFingerprint = useMemo(
+    () => onDeviceClarificationDraft
+      ? createOnDeviceClarificationLease('draft', onDeviceClarificationDraft).fingerprint
+      : null,
+    [onDeviceClarificationDraft],
+  );
 
-  const appleClarificationAssociations = useMemo(() => ({
+  const onDeviceClarificationAssociations = useMemo(() => ({
     projectIds: new Set(projects.filter(isSelectableProjectForTaskAssignment).map((project) => project.id)),
     areaIds: new Set(areas.filter((area) => !area.deletedAt).map((area) => area.id)),
     contextIds: new Set([...contextSuggestionPool, ...selectedContexts]),
     tagIds: new Set([...tagSuggestionPool, ...selectedTags]),
   }), [areas, contextSuggestionPool, projects, selectedContexts, selectedTags, tagSuggestionPool]);
-  const appleClarificationAssociationsRef = useRef(appleClarificationAssociations);
-  appleClarificationAssociationsRef.current = appleClarificationAssociations;
+  const onDeviceClarificationAssociationsRef = useRef(onDeviceClarificationAssociations);
+  onDeviceClarificationAssociationsRef.current = onDeviceClarificationAssociations;
 
   const projectFilterAreaId = selectedAreaId || undefined;
   const areaFilteredProjects = useMemo(
@@ -617,43 +647,86 @@ export function useInboxProcessingController({
     return true;
   }, [inboxTasks, primeTaskState, scrollProcessingToTop]);
 
+  const poisonReadyOnDeviceClarification = useCallback((): boolean => {
+    const requestId = readyOnDeviceClarificationRequestRef.current;
+    if (!requestId) return false;
+    readyOnDeviceClarificationRequestRef.current = null;
+    consumedOnDeviceClarificationRequestsRef.current.add(requestId);
+    return true;
+  }, []);
+
   const resetProcessingState = useCallback(() => {
+    poisonReadyOnDeviceClarification();
     setProcessingSession(createProcessInboxSession());
     setAiModal(null);
     primeTaskState(null);
-  }, [primeTaskState]);
+  }, [poisonReadyOnDeviceClarification, primeTaskState]);
 
-  const cancelAppleClarification = useCallback(() => {
-    activeAppleClarificationRef.current?.abort();
-    activeAppleClarificationRef.current = null;
+  const cancelOnDeviceClarification = useCallback((): boolean => {
+    const cancelledActiveRequest = activeOnDeviceClarificationRef.current !== null;
+    activeOnDeviceClarificationRef.current?.abort();
+    activeOnDeviceClarificationRef.current = null;
+    const invalidatedReadyProposal = poisonReadyOnDeviceClarification();
+    if (invalidatedReadyProposal) setAiModal(null);
     setIsAIWorking(false);
-  }, []);
+    return cancelledActiveRequest || invalidatedReadyProposal;
+  }, [poisonReadyOnDeviceClarification]);
 
   const handleClose = useCallback(() => {
-    cancelAppleClarification();
+    cancelOnDeviceClarification();
     resetProcessingState();
     onClose();
-  }, [cancelAppleClarification, onClose, resetProcessingState]);
+  }, [cancelOnDeviceClarification, onClose, resetProcessingState]);
 
-  const closeAIModal = useCallback(() => setAiModal(null), []);
+  const closeAIModal = useCallback(() => {
+    poisonReadyOnDeviceClarification();
+    setAiModal(null);
+  }, [poisonReadyOnDeviceClarification]);
 
   useEffect(() => {
-    if (!visible || !appleClarificationPrototypeEnabled) {
-      setAppleClarificationBackend('configured');
+    if (!visible || !onDeviceClarificationKind) {
+      setOnDeviceClarificationBackend('configured');
       return;
     }
     let active = true;
-    void readAppleClarificationBackend().then((backend) => {
-      if (active) setAppleClarificationBackend(backend);
+    const readBackend = onDeviceClarificationKind === 'nano'
+      ? readNanoClarificationBackend
+      : readAppleClarificationBackend;
+    void readBackend().then((backend) => {
+      if (active) setOnDeviceClarificationBackend(backend);
     });
     return () => {
       active = false;
     };
-  }, [appleClarificationPrototypeEnabled, visible]);
+  }, [onDeviceClarificationKind, visible]);
 
   useEffect(() => () => {
-    cancelAppleClarification();
-  }, [cancelAppleClarification, currentTask?.id, visible]);
+    if (cancelOnDeviceClarification()) {
+      if (onDeviceClarificationKind === 'nano') {
+        void reportNanoClarificationOutcome('stale_ignored');
+      } else if (onDeviceClarificationKind === 'apple') {
+        void reportAppleClarificationOutcome('stale_ignored');
+      }
+    }
+  }, [
+    cancelOnDeviceClarification,
+    currentTask?.id,
+    onDeviceClarificationDraftFingerprint,
+    onDeviceClarificationKind,
+    visible,
+  ]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' || !cancelOnDeviceClarification()) return;
+      if (onDeviceClarificationKind === 'nano') {
+        void reportNanoClarificationOutcome('stale_ignored');
+      } else if (onDeviceClarificationKind === 'apple') {
+        void reportAppleClarificationOutcome('stale_ignored');
+      }
+    });
+    return () => subscription.remove();
+  }, [cancelOnDeviceClarification, onDeviceClarificationKind]);
 
   useEffect(() => {
     if (!visible) {
@@ -1304,7 +1377,7 @@ export function useInboxProcessingController({
     await applyWorkflowDecision({ type: 'skip' });
   }, [applyWorkflowDecision]);
 
-  const applyAppleClarificationStatus = useCallback((status: AppleClarificationSuggestion['status']) => {
+  const applyOnDeviceClarificationStatus = useCallback((status: OnDeviceClarificationSuggestion['status']) => {
     if (!status) return;
     if (status === 'someday' || status === 'reference') {
       setActionabilityChoice(status);
@@ -1317,7 +1390,7 @@ export function useInboxProcessingController({
     setExecutionChoice(status === 'waiting' ? 'delegate' : 'defer');
   }, []);
 
-  const applyAppleClarificationSuggestion = useCallback((suggestion: AppleClarificationSuggestion) => {
+  const applyOnDeviceClarificationSuggestion = useCallback((suggestion: OnDeviceClarificationSuggestion) => {
     setProcessingTitle(suggestion.cleanedTitle);
     if (suggestion.projectId) {
       setSelectedProjectId(suggestion.projectId);
@@ -1358,10 +1431,10 @@ export function useInboxProcessingController({
     ) {
       setShowAdvancedOptions(true);
     }
-    applyAppleClarificationStatus(suggestion.status);
-  }, [applyAppleClarificationStatus]);
+    applyOnDeviceClarificationStatus(suggestion.status);
+  }, [applyOnDeviceClarificationStatus]);
 
-  const formatAppleClarificationPreview = useCallback((suggestion: AppleClarificationSuggestion): string => {
+  const formatOnDeviceClarificationPreview = useCallback((suggestion: OnDeviceClarificationSuggestion): string => {
     const labels = new Map<string, string>();
     for (const project of projects) labels.set(project.id, project.title);
     for (const area of areas) labels.set(area.id, area.name);
@@ -1377,37 +1450,48 @@ export function useInboxProcessingController({
     return lines.join('\n');
   }, [areas, contextSuggestionPool, projects, tagSuggestionPool]);
 
-  const handleAppleClarifyInbox = useCallback(async () => {
-    const initialDraft = appleClarificationDraftRef.current;
-    if (!currentTask || !initialDraft) return;
+  const handleOnDeviceClarifyInbox = useCallback(async () => {
+    const initialDraft = onDeviceClarificationDraftRef.current;
+    const kind = onDeviceClarificationKind;
+    if (!currentTask || !initialDraft || !kind) return;
 
-    cancelAppleClarification();
+    cancelOnDeviceClarification();
     const controller = new AbortController();
-    activeAppleClarificationRef.current = controller;
+    activeOnDeviceClarificationRef.current = controller;
     const requestId = `inbox-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const lease = createAppleClarificationLease(requestId, initialDraft);
+    const lease = createOnDeviceClarificationLease(requestId, initialDraft);
+    const reportOutcome = kind === 'nano'
+      ? reportNanoClarificationOutcome
+      : reportAppleClarificationOutcome;
     setIsAIWorking(true);
     try {
-      const capability = await getAppleClarificationCapability(language);
-      if (controller.signal.aborted || activeAppleClarificationRef.current !== controller) {
-        throw new AppleClarificationCancelledError();
+      const capability = kind === 'nano'
+        ? await getNanoClarificationCapability(language)
+        : await getAppleClarificationCapability(language);
+      if (controller.signal.aborted || activeOnDeviceClarificationRef.current !== controller) {
+        throw kind === 'nano'
+          ? new NanoClarificationCancelledError()
+          : new AppleClarificationCancelledError();
       }
-      const draftBeforeRequest = appleClarificationDraftRef.current;
-      if (!draftBeforeRequest || !isAppleClarificationLeaseCurrent(lease, draftBeforeRequest)) {
-        void reportAppleClarificationOutcome('stale_ignored');
+      const draftBeforeRequest = onDeviceClarificationDraftRef.current;
+      if (!draftBeforeRequest || !isOnDeviceClarificationLeaseCurrent(lease, draftBeforeRequest)) {
+        void reportOutcome('stale_ignored');
         return;
       }
       if (!capability.available) {
+        const reason = capability.reason ?? 'unknown';
         showToast({
           title: tFallback(t, 'taskEdit.aiClarify', 'Clarify with AI'),
-          message: describeAppleClarificationUnavailableReason(capability.reason),
+          message: kind === 'nano'
+            ? describeNanoClarificationUnavailableReason(reason)
+            : describeAppleClarificationUnavailableReason(reason),
           tone: 'warning',
           durationMs: 6200,
         });
-        void reportAppleClarificationOutcome('unavailable', { reason: capability.reason ?? 'unknown' });
+        void reportOutcome('unavailable', { reason });
         return;
       }
-      const candidates = buildAppleClarificationCandidates({
+      const candidates = buildOnDeviceClarificationCandidates({
         title: initialDraft.title,
         description: initialDraft.description,
         projects,
@@ -1419,30 +1503,48 @@ export function useInboxProcessingController({
         selectedContexts,
         selectedTags,
       });
-      const suggestion = await requestAppleInboxClarification({
+      const request = {
         requestId,
         locale: language,
         title: initialDraft.title,
         description: initialDraft.description,
         candidates,
-      }, { signal: controller.signal });
-      if (controller.signal.aborted || activeAppleClarificationRef.current !== controller) {
-        throw new AppleClarificationCancelledError();
+      };
+      const suggestion = kind === 'nano'
+        ? await requestNanoInboxClarification(request, { signal: controller.signal })
+        : await requestAppleInboxClarification(request, { signal: controller.signal });
+      if (controller.signal.aborted || activeOnDeviceClarificationRef.current !== controller) {
+        throw kind === 'nano'
+          ? new NanoClarificationCancelledError()
+          : new AppleClarificationCancelledError();
       }
-      const currentDraft = appleClarificationDraftRef.current;
-      if (!currentDraft || !isAppleClarificationLeaseCurrent(lease, currentDraft)) {
-        void reportAppleClarificationOutcome('stale_ignored');
+      const currentDraft = onDeviceClarificationDraftRef.current;
+      if (!currentDraft || !isOnDeviceClarificationLeaseCurrent(lease, currentDraft)) {
+        void reportOutcome('stale_ignored');
         return;
       }
 
+      const closeProposal = () => {
+        if (readyOnDeviceClarificationRequestRef.current !== requestId) return;
+        poisonReadyOnDeviceClarification();
+        setAiModal(null);
+      };
       const apply = () => {
-        const latestDraft = appleClarificationDraftRef.current;
+        const latestDraft = onDeviceClarificationDraftRef.current;
         if (
           !latestDraft
-          || !areAppleClarificationAssociationsCurrent(suggestion, appleClarificationAssociationsRef.current)
-          || !consumeAppleClarificationApply(lease, latestDraft, consumedAppleClarificationRequestsRef.current)
+          || readyOnDeviceClarificationRequestRef.current !== requestId
+          || !areOnDeviceClarificationAssociationsCurrent(
+            suggestion,
+            onDeviceClarificationAssociationsRef.current,
+          )
+          || !consumeOnDeviceClarificationApply(
+            lease,
+            latestDraft,
+            consumedOnDeviceClarificationRequestsRef.current,
+          )
         ) {
-          closeAIModal();
+          closeProposal();
           showToast({
             title: tFallback(t, 'common.notice', 'Notice'),
             message: tFallback(
@@ -1454,52 +1556,81 @@ export function useInboxProcessingController({
           });
           return;
         }
-        applyAppleClarificationSuggestion(suggestion);
-        closeAIModal();
-        void reportAppleClarificationOutcome('applied_to_draft', {
+        readyOnDeviceClarificationRequestRef.current = null;
+        applyOnDeviceClarificationSuggestion(suggestion);
+        setAiModal(null);
+        void reportOutcome('applied_to_draft', {
           statusIncluded: Boolean(suggestion.status),
           associationCount: suggestion.contextIds.length + suggestion.tagIds.length
             + Number(Boolean(suggestion.projectId)) + Number(Boolean(suggestion.areaId)),
           dateCount: Number(Boolean(suggestion.startDate)) + Number(Boolean(suggestion.dueDate)),
         });
       };
+      readyOnDeviceClarificationRequestRef.current = requestId;
       setAiModal({
         title: tFallback(t, 'ai.appleClarification.suggestionTitle', 'On-device suggestion'),
-        message: formatAppleClarificationPreview(suggestion),
+        message: formatOnDeviceClarificationPreview(suggestion),
         actions: [
           { label: t('ai.applySuggestion'), variant: 'primary', onPress: apply },
-          { label: t('common.cancel'), variant: 'secondary', onPress: closeAIModal },
+          { label: t('common.cancel'), variant: 'secondary', onPress: closeProposal },
         ],
       });
-      void reportAppleClarificationOutcome('suggestion_ready');
+      void reportOutcome('suggestion_ready');
     } catch (error) {
-      if (!(error instanceof AppleClarificationCancelledError)) {
-        void logWarn('Apple Inbox clarification path failed', {
+      const cancelled = error instanceof AppleClarificationCancelledError
+        || error instanceof NanoClarificationCancelledError;
+      if (!cancelled) {
+        const nanoReason = kind === 'nano'
+          ? error instanceof NanoClarificationError
+            || error instanceof OnDeviceClarificationInputError
+            || error instanceof OnDeviceClarificationOutputError
+            ? error.code
+            : 'unknown'
+          : undefined;
+        void logWarn(`${kind === 'nano' ? 'Nano' : 'Apple'} Inbox clarification path failed`, {
           scope: 'inbox',
           extra: {
-            releaseCheck: APPLE_CLARIFICATION_RELEASE_CHECK,
-            backend: 'apple_on_device',
+            releaseCheck: kind === 'nano'
+              ? NANO_CLARIFICATION_RELEASE_CHECK
+              : APPLE_CLARIFICATION_RELEASE_CHECK,
+            backend: kind === 'nano' ? 'nano_on_device' : 'apple_on_device',
             outcome: 'failed',
+            ...(nanoReason ? { reason: nanoReason } : {}),
             failureClass: error instanceof Error ? error.name : 'unknown',
           },
         });
-        Alert.alert(t('ai.errorTitle'), formatAIErrorAlertBody(t('ai.errorBody'), error));
+        if (kind === 'nano') {
+          showToast({
+            title: t('ai.errorTitle'),
+            message: error instanceof OnDeviceClarificationInputError
+              || error instanceof OnDeviceClarificationOutputError
+              ? error.message
+              : nanoReason
+              ? describeNanoClarificationUnavailableReason(nanoReason)
+              : t('ai.errorBody'),
+            tone: 'warning',
+            durationMs: 6200,
+          });
+        } else {
+          Alert.alert(t('ai.errorTitle'), formatAIErrorAlertBody(t('ai.errorBody'), error));
+        }
       }
     } finally {
-      if (activeAppleClarificationRef.current === controller) {
-        activeAppleClarificationRef.current = null;
+      if (activeOnDeviceClarificationRef.current === controller) {
+        activeOnDeviceClarificationRef.current = null;
         setIsAIWorking(false);
       }
     }
   }, [
-    applyAppleClarificationSuggestion,
+    applyOnDeviceClarificationSuggestion,
     areas,
-    cancelAppleClarification,
-    closeAIModal,
+    cancelOnDeviceClarification,
     contextSuggestionPool,
     currentTask,
-    formatAppleClarificationPreview,
+    formatOnDeviceClarificationPreview,
     language,
+    onDeviceClarificationKind,
+    poisonReadyOnDeviceClarification,
     projects,
     selectedAreaId,
     selectedContexts,
@@ -1512,8 +1643,8 @@ export function useInboxProcessingController({
 
   const handleAIClarifyInbox = useCallback(async () => {
     if (!currentTask) return;
-    if (appleClarificationBackend === 'on-device') {
-      await handleAppleClarifyInbox();
+    if (onDeviceClarificationBackend === 'on-device') {
+      await handleOnDeviceClarifyInbox();
       return;
     }
     if (!aiEnabled) {
@@ -1599,11 +1730,11 @@ export function useInboxProcessingController({
   }, [
     aiEnabled,
     aiProvider,
-    appleClarificationBackend,
+    onDeviceClarificationBackend,
     closeAIModal,
     contextSuggestionPool,
     currentTask,
-    handleAppleClarifyInbox,
+    handleOnDeviceClarifyInbox,
     openSettingsLabel,
     processingTitle,
     router,
@@ -1641,7 +1772,7 @@ export function useInboxProcessingController({
     filteredProjects,
     formatProgressLabel,
     handleAIClarifyInbox,
-    handleAICancelInbox: cancelAppleClarification,
+    handleAICancelInbox: cancelOnDeviceClarification,
     handleClose,
     handleConfirmWaitingMobile,
     handleConvertToProject,
@@ -1662,7 +1793,7 @@ export function useInboxProcessingController({
     headerStyle,
     insets,
     isAIWorking,
-    isAICancellable: isAIWorking && appleClarificationBackend === 'on-device',
+    isAICancellable: isAIWorking && onDeviceClarificationBackend === 'on-device',
     isDark,
     isNextTaskDisabled,
     newContext,

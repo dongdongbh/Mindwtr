@@ -13,7 +13,7 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
-    // Apple development evaluations (#915, #1194, #1214, #1195).
+    // On-device development evaluations (#915, #1194, #1214, #1195, #1215).
     'statusIncluded', 'associationCount', 'dateCount', 'failureClass',
     'matchCount', 'acceptedCount', 'droppedCount',
     'snapshotVersion', 'publishedCount', 'omittedCount', 'exactLinkCount',

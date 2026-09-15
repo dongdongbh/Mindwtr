@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Constants from 'expo-constants';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -34,6 +34,17 @@ import {
     describeAppleClarificationUnavailableReason,
     getAppleClarificationCapability,
 } from '@/lib/apple-foundation-models';
+import {
+    readNanoClarificationBackend,
+    writeNanoClarificationBackend,
+} from '@/lib/nano-clarification-preference';
+import {
+    NanoClarificationCancelledError,
+    NanoClarificationError,
+    describeNanoClarificationUnavailableReason,
+    downloadNanoClarificationModel,
+    getNanoClarificationCapability,
+} from '@/lib/nano-clarification';
 import { DEFAULT_GEMINI_STT_MODEL, DEFAULT_OPENAI_STT_MODEL } from '@/lib/speech-to-text';
 import { useToast } from '@/contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
@@ -75,11 +86,17 @@ export function AISettingsScreen() {
         settings: state.settings,
         updateSettings: state.updateSettings,
     }), shallow);
-    const extraConfig = Constants.expoConfig?.extra as MobileExtraConfig | undefined;
+    const extraConfig = Constants.expoConfig?.extra as (
+        MobileExtraConfig & { nanoClarificationPrototypeEnabled?: boolean | string }
+    ) | undefined;
     const isFossBuild = extraConfig?.isFossBuild === true || extraConfig?.isFossBuild === 'true';
     const appleClarificationPrototypeEnabled = Platform.OS === 'ios' && (
         extraConfig?.appleClarificationPrototypeEnabled === true
         || extraConfig?.appleClarificationPrototypeEnabled === 'true'
+    );
+    const nanoClarificationPrototypeEnabled = Platform.OS === 'android' && !isFossBuild && (
+        extraConfig?.nanoClarificationPrototypeEnabled === true
+        || extraConfig?.nanoClarificationPrototypeEnabled === 'true'
     );
     const isExpoGo = Constants.appOwnership === 'expo';
     const [aiKey, setAiKey] = useState<LoadedKey>({ provider: '', value: '' });
@@ -99,6 +116,10 @@ export function AISettingsScreen() {
     const [fetchedSpeechModels, setFetchedSpeechModels] = useState<string[] | null>(null);
     const [appleClarificationBackend, setAppleClarificationBackend] = useState<AppleClarificationBackend>('configured');
     const [appleClarificationAvailability, setAppleClarificationAvailability] = useState('');
+    const [nanoClarificationCanDownload, setNanoClarificationCanDownload] = useState(false);
+    const [nanoClarificationDownloadError, setNanoClarificationDownloadError] = useState('');
+    const [nanoClarificationDownloadState, setNanoClarificationDownloadState] = useState<'idle' | 'downloading' | 'success' | 'error'>('idle');
+    const nanoClarificationDownloadRef = useRef<AbortController | null>(null);
 
     const aiProvider = (isFossBuild ? 'openai' : (settings.ai?.provider ?? 'openai')) as AIProviderId;
     const aiApiKey = aiKey.provider === aiProvider ? aiKey.value : '';
@@ -146,27 +167,98 @@ export function AISettingsScreen() {
     }, [aiSettings, updateSettings]);
 
     useEffect(() => {
-        if (!appleClarificationPrototypeEnabled) return;
+        if (!appleClarificationPrototypeEnabled && !nanoClarificationPrototypeEnabled) return;
         let active = true;
+        const readBackend = nanoClarificationPrototypeEnabled
+            ? readNanoClarificationBackend
+            : readAppleClarificationBackend;
+        const readCapability = nanoClarificationPrototypeEnabled
+            ? getNanoClarificationCapability
+            : getAppleClarificationCapability;
         void Promise.all([
-            readAppleClarificationBackend(),
-            getAppleClarificationCapability(),
+            readBackend(),
+            readCapability(),
         ]).then(([backend, capability]) => {
             if (!active) return;
             setAppleClarificationBackend(backend);
             setAppleClarificationAvailability(capability.available
                 ? 'Available on this device. Requests stay on device.'
-                : describeAppleClarificationUnavailableReason(capability.reason));
+                : nanoClarificationPrototypeEnabled
+                    ? describeNanoClarificationUnavailableReason(capability.reason)
+                    : describeAppleClarificationUnavailableReason(capability.reason));
+            setNanoClarificationCanDownload(nanoClarificationPrototypeEnabled && [
+                'downloadable',
+                'download_failed',
+            ].includes(capability.reason ?? 'unknown'));
         });
         return () => {
             active = false;
+            nanoClarificationDownloadRef.current?.abort();
+            nanoClarificationDownloadRef.current = null;
         };
-    }, [appleClarificationPrototypeEnabled]);
+    }, [appleClarificationPrototypeEnabled, nanoClarificationPrototypeEnabled]);
 
     const handleAppleClarificationBackendChange = useCallback((backend: AppleClarificationBackend) => {
         setAppleClarificationBackend(backend);
-        void writeAppleClarificationBackend(backend);
-    }, []);
+        if (nanoClarificationPrototypeEnabled) {
+            void writeNanoClarificationBackend(backend);
+        } else {
+            void writeAppleClarificationBackend(backend);
+        }
+    }, [nanoClarificationPrototypeEnabled]);
+
+    const handleNanoClarificationDownload = useCallback(() => {
+        if (
+            !nanoClarificationPrototypeEnabled
+            || !nanoClarificationCanDownload
+            || nanoClarificationDownloadState === 'downloading'
+        ) return;
+        const requestId = `nano-download-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const controller = new AbortController();
+        nanoClarificationDownloadRef.current = controller;
+        setNanoClarificationDownloadError('');
+        setNanoClarificationDownloadState('downloading');
+        void downloadNanoClarificationModel(requestId, undefined, { signal: controller.signal })
+            .then((capability) => {
+                if (controller.signal.aborted || nanoClarificationDownloadRef.current !== controller) return;
+                setAppleClarificationAvailability(capability.available
+                    ? 'Available on this device. Requests stay on device.'
+                    : describeNanoClarificationUnavailableReason(capability.reason));
+                setNanoClarificationCanDownload(!capability.available && [
+                    'downloadable',
+                    'download_failed',
+                ].includes(capability.reason));
+                setNanoClarificationDownloadState(capability.available ? 'success' : 'error');
+                if (!capability.available) {
+                    setNanoClarificationDownloadError(t('settings.speechOfflineDownloadError'));
+                }
+            })
+            .catch((error) => {
+                if (
+                    controller.signal.aborted
+                    || nanoClarificationDownloadRef.current !== controller
+                    || error instanceof NanoClarificationCancelledError
+                ) return;
+                const reason = error instanceof NanoClarificationError ? error.code : 'unknown';
+                setAppleClarificationAvailability(describeNanoClarificationUnavailableReason(reason));
+                setNanoClarificationCanDownload([
+                    'downloadable',
+                    'download_failed',
+                ].includes(reason));
+                setNanoClarificationDownloadError(t('settings.speechOfflineDownloadError'));
+                setNanoClarificationDownloadState('error');
+            })
+            .finally(() => {
+                if (nanoClarificationDownloadRef.current === controller) {
+                    nanoClarificationDownloadRef.current = null;
+                }
+            });
+    }, [
+        nanoClarificationCanDownload,
+        nanoClarificationDownloadState,
+        nanoClarificationPrototypeEnabled,
+        t,
+    ]);
 
     useEffect(() => {
         setOpenAIExtraParamsDraft(formatOpenAIExtraBodyParams(aiOpenAIExtraBodyParams));
@@ -606,6 +698,10 @@ export function AISettingsScreen() {
                         appleClarificationAvailability={appleClarificationAvailability}
                         appleClarificationBackend={appleClarificationBackend}
                         appleClarificationVisible={appleClarificationPrototypeEnabled}
+                        nanoClarificationCanDownload={nanoClarificationCanDownload}
+                        nanoClarificationDownloadError={nanoClarificationDownloadError}
+                        nanoClarificationDownloadState={nanoClarificationDownloadState}
+                        nanoClarificationVisible={nanoClarificationPrototypeEnabled}
                         aiReasoningEffort={aiReasoningEffort}
                         aiRequestTimeoutSeconds={aiRequestTimeoutSeconds}
                         aiThinkingBudget={aiThinkingBudget}
@@ -622,6 +718,7 @@ export function AISettingsScreen() {
                         onAiModelChange={(value) => updateAISettings({ model: value })}
                         onAiProviderChange={handleAIProviderChange}
                         onAppleClarificationBackendChange={handleAppleClarificationBackendChange}
+                        onNanoClarificationDownload={handleNanoClarificationDownload}
                         onAiReasoningEffortChange={(value) => updateAISettings({ reasoningEffort: value })}
                         onAiRequestTimeoutSecondsChange={(value) => updateAISettings({ requestTimeoutSeconds: value })}
                         onAiThinkingBudgetChange={(value) => updateAISettings({ thinkingBudget: value })}

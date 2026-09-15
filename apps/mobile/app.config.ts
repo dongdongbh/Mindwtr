@@ -35,6 +35,8 @@ const donationPromptEnabled = process.env.DONATION_PROMPT_ENABLED === '1'
   || process.env.DONATION_PROMPT_ENABLED === 'true';
 const promptTestControlsEnabled = process.env.PROMPT_TEST_CONTROLS_ENABLED === '1'
   || process.env.PROMPT_TEST_CONTROLS_ENABLED === 'true';
+const nanoClarificationRequested = process.env.MINDWTR_NANO_ENABLED === '1'
+  || process.env.MINDWTR_NANO_ENABLED === 'true';
 // APP_VARIANT=development builds "Mindwtr Dev" with its own Android
 // applicationId / iOS bundle id, so a dev client installs beside the store app
 // instead of replacing it and keeps its own data. Every Android config plugin
@@ -44,6 +46,9 @@ const promptTestControlsEnabled = process.env.PROMPT_TEST_CONTROLS_ENABLED === '
 // hits CloudKit's Development environment anyway, only widget payloads collide.
 const isDevVariant = (process.env.APP_VARIANT ?? '').trim() === 'development';
 const isBenchmarkVariant = (process.env.APP_VARIANT ?? '').trim() === 'benchmark';
+// #1215 stays an explicit development evaluation. FOSS and normal builds keep
+// API 24 and resolve no ML Kit/AICore dependency.
+const nanoClarificationEnabled = nanoClarificationRequested && isDevVariant && !isFossBuild;
 // RC workflows and development/preview profiles opt in. Stable is off by default.
 const watchEnabledValue = (process.env.MINDWTR_WATCH_ENABLED ?? '').trim().toLowerCase();
 const watchEnabled = watchEnabledValue === '1' || watchEnabledValue === 'true'
@@ -112,6 +117,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // #1214 is an evaluation prototype. Store/preview builds omit every JS
     // route to the compiled optional module until device quality gates pass.
     appleClarificationPrototypeEnabled: isDevVariant,
+    nanoClarificationPrototypeEnabled: nanoClarificationEnabled,
   };
 
   return withAppVariant({
@@ -122,6 +128,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       infoPlist: { ...base.ios?.infoPlist, MindwtrWatchEnabled: watchEnabled },
     },
     plugins: [
+      // Expo config mods execute in stack order. Keep this before
+      // expo-build-properties so the explicit evaluation floor wins last.
+      ['./plugins/android-nano-clarification', { enabled: nanoClarificationEnabled }],
       ...withIosSceneLifecyclePlugin(
         (base.plugins ?? []).filter((entry) => pluginName(entry) !== './plugins/ios-watch'),
       ),

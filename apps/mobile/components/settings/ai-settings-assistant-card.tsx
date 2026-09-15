@@ -32,6 +32,10 @@ type AiSettingsAssistantCardProps = {
     appleClarificationAvailability: string;
     appleClarificationBackend: AppleClarificationBackend;
     appleClarificationVisible: boolean;
+    nanoClarificationCanDownload: boolean;
+    nanoClarificationDownloadError: string;
+    nanoClarificationDownloadState: 'idle' | 'downloading' | 'success' | 'error';
+    nanoClarificationVisible: boolean;
     aiReasoningEffort: AIReasoningEffort;
     aiRequestTimeoutSeconds: number;
     aiThinkingBudget: number;
@@ -48,6 +52,7 @@ type AiSettingsAssistantCardProps = {
     onAiModelChange: (value: string) => void;
     onAiProviderChange: (provider: AIProviderId) => void;
     onAppleClarificationBackendChange: (backend: AppleClarificationBackend) => void;
+    onNanoClarificationDownload: () => void;
     onAiReasoningEffortChange: (value: AIReasoningEffort) => void;
     onAiRequestTimeoutSecondsChange: (value: AIRequestTimeoutSeconds) => void;
     onAiThinkingBudgetChange: (value: number) => void;
@@ -73,6 +78,10 @@ export function AiSettingsAssistantCard({
     appleClarificationAvailability,
     appleClarificationBackend,
     appleClarificationVisible,
+    nanoClarificationCanDownload,
+    nanoClarificationDownloadError,
+    nanoClarificationDownloadState,
+    nanoClarificationVisible,
     aiReasoningEffort,
     aiRequestTimeoutSeconds,
     aiThinkingBudget,
@@ -89,6 +98,7 @@ export function AiSettingsAssistantCard({
     onAiModelChange,
     onAiProviderChange,
     onAppleClarificationBackendChange,
+    onNanoClarificationDownload,
     onAiReasoningEffortChange,
     onAiRequestTimeoutSecondsChange,
     onAiThinkingBudgetChange,
@@ -113,7 +123,7 @@ export function AiSettingsAssistantCard({
 
             {aiAssistantOpen && (
                 <>
-                    {appleClarificationVisible && (
+                    {(appleClarificationVisible || nanoClarificationVisible) && (
                         <>
                             <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
                                 <View style={styles.settingInfo}>
@@ -132,8 +142,47 @@ export function AiSettingsAssistantCard({
                                             {appleClarificationAvailability}
                                         </Text>
                                     ) : null}
+                                    {nanoClarificationVisible ? (
+                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                            Gemini Nano processes task content on this device. Model setup uses the network and device storage. Google ML Kit sends performance and utilization metrics to Google.
+                                        </Text>
+                                    ) : null}
+                                    {nanoClarificationDownloadError ? (
+                                        <Text style={[styles.settingDescription, { color: tc.danger ?? '#dc2626' }]}>
+                                            {nanoClarificationDownloadError}
+                                        </Text>
+                                    ) : null}
                                 </View>
                             </View>
+                            {nanoClarificationVisible && nanoClarificationCanDownload ? (
+                                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                                    <TouchableOpacity
+                                        accessibilityRole="button"
+                                        accessibilityState={{ disabled: nanoClarificationDownloadState === 'downloading' }}
+                                        disabled={nanoClarificationDownloadState === 'downloading'}
+                                        style={[
+                                            styles.backendOption,
+                                            {
+                                                borderColor: tc.border,
+                                                backgroundColor: tc.filterBg,
+                                                minHeight: 44,
+                                                justifyContent: 'center',
+                                                alignSelf: 'flex-start',
+                                                opacity: nanoClarificationDownloadState === 'downloading' ? 0.65 : 1,
+                                            },
+                                        ]}
+                                        onPress={onNanoClarificationDownload}
+                                    >
+                                        <CompactText style={[styles.backendOptionText, { color: tc.tint }]}>
+                                            {nanoClarificationDownloadState === 'downloading'
+                                                ? t('settings.speechOfflineDownloadModel')
+                                                : nanoClarificationDownloadState === 'success'
+                                                    ? t('settings.speechOfflineDownloadSuccess')
+                                                    : t('settings.speechOfflineDownload')}
+                                        </CompactText>
+                                    </TouchableOpacity>
+                                </View>
+                            ) : null}
                             <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
                                 <View style={styles.backendToggle}>
                                     <TouchableOpacity

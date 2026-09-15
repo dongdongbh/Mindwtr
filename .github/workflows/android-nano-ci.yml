@@ -1,0 +1,113 @@
+name: Android Nano evaluation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - '.github/workflows/android-nano-ci.yml'
+      - 'apps/mobile/modules/nano-clarification/**'
+      - 'apps/mobile/plugins/android-nano-clarification*'
+      - 'apps/mobile/app.config.ts'
+      - 'scripts/ci/check-nano-build*'
+      - 'apps/mobile/package.json'
+      - 'bun.lock'
+  push:
+    branches: [main, master]
+    paths:
+      - '.github/workflows/android-nano-ci.yml'
+      - 'apps/mobile/modules/nano-clarification/**'
+      - 'apps/mobile/plugins/android-nano-clarification*'
+      - 'apps/mobile/app.config.ts'
+      - 'scripts/ci/check-nano-build*'
+      - 'apps/mobile/package.json'
+      - 'bun.lock'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+concurrency:
+  group: android-nano-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Nano ${{ matrix.mode }} build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: default
+            variant: ''
+            nano: '0'
+            foss: '0'
+            expected: disabled
+          - mode: evaluation
+            variant: development
+            nano: '1'
+            foss: '0'
+            expected: enabled
+          - mode: foss
+            variant: development
+            nano: '1'
+            foss: '1'
+            expected: disabled
+    env:
+      APP_VARIANT: ${{ matrix.variant }}
+      MINDWTR_NANO_ENABLED: ${{ matrix.nano }}
+      FOSS_BUILD: ${{ matrix.foss }}
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      NODE_ENV: development
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 22
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: '.bun-version'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Setup Android SDK
+        run: bash scripts/ci/setup-android-sdk.sh
+      - name: Check build-boundary assertions
+        run: python3 scripts/ci/check-nano-build.test.py
+      - name: Generate the selected native variant
+        working-directory: apps/mobile
+        run: ../../node_modules/.bin/expo prebuild --clean --platform android --no-install
+      - name: Compile the bridge and test lifecycle coordination
+        working-directory: apps/mobile/android
+        run: ./gradlew :nano-clarification:verifyNanoBuildMode :nano-clarification:assembleDebug :nano-clarification:testDebugUnitTest :app:processDebugMainManifest --no-daemon -PreactNativeArchitectures=arm64-v8a
+      - name: Check SDK exclusion and minimum Android version
+        working-directory: apps/mobile/android
+        run: |
+          set -euo pipefail
+          ./gradlew :nano-clarification:dependencies --configuration debugRuntimeClasspath --console=plain --no-daemon > "$RUNNER_TEMP/nano-dependencies.txt"
+          ./gradlew :app:dependencies --configuration debugRuntimeClasspath --console=plain --no-daemon > "$RUNNER_TEMP/nano-app-dependencies.txt"
+          python3 ../../../scripts/ci/check-nano-build.py --mode "${{ matrix.expected }}" --dependencies "$RUNNER_TEMP/nano-dependencies.txt" --app-dependencies "$RUNNER_TEMP/nano-app-dependencies.txt" --android-dir .
+      - name: Compile the complete evaluation app
+        if: matrix.expected == 'enabled'
+        working-directory: apps/mobile/android
+        run: ./gradlew :app:assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: nano-${{ matrix.mode }}-evidence
+          path: |
+            ${{ runner.temp }}/nano-dependencies.txt
+            ${{ runner.temp }}/nano-app-dependencies.txt
+            apps/mobile/modules/nano-clarification/android/build/test-results/
+            apps/mobile/android/app/build/intermediates/merged_manifest/
+            apps/mobile/android/gradle.properties
+          if-no-files-found: warn

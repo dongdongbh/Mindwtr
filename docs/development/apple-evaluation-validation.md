@@ -18,6 +18,14 @@ No row is satisfied merely by adding its workflow or test command. Record the
 exact revision and run URL when it actually runs. This Linux development host
 does not have Xcode or an Apple model-capable runtime.
 
+## Recorded validation
+
+[Native Platform CI run 34920480209](https://github.com/dongdongbh/Mindwtr/actions/runs/34920480209) passed on `d141a1b3810d651bb62756d4581a33601ed7717c`: Xcode 26 app and Watch builds, Xcode 27 Release simulator build, cold/warm deep-link smoke, unsigned device archive, and the new Swift cancellation/collector/image tests on both toolchains. The [API-only run](https://github.com/dongdongbh/Mindwtr/actions/runs/34920453918) also passed for ARM64 simulator, Intel simulator fallback, and ARM64 device targets.
+
+The post-push general CI found six missing translation-key definitions. Follow-up `fdc51dd8c7d5e15c956906d7b743f65c30292f12` adds those definitions and required locale entries; 246 core localization checks and six mobile key checks passed locally. Full post-fix CI is tracked in [the progress record](on-device-ai-progress.md).
+
+Physical-device model evaluation, older-runtime behavior, and Siri schema/mutation conformance remain open. A successful latest-SDK build does not satisfy those rows.
+
 ## Native build
 
 For a fast API-only check, dispatch Native Platform CI with
@@ -30,9 +38,10 @@ compiler without that setting. The full Xcode 27 lane runs this preflight too.
 
 The existing **Native Platform CI** runs Xcode 26 and Xcode 27 matrix lanes.
 Dispatch it with `platform=ios` on the revision being evaluated.
-Each lane checks its required toolchain,
-checks its actual SDK version, records the toolchain, generates a clean Expo
-project, compiles native modules, and builds an unsigned Release archive.
+Each lane checks its required toolchain and actual SDK version, records the
+toolchain, generates a clean Expo project, and compiles native modules. Xcode 26
+builds the app and Watch targets; Xcode 27 additionally builds the bundled Release
+simulator app, exercises cold/warm deep links, and creates an unsigned device archive.
 It fails if the requested SDK is unavailable; an older-SDK fallback is not
 valid evidence for newer APIs. The iOS 27 job uses GitHub's
 [`xcode-27` preview image](https://github.com/actions/runner-images/issues/14404),

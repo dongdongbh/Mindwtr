@@ -1,5 +1,5 @@
 import React from 'react';
-import { Animated, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView } from 'react-native';
+import { Animated, AppState, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -35,6 +35,12 @@ const appleClarificationMocks = vi.hoisted(() => ({
   request: vi.fn(),
   report: vi.fn(),
 }));
+const nanoClarificationMocks = vi.hoisted(() => ({
+  prototypeEnabled: false,
+  capability: vi.fn(),
+  request: vi.fn(),
+  report: vi.fn(),
+}));
 const similarityMocks = vi.hoisted(() => ({
   createIndex: vi.fn(),
   find: vi.fn(),
@@ -51,6 +57,16 @@ vi.mock('../lib/apple-foundation-models', async (importOriginal) => {
     getAppleClarificationCapability: appleClarificationMocks.capability,
     requestAppleInboxClarification: appleClarificationMocks.request,
     reportAppleClarificationOutcome: appleClarificationMocks.report,
+  };
+});
+vi.mock('../lib/nano-clarification', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/nano-clarification')>();
+  return {
+    ...actual,
+    isNanoClarificationPrototypeEnabled: () => nanoClarificationMocks.prototypeEnabled,
+    getNanoClarificationCapability: nanoClarificationMocks.capability,
+    requestNanoInboxClarification: nanoClarificationMocks.request,
+    reportNanoClarificationOutcome: nanoClarificationMocks.report,
   };
 });
 const push = vi.fn();
@@ -384,6 +400,14 @@ describe('InboxProcessingModal', () => {
     });
     appleClarificationMocks.request.mockReset();
     appleClarificationMocks.report.mockReset().mockResolvedValue(null);
+    nanoClarificationMocks.prototypeEnabled = false;
+    nanoClarificationMocks.capability.mockReset().mockResolvedValue({
+      available: true,
+      reason: 'available',
+      supportedOperations: ['inbox_clarification'],
+    });
+    nanoClarificationMocks.request.mockReset();
+    nanoClarificationMocks.report.mockReset().mockResolvedValue(null);
     similarityMocks.createIndex.mockClear();
     similarityMocks.find.mockClear();
     addProject.mockClear();
@@ -2501,6 +2525,163 @@ describe('InboxProcessingModal', () => {
 
     expect(appleClarificationMocks.request).not.toHaveBeenCalled();
     expect(findNodesWithText(root, 'On-device suggestion')).toHaveLength(0);
+  });
+
+  it('dispatches Nano clarification into the editable draft and consumes Apply once', async () => {
+    setPlatform('android');
+    nanoClarificationMocks.prototypeEnabled = true;
+    asyncStorageMock.getItem.mockImplementation(async (storageKey: string) => (
+      storageKey === 'mindwtr:nanoClarificationBackend:v1' ? 'on-device' : null
+    ));
+    nanoClarificationMocks.request.mockResolvedValue({
+      cleanedTitle: 'Call the dentist',
+      status: 'next',
+      contextIds: [],
+      tagIds: [],
+      dueDate: '2026-09-18',
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+    const root = tree.root;
+
+    act(() => {
+      findPressableWithText(root, 'taskEdit.aiClarify').props.onPress();
+    });
+    await flushAsyncActions();
+    const apply = findPressableWithText(root, 'ai.applySuggestion').props.onPress;
+    act(() => {
+      apply();
+      apply();
+    });
+
+    expect(findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.value).toBe('Call the dentist');
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(nanoClarificationMocks.request).toHaveBeenCalledTimes(1);
+    expect(clarifyTask).not.toHaveBeenCalled();
+    expect(nanoClarificationMocks.report).toHaveBeenCalledWith(
+      'applied_to_draft',
+      expect.objectContaining({ dateCount: 1, statusIncluded: true }),
+    );
+  });
+
+  it.each([
+    ['busy', 'The on-device model is busy. Try again in a moment.'],
+    ['quota_exceeded', 'The on-device inference limit was reached. Try again later.'],
+  ])('keeps %s Nano failures local and asks for a deliberate retry', async (reason, message) => {
+    setPlatform('android');
+    nanoClarificationMocks.prototypeEnabled = true;
+    asyncStorageMock.getItem.mockImplementation(async (storageKey: string) => (
+      storageKey === 'mindwtr:nanoClarificationBackend:v1' ? 'on-device' : null
+    ));
+    nanoClarificationMocks.capability.mockResolvedValue({
+      available: false,
+      reason,
+      supportedOperations: [],
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+
+    act(() => {
+      findPressableWithText(tree.root, 'taskEdit.aiClarify').props.onPress();
+    });
+    await flushAsyncActions();
+
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ message, tone: 'warning' }));
+    expect(nanoClarificationMocks.request).not.toHaveBeenCalled();
+    expect(clarifyTask).not.toHaveBeenCalled();
+  });
+
+  it('cancels Nano inference when Mindwtr leaves the foreground', async () => {
+    setPlatform('android');
+    nanoClarificationMocks.prototypeEnabled = true;
+    asyncStorageMock.getItem.mockImplementation(async (storageKey: string) => (
+      storageKey === 'mindwtr:nanoClarificationBackend:v1' ? 'on-device' : null
+    ));
+    let appStateListener: ((state: string) => void) | undefined;
+    const addEventListener = vi.spyOn(AppState, 'addEventListener').mockImplementation((
+      _event: any,
+      listener: any,
+    ) => {
+      appStateListener = listener;
+      return { remove: vi.fn() } as any;
+    });
+    let observedSignal: AbortSignal | undefined;
+    nanoClarificationMocks.request.mockImplementation((_input, options) => {
+      observedSignal = options?.signal;
+      return new Promise(() => {});
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+
+    act(() => {
+      findPressableWithText(tree.root, 'taskEdit.aiClarify').props.onPress();
+    });
+    await flushAsyncActions();
+    expect(observedSignal?.aborted).toBe(false);
+
+    act(() => {
+      appStateListener?.('background');
+    });
+    expect(observedSignal?.aborted).toBe(true);
+    addEventListener.mockRestore();
+  });
+
+  it('poisons a ready Nano proposal when Mindwtr backgrounds before Apply', async () => {
+    setPlatform('android');
+    nanoClarificationMocks.prototypeEnabled = true;
+    asyncStorageMock.getItem.mockImplementation(async (storageKey: string) => (
+      storageKey === 'mindwtr:nanoClarificationBackend:v1' ? 'on-device' : null
+    ));
+    nanoClarificationMocks.request.mockResolvedValue({
+      cleanedTitle: 'Late background title',
+      contextIds: [],
+      tagIds: [],
+    });
+    let appStateListener: ((state: string) => void) | undefined;
+    const addEventListener = vi.spyOn(AppState, 'addEventListener').mockImplementation((
+      _event: any,
+      listener: any,
+    ) => {
+      appStateListener = listener;
+      return { remove: vi.fn() } as any;
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+
+    act(() => {
+      findPressableWithText(tree.root, 'taskEdit.aiClarify').props.onPress();
+    });
+    await flushAsyncActions();
+    const staleApply = findPressableWithText(tree.root, 'ai.applySuggestion').props.onPress;
+
+    act(() => {
+      appStateListener?.('background');
+    });
+    expect(findNodesWithText(tree.root, 'On-device suggestion')).toHaveLength(0);
+
+    act(() => {
+      staleApply();
+    });
+    expect(findTextInputByAccessibilityLabel(tree.root, 'taskEdit.titleLabel').props.value).toBe('Inbox task');
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(nanoClarificationMocks.report).toHaveBeenCalledWith('stale_ignored');
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'The item or its available associations changed. Ask for a fresh suggestion.',
+      tone: 'warning',
+    }));
+    addEventListener.mockRestore();
   });
 
   describe('terminal decisions', () => {

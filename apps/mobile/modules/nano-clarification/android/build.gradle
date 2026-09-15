@@ -1,0 +1,80 @@
+apply plugin: 'com.android.library'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+
+def nanoEnabled = (findProperty("mindwtrNanoEnabled") ?: "false").toBoolean()
+
+android {
+  namespace "tech.dongdongbh.mindwtr.nanoclarification"
+
+  // ML Kit Prompt beta4 requires API 26. The config plugin raises the generated
+  // evaluation app to the same floor only when this source set is selected.
+  if (nanoEnabled) {
+    defaultConfig {
+      minSdkVersion 26
+    }
+  }
+
+  sourceSets {
+    main.java.srcDirs = [
+      "src/main/java",
+      nanoEnabled ? "src/enabled/java" : "src/disabled/java",
+    ]
+    if (nanoEnabled) {
+      test.java.srcDirs += ["src/enabledTest/java"]
+    }
+  }
+
+  testOptions {
+    unitTests.returnDefaultValues = true
+  }
+}
+
+dependencies {
+  if (nanoEnabled) {
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta4") {
+      // beta4 is compiled with Kotlin 2.3. The SDK's Java/Futures adapter keeps
+      // that metadata off Mindwtr's Kotlin 2.1 compile classpath; the newer
+      // compatible stdlib is selected only when packaging the evaluation APK.
+      exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib"
+    }
+    runtimeOnly "org.jetbrains.kotlin:kotlin-stdlib:2.3.21"
+    // beta4 invokes JVM-default coroutine bridges absent from the app's 1.9
+    // runtime (Job.cancel$default crashes when cancelling model setup).
+    // Align the entire optional evaluation runtime, including Android/Guava.
+    runtimeOnly enforcedPlatform("org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.11.0")
+  }
+  testImplementation "junit:junit:4.13.2"
+}
+
+if (nanoEnabled) {
+  configurations.configureEach { configuration ->
+    if (configuration.name.endsWith("CompileClasspath")) {
+      configuration.resolutionStrategy.force "org.jetbrains.kotlin:kotlin-stdlib:2.1.20"
+    }
+  }
+  tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    // The Kotlin module never calls beta4 Kotlin declarations; MlKitNanoClient
+    // isolates them behind Java types. Skip only the dependency metadata scan.
+    kotlinOptions.freeCompilerArgs += ["-Xskip-metadata-version-check"]
+  }
+}
+
+tasks.register("verifyNanoBuildMode") {
+  doLast {
+    def enabledSources = android.sourceSets.main.java.srcDirs.any { it.path.contains("/enabled/") }
+    if (enabledSources != nanoEnabled) {
+      throw new GradleException("Nano clarification source set does not match mindwtrNanoEnabled")
+    }
+    if (!nanoEnabled && configurations.implementation.dependencies.any {
+      it.group == "com.google.mlkit" && it.name == "genai-prompt"
+    }) {
+      throw new GradleException("Disabled Nano clarification build resolved the ML Kit Prompt dependency")
+    }
+  }
+}
