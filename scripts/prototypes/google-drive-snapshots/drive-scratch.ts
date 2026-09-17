@@ -1,6 +1,7 @@
 /** Isolated synthetic-data experiment. NOT an application sync backend. */
 import { randomUUID } from 'node:crypto';
 import type { Snapshot } from './model';
+import type { ChangePage } from './incremental';
 
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
@@ -21,7 +22,8 @@ const object = (text: string): Record<string, any> => {
 };
 
 export function createScratchDriveStore(options: {
-  accessToken: string; allowTestWrites?: boolean; fetchImpl?: typeof fetch; timeoutMs?: number;
+  accessToken: string; allowTestWrites?: boolean;
+  fetchImpl?: (input: string, init: RequestInit) => Promise<Response>; timeoutMs?: number;
 }) {
   if (options.allowTestWrites !== true) fail('writes-not-authorized');
   if (!options.accessToken?.trim()) fail('invalid-token');
@@ -81,9 +83,59 @@ export function createScratchDriveStore(options: {
     } finally { clearTimeout(timer); }
   }
 
+  async function readSnapshot(id: string): Promise<Snapshot> {
+    if (!validId(id)) return fail('invalid-snapshot-id');
+    const metadata = await request(metadataUrl(id));
+    if (metadata.status !== 200 || !owned(object(metadata.text), id)) return fail('ownership-mismatch');
+    const response = await request(`${API}/files/${encodeURIComponent(id)}?alt=media`);
+    if (response.status !== 200) return fail('snapshot-unavailable');
+    const snapshot = object(response.text);
+    if (snapshot.id !== id || snapshot.namespace !== namespace) return fail('snapshot-identity-mismatch');
+    return snapshot as Snapshot;
+  }
+
+  const validToken = (value: unknown): value is string => typeof value === 'string'
+    && value.length > 0 && value.length <= 4096;
+
   return {
     namespace,
     metrics,
+    readSnapshot,
+    async getStartPageToken(): Promise<string> {
+      const response = await request(`${API}/changes/startPageToken?fields=startPageToken`);
+      if (response.status !== 200) return fail('change-start-failed');
+      const token = object(response.text).startPageToken;
+      if (!validToken(token)) return fail('invalid-change-token');
+      return token;
+    },
+    async getChangePage(cursor: string): Promise<ChangePage> {
+      if (!validToken(cursor)) return fail('invalid-change-token');
+      const params = new URLSearchParams({ pageToken: cursor, spaces: 'drive', pageSize: '100',
+        includeRemoved: 'true', includeCorpusRemovals: 'true',
+        fields: 'nextPageToken,newStartPageToken,changes(fileId,removed,file(id,trashed,appProperties))' });
+      const response = await request(`${API}/changes?${params}`);
+      if (response.status !== 200) return fail('change-list-failed');
+      const page = object(response.text);
+      if (!Array.isArray(page.changes) || page.changes.length > 1000) return fail('invalid-change-page');
+      if (page.nextPageToken !== undefined && !validToken(page.nextPageToken)) return fail('invalid-change-token');
+      if (page.newStartPageToken !== undefined && !validToken(page.newStartPageToken)) return fail('invalid-change-token');
+      if ((page.nextPageToken === undefined) === (page.newStartPageToken === undefined)) return fail('invalid-change-page');
+      return {
+        nextPageToken: page.nextPageToken,
+        newStartPageToken: page.newStartPageToken,
+        changes: page.changes.map((change: Record<string, any>) => {
+          if (!change || !validId(change.fileId)
+            || (change.removed !== undefined && typeof change.removed !== 'boolean')
+            || (change.file !== undefined && (!change.file || typeof change.file !== 'object'
+              || Array.isArray(change.file) || change.file.id !== change.fileId))) return fail('invalid-change');
+          if (change.file?.trashed !== undefined && typeof change.file.trashed !== 'boolean') return fail('invalid-change');
+          // The feed cannot be namespace-filtered server-side. Request only
+          // identity/ownership metadata; never download unrelated file bodies.
+          return { id: change.fileId, removed: change.removed === true || change.file?.trashed === true,
+            owned: !!change.file && owned(change.file, change.fileId) };
+        }),
+      };
+    },
     async generateId(): Promise<string> {
       if (generated.size >= MAX_FILES) return fail('file-budget');
       const response = await request(`${API}/files/generateIds?count=1&space=drive&type=files`);

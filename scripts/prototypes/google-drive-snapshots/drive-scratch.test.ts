@@ -35,7 +35,7 @@ function fakeDrive(options: { wrongMarker?: boolean; ambiguous?: boolean; incomp
     if (method === 'DELETE') { files.delete(id); return new Response(null, { status: 204 }); }
     if (url.searchParams.get('alt') === 'media') return new Response(file.bytes);
     return json(options.wrongMarker ? { ...file.metadata, appProperties: {} } : file.metadata);
-  }) as typeof fetch;
+  });
   return { fetchImpl, files, calls };
 }
 
@@ -95,9 +95,50 @@ describe('isolated Drive scratch transport', () => {
   });
   test('bounds stalled response bodies and does not leak raw errors', async () => {
     const store = createScratchDriveStore({ accessToken: 'secret-token', allowTestWrites: true,
-      timeoutMs: 10, fetchImpl: (async () => new Response(new ReadableStream({ start() {} }))) as typeof fetch });
+      timeoutMs: 10, fetchImpl: async () => new Response(new ReadableStream({ start() {} })) });
     const start = performance.now();
     await expect(store.generateId()).rejects.toThrow('request-timeout');
     expect(performance.now() - start).toBeLessThan(1_000);
+  });
+  test('reads change tokens and only ownership metadata, without fetching foreign bodies', async () => {
+    const calls: URL[] = [];
+    let namespace = '';
+    const store = createScratchDriveStore({ accessToken: 'synthetic', allowTestWrites: true,
+      fetchImpl: (async (input: any) => {
+        const url = new URL(String(input)); calls.push(url);
+        if (url.pathname.endsWith('/startPageToken')) return Response.json({ startPageToken: 'opaque/start+' });
+        expect(url.searchParams.get('pageToken')).toBe('opaque/start+');
+        expect(url.searchParams.get('includeRemoved')).toBe('true');
+        expect(url.searchParams.get('fields')).not.toContain('name');
+        return Response.json({ changes: [
+          { fileId: 'owned', removed: false, file: { id: 'owned', appProperties: { mindwtrSnapshotPrototype: namespace } } },
+          { fileId: 'foreign', file: { id: 'foreign', appProperties: {} } },
+          { fileId: 'gone', removed: true },
+        ], newStartPageToken: 'final' });
+      }) });
+    namespace = store.namespace;
+    const start = await store.getStartPageToken();
+    expect(await store.getChangePage(start)).toEqual({ nextPageToken: undefined, newStartPageToken: 'final', changes: [
+      { id: 'owned', removed: false, owned: true }, { id: 'foreign', removed: false, owned: false },
+      { id: 'gone', removed: true, owned: false },
+    ] });
+    expect(calls).toHaveLength(2);
+  });
+  test('checks ownership before a requested snapshot body', async () => {
+    const { store, snapshot, calls } = await fixture({ wrongMarker: true });
+    await expect(store.publish(snapshot)).rejects.toThrow();
+    calls.length = 0;
+    await expect(store.readSnapshot(snapshot.id)).rejects.toThrow('ownership-mismatch');
+    expect(calls).toHaveLength(1);
+  });
+  test('rejects malformed change metadata and unsafe tokens', async () => {
+    for (const page of [{ changes: [], nextPageToken: 'a', newStartPageToken: 'b' },
+      { changes: [{ fileId: 'one', file: { id: 'two' } }], newStartPageToken: 'a' },
+      { changes: [{ fileId: 'one', removed: 'false' }], newStartPageToken: 'a' },
+      { changes: [], newStartPageToken: '' }]) {
+      const store = createScratchDriveStore({ accessToken: 'synthetic', allowTestWrites: true,
+        fetchImpl: async () => Response.json(page) });
+      await expect(store.getChangePage('start')).rejects.toThrow();
+    }
   });
 });

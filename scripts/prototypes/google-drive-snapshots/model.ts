@@ -1,6 +1,7 @@
 import { sanitizeAppDataForRemote } from '../../../packages/core/src/sync-helpers';
 import { validateMergedSyncData, validateSyncPayloadShape } from '../../../packages/core/src/sync-normalization';
 import { mergeAppData } from '../../../packages/core/src/sync';
+import { safeParseDate } from '../../../packages/core/src/date';
 import { TASK_STATUS_VALUES } from '../../../packages/core/src/task-status';
 import type { AppData } from '../../../packages/core/src/types';
 
@@ -289,6 +290,443 @@ export const resolveSnapshots = (
     return {
         heads: graph.heads.map((head) => head.id),
         data: resolveGraphData(graph, nowIso),
+    };
+};
+
+type CachedSnapshot = {
+    serialized: string;
+    normalized: AppData;
+    reusableFromMs: number | null;
+    coveredParents: Set<string>;
+};
+
+type CachedCandidate = {
+    snapshot: Snapshot;
+    serialized: string;
+    normalized: AppData | null;
+    cached: CachedSnapshot | null;
+};
+
+export type CachedSnapshotResolverStats = {
+    resolves: number;
+    fullValidationFallbacks: number;
+    normalizedSnapshotReuses: number;
+    coverageProofReuses: number;
+    cacheLimitRejections: number;
+    cacheEntries: number;
+};
+
+type MutableCachedSnapshotResolverStats = Omit<CachedSnapshotResolverStats, 'cacheEntries'>;
+
+type LocalTimeContext = {
+    configuredTimeZone: string;
+    timeZone: string;
+    offsetMinutes: number;
+};
+
+const localTimeContext = (nowMs: number): LocalTimeContext => ({
+    configuredTimeZone: process.env.TZ ?? '',
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
+    offsetMinutes: new Date(nowMs).getTimezoneOffset(),
+});
+
+const sameLocalTimeContext = (
+    left: LocalTimeContext,
+    right: LocalTimeContext,
+): boolean => left.configuredTimeZone === right.configuredTimeZone
+    && left.timeZone === right.timeZone
+    && left.offsetMinutes === right.offsetMinutes;
+
+const MERGE_CLOCK_TIMESTAMP_FIELDS = [
+    'createdAt',
+    'updatedAt',
+    'deletedAt',
+    'purgedAt',
+    'completedAt',
+    'cancelledAt',
+    'projectArchivedAt',
+    'deletedAtBeforeProjectArchive',
+    'completedAtBeforeProjectArchive',
+] as const;
+
+const hasFutureOrMalformedMergeTimestamp = (
+    entity: object,
+    nowMs: number,
+): boolean => {
+    const record = entity as Record<string, unknown>;
+    for (const field of MERGE_CLOCK_TIMESTAMP_FIELDS) {
+        const value = record[field];
+        if (value === undefined || value === null) continue;
+        if (typeof value !== 'string') return true;
+        const parsed = Date.parse(value);
+        if (!Number.isFinite(parsed) || parsed > nowMs) return true;
+    }
+    return false;
+};
+
+const hasFutureFocusedStart = (data: AppData, nowMs: number): boolean => {
+    const now = new Date(nowMs);
+    const endOfToday = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        23,
+        59,
+        59,
+        999,
+    );
+    return data.tasks.some((task) => {
+        const focused = task.isFocusedToday as unknown;
+        if (focused !== true && focused !== 1) return false;
+        const start = safeParseDate(task.startTime);
+        return start !== null && start > endOfToday;
+    });
+};
+
+const hasUnsafeMergeClockFields = (data: AppData, nowMs: number): boolean => {
+    const entities: object[] = [
+        ...data.tasks,
+        ...data.projects,
+        ...data.sections,
+        ...data.areas,
+        ...(data.people ?? []),
+    ];
+    return entities.some((entity) => hasFutureOrMalformedMergeTimestamp(entity, nowMs))
+        || hasFutureFocusedStart(data, nowMs);
+};
+
+/**
+ * Core merge consults the clock for entity revision/lifecycle arbitration and
+ * for clearing a focused task whose start is after today. Scheduling-only dates
+ * do not participate. Once those audited fields cannot cross a future boundary,
+ * a one-millisecond probe detects the remaining direct `nowIso` stamps in
+ * normalization/reference repair. Clock rollback is handled separately.
+ */
+const reusableNormalizedData = (
+    data: AppData,
+    normalized: AppData,
+    nowMs: number,
+): boolean => {
+    if (hasUnsafeMergeClockFields(data, nowMs)) return false;
+    const nextMs = nowMs + 1;
+    if (!Number.isFinite(nextMs) || nextMs > 8_640_000_000_000_000) return false;
+    const nextNormalized = normalizeData(data, new Date(nextMs).toISOString());
+    return canonicalJson(nextNormalized) === canonicalJson(normalized);
+};
+
+const validateCachedEnvelope = (
+    snapshots: Snapshot[],
+    namespace: string,
+    cache: Map<string, CachedSnapshot>,
+    nowIso: string,
+    nowMs: number,
+    allowReuse: boolean,
+): {
+    candidates: CachedCandidate[];
+    requiresFullValidation: boolean;
+    normalizedSnapshotReuses: number;
+} => {
+    if (!Array.isArray(snapshots)) throw new Error('snapshots must be an array');
+    assertIdentifier(namespace, 'namespace');
+    if (snapshots.length > MAX_SNAPSHOT_FILES) {
+        throw new Error(`snapshot history exceeds ${MAX_SNAPSHOT_FILES} files`);
+    }
+
+    const candidates: CachedCandidate[] = [];
+    const serializedById = new Map<string, string>();
+    let requiresFullValidation = !allowReuse;
+    let normalizedSnapshotReuses = 0;
+
+    for (const [index, candidate] of snapshots.entries()) {
+        const label = `snapshot[${index}]`;
+        if (!isRecord(candidate)) throw new Error(`${label} must be an object`);
+        if (candidate.format !== 'mindwtr-drive-snapshot-prototype') {
+            throw new Error(`${label} has an unsupported format`);
+        }
+        if (candidate.version !== 1) throw new Error(`${label} has an unsupported version`);
+        assertIdentifier(candidate.id, `${label}.id`);
+        assertIdentifier(candidate.namespace, `${label}.namespace`);
+        if (candidate.namespace !== namespace) throw new Error(`${label} has the wrong namespace`);
+        if (!Array.isArray(candidate.parents)) throw new Error(`${label}.parents must be an array`);
+        if (candidate.parents.length > MAX_PARENTS_PER_SNAPSHOT) {
+            throw new Error(`${label} exceeds ${MAX_PARENTS_PER_SNAPSHOT} parents`);
+        }
+
+        const parentIds = new Set<string>();
+        for (const [parentIndex, parent] of candidate.parents.entries()) {
+            assertIdentifier(parent, `${label}.parents[${parentIndex}]`);
+            if (parentIds.has(parent)) throw new Error(`${label} contains duplicate parent ${parent}`);
+            parentIds.add(parent);
+        }
+
+        const snapshot = candidate as unknown as Snapshot;
+        const serialized = canonicalJson(snapshot);
+        const previousSerialized = serializedById.get(snapshot.id);
+        if (previousSerialized !== undefined) {
+            if (previousSerialized !== serialized) {
+                throw new Error(`duplicate snapshot id ${snapshot.id} has mismatched content`);
+            }
+            continue;
+        }
+        serializedById.set(snapshot.id, serialized);
+
+        const cached = cache.get(snapshot.id) ?? null;
+        if (cached !== null && cached.serialized !== serialized) {
+            throw new Error(`snapshot id ${snapshot.id} changed after caching`);
+        }
+
+        if (
+            cached !== null
+            && allowReuse
+            && cached.reusableFromMs !== null
+            && nowMs >= cached.reusableFromMs
+        ) {
+            candidates.push({
+                snapshot,
+                serialized,
+                normalized: structuredClone(cached.normalized),
+                cached,
+            });
+            normalizedSnapshotReuses += 1;
+            continue;
+        }
+
+        const validData = assertAppData(snapshot.data, `${label}.data`);
+        const normalized = normalizeData(validData, nowIso);
+        const reusable = reusableNormalizedData(validData, normalized, nowMs);
+        if (!reusable) requiresFullValidation = true;
+        candidates.push({ snapshot, serialized, normalized, cached });
+    }
+
+    return { candidates, requiresFullValidation, normalizedSnapshotReuses };
+};
+
+const cachedGraphHeads = (candidates: CachedCandidate[]): Snapshot[] => {
+    const snapshotsById = new Map(candidates.map(({ snapshot }) => [snapshot.id, snapshot]));
+    for (const snapshot of snapshotsById.values()) {
+        for (const parentId of snapshot.parents) {
+            if (!snapshotsById.has(parentId)) {
+                throw new Error(`snapshot ${snapshot.id} is missing parent ${parentId}`);
+            }
+        }
+    }
+
+    const visitState = new Map<string, 'visiting' | 'visited'>();
+    const visit = (id: string): void => {
+        const state = visitState.get(id);
+        if (state === 'visiting') throw new Error(`snapshot graph contains a cycle at ${id}`);
+        if (state === 'visited') return;
+        visitState.set(id, 'visiting');
+        for (const parentId of snapshotsById.get(id)?.parents ?? []) visit(parentId);
+        visitState.set(id, 'visited');
+    };
+    for (const id of snapshotsById.keys()) visit(id);
+
+    const parentIds = new Set<string>();
+    for (const snapshot of snapshotsById.values()) {
+        for (const parentId of snapshot.parents) parentIds.add(parentId);
+    }
+    return [...snapshotsById.values()]
+        .filter((snapshot) => !parentIds.has(snapshot.id))
+        .sort((left, right) => compareIds(left.id, right.id));
+};
+
+const resolveCachedHeads = (
+    heads: Snapshot[],
+    normalizedById: Map<string, AppData>,
+    nowIso: string,
+): AppData | null => {
+    if (heads.length === 0) return null;
+    if (heads.length === 1) {
+        return structuredClone(normalizedById.get(heads[0]!.id)!);
+    }
+
+    // Match resolveGraphData exactly for a frontier: normalization is not
+    // distributive over repairs that become visible only after heads unite.
+    let merged = structuredClone(heads[0]!.data);
+    for (const head of heads.slice(1)) {
+        merged = mergeAppData(merged, structuredClone(head.data), { nowIso });
+    }
+    return normalizeData(merged, nowIso);
+};
+
+export const createCachedSnapshotResolver = (namespace: string): {
+    resolve: (snapshots: Snapshot[], nowIso: string) => { heads: string[]; data: AppData | null };
+    getStats: () => CachedSnapshotResolverStats;
+} => {
+    assertIdentifier(namespace, 'namespace');
+    const cache = new Map<string, CachedSnapshot>();
+    let lastNowMs: number | null = null;
+    let lastTimeContext: LocalTimeContext | null = null;
+    const stats: MutableCachedSnapshotResolverStats = {
+        resolves: 0,
+        fullValidationFallbacks: 0,
+        normalizedSnapshotReuses: 0,
+        coverageProofReuses: 0,
+        cacheLimitRejections: 0,
+    };
+
+    const assertCacheCapacity = (candidates: CachedCandidate[]): void => {
+        let additionalEntries = 0;
+        for (const { snapshot } of candidates) {
+            if (!cache.has(snapshot.id)) additionalEntries += 1;
+        }
+        if (cache.size + additionalEntries > MAX_SNAPSHOT_FILES) {
+            stats.cacheLimitRejections += 1;
+            throw new Error(`snapshot resolver cache exceeds ${MAX_SNAPSHOT_FILES} files`);
+        }
+    };
+
+    const invalidateAllReusableProofs = (): void => {
+        for (const entry of cache.values()) {
+            entry.reusableFromMs = null;
+            entry.coveredParents.clear();
+        }
+    };
+
+    const refreshCacheAfterFullValidation = (
+        candidates: CachedCandidate[],
+        nowIso: string,
+        nowMs: number,
+        replaceProofs: boolean,
+    ): void => {
+        for (const candidate of candidates) {
+            const normalized = normalizeData(candidate.snapshot.data, nowIso);
+            const reusable = reusableNormalizedData(candidate.snapshot.data, normalized, nowMs);
+            const existing = cache.get(candidate.snapshot.id);
+            if (existing === undefined) {
+                cache.set(candidate.snapshot.id, {
+                    serialized: candidate.serialized,
+                    normalized: structuredClone(normalized),
+                    reusableFromMs: reusable ? nowMs : null,
+                    coveredParents: new Set(),
+                });
+            } else if (replaceProofs) {
+                existing.normalized = structuredClone(normalized);
+                existing.reusableFromMs = reusable ? nowMs : null;
+                existing.coveredParents.clear();
+            } else if (
+                reusable
+                && (existing.reusableFromMs === null || nowMs < existing.reusableFromMs)
+            ) {
+                existing.normalized = structuredClone(normalized);
+                existing.reusableFromMs = nowMs;
+            }
+        }
+
+        for (const { snapshot } of candidates) {
+            const child = cache.get(snapshot.id)!;
+            if (child.reusableFromMs === null || nowMs < child.reusableFromMs) continue;
+            for (const parentId of snapshot.parents) {
+                const parent = cache.get(parentId);
+                if (
+                    parent !== undefined
+                    && parent.reusableFromMs !== null
+                    && nowMs >= parent.reusableFromMs
+                ) {
+                    child.coveredParents.add(parentId);
+                }
+            }
+        }
+    };
+
+    return {
+        resolve: (snapshots: Snapshot[], nowIso: string) => {
+            stats.resolves += 1;
+            assertNowIso(nowIso);
+            const nowMs = Date.parse(nowIso);
+            const currentTimeContext = localTimeContext(nowMs);
+            const clockRolledBack = lastNowMs !== null && nowMs < lastNowMs;
+            const timeContextChanged = lastTimeContext !== null
+                && !sameLocalTimeContext(lastTimeContext, currentTimeContext);
+            const checked = validateCachedEnvelope(
+                snapshots,
+                namespace,
+                cache,
+                nowIso,
+                nowMs,
+                !clockRolledBack && !timeContextChanged,
+            );
+            assertCacheCapacity(checked.candidates);
+
+            if (checked.requiresFullValidation) {
+                const resolved = resolveSnapshots(snapshots, namespace, nowIso);
+                if (timeContextChanged) invalidateAllReusableProofs();
+                refreshCacheAfterFullValidation(
+                    checked.candidates,
+                    nowIso,
+                    nowMs,
+                    timeContextChanged,
+                );
+                stats.fullValidationFallbacks += 1;
+                lastNowMs = nowMs;
+                lastTimeContext = currentTimeContext;
+                return resolved;
+            }
+
+            const heads = cachedGraphHeads(checked.candidates);
+            const normalizedById = new Map<string, AppData>();
+            for (const candidate of checked.candidates) {
+                normalizedById.set(candidate.snapshot.id, candidate.normalized!);
+            }
+
+            const coveredParents = new Map<string, Set<string>>();
+            let coverageProofReuses = 0;
+            for (const candidate of checked.candidates) {
+                const childData = candidate.normalized!;
+                const alreadyCovered = candidate.cached?.coveredParents ?? new Set<string>();
+                const newlyCovered = new Set<string>();
+                for (const parentId of [...candidate.snapshot.parents].sort(compareIds)) {
+                    if (alreadyCovered.has(parentId)) {
+                        coverageProofReuses += 1;
+                        continue;
+                    }
+                    const parentData = normalizedById.get(parentId)!;
+                    const childWithParent = normalizeData(
+                        mergeAppData(structuredClone(childData), structuredClone(parentData), { nowIso }),
+                        nowIso,
+                    );
+                    if (dataSignature(childWithParent) !== dataSignature(childData)) {
+                        throw new Error(`snapshot ${candidate.snapshot.id} does not cover parent ${parentId}`);
+                    }
+                    newlyCovered.add(parentId);
+                }
+                coveredParents.set(candidate.snapshot.id, newlyCovered);
+            }
+
+            const result = {
+                heads: heads.map((head) => head.id),
+                data: resolveCachedHeads(heads, normalizedById, nowIso),
+            };
+
+            for (const candidate of checked.candidates) {
+                let entry = cache.get(candidate.snapshot.id);
+                if (entry === undefined) {
+                    entry = {
+                        serialized: candidate.serialized,
+                        normalized: structuredClone(candidate.normalized!),
+                        reusableFromMs: nowMs,
+                        coveredParents: new Set(),
+                    };
+                    cache.set(candidate.snapshot.id, entry);
+                } else if (
+                    entry.reusableFromMs === null
+                    || nowMs < entry.reusableFromMs
+                ) {
+                    entry.normalized = structuredClone(candidate.normalized!);
+                    entry.reusableFromMs = nowMs;
+                }
+                for (const parentId of coveredParents.get(candidate.snapshot.id) ?? []) {
+                    entry.coveredParents.add(parentId);
+                }
+            }
+            stats.normalizedSnapshotReuses += checked.normalizedSnapshotReuses;
+            stats.coverageProofReuses += coverageProofReuses;
+            lastNowMs = nowMs;
+            lastTimeContext = currentTimeContext;
+            return result;
+        },
+        getStats: () => ({ ...stats, cacheEntries: cache.size }),
     };
 };
 
