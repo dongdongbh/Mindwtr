@@ -51,9 +51,9 @@ export function getTrashRetentionHint(t: (key: string) => string): string {
     );
 }
 
-/** A Trash row's deleted date: the short date in the app's date format. */
-export function formatTrashDeletedDate(deletedAt: string | undefined, formatDate: DateFormatter): string {
-    return formatDate(deletedAt, 'P', 'Unknown');
+/** A Trash row's deleted date: the short date in the app's date format; `notSetLabel` names a missing one. */
+export function formatTrashDeletedDate(deletedAt: string | undefined, formatDate: DateFormatter, notSetLabel: string): string {
+    return formatDate(deletedAt, 'P', notSetLabel);
 }
 
 export function getTrashRowLabels(t: (key: string) => string) {
@@ -64,6 +64,7 @@ export function getTrashRowLabels(t: (key: string) => string) {
         restore: tFallback(t, 'trash.restore', 'Restore'),
         delete: tFallback(t, 'common.delete', 'Delete'),
         select: tFallback(t, 'bulk.select', 'Select'),
+        notSet: tFallback(t, 'common.notSet', 'Not set'),
     };
 }
 

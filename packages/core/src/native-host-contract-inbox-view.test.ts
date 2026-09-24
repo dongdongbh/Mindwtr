@@ -129,6 +129,15 @@ describe('native host contract: the Inbox view', () => {
         const tokens = value(host.getInboxFilterTokens({ offset: 0, limit: 2, revision: first.revision }));
         expect(tokens.items.map((token) => token.value)).toEqual(first.filters.tokens.items.slice(0, 2).map((token) => token.value));
         expect(tokens.total).toBe(first.filters.tokens.total);
+        // The picker's search box narrows the tokens, ignoring case.
+        const needle = first.filters.tokens.items[0].value.slice(1, 3).toUpperCase();
+        const found = value(host.getInboxFilterTokens({ offset: 0, limit: 100, revision: first.revision, query: ` ${needle} ` }));
+        expect(found.items.map((token) => token.value)).toEqual(first.filters.tokens.items
+            .map((token) => token.value)
+            .filter((token) => token.toLowerCase().includes(needle.toLowerCase())));
+        expect(found.total).toBe(found.items.length);
+        expect(host.getInboxFilterTokens({ offset: 0, limit: 2, revision: first.revision, query: 7 as never }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         // Another grouping is another view: its revision differs.
         expect(host.getInboxFilterTokens({ params: { groupBy: 'tag' }, offset: 0, limit: 2, revision: first.revision }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });

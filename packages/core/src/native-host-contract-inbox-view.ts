@@ -20,7 +20,7 @@
  *
  * The rows are windowed by NATIVE_HOST_MAX_WINDOW with `offset`/`limit`; the
  * filter sheet's tokens carry their first window, and getInboxFilterTokens pages
- * the rest under the same revision.
+ * the rest under the same revision; its optional `query` is the picker's search box.
  *
  * Only functions read this module's imports from native-host-contract.ts, so the
  * import cycle between the two files is safe.
@@ -42,7 +42,9 @@ import {
     isFilterEdit,
     isObjectRecord,
     isPaging,
+    isText,
     isTextList,
+    matchesPickerQuery,
     nativeFilterView,
     page,
     paramsKey,
@@ -304,7 +306,7 @@ export function createInboxViewMethods(deps: InboxViewDeps) {
         },
 
         /** A later window of the filter sheet's tokens. `params` are the view's inputs as last sent (with the returned `filters.state`, no `filterEdit`). */
-        getInboxFilterTokens(input: { params?: InboxViewInput; offset: number; limit: number; revision: string }): NativeHostResult<{
+        getInboxFilterTokens(input: { params?: InboxViewInput; offset: number; limit: number; revision: string; query?: string }): NativeHostResult<{
             version: typeof NATIVE_HOST_CONTRACT_VERSION;
             revision: string;
         } & NativeWindow<TokenOption>> {
@@ -312,18 +314,21 @@ export function createInboxViewMethods(deps: InboxViewDeps) {
             if (!ready.ok) return ready;
             const raw = isObjectRecord(input) && input.params !== undefined ? input.params : {};
             const params = isObjectRecord(raw) && raw.filterEdit === undefined ? readParams(raw) : null;
-            if (!params || !isObjectRecord(input) || typeof input.revision !== 'string' || !isPaging(input)) {
-                return fail('INVALID_INPUT', 'The view\'s params, a valid window and its revision are required');
+            if (!params || !isObjectRecord(input) || typeof input.revision !== 'string' || !isPaging(input)
+                || (input.query !== undefined && !isText(input.query))) {
+                return fail('INVALID_INPUT', 'The view\'s params, a valid window, its revision and an optional picker query are required');
             }
             const built = build(params);
             if (built.revision !== input.revision) return fail('STALE_REVISION', 'Inbox changed; read it again');
+            const query = input.query;
+            const tokens = query === undefined ? built.data.tokens : built.data.tokens.filter((token) => matchesPickerQuery(token.value, query));
             return {
                 ok: true,
                 value: {
                     version: NATIVE_HOST_CONTRACT_VERSION,
                     revision: built.revision,
-                    total: built.data.tokens.length,
-                    items: page(built.data.tokens, input),
+                    total: tokens.length,
+                    items: page(tokens, input),
                 },
             };
         },

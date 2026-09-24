@@ -12,8 +12,15 @@ import {
     toggleContextsNoContext,
     toggleContextsToken,
 } from './contexts-view-model';
-import { configureDateFormatting } from './date';
-import { getArchivedProjectRow, getArchiveSummary } from './archive-view-model';
+import { configureDateFormatting, createDateFormatter } from './date';
+import {
+    getArchiveCompletedAtPickerStart,
+    getArchivedProjectRow,
+    getArchivedTaskRow,
+    getArchiveRowLabels,
+    getArchiveSummary,
+    resolvePickedCompletedAt,
+} from './archive-view-model';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import { taskMatchesContextOrTagSelection } from './hierarchy-utils';
 import { loadTranslations } from './i18n/i18n-loader';
@@ -219,7 +226,30 @@ describe('contexts view filters', () => {
     it('uses an archived project’s area color when its stored color is the placeholder', () => {
         const project = { id: 'project', title: 'Project', status: 'archived', areaId: 'area', color: DEFAULT_PROJECT_COLOR } as Project;
         const area = { id: 'area', name: 'Area', color: '#123456' } as Area;
-        expect(getArchivedProjectRow(project, () => 'date', new Map([['area', area]])).indicatorColor).toBe('#123456');
-        expect(getArchivedProjectRow(project, () => 'date', new Map()).indicatorColor).toBeUndefined();
+        expect(getArchivedProjectRow(project, () => 'date', new Map([['area', area]]), 'Not set').indicatorColor).toBe('#123456');
+        expect(getArchivedProjectRow(project, () => 'date', new Map(), 'Not set').indicatorColor).toBeUndefined();
+    });
+
+    it('names a missing archived date with the translated Not set label, never English', () => {
+        const labels = getArchiveRowLabels((key) => (key === 'common.notSet' ? 'Non défini' : key));
+        const undated = { ...task({ id: 'undated', status: 'archived' }), updatedAt: '' } as Task;
+        expect(getArchivedTaskRow(undated, () => 'date', labels.notSet).dateLabel).toBe('Non défini');
+        const project = { id: 'project', title: 'Project', status: 'archived', updatedAt: '' } as Project;
+        expect(getArchivedProjectRow(project, () => 'date', new Map(), labels.notSet).dateLabel).toBe('Non défini');
+        expect(getArchiveRowLabels((key) => key).notSet).toBe('Not set');
+    });
+
+    it('turns the completion picker\'s local day and time into the instant mobile stores, and starts it where mobile does', () => {
+        expect(resolvePickedCompletedAt('2026-09-20', '14:05')).toBe(new Date(2026, 8, 20, 14, 5, 0, 0).toISOString());
+        expect(resolvePickedCompletedAt('2026-02-30', '14:05')).toBeNull();
+        expect(resolvePickedCompletedAt('2026-09-20', '24:00')).toBeNull();
+        expect(resolvePickedCompletedAt('2026-9-20', '14:05')).toBeNull();
+        expect(resolvePickedCompletedAt(undefined, '14:05')).toBeNull();
+        const format = createDateFormatter({ language: 'en', dateFormat: 'system', calendarSystem: 'gregorian', timeFormat: '12h', systemLocale: null });
+        const now = new Date(2026, 8, 24, 8, 30);
+        const done = { ...task({ id: 'done', status: 'archived' }), completedAt: new Date(2026, 8, 3, 21, 45).toISOString() } as Task;
+        expect(getArchiveCompletedAtPickerStart(done, format, now)).toEqual({ day: '2026-09-03', time: '21:45' });
+        expect(getArchiveCompletedAtPickerStart({ ...done, completedAt: undefined, updatedAt: 'nonsense' } as Task, format, now))
+            .toEqual({ day: '2026-09-24', time: '08:30' });
     });
 });

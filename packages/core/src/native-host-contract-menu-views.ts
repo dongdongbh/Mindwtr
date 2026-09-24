@@ -76,7 +76,8 @@ import { useTaskStore } from './store';
 import { TASK_EDITOR_ENERGY_LEVEL_OPTIONS, TASK_EDITOR_PRIORITY_OPTIONS } from './task-editor-model';
 import type { TaskGroupBy } from './task-group-sections';
 import { DONE_TASK_LIST_SORT_OPTIONS, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
-import type { Task, TaskEnergyLevel, TaskPriority, TaskSortBy, TimeEstimate, ViewSectionDefinition } from './types';
+import { tFallback } from './i18n';
+import type { MultiValueFilterMatchMode, Task, TaskEnergyLevel, TaskPriority, TaskSortBy, TimeEstimate, ViewSectionDefinition } from './types';
 import { buildTaskViewSectionUndoUpdates, sortViewSectionDefinitions } from './view-sections';
 
 type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['error']['code'];
@@ -117,6 +118,12 @@ export type NativeMoreMenu = Omit<MoreMenuModel, 'savedSearches'> & {
 
 export type TokenOption = { value: string; state: 'included' | 'excluded' | 'none'; edit: ListFilterEdit };
 type ProjectOption = { id: string; title: string; selected: boolean; edit: ListFilterEdit };
+/** A match mode control (the picker's footer): Any, then All, each with the edit that chooses it. */
+export type NativeMatchModeControl = {
+    kind: 'context' | 'tag';
+    label: string;
+    options: { value: MultiValueFilterMatchMode; label: string; selected: boolean; edit: ListFilterEdit }[];
+};
 
 /** The filter picker: options carry the exact edit to send back as `filterEdit`. */
 export type NativeListFilterView = {
@@ -128,6 +135,8 @@ export type NativeListFilterView = {
     visibility: ListFilterOptions['visibility'];
     showContextMatchMode: boolean;
     showTagMatchMode: boolean;
+    /** The match mode controls shown (contexts, then tags); empty until two tokens of a kind are chosen. */
+    matchModes: NativeMatchModeControl[];
     tokens: NativeWindow<TokenOption>;
     projects: NativeWindow<ProjectOption> | null;
     priorities: { value: TaskPriority; label: string; selected: boolean; edit: ListFilterEdit }[];
@@ -263,7 +272,7 @@ export const isObjectRecord = (value: unknown): value is Record<string, unknown>
 );
 // ponytail: id lists (a selection) stop at 1000; raise with the selection UI if people select more.
 const MAX_IDS = 1000;
-const isText = (value: unknown, max = 500): value is string => typeof value === 'string' && value.length <= max;
+export const isText = (value: unknown, max = 500): value is string => typeof value === 'string' && value.length <= max;
 export const isTextList = (value: unknown, max = MAX_IDS): value is string[] => (
     Array.isArray(value) && value.length <= max && value.every((entry) => isText(entry))
 );
@@ -344,6 +353,29 @@ export const paramsKey = (params: unknown): string => {
 export const page = <T,>(items: readonly T[], input: { offset: number; limit: number }) => items.slice(input.offset, input.offset + input.limit);
 export const firstWindow = <T,>(items: readonly T[]): NativeWindow<T> => ({ total: items.length, items: items.slice(0, NATIVE_HOST_MAX_WINDOW) });
 
+/**
+ * The picker's search, as mobile's filter sheet narrows its token and project lists:
+ * a trimmed, case-insensitive substring. toLowerCase, not toLocaleLowerCase: QuickJS has no Intl.
+ */
+export const matchesPickerQuery = (label: string, query: string): boolean => label.toLowerCase().includes(query.trim().toLowerCase());
+
+const matchModeControls = (resolved: ResolvedListFilter, t: (key: string) => string): NativeMatchModeControl[] => {
+    const control = (kind: 'context' | 'tag', label: string, mode: MultiValueFilterMatchMode): NativeMatchModeControl => ({
+        kind,
+        label,
+        options: (['any', 'all'] as const).map((value) => ({
+            value,
+            label: value === 'any' ? tFallback(t, 'filters.matchAny', 'Any') : tFallback(t, 'common.all', 'All'),
+            selected: mode === value,
+            edit: { type: 'setMatchMode', kind, value },
+        })),
+    });
+    return [
+        ...(resolved.showContextMatchMode ? [control('context', tFallback(t, 'filters.contextMatchMode', 'Context match'), resolved.state.contextMatchMode)] : []),
+        ...(resolved.showTagMatchMode ? [control('tag', tFallback(t, 'filters.tagMatchMode', 'Tag match'), resolved.state.tagMatchMode)] : []),
+    ];
+};
+
 export const tokenOptions = (options: ListFilterOptions, state: ListFilterState): TokenOption[] => options.tokens.map((value) => ({
     value,
     state: state.tokens.includes(value) ? 'included' : state.excludedTokens.includes(value) ? 'excluded' : 'none',
@@ -371,6 +403,7 @@ export const nativeFilterView = (
         visibility: options.visibility,
         showContextMatchMode: resolved.showContextMatchMode,
         showTagMatchMode: resolved.showTagMatchMode,
+        matchModes: matchModeControls(resolved, t),
         tokens: firstWindow(tokens),
         projects: projects ? firstWindow(projects) : null,
         priorities: TASK_EDITOR_PRIORITY_OPTIONS.map((value) => ({
@@ -854,12 +887,14 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
         /**
          * A later window of one of a view's collections. `params` are the view's own
          * inputs as last sent (with the returned `filters.state`, no `filterEdit`);
-         * `revision` is the view's.
+         * `revision` is the view's. `query` is the filter picker's search text: the
+         * tokens or projects matching it, from offset zero.
          */
         getMenuViewCollection(input: {
             view: 'more' | 'waiting' | 'someday' | 'reference' | 'done';
             collection: MenuViewCollectionName;
             params?: Record<string, unknown>;
+            query?: string;
             offset: number;
             limit: number;
             revision: string;
@@ -875,8 +910,9 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             if (!ready.ok) return ready;
             const params = isObjectRecord(input) && input.params !== undefined ? input.params : {};
             if (!isObjectRecord(input) || !isObjectRecord(params) || typeof input.revision !== 'string' || !isPaging(input)
-                || !VIEW_COLLECTIONS[input.view as string]?.includes(input.collection) || params.filterEdit !== undefined) {
-                return fail('INVALID_INPUT', 'A view, one of its collections, its params, a valid window and its revision are required');
+                || !VIEW_COLLECTIONS[input.view as string]?.includes(input.collection) || params.filterEdit !== undefined
+                || (input.query !== undefined && (!isText(input.query) || (input.collection !== 'tokens' && input.collection !== 'projects')))) {
+                return fail('INVALID_INPUT', 'A view, one of its collections, its params, a valid window, its revision and a picker query only for tokens or projects are required');
             }
             let built: Built<unknown> | null = null;
             if (input.view === 'more') built = buildMore();
@@ -894,7 +930,12 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             }
             if (!built) return fail('INVALID_INPUT', 'The view params are not valid');
             if (built.revision !== input.revision) return fail('STALE_REVISION', 'The view changed; read it again');
-            const items = built.collections[input.collection] ?? [];
+            const all = built.collections[input.collection] ?? [];
+            const query = input.query;
+            const items = query === undefined ? all : all.filter((item) => matchesPickerQuery(
+                input.collection === 'tokens' ? (item as TokenOption).value : (item as ProjectOption).title,
+                query,
+            ));
             return {
                 ok: true,
                 value: {

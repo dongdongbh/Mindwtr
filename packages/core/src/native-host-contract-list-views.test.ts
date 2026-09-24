@@ -18,6 +18,7 @@ import {
     type ListViewsPart,
     type ListViewsScenario,
 } from './list-views-model.replay';
+import { EMPTY_LIST_FILTER_STATE } from './list-filter-state';
 import { createNativeHostContract } from './native-host-contract';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { noopStorage } from './storage';
@@ -134,7 +135,7 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const formatDate = english();
         for (const item of result.value.items) {
             if (item.type !== 'task') continue;
-            const row = getArchivedTaskRow(state._tasksById.get(item.row.id)!, formatDate);
+            const row = getArchivedTaskRow(state._tasksById.get(item.row.id)!, formatDate, 'Not set');
             expect(item.dateLabel).toBe(`${row.cancelled ? 'Cancelled' : 'Completed'}: ${row.dateLabel}`);
         }
     });
@@ -358,6 +359,173 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(recorder.log).toEqual([]);
     });
 
+    const archiveView = (host: ReturnType<typeof createNativeHostContract>, input: Parameters<ReturnType<typeof createNativeHostContract>['getArchiveView']>[0]) => {
+        const result = host.getArchiveView(input);
+        if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
+        return result.value;
+    };
+    const taskIds = (view: { items: { type: string; row?: { id: string } }[] }) => (
+        Array.from(new Set(view.items.flatMap((item) => (item.type === 'task' && item.row ? [item.row.id] : []))))
+    );
+
+    it('filters Archive with the menu views\' filter sheet: edits, chips that carry their edit, match modes, no project filter', async () => {
+        const { host } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'));
+        const opened = archiveView(host, { filterSheetOpen: true, offset: 0, limit: 100 });
+        expect(opened.filters.clearEdit).toEqual({ type: 'clear' });
+        const office = opened.filters.tokens.items.find((token) => token.value === '@office');
+        expect(office).toEqual({ value: '@office', state: 'none', edit: { type: 'toggleToken', value: '@office' } });
+        const one = archiveView(host, { filters: opened.filters.state, filterEdit: office!.edit, filterSheetOpen: true, offset: 0, limit: 100 });
+        expect(one.filters.state.tokens).toEqual(['@office']);
+        expect(taskIds(one)).toEqual(['ar-report']);
+        expect(one.chips).toEqual([{ id: 'token:@office', label: '@office', excluded: false, action: { filterEdit: { type: 'removeToken', value: '@office' } } }]);
+        expect(one.filters.chips).toEqual([{ id: 'token:@office', label: '@office', excluded: false }]);
+        expect(one.filters).toMatchObject({ buttonLabel: 'Filters · 1', activeCount: 1, hasActive: true, matchModes: [] });
+
+        const two = archiveView(host, { filters: one.filters.state, filterEdit: { type: 'toggleToken', value: '@phone' }, offset: 0, limit: 100 });
+        expect(taskIds(two)).toEqual([]);
+        expect(two.filters.matchModes).toEqual([{ kind: 'context', label: 'Context match', options: [
+            { value: 'any', label: 'Any', selected: false, edit: { type: 'setMatchMode', kind: 'context', value: 'any' } },
+            { value: 'all', label: 'All', selected: true, edit: { type: 'setMatchMode', kind: 'context', value: 'all' } },
+        ] }]);
+        const any = archiveView(host, { filters: two.filters.state, filterEdit: two.filters.matchModes[0].options[0].edit, offset: 0, limit: 100 });
+        expect(any.filters.state.contextMatchMode).toBe('any');
+        expect(taskIds(any).sort()).toEqual(['ar-call', 'ar-report']);
+        const cleared = archiveView(host, { filters: any.filters.state, filterEdit: any.filters.clearEdit, offset: 0, limit: 100 });
+        expect(cleared.filters.state).toEqual(EMPTY_LIST_FILTER_STATE);
+
+        // Mobile's Archive sheet has no project filter: a project selection never filters it.
+        const project = archiveView(host, { filters: { projects: ['p-launch'] }, offset: 0, limit: 100 });
+        expect(project.filters).toMatchObject({ projects: null, activeCount: 0, state: { projects: [] } });
+        expect(host.getArchiveView({ filterEdit: { type: 'toggleToken', value: '' } as never, offset: 0, limit: 1 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(host.getArchiveView({ filters: { color: 'red' } as never, offset: 0, limit: 1 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('searches the Archive filter picker\'s tokens and pages them under the view revision', async () => {
+        const { host } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'));
+        const view = archiveView(host, { filterSheetOpen: true, offset: 0, limit: 100 });
+        const params = { filters: view.filters.state, filterSheetOpen: true };
+        const all = view.filters.tokens.items;
+        expect(host.getArchiveFilterTokens({ params, query: ' ERR ', offset: 0, limit: 100, revision: view.revision })).toEqual({ ok: true, value: {
+            version: 1, revision: view.revision, total: 2, items: all.filter((token) => token.value.toLowerCase().includes('err')),
+        } });
+        expect(host.getArchiveFilterTokens({ params, offset: 2, limit: 2, revision: view.revision }))
+            .toMatchObject({ ok: true, value: { total: all.length, items: all.slice(2, 4) } });
+        // A closed sheet offers only the chosen tokens.
+        expect(host.getArchiveFilterTokens({ params: { filters: { tokens: ['#home'] } }, offset: 0, limit: 100, revision: view.revision }))
+            .toMatchObject({ ok: true, value: { total: 1, items: [{ value: '#home', state: 'included' }] } });
+        const invalid = { ok: false, error: { code: 'INVALID_INPUT' } };
+        expect(host.getArchiveFilterTokens({ params, query: 'x'.repeat(501), offset: 0, limit: 10, revision: view.revision })).toMatchObject(invalid);
+        expect(host.getArchiveFilterTokens({ params: { ...params, filterEdit: { type: 'clear' } } as never, offset: 0, limit: 10, revision: view.revision })).toMatchObject(invalid);
+        expect(host.getArchiveFilterTokens({ params, offset: 0, limit: 10 } as never)).toMatchObject(invalid);
+        expect((await useTaskStore.getState().updateTask('ar-milk', { tags: ['#changed'] })).success).toBe(true);
+        expect(host.getArchiveFilterTokens({ params, query: 'err', offset: 0, limit: 10, revision: view.revision }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+    });
+
+    it('selects every Archive row on screen, less the ones deselected, and moves exactly those', async () => {
+        const { host, recorder } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'));
+        // A folded heading hides its rows from Select all, as on mobile.
+        const base = { groupBy: 'project' as const, collapsedGroupIds: ['project:p-launch'] };
+        const view = archiveView(host, { ...base, selectAll: { except: ['ar-milk', 'ar-gone'] }, offset: 0, limit: 100 });
+        const shown = taskIds(view);
+        expect(shown).not.toContain('ar-report');
+        expect(shown).toContain('ar-milk');
+        expect(view.selectAll).toEqual({
+            params: { groupBy: 'project', filters: EMPTY_LIST_FILTER_STATE, collapsedGroupIds: ['project:p-launch'] },
+            revision: expect.any(String),
+            except: ['ar-milk'],
+        });
+        expect(view).toMatchObject({ visibleTaskCount: shown.length, selectedCount: shown.length - 1, selectedIds: [] });
+        expect(view.labels.selected).toBe(`${shown.length - 1} selected`);
+        for (const item of view.items) if (item.type === 'task') expect(item.selected).toBe(item.row.id !== 'ar-milk');
+        expect(archiveView(host, { ...base, selectedIds: ['ar-milk', 'ar-report'], offset: 0, limit: 100 }))
+            .toMatchObject({ selectedIds: ['ar-milk'], selectedCount: 1, selectAll: null });
+        const invalid = { ok: false, error: { code: 'INVALID_INPUT' } };
+        expect(host.getArchiveView({ selectedIds: [], selectAll: {}, offset: 0, limit: 1 })).toMatchObject(invalid);
+
+        const run = (action: unknown) => host.runArchiveAction({ requestId: generateUUID(), action: action as never });
+        const selectAll = view.selectAll!;
+        expect(await run({ type: 'moveTasksToInbox', selectAll, taskIds: ['ar-call'] })).toMatchObject(invalid);
+        expect(await run({ type: 'moveTasksToInbox', selectAll: { ...selectAll, except: shown } })).toMatchObject(invalid);
+        expect(await run({ type: 'moveTasksToInbox', selectAll: { ...selectAll, params: { ...selectAll.params, filterEdit: { type: 'clear' } } } })).toMatchObject(invalid);
+        expect(await run({ type: 'trashTasks', selectAll: { params: selectAll.params } })).toMatchObject(invalid);
+        expect(recorder.log).toEqual([]);
+        // A change that leaves the rows shown as they were does not refuse.
+        expect((await useTaskStore.getState().updateTask('ar-nodate', { title: 'Renamed' })).success).toBe(true);
+        recorder.log.length = 0;
+        expect(await run({ type: 'moveTasksToInbox', selectAll })).toEqual({ ok: true, value: { changed: true, toast: null } });
+        expect(recorder.log).toEqual([['batchMoveTasks', shown.filter((id) => id !== 'ar-milk'), 'inbox']]);
+        expect(useTaskStore.getState()._tasksById.get('ar-milk')?.status).toBe('archived');
+        expect(useTaskStore.getState()._tasksById.get('ar-report')?.status).toBe('archived');
+    });
+
+    it('refuses an Archive Select all once the rows shown changed, and writes nothing', async () => {
+        const { host, recorder } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'));
+        const view = archiveView(host, { selectAll: {}, offset: 0, limit: 100 });
+        expect((await useTaskStore.getState().updateTask('ar-milk', { status: 'inbox' })).success).toBe(true);
+        recorder.log.length = 0;
+        expect(await host.runArchiveAction({ requestId: generateUUID(), action: { type: 'trashTasks', selectAll: view.selectAll! } }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(recorder.log).toEqual([]);
+    });
+
+    it('retries an Archive Select all move after a failed save: one write, never resolved again', async () => {
+        const saveData = vi.fn().mockResolvedValue(undefined);
+        const { host, recorder } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'), saveData);
+        const view = archiveView(host, { selectAll: {}, offset: 0, limit: 100 });
+        const ids = taskIds(view);
+        const input = { requestId: generateUUID(), action: { type: 'moveTasksToInbox' as const, selectAll: view.selectAll! } };
+        saveData.mockRejectedValue(new Error('disk unavailable'));
+        expect(await host.runArchiveAction(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        saveData.mockResolvedValue(undefined);
+        // The rows shown changed with the landed move; the retry only saves it.
+        expect(await host.runArchiveAction(input)).toEqual({ ok: true, value: { changed: true, toast: null } });
+        expect(recorder.log).toEqual([['batchMoveTasks', ids, 'inbox']]);
+        const saved = saveData.mock.lastCall?.[0] as { tasks: { id: string; status: string }[] };
+        expect(ids.map((id) => saved.tasks.find((task) => task.id === id)?.status)).toEqual(ids.map(() => 'inbox'));
+    });
+
+    it('retries an Archive Select all trash after a failed save; its Undo restores those rows', async () => {
+        const saveData = vi.fn().mockResolvedValue(undefined);
+        const { host, recorder } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'), saveData);
+        const view = archiveView(host, { selectAll: { except: ['ar-call'] }, offset: 0, limit: 100 });
+        const ids = taskIds(view).filter((id) => id !== 'ar-call');
+        const input = { requestId: generateUUID(), action: { type: 'trashTasks' as const, selectAll: view.selectAll! } };
+        saveData.mockRejectedValue(new Error('disk unavailable'));
+        expect(await host.runArchiveAction(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        saveData.mockResolvedValue(undefined);
+        const retried = await host.runArchiveAction(input);
+        expect(retried).toMatchObject({ ok: true, value: { changed: true, toast: { undo: { action: { type: 'restoreTasks', taskIds: ids } } } } });
+        expect(recorder.log).toEqual([['batchDeleteTasks', ids]]);
+        expect(useTaskStore.getState()._tasksById.get('ar-call')?.deletedAt).toBeUndefined();
+    });
+
+    it('stores a picked local day and time as mobile\'s picker does, and retries it exactly after a failed save', async () => {
+        const saveData = vi.fn().mockResolvedValue(undefined);
+        const { host, recorder } = await openHost(fixture.archive, scenario(fixture.archive, 'rows, labels, summary and menus'), saveData);
+        const view = archiveView(host, { offset: 0, limit: 100 });
+        // ar-alpha completed at 09:00Z: 05:00 on the fixture's New York clock.
+        expect(view.items.find((item) => item.type === 'task' && item.row.id === 'ar-alpha')).toMatchObject({ completedAtPicker: { day: '2026-09-23', time: '05:00' } });
+        expect(view.items.find((item) => item.type === 'task' && item.row.id === 'ar-call')).toMatchObject({ cancelled: true, completedAtPicker: null });
+        const input = { requestId: generateUUID(), action: { type: 'setCompletedAt' as const, taskId: 'ar-alpha', day: '2026-09-20', time: '14:30' } };
+        saveData.mockRejectedValue(new Error('disk unavailable'));
+        expect(await host.runArchiveAction(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        saveData.mockResolvedValue(undefined);
+        expect(await host.runArchiveAction(input)).toEqual({ ok: true, value: { changed: true, toast: null } });
+        expect(recorder.log).toEqual([['updateTask', 'ar-alpha', { completedAt: '2026-09-20T18:30:00.000Z' }]]);
+        const run = (action: unknown) => host.runArchiveAction({ requestId: generateUUID(), action: action as never });
+        // Target state: the same time again writes nothing, in either form.
+        expect(await run({ type: 'setCompletedAt', taskId: 'ar-alpha', day: '2026-09-20', time: '14:30' })).toEqual({ ok: true, value: { changed: false, toast: null } });
+        expect(await run({ type: 'setCompletedAt', taskId: 'ar-alpha', completedAt: '2026-09-20T18:30:00.000Z' })).toEqual({ ok: true, value: { changed: false, toast: null } });
+        const invalid = { ok: false, error: { code: 'INVALID_INPUT' } };
+        expect(await run({ type: 'setCompletedAt', taskId: 'ar-alpha', day: '2026-02-30', time: '14:30' })).toMatchObject(invalid);
+        expect(await run({ type: 'setCompletedAt', taskId: 'ar-alpha', day: '2026-09-20' })).toMatchObject(invalid);
+        expect(await run({ type: 'setCompletedAt', taskId: 'ar-alpha', day: '2026-09-20', time: '2:30 PM' })).toMatchObject(invalid);
+        expect(await run({ type: 'setCompletedAt', taskId: 'ar-alpha', day: '2026-09-20', time: '14:30', completedAt: '2026-09-20T18:30:00.000Z' })).toMatchObject(invalid);
+        expect(await run({ type: 'setCompletedAt', taskId: 'ar-call', day: '2026-09-20', time: '14:30' })).toMatchObject(invalid);
+        expect(recorder.log).toHaveLength(1);
+    });
+
     it('is NOT_READY until storage is activated', async () => {
         setStorageAdapter(noopStorage);
         const host = createNativeHostContract();
@@ -368,6 +536,11 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(host.getHistoryView({ tab: 'archived' })).toMatchObject({ ok: false, error: { code: 'NOT_READY' } });
         expect(await host.runContextsAction({ requestId, action: { type: 'trashTask', taskId: 'x' } })).toMatchObject({ ok: false, error: { code: 'NOT_READY' } });
         expect(await host.runArchiveAction({ requestId, action: { type: 'trashTask', taskId: 'x' } })).toMatchObject({ ok: false, error: { code: 'NOT_READY' } });
+        expect(host.getArchiveFilterTokens({ offset: 0, limit: 1, revision: 'r' })).toMatchObject({ ok: false, error: { code: 'NOT_READY' } });
+        expect(await host.runArchiveAction({ requestId, action: { type: 'moveTasksToInbox', selectAll: { params: {}, revision: 'r' } } }))
+            .toMatchObject({ ok: false, error: { code: 'NOT_READY' } });
+        expect(await host.runArchiveAction({ requestId, action: { type: 'setCompletedAt', taskId: 'x', day: '2026-09-20', time: '10:00' } }))
+            .toMatchObject({ ok: false, error: { code: 'NOT_READY' } });
         expect(await host.runTrashAction({ requestId, action: { type: 'emptyTrash', revision: 'x' } })).toMatchObject({ ok: false, error: { code: 'NOT_READY' } });
     });
 });

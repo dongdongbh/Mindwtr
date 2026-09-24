@@ -120,6 +120,7 @@ import {
     ARCHIVE_TASK_GROUP_OPTIONS,
     buildArchiveTaskItems,
     filterArchivedTasksByArea,
+    getArchiveCompletedAtPickerStart,
     getArchiveConfirmation,
     getArchivedProjectRow,
     getArchivedTaskRow,
@@ -136,6 +137,7 @@ import {
     reactivateArchivedProject,
     resolveArchiveSortBy,
     resolveHistoryTab,
+    resolvePickedCompletedAt,
     selectArchivedProjects,
     selectArchivedTasks,
     setArchivedTaskCompletedAt,
@@ -162,8 +164,8 @@ import {
     type ContextsTokenPicker,
 } from './contexts-view-model';
 import { formatTimeEstimateLabel } from './calendar-scheduling';
-import { countActiveFilterCriteria, criteriaFromSelections } from './filter-criteria';
-import { getListSearchChipLabel } from './list-filter-state';
+import { applyListFilterEdit, resolveListFilterState, type ListFilterEdit, type ListFilterState } from './list-filter-state';
+import type { ListFilterOptions } from './menu-views-model';
 import { getProjectAccentColor } from './task-accent-color';
 import { formatListItemCount } from './list-count';
 import type { ContextOrTagMatchMode } from './hierarchy-utils';
@@ -171,7 +173,7 @@ import { getInlineMarkdownPreview } from './markdown';
 import { taskMatchesFilterSelections } from './task-filter-selections';
 import type { TaskGroupItem } from './task-group-sections';
 import { DONE_TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
-import { getTaskMetadataFilterVisibility, type TaskMetadataFilterVisibility } from './task-metadata-filter-visibility';
+import { getTaskMetadataFilterVisibility } from './task-metadata-filter-visibility';
 import { buildTrashTimeline, resolveTrashClearScope } from './task-utils';
 import {
     formatTrashCounts,
@@ -188,8 +190,20 @@ import {
     selectTrashedTasks,
     type ListConfirmation,
 } from './trash-view-model';
-import type { MultiValueFilterMatchMode, TaskEnergyLevel, TaskSortBy } from './types';
-import { createMenuViewMethods, paramsKey } from './native-host-contract-menu-views';
+import type { TaskSortBy } from './types';
+import {
+    createMenuViewMethods,
+    isFilterEdit,
+    matchesPickerQuery,
+    nativeFilterView,
+    paramsKey,
+    readFilterState,
+    tokenOptions,
+    type NativeListChip,
+    type NativeListFilterView,
+    type NativeWindow,
+    type TokenOption,
+} from './native-host-contract-menu-views';
 import { createReviewViewMethods } from './native-host-contract-review-views';
 import { createQuickCaptureMethods } from './native-host-contract-quick-capture';
 import { createCalendarViewMethods } from './native-host-contract-calendar';
@@ -2551,16 +2565,27 @@ export type NativeContextsAction =
     | { type: 'trashTasks'; taskIds: string[] }
     | { type: 'restoreTasks'; taskIds: string[] };
 
-export type NativeListFilters = {
-    searchQuery?: string;
-    tokens?: string[];
-    excludedTokens?: string[];
-    priorities?: TaskPriority[];
-    energyLevels?: TaskEnergyLevel[];
-    timeEstimates?: TimeEstimate[];
-    location?: string;
-    contextMatchMode?: MultiValueFilterMatchMode;
-    tagMatchMode?: MultiValueFilterMatchMode;
+/** Archive's view inputs; `filters` is the returned `filters.state`, `filterEdit` one control's edit. */
+export type NativeArchiveParams = {
+    segment?: ArchiveSegment;
+    sortBy?: TaskSortBy;
+    groupBy?: ArchiveTaskGroupBy;
+    filters?: Partial<ListFilterState>;
+    filterEdit?: ListFilterEdit;
+    /** Once the sheet is open it offers every token in use; before that, only the chosen ones. */
+    filterSheetOpen?: boolean;
+    collapsedGroupIds?: string[];
+};
+/**
+ * RN's Select all: every task row on screen (a folded heading hides its rows), less
+ * `except`, the rows deselected since. A bulk action resolves it again and refuses
+ * with STALE_REVISION once those rows changed, so it acts only on the rows shown.
+ */
+export type NativeArchiveSelectAll = {
+    /** The view's params (filters as returned, no filterEdit). */
+    params: Omit<NativeArchiveParams, 'filterEdit'>;
+    revision: string;
+    except?: string[];
 };
 export type NativeArchiveItem =
     | { type: 'section'; id: string; title: string; count: number; muted: boolean; collapsible: boolean; collapsed: boolean }
@@ -2576,6 +2601,10 @@ export type NativeArchiveItem =
         descriptionMarkdown: string | null;
         /** Completed rows open a completion time picker at this value. */
         completedAtValue: string | null;
+        /** The same start as a local day and time; send the picked ones back with setCompletedAt. Null for cancelled rows. */
+        completedAtPicker: { day: string; time: string } | null;
+        /** In the bulk selection (selectedIds, or Select all less its except). */
+        selected: boolean;
     }
     | {
         type: 'project';
@@ -2596,21 +2625,29 @@ export type NativeArchiveView = {
     menu: ArchiveMenu;
     /** Null when the search row is hidden. */
     search: { query: string; placeholder: string } | null;
-    filters: {
-        activeCount: number;
+    /** The filter sheet as the menu views carry it; getArchiveFilterTokens pages its tokens. */
+    filters: NativeListFilterView & {
         /** "Filters · 2" beside the search box, or null with no active filter. */
         buttonLabel: string | null;
+        /** Deprecated: `chips` below carries each chip's edit. */
         chips: { id: string; label: string; excluded: boolean }[];
-        visibility: TaskMetadataFilterVisibility;
+        /** Deprecated and unwindowed: use `tokens`. */
         tokenOptions: string[];
+        /** Deprecated: use `timeEstimates`. */
         timeEstimateOptions: { value: TimeEstimate; label: string }[];
     };
+    /** The active filters; removing one sends its `action.filterEdit`. */
+    chips: NativeListChip[];
     summary: string | null;
     total: number;
     items: NativeArchiveItem[];
     /** The task rows a folded heading has not removed: what Select all selects. */
     visibleTaskCount: number;
+    /** The explicitly selected rows still on screen (empty under Select all). */
     selectedIds: string[];
+    selectedCount: number;
+    /** Sent with `selectAll: { except }`: the object a bulk action takes as `selectAll`. Null otherwise. */
+    selectAll: NativeArchiveSelectAll | null;
     empty: ReturnType<typeof getArchiveEmptyState> | null;
     labels: ReturnType<typeof getArchiveRowLabels> & { selectAll: string; restoreSelected: string; done: string; selected: string };
     confirmations: { trashTask: ListConfirmation; trashTasks: ListConfirmation };
@@ -2618,9 +2655,13 @@ export type NativeArchiveView = {
 export type NativeArchiveAction =
     | { type: 'moveToInbox'; taskId: string }
     | { type: 'moveTasksToInbox'; taskIds: string[] }
+    | { type: 'moveTasksToInbox'; selectAll: NativeArchiveSelectAll }
     | { type: 'setCompletedAt'; taskId: string; completedAt: string }
+    /** The picker's local day (yyyy-MM-dd) and time (HH:mm); core stores them as mobile's picker does. */
+    | { type: 'setCompletedAt'; taskId: string; day: string; time: string }
     | { type: 'trashTask'; taskId: string }
     | { type: 'trashTasks'; taskIds: string[] }
+    | { type: 'trashTasks'; selectAll: NativeArchiveSelectAll }
     | { type: 'restoreTasks'; taskIds: string[] }
     | { type: 'reactivateProject'; projectId: string }
     | { type: 'trashProject'; projectId: string };
@@ -2653,6 +2694,8 @@ export type NativeTrashAction =
     | { type: 'emptyTrash'; revision: string };
 
 /** A list action's answer; SAVE_FAILED carries it when the write landed and only its save failed. */
+/** An Archive action once Select all is resolved to its task ids. */
+type ResolvedArchiveAction = Exclude<NativeArchiveAction, { selectAll: NativeArchiveSelectAll }>;
 type ListActionOutcome<Action> = NativeHostResult<NativeListActionResult<Action>> | NativeUnsavedWrite<NativeListActionResult<Action>>;
 
 type ListViewDeps = {
@@ -2683,49 +2726,30 @@ const isWindow = (input: { offset?: unknown; limit?: unknown; revision?: unknown
     && (input.revision === undefined || typeof input.revision === 'string')
     && ((input.offset as number) === 0 || typeof input.revision === 'string')
 );
-const isListFilters = (value: unknown): value is NativeListFilters => (
-    value === undefined || (isObjectRecord(value)
-        && (value.searchQuery === undefined || (typeof value.searchQuery === 'string' && value.searchQuery.length <= 2000))
-        && (value.tokens === undefined || isStringList(value.tokens, 500))
-        && (value.excludedTokens === undefined || isStringList(value.excludedTokens, 500))
-        && (value.priorities === undefined || (isStringList(value.priorities, 10) && value.priorities.every((entry) => EDITOR_PRIORITIES.includes(entry as TaskPriority))))
-        && (value.energyLevels === undefined || (isStringList(value.energyLevels, 10) && value.energyLevels.every((entry) => ['low', 'medium', 'high'].includes(entry))))
-        && (value.timeEstimates === undefined || (isStringList(value.timeEstimates, 20) && value.timeEstimates.every((entry) => TIME_ESTIMATE_OPTIONS.includes(entry as TimeEstimate))))
-        && (value.location === undefined || (typeof value.location === 'string' && value.location.length <= 500))
-        && (value.contextMatchMode === undefined || value.contextMatchMode === 'all' || value.contextMatchMode === 'any')
-        && (value.tagMatchMode === undefined || value.tagMatchMode === 'all' || value.tagMatchMode === 'any'))
-);
 
-/**
- * The filter sheet's selections as mobile's useTaskFilterSelections turns them into
- * criteria and chips (no saved filter; Archive offers no project filter). A section
- * the tasks do not justify stops filtering, as the hook drops it.
- */
-function resolveListFilters(filters: NativeListFilters | undefined, visibility: TaskMetadataFilterVisibility, t: (key: string) => string) {
-    const searchQuery = filters?.searchQuery ?? '';
-    const tokens = filters?.tokens ?? [];
-    const excludedTokens = filters?.excludedTokens ?? [];
-    const priorities = visibility.priority ? filters?.priorities ?? [] : [];
-    const energyLevels = visibility.energyLevel ? filters?.energyLevels ?? [] : [];
-    const timeEstimates = visibility.timeEstimate ? filters?.timeEstimates ?? [] : [];
-    const location = visibility.location ? (filters?.location ?? '').trim() : '';
-    const criteria = criteriaFromSelections({
-        tokens, excludedTokens, projects: [], locations: location ? [location] : [], priorities, energyLevels, timeEstimates,
-        contextMatchMode: filters?.contextMatchMode ?? 'all', tagMatchMode: filters?.tagMatchMode ?? 'all',
-    });
-    const search = searchQuery.trim();
-    const chips = [
-        ...(search ? [{ id: 'search', label: getListSearchChipLabel(search, t), excluded: false }] : []),
-        ...tokens.map((token) => ({ id: `token:${token}`, label: token, excluded: false })),
-        ...excludedTokens.map((token) => ({ id: `excluded-token:${token}`, label: token, excluded: true })),
-        ...priorities.map((priority) => ({ id: `priority:${priority}`, label: t(`priority.${priority}`), excluded: false })),
-        ...energyLevels.map((level) => ({ id: `energy:${level}`, label: t(`energyLevel.${level}`), excluded: false })),
-        ...timeEstimates.map((estimate) => ({ id: `time:${estimate}`, label: formatTimeEstimateLabel(estimate), excluded: false })),
-        ...(location ? [{ id: 'location', label: `${tFallback(t, 'taskEdit.locationLabel', 'Location')}: ${location}`, excluded: false }] : []),
-    ];
-    const activeCount = (search ? 1 : 0) + countActiveFilterCriteria(criteria);
-    return { searchQuery, criteria, chips, activeCount };
-}
+/** Archive's view inputs with defaults, `filterEdit` applied; null when any is invalid. */
+const readArchiveParams = (input: Record<string, unknown>) => {
+    const filters = readFilterState(input.filters);
+    if (!filters
+        || (input.segment !== undefined && !ARCHIVE_SEGMENTS.includes(input.segment as ArchiveSegment))
+        || (input.sortBy !== undefined && !DONE_TASK_LIST_SORT_OPTIONS.includes(input.sortBy as TaskSortBy))
+        || (input.groupBy !== undefined && !ARCHIVE_TASK_GROUP_OPTIONS.includes(input.groupBy as ArchiveTaskGroupBy))
+        || (input.filterSheetOpen !== undefined && typeof input.filterSheetOpen !== 'boolean')
+        || (input.collapsedGroupIds !== undefined && !isStringList(input.collapsedGroupIds, 1000))
+        || (input.filterEdit !== undefined && !isFilterEdit(input.filterEdit))) {
+        return null;
+    }
+    const edit = input.filterEdit as ListFilterEdit | undefined;
+    return {
+        segment: (input.segment as ArchiveSegment | undefined) ?? 'tasks',
+        sortBy: input.sortBy as TaskSortBy | undefined,
+        groupBy: (input.groupBy as ArchiveTaskGroupBy | undefined) ?? 'none',
+        filters: edit ? applyListFilterEdit(filters, edit) : filters,
+        filterSheetOpen: input.filterSheetOpen === true,
+        collapsedGroupIds: (input.collapsedGroupIds as string[] | undefined) ?? [],
+    };
+};
+type ArchiveParams = NonNullable<ReturnType<typeof readArchiveParams>>;
 
 function createListViewMethods(deps: ListViewDeps) {
     // Exact retries, shared with other contract writes through one helper.
@@ -2791,7 +2815,7 @@ function createListViewMethods(deps: ListViewDeps) {
     /** The actions Contexts and Archive share, as their mobile handlers write them. */
     const performTaskAction = async (
         screen: 'contexts' | 'archive',
-        action: NativeContextsAction | NativeArchiveAction,
+        action: NativeContextsAction | ResolvedArchiveAction,
     ): Promise<ListActionOutcome<NativeContextsAction | NativeArchiveAction> | null> => {
         const t = deps.t();
         const store = () => useTaskStore.getState();
@@ -2824,6 +2848,57 @@ function createListViewMethods(deps: ListViewDeps) {
             default:
                 return null;
         }
+    };
+
+    /** Archive's rows and filter sheet for these params; paging and Select all reuse one build. */
+    const buildArchive = (params: ArchiveParams, revision: string) => cached('archive', JSON.stringify([revision, params]), () => {
+        const t = deps.t();
+        const { state, areaById, projectById, selection } = areaScope();
+        const sortBy = resolveArchiveSortBy(params.sortBy, state.settings);
+        const allArchived = filterArchivedTasksByArea(sortArchivedTasks(selectArchivedTasks(state._allTasks), sortBy), selection, projectById, areaById);
+        const flags = resolveFeatureFlags(state.settings);
+        const visibility = getTaskMetadataFilterVisibility(allArchived, { prioritiesEnabled: flags.priorities, timeEstimatesEnabled: flags.timeEstimates });
+        // Mobile's Archive sheet offers no project filter, so no project selection filters it.
+        const resolved = resolveListFilterState(params.filters, { visibility, retainProjects: [], t });
+        const archivedTasks = allArchived.filter((task) => taskMatchesFilterSelections(task, { criteria: resolved.criteria, searchQuery: resolved.searchQuery }));
+        const taskItems = buildArchiveTaskItems({
+            groupBy: params.groupBy, tasks: archivedTasks, areas: state.areas, projectById, t, collapsedGroupIds: new Set(params.collapsedGroupIds),
+        });
+        const visibleIds = getTaskGroupItemIds(taskItems);
+        const projects = selectArchivedProjects(state.projects, selection, areaById);
+        const options: ListFilterOptions = {
+            tokens: getArchiveTokenFilterOptions(allArchived, params.filterSheetOpen, resolved.state),
+            projects: null,
+            timeEstimates: TIME_ESTIMATE_OPTIONS,
+            visibility,
+        };
+        return {
+            taskItems, projects, visibleIds, areaById, resolved, options,
+            menu: getArchiveMenu({ sortBy, groupBy: params.groupBy, settings: state.settings }, t),
+            labels: getArchiveRowLabels(t),
+            tokens: tokenOptions(options, resolved.state),
+            archivedCount: allArchived.length,
+            shownCount: params.segment === 'tasks' ? archivedTasks.length : projects.length,
+            // Select all's rows: any change to them makes its bulk action stale.
+            selectAllRevision: `${visibleIds.length}:${paramsKey(visibleIds)}`,
+            titles: projectTitles(),
+        };
+    });
+
+    /** Select all's task ids now, or STALE_REVISION once the rows shown differ from those it was offered for. */
+    const resolveSelectAll = (selectAll: unknown): string[] | NativeHostResult<never> => {
+        const params = isObjectRecord(selectAll) && isObjectRecord(selectAll.params) && selectAll.params.filterEdit === undefined
+            ? readArchiveParams(selectAll.params)
+            : null;
+        const { revision, except } = (params ? selectAll : {}) as Partial<NativeArchiveSelectAll>;
+        if (!params || typeof revision !== 'string' || (except !== undefined && !isIdList(except, true))) {
+            return fail('INVALID_INPUT', 'Select all needs the view\'s params, its revision and the rows deselected since');
+        }
+        const view = buildArchive(params, deps.revision(new Date()));
+        if (view.selectAllRevision !== revision) return fail('STALE_REVISION', 'Archive changed; select all again');
+        const deselected = new Set(except);
+        const ids = view.visibleIds.filter((id) => !deselected.has(id));
+        return ids.length > 0 ? ids : fail('INVALID_INPUT', 'Select all selects no task');
     };
 
     return {
@@ -2960,65 +3035,45 @@ function createListViewMethods(deps: ListViewDeps) {
             });
         },
 
-        getArchiveView(input: {
-            segment?: ArchiveSegment; sortBy?: TaskSortBy; groupBy?: ArchiveTaskGroupBy; filters?: NativeListFilters;
-            filterSheetOpen?: boolean; collapsedGroupIds?: string[]; selectedIds?: string[];
+        /**
+         * Archive. Send the returned `filters.state` back as `filters` with a control's
+         * `filterEdit`. Bulk selection: `selectedIds`, or after Select all
+         * `selectAll: { except }` (the rows deselected since), never both.
+         */
+        getArchiveView(input: NativeArchiveParams & {
+            selectedIds?: string[]; selectAll?: { except?: string[] };
             offset: number; limit: number; revision?: string;
         }): NativeHostResult<NativeArchiveView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
-            if (!isObjectRecord(input) || !isWindow(input)
-                || (input.segment !== undefined && !ARCHIVE_SEGMENTS.includes(input.segment))
-                || (input.sortBy !== undefined && !DONE_TASK_LIST_SORT_OPTIONS.includes(input.sortBy))
-                || (input.groupBy !== undefined && !ARCHIVE_TASK_GROUP_OPTIONS.includes(input.groupBy))
-                || !isListFilters(input.filters)
-                || (input.filterSheetOpen !== undefined && typeof input.filterSheetOpen !== 'boolean')
-                || (input.collapsedGroupIds !== undefined && !isStringList(input.collapsedGroupIds, 1000))
-                || (input.selectedIds !== undefined && !isIdList(input.selectedIds, true))) {
-                return fail('INVALID_INPUT', 'Valid view options, filters, offset, bounded limit, and revision for later pages are required');
+            const params = isObjectRecord(input) ? readArchiveParams(input) : null;
+            if (!params || !isWindow(input)
+                || (input.selectedIds !== undefined && !isIdList(input.selectedIds, true))
+                || (input.selectAll !== undefined && (!isObjectRecord(input.selectAll) || input.selectedIds !== undefined
+                    || (input.selectAll.except !== undefined && !isIdList(input.selectAll.except, true))))) {
+                return fail('INVALID_INPUT', 'Valid view options, filters, one selection, offset, bounded limit, and revision for later pages are required');
             }
             const now = new Date();
             const revision = deps.revision(now);
             if (input.revision !== undefined && input.revision !== revision) return fail('STALE_REVISION', 'Archive changed; restart paging from offset zero');
             const t = deps.t();
-            const segment = input.segment ?? 'tasks';
-            const groupBy = input.groupBy ?? 'none';
-            const view = cached('archive', JSON.stringify([revision, segment, input.sortBy, groupBy, input.filters, input.filterSheetOpen, input.collapsedGroupIds, input.selectedIds]), () => {
-                const { state, areaById, projectById, selection } = areaScope();
-                const sortBy = resolveArchiveSortBy(input.sortBy, state.settings);
-                const allArchived = filterArchivedTasksByArea(sortArchivedTasks(selectArchivedTasks(state._allTasks), sortBy), selection, projectById, areaById);
-                const flags = resolveFeatureFlags(state.settings);
-                const visibility = getTaskMetadataFilterVisibility(allArchived, { prioritiesEnabled: flags.priorities, timeEstimatesEnabled: flags.timeEstimates });
-                const filters = resolveListFilters(input.filters, visibility, t);
-                const archivedTasks = allArchived.filter((task) => taskMatchesFilterSelections(task, { criteria: filters.criteria, searchQuery: filters.searchQuery }));
-                const taskItems = buildArchiveTaskItems({
-                    groupBy, tasks: archivedTasks, areas: state.areas, projectById, t, collapsedGroupIds: new Set(input.collapsedGroupIds ?? []),
-                });
-                const visibleIds = getTaskGroupItemIds(taskItems);
-                const projects = selectArchivedProjects(state.projects, selection, areaById);
-                const menu = getArchiveMenu({ sortBy, groupBy, settings: state.settings }, t);
-                const onScreen = new Set(visibleIds);
-                const labels = getArchiveRowLabels(t);
-                return {
-                    taskItems, projects, visibleIds, menu, labels, visibility, areaById,
-                    filters,
-                    archivedCount: allArchived.length,
-                    shownCount: segment === 'tasks' ? archivedTasks.length : projects.length,
-                    tokenOptions: getArchiveTokenFilterOptions(allArchived, input.filterSheetOpen === true, {
-                        tokens: input.filters?.tokens ?? [], excludedTokens: input.filters?.excludedTokens ?? [],
-                    }),
-                    selected: (input.selectedIds ?? []).filter((id) => onScreen.has(id)),
-                    titles: projectTitles(),
-                };
-            });
+            const { segment, groupBy } = params;
+            const view = buildArchive(params, revision);
+            const onScreen = new Set(view.visibleIds);
+            const selectAll = input.selectAll;
+            const except = (selectAll?.except ?? []).filter((id) => onScreen.has(id));
+            const selectedIds = (input.selectedIds ?? []).filter((id) => onScreen.has(id));
+            const picked = new Set(selectAll ? except : selectedIds);
+            const isSelected = (id: string) => (selectAll ? onScreen.has(id) && !picked.has(id) : picked.has(id));
+            const selectedCount = selectAll ? view.visibleIds.length - except.length : selectedIds.length;
             const formatDate = deps.formatDate();
-            const hasActive = view.filters.activeCount > 0;
+            const { resolved, labels } = view;
             const toItem = (entry: TaskGroupItem | Project): NativeArchiveItem => {
                 if (!('type' in entry)) {
-                    const row = getArchivedProjectRow(entry, formatDate, view.areaById);
+                    const row = getArchivedProjectRow(entry, formatDate, view.areaById, labels.notSet);
                     return {
                         type: 'project', id: entry.id, title: entry.title, cancelled: row.cancelled, struck: !row.cancelled,
-                        dateLabel: `${row.cancelled ? view.labels.projectCancelled : view.labels.completed}: ${row.dateLabel}`,
+                        dateLabel: `${row.cancelled ? labels.projectCancelled : labels.completed}: ${row.dateLabel}`,
                         areaName: entry.areaId ? view.areaById.get(entry.areaId)?.name ?? null : null,
                         indicatorColor: row.indicatorColor ?? null,
                         trashConfirmation: getArchiveConfirmation({ kind: 'project', project: entry }, t),
@@ -3031,16 +3086,18 @@ function createListViewMethods(deps: ListViewDeps) {
                     const title = month ? formatDate(new Date(Number(month[1]), Number(month[2]) - 1, 1), 'LLLL yyyy', entry.title) : entry.title;
                     return { type: 'section', id: entry.id, title, count: entry.count, muted: entry.muted === true, collapsible: entry.collapsible === true, collapsed: entry.collapsed === true };
                 }
-                const row = getArchivedTaskRow(entry.task, formatDate);
+                const row = getArchivedTaskRow(entry.task, formatDate, labels.notSet);
                 return {
                     type: 'task',
                     groupId: entry.groupId ?? null,
                     row: toNativeTaskRow(entry.task, view.titles, deps.rowMeta(entry.task, now)),
                     cancelled: row.cancelled,
                     struck: !row.cancelled,
-                    dateLabel: `${row.cancelled ? view.labels.taskCancelled : view.labels.completed}: ${row.dateLabel}`,
+                    dateLabel: `${row.cancelled ? labels.taskCancelled : labels.completed}: ${row.dateLabel}`,
                     descriptionMarkdown: entry.task.description ? getInlineMarkdownPreview(entry.task.description) : null,
                     completedAtValue: row.cancelled ? null : entry.task.completedAt || entry.task.updatedAt || null,
+                    completedAtPicker: row.cancelled ? null : getArchiveCompletedAtPickerStart(entry.task, formatDate, now),
+                    selected: isSelected(entry.task.id),
                 };
             };
             const entries: (TaskGroupItem | Project)[] = segment === 'tasks' ? view.taskItems : view.projects;
@@ -3050,69 +3107,130 @@ function createListViewMethods(deps: ListViewDeps) {
                 segment,
                 segments: ARCHIVE_SEGMENTS.map((id) => ({ id, label: getArchiveSegmentLabel(id, t), selected: id === segment })),
                 menu: view.menu,
-                search: showArchiveSearch(segment, view.archivedCount, hasActive)
-                    ? { query: view.filters.searchQuery, placeholder: tFallback(t, 'common.search', 'Search') }
+                search: showArchiveSearch(segment, view.archivedCount, resolved.hasActive)
+                    ? { query: resolved.searchQuery, placeholder: tFallback(t, 'common.search', 'Search') }
                     : null,
                 filters: {
-                    activeCount: view.filters.activeCount,
-                    buttonLabel: hasActive ? `${view.menu.filtersLabel} · ${view.filters.activeCount}` : null,
-                    chips: view.filters.chips,
-                    visibility: view.visibility,
-                    tokenOptions: view.tokenOptions,
+                    ...nativeFilterView(resolved, view.options, view.tokens, null, t),
+                    buttonLabel: resolved.hasActive ? `${view.menu.filtersLabel} · ${resolved.activeCount}` : null,
+                    chips: resolved.chips.map(({ id, label, excluded }) => ({ id, label, excluded })),
+                    tokenOptions: view.options.tokens,
                     timeEstimateOptions: TIME_ESTIMATE_OPTIONS.map((value) => ({ value, label: formatTimeEstimateLabel(value) })),
                 },
+                chips: resolved.chips.map((chip) => ({ id: chip.id, label: chip.label, excluded: chip.excluded, action: { filterEdit: chip.edit } })),
                 summary: getArchiveSummary(segment, view.shownCount, t),
                 total: entries.length,
                 items: entries.slice(input.offset, input.offset + input.limit).map(toItem),
                 visibleTaskCount: view.visibleIds.length,
-                selectedIds: view.selected,
+                selectedIds: selectAll ? [] : selectedIds,
+                selectedCount,
+                selectAll: selectAll
+                    ? {
+                        params: { ...(params.sortBy ? { sortBy: params.sortBy } : {}), groupBy, filters: resolved.state, collapsedGroupIds: params.collapsedGroupIds },
+                        revision: view.selectAllRevision,
+                        except,
+                    }
+                    : null,
                 empty: entries.length === 0
-                    ? getArchiveEmptyState({ segment, hasActiveFilters: hasActive, filterChipLabels: view.filters.chips.map((chip) => chip.label) }, t)
+                    ? getArchiveEmptyState({ segment, hasActiveFilters: resolved.hasActive, filterChipLabels: resolved.chips.map((chip) => chip.label) }, t)
                     : null,
                 labels: {
-                    ...view.labels,
+                    ...labels,
                     selectAll: `${tFallback(t, 'bulk.select', 'Select')} ${tFallback(t, 'common.all', 'all')}`,
                     restoreSelected: t('trash.restoreToInbox'),
                     done: tFallback(t, 'common.done', 'Done'),
-                    selected: `${view.selected.length} ${t('bulk.selected')}`,
+                    selected: `${selectedCount} ${t('bulk.selected')}`,
                 },
                 confirmations: { trashTask: getArchiveConfirmation({ kind: 'task' }, t), trashTasks: getBulkTrashConfirmation(t) },
             } };
         },
 
-        /** One Archive action, as the screen writes it. Reuse `requestId` to retry. */
+        /**
+         * The Archive filter sheet's tokens: a later window, or those matching the
+         * picker's search `query` from offset zero. `params` are the view's inputs as
+         * last sent (filters as returned, no filterEdit); `revision` is the view's.
+         */
+        getArchiveFilterTokens(input: {
+            params?: Omit<NativeArchiveParams, 'filterEdit'>; query?: string; offset: number; limit: number; revision: string;
+        }): NativeHostResult<{ version: typeof NATIVE_HOST_CONTRACT_VERSION; revision: string } & NativeWindow<TokenOption>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const raw: unknown = isObjectRecord(input) && input.params !== undefined ? input.params : {};
+            const params = isObjectRecord(raw) && raw.filterEdit === undefined ? readArchiveParams(raw) : null;
+            if (!params || typeof input.revision !== 'string' || !isWindow(input)
+                || (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 500))) {
+                return fail('INVALID_INPUT', 'The view\'s params, its revision, a valid window and a short search text are required');
+            }
+            const revision = deps.revision(new Date());
+            if (input.revision !== revision) return fail('STALE_REVISION', 'Archive changed; read it again');
+            const { tokens } = buildArchive(params, revision);
+            const query = input.query;
+            const matches = query === undefined ? tokens : tokens.filter((token) => matchesPickerQuery(token.value, query));
+            return {
+                ok: true,
+                value: { version: NATIVE_HOST_CONTRACT_VERSION, revision, total: matches.length, items: matches.slice(input.offset, input.offset + input.limit) },
+            };
+        },
+
+        /**
+         * One Archive action, as the screen writes it. Reuse `requestId` to retry. A bulk
+         * move or trash takes `taskIds` or the view's `selectAll`; setCompletedAt takes
+         * an ISO `completedAt` or the picker's local `day` and `time`.
+         */
         async runArchiveAction(input: { requestId: string; action: NativeArchiveAction }): Promise<NativeHostResult<NativeListActionResult<NativeArchiveAction>>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!isObjectRecord(input) || !isObjectRecord(input.action)) return fail('INVALID_INPUT', 'A request UUID and an action are required');
             const action = input.action as NativeArchiveAction;
             return receipts.run(input.requestId, JSON.stringify(['archive', action]), async () => {
-                const shared = await performTaskAction('archive', action);
+                let resolved = action as ResolvedArchiveAction;
+                if ((action.type === 'moveTasksToInbox' || action.type === 'trashTasks') && 'selectAll' in action && action.selectAll !== undefined) {
+                    if ('taskIds' in action) return fail('INVALID_INPUT', 'Send taskIds or selectAll, not both');
+                    // Resolved inside the receipt: a retry of a landed request never resolves it again.
+                    const ids = resolveSelectAll(action.selectAll);
+                    if (!Array.isArray(ids)) return ids;
+                    resolved = { type: action.type, taskIds: ids };
+                }
+                const shared = await performTaskAction('archive', resolved);
                 if (shared) return shared as ListActionOutcome<NativeArchiveAction>;
                 const store = useTaskStore.getState();
                 const done = (written: NativeHostResult<null>): ListActionOutcome<NativeArchiveAction> => settleWrite(written, { changed: true, toast: null });
-                switch (action.type) {
-                    case 'moveToInbox':
-                        if (!liveTask(action.taskId)) return fail('TASK_NOT_FOUND', 'Task not found');
-                        return done(await write(() => moveArchivedTaskToInbox(store, action.taskId)));
-                    case 'moveTasksToInbox':
-                        if (!isIdList(action.taskIds) || action.taskIds.some((id) => !liveTask(id))) return fail('INVALID_INPUT', 'Tasks that exist are required');
-                        return done(await write(() => moveArchivedTasksToInbox(store, action.taskIds)));
-                    case 'setCompletedAt': {
-                        const task = liveTask(action.taskId);
-                        if (!task) return fail('TASK_NOT_FOUND', 'Task not found');
-                        if (typeof action.completedAt !== 'string' || !ISO_TIMESTAMP_PATTERN.test(action.completedAt) || !safeParseDate(action.completedAt)
-                            || isTaskCancelled(task)) {
-                            return fail('INVALID_INPUT', 'A completion timestamp for a completed task is required');
-                        }
-                        return done(await write(() => setArchivedTaskCompletedAt(store, action.taskId, action.completedAt)));
+                switch (resolved.type) {
+                    case 'moveToInbox': {
+                        const { taskId } = resolved;
+                        if (!liveTask(taskId)) return fail('TASK_NOT_FOUND', 'Task not found');
+                        return done(await write(() => moveArchivedTaskToInbox(store, taskId)));
                     }
-                    case 'reactivateProject':
-                        if (!liveProject(action.projectId)) return fail('INVALID_INPUT', 'Project is not available');
-                        return done(await write(() => reactivateArchivedProject(store, action.projectId)));
-                    case 'trashProject':
-                        if (!liveProject(action.projectId)) return fail('INVALID_INPUT', 'Project is not available');
-                        return done(await write(() => store.deleteProject(action.projectId)));
+                    case 'moveTasksToInbox': {
+                        const { taskIds } = resolved;
+                        if (!isIdList(taskIds) || taskIds.some((id) => !liveTask(id))) return fail('INVALID_INPUT', 'Tasks that exist are required');
+                        return done(await write(() => moveArchivedTasksToInbox(store, taskIds)));
+                    }
+                    case 'setCompletedAt': {
+                        const { taskId } = resolved;
+                        const task = liveTask(taskId);
+                        if (!task) return fail('TASK_NOT_FOUND', 'Task not found');
+                        const { completedAt: iso, day, time } = resolved as { completedAt?: unknown; day?: unknown; time?: unknown };
+                        const completedAt = iso === undefined
+                            ? resolvePickedCompletedAt(day, time)
+                            : day === undefined && time === undefined && typeof iso === 'string' && ISO_TIMESTAMP_PATTERN.test(iso) && safeParseDate(iso) ? iso : null;
+                        if (!completedAt || isTaskCancelled(task)) {
+                            return fail('INVALID_INPUT', 'A completion timestamp, or a local day and time, for a completed task is required');
+                        }
+                        // Target state: a replay of a time that already landed writes nothing.
+                        if (task.completedAt === completedAt) return { ok: true, value: { changed: false, toast: null } };
+                        return done(await write(() => setArchivedTaskCompletedAt(store, taskId, completedAt)));
+                    }
+                    case 'reactivateProject': {
+                        const { projectId } = resolved;
+                        if (!liveProject(projectId)) return fail('INVALID_INPUT', 'Project is not available');
+                        return done(await write(() => reactivateArchivedProject(store, projectId)));
+                    }
+                    case 'trashProject': {
+                        const { projectId } = resolved;
+                        if (!liveProject(projectId)) return fail('INVALID_INPUT', 'Project is not available');
+                        return done(await write(() => store.deleteProject(projectId)));
+                    }
                     default:
                         return fail('INVALID_INPUT', 'Archive does not offer that action');
                 }
@@ -3152,7 +3270,7 @@ function createListViewMethods(deps: ListViewDeps) {
             });
             const formatDate = deps.formatDate();
             const labels = getTrashRowLabels(t);
-            const deletedLabel = (deletedAt: string | undefined) => `${labels.deleted}: ${formatTrashDeletedDate(deletedAt, formatDate)}`;
+            const deletedLabel = (deletedAt: string | undefined) => `${labels.deleted}: ${formatTrashDeletedDate(deletedAt, formatDate, labels.notSet)}`;
             const count = view.items.length;
             return { ok: true, value: {
                 version: NATIVE_HOST_CONTRACT_VERSION,

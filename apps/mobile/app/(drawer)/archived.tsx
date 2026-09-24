@@ -78,6 +78,7 @@ function ArchivedTaskItem({
     onToggleSelect,
     completedLabel,
     cancelledLabel,
+    notSetLabel,
     editCompletedAtLabel,
     selectLabel,
     restoreLabel,
@@ -95,6 +96,7 @@ function ArchivedTaskItem({
     onToggleSelect: () => void;
     completedLabel: string;
     cancelledLabel: string;
+    notSetLabel: string;
     editCompletedAtLabel: string;
     selectLabel: string;
     restoreLabel: string;
@@ -104,7 +106,7 @@ function ArchivedTaskItem({
     isHighlighted?: boolean;
 }) {
     const swipeableRef = useRef<Swipeable>(null);
-    const { cancelled, dateLabel: completionDateLabel } = getArchivedTaskRow(task, safeFormatDate);
+    const { cancelled, dateLabel: completionDateLabel } = getArchivedTaskRow(task, safeFormatDate, notSetLabel);
 
     const renderLeftActions = () => (
         <Pressable
@@ -215,6 +217,7 @@ function ArchivedProjectItem({
     onDelete,
     completedLabel,
     cancelledLabel,
+    notSetLabel,
     restoreLabel,
     deleteLabel,
 }: {
@@ -227,11 +230,12 @@ function ArchivedProjectItem({
     onDelete: () => void;
     completedLabel: string;
     cancelledLabel: string;
+    notSetLabel: string;
     restoreLabel: string;
     deleteLabel: string;
 }) {
     const swipeableRef = useRef<Swipeable>(null);
-    const { cancelled, dateLabel: archivedDateLabel, indicatorColor } = getArchivedProjectRow(project, safeFormatDate, areaById);
+    const { cancelled, dateLabel: archivedDateLabel, indicatorColor } = getArchivedProjectRow(project, safeFormatDate, areaById, notSetLabel);
 
     const renderLeftActions = () => (
         <Pressable
@@ -613,6 +617,7 @@ export default function ArchivedScreen() {
             onDelete={() => handleDeleteProject(item.id)}
             completedLabel={rowLabels.completed}
             cancelledLabel={rowLabels.projectCancelled}
+            notSetLabel={rowLabels.notSet}
             restoreLabel={rowLabels.restore}
             deleteLabel={rowLabels.delete}
         />
@@ -629,6 +634,7 @@ export default function ArchivedScreen() {
             onToggleSelect={() => toggleMultiSelect(item.id)}
             completedLabel={rowLabels.completed}
             cancelledLabel={rowLabels.taskCancelled}
+            notSetLabel={rowLabels.notSet}
             editCompletedAtLabel={rowLabels.editCompletedAt}
             selectLabel={rowLabels.select}
             restoreLabel={rowLabels.restore}

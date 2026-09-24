@@ -118,6 +118,7 @@ function TrashTaskItem({
   isHighlighted,
   typeLabel,
   deletedLabel,
+  notSetLabel,
   restoreLabel,
   deleteLabel,
 }: {
@@ -132,6 +133,7 @@ function TrashTaskItem({
   isHighlighted?: boolean;
   typeLabel: string;
   deletedLabel: string;
+  notSetLabel: string;
   restoreLabel: string;
   deleteLabel: string;
 }) {
@@ -164,7 +166,7 @@ function TrashTaskItem({
             />
           )}
           <Text style={[styles.archivedDate, { color: tc.secondaryText }]}>{typeLabel}</Text>
-          <Text style={[styles.archivedDate, { color: tc.secondaryText }]}>{deletedLabel}: {formatTrashDeletedDate(task.deletedAt, safeFormatDate)}</Text>
+          <Text style={[styles.archivedDate, { color: tc.secondaryText }]}>{deletedLabel}: {formatTrashDeletedDate(task.deletedAt, safeFormatDate, notSetLabel)}</Text>
         </View>
         <View style={[styles.statusIndicator, { backgroundColor: '#6B7280' }]} />
       </Pressable>
@@ -184,6 +186,7 @@ function TrashProjectItem({
   isSelected,
   typeLabel,
   deletedLabel,
+  notSetLabel,
   restoreLabel,
   deleteLabel,
 }: {
@@ -198,6 +201,7 @@ function TrashProjectItem({
   isSelected: boolean;
   typeLabel: string;
   deletedLabel: string;
+  notSetLabel: string;
   restoreLabel: string;
   deleteLabel: string;
 }) {
@@ -222,7 +226,7 @@ function TrashProjectItem({
             {project.title}
           </Text>
           <Text style={[styles.archivedDate, { color: tc.secondaryText }]}>{typeLabel}</Text>
-          <Text style={[styles.archivedDate, { color: tc.secondaryText }]}>{deletedLabel}: {formatTrashDeletedDate(project.deletedAt, safeFormatDate)}</Text>
+          <Text style={[styles.archivedDate, { color: tc.secondaryText }]}>{deletedLabel}: {formatTrashDeletedDate(project.deletedAt, safeFormatDate, notSetLabel)}</Text>
         </View>
         {indicatorColor ? <View style={[styles.statusIndicator, { backgroundColor: indicatorColor }]} /> : null}
       </Pressable>
@@ -547,6 +551,7 @@ export default function TrashScreen() {
                   isSelected={selectedProjectIds.has(item.project.id)}
                   typeLabel={rowLabels.projectType}
                   deletedLabel={rowLabels.deleted}
+                  notSetLabel={rowLabels.notSet}
                   restoreLabel={rowLabels.restore}
                   deleteLabel={rowLabels.delete}
                 />
@@ -564,6 +569,7 @@ export default function TrashScreen() {
                   isHighlighted={item.task.id === highlightTaskId}
                   typeLabel={rowLabels.taskType}
                   deletedLabel={rowLabels.deleted}
+                  notSetLabel={rowLabels.notSet}
                   restoreLabel={rowLabels.restore}
                   deleteLabel={rowLabels.delete}
                 />

@@ -391,6 +391,37 @@ describe('native host contract: More sheet and list views', () => {
         expect(title).not.toBe('August 2026');
     });
 
+    it('offers each match mode control with its edit, and searches the filter picker\'s tokens and projects', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('reference', 'base'));
+        const filters = { ...EMPTY_LIST_FILTER_STATE, tokens: ['@home', '@desk', '#home', '#work'] };
+        const view = value(host.getReferenceView({ filters, offset: 0, limit: 100 }));
+        expect(view.filters.matchModes.map((control) => [control.kind, control.label, control.options.map((option) => [option.label, option.selected])])).toEqual([
+            ['context', 'Context match', [['Any', false], ['All', true]]],
+            ['tag', 'Tag match', [['Any', false], ['All', true]]],
+        ]);
+        const anyTag = view.filters.matchModes[1].options[0].edit;
+        expect(anyTag).toEqual({ type: 'setMatchMode', kind: 'tag', value: 'any' });
+        const next = value(host.getReferenceView({ filters: view.filters.state, filterEdit: anyTag, offset: 0, limit: 100 }));
+        expect(next.filters.state.tagMatchMode).toBe('any');
+        expect(next.filters.matchModes[1].options.map((option) => option.selected)).toEqual([true, false]);
+        expect(value(host.getReferenceView({ offset: 0, limit: 100 })).filters.matchModes).toEqual([]);
+
+        const plain = value(host.getReferenceView({ offset: 0, limit: 100 }));
+        const params = { filters: plain.filters.state };
+        const search = (collection: 'tokens' | 'projects' | 'sections', query: unknown) => host.getMenuViewCollection({
+            view: 'reference', collection, params, query: query as string, offset: 0, limit: 100, revision: plain.revision,
+        });
+        const tokens = plain.filters.tokens.items;
+        expect(value(search('tokens', ' HOME ')).items).toEqual(tokens.filter((token) => token.value.toLowerCase().includes('home')));
+        expect(value(search('tokens', ' HOME ')).total).toBeGreaterThan(0);
+        const projects = plain.filters.projects!.items;
+        expect(value(search('projects', 'laun')).items).toEqual(projects.filter((project) => project.title === 'Launch'));
+        expect(value(search('tokens', 'zzz'))).toMatchObject({ total: 0, items: [] });
+        expect(search('tokens', 5)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(search('sections', 'x')).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
     it('is NOT_READY until storage is activated', async () => {
         setStorageAdapter(noopStorage);
         const host = createNativeHostContract();

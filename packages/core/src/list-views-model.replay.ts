@@ -504,7 +504,8 @@ type ArchiveModel = {
 };
 type ArchiveBackend = {
     model: (state: ArchiveState) => ArchiveModel;
-    run: (write: NativeArchiveAction) => Promise<Toast | null>;
+    /** Mobile's writes: explicit ids and ISO completion times (the contract's selectAll and day/time forms have their own tests). */
+    run: (write: Exclude<NativeArchiveAction, { selectAll: unknown } | { day: string }>) => Promise<Toast | null>;
 };
 
 /** The filter sheet's selections as mobile's hook turns them into criteria, chips and a count. */
@@ -556,7 +557,7 @@ export function createArchiveCoreBackend(t: Translate): ArchiveBackend {
                 if (entry.type === 'section') {
                     return { type: 'section', id: entry.id, title: entry.title, count: entry.count, collapsible: entry.collapsible === true, collapsed: entry.collapsed === true };
                 }
-                const row = getArchivedTaskRow(entry.task, safeFormatDate);
+                const row = getArchivedTaskRow(entry.task, safeFormatDate, labels.notSet);
                 return {
                     type: 'task', id: entry.task.id, title: entry.task.title, groupId: entry.groupId ?? null, cancelled: row.cancelled,
                     dateLabel: `${row.cancelled ? labels.taskCancelled : labels.completed}: ${row.dateLabel}`,
@@ -565,7 +566,7 @@ export function createArchiveCoreBackend(t: Translate): ArchiveBackend {
                 };
             };
             const items = state.segment === 'tasks' ? taskItems.map(toTask) : projects.map((project) => {
-                const row = getArchivedProjectRow(project, safeFormatDate, areaById);
+                const row = getArchivedProjectRow(project, safeFormatDate, areaById, labels.notSet);
                 return {
                     type: 'project' as const, id: project.id, title: project.title, cancelled: row.cancelled,
                     dateLabel: `${row.cancelled ? labels.projectCancelled : labels.completed}: ${row.dateLabel}`,
@@ -879,7 +880,7 @@ export function createTrashCoreBackend(t: Translate): TrashBackend {
                     return {
                         type: item.type, id: entity.id, title: entity.title, deletedAt: entity.deletedAt!,
                         typeLabel: item.type === 'task' ? labels.taskType : labels.projectType,
-                        deletedLabel: `${labels.deleted}: ${formatTrashDeletedDate(entity.deletedAt, safeFormatDate)}`,
+                        deletedLabel: `${labels.deleted}: ${formatTrashDeletedDate(entity.deletedAt, safeFormatDate, labels.notSet)}`,
                         markdown: item.type === 'task' && item.task.description ? getInlineMarkdownPreview(item.task.description) : null,
                         indicatorColor: item.type === 'project' ? getProjectAccentColor(item.project, areaById) ?? null : '#6B7280',
                     };

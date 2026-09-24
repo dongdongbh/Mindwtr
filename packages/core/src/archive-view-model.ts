@@ -147,25 +147,54 @@ export function selectArchivedProjects(
         .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
 }
 
-/** An archived task row's outcome and its date: when it was cancelled, else completed. */
-export function getArchivedTaskRow(task: Task, formatDate: DateFormatter): { cancelled: boolean; dateLabel: string } {
+/** An archived task row's outcome and its date: when it was cancelled, else completed. `notSetLabel` names a missing date. */
+export function getArchivedTaskRow(task: Task, formatDate: DateFormatter, notSetLabel: string): { cancelled: boolean; dateLabel: string } {
     const cancelled = isTaskCancelled(task);
     const timestamp = cancelled ? task.cancelledAt || task.updatedAt : task.completedAt || task.updatedAt;
-    return { cancelled, dateLabel: timestamp ? formatDate(timestamp, 'Pp', timestamp) : 'Unknown' };
+    return { cancelled, dateLabel: timestamp ? formatDate(timestamp, 'Pp', timestamp) : notSetLabel };
 }
 
-/** An archived project row's outcome, date and status dot color. */
+/** An archived project row's outcome, date and status dot color. `notSetLabel` names a missing date. */
 export function getArchivedProjectRow(
     project: Project,
     formatDate: DateFormatter,
     areaById: Map<string, Area>,
+    notSetLabel: string,
 ): { cancelled: boolean; dateLabel: string; indicatorColor: string | undefined } {
     const timestamp = project.cancelledAt || project.updatedAt;
     return {
         cancelled: Boolean(project.cancelledAt),
-        dateLabel: timestamp ? formatDate(timestamp, 'Pp', timestamp) : 'Unknown',
+        dateLabel: timestamp ? formatDate(timestamp, 'Pp', timestamp) : notSetLabel,
         indicatorColor: getProjectAccentColor(project, areaById),
     };
+}
+
+/**
+ * Where the completion time picker opens (yyyy-MM-dd, HH:mm): the stored completion,
+ * else the last change, else now, as mobile's picker starts.
+ */
+export function getArchiveCompletedAtPickerStart(task: Task, formatDate: DateFormatter, now: Date): { day: string; time: string } {
+    const value = task.completedAt || task.updatedAt;
+    const parsed = value ? new Date(value) : null;
+    const start = parsed && !Number.isNaN(parsed.getTime()) ? parsed : now;
+    return { day: formatDate(start, 'yyyy-MM-dd'), time: formatDate(start, 'HH:mm') };
+}
+
+const PICKED_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
+const PICKED_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/**
+ * The completion time mobile's picker stores for a local day and time: that local
+ * minute as an ISO instant, seconds zeroed. Null for a malformed or impossible day.
+ */
+export function resolvePickedCompletedAt(day: unknown, time: unknown): string | null {
+    const date = typeof day === 'string' ? PICKED_DAY.exec(day) : null;
+    const clock = typeof time === 'string' ? PICKED_TIME.exec(time) : null;
+    if (!date || !clock) return null;
+    const picked = new Date(Number(date[1]), Number(date[2]) - 1, Number(date[3]));
+    if (picked.getFullYear() !== Number(date[1]) || picked.getMonth() !== Number(date[2]) - 1 || picked.getDate() !== Number(date[3])) return null;
+    picked.setHours(Number(clock[1]), Number(clock[2]), 0, 0);
+    return picked.toISOString();
 }
 
 export function getArchiveRowLabels(t: (key: string) => string) {
@@ -174,6 +203,7 @@ export function getArchiveRowLabels(t: (key: string) => string) {
         taskCancelled: tFallback(t, 'task.cancelled', 'Cancelled'),
         projectCancelled: tFallback(t, 'projects.cancelled', 'Cancelled'),
         editCompletedAt: tFallback(t, 'task.editCompletedAt', 'Edit completion time'),
+        notSet: tFallback(t, 'common.notSet', 'Not set'),
         select: tFallback(t, 'bulk.select', 'Select'),
         restore: tFallback(t, 'trash.restore', 'Restore'),
         delete: tFallback(t, 'common.delete', 'Delete'),
