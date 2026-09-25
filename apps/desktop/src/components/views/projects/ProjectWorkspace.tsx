@@ -6,7 +6,6 @@ import { Attachment,
     Task,
     collectBulkTaskTokens,
     collectProjectTaskLinks,
-    compareTasksByProjectOrder,
     getProjectSectionsForView,
     getSequentialProjectTaskCues,
     isTaskFinished,
@@ -644,7 +643,10 @@ export function ProjectWorkspace({
         if (projectTaskSortBy !== 'default') {
             return sortTasksBy(items, projectTaskSortBy);
         }
-        return [...items].sort(compareTasksByProjectOrder);
+        // Normal project browsing follows the shared status order. Manual
+        // ordering is handled by the explicit reorder-mode model on mobile and
+        // native hosts; desktop's default project view is status ordered.
+        return sortTasksBy(items, 'default');
     }, [projectTaskSortBy]);
 
     const sortedProjectTasks = useMemo(() => {

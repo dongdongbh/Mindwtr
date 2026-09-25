@@ -70,15 +70,22 @@ const shape = (items: ProjectTaskListItem[], cues: Map<string, string>) => items
 const scenario = (name: string) => fixture.scenarios.find((candidate) => candidate.name === name)!;
 
 describe('project task list model', () => {
-    it.each(fixture.scenarios.map((item) => [item.name, item] as const))(
-        'matches what mobile rendered before the move: %s',
+    it.each(fixture.scenarios.filter((item) => item.sortBy !== 'default').map((item) => [item.name, item] as const))(
+        'matches sorted project views: %s',
         (name, item) => {
             const { model, cues } = buildLikeMobile(item);
             expect(shape(model.items, cues)).toEqual(fixture.mobileSnapshot[name]);
         },
     );
 
-    it('keeps empty sections as drop targets and hides the Reference pile in reorder mode', () => {
+    it('uses shared status order in normal project browsing', () => {
+        const { model } = buildLikeMobile(scenario('live-default'));
+        expect(model.orderedTasks.map((task) => task.status)).toEqual([
+            'next', 'next', 'next', 'next', 'next', 'next', 'next', 'waiting', 'someday',
+        ]);
+    });
+
+    it('keeps manual order while explicitly reordering', () => {
         const { model } = buildLikeMobile(scenario('live-default'), { reorderMode: true });
         const sectionIds = model.items.flatMap((item) => (item.type === 'section' ? [item.id] : []));
         expect(sectionIds).toEqual(['sec-a', 'sec-empty', 'sec-b', 'no-section']);
