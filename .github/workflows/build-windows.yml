@@ -1,0 +1,47 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          node scripts/ci/prepare-windows-bun-install.js
+          bun install --frozen-lockfile --backend copyfile
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          cd apps/desktop
+          bunx tauri build
+        env:
+          GGML_NATIVE: "OFF"
+          GGML_AVX2: "OFF"
+          GGML_FMA: "OFF"
+          GGML_F16C: "OFF"
+          GGML_BMI2: "OFF"
+
+      - name: Save installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindwtr-windows
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
