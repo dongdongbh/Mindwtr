@@ -21,6 +21,7 @@ import {
     getTaskOrder,
     isTaskFutureFocusCandidate,
     mergeAppDataWithStats,
+    sortTasks,
     normalizeTaskUpdate,
     normalizeTaskLifecycleFields,
     normalizeProjectLifecycleFields,
@@ -1596,7 +1597,12 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                                 return errorResponse('Failed to read data', 500);
                             }
                             if (isTrustedValidatedDataFile(filePath)) {
-                                return jsonFileResponse(rawData);
+                                const cached = loadAppDataOrError(filePath);
+                                if ('error' in cached) return cached.error;
+                                return jsonResponse({
+                                    ...cached,
+                                    tasks: sortTasks(cached.tasks),
+                                });
                             }
                             let data: unknown;
                             try {
@@ -1621,7 +1627,10 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                                 rawData = readFileSync(filePath);
                                 assertStorageRoot();
                             }
-                            return jsonFileResponse(rawData);
+                            return jsonResponse({
+                                ...validated.data,
+                                tasks: sortTasks(validated.data.tasks),
+                            });
                         });
                     }
 

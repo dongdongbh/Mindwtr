@@ -4170,6 +4170,26 @@ describe('cloud server api', () => {
         }).map((task) => task.id)).toEqual(['inbox', 'next', 'waiting', 'later']);
     });
 
+    test('GET /v1/data returns tasks in default status order', async () => {
+        const tasks = [
+            { id: 'data-someday', title: 'Someday', status: 'someday', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z' },
+            { id: 'data-inbox', title: 'Inbox', status: 'inbox', createdAt: '2026-01-03T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'data-next', title: 'Next', status: 'next', dueDate: '2026-01-04', createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
+            { id: 'data-waiting', title: 'Waiting', status: 'waiting', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-04T00:00:00.000Z' },
+        ];
+        const seedResponse = await fetch(`${baseUrl}/v1/data`, {
+            method: 'PUT',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({ tasks, projects: [], sections: [], areas: [], settings: {} }),
+        });
+        expect(seedResponse.status).toBe(200);
+        const response = await fetch(`${baseUrl}/v1/data`, { headers: authHeaders });
+        expect(response.status).toBe(200);
+        expect((await response.json()).tasks.map((task: { id: string }) => task.id)).toEqual([
+            'data-inbox', 'data-next', 'data-waiting', 'data-someday',
+        ]);
+    });
+
     test('/v1/tasks?query= reports the true total and pages correctly past 200 matches', async () => {
         // Same truncation class as /v1/search above: pickTaskList used to intersect against
         // searchAll()'s 200-capped result, so a query with more than 200 matches lost the
