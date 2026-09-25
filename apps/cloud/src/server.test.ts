@@ -87,6 +87,7 @@ import {
 } from './server-storage';
 import {
     asStatus,
+    pickTaskList,
     validateAppData,
     validateEntityProps,
 } from './server-validation';
@@ -4154,6 +4155,19 @@ describe('cloud server api', () => {
         expect((pastLimitBody.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual(
             tasks.slice(200).map((task) => task.id),
         );
+    });
+
+    test('default task listing orders by status before due date and creation time', () => {
+        const tasks = [
+            { id: 'later', title: 'Later', status: 'someday', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z' },
+            { id: 'inbox', title: 'Inbox', status: 'inbox', createdAt: '2026-01-03T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'next', title: 'Next', status: 'next', dueDate: '2026-01-04', createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
+            { id: 'waiting', title: 'Waiting', status: 'waiting', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-04T00:00:00.000Z' },
+        ];
+        expect(pickTaskList({ tasks, projects: [], sections: [], areas: [], people: [], settings: {} } as never, {
+            includeDeleted: false,
+            includeCompleted: true,
+        }).map((task) => task.id)).toEqual(['inbox', 'next', 'waiting', 'later']);
     });
 
     test('/v1/tasks?query= reports the true total and pages correctly past 200 matches', async () => {

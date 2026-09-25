@@ -566,5 +566,14 @@ export function pickTaskList(
         const matchingTaskIds = new Set(filterCloudTasksBySearch(tasks, filterNotDeleted(data.projects), opts.query).map((task) => task.id));
         tasks = tasks.filter((task) => matchingTaskIds.has(task.id));
     }
-    return tasks;
+    const statusOrder: Record<string, number> = { inbox: 0, next: 1, waiting: 2, someday: 3, reference: 4, done: 5, archived: 6 };
+    return tasks.sort((left, right) => {
+        const statusDiff = (statusOrder[left.status] ?? 99) - (statusOrder[right.status] ?? 99);
+        if (statusDiff !== 0) return statusDiff;
+        const leftDue = left.dueDate ? Date.parse(left.dueDate) : Number.POSITIVE_INFINITY;
+        const rightDue = right.dueDate ? Date.parse(right.dueDate) : Number.POSITIVE_INFINITY;
+        if (leftDue !== rightDue) return leftDue - rightDue;
+        const createdDiff = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+        return createdDiff !== 0 ? createdDiff : left.id.localeCompare(right.id);
+    });
 }
