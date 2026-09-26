@@ -19,6 +19,9 @@ for (const theme of ['dark', 'light']) {
         for (const route of ['agenda', 'inbox', 'next', 'someday', 'waiting', 'done', 'archived', 'reference', 'contexts', 'review']) {
             await page.setViewportSize({ width: 1440, height: 900 });
             await page.goto(`/?view=${route}`);
+            // A full navigation reloads Vite's module graph. Wait for the app
+            // shell before applying the normal five-second control assertions.
+            await page.locator('#main-content').waitFor({ state: 'visible', timeout: 15_000 });
             const sort = page.getByRole('combobox', { name: 'Sort', exact: true });
             const group = page.getByRole('combobox', { name: route === 'agenda' ? 'Group next actions by' : 'Group', exact: true });
             await expect(sort).toBeVisible();

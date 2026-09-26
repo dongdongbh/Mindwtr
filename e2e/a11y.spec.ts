@@ -129,11 +129,14 @@ for (const theme of THEMES) {
         const found: ContrastViolation[] = [];
 
         await page.goto('/');
+        // CI can still be loading the app's modules after the document load.
+        await page.locator('#main-content').waitFor({ state: 'visible', timeout: 15_000 });
         await expect(page.locator('[data-sidebar-item][data-view="agenda"]')).toBeVisible();
         found.push(...await runAxeContrast(page, contrastTheme, 'focus'));
 
         // Settings is code-split, so wait for its own heading, not the shell.
         await page.goto('/?view=settings');
+        await page.locator('#main-content').waitFor({ state: 'visible', timeout: 15_000 });
         await expect(page.getByRole('heading', { name: 'General', level: 2 })).toBeVisible();
         found.push(...await runAxeContrast(page, contrastTheme, 'settings'));
 
