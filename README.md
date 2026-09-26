@@ -15,7 +15,6 @@ A free to-do app built on Getting Things Done (GTD). Works offline, no account n
 [![CI](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml/badge.svg)](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml)
 [![GitHub license](https://img.shields.io/github/license/dongdongbh/Mindwtr?color=brightgreen)](LICENSE)
 [![GitHub downloads](https://img.shields.io/github/downloads/dongdongbh/Mindwtr/total)](https://github.com/dongdongbh/Mindwtr/releases)
-[![AppImage](https://img.shields.io/badge/AppImage-available-2A6DB2)](https://appimage.github.io/Mindwtr/)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/gc4h5t58PR)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ff5f5f?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/dongdongbh)
 [![Ko-fi](https://img.shields.io/badge/Sponsor-Ko--fi-29abe0?logo=kofi&logoColor=white)](https://ko-fi.com/D1D01T20WK)
@@ -62,6 +61,13 @@ A free to-do app built on Getting Things Done (GTD). Works offline, no account n
          alt="Get it on F-Droid"
          style="height: 74px"
          height="74" />
+  </a>
+  <a href="https://appimage.github.io/Mindwtr/" target="_blank">
+    <img alt="Download as an AppImage"
+         src="https://docs.appimage.org/_images/download-appimage-banner.svg"
+         align="center"
+         style="height: 50px"
+         height="50" />
   </a>
   <a href="https://snapcraft.io/mindwtr" target="_blank">
     <img alt="Get it from the Snap Store"
