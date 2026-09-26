@@ -1860,7 +1860,8 @@ fn build_fts_query(input: &str) -> Option<String> {
     let tokens: Vec<String> = cleaned
         .split_whitespace()
         .filter(|t| !t.is_empty())
-        .map(|t| format!("{}*", t))
+        // Cleaning excludes quotes; quote tokens so @/# remain literal FTS5 text (#1264).
+        .map(|t| format!("\"{}\"*", t))
         .collect();
     if tokens.is_empty() {
         None
