@@ -45,7 +45,7 @@ export type ProjectTaskListModelInput = {
     criteria: FilterCriteria;
     searchQuery: string;
     sortBy: TaskSortBy;
-    /** Use the stored project order when sortBy is 'default' (the list supports manual reorder). */
+    /** Use the stored project order only while the caller is explicitly in reorder mode. */
     projectOrder: boolean;
     /** Reorder mode keeps empty sections as drop targets and hides the Reference pile. */
     reorderMode: boolean;
@@ -117,7 +117,8 @@ export function buildProjectTaskListModel(input: ProjectTaskListModelInput): Pro
     ));
 
     let orderedTasks: Task[];
-    if (input.projectOrder && sortBy === 'default') {
+    if (input.projectOrder && input.reorderMode && sortBy === 'default') {
+        // Manual order is used only while the user is explicitly reordering.
         orderedTasks = sortProjectTasksByOrder(filteredTasks);
     } else if (statusFilter === 'done' && sortBy === 'default') {
         // Done is a log: default order is completion date descending, matching desktop.

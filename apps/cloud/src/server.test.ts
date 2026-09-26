@@ -87,6 +87,7 @@ import {
 } from './server-storage';
 import {
     asStatus,
+    pickTaskList,
     validateAppData,
     validateEntityProps,
 } from './server-validation';
@@ -4154,6 +4155,39 @@ describe('cloud server api', () => {
         expect((pastLimitBody.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual(
             tasks.slice(200).map((task) => task.id),
         );
+    });
+
+    test('default task listing orders by status before due date and creation time', () => {
+        const tasks = [
+            { id: 'later', title: 'Later', status: 'someday', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z' },
+            { id: 'inbox', title: 'Inbox', status: 'inbox', createdAt: '2026-01-03T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'next', title: 'Next', status: 'next', dueDate: '2026-01-04', createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
+            { id: 'waiting', title: 'Waiting', status: 'waiting', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-04T00:00:00.000Z' },
+        ];
+        expect(pickTaskList({ tasks, projects: [], sections: [], areas: [], people: [], settings: {} } as never, {
+            includeDeleted: false,
+            includeCompleted: true,
+        }).map((task) => task.id)).toEqual(['inbox', 'next', 'waiting', 'later']);
+    });
+
+    test('GET /v1/data returns tasks in default status order', async () => {
+        const tasks = [
+            { id: 'data-someday', title: 'Someday', status: 'someday', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z' },
+            { id: 'data-inbox', title: 'Inbox', status: 'inbox', createdAt: '2026-01-03T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'data-next', title: 'Next', status: 'next', dueDate: '2026-01-04', createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
+            { id: 'data-waiting', title: 'Waiting', status: 'waiting', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-04T00:00:00.000Z' },
+        ];
+        const seedResponse = await fetch(`${baseUrl}/v1/data`, {
+            method: 'PUT',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({ tasks, projects: [], sections: [], areas: [], settings: {} }),
+        });
+        expect(seedResponse.status).toBe(200);
+        const response = await fetch(`${baseUrl}/v1/data`, { headers: authHeaders });
+        expect(response.status).toBe(200);
+        expect((await response.json()).tasks.map((task: { id: string }) => task.id)).toEqual([
+            'data-inbox', 'data-next', 'data-waiting', 'data-someday',
+        ]);
     });
 
     test('/v1/tasks?query= reports the true total and pages correctly past 200 matches', async () => {
