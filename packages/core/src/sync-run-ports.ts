@@ -40,6 +40,8 @@ export type SyncEncryptionPosture = {
     onRemotePlaintextDiscovered(): void | Promise<void>;
     /** Ciphertext this device has no key for. Persisted before the cycle fails. */
     onRemoteEncryptionDiscovered(discovered: { salt: Uint8Array; params: SyncCryptoKdfParams }): void | Promise<void>;
+    /** Called only after an existing encrypted document was decrypted and parsed. */
+    onRemoteEncryptionVerified?(material: SyncKeyMaterial): void | Promise<void>;
     /** The platform's no-key error, thrown after the discovery is persisted. */
     noKeyError(): Error;
     /** Optional: a plaintext read arrived without a strong ETag on a cycle not yet

@@ -144,6 +144,7 @@ import {
     isSyncEncryptionFailure,
     markRemoteSyncEncryptionDiscovered,
     markRemoteSyncEncryptionPlaintext,
+    restoreVerifiedRemoteSyncEncryption,
     runChangePassphraseOverRemote,
     runDisableLocalOnly,
     runDisableOverRemote,
@@ -2662,6 +2663,13 @@ export class SyncService {
         const encryptionPosture: SyncEncryptionPosture = {
             material: encryptionMaterial,
             logRemoteRead: logSyncEncryptionRemoteRead,
+            onRemoteEncryptionVerified: async (material) => {
+                if (await restoreVerifiedRemoteSyncEncryption(material, desktopSyncLocationScope(context))) {
+                    logSyncInfo('Verified encrypted remote cleared stale plaintext state', {
+                        releaseCheck: 'v1.3.3/encrypted-remote-recovery',
+                    });
+                }
+            },
             onRemotePlaintextDiscovered: () => markRemoteSyncEncryptionPlaintext(
                 desktopSyncLocationScope(context),
             ),

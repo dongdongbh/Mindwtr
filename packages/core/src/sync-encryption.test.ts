@@ -10,6 +10,7 @@ import {
     isSyncEncryptionStateBlocked,
     markRemoteEncryptionDiscovered,
     markRemotePlaintextDiscovered,
+    restoreVerifiedRemoteEncryption,
     reaffirmRemoteEncryptionNoKey,
     runChangeSyncEncryptionPassphraseOverRemote,
     runDisableSyncEncryptionLocalOnly,
@@ -30,6 +31,39 @@ import { SYNC_CRYPTO_DEFAULT_KDF_PARAMS, encryptSyncArtifact, deriveSyncKeyMater
 // Cheap KDF params for fast tests — deliberately not the production default (mirrors the
 // pattern already used by sync-crypto.test.ts fixtures).
 const FAST_KDF = { mKib: 8, t: 1, p: 1 };
+
+describe('verified encrypted remote recovery (#1293)', () => {
+    it('repairs only a matching stale marker, preserves material, and propagates save failure', async () => {
+        const material = { key: new Uint8Array(32), salt: new Uint8Array([1, 2]), params: FAST_KDF };
+        const stale: SyncEncryptionLocalState = {
+            state: 'remote-plaintext', discoveredScope: 'webdav-scope',
+            discoveredSalt: '0102', discoveredParams: FAST_KDF,
+        };
+        let value = { ...stale };
+        const write = vi.fn((next) => { value = next; });
+        const port = { read: () => value, write };
+        for (const change of [
+            { state: 'off' as const },
+            { discoveredScope: 'other' },
+            { discoveredSalt: '0304' },
+            { discoveredParams: { ...FAST_KDF, t: 2 } },
+            { incompleteTransition: 'disable' as const },
+        ]) {
+            value = { ...stale, ...change };
+            expect(await restoreVerifiedRemoteEncryption(port, material, 'webdav-scope')).toBe(false);
+        }
+        value = { ...stale };
+        expect(await restoreVerifiedRemoteEncryption(port, material, null)).toBe(false);
+        expect(write).not.toHaveBeenCalled();
+        expect(await restoreVerifiedRemoteEncryption(port, material, 'webdav-scope')).toBe(true);
+        expect(value).toEqual({ ...stale, state: 'enabled' });
+        expect(await restoreVerifiedRemoteEncryption(port, material, 'webdav-scope')).toBe(false);
+        value = { ...stale };
+        await expect(restoreVerifiedRemoteEncryption({
+            read: () => value, write: async () => { throw new Error('disk full'); },
+        }, material, 'webdav-scope')).rejects.toThrow('disk full');
+    });
+});
 
 function createFakeRemote(seed: Record<string, { bytes: Uint8Array; kind: 'document' | 'attachment' }> = {}): SyncEncryptionRemotePort & {
     store: Map<string, Uint8Array>;

@@ -21,6 +21,8 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ## v1.3.3 (add before tagging, trim in the release after)
 
+- **`v1.3.3/encrypted-remote-recovery`** — desktop `sync-service.ts` and mobile `sync-service.ts`, after a verified WebDAV encrypted-document read durably restores a matching stale `remote-plaintext` state to `enabled` (#1293). Message: `Verified encrypted remote cleared stale plaintext state`. The next automatic sync must proceed rather than report plaintext suppression; the marker alone proves the local state repair, not a completed sync. No remote location, task content, or encryption material is logged.
+
 - **`v1.3.3/restore-snapshot-sync`** — desktop `apps/desktop/src/lib/sync-service.ts`, after the restored snapshot is prepared with fresh sync revisions, saved exactly, and reloaded. Message: `Recovery snapshot restore committed`; field: `releaseCheck`. The tester restores a recovery snapshot, confirms its tasks stay live after sync with another device, and checks that a second sync leaves them unchanged. A failed read, save, or reload emits no success line. No task content, identifiers, or snapshot paths are logged.
 
 - **`v1.3.3/ios-external-calendar-open`** — mobile `apps/mobile/components/views/calendar/useCalendarViewController.ts`, when Expo Calendar reports completion of the iOS native event editor action. Message: `Native calendar event dialog completed`; field: `releaseCheck`. The tester must also confirm Mindwtr responds to taps after the editor disappears. A missing line after dismissing the editor calls for another diagnostic log. No event content or identifiers are logged.

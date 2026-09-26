@@ -592,8 +592,8 @@ export function markRemoteEncryptionDiscovered(
 /** The inverse direction of `markRemoteEncryptionDiscovered`, called from a read seam that
  * holds a key and finds the sync location back in plaintext. Only an `enabled` device can
  * reach this state — a device with no key of its own has nothing to fork. Salt and params are
- * carried over deliberately: the key must stay resolvable so the user can run the disable
- * transition, which is the only sanctioned way out. Mirrored by Rust's
+ * carried over deliberately: the key must stay resolvable for a disable transition or
+ * recovery after a verified encrypted read. Mirrored by Rust's
  * `mark_remote_plaintext` for the file backend. */
 export function markRemotePlaintextDiscovered(
     localState: SyncEncryptionLocalStatePort,
@@ -608,10 +608,25 @@ export function markRemotePlaintextDiscovered(
     });
 }
 
-/** declineSyncEncryptionPassphrase(): re-affirms (never clears) the persisted no-key
- * state. A "not now" dismissal in the UI must never re-enable automatic sync against
- * ciphertext this device cannot read — this exists as a stable, documented no-op so
- * phase 3 has something safe to call, not to perform a state change of its own. */
+/** Called only after authenticated decryption and parsing, never header discovery.
+ * Preserve credentials and refuse stale evidence from another location/generation. */
+export async function restoreVerifiedRemoteEncryption(
+    localState: SyncEncryptionLocalStatePort,
+    material: SyncKeyMaterial,
+    scope: string | null | undefined,
+): Promise<boolean> {
+    const current = localState.read();
+    if (!current || current.state !== 'remote-plaintext' || current.incompleteTransition
+        || !scope || current.discoveredScope !== scope
+        || current.discoveredSalt !== bytesToHex(material.salt)
+        || current.discoveredParams?.mKib !== material.params.mKib
+        || current.discoveredParams?.t !== material.params.t
+        || current.discoveredParams?.p !== material.params.p) return false;
+    await localState.write({ ...current, state: 'enabled' });
+    return true;
+}
+
+/** A "not now" dismissal must never clear the persisted no-key state. */
 export function reaffirmRemoteEncryptionNoKey(localState: SyncEncryptionLocalStatePort): void {
     const current = localState.read();
     if (!current || current.state !== 'remote-encrypted-no-key') return;

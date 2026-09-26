@@ -748,6 +748,27 @@ describe('createSyncBackendIO webdav encryption posture', () => {
 
     const platforms = ['desktop-native', 'desktop-web', 'mobile'] as const;
 
+    it('verifies recovery only after an existing encrypted read with a strong version', async () => {
+        for (const mode of ['encrypted', 'absent', 'plaintext', 'weak', 'failed'] as const) {
+            const { posture } = makePosture('desktop-native', mode === 'plaintext' ? null : MATERIAL);
+            const verified = vi.fn();
+            posture.onRemoteEncryptionVerified = verified;
+            const read = mode === 'failed'
+                ? vi.fn().mockRejectedValue(new Error('authentication failed'))
+                : vi.fn().mockResolvedValue({
+                    state: 'data', data: mode === 'absent' ? null : APP_DATA,
+                    exists: mode !== 'absent', strongEtag: mode === 'weak' ? null : '"v1"',
+                });
+            const io = createSyncBackendIO(webdavCtx(), makeTransport({ webdavGet: read }), posture);
+            if (mode === 'weak' || mode === 'failed') {
+                await expect(io.readRemote()).rejects.toThrow();
+            } else {
+                await io.readRemote();
+            }
+            expect(verified).toHaveBeenCalledTimes(mode === 'encrypted' ? 1 : 0);
+        }
+    });
+
     describe.each(platforms)('%s', (platform) => {
         it('fails the cycle when the remote went back to plaintext', async () => {
             const { posture, calls } = makePosture(platform, MATERIAL);

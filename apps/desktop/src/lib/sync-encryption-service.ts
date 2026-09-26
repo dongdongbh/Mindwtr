@@ -358,9 +358,21 @@ export async function markRemoteSyncEncryptionDiscovered(discovered: {
     clearSyncEncryptionMaterialCache();
 }
 
-/** Persists `remote-plaintext` when a TS seam holds a key and finds the sync location back in
- *  plaintext (a peer disabled encryption there). Mirrors core's `markRemotePlaintextDiscovered`;
- *  Rust refuses to move any state but `enabled`, so this is safe to call from a read path. */
+/** Recover a stale marker only after this cycle authenticated the encrypted document. */
+export async function restoreVerifiedRemoteSyncEncryption(
+    material: SyncKeyMaterial,
+    locationScope: string,
+): Promise<boolean> {
+    const restored = await invokeNativeOr(false, 'restore_sync_encryption_verified_remote', {
+        salt: bytesToHex(material.salt),
+        kdfParams: material.params,
+        locationScope,
+    });
+    if (restored) clearSyncEncryptionMaterialCache();
+    return restored;
+}
+
+/** Persist the plaintext discovery without discarding the device's encryption material. */
 export async function markRemoteSyncEncryptionPlaintext(locationScope?: string | null): Promise<void> {
     await invokeNativeOr(null, 'mark_sync_encryption_remote_plaintext', {
         locationScope: locationScope ?? null,

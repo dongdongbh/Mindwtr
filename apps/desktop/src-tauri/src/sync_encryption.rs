@@ -769,8 +769,7 @@ pub(crate) fn mark_remote_encrypted_no_key(
 
 /// Mirrors core's `markRemotePlaintextDiscovered`: only an `enabled` device can reach this
 /// state, and its salt/params/fallback key are carried over unchanged so the key stays
-/// resolvable -- running the disable transition is the only sanctioned way out and it needs
-/// one.
+/// resolvable for a disable transition or recovery after a verified encrypted read.
 pub(crate) fn mark_remote_plaintext(
     app: &tauri::AppHandle,
     scope: Option<&str>,
@@ -1052,9 +1051,71 @@ pub(crate) fn mark_sync_encryption_transition_incomplete(
     begin_sync_encryption_transition(&app, &transition_kind)
 }
 
+// A successful read may repair only the same location/generation's stale marker.
+fn restore_verified_remote_encryption(
+    current: &mut SyncEncryptionLocalState,
+    salt: &str,
+    params: KdfParamsPayload,
+    scope: &str,
+) -> bool {
+    if current.state != STATE_REMOTE_PLAINTEXT
+        || current.incomplete_transition.is_some()
+        || scope.is_empty()
+        || current.discovered_scope.as_deref() != Some(scope)
+        || current.salt.as_deref() != Some(salt)
+        || current.kdf_params != Some(params)
+    {
+        return false;
+    }
+    current.state = STATE_ENABLED.to_string();
+    true
+}
+
+#[tauri::command(async)]
+pub(crate) fn restore_sync_encryption_verified_remote(
+    app: tauri::AppHandle,
+    salt: String,
+    kdf_params: KdfParamsPayload,
+    location_scope: String,
+) -> Result<bool, String> {
+    let _guard = lock_sync_encryption_state();
+    let path = sync_encryption_state_path(&app);
+    let Some(mut current) = read_state_file(&path)? else { return Ok(false); };
+    if !restore_verified_remote_encryption(&mut current, &salt, kdf_params, &location_scope) {
+        return Ok(false);
+    }
+    write_state_file(&path, Some(&current))?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verified_remote_recovery_requires_matching_location_generation_and_no_transition() {
+        let params = KdfParamsPayload::from(SYNC_CRYPTO_DEFAULT_KDF_PARAMS);
+        let stale = SyncEncryptionLocalState {
+            state: STATE_REMOTE_PLAINTEXT.to_string(),
+            salt: Some("0102".to_string()),
+            kdf_params: Some(params),
+            discovered_scope: Some("webdav-scope".to_string()),
+            fallback_key: Some("preserved".to_string()),
+            ..SyncEncryptionLocalState::default()
+        };
+        for (salt, scope) in [("other", "webdav-scope"), ("0102", "other"), ("0102", "")] {
+            let mut state = stale.clone();
+            assert!(!restore_verified_remote_encryption(&mut state, salt, params, scope));
+            assert_eq!(state, stale);
+        }
+        let mut state = stale.clone();
+        state.incomplete_transition = Some("disable".to_string());
+        assert!(!restore_verified_remote_encryption(&mut state, "0102", params, "webdav-scope"));
+        state = stale.clone();
+        assert!(restore_verified_remote_encryption(&mut state, "0102", params, "webdav-scope"));
+        assert_eq!(state, SyncEncryptionLocalState { state: STATE_ENABLED.to_string(), ..stale });
+        assert!(!restore_verified_remote_encryption(&mut state, "0102", params, "webdav-scope"));
+    }
 
     // Shared with packages/core/src/sync-encryption.test.ts — both languages' name mapping
     // must agree on every case, including compound suffix chains (S1: `.bak.previous` was

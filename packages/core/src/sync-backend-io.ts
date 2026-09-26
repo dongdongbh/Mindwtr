@@ -259,6 +259,9 @@ export function createSyncBackendIO(
                 posture?.onWeakEtagPlaintextRead?.(remote.strongEtag ?? null);
             }
         }
+        if (material && remote.exists && remote.data !== null) {
+            await posture?.onRemoteEncryptionVerified?.(material);
+        }
         return remote;
     };
 
