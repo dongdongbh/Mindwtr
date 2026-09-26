@@ -37,7 +37,7 @@ const reportedZhHantLabels = {
     textSizeDesc: '調整桌面應用的介面文字。',
     showTaskAge: '顯示任務年齡',
     showTaskAgeDesc: '在任務元數據中顯示任務創建距今多久。',
-    defaultScheduleTime: '默認安排時間',
+    defaultScheduleTime: '預設安排時間',
     defaultScheduleTimeDesc: '可選。選擇日期後自動填入開始、截止和回顧時間。留空則保持僅日期。',
     undoNotifications: '撤銷通知',
     undoNotificationsDesc: '完成、刪除或取消任務後顯示可復原操作。',
