@@ -1463,6 +1463,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                     recordingBusy ? 'opacity-70 cursor-not-allowed' : 'hover:opacity-90'
                                 )}
                                 aria-label={audioButtonLabel}
+                                autoFocus
                                 disabled={recordingBusy}
                             >
                                 {audioButtonLabel}

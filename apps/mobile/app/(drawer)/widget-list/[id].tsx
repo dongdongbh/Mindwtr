@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, RefreshControl, Text, View } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { shallow, useTaskStore, type Task, type TaskStatus } from '@mindwtr/core';
@@ -9,11 +9,12 @@ import { useLanguage } from '@/contexts/language-context';
 import { useTheme } from '@/contexts/theme-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { resolveWidgetListDestination } from '@/lib/widget-list-destination';
+import { logInfo } from '@/lib/app-log';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 
 /** An exact widget list destination, not an additional main navigation item. */
 export default function WidgetListScreen() {
-  const { id } = useLocalSearchParams<{ id?: string | string[] }>();
+  const { id, source } = useLocalSearchParams<{ id?: string | string[]; source?: string }>();
   const data = useTaskStore((state) => ({
     // Match widget publication's canonical pools: parent tombstones must remain
     // present so the shared visibility predicate can exclude their children.
@@ -29,6 +30,13 @@ export default function WidgetListScreen() {
   const list = useMemo(() => resolveWidgetListDestination(data, language, id), [data, id, language]);
   const title = list?.title ?? t('search.noResults');
   const available = Boolean(list);
+  useEffect(() => {
+    if (source !== 'shortcut') return;
+    void logInfo('Saved list shortcut destination resolved', {
+      scope: 'shortcuts',
+      extra: { releaseCheck: 'v1.3.3/saved-list-shortcut', available },
+    });
+  }, [source, id, available]);
   const listKind = id === 'next' ? 'next' : typeof id === 'string' && id.startsWith('project:') ? 'project' : 'filter';
   const { updateTask, deleteTask, fetchData } = useTaskStore((state) => ({
     updateTask: state.updateTask,

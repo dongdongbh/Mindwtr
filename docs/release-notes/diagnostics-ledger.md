@@ -21,6 +21,8 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ## v1.3.3 (add before tagging, trim in the release after)
 
+- **`v1.3.3/saved-list-shortcut`** — mobile `app/(drawer)/widget-list/[id].tsx`: `Saved list shortcut destination resolved`, with `available`. Run Open Mindwtr Saved List from Shortcuts; expect `available: true` and the selected filter's current tasks. A removed filter reports false without opening a different list. No list names, IDs, or task content are logged.
+
 - **`v1.3.3/encrypted-remote-recovery`** — desktop `sync-service.ts` and mobile `sync-service.ts`, after a verified WebDAV encrypted-document read durably restores a matching stale `remote-plaintext` state to `enabled` (#1293). Message: `Verified encrypted remote cleared stale plaintext state`. The next automatic sync must proceed rather than report plaintext suppression; the marker alone proves the local state repair, not a completed sync. No remote location, task content, or encryption material is logged.
 
 - **`v1.3.3/restore-snapshot-sync`** — desktop `apps/desktop/src/lib/sync-service.ts`, after the restored snapshot is prepared with fresh sync revisions, saved exactly, and reloaded. Message: `Recovery snapshot restore committed`; field: `releaseCheck`. The tester restores a recovery snapshot, confirms its tasks stay live after sync with another device, and checks that a second sync leaves them unchanged. A failed read, save, or reload emits no success line. No task content, identifiers, or snapshot paths are logged.

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { buildEntityMap, useTaskStore, type Task } from '@mindwtr/core';
 import type { ComponentProps } from 'react';
 
@@ -923,7 +924,7 @@ describe('QuickAddModal', () => {
         expect(tauriMocks.invoke).not.toHaveBeenCalledWith('start_audio_recording');
     });
 
-    it('starts recording when speech-to-text is configured (record gate agrees with the transcribe gate)', async () => {
+    it.each(['text', 'audio'] as const)('starts recording with Enter from %s capture when speech-to-text is configured', async (captureMode) => {
         // The record gate and the transcribe gate both resolve readiness through
         // resolveSpeechCapture from the same settings snapshot, so a configured
         // offline provider must let recording proceed rather than showing the
@@ -951,15 +952,16 @@ describe('QuickAddModal', () => {
 
         await act(async () => {
             window.dispatchEvent(new CustomEvent('mindwtr:quick-add', {
-                detail: { initialValue: 'Voice note' },
+                detail: { initialValue: 'Voice note', captureMode },
             }));
             await Promise.resolve();
         });
 
-        fireEvent.click(screen.getByRole('button', { name: 'Audio' }));
+        if (captureMode === 'text') fireEvent.click(screen.getByRole('button', { name: 'Audio' }));
 
         await act(async () => {
-            fireEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+            expect(screen.getByRole('button', { name: 'Start recording' })).toHaveFocus();
+            await userEvent.keyboard('{Enter}');
             await Promise.resolve();
         });
 

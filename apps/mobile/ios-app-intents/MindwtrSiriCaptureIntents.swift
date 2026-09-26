@@ -291,6 +291,61 @@ struct MindwtrOpenListIntent: AppIntent {
     }
 }
 
+// A separate action preserves existing Open List automations and their enum values.
+@available(iOS 16.0, *)
+struct MindwtrSavedListEntity: AppEntity {
+    let id: String
+    let name: String
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Saved List")
+    static var defaultQuery = MindwtrSavedListQuery()
+    var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(name)") }
+}
+
+@available(iOS 16.0, *)
+struct MindwtrSavedListQuery: EntityStringQuery {
+    func suggestedEntities() async throws -> [MindwtrSavedListEntity] {
+        MindwtrSavedListCatalog.load().map { MindwtrSavedListEntity(id: $0.id, name: $0.name) }
+    }
+
+    func entities(for identifiers: [String]) async throws -> [MindwtrSavedListEntity] {
+        let lists = try await suggestedEntities()
+        return identifiers.compactMap { id in lists.first { $0.id == id } }
+    }
+
+    func entities(matching string: String) async throws -> [MindwtrSavedListEntity] {
+        try await suggestedEntities().filter { $0.name.localizedCaseInsensitiveContains(string) }
+    }
+}
+
+@available(iOS 16.0, *)
+struct MindwtrOpenSavedListIntent: AppIntent {
+    static var title: LocalizedStringResource = "Open Mindwtr Saved List"
+    static var description = IntentDescription("Opens a saved Focus filter, including context filters. Save the filter and open Mindwtr once to refresh the available lists.")
+
+#if compiler(>=6.0)
+    @available(iOS 26.0, *)
+    static var supportedModes: IntentModes { .foreground(.immediate) }
+#endif
+
+    @available(*, deprecated, message: "Use supportedModes with newer App Intents SDKs.")
+    static var openAppWhenRun: Bool { true }
+
+    @Parameter(title: "Saved List")
+    var list: MindwtrSavedListEntity
+
+    static var parameterSummary: some ParameterSummary { Summary("Open \(\.$list)") }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard MindwtrSavedListCatalog.load().contains(where: { $0.id == list.id }),
+              let url = MindwtrSavedListCatalog.destination(id: list.id) else {
+            return .result(dialog: "That saved list is unavailable. Open Mindwtr to refresh it, then choose a saved list again.")
+        }
+        MindwtrSiriCaptureLauncher.open(url)
+        return .result(dialog: "Opening your saved list in Mindwtr.")
+    }
+}
+
 // Background captures never touch the app database from Swift. The intent
 // appends a JSON payload to Documents/pending-captures/ and the React Native
 // side ingests it through the normal store/sync write path on next launch or
