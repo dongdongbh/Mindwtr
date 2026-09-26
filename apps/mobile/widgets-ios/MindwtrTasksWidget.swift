@@ -956,6 +956,9 @@ struct MindwtrTasksWidget: Widget {
         .configurationDisplayName("Mindwtr")
         .description("Focus tasks and quick capture")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
+        // The view already owns its padding and budgets task rows from that space.
+        // System margins otherwise leave medium widgets with no room for a row.
+        .contentMarginsDisabled()
     }
 }
 
@@ -970,5 +973,6 @@ struct MindwtrLegacyTasksWidget: Widget {
         .configurationDisplayName("Mindwtr")
         .description("Focus tasks and quick capture")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
+        .contentMarginsDisabled()
     }
 }
