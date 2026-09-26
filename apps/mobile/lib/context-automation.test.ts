@@ -124,6 +124,11 @@ describe('context-automation', () => {
     });
   });
 
+  it('inserts a context name literally, even with $ replacement patterns', () => {
+    expect(buildContextAutomationNotificationCopy('@a$&b', []).title).toBe('No @a$&b next actions');
+    expect(buildContextAutomationNotificationCopy('@a$$b', []).message).toBe('Mindwtr did not find any /next tasks for @a$$b.');
+  });
+
   it('accepts localized notification templates', () => {
     expect(buildContextAutomationNotificationCopy('@parents', [], {
       noTasksTitle: 'No hay acciones para {{context}}',

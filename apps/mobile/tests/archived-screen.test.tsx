@@ -208,6 +208,7 @@ vi.mock('lucide-react-native', () => ({
   ChevronRight: (props: any) => React.createElement('ChevronRight', props),
   Folder: (props: any) => React.createElement('Folder', props),
   MoreHorizontal: (props: any) => React.createElement('MoreHorizontal', props),
+  RotateCcw: (props: any) => React.createElement('RotateCcw', props),
   Settings2: (props: any) => React.createElement('Settings2', props),
   SlidersHorizontal: (props: any) => React.createElement('SlidersHorizontal', props),
   X: (props: any) => React.createElement('X', props),

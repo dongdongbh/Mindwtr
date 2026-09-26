@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { translateWithFallback, type Task } from '@mindwtr/core';
+import { formatI18nTemplate, translateWithFallback, type Task } from '@mindwtr/core';
 import { Button } from '../ui/Button';
 import { Dialog, DialogBody, DialogHeader } from '../ui/Dialog';
 
@@ -45,14 +45,14 @@ export function ProjectNextActionPrompt({
     const canAddTask = newTitle.trim().length > 0;
     const resolveText = (key: string, fallback: string) => translateWithFallback(t, key, fallback);
     const description = scope === 'section' && sectionTitle
-        ? resolveText(
+        ? formatI18nTemplate(resolveText(
             'projects.nextActionPromptSectionDesc',
             'Choose or add the next action for {{section}} in {{project}}.',
-        ).replace('{{section}}', sectionTitle).replace('{{project}}', projectTitle)
-        : resolveText(
+        ), { section: sectionTitle, project: projectTitle })
+        : formatI18nTemplate(resolveText(
             'projects.nextActionPromptDesc',
             'Choose or add the next action for {{project}}.',
-        ).replace('{{project}}', projectTitle);
+        ), { project: projectTitle });
 
     if (!isOpen) return null;
 

@@ -569,6 +569,71 @@ describe('React Native Archive parity fixture', () => {
     }
   }, 120_000);
 
+  it('draws Restore with a vector icon and speaks row labels in the app language', async () => {
+    const english = harness.strings;
+    harness.strings = {
+      ...english,
+      'archived.openTaskDetails': 'Archivierte Aufgabe öffnen: {{title}}',
+      'archived.openProject': 'Archiviertes Projekt öffnen: {{title}}',
+    };
+    try {
+      await seedStore(settingsVariants.base, allTasks);
+      let renderer!: ReactTestRenderer;
+      await act(async () => { renderer = create(<ArchivedScreen />); });
+      const root = renderer.root;
+      const restoreActions = () => hostsOf(root, 'Swipeable').map((row) => row.findAll((child) => String(child.type) === 'Pressable')[0]);
+      const labels = () => hostsOf(root, 'Pressable').map((node) => String(node.props.accessibilityLabel ?? ''));
+
+      expect(textsIn(root).filter((text) => text.includes('↩'))).toEqual([]);
+      expect(restoreActions().every((action) => hostsOf(action, 'Icon:RotateCcw').length === 1)).toBe(true);
+      expect(labels()).toContain('Archivierte Aufgabe öffnen: Quarterly report');
+
+      await perform(root, ['segment', 'projects']);
+      expect(restoreActions().length).toBeGreaterThan(0);
+      expect(restoreActions().every((action) => hostsOf(action, 'Icon:RotateCcw').length === 1)).toBe(true);
+      expect(labels()).toContain('Archiviertes Projekt öffnen: Board report');
+      await act(async () => { renderer.unmount(); });
+    } finally {
+      harness.strings = english;
+      await flushPendingSave();
+    }
+  });
+
+  it('shows the error toast when reactivating an archived project fails', async () => {
+    harness.toasts.length = 0;
+    await seedStore(settingsVariants.base, allTasks);
+    useTaskStore.setState({ updateProject: async () => ({ success: false, error: 'disk full' }) } as never);
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<ArchivedScreen />); });
+
+    await perform(renderer.root, ['segment', 'projects']);
+    await perform(renderer.root, ['swipe', 'p-report', 'restore']);
+
+    await vi.waitFor(() => expect(harness.toasts.at(-1)).toMatchObject({ tone: 'error', message: 'disk full' }));
+    await act(async () => { renderer.unmount(); });
+    await flushPendingSave();
+  });
+
+  it.each([
+    ['task', 'deleteTask', 'ar-milk', 'tasks'],
+    ['project', 'deleteProject', 'p-trip', 'projects'],
+  ] as const)('shows the error toast when deleting an archived %s fails', async (_kind, action, id, segment) => {
+    harness.alerts.length = 0;
+    harness.toasts.length = 0;
+    await seedStore(settingsVariants.base, allTasks);
+    useTaskStore.setState({ [action]: async () => ({ success: false, error: 'disk full' }) } as never);
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<ArchivedScreen />); });
+
+    if (segment === 'projects') await perform(renderer.root, ['segment', 'projects']);
+    await perform(renderer.root, ['swipe', id, 'delete']);
+    await perform(renderer.root, ['alert', 'Delete']);
+
+    await vi.waitFor(() => expect(harness.toasts.at(-1)).toMatchObject({ tone: 'error', message: 'disk full' }));
+    await act(async () => { renderer.unmount(); });
+    await flushPendingSave();
+  });
+
   // One home: Archive, TaskList and Someday all group through core; the mobile
   // module only re-exports it.
   it('groups through core: the mobile grouping module re-exports it', () => {

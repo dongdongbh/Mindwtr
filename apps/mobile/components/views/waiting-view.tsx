@@ -1,5 +1,5 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { buildWaitingViewModel, shallow, useTaskStore } from '@mindwtr/core';
+import { buildWaitingViewModel, shallow, tFallback, useTaskStore } from '@mindwtr/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Task, TaskStatus } from '@mindwtr/core';
 import { useTheme } from '../../contexts/theme-context';
@@ -8,12 +8,14 @@ import { PauseCircle } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useToast } from '@/contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { TaskEditModal } from '../task-edit-modal';
 import { getBulkMoveStatusOptions } from '../task-list/TaskListBulkBar';
 import { useTaskListSelection } from '../use-task-list-selection';
+import { settleStoreAction } from '../store-action-result';
 import { TaskListView } from '../task-list-view';
 import { DeferredProjectsSection } from './deferred-projects-section';
 
@@ -33,6 +35,7 @@ export function WaitingView() {
   }), shallow);
   const { isDark } = useTheme();
   const { t } = useLanguage();
+  const { showToast } = useToast();
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [selectedWaitingPerson, setSelectedWaitingPerson] = useState('');
   const router = useRouter();
@@ -81,7 +84,15 @@ export function WaitingView() {
     return updateTask(task.id, { status });
   };
   const handleActivateProject = (projectId: string) => {
-    updateProject(projectId, { status: 'active' });
+    void settleStoreAction(() => updateProject(projectId, { status: 'active' })).then((outcome) => {
+      if (outcome.ok) return;
+      showToast({
+        title: tFallback(t, 'common.error', 'Error'),
+        message: outcome.message || tFallback(t, 'projects.reactivateFailed', 'Failed to reactivate project'),
+        tone: 'error',
+        durationMs: 4200,
+      });
+    });
   };
   const handleOpenProject = (projectId: string) => {
     router.push({ pathname: '/projects-screen', params: { projectId } });
@@ -112,11 +123,11 @@ export function WaitingView() {
       <View style={[styles.stats, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{model.count}</Text>
-          <Text style={styles.statLabel}>{labels.count}</Text>
+          <Text style={[styles.statLabel, { color: tc.secondaryText }]}>{labels.count}</Text>
         </View>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{model.withDeadlineCount}</Text>
-          <Text style={styles.statLabel}>{labels.withDeadline}</Text>
+          <Text style={[styles.statLabel, { color: tc.secondaryText }]}>{labels.withDeadline}</Text>
         </View>
       </View>
 
@@ -270,7 +281,6 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 12,
-    color: '#6B7280',
     marginTop: 4,
   },
   taskListContent: {

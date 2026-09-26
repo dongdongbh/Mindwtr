@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
-import { tFallback, type Task, type TaskStatus, type ViewSectionTaskGroup } from '@mindwtr/core';
+import { formatI18nTemplate, tFallback, type Task, type TaskStatus, type ViewSectionTaskGroup } from '@mindwtr/core';
 
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
@@ -167,7 +167,7 @@ export function TaskListView({
           {onAddTaskToSection ? (
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel={tFallback(t, 'viewSections.addTask', 'Add task to {section}').replace('{section}', item.title)}
+              accessibilityLabel={formatI18nTemplate(tFallback(t, 'viewSections.addTask', 'Add task to {section}'), { section: item.title })}
               onPress={() => onAddTaskToSection(item.id)}
               style={styles.groupAddButton}
             >

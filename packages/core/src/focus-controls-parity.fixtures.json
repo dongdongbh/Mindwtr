@@ -3,7 +3,8 @@
   "command": "cd apps/mobile && TZ=UTC MINDWTR_CAPTURE_FOCUS_CONTROLS=1 bunx vitest run lib/focus-controls-parity.test.tsx",
   "capturedAt": "6cb44d10c5b45fbdd2ef54bd441050e1d0a01948",
   "sourceState": "The harness file was added to a checkout of that commit before any other change; the RN Focus screen, filter sheet and selections hook were unchanged.",
-  "manualAdjustment": "2026-09-24: moved the existing Next Actions section before Review Due in 74 observations for Focus #1281; original RN capture inputs and section content are unchanged. This was not recaptured from runtime."
+  "manualAdjustment": "2026-09-24: moved the existing Next Actions section before Review Due in 74 observations for Focus #1281; original RN capture inputs and section content are unchanged. This was not recaptured from runtime.",
+  "recapture": "2026-09-26 (task rn-focus-menu-bugs-20260924-01): recaptured with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 after two RN fixes. (1) useTaskFilterSelections drops an applied saved filter's selections for hidden sections: observations 1-3 of \"priority rules with priorities off\" now show priorities [] and More filters \"All\". (2) markSavedFilterDeleted changes only the deleted entry: observations 2-3 of \"delete saved filters\" now write sf-list with its stored view \"list\" in stored order, so \"List only\" no longer appears in the Focus saved row. Every other observation and every input is byte-identical."
  },
  "timeZone": "America/New_York",
  "now": "2026-09-23T14:00:00.000Z",
@@ -14024,7 +14025,7 @@
       ],
       [
        "More filters",
-       "Urgent, High"
+       "All"
       ]
      ],
      "clear": true,
@@ -14045,10 +14046,7 @@
       "tokens": [],
       "excludedTokens": [],
       "projects": [],
-      "priorities": [
-       "urgent",
-       "high"
-      ],
+      "priorities": [],
       "energyLevels": [],
       "timeEstimates": [],
       "locationQuery": "",
@@ -14313,7 +14311,7 @@
       ],
       [
        "More filters",
-       "Urgent, High"
+       "All"
       ]
      ],
      "clear": false,
@@ -14323,10 +14321,7 @@
       "tokens": [],
       "excludedTokens": [],
       "projects": [],
-      "priorities": [
-       "urgent",
-       "high"
-      ],
+      "priorities": [],
       "energyLevels": [],
       "timeEstimates": [],
       "locationQuery": "",
@@ -14582,7 +14577,7 @@
       ],
       [
        "More filters",
-       "Urgent, High"
+       "All"
       ]
      ],
      "clear": false,
@@ -14592,10 +14587,7 @@
       "tokens": [],
       "excludedTokens": [],
       "projects": [],
-      "priorities": [
-       "urgent",
-       "high"
-      ],
+      "priorities": [],
       "energyLevels": [],
       "timeEstimates": [],
       "locationQuery": "",
@@ -26297,11 +26289,6 @@
        "deleteLabel": "Delete saved filter Work area"
       },
       {
-       "label": "List only",
-       "selected": false,
-       "deleteLabel": "Delete saved filter List only"
-      },
-      {
        "label": "At the office",
        "selected": false,
        "deleteLabel": "Delete saved filter At the office"
@@ -26557,6 +26544,18 @@
          "updatedAt": "2026-09-02T12:00:00.000Z"
         },
         {
+         "id": "sf-list",
+         "name": "List only",
+         "view": "list",
+         "criteria": {
+          "tags": [
+           "#work"
+          ]
+         },
+         "createdAt": "2026-09-03T12:00:00.000Z",
+         "updatedAt": "2026-09-03T12:00:00.000Z"
+        },
+        {
          "id": "sf-gone",
          "name": "Gone",
          "view": "focus",
@@ -26568,18 +26567,6 @@
          "createdAt": "2026-09-03T12:00:00.000Z",
          "updatedAt": "2026-09-05T12:00:00.000Z",
          "deletedAt": "2026-09-05T12:00:00.000Z"
-        },
-        {
-         "id": "sf-list",
-         "name": "List only",
-         "view": "focus",
-         "criteria": {
-          "tags": [
-           "#work"
-          ]
-         },
-         "createdAt": "2026-09-03T12:00:00.000Z",
-         "updatedAt": "2026-09-03T12:00:00.000Z"
         },
         {
          "id": "sf-loc",
@@ -26652,11 +26639,6 @@
        "label": "Work area",
        "selected": false,
        "deleteLabel": "Delete saved filter Work area"
-      },
-      {
-       "label": "List only",
-       "selected": false,
-       "deleteLabel": "Delete saved filter List only"
       }
      ]
     },
@@ -26909,6 +26891,18 @@
          "updatedAt": "2026-09-02T12:00:00.000Z"
         },
         {
+         "id": "sf-list",
+         "name": "List only",
+         "view": "list",
+         "criteria": {
+          "tags": [
+           "#work"
+          ]
+         },
+         "createdAt": "2026-09-03T12:00:00.000Z",
+         "updatedAt": "2026-09-03T12:00:00.000Z"
+        },
+        {
          "id": "sf-gone",
          "name": "Gone",
          "view": "focus",
@@ -26920,18 +26914,6 @@
          "createdAt": "2026-09-03T12:00:00.000Z",
          "updatedAt": "2026-09-05T12:00:00.000Z",
          "deletedAt": "2026-09-05T12:00:00.000Z"
-        },
-        {
-         "id": "sf-list",
-         "name": "List only",
-         "view": "focus",
-         "criteria": {
-          "tags": [
-           "#work"
-          ]
-         },
-         "createdAt": "2026-09-03T12:00:00.000Z",
-         "updatedAt": "2026-09-03T12:00:00.000Z"
         },
         {
          "id": "sf-loc",
@@ -26992,6 +26974,18 @@
          "updatedAt": "2026-09-02T12:00:00.000Z"
         },
         {
+         "id": "sf-list",
+         "name": "List only",
+         "view": "list",
+         "criteria": {
+          "tags": [
+           "#work"
+          ]
+         },
+         "createdAt": "2026-09-03T12:00:00.000Z",
+         "updatedAt": "2026-09-03T12:00:00.000Z"
+        },
+        {
          "id": "sf-gone",
          "name": "Gone",
          "view": "focus",
@@ -27003,18 +26997,6 @@
          "createdAt": "2026-09-03T12:00:00.000Z",
          "updatedAt": "2026-09-05T12:00:00.000Z",
          "deletedAt": "2026-09-05T12:00:00.000Z"
-        },
-        {
-         "id": "sf-list",
-         "name": "List only",
-         "view": "focus",
-         "criteria": {
-          "tags": [
-           "#work"
-          ]
-         },
-         "createdAt": "2026-09-03T12:00:00.000Z",
-         "updatedAt": "2026-09-03T12:00:00.000Z"
         },
         {
          "id": "sf-loc",

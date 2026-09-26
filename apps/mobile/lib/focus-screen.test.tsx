@@ -1313,6 +1313,25 @@ describe('FocusScreen', () => {
     ).toEqual(['no-context-next', 'home-next', 'work-next']);
   });
 
+  it('keys a task shown under two context groups once per group', () => {
+    storeState.settings = {
+      appearance: {},
+      features: {},
+      gtd: { focusGroupBy: 'context' },
+    } as any;
+    storeState.tasks = [makeTask('both', { title: 'Both', contexts: ['@home', '@work'] })];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    const list = tree.root.findByType(SectionList);
+    const next = (list.props.sections as { type: string; data: unknown[] }[]).find((section) => section.type === 'next')!;
+    const keys = next.data.map((item) => list.props.keyExtractor(item));
+    expect(keys).toEqual(['context:@home', 'context:@home:both', 'context:@work', 'context:@work:both']);
+  });
+
   it('updates the mobile Focus list identity when grouping changes to a single context group', () => {
     storeState.tasks = [
       makeTask('work-first', { title: 'Work first', contexts: ['@work'] }),

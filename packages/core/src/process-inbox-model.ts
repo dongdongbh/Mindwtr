@@ -13,7 +13,7 @@ import {
     type QuickDatePreset,
 } from './date';
 import { isTaskVisibleInInbox } from './area-filter';
-import { tFallback } from './i18n';
+import { formatI18nTemplate, tFallback } from './i18n';
 import { stripMarkdown } from './markdown';
 import { getPersonSuggestionNames } from './people';
 import { buildQuickAddParseOptions, parseProcessInboxTitleInput } from './quick-add';
@@ -883,7 +883,7 @@ export function getProcessInboxProgress(latchedTotal: number, remaining: number)
 
 export function formatProcessInboxCommitMessage(t: Translate, committed: ProcessInboxCommitted, title: string): string {
     if (committed === 'trash') {
-        return tFallback(t, 'inbox.movedToTrash', '{{title}} moved to Trash').replace('{{title}}', title);
+        return formatI18nTemplate(tFallback(t, 'inbox.movedToTrash', '{{title}} moved to Trash'), { title });
     }
     if (committed === 'done') return formatTaskMarkedDoneMessage(t, title);
     return formatTaskMovedMessage(t, title, committed);

@@ -1755,6 +1755,8 @@ export const huOverrides: Record<string, string> = {
     'archived.emptyProjects': 'Nincsenek archivált projektek',
     'archived.emptyProjectsHint': 'Az archivált projektjei itt fognak megjelenni',
     'archived.restoreProject': 'Projekt visszaállítása',
+    'archived.openTaskDetails': 'Archivált feladat részleteinek megnyitása: {{title}}',
+    'archived.openProject': 'Archivált projekt megnyitása: {{title}}',
     'trash.title': 'Kuka',
     'trash.searchPlaceholder': 'Kukába helyezett feladatok keresése…',
     'trash.noTasksFound': 'Nem található kukába helyezett feladat.',

@@ -370,6 +370,27 @@ describe('SomedayView section grouping', () => {
     expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
   });
 
+  it('draws the stat labels in the theme\'s secondary text color', () => {
+    setState([makeTask('one')], []);
+    renderSomedayView();
+    const flatten = (style: unknown): Record<string, unknown> => (
+      Array.isArray(style) ? Object.assign({}, ...style.map(flatten)) : (style && typeof style === 'object' ? style as Record<string, unknown> : {})
+    );
+    const label = renderer!.root.findAll((node) => String(node.type) === 'Text' && node.props.children === 'someday.ideas')[0];
+    expect(flatten(label.props.style).color).toBe('#666');
+  });
+
+  it('shows the error toast when reactivating a parked project fails', async () => {
+    setState([makeTask('one')], []);
+    mocked.state.updateProject = vi.fn(async () => ({ success: false, error: 'disk full' }));
+    renderSomedayView();
+
+    await act(async () => { mocked.taskListProps.ListHeaderComponent.props.onActivateProject('p-parked'); });
+
+    expect(mocked.state.updateProject).toHaveBeenCalledWith('p-parked', { status: 'active' });
+    await vi.waitFor(() => expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error', message: 'disk full' })));
+  });
+
   it('opens New section from the summary overflow without a separate list row', async () => {
     setState([makeTask('one')], [{ id: 'books', title: 'Books to read', order: 0 }]);
     renderSomedayView();

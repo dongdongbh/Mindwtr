@@ -1820,6 +1820,8 @@ export const en: Record<string, string> = {
         'archived.emptyProjects': 'No archived projects',
         'archived.emptyProjectsHint': 'Projects you archive will appear here',
         'archived.restoreProject': 'Restore project',
+        'archived.openTaskDetails': 'Open archived task details: {{title}}',
+        'archived.openProject': 'Open archived project: {{title}}',
         'trash.title': 'Trash',
         'trash.searchPlaceholder': 'Search trashed tasks...',
         'trash.noTasksFound': 'No trashed tasks found.',

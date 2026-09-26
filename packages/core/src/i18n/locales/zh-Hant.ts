@@ -1678,6 +1678,8 @@ export const zhHant: Record<string, string> = {
         'archived.emptyProjects': '沒有歸檔的專案',
         'archived.emptyProjectsHint': '你歸檔的專案將會顯示在這裡',
         'archived.restoreProject': '復原專案',
+        'archived.openTaskDetails': '開啟歸檔任務詳情：{{title}}',
+        'archived.openProject': '開啟歸檔專案：{{title}}',
         'trash.title': '垃圾桶',
         'trash.searchPlaceholder': '搜索已刪除任務...',
         'trash.noTasksFound': '未找到已刪除任務。',

@@ -6,6 +6,7 @@ import { ProjectNextActionPrompt } from './ProjectNextActionPrompt';
 const labels: Record<string, string> = {
     'projects.nextActionPromptTitle': "What's the next action?",
     'projects.nextActionPromptDesc': 'Choose or add the next action for {{project}}.',
+    'projects.nextActionPromptSectionDesc': 'Choose or add the next action for {{section}} in {{project}}.',
     'projects.nextActionPromptChooseExisting': 'Choose an existing task',
     'projects.nextActionPromptAddNew': 'Add a new next action',
     'projects.nextActionPromptPlaceholder': 'New next action...',
@@ -36,6 +37,12 @@ const renderPrompt = (overrides: Partial<React.ComponentProps<typeof ProjectNext
     );
 
 describe('ProjectNextActionPrompt', () => {
+    it('names the section and project literally, even with $ replacement patterns', () => {
+        renderPrompt({ projectTitle: 'Launch $&', scope: 'section', sectionTitle: 'Phase $$1 {{project}}' });
+
+        expect(screen.getByText('Choose or add the next action for Phase $$1 {{project}} in Launch $&.')).toBeTruthy();
+    });
+
     it('renders a Complete project action that fires the completion callback', () => {
         const onCompleteProject = vi.fn();
         renderPrompt({ onCompleteProject });

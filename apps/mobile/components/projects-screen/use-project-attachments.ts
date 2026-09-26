@@ -7,7 +7,7 @@ import {
   normalizeLinkAttachmentInput,
   Project,
   useTaskStore,
-  validateAttachmentForUpload, tFallback } from '@mindwtr/core';
+  validateAttachmentForUpload, tFallback, formatI18nTemplate } from '@mindwtr/core';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
 import { isLikelyFilePath } from '@/lib/sync-service-utils';
@@ -183,7 +183,7 @@ export function useProjectAttachments({
         // example D:\\Documents\\x.docx) and is never uploaded; handing it to the
         // OS as a URL failed silently (#1001).
         if (isLikelyFilePath(resolved.uri) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(resolved.uri)) {
-            Alert.alert(t('attachments.title'), tFallback(t, 'attachments.linkedFileElsewhere', 'This link points to a file on another device: {{path}}. Open it there, or attach the file instead of linking it.').replace('{{path}}', resolved.uri));
+            Alert.alert(t('attachments.title'), formatI18nTemplate(tFallback(t, 'attachments.linkedFileElsewhere', 'This link points to a file on another device: {{path}}. Open it there, or attach the file instead of linking it.'), { path: resolved.uri }));
             return;
         }
         Linking.openURL(resolved.uri).catch((error) => {

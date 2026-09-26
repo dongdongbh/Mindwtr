@@ -1862,6 +1862,8 @@ export const daOverrides: Record<string, string> = {
     'archived.emptyProjects': 'Ingen arkiverede projekter',
     'archived.emptyProjectsHint': 'Projekter, du arkiverer, vises her',
     'archived.restoreProject': 'Gendan projekt',
+    'archived.openTaskDetails': 'Åbn detaljer for arkiveret opgave: {{title}}',
+    'archived.openProject': 'Åbn arkiveret projekt: {{title}}',
     'trash.title': 'Papirkurv',
     'trash.searchPlaceholder': 'Søg i opgaver i papirkurven...',
     'trash.noTasksFound': 'Der blev ikke fundet nogen opgaver i papirkurven.',

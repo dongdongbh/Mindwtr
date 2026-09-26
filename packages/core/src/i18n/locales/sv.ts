@@ -1786,6 +1786,8 @@ export const svOverrides: Record<string, string> = {
         'archived.emptyProjects': 'Inga arkiverade projekt',
         'archived.emptyProjectsHint': 'Projekt du arkiverar visas här',
         'archived.restoreProject': 'Återställ projekt',
+        'archived.openTaskDetails': 'Öppna detaljer för arkiverad uppgift: {{title}}',
+        'archived.openProject': 'Öppna arkiverat projekt: {{title}}',
         'trash.title': 'Papperskorg',
         'trash.searchPlaceholder': 'Sök borttagna uppgifter...',
         'trash.noTasksFound': 'Inga borttagna uppgifter hittades.',

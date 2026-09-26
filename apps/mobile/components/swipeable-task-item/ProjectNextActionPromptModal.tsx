@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { tFallback } from '@mindwtr/core';
+import { formatI18nTemplate, tFallback } from '@mindwtr/core';
 import type { Task } from '@mindwtr/core';
 import type { ThemeColors } from '../../hooks/use-theme-colors';
 import { styles } from './swipeable-task-item.styles';
@@ -47,16 +47,16 @@ export function ProjectNextActionPromptModal({
     const canAddTask = newTitle.trim().length > 0;
     const addDisabled = !canAddTask || submitting;
     const description = scope === 'section' && sectionTitle
-        ? tFallback(
+        ? formatI18nTemplate(tFallback(
             t,
             'projects.nextActionPromptSectionDesc',
             'Choose or add the next action for {{section}} in {{project}}.',
-        ).replace('{{section}}', sectionTitle).replace('{{project}}', projectTitle)
-        : tFallback(
+        ), { section: sectionTitle, project: projectTitle })
+        : formatI18nTemplate(tFallback(
             t,
             'projects.nextActionPromptDesc',
             'Choose or add the next action for {{project}}.',
-        ).replace('{{project}}', projectTitle);
+        ), { project: projectTitle });
 
     return (
         <Modal

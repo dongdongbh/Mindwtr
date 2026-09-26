@@ -189,6 +189,16 @@ describe('TaskListView', () => {
     expect(onAddTaskToSection).toHaveBeenCalledWith('view-section:someday:empty');
   });
 
+  it('names a section literally in its Add task label, even with $ replacement patterns', () => {
+    const renderer = renderView({
+      tasks: [],
+      taskGroups: [{ id: 'view-section:someday:odd', title: 'Ideas $& $$', tasks: [] }],
+      onAddTaskToSection: vi.fn(),
+    });
+    const labels = renderer.root.findAllByType('TouchableOpacity' as never).map((button) => button.props.accessibilityLabel);
+    expect(labels).toContain('Add task to Ideas $& $$');
+  });
+
   it('keeps Waiting row metadata visible when no details preference is provided', () => {
     const renderer = renderView({ tasks: [makeTask('waiting', { status: 'waiting' })] });
     const row = renderer.root.findByType('SwipeableTaskItem' as never);

@@ -11,7 +11,7 @@ import { applyListFilterEdit, EMPTY_LIST_FILTER_STATE, resolveListFilterState } 
 import { buildSomedayViewModel, buildWaitingViewModel } from './menu-views-model';
 import { buildMoreMenuModel, resolveMobileQuickAccessView } from './more-menu-model';
 import { createNativeHostContract } from './native-host-contract';
-import { moveSomedaySection, planSomedaySectionCreate, planSomedaySectionMove, renameSomedaySection } from './someday-sections-model';
+import { getSomedaySectionTaskText, moveSomedaySection, planSomedaySectionCreate, planSomedaySectionMove, renameSomedaySection } from './someday-sections-model';
 import { resetForTests } from './store';
 import type { AppSettings, Task } from './types';
 
@@ -148,6 +148,10 @@ describe('list view models', () => {
         expect(renameSomedaySection(stored, 'a', '  ')).toBeNull();
         expect(moveSomedaySection(stored, 'a', -1)).toBeNull();
         expect(moveSomedaySection(stored, 'a', 1)?.map(({ id, order }) => [id, order])).toEqual([['b', 0], ['a', 1]]);
+    });
+
+    it('names a Someday section literally in its Add task heading, even with $ replacement patterns', () => {
+        expect(getSomedaySectionTaskText((key) => key, 'Ideas $& $$').title).toBe('Add task to Ideas $& $$');
     });
 
     it('keeps the first attempt\'s Undo when a failed move is retried', () => {

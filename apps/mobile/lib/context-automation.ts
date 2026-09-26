@@ -1,4 +1,5 @@
 import {
+  formatI18nTemplate,
   isTaskInActiveProject,
   matchesHierarchicalToken,
   resolveFeatureFlags,
@@ -165,9 +166,7 @@ export function buildContextAutomationNotificationCopy(
 ): ContextAutomationNotificationCopy {
   const normalizedContext = normalizeContextToken(context);
   const count = tasks.length;
-  const interpolate = (template: string) => template
-    .replace(/{{context}}/g, normalizedContext)
-    .replace(/{{count}}/g, String(count));
+  const interpolate = (template: string) => formatI18nTemplate(template, { context: normalizedContext, count });
 
   if (count === 0) {
     return {

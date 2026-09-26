@@ -226,9 +226,10 @@ export function getSomedaySectionMoveText(t: Translate) {
 
 /** "Moved to Ideas (2)"; no section title means "No section". */
 export function formatSomedaySectionMoved(t: Translate, count: number, sectionTitle?: string): string {
-    return tFallback(t, 'viewSections.moved', 'Moved to {section} ({count})')
-        .replace('{count}', String(count))
-        .replace('{section}', sectionTitle ?? tFallback(t, 'viewSections.noSection', 'No section'));
+    return formatI18nTemplate(tFallback(t, 'viewSections.moved', 'Moved to {section} ({count})'), {
+        count,
+        section: sectionTitle ?? tFallback(t, 'viewSections.noSection', 'No section'),
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +264,7 @@ export function planSomedaySectionTaskAdd(input: {
 
 export function getSomedaySectionTaskText(t: Translate, groupTitle: string) {
     return {
-        title: tFallback(t, 'viewSections.addTask', 'Add task to {section}').replace('{section}', groupTitle),
+        title: formatI18nTemplate(tFallback(t, 'viewSections.addTask', 'Add task to {section}'), { section: groupTitle }),
         inputLabel: tFallback(t, 'taskEdit.titleLabel', 'Task title'),
         placeholder: tFallback(t, 'quickAdd.inputLabel', 'Task title'),
         failed: tFallback(t, 'task.addFailed', 'Failed to add task'),

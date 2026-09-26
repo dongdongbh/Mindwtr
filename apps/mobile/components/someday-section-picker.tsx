@@ -165,9 +165,9 @@ export function SomedaySectionPicker({
                 accessibilityLabel={t('common.save')}
                 disabled={creating || !title.trim()}
                 onPress={() => { void createSection(); }}
-                style={[pickerStyles.button, pickerStyles.primaryButton, (creating || !title.trim()) && pickerStyles.disabledButton]}
+                style={[pickerStyles.button, { backgroundColor: tc.tint, borderColor: tc.tint }, (creating || !title.trim()) && pickerStyles.disabledButton]}
               >
-                <Text style={pickerStyles.primaryButtonText}>{t('common.save')}</Text>
+                <Text style={[pickerStyles.primaryButtonText, { color: tc.onTint }]}>{t('common.save')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -184,7 +184,6 @@ const pickerStyles = StyleSheet.create({
   disabledButton: { opacity: 0.5 },
   input: { borderRadius: 8, borderWidth: 1, fontSize: 16, minHeight: 44, paddingHorizontal: 12 },
   overlay: { alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.45)', flex: 1, justifyContent: 'center' },
-  primaryButton: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  primaryButtonText: { color: '#FFFFFF', fontWeight: '600' },
+  primaryButtonText: { fontWeight: '600' },
   title: { fontSize: 17, fontWeight: '700' },
 });

@@ -204,6 +204,20 @@ describe('useTaskEditAttachments download settlement', () => {
     act(() => tree.unmount());
   });
 
+  it('names another device\'s file path literally, even with $ replacement patterns', async () => {
+    const attachment = { ...makeAttachment(1), kind: 'link' as const, uri: 'D:\\Docs\\a$&b$$.docx', mimeType: undefined };
+    useTaskStore.setState({ _allTasks: [makeTask(attachment)] });
+    availabilityMock.ensureAttachmentAvailableDetailed.mockResolvedValue({ status: 'available', attachment });
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={attachment} />); });
+
+    await act(async () => { await expose.current!.openAttachment(attachment); });
+
+    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', expect.stringContaining('another device: D:\\Docs\\a$&b$$.docx.'));
+    act(() => tree.unmount());
+  });
+
   it('still opens a web link and reports a link the OS refuses', async () => {
     const Linking = await import('expo-linking');
     const attachment = { ...makeAttachment(1), kind: 'link' as const, uri: 'https://example.com/doc', mimeType: undefined };

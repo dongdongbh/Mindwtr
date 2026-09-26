@@ -1,5 +1,5 @@
 import { View, Text, FlatList, Pressable, StyleSheet, Alert } from 'react-native';
-import { Check, Trash2 } from 'lucide-react-native';
+import { Check, RotateCcw, Trash2 } from 'lucide-react-native';
 import {
   buildTrashTimeline,
   formatTrashCounts,
@@ -63,7 +63,8 @@ function TrashSwipeRow({
         onRestore();
       }}
     >
-      <Text style={styles.swipeActionText}>↩️ {restoreLabel}</Text>
+      <RotateCcw size={18} color="#FFFFFF" />
+      <Text style={[styles.swipeActionText, { marginTop: 4 }]}>{restoreLabel}</Text>
     </Pressable>
   );
 

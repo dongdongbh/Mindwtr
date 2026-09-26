@@ -35,6 +35,7 @@ import { buildProjectOrderMap,
     resolveI18nText,
     useTaskStore, tFallback,
     baseTextCollator,
+    formatI18nTemplate,
 } from '@mindwtr/core';
 import type { FilterCriteria, Task, TaskStatus } from '@mindwtr/core';
 import type { BulkOrganizeTaskUpdateInput } from '@mindwtr/core';
@@ -904,9 +905,10 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                 }
             };
             const undo = registerUndoableAction(() => { void runUndo(); });
-            const message = tFallback(t, 'viewSections.moved', 'Moved to {section} ({count})')
-                .replace('{count}', String(move.changedCount))
-                .replace('{section}', move.destinationTitle);
+            const message = formatI18nTemplate(tFallback(t, 'viewSections.moved', 'Moved to {section} ({count})'), {
+                count: move.changedCount,
+                section: move.destinationTitle,
+            });
             showToast(message, 'success', 5000, {
                 label: tFallback(t, 'common.undo', 'Undo'),
                 onClick: undo,
@@ -929,8 +931,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const getSomedayAddTaskLabel = useCallback((group: TaskGroup) => (
         group.id === 'view-section:someday:none'
             ? undefined
-            : tFallback(t, 'viewSections.addTask', 'Add task to {section}')
-                .replace('{section}', group.title)
+            : formatI18nTemplate(tFallback(t, 'viewSections.addTask', 'Add task to {section}'), { section: group.title })
     ), [t]);
     const bulkAreaOptions = [...areas]
         .sort(compareAreasByOrder)

@@ -15,6 +15,7 @@ import {
     getArchiveSegmentLabel,
     getArchiveSummary,
     getArchiveTokenFilterOptions,
+    formatI18nTemplate,
     getInlineMarkdownPreview,
     getTaskGroupItemIds,
     getTaskMetadataFilterVisibility,
@@ -65,7 +66,7 @@ import { settleStoreAction } from '@/components/store-action-result';
 import { useToast } from '@/contexts/toast-context';
 import { TASK_LIST_WINDOWING_PROPS } from '@/components/task-list-windowing';
 import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Archive, ArrowUpDown, Check, ChevronDown, ChevronRight, Folder, SlidersHorizontal, Trash2 } from 'lucide-react-native';
+import { Archive, ArrowUpDown, Check, ChevronDown, ChevronRight, Folder, RotateCcw, SlidersHorizontal, Trash2 } from 'lucide-react-native';
 import { ListOverflowMenu } from '@/components/list-overflow-menu';
 
 function ArchivedTaskItem({
@@ -81,6 +82,7 @@ function ArchivedTaskItem({
     notSetLabel,
     editCompletedAtLabel,
     selectLabel,
+    openLabel,
     restoreLabel,
     deleteLabel,
     selectionMode,
@@ -99,6 +101,7 @@ function ArchivedTaskItem({
     notSetLabel: string;
     editCompletedAtLabel: string;
     selectLabel: string;
+    openLabel: string;
     restoreLabel: string;
     deleteLabel: string;
     selectionMode: boolean;
@@ -116,7 +119,8 @@ function ArchivedTaskItem({
                 onRestore();
             }}
         >
-            <Text style={styles.swipeActionText}>↩️ {restoreLabel}</Text>
+            <RotateCcw size={18} color="#FFFFFF" />
+            <Text style={[styles.swipeActionText, { marginTop: 4 }]}>{restoreLabel}</Text>
         </Pressable>
     );
 
@@ -143,7 +147,7 @@ function ArchivedTaskItem({
         >
             <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={selectionMode ? `${selectLabel} ${task.title}` : `Open archived task details: ${task.title}`}
+                accessibilityLabel={selectionMode ? `${selectLabel} ${task.title}` : openLabel}
                 accessibilityState={selectionMode ? { selected: isSelected } : undefined}
                 onPress={selectionMode ? onToggleSelect : onOpen}
                 style={({ pressed }) => [
@@ -218,6 +222,7 @@ function ArchivedProjectItem({
     completedLabel,
     cancelledLabel,
     notSetLabel,
+    openLabel,
     restoreLabel,
     deleteLabel,
 }: {
@@ -231,6 +236,7 @@ function ArchivedProjectItem({
     completedLabel: string;
     cancelledLabel: string;
     notSetLabel: string;
+    openLabel: string;
     restoreLabel: string;
     deleteLabel: string;
 }) {
@@ -245,7 +251,8 @@ function ArchivedProjectItem({
                 onRestore();
             }}
         >
-            <Text style={styles.swipeActionText}>↩️ {restoreLabel}</Text>
+            <RotateCcw size={18} color="#FFFFFF" />
+            <Text style={[styles.swipeActionText, { marginTop: 4 }]}>{restoreLabel}</Text>
         </Pressable>
     );
 
@@ -272,7 +279,7 @@ function ArchivedProjectItem({
         >
             <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Open archived project: ${project.title}`}
+                accessibilityLabel={openLabel}
                 onPress={onOpen}
                 style={({ pressed }) => [
                     styles.taskItem,
@@ -568,16 +575,28 @@ export default function ArchivedScreen() {
                     text: confirmation.confirmLabel,
                     style: 'destructive',
                     onPress: () => {
-                        void deleteTask(taskId);
+                        void settleStoreAction(() => deleteTask(taskId))
+                            .then((outcome) => {
+                                if (!outcome.ok) showTaskUpdateError(outcome.message);
+                            });
                     },
                 },
             ]
         );
-    }, [deleteTask, t]);
+    }, [deleteTask, showTaskUpdateError, t]);
 
     const handleRestoreProject = useCallback((projectId: string) => {
-        void reactivateArchivedProject({ updateProject }, projectId);
-    }, [updateProject]);
+        void settleStoreAction(() => reactivateArchivedProject({ updateProject }, projectId))
+            .then((outcome) => {
+                if (outcome.ok) return;
+                showToast({
+                    title: tFallback(t, 'common.error', 'Error'),
+                    message: outcome.message || tFallback(t, 'projects.reactivateFailed', 'Failed to reactivate project'),
+                    tone: 'error',
+                    durationMs: 4200,
+                });
+            });
+    }, [showToast, t, updateProject]);
 
     const handleDeleteProject = useCallback((projectId: string) => {
         const confirmation = getArchiveConfirmation({ kind: 'project', project: projects.find((item) => item.id === projectId) }, t);
@@ -590,12 +609,21 @@ export default function ArchivedScreen() {
                     text: confirmation.confirmLabel,
                     style: 'destructive',
                     onPress: () => {
-                        void deleteProject(projectId);
+                        void settleStoreAction(() => deleteProject(projectId))
+                            .then((outcome) => {
+                                if (outcome.ok) return;
+                                showToast({
+                                    title: tFallback(t, 'common.error', 'Error'),
+                                    message: outcome.message || tFallback(t, 'projects.deleteFailed', 'Failed to delete project'),
+                                    tone: 'error',
+                                    durationMs: 4200,
+                                });
+                            });
                     },
                 },
             ],
         );
-    }, [deleteProject, projects, t]);
+    }, [deleteProject, projects, showToast, t]);
 
     const handleSegmentChange = useCallback((next: ArchiveSegment) => {
         setSegment((current) => {
@@ -606,6 +634,10 @@ export default function ArchivedScreen() {
     }, [exitSelectionMode]);
 
     const rowLabels = useMemo(() => getArchiveRowLabels(t), [t]);
+    const openLabels = useMemo(() => ({
+        task: tFallback(t, 'archived.openTaskDetails', 'Open archived task details: {{title}}'),
+        project: tFallback(t, 'archived.openProject', 'Open archived project: {{title}}'),
+    }), [t]);
     const renderArchivedProject = useCallback(({ item }: { item: Project }) => (
         <ArchivedProjectItem
             project={item}
@@ -618,10 +650,11 @@ export default function ArchivedScreen() {
             completedLabel={rowLabels.completed}
             cancelledLabel={rowLabels.projectCancelled}
             notSetLabel={rowLabels.notSet}
+            openLabel={formatI18nTemplate(openLabels.project, { title: item.title })}
             restoreLabel={rowLabels.restore}
             deleteLabel={rowLabels.delete}
         />
-    ), [tc, areaById, handleRestoreProject, handleDeleteProject, rowLabels]);
+    ), [tc, areaById, handleRestoreProject, handleDeleteProject, openLabels, rowLabels]);
 
     const renderArchivedTask = useCallback(({ item }: { item: Task }) => (
         <ArchivedTaskItem
@@ -637,13 +670,14 @@ export default function ArchivedScreen() {
             notSetLabel={rowLabels.notSet}
             editCompletedAtLabel={rowLabels.editCompletedAt}
             selectLabel={rowLabels.select}
+            openLabel={formatI18nTemplate(openLabels.task, { title: item.title })}
             restoreLabel={rowLabels.restore}
             deleteLabel={rowLabels.delete}
             selectionMode={selectionMode}
             isSelected={selectedIds.has(item.id)}
             isHighlighted={item.id === highlightTaskId}
         />
-    ), [tc, handleDelete, handleOpenTask, handleRestore, highlightTaskId, rowLabels, selectedIds, selectionMode, toggleMultiSelect]);
+    ), [tc, handleDelete, handleOpenTask, handleRestore, highlightTaskId, openLabels, rowLabels, selectedIds, selectionMode, toggleMultiSelect]);
 
     const renderGroupedItem = useCallback(({ item }: { item: TaskGroupItem }) => {
         if (item.type === 'section') {

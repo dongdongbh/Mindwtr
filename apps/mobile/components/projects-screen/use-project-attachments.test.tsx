@@ -105,6 +105,7 @@ type HarnessApi = {
   selectedProject: Project | null;
   addProjectFileAttachment: ReturnType<typeof useProjectAttachments>['addProjectFileAttachment'];
   downloadAttachment: ReturnType<typeof useProjectAttachments>['downloadAttachment'];
+  openAttachment: ReturnType<typeof useProjectAttachments>['openAttachment'];
   replaceProject: (project: Project) => void;
 };
 
@@ -129,6 +130,7 @@ function Harness({ expose, initial }: {
     selectedProject,
     addProjectFileAttachment: hook.addProjectFileAttachment,
     downloadAttachment: hook.downloadAttachment,
+    openAttachment: hook.openAttachment,
     replaceProject: (project) => {
       coreStoreState._allProjects = [project];
       setSelectedProject(project);
@@ -166,6 +168,20 @@ describe('useProjectAttachments download settlement', () => {
     expect(expose.current!.selectedProject).toEqual(project);
     expect(coreStoreState._allProjects[0]).toEqual(project);
     expect(Alert.alert).toHaveBeenCalledWith('attachments.title', 'attachments.downloadConflict');
+    act(() => tree.unmount());
+  });
+
+  it('names another device\'s file path literally, even with $ replacement patterns', async () => {
+    const attachment = makeAttachment(1, { kind: 'link', uri: 'D:\\Docs\\a$&b$$.docx', mimeType: undefined, cloudKey: undefined });
+    const project = makeProject(attachment);
+    coreStoreState._allProjects = [project];
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={project} />); });
+
+    await act(async () => { await expose.current!.openAttachment(attachment); });
+
+    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', expect.stringContaining('another device: D:\\Docs\\a$&b$$.docx.'));
     act(() => tree.unmount());
   });
 

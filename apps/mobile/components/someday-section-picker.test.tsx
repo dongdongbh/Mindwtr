@@ -85,4 +85,24 @@ describe('SomedaySectionPicker', () => {
     await vi.waitFor(() => expect(onSelect).toHaveBeenCalledWith('books'));
     act(() => tree!.unmount());
   });
+
+  it('draws the new section Save button in the theme colors', () => {
+    const flatten = (style: unknown): Record<string, unknown> => (
+      Array.isArray(style) ? Object.assign({}, ...style.map(flatten)) : (style && typeof style === 'object' ? style as Record<string, unknown> : {})
+    );
+    let tree: ReturnType<typeof create>;
+    act(() => { tree = create(<SomedaySectionPicker
+      createOnly
+      sections={[]}
+      onCreate={vi.fn()}
+      onSelect={vi.fn()}
+      t={t}
+      themeColors={tc}
+    />); });
+    const save = tree!.root.findAllByType('TouchableOpacity' as never)
+      .find((node) => node.props.accessibilityLabel === 'common.save')!;
+    expect(flatten(save.props.style)).toMatchObject({ backgroundColor: tc.tint, borderColor: tc.tint });
+    expect(flatten(save.findByType('Text' as never).props.style)).toMatchObject({ color: tc.onTint });
+    act(() => tree!.unmount());
+  });
 });

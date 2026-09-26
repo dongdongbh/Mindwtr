@@ -28,7 +28,7 @@ import {
     type FocusPools,
     type FocusTaskLists,
 } from './focus-sections';
-import { tFallback } from './i18n';
+import { formatI18nTemplate, tFallback } from './i18n';
 import {
     applyListFilterEdit,
     EMPTY_LIST_FILTER_STATE,
@@ -312,10 +312,11 @@ export function moveFocusReorderTask<T extends { id: string }>(order: readonly T
 
 /** A reorder row's spoken label: "{{title}}. Position {{position}} of {{count}}". */
 export function getFocusReorderPositionLabel(t: Translate, title: string, index: number, count: number): string {
-    return tFallback(t, 'focus.reorderPosition', '{{title}}. Position {{position}} of {{count}}')
-        .replace('{{position}}', String(index + 1))
-        .replace('{{count}}', String(count))
-        .replace('{{title}}', title);
+    return formatI18nTemplate(tFallback(t, 'focus.reorderPosition', '{{title}}. Position {{position}} of {{count}}'), {
+        title,
+        position: index + 1,
+        count,
+    });
 }
 
 /** A reorder row's second line: the project, then the due date. */
@@ -328,12 +329,13 @@ export function getFocusReorderSecondaryLabel(task: Task, projectById: ReadonlyM
     return details.join(' · ');
 }
 
-export type FocusListTaskItem = { type: 'task'; task: Task; grouped: boolean };
+/** `groupId` is the Next group heading the row sits under: grouping by context or tag can show a task under several. */
+export type FocusListTaskItem = { type: 'task'; task: Task; grouped: boolean; groupId?: string };
 export type FocusListGroupHeader = { type: 'groupHeader'; id: string; title: string; count: number; muted?: boolean; dotColor?: string };
 export type FocusListItem = FocusListTaskItem | FocusListGroupHeader;
 
-const taskItems = (tasks: readonly Task[], grouped = false): FocusListTaskItem[] => (
-    tasks.map((task) => ({ type: 'task' as const, task, grouped }))
+const taskItems = (tasks: readonly Task[], grouped = false, groupId?: string): FocusListTaskItem[] => (
+    tasks.map((task) => ({ type: 'task' as const, task, grouped, ...(groupId === undefined ? {} : { groupId }) }))
 );
 
 /** Today's rows: ready ones, then a muted "Later today" heading over the timed starts still to come. */
@@ -382,7 +384,7 @@ export function buildFocusNextItems(input: {
             muted: group.muted,
             dotColor: group.dotColor,
         },
-        ...taskItems(group.tasks, true),
+        ...taskItems(group.tasks, true, group.key),
     ]);
 }
 

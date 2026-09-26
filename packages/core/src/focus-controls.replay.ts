@@ -62,35 +62,6 @@ export const loadFocusControlsFixture = (): FocusControlsFixture => JSON.parse(
 
 type Translate = (key: string) => string;
 
-type SheetObservation = {
-    sheet: { rows: string[][]; options: { visibility: { priority: boolean } }; selections: { priorities: string[]; locationQuery: string } };
-};
-
-/**
- * One place core does not copy React Native. useTaskFilterSelections drops a
- * hidden section's selections only when the section's visibility turns off
- * (task-filter-selections.ts:151). Applying a saved filter with priorities while
- * Priorities is already off keeps them in RN's state, so its sheet summary reads
- * "Urgent, High" with no chip and no effect. A plain state has no visibility
- * history, so core drops them as the hook's comment intends
- * (resolveListFilterState). Criteria, chips and counts agree.
- */
-export const staleFocusPriorityObservations = (name: string, fixture = loadFocusControlsFixture()): SheetObservation[] => (
-    (fixture.observations[name] as SheetObservation[])
-        .filter(({ sheet }) => !sheet.options.visibility.priority && sheet.selections.priorities.length > 0)
-);
-
-/** The frozen observations with that one difference applied, as core produces them. */
-export function expectedFocusObservations(name: string, fixture = loadFocusControlsFixture()): unknown[] {
-    const expected = structuredClone(fixture.observations[name]) as SheetObservation[];
-    for (const { sheet } of expected) {
-        if (sheet.options.visibility.priority || sheet.selections.priorities.length === 0 || sheet.selections.locationQuery) continue;
-        sheet.selections.priorities = [];
-        sheet.rows[sheet.rows.length - 1] = [sheet.rows[sheet.rows.length - 1][0], 'All'];
-    }
-    return expected;
-}
-
 // ---------------------------------------------------------------------------
 // Store seeding and write recording, as the mobile harness did.
 

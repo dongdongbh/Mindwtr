@@ -1786,6 +1786,8 @@ export const faOverrides: Record<string, string> = {
         'archived.emptyProjects': 'پروژه بایگانی‌شده‌ای نیست',
         'archived.emptyProjectsHint': 'پروژه‌هایی که بایگانی می‌کنید اینجا نمایش داده می‌شوند',
         'archived.restoreProject': 'بازگردانی پروژه',
+        'archived.openTaskDetails': 'باز کردن جزئیات کار بایگانی‌شده: {{title}}',
+        'archived.openProject': 'باز کردن پروژه بایگانی‌شده: {{title}}',
         'trash.title': 'زباله‌دان',
         'trash.searchPlaceholder': 'جستجوی کارهای حذف‌شده...',
         'trash.noTasksFound': 'کار حذف‌شده‌ای یافت نشد.',

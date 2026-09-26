@@ -1755,6 +1755,8 @@ export const esOverrides: Record<string, string> = {
 'archived.emptyProjects': "Sin proyectos archivados",
 'archived.emptyProjectsHint': "Los proyectos que archives aparecerán aquí",
 'archived.restoreProject': "Restaurar proyecto",
+'archived.openTaskDetails': "Abrir detalles de la tarea archivada: {{title}}",
+'archived.openProject': "Abrir proyecto archivado: {{title}}",
 'trash.title': "Papelera",
 'trash.searchPlaceholder': "Buscar tareas eliminadas...",
 'trash.noTasksFound': "No se encontraron tareas eliminadas.",

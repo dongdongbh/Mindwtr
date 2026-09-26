@@ -147,18 +147,20 @@ export function useTaskFilterSelections({
 
   // Selections whose section is no longer offered stop filtering silently:
   // drop them so a later re-appearance does not resurrect a hidden filter.
+  // The selections are dependencies too: an applied saved filter can select
+  // what the view already hides or does not offer.
   useEffect(() => {
     if (!visibility.priority) setPriorities((current) => (current.length > 0 ? [] : current));
-  }, [visibility.priority]);
+  }, [priorities, visibility.priority]);
   useEffect(() => {
     if (!visibility.energyLevel) setEnergyLevels((current) => (current.length > 0 ? [] : current));
-  }, [visibility.energyLevel]);
+  }, [energyLevels, visibility.energyLevel]);
   useEffect(() => {
     if (!visibility.timeEstimate) setTimeEstimates((current) => (current.length > 0 ? [] : current));
-  }, [visibility.timeEstimate]);
+  }, [timeEstimates, visibility.timeEstimate]);
   useEffect(() => {
     if (!visibility.location) setLocationQuery((current) => (current.trim() ? '' : current));
-  }, [visibility.location]);
+  }, [locationQuery, visibility.location]);
   useEffect(() => {
     if (!retainTokens) return;
     setTokenSelection((current) => {
@@ -169,11 +171,11 @@ export function useTaskFilterSelections({
         ? current
         : { included, excluded };
     });
-  }, [retainTokens]);
+  }, [retainTokens, tokenSelection]);
   useEffect(() => {
     if (!retainProjects) return;
     setProjects((current) => stableFilter(current, (projectId) => retainProjects.includes(projectId)));
-  }, [retainProjects]);
+  }, [projects, retainProjects]);
 
   const toggleToken = useCallback((token: string) => {
     setActiveSavedFilterId(null);

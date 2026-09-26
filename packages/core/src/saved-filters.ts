@@ -15,6 +15,7 @@ import type { BulkTaskTokenField } from './bulk-task-tokens';
 import { normalizeBulkTaskTokenInput } from './bulk-task-tokens';
 import { safeParseDate, safeParseDueDate } from './date';
 import { matchesHierarchicalToken, normalizePrefixedToken } from './hierarchy-utils';
+import { logInfo } from './logger';
 import type {
     DateRange,
     FilterCriteria,
@@ -507,14 +508,24 @@ export function normalizeSavedFilters(value: unknown): SavedFilter[] {
     });
 }
 
+/**
+ * Tombstone one saved filter. Only that entry changes: the others stay as
+ * stored, in stored order, including a newer app's views and fields.
+ */
 export function markSavedFilterDeleted(
     filters: readonly SavedFilter[] | undefined,
     filterId: string,
     deletedAt: string = new Date().toISOString(),
 ): SavedFilter[] {
-    return normalizeSavedFilters(filters).map((filter) => (
+    const next = (filters ?? []).map((filter) => (
         filter.id === filterId
             ? { ...filter, updatedAt: deletedAt, deletedAt }
             : filter
     ));
+    logInfo('Saved filter deleted; other saved filters kept as stored', {
+        scope: 'saved-filters',
+        category: 'storage',
+        context: { releaseCheck: 'v1.3.3/saved-filter-delete-keeps-others', count: next.length - 1 },
+    });
+    return next;
 }

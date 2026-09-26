@@ -2,7 +2,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { buildFocusControlsModel, DEFAULT_FOCUS_CONTROL_STATE, type FocusControlState } from './focus-controls';
 import {
     createContractFocusDriver,
-    expectedFocusObservations,
     focusControlsWrites,
     loadFocusControlsFixture,
     seedFocusControlsStore,
@@ -85,7 +84,7 @@ describe('native host contract: Focus controls', () => {
                 await driver.perform(action);
                 observed.push(driver.observe());
             }
-            expect(contractPart(observed)).toEqual(contractPart(expectedFocusObservations(entry.name)));
+            expect(contractPart(observed)).toEqual(contractPart(fixture.observations[entry.name]));
         },
     );
 

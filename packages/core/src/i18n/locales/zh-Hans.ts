@@ -1678,6 +1678,8 @@ export const zhHans: Record<string, string> = {
         'archived.emptyProjects': '没有归档的项目',
         'archived.emptyProjectsHint': '你归档的项目将会显示在这里',
         'archived.restoreProject': '恢复项目',
+        'archived.openTaskDetails': '打开归档任务详情：{{title}}',
+        'archived.openProject': '打开归档项目：{{title}}',
         'trash.title': '垃圾桶',
         'trash.searchPlaceholder': '搜索已删除任务...',
         'trash.noTasksFound': '未找到已删除任务。',

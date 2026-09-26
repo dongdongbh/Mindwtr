@@ -9,6 +9,7 @@ import {
   planSomedaySectionTaskAdd,
   selectSomedayTasks,
   shallow,
+  tFallback,
   useTaskStore,
 } from '@mindwtr/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -32,6 +33,7 @@ import { DeferredProjectsSection } from './deferred-projects-section';
 import { SomedaySectionPicker } from '../someday-section-picker';
 import { createSomedaySection } from '@/lib/someday-section-actions';
 import { useToast } from '@/contexts/toast-context';
+import { settleStoreAction } from '../store-action-result';
 import { logError } from '@/lib/app-log';
 import { useSomedaySectionMove } from './use-someday-section-move';
 import { ListOverflowMenu } from '../list-overflow-menu';
@@ -195,7 +197,15 @@ export function SomedayView() {
     return updateTask(task.id, { status });
   };
   const handleActivateProject = (projectId: string) => {
-    updateProject(projectId, { status: 'active' });
+    void settleStoreAction(() => updateProject(projectId, { status: 'active' })).then((outcome) => {
+      if (outcome.ok) return;
+      showToast({
+        title: tFallback(t, 'common.error', 'Error'),
+        message: outcome.message || tFallback(t, 'projects.reactivateFailed', 'Failed to reactivate project'),
+        tone: 'error',
+        durationMs: 4200,
+      });
+    });
   };
   const handleOpenProject = (projectId: string) => {
     router.push({ pathname: '/projects-screen', params: { projectId } });
@@ -226,11 +236,11 @@ export function SomedayView() {
       <View style={[styles.stats, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{model.ideasCount}</Text>
-          <Text style={styles.statLabel}>{labels.ideas}</Text>
+          <Text style={[styles.statLabel, { color: tc.secondaryText }]}>{labels.ideas}</Text>
         </View>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{model.inProjectsCount}</Text>
-          <Text style={styles.statLabel}>{labels.inProjects}</Text>
+          <Text style={[styles.statLabel, { color: tc.secondaryText }]}>{labels.inProjects}</Text>
         </View>
         {selections.hasActive ? (
           <FilterChip
@@ -507,7 +517,6 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 12,
-    color: '#6B7280',
     marginTop: 4,
   },
   taskListContent: {

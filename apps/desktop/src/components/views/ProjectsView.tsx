@@ -24,6 +24,7 @@ import {
     AREA_FILTER_ALL,
     AREA_FILTER_NONE,
     buildProjectGroups,
+    formatI18nTemplate,
     projectMatchesAreaFilterSelection,
     tFallback,
     useTaskStore,
@@ -620,8 +621,7 @@ export function ProjectsView() {
                 if (result && result.success === false) {
                     throw new Error(result.error || 'Failed to move task');
                 }
-                const message = tFallback(t, 'projects.taskMovedTo', 'Moved to {{name}}')
-                    .replace('{{name}}', destinationName);
+                const message = formatI18nTemplate(tFallback(t, 'projects.taskMovedTo', 'Moved to {{name}}'), { name: destinationName });
                 const undo = () => {
                     void Promise.resolve(updateTask(taskId, previous)).catch(failTaskMove);
                 };

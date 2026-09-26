@@ -90,6 +90,17 @@ describe('SyncStatusSection', () => {
         expect(queryByText(secondSnapshot)).not.toBeInTheDocument();
     });
 
+    it('names a snapshot literally in its Restore label, even with $ replacement patterns', () => {
+        const { getByRole } = renderStatus(new Date().toISOString(), {
+            snapshots: ['odd$&name$$.json'],
+            t: labelsWith({ recoverySnapshotsRestoreNamed: 'Restore snapshot {{snapshotName}}' }),
+        });
+
+        fireEvent.click(getByRole('button', { name: 'recoverySnapshots' }));
+
+        expect(getByRole('button', { name: 'Restore snapshot odd$&name$$.json' })).toBeInTheDocument();
+    });
+
     it('uses localized labels for sync history metadata', () => {
         const { getByRole, getByText, queryByText } = renderStatus(new Date().toISOString(), {
             lastSyncHistory: [{

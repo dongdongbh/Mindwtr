@@ -390,4 +390,18 @@ describe('React Native Trash parity fixture', () => {
       expect({ [scenario.name]: captured[scenario.name] }).toEqual({ [scenario.name]: observations[scenario.name] });
     }
   }, 120_000);
+
+  it('draws the Restore swipe action with a vector icon, not an emoji', async () => {
+    configureDateFormatting({ language: 'en', systemLocale: DEVICE_LOCALE });
+    await seedStore(settingsVariants.base, allTasks, projects);
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<TrashScreen />); });
+    const restoreActions = hostsOf(renderer.root, 'Swipeable').map((row) => row.findAll((child) => String(child.type) === 'Pressable')[0]);
+
+    expect(restoreActions.length).toBeGreaterThan(0);
+    expect(textsIn(renderer.root).filter((text) => text.includes('↩'))).toEqual([]);
+    expect(restoreActions.every((action) => hostsOf(action, 'Icon:RotateCcw').length === 1)).toBe(true);
+    await act(async () => { renderer.unmount(); });
+    await flushPendingSave();
+  });
 });

@@ -1444,7 +1444,7 @@ export default function FocusScreen() {
       <SectionList
         sections={hasTasks ? sections : []}
         extraData={focusListVersion}
-        keyExtractor={(item) => item.type === 'task' ? item.task.id : item.type === 'project' ? `project:${item.project.id}` : item.id}
+        keyExtractor={(item) => item.type === 'task' ? (item.groupId ? `${item.groupId}:${item.task.id}` : item.task.id) : item.type === 'project' ? `project:${item.project.id}` : item.id}
         stickySectionHeadersEnabled={false}
         getItemLayout={getFocusItemLayout}
         initialNumToRender={FOCUS_LIST_INITIAL_RENDER_COUNT}

@@ -1,5 +1,5 @@
 import { normalizeFocusTaskLimit } from './focus-utils';
-import { translateWithFallback } from './i18n';
+import { formatI18nTemplate, translateWithFallback } from './i18n';
 import { useTaskStore } from './store';
 import type { Task, TaskStatus } from './types';
 
@@ -10,13 +10,14 @@ type TranslateFn = (key: string) => string;
 // chord, mobile search. The copies had already drifted, one of them untranslated.
 // The single/double brace split follows the keys as they already ship.
 export function formatTaskMarkedDoneMessage(t: TranslateFn, title: string): string {
-    return translateWithFallback(t, 'task.markedDone', '{title} marked Done').replace('{title}', title);
+    return formatI18nTemplate(translateWithFallback(t, 'task.markedDone', '{title} marked Done'), { title });
 }
 
 export function formatTaskMovedMessage(t: TranslateFn, title: string, status: TaskStatus): string {
-    return translateWithFallback(t, 'task.movedToStatus', '{{title}} moved to {{status}}')
-        .replace('{{title}}', title)
-        .replace('{{status}}', translateWithFallback(t, `status.${status}`, status));
+    return formatI18nTemplate(translateWithFallback(t, 'task.movedToStatus', '{{title}} moved to {{status}}'), {
+        title,
+        status: translateWithFallback(t, `status.${status}`, status),
+    });
 }
 
 // Completing a task force-clears its Today star (applyTaskUpdates), so

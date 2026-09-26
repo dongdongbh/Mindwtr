@@ -1825,6 +1825,8 @@ export const jaOverrides: Record<string, string> = {
         'archived.emptyProjects': 'アーカイブ済みのプロジェクトはありません',
         'archived.emptyProjectsHint': 'アーカイブしたプロジェクトがここに表示されます',
         'archived.restoreProject': 'プロジェクトを復元',
+        'archived.openTaskDetails': 'アーカイブ済みのタスクの詳細を開く: {{title}}',
+        'archived.openProject': 'アーカイブ済みのプロジェクトを開く: {{title}}',
         'trash.title': 'ゴミ箱',
         'trash.searchPlaceholder': 'ゴミ箱のタスクを検索…',
         'trash.noTasksFound': 'ゴミ箱にタスクは見つかりませんでした。',

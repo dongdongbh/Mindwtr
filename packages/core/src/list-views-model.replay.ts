@@ -987,7 +987,7 @@ export async function replayTrash(backend: TrashBackend, scenario: ListViewsScen
                         !selectionMode,
                         item.markdown,
                         item.indicatorColor,
-                        selectionMode ? null : [`↩️ ${labels.restore}`, labels.delete],
+                        selectionMode ? null : [labels.restore, labels.delete],
                     ];
                 }),
                 empty: current.empty ? ['Icon:Trash2', current.empty.title, current.empty.message] : null,

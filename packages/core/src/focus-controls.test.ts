@@ -5,6 +5,7 @@ import {
     DEFAULT_FOCUS_CONTROL_STATE,
     getFocusFilterTokens,
     getFocusGroupByOptions,
+    getFocusReorderPositionLabel,
     getFocusSortOptions,
     moveFocusReorderTask,
     planFocusFilterDelete,
@@ -14,10 +15,8 @@ import {
 } from './focus-controls';
 import {
     createCoreFocusDriver,
-    expectedFocusObservations,
     loadFocusControlsFixture,
     seedFocusControlsStore,
-    staleFocusPriorityObservations,
 } from './focus-controls.replay';
 import { loadTranslations } from './i18n/i18n-loader';
 import { EMPTY_LIST_FILTER_STATE } from './list-filter-state';
@@ -57,20 +56,9 @@ describe('Focus controls', () => {
                 await driver.perform(action);
                 observed.push(driver.observe());
             }
-            expect(observed).toEqual(expectedFocusObservations(scenario.name));
+            expect(observed).toEqual(fixture.observations[scenario.name]);
         },
     );
-
-    it('pins the one place core does not copy React Native: a hidden priority kept by applying a saved filter', () => {
-        for (const { name } of fixture.scenarios) {
-            const stale = staleFocusPriorityObservations(name);
-            expect(stale.length).toBe(name === 'priority rules with priorities off' ? 3 : 0);
-            for (const { sheet } of stale) {
-                expect(sheet.selections.priorities).toEqual(['urgent', 'high']);
-                expect(sheet.rows.at(-1)).toEqual(['More filters', 'Urgent, High']);
-            }
-        }
-    });
 
     it('offers the context and tag chips of the tasks Focus can show, sorted and unique', () => {
         expect(getFocusFilterTokens([
@@ -116,6 +104,11 @@ describe('Focus controls', () => {
         expect(detached.state.savedFilterId).toBeNull();
         expect(detached.chips.map((chip) => chip.id)).toEqual(['location']);
         expect(detached.canSave).toBe(true);
+    });
+
+    it('speaks a reorder row\'s title literally, even with $ replacement patterns', () => {
+        expect(getFocusReorderPositionLabel((key) => key, 'Pay $& and $$ {{count}}', 0, 3))
+            .toBe('Pay $& and $$ {{count}}. Position 1 of 3');
     });
 
     it('marks a deleted saved filter instead of dropping it', () => {

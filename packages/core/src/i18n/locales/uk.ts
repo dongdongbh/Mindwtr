@@ -1751,6 +1751,8 @@ export const ukOverrides: Record<string, string> = {
     "archived.emptyProjects": "Немає архівованих проектів",
     "archived.emptyProjectsHint": "Проекти, які ви архівуєте, з’являться тут",
     "archived.restoreProject": "Відновити проект",
+    "archived.openTaskDetails": "Відкрити деталі архівованого завдання: {{title}}",
+    "archived.openProject": "Відкрити архівований проект: {{title}}",
     "trash.title": "сміття",
     "trash.searchPlaceholder": "Пошук завдань у смітнику...",
     "trash.noTasksFound": "Завдань у кошику не знайдено.",

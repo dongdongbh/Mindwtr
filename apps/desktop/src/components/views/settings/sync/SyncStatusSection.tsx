@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+    formatI18nTemplate,
     isSettingsSyncGroupEnabled,
     listMergeConflictSamples,
     safeFormatDate,
@@ -351,9 +352,7 @@ export function SyncStatusSection({
                                     const accessibilityName = displayLabel === snapshot
                                         ? snapshot
                                         : `${displayLabel} (${snapshot})`;
-                                    const restoreLabel = t.recoverySnapshotsRestoreNamed
-                                        .replace('{{snapshotName}}', accessibilityName)
-                                        .replace('{snapshotName}', accessibilityName);
+                                    const restoreLabel = formatI18nTemplate(t.recoverySnapshotsRestoreNamed, { snapshotName: accessibilityName });
                                     return (
                                         <div key={snapshot} className="flex items-center justify-between gap-2 text-xs">
                                             <span className="text-muted-foreground font-mono truncate">{displayLabel}</span>

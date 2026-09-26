@@ -77,6 +77,16 @@
     "clear a trash the area filter narrows",
     "deleted dates follow the app date format"
    ]
+  },
+  "recapturedAfterArchiveRestoreIcon": {
+   "base": "9c974fba9",
+   "change": "Task rn-focus-menu-bugs-20260924-01, bug 5: the Archive swipe Restore action draws the lucide RotateCcw icon instead of the emoji. Recaptured with MINDWTR_CAPTURE_LIST_VIEWS=1 on app/(drawer)/archived.parity.test.tsx only. The only change is the observations text field: 47 observations now read \"Restore\" where they read \"↩️ Restore\". Core and the native host contract do not compare text, and every other field and input is byte-identical.",
+   "part": "archive"
+  },
+  "recapturedAfterTrashRestoreIcon": {
+   "base": "9f486312f",
+   "change": "Task rn-focus-menu-bugs-20260924-01, correction pass 1: the Trash swipe Restore action draws the lucide RotateCcw icon instead of the emoji. Recaptured with MINDWTR_CAPTURE_LIST_VIEWS=1 on app/(drawer)/trash.parity.test.tsx only. 26 observations changed, and only in their text: the row action label in rows and the text field now read \"Restore\" where they read \"↩️ Restore\". The core replay (list-views-model.replay.ts) drops the emoji to match. Every other field and input is byte-identical.",
+   "part": "trash"
   }
  },
  "contexts": {
@@ -12761,23 +12771,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -13029,23 +13039,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -13295,23 +13305,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM"
@@ -13561,23 +13571,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -13827,23 +13837,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM"
@@ -14093,23 +14103,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -14355,23 +14365,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -14622,23 +14632,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -14932,29 +14942,29 @@
       "Select",
       "Today",
       "1",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
       "Yesterday",
       "1",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
       "September 2026",
       "2",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
       "Not completed",
       "1",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -15233,23 +15243,23 @@
       "1",
       "Yesterday",
       "1",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
       "September 2026",
       "2",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
       "Not completed",
       "1",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -18394,23 +18404,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -18611,7 +18621,7 @@
       "Filters · 1",
       "1 task",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM"
@@ -19046,23 +19056,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -19319,23 +19329,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -19543,7 +19553,7 @@
       "Filters · 1",
       "1 task",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM"
@@ -19793,19 +19803,19 @@
       "Filters · 1",
       "4 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -20461,23 +20471,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -20685,7 +20695,7 @@
       "Filters · 1",
       "1 task",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM"
@@ -21517,23 +21527,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -21785,23 +21795,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -22044,19 +22054,19 @@
       "Projects",
       "4 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -22306,19 +22316,19 @@
       "Projects",
       "4 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -22553,19 +22563,19 @@
       "Projects",
       "4 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -22815,19 +22825,19 @@
       "Projects",
       "4 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -23052,15 +23062,15 @@
       "Projects",
       "3 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -23280,15 +23290,15 @@
       "Projects",
       "3 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -23516,15 +23526,15 @@
       "Projects",
       "3 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/20/2026, 6:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -23744,15 +23754,15 @@
       "Projects",
       "3 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/20/2026, 6:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -23980,15 +23990,15 @@
       "Projects",
       "3 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call the venue",
       "Cancelled: 09/21/2026, 9:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/20/2026, 6:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM"
@@ -24240,23 +24250,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -25920,15 +25930,15 @@
       "Projects",
       "3 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -26988,15 +26998,15 @@
       "Projects",
       "3 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM"
@@ -27465,15 +27475,15 @@
       "Projects",
       "3 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM"
@@ -27725,23 +27735,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -27829,17 +27839,17 @@
       "Tasks",
       "Projects",
       "3 projects",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Summer trip",
       "Cancelled: 09/19/2026, 12:00 PM",
       "Home",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Board report",
       "Completed: 09/20/2026, 11:00 AM",
       "Work",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old garden",
       "Completed: 08/30/2026, 8:00 AM"
@@ -27922,12 +27932,12 @@
       "Tasks",
       "Projects",
       "2 projects",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Summer trip",
       "Cancelled: 09/19/2026, 12:00 PM",
       "Home",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old garden",
       "Completed: 08/30/2026, 8:00 AM"
@@ -28017,12 +28027,12 @@
       "Tasks",
       "Projects",
       "2 projects",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Summer trip",
       "Cancelled: 09/19/2026, 12:00 PM",
       "Home",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old garden",
       "Completed: 08/30/2026, 8:00 AM"
@@ -28097,12 +28107,12 @@
       "Tasks",
       "Projects",
       "2 projects",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Summer trip",
       "Cancelled: 09/19/2026, 12:00 PM",
       "Home",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old garden",
       "Completed: 08/30/2026, 8:00 AM"
@@ -28192,12 +28202,12 @@
       "Tasks",
       "Projects",
       "2 projects",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Summer trip",
       "Cancelled: 09/19/2026, 12:00 PM",
       "Home",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old garden",
       "Completed: 08/30/2026, 8:00 AM"
@@ -28264,7 +28274,7 @@
       "Tasks",
       "Projects",
       "1 project",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old garden",
       "Completed: 08/30/2026, 8:00 AM"
@@ -28571,23 +28581,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -28839,23 +28849,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -29517,17 +29527,17 @@
       "Tasks",
       "Projects",
       "3 projects",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Summer trip",
       "Cancelled: 09/19/2026, 12:00 PM",
       "Home",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Board report",
       "Completed: 09/20/2026, 11:00 AM",
       "Work",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old garden",
       "Completed: 08/30/2026, 8:00 AM"
@@ -29777,23 +29787,23 @@
       "Projects",
       "5 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Alpha review",
       "Completed: 09/23/2026, 5:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Quarterly report",
       "Completed: 09/22/2026, 11:30 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old note",
       "Completed: 09/08/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -30000,11 +30010,11 @@
       "Projects",
       "2 tasks",
       "Select",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Buy milk",
       "Completed: 09/10/2026, 8:00 AM",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call venue",
       "Cancelled: 09/21/2026, 9:00 AM"
@@ -30067,7 +30077,7 @@
       "Tasks",
       "Projects",
       "1 project",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Summer trip",
       "Cancelled: 09/19/2026, 12:00 PM",
@@ -30207,17 +30217,17 @@
       "Tasks",
       "Projects",
       "3 projects",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Summer trip",
       "Cancelled: 09/19/2026, 12:00 PM",
       "Home",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Board report",
       "Completed: 09/20/2026, 11:00 AM",
       "Work",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old garden",
       "Completed: 08/30/2026, 8:00 AM"
@@ -30628,7 +30638,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30644,7 +30654,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30660,7 +30670,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30676,7 +30686,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30692,7 +30702,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30708,7 +30718,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -30722,32 +30732,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -30786,7 +30796,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30802,7 +30812,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30818,7 +30828,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30834,7 +30844,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30850,7 +30860,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30866,7 +30876,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -30880,32 +30890,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -30942,7 +30952,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30958,7 +30968,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30974,7 +30984,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -30990,7 +31000,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31006,7 +31016,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -31025,27 +31035,27 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -31082,7 +31092,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31098,7 +31108,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31114,7 +31124,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -31133,17 +31143,17 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -31180,7 +31190,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31196,7 +31206,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -31215,12 +31225,12 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
@@ -31259,7 +31269,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31275,7 +31285,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31291,7 +31301,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31307,7 +31317,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31323,7 +31333,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31339,7 +31349,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -31353,32 +31363,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -31415,7 +31425,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31431,7 +31441,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31447,7 +31457,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31463,7 +31473,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31479,7 +31489,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31495,7 +31505,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -31524,32 +31534,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -31586,7 +31596,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31602,7 +31612,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31618,7 +31628,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31634,7 +31644,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31650,7 +31660,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31666,7 +31676,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -31680,32 +31690,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -31742,7 +31752,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31758,7 +31768,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31774,7 +31784,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31790,7 +31800,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31806,7 +31816,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31822,7 +31832,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -31851,32 +31861,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -31913,7 +31923,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31929,7 +31939,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31945,7 +31955,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31961,7 +31971,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -31977,7 +31987,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -31996,27 +32006,27 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -32053,7 +32063,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32069,7 +32079,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32085,7 +32095,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32101,7 +32111,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32117,7 +32127,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -32146,27 +32156,27 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -32203,7 +32213,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32219,7 +32229,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32235,7 +32245,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32251,7 +32261,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -32270,22 +32280,22 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -32324,7 +32334,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32340,7 +32350,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32356,7 +32366,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32372,7 +32382,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32388,7 +32398,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -32404,7 +32414,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -32418,32 +32428,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -33270,7 +33280,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -33286,7 +33296,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -33302,7 +33312,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -33327,17 +33337,17 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -33376,7 +33386,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -33392,7 +33402,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -33408,7 +33418,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -33424,7 +33434,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -33440,7 +33450,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -33456,7 +33466,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -33470,32 +33480,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -34547,7 +34557,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -34563,7 +34573,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -34579,7 +34589,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -34595,7 +34605,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -34611,7 +34621,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -34627,7 +34637,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -34641,32 +34651,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -35019,7 +35029,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35035,7 +35045,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35051,7 +35061,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35067,7 +35077,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35083,7 +35093,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35099,7 +35109,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -35113,32 +35123,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -35335,7 +35345,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35351,7 +35361,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35367,7 +35377,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35383,7 +35393,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35399,7 +35409,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35415,7 +35425,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -35429,32 +35439,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -35491,7 +35501,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35507,7 +35517,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35523,7 +35533,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35539,7 +35549,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35555,7 +35565,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35571,7 +35581,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -35600,32 +35610,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -35662,7 +35672,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35678,7 +35688,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35694,7 +35704,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35710,7 +35720,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35726,7 +35736,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35742,7 +35752,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -35756,32 +35766,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -35818,7 +35828,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35834,7 +35844,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35850,7 +35860,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35866,7 +35876,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35882,7 +35892,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -35898,7 +35908,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -35927,32 +35937,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 09/19/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -36026,7 +36036,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36042,7 +36052,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -36056,12 +36066,12 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -36098,7 +36108,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36114,7 +36124,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -36143,12 +36153,12 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
@@ -36215,7 +36225,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36231,7 +36241,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36247,7 +36257,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36263,7 +36273,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -36277,22 +36287,22 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
@@ -36329,7 +36339,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36345,7 +36355,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36361,7 +36371,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36377,7 +36387,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -36406,22 +36416,22 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 09/22/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 09/21/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 09/20/2026",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
@@ -36506,7 +36516,7 @@
        "Heading",
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36522,7 +36532,7 @@
        null,
        "#2563eb",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36538,7 +36548,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36554,7 +36564,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36570,7 +36580,7 @@
        null,
        "#6B7280",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ],
@@ -36586,7 +36596,7 @@
        null,
        "#16a34a",
        [
-        "↩️ Restore",
+        "Restore",
         "Delete"
        ]
       ]
@@ -36600,32 +36610,32 @@
       "Select",
       "Clear Trash",
       "Items in Trash are removed for good after 90 days",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Draft report",
       "Task",
       "Deleted: 2026-09-22",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Old launch",
       "Project",
       "Deleted: 2026-09-21",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Launch checklist",
       "Task",
       "Deleted: 2026-09-21",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Call plumber",
       "Task",
       "Deleted: 2026-09-20",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Finished and trashed",
       "Task",
       "Deleted: 2026-09-19",
-      "↩️ Restore",
+      "Restore",
       "Delete",
       "Garage",
       "Project",
