@@ -243,6 +243,8 @@ export const allowedEnglishMirrorKeysByLocale: Record<string, readonly string[]>
         'settings.localApiToken',
         'settings.networkProxyUrl',
     ],
+
+    ru: ['settings.eink', 'settings.oled', 'settings.appleRemindersImport.appleReminders'],
 };
 
 const translatableEnglishPattern = /[A-Za-z]{3,}/;
@@ -265,14 +267,109 @@ export function stripAllowedEnglishTerms(value: string): string {
         .replace(/<[A-Za-z][A-Za-z0-9_-]*>/g, '')
         .replace(/[+#@!][A-Za-z][A-Za-z0-9:_-]*/g, '');
 
-    for (const term of allowedEnglishMirrorTerms) {
+    for (const term of [...allowedEnglishMirrorTerms].sort((a, b) => b.length - a.length)) {
         next = next.replace(new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g'), '');
     }
     return next;
 }
 
-export function hasTranslatableEnglishText(value: string): boolean {
-    return translatableEnglishPattern.test(stripAllowedEnglishTerms(value));
+const mixedEnglishTechnicalTerms = [
+    // Product names and technical literals remain unchanged in translated copy.
+    'E-Ink',
+    'OLED',
+    'Midnight',
+    'Material 3',
+    'Android',
+    'Jalali',
+    'DAVx5',
+    'Outlook',
+    'Mindwtr Cloud',
+    'ETag',
+    'VPN',
+    'data.json',
+    'Expo Go',
+    'llama.cpp',
+    'Ollama',
+    'LM Studio',
+    'GLM',
+    'vLLM',
+    'Whisper',
+    'GPT-5',
+    'Copilot',
+    'Apple Calendar',
+    'macOS',
+    'Evolution Data Server',
+    'Linux',
+    'iCloud Drive',
+    'Google Drive',
+    'OneDrive',
+    'ownCloud',
+    'Nextcloud',
+    'Microsoft Store',
+    'Arch',
+    'AUR',
+    'Google Play',
+    'App Store',
+    'FOSS',
+    'Apple Reminders',
+    'OAuth',
+    'MDM',
+    'iOS',
+    'Files',
+    'Inter',
+    'GPU',
+    'localhost',
+    'Bearer',
+    'Authorization',
+    'Parakeet',
+    'localStorage',
+    'PWA',
+    'Dataview',
+    'IMAP',
+    'Gmail',
+    'iCloud Mail',
+    'Fastmail',
+    'Esc',
+    'http',
+    'webcal',
+    'Google Calendar', 'Google', 'LLM',
+];
+
+// Only these help strings describe literal API fields, commands or file extensions.
+// Keep exceptions local to the key so ordinary English elsewhere is still rejected.
+const literalTermsByKey: Record<string, readonly string[]> = {
+    'settings.syncMobile.oauthWithDropboxAppFolderAccessMindwtrSyncsAppsMindwtr': ['.json'],
+    'quickAdd.help': ['/* focus'],
+    'quickAdd.bulkImportTextFile': ['.txt'],
+    'settings.calendarDesc': ['.ics'],
+    'settings.aiExtraBodyParamsHint': ['model', 'messages', 'response_format', 'thinking', 'type', 'disabled'],
+    'obsidian.taskNotesDetectedHint': ['status', 'tags', 'task', 'due', 'scheduled', 'contexts', 'projects', 'timeEstimate', 'recurrence', 'completedDate'],
+    'search.helpOperators': ['status', 'context', 'tag', 'project', 'due'],
+    'settings.linuxUpdateHint': ['yay -S mindwtr', 'paru -S mindwtr'],
+    'settings.calendarMobile.chooseLocalIcsFile': ['.ics'],
+    'settings.calendarMobile.localIcsFileAdded': ['.ics'],
+    'settings.calendarMobile.localIcsFilesAreReadOnly': ['.ics'],
+    'settings.calendarChooseLocalFile': ['.ics'],
+    'settings.obsidianDataviewMetadataHint': ['project', 'context', 'due', 'scheduled', 'priority', 'estimate'],
+    'settings.obsidianMissingMarker': ['.obsidian'],
+};
+
+function stripLiteralTerm(text: string, term: string): string {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return text.replace(new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'g'), '');
+}
+
+export function hasTranslatableEnglishText(value: string, key?: string): boolean {
+    let text = value;
+    if (key) {
+        for (const term of [...mixedEnglishTechnicalTerms].sort((a, b) => b.length - a.length)) {
+            text = stripLiteralTerm(text, term);
+        }
+    }
+    for (const term of (key ? literalTermsByKey[key] : undefined) ?? []) {
+        text = stripLiteralTerm(text, term);
+    }
+    return translatableEnglishPattern.test(stripAllowedEnglishTerms(text));
 }
 
 // ---------------------------------------------------------------------------
