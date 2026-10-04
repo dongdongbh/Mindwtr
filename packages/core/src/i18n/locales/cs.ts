@@ -1061,6 +1061,7 @@ export const csOverrides: Record<string, string> = {
         'settings.saveLog': 'Uložit protokol',
         'settings.logMissing': 'Soubor protokolu zatím neexistuje. Nejdřív zapněte protokolování a problém zopakujte.',
         'settings.logCleared': 'Soubor protokolu vymazán.',
+        'settings.logClearFailed': 'Soubor protokolu se nepodařilo vymazat.',
         'settings.shareUnavailable': 'Sdílení není na tomto zařízení dostupné.',
         'settings.useSystem': 'Použít systémový motiv',
         'settings.followDevice': 'Řídit se vzhledem zařízení',

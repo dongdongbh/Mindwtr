@@ -1168,6 +1168,7 @@ export const ukOverrides: Record<string, string> = {
     "settings.saveLog": "Зберегти журнал",
     "settings.logMissing": "Файл журналу ще не знайдено. Увімкніть журналювання та спочатку відтворіть проблему.",
     "settings.logCleared": "Файл журналу очищено.",
+    "settings.logClearFailed": "Не вдалося очистити файл журналу.",
     "settings.shareUnavailable": "Спільний доступ недоступний на цьому пристрої.",
     "settings.useSystem": "Використовуйте тему системи",
     "settings.followDevice": "Дотримуйтеся налаштувань зовнішнього вигляду пристрою",

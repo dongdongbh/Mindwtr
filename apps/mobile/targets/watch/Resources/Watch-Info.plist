@@ -2,6 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
+    <key>CFBundleSpokenName</key>
+    <string>$(MINDWTR_SPOKEN_NAME)</string>
+    <key>INAlternativeAppNames</key>
+    <array>
+      <dict>
+        <key>INAlternativeAppName</key>
+        <string>$(MINDWTR_SPOKEN_NAME)</string>
+        <key>INAlternativeAppNamePronunciationHint</key>
+        <string>$(MINDWTR_SPOKEN_NAME)</string>
+      </dict>
+    </array>
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>

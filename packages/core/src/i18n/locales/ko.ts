@@ -1160,6 +1160,7 @@ export const koOverrides: Record<string, string> = {
         'settings.saveLog': '로그 저장',
         'settings.logMissing': '아직 로그 파일을 찾을 수 없습니다. 먼저 로깅을 활성화하고 문제를 재현하세요.',
         'settings.logCleared': '로그 파일이 지워졌습니다.',
+        'settings.logClearFailed': '로그 파일을 지울 수 없습니다.',
         'settings.shareUnavailable': '이 기기에서는 공유를 사용할 수 없습니다.',
         // Mobile Settings
         'settings.useSystem': '시스템 테마 사용',

@@ -1165,6 +1165,7 @@ export const zhHans: Record<string, string> = {
         'settings.saveLog': '保存日志',
         'settings.logMissing': '日志尚未生成，请先开启日志并复现问题。',
         'settings.logCleared': '日志已清除。',
+        'settings.logClearFailed': '无法清除日志文件。',
         'settings.shareUnavailable': '此设备不支持分享。',
         'settings.useSystem': '跟随系统',
         'settings.followDevice': '跟随设备外观设置',

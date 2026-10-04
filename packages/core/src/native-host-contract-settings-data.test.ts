@@ -57,6 +57,7 @@ describe('native host contract: Settings › Data', () => {
             logMissing: t('settings.logMissing'),
             shareUnavailable: t('settings.shareUnavailable'),
             logCleared: t('settings.logCleared'),
+            logClearFailed: 'Could not clear the log file.',
         });
         const menu = value(host.getSettingsMenu());
         expect(menu.groups.flat().find((row) => row.id === 'data')?.enabled).toBe(true);
@@ -66,6 +67,8 @@ describe('native host contract: Settings › Data', () => {
         expect(on.diagnostics.debugLogging).toMatchObject({ label: zh('settings.debugLogging'), value: true, edit: { type: 'debugLogging', value: false } });
         expect(on.diagnostics.shareLog).toEqual({ label: zh('settings.shareLog'), description: zh('settings.logFile') });
         expect(on.diagnostics.clearLog).toEqual({ label: zh('settings.clearLog') });
+        expect(on.diagnostics.logClearFailed).toBe(zh('settings.logClearFailed'));
+        expect(on.diagnostics.logClearFailed).not.toBe('settings.logClearFailed');
     });
 
     it('turns logging on once, keeps the other diagnostics fields, and stamps RN\'s forced line', async () => {

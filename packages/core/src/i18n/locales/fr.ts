@@ -1000,6 +1000,7 @@ export const frOverrides: Record<string, string> = {
         'settings.saveLog': 'Enregistrer le journal',
         'settings.logMissing': 'Fichier journal introuvable pour l’instant. Activez la journalisation et reproduisez d’abord le problème.',
         'settings.logCleared': 'Fichier journal effacé.',
+        'settings.logClearFailed': 'Impossible d’effacer le fichier journal.',
         'settings.shareUnavailable': 'Le partage n’est pas disponible sur cet appareil.',
         // Mobile Settings
         'settings.useSystem': 'Utiliser le thème système',

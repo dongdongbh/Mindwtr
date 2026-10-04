@@ -886,6 +886,7 @@ export const ptOverrides: Record<string, string> = {
         'settings.saveLog': 'Salvar registro',
         'settings.logMissing': 'Arquivo de log ainda não encontrado. Ative o registro e reproduza o problema primeiro.',
         'settings.logCleared': 'Arquivo de log limpo.',
+        'settings.logClearFailed': 'Não foi possível limpar o arquivo de log.',
         'settings.shareUnavailable': 'O compartilhamento não está disponível neste dispositivo.',
 
         // Mobile Settings

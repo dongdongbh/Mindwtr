@@ -377,7 +377,7 @@ assert.equal(/createNativeSync\(\{[\s\S]*?localData:/.exec(hostEntry)[0].match(/
 {
     assert.match(hostEntry, /class ValidatedSqliteAdapter extends NativeReceiptSqliteAdapter \{/);
     const bootBody = hostEntry.slice(hostEntry.indexOf('const boot = '), hostEntry.indexOf('globalThis.MindwtrHost ='));
-    const bootOrder = ['setStorageAdapter(adapter)', 'if (journaled) await loadNativeRequestReceipts(sqlite)', "else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt'] })", 'await adapter.getData()', 'await activateAndVerify(adapter'].map((text) => bootBody.indexOf(text));
+    const bootOrder = ['setStorageAdapter(adapter)', 'if (journaled) await loadNativeRequestReceipts(sqlite)', "else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data'] })", 'await adapter.getData()', 'await activateAndVerify(adapter'].map((text) => bootBody.indexOf(text));
     assert(bootOrder.every((index, i) => index > (i ? bootOrder[i - 1] : -1)), `receipts boot order ${bootOrder}`);
     assert.match(hostEntry, /pruneReceipts\(\): string \{\s*return submit\(async \(\) => \(\{ pruned: await pruneNativeRequestReceipts\(sqlite\) \}\)\);/);
     const coreAdapter = readFileSync(resolve(app, '../../packages/core/src/sqlite-adapter.ts'), 'utf8');
@@ -2737,7 +2737,16 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // Core's logger writes through the file port; the gate reads the store's setting, as RN's isLoggingEnabled does.
     assert.match(hostEntry, /setLogger\(\(payload\) => \{\s+consoleLogger\(payload\);\s+try \{\s+void diagnosticsLog\.append\(diagnosticsEntryFromLogPayload\(payload\), \{ force: payload\.force \}\);/);
     assert.match(hostEntry, /isEnabled: \(\) => isDiagnosticsLoggingEnabled\(useTaskStore\.getState\(\)\.settings\),\s+files: \[nativeLogFile\],/);
-    assert.match(hostEntry, /logShare\(\): string \{\s+return submit\(async \(\) => \(\{ path: await diagnosticsLog\.ensurePath\(\) \}\)\);/);
+    const shareBody = hostEntry.slice(hostEntry.indexOf('    logShare(): string {'), hostEntry.indexOf('    logClear(): string {'));
+    assert.match(shareBody, /diagnosticsLog\.serialize\(\(\) => diagnosticsLog\.ensurePath\(\)\)/);
+    const markerAt = shareBody.indexOf("logInfo('Native iOS diagnostics share requested'");
+    assert(markerAt >= 0 && markerAt < shareBody.indexOf('diagnosticsLog.serialize'), 'iOS marker queues before the final export barrier');
+    assert.match(shareBody, /__mindwtrHostPlatform === 'ios'/);
+    assert.match(shareBody, /force: true/);
+    assert(shareBody.includes("context: { releaseCheck: 'v1.3.4/ios-diagnostics', operation: 'share' }"));
+    const clearBody = hostEntry.slice(hostEntry.indexOf('    logClear(): string {'), hostEntry.indexOf('    archiveTaskSelection(json: string)'));
+    assert.doesNotMatch(clearBody, /logInfo\(|logWarn\(|diagnosticsLog\.append\(/, 'Clear cannot append a line that recreates its target');
+    assert.match(clearBody, /logClearChecked\(\): string \{\s+return submit\(\(\) => diagnosticsLog\.clearChecked\(\)\);/);
     assert.match(hostEntry, /logClear\(\): string \{\s+return submit\(async \(\) => \{\s+await diagnosticsLog\.clear\(\);/);
     // The host's diagnostic lines put their fields in the payload's context, the part the log file keeps.
     assert.doesNotMatch(hostEntry, /\bextra: \{|, extra \}/);
@@ -3215,11 +3224,12 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 }
 
 const fakeCore = `
+import { logInfo as realLogInfo, setLogger as setRealLogger } from ${JSON.stringify(resolve(app, '../../packages/core/src/logger.ts'))};
 export { createDiagnosticsLog, diagnosticsEntryFromLogPayload, isDiagnosticsLoggingEnabled } from ${JSON.stringify(resolve(app, '../../packages/core/src/diagnostics-log.ts'))};
 export { canSaveTaskListTag } from ${JSON.stringify(resolve(app, '../../packages/core/src/task-list-bulk-actions.ts'))};
 export { formatListItemCount } from ${JSON.stringify(resolve(app, '../../packages/core/src/list-count.ts'))};
 export { getBulkMoveStatusOptions } from ${JSON.stringify(resolve(app, '../../packages/core/src/task-list-bulk-actions.ts'))};
-export function setLogger(logger) { globalThis.coreLogger = logger; }
+export function setLogger(logger) { globalThis.coreLogger = logger; setRealLogger(logger); }
 export function consoleLogger() {}
 export class SqliteAdapter {
   async ensureSchema() { globalThis.events.push('schema'); }
@@ -3465,7 +3475,10 @@ export const useTaskStore = { getState: () => ({
   _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
   persistenceFailure: globalThis.persistenceFailure,
 }) };
-export function logInfo() { throw new Error('diagnostic sink failed'); }
+export function logInfo(message, meta) {
+  if (globalThis.__mindwtrHostPlatform === 'ios') return realLogInfo(message, meta);
+  throw new Error('diagnostic sink failed');
+}
 export function logWarn() { throw new Error('diagnostic sink failed'); }
 `;
 // host-sync.ts's and host-reminders.ts's core imports: bound only on a host with the key-value or the alarm bridges, which the
@@ -3485,10 +3498,11 @@ const built = await build({
         plugin.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: fakeCoreWithSync, loader: 'js', resolveDir: app }));
     } }],
 });
-const makeState = (taskCount, fakeDataSequence = []) => {
+const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined) => {
     const state = {
         fakeData: { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} },
         fakeDataSequence, activationCount: 0, saveCount: 0, queryCount: 0,
+        __mindwtrHostPlatform: hostPlatform,
         events: [], planInputs: [], plan: null, sqliteHasData: true, saveError: null, afterSave: null, lastLoaded: null, commitResult: null,
         createCount: 0, completeCount: 0, persistenceFailure: null, captureInputs: [],
         snapshotResult: { ok: true, value: { fileName: 'data.2026-09-24T10-00-00.000.snapshot.json', contents: '{}' } }, editorInputs: [], updateInputs: [], focusInputs: [],
@@ -3529,14 +3543,15 @@ const makeState = (taskCount, fakeDataSequence = []) => {
                 state.logOps.push(operation);
                 if (state.logFailure) return `!MindwtrNativeError:${state.logFailure}`;
                 switch (operation) {
-                    case 'path': return 'files/logs/mindwtr.log';
+                    case 'path': return state.logUnavailable ? '' : 'files/logs/mindwtr.log';
                     case 'ensure': state.logText ??= ''; return 'files/logs/mindwtr.log';
                     case 'exists': return state.logText === null ? '' : '1';
+                    case 'isAbsent': return state.logAbsentError ? '!MindwtrNativeError:absence unknown' : state.logText === null ? '1' : '';
                     case 'read': return state.logText;
                     case 'size': return String(Buffer.byteLength(state.logText ?? ''));
                     case 'append': state.logText += text; return '';
                     case 'write': state.logText = text; return '';
-                    case 'delete': { const had = state.logText !== null; state.logText = null; return had ? '1' : ''; }
+                    case 'delete': { if (state.logDeleteRefused) return ''; const had = state.logText !== null; state.logText = null; return had ? '1' : ''; }
                     default: throw new Error(`unknown log operation ${operation}`);
                 }
             },
@@ -3662,7 +3677,7 @@ assert.deepEqual(ready.events, ['schema', 'activate', 'load', 'flush', 'baseline
 // journaled boot requires tokens and loads all receipts before the validated load, activation, and replay.
 assert.equal(ready.replayTokens, 'optional');
 assert.equal(ready.receiptsLoadedAt, 0);
-assert.deepEqual([...ready.receiptScope], ['appLock', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt'], 'the VM array, compared in this realm');
+assert.deepEqual([...ready.receiptScope], ['appLock', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data'], 'the VM array, compared in this realm');
 {
     const journaled = makeState(0);
     assert.equal((await poll(journaled, journaled.MindwtrHost.boot('', '', 'journaled'))).ok, true);
@@ -4208,6 +4223,42 @@ assert.equal(brokenStorage.activationCount, 0);
     assert.doesNotThrow(() => log.coreLogger({ level: 'error', message: 'lost', force: true }));
     await tick();
     assert.deepEqual(await poll(log, log.MindwtrHost.logShare()), { ok: true, value: { path: null } });
+}
+// iOS uses the real shared logger/queue and strict native probe, including while a domain retry is owed.
+{
+    const log = makeState(0, [], 'ios');
+    assert.equal((await poll(log, log.MindwtrHost.boot())).ok, true);
+    assert(log.receiptScope.includes('data'), 'Apple scoped bootstrap durably acknowledges Data toggles');
+    log.persistenceStatus = { generation: 1, queued: true, inFlight: false, immediate: false, retrying: false, failed: true };
+    log.persistenceFailure = { kind: 'save_failed', message: 'owed domain write' };
+    const domainBefore = JSON.stringify({ events: log.events, fakeData: log.fakeData, saves: log.saveCount, menuInputs: log.menuInputs });
+    log.logOps.length = 0;
+    log.coreLogger({ level: 'info', message: 'earlier diagnostic', force: true });
+    assert.deepEqual(await poll(log, log.MindwtrHost.logShare()), { ok: true, value: { path: 'files/logs/mindwtr.log' } });
+    const lines = log.logText.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    assert.deepEqual(lines.map(({ ts: _ts, ...line }) => line), [
+        { level: 'info', scope: 'core', message: 'earlier diagnostic' },
+        { level: 'info', scope: 'native-ios', message: 'Native iOS diagnostics share requested', context: { releaseCheck: 'v1.3.4/ios-diagnostics', operation: 'share' } },
+    ], 'the forced iOS aggregate marker reaches actual file bytes before the live path is returned');
+    assert.equal(log.logOps.at(-1), 'ensure', 'the final export barrier follows every earlier append');
+    assert.equal(log.logOps.filter((op) => op === 'append').length, 2);
+    log.logOps.length = 0;
+    assert.deepEqual(await poll(log, log.MindwtrHost.logClearChecked()), { ok: true, value: { outcome: 'cleared' } });
+    assert.equal(log.logText, null);
+    assert.deepEqual(log.logOps, ['delete', 'path', 'isAbsent'], 'checked Clear writes no success line');
+    assert.deepEqual(await poll(log, log.MindwtrHost.logClearChecked()), { ok: true, value: { outcome: 'alreadyAbsent' } });
+    assert.equal(log.logText, null);
+    assert.equal(JSON.stringify({ events: log.events, fakeData: log.fakeData, saves: log.saveCount, menuInputs: log.menuInputs }), domainBefore, 'file-only calls do not retry or mutate domain work');
+    log.logText = 'retained';
+    log.logDeleteRefused = true;
+    assert.deepEqual(await poll(log, log.MindwtrHost.logClearChecked()), { ok: true, value: { outcome: 'unconfirmed' } });
+    assert.equal(log.logText, 'retained');
+    log.logDeleteRefused = false;
+    log.logAbsentError = true;
+    assert.deepEqual(await poll(log, log.MindwtrHost.logClearChecked()), { ok: true, value: { outcome: 'unconfirmed' } });
+    log.logAbsentError = false;
+    log.logUnavailable = true;
+    assert.deepEqual(await poll(log, log.MindwtrHost.logClearChecked()), { ok: true, value: { outcome: 'unavailable' } });
 }
 console.log('Storage exception rethrown in JS;', 'lifecycle ownership and debug-only fault hooks checked');
 console.log('RN legacy guard runs before the RN database opens and reads RKStorage and the database only as byte copies');

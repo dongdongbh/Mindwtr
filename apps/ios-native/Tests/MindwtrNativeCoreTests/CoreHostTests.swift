@@ -36199,4 +36199,382 @@ extension CoreHostTests {
         XCTAssertEqual(try referenceMove193SQLRows(unchanged.execute("PRAGMA foreign_key_check")), try referenceMove193SQLRows(violationsBefore))
         unchanged.close(); await core.close()
     }
+    private func diagnostics197Request(_ enabled: Bool, id: String = UUID().uuidString.lowercased()) throws -> String {
+        try json(["requestId": id, "edit": ["type": "debugLogging", "value": enabled]])
+    }
+
+    private func diagnostics197Model(_ core: CoreHost) async throws -> [String: Any] {
+        try object(await core.call("menuRead", argumentsJSON: json(["dataSettings", "{}"])))
+    }
+
+    private func diagnostics197Enabled(_ model: [String: Any]) throws -> Bool {
+        let diagnostics = try XCTUnwrap(model["diagnostics"] as? [String: Any])
+        let logging = try XCTUnwrap(diagnostics["debugLogging"] as? [String: Any])
+        return try XCTUnwrap(logging["value"] as? Bool)
+    }
+
+    private func diagnostics197FullSnapshot() throws -> String {
+        let db = try SQLiteBridge(url: database); defer { db.close() }
+        func rows(_ sql: String) throws -> [[String: Any]] {
+            try XCTUnwrap(NativeJSON.jsonObject(with: Data(db.execute(sql).utf8)) as? [[String: Any]])
+        }
+        func quote(_ value: String) -> String { "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        let tables = try rows("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        let tableList = try rows("PRAGMA table_list")
+        var result: [String: Any] = ["schema": try rows("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name"),
+                                   "foreignKeyCheck": try rows("PRAGMA foreign_key_check"), "userVersion": try rows("PRAGMA user_version")]
+        for table in tables {
+            let name = try XCTUnwrap(table["name"] as? String), quoted = quote(name)
+            let columns = try rows("PRAGMA table_xinfo(" + quoted + ")")
+            let withoutRowid = tableList.first { $0["name"] as? String == name }?["wr"] as? Int == 1
+            let visible = columns.filter { ($0["hidden"] as? Int ?? 0) != 1 }.compactMap { $0["name"] as? String }
+            let cells = (withoutRowid ? [] : ["rowid"]) + visible
+            let projection = cells.enumerated().map { index, cell in
+                let value = quote(cell)
+                return "typeof(" + value + ") AS __evidence_type_" + String(index)
+                    + ",CASE WHEN typeof(" + value + ")='blob' THEN hex(" + value + ") ELSE " + value
+                    + " END AS __evidence_value_" + String(index)
+            }.joined(separator: ",")
+            let order = withoutRowid ? visible.map(quote).joined(separator: ",") : "rowid"
+            let indexes = try rows("PRAGMA index_list(" + quoted + ")")
+            var indexColumns: [String: Any] = [:]
+            for index in indexes {
+                let id = try XCTUnwrap(index["name"] as? String)
+                indexColumns[id] = try rows("PRAGMA index_xinfo(" + quote(id) + ")")
+            }
+            let rawRows = try rows("SELECT " + projection + " FROM " + quoted + " ORDER BY " + order)
+            let storedRows: [[[String: Any]]] = try rawRows.map { row in
+                try cells.enumerated().map { index, cell in
+                    ["name": cell, "type": try XCTUnwrap(row["__evidence_type_" + String(index)] as? String),
+                     "value": try XCTUnwrap(row["__evidence_value_" + String(index)])]
+                }
+            }
+            result[name] = ["columns": columns, "indexes": indexes, "indexColumns": indexColumns,
+                            "foreignKeys": try rows("PRAGMA foreign_key_list(" + quoted + ")"), "rows": storedRows]
+        }
+        return try json(result)
+    }
+
+    func testBackup198JSONExportPreservesRaw21AndUsesSharedBytes() async throws {
+        let core = host(); _ = try await core.start()
+        let request = try await capture(core, title: "Backup198 日本語 🦉", id: UUID().uuidString.lowercased())
+        _ = try await core.call("captureSubmit", argumentsJSON: request)
+        let expected = try object(await core.call("menuRead", argumentsJSON: json(["dataBackup", "{}"])))
+        let before = try diagnostics197FullSnapshot()
+        let prepared = try await core.prepareDataBackup()
+        XCTAssertEqual(try Data(contentsOf: prepared.url), Data(try XCTUnwrap(expected["content"] as? String).utf8))
+        XCTAssertTrue(try String(contentsOf: prepared.url, encoding: .utf8).contains("Backup198 日本語 🦉"))
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        await core.discardDataBackup(prepared.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.url.path))
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        await core.close()
+        await expectFailure { _ = try await core.prepareDataBackup() }
+        await expectFailure { _ = try await core.prepareDataBackup(format: .csv) }
+        await expectFailure { _ = try await core.prepareDataBackup(format: .tasknotes) }
+    }
+
+    func testBackup199CSVExportUsesSharedBytesAndPreservesRaw21() async throws {
+        let core = host(); _ = try await core.start()
+        let request = try await capture(core, title: "CSV199 日本語, \"quoted\"", id: UUID().uuidString.lowercased())
+        _ = try await core.call("captureSubmit", argumentsJSON: request)
+        let expected = try object(await core.call("menuRead", argumentsJSON: json(["dataCsvExport", "{}"])))
+        let before = try diagnostics197FullSnapshot()
+        let prepared = try await core.prepareDataBackup(format: .csv)
+        XCTAssertEqual(prepared.url.pathExtension, "csv")
+        XCTAssertEqual(try Data(contentsOf: prepared.url), Data(try XCTUnwrap(expected["content"] as? String).utf8))
+        XCTAssertTrue(try String(contentsOf: prepared.url, encoding: .utf8).contains("\"CSV199 日本語, \"\"quoted\"\"\""))
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        await core.discardDataBackup(prepared.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.url.path))
+        await core.close()
+    }
+
+    func testBackup200TaskNotesZIPPreservesBinaryContentAndRaw21() async throws {
+        let core = host(); _ = try await core.start()
+        let request = try await capture(core, title: "ZIP200 日本語 🦉", id: UUID().uuidString.lowercased())
+        _ = try await core.call("captureSubmit", argumentsJSON: request)
+        let expected = try object(await core.call("menuRead", argumentsJSON: json(["dataTaskNotesExport", "{}"])))
+        XCTAssertEqual(expected["encoding"] as? String, "base64")
+        let before = try diagnostics197FullSnapshot()
+        let prepared = try await core.prepareDataBackup(format: .tasknotes)
+        XCTAssertTrue(prepared.url.lastPathComponent.hasSuffix("-tasknotes.zip"))
+        let control = directory.appendingPathComponent("task200-control.zip")
+        try XCTUnwrap(Data(base64Encoded: XCTUnwrap(expected["content"] as? String))).write(to: control)
+        defer { try? FileManager.default.removeItem(at: control) }
+        // ZIP timestamps can differ across these reads; compare exact decompressed entries.
+        func contents(_ url: URL) throws -> Data {
+            let process = Process(), output = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+            process.arguments = ["-p", url.path]
+            process.standardOutput = output
+            try process.run()
+            let bytes = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit(); XCTAssertEqual(process.terminationStatus, 0)
+            return bytes
+        }
+        let actual = try contents(prepared.url)
+        XCTAssertEqual(actual, try contents(control))
+        XCTAssertTrue(String(decoding: actual, as: UTF8.self).contains("ZIP200 日本語 🦉"))
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        await core.discardDataBackup(prepared.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.url.path))
+        await core.close()
+    }
+
+    func testBackup198ExclusiveOwnerProtectsLiveShareAndRestartCleansInterruptedFile() async throws {
+        let core = host(); _ = try await core.start()
+        let before = try diagnostics197FullSnapshot()
+        let prepared = try await core.prepareDataBackup()
+        let competing = host()
+        await expectFailure { _ = try await competing.start() }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: prepared.url.path))
+        await competing.close()
+        // Close without the UI dismissal callback, keeping the old object alive.
+        await core.close()
+        let restarted = host(); _ = try await restarted.start()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.url.path))
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        await restarted.close()
+    }
+
+    func testBackup198PendingWriteAndUninitializedHostRefuseWithoutRecovery() async throws {
+        let faults = HostIOFaults(), core = host(faults)
+        await expectFailure { _ = try await core.prepareDataBackup() }
+        await expectFailure { _ = try await core.prepareDataBackup(format: .csv) }
+        await expectFailure { _ = try await core.prepareDataBackup(format: .tasknotes) }
+        _ = try await core.start()
+        let request = try await capture(core, title: "Backup198 pending", id: UUID().uuidString.lowercased())
+        let before = try diagnostics197FullSnapshot()
+        faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected save failure") } }
+        await expectFailure { _ = try await core.call("captureSubmit", argumentsJSON: request) }
+        let exact = try Data(contentsOf: journal)
+        await expectFailure { _ = try await core.prepareDataBackup() }
+        await expectFailure { _ = try await core.prepareDataBackup(format: .csv) }
+        await expectFailure { _ = try await core.prepareDataBackup(format: .tasknotes) }
+        XCTAssertEqual(try Data(contentsOf: journal), exact)
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasPrefix("backup-export-") })
+        await core.close()
+    }
+
+    func testDiagnostics197ShareMarkerCheckedClearAndLibraryIsolation() async throws {
+        let core = host(); _ = try await core.start()
+        let request = try diagnostics197Request(true)
+        _ = try await core.call("dataSetting", argumentsJSON: json([request]))
+        let model = try await diagnostics197Model(core)
+        XCTAssertTrue(try diagnostics197Enabled(model))
+        let before = try diagnostics197FullSnapshot()
+        let shared = try object(await core.diagnosticsFileAction("logShare"))
+        let path = try XCTUnwrap(shared["path"] as? String)
+        let url = try await core.validatedDiagnosticsShareURL(path)
+        let bytes = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(bytes.contains("v1.3.4/ios-diagnostics"))
+        XCTAssertTrue(bytes.contains("Native iOS diagnostics share requested"))
+        XCTAssertTrue(bytes.contains("Debug logging enabled"))
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        let otherRoot = directory.appendingPathComponent("isolated-second-library")
+        let other = CoreHost(databaseURL: otherRoot.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle)
+        _ = try await other.start()
+        await expectFailure { _ = try await other.validatedDiagnosticsShareURL(path) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: otherRoot.appendingPathComponent("logs/mindwtr.log").path))
+        await other.close()
+        let cleared = try object(await core.diagnosticsFileAction("logClearChecked"))
+        XCTAssertEqual(cleared["outcome"] as? String, "cleared")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        let absent = try object(await core.diagnosticsFileAction("logClearChecked"))
+        XCTAssertEqual(absent["outcome"] as? String, "alreadyAbsent")
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        await core.close()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "Orderly close cannot recreate a checked-cleared log")
+    }
+
+    func testDiagnostics197TransportRejectsBeforeJournalOrSQL() async throws {
+        let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
+        let before = try diagnostics197FullSnapshot(); var journals = 0, writes = 0
+        faults.journalWrite = { journals += 1 }
+        faults.beforeSQL = { if self.archive180IsDomainWrite($0) { writes += 1 } }
+        let id = UUID().uuidString.lowercased()
+        let invalid = [
+            "{\"requestId\":\"" + id + "\",\"requestId\":\"" + id + "\",\"edit\":{\"type\":\"debugLogging\",\"value\":true}}",
+            "{\"requestId\":\"" + id + "\",\"edit\":{\"type\":\"debugLogging\",\"value\":false},\"edit\":{\"type\":\"debugLogging\",\"value\":true}}",
+            "{\"requestId\":\"" + id + "\",\"edit\":{\"type\":\"other\",\"type\":\"debugLogging\",\"value\":true}}",
+            "{\"requestId\":\"" + id + "\",\"edit\":{\"type\":\"debugLogging\",\"value\":false,\"value\":true}}",
+            "{\"requestId\":\"" + id + "\",\"\\u0072equestId\":\"" + id + "\",\"edit\":{\"type\":\"debugLogging\",\"value\":true}}",
+            "{\"requestId\":\"" + id + "\",\"edit\":{\"type\":\"debugLogging\",\"value\":false,\"\\u0076alue\":true}}",
+            try json(["requestId": id, "extra": true, "edit": ["type": "debugLogging", "value": true]]),
+            try json(["requestId": "invalid", "edit": ["type": "debugLogging", "value": true]]),
+            try json(["requestId": id, "edit": ["type": "debugLogging", "value": 1]]),
+            try json(["requestId": id, "edit": ["type": "debugLogging", "value": "true"]]),
+            try json(["requestId": id, "edit": ["type": "other", "value": true]]),
+            String(repeating: " ", count: 1_025) + (try diagnostics197Request(true))
+        ]
+        for request in invalid { await expectFailure { _ = try await core.call("dataSetting", argumentsJSON: json([request])) } }
+        await expectFailure { _ = try await core.call("dataSetting", argumentsJSON: "[]") }
+        await expectFailure { _ = try await core.call("menuRead", argumentsJSON: json(["dataSettings", "{\"extra\":true}"])) }
+        await expectFailure { _ = try await core.diagnosticsFileAction("dataSetting") }
+        XCTAssertEqual(journals, 0); XCTAssertEqual(writes, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        await core.close()
+    }
+
+    func testDiagnostics197OldOnAckAfterLaterOffColdKeepsExactReceiptAndOff() async throws {
+        let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
+        let id = UUID().uuidString.lowercased()
+        let on = "{\"\\u0072equestId\":\"" + id + "\",\"ed\\u0069t\":{\"t\\u0079pe\":\"debugLogging\",\"va\\u006cue\":true}}"
+        let originalArgs = "[ " + String(try json([on]).dropFirst().dropLast()) + " ]"
+        faults.journalRemove = { throw HostFailure("Injected lost acknowledgment cleanup") }
+        await expectFailure { _ = try await core.call("dataSetting", argumentsJSON: originalArgs) }
+        let oldJournal = try Data(contentsOf: journal)
+        let decoded = try object(String(decoding: oldJournal, as: UTF8.self))
+        XCTAssertEqual(decoded["method"] as? String, "dataSetting")
+        XCTAssertEqual(Data(try XCTUnwrap(decoded["argumentsJSON"] as? String).utf8), Data(originalArgs.utf8))
+        faults.journalRemove = nil
+        _ = try await core.retryPending()
+        _ = try await core.call("dataSetting", argumentsJSON: json([diagnostics197Request(false)]))
+        let before = try diagnostics197FullSnapshot()
+        await core.close()
+        try oldJournal.write(to: journal)
+        let restarted = host(); let startup = try object(await restarted.start())
+        XCTAssertEqual((startup["recovery"] as? [String: Any])?["method"] as? String, "dataSetting")
+        let model = try await diagnostics197Model(restarted)
+        XCTAssertFalse(try diagnostics197Enabled(model))
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before, "Old on acknowledgment cannot rewrite later off or either full receipt")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        await restarted.close()
+        let second = host(); _ = try await second.start()
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        await second.close()
+    }
+
+    func testDiagnostics197FailedToggleExactRetryAndFileActionsDoNotSettleIt() async throws {
+        let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
+        _ = try await core.call("dataSetting", argumentsJSON: json([diagnostics197Request(true)]))
+        let before = try diagnostics197FullSnapshot()
+        faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected Data save failure") } }
+        let request = try diagnostics197Request(false)
+        await expectFailure { _ = try await core.call("dataSetting", argumentsJSON: json([request])) }
+        let exact = try Data(contentsOf: journal)
+        _ = try await core.diagnosticsFileAction("logShare")
+        _ = try await core.diagnosticsFileAction("logClearChecked")
+        XCTAssertEqual(try Data(contentsOf: journal), exact)
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        await expectFailure { _ = try await core.retryPending() }
+        try assertJournalContentUnchanged(exact)
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        await core.close()
+        let restarted = host(); _ = try await restarted.start()
+        let model = try await diagnostics197Model(restarted)
+        XCTAssertFalse(try diagnostics197Enabled(model))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        let saved = try diagnostics197FullSnapshot(); await restarted.close()
+        let second = host(); _ = try await second.start()
+        XCTAssertEqual(try diagnostics197FullSnapshot(), saved)
+        await second.close()
+    }
+
+    func testDiagnostics197ActualPendingTaskShareClearPreserveJournalAndRaw21() async throws {
+        let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
+        _ = try await core.call("dataSetting", argumentsJSON: json([diagnostics197Request(true)]))
+        _ = try await diagnostics197Model(core)
+        let task = UUID().uuidString.lowercased()
+        let request = try await capture(core, title: "Task197 pending task", id: task)
+        let before = try diagnostics197FullSnapshot()
+        faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected task save failure") } }
+        await expectFailure { _ = try await core.call("captureSubmit", argumentsJSON: request) }
+        let exact = try Data(contentsOf: journal)
+        XCTAssertNotEqual(try object(String(decoding: exact, as: UTF8.self))["method"] as? String, "dataSetting")
+        let share = try object(await core.diagnosticsFileAction("logShare"))
+        let url = try await core.validatedDiagnosticsShareURL(XCTUnwrap(share["path"] as? String))
+        XCTAssertTrue(try String(contentsOf: url).contains("v1.3.4/ios-diagnostics"))
+        let result = try object(await core.diagnosticsFileAction("logClearChecked"))
+        XCTAssertEqual(result["outcome"] as? String, "cleared")
+        XCTAssertEqual(try Data(contentsOf: journal), exact)
+        XCTAssertEqual(try diagnostics197FullSnapshot(), before)
+        await expectFailure { _ = try await core.call("menuRead", argumentsJSON: json(["dataSettings", "{}"])) }
+        faults.beforeSQL = nil
+        _ = try await core.retryPending()
+        XCTAssertEqual(try storedTask(task)["title"] as? String, "Task197 pending task")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        await core.close()
+    }
+
+    func testDiagnostics197UninitializedClosedAndMalformedShareRefuse() async throws {
+        let core = host()
+        await expectFailure { _ = try await core.diagnosticsFileAction("logShare") }
+        _ = try await core.start()
+        for path in ["file:///etc/passwd", directory.appendingPathComponent("logs/mindwtr.log.partial").absoluteString, ""] {
+            await expectFailure { _ = try await core.validatedDiagnosticsShareURL(path) }
+        }
+        let share = try object(await core.diagnosticsFileAction("logShare"))
+        let url = try await core.validatedDiagnosticsShareURL(XCTUnwrap(share["path"] as? String))
+        try FileManager.default.removeItem(at: url)
+        let outside = directory.appendingPathComponent("retained-outside")
+        try Data("retained".utf8).write(to: outside)
+        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: outside)
+        await expectFailure { _ = try await core.validatedDiagnosticsShareURL(url.absoluteString) }
+        let clear = try object(await core.diagnosticsFileAction("logClearChecked"))
+        XCTAssertEqual(clear["outcome"] as? String, "unconfirmed")
+        XCTAssertEqual(try String(contentsOf: outside), "retained")
+        await core.close()
+        await expectFailure { _ = try await core.diagnosticsFileAction("logShare") }
+    }
+
+    func testDiagnostics197RealFileRotationUsesSharedCharacterTailAndPreservesUnreadable() async throws {
+        let core = host(); _ = try await core.start()
+        let log = directory.appendingPathComponent("logs/mindwtr.log")
+        try FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(String(repeating: "漢", count: 300_000).utf8).write(to: log)
+        let shared = try object(await core.diagnosticsFileAction("logShare"))
+        let url = try await core.validatedDiagnosticsShareURL(XCTUnwrap(shared["path"] as? String))
+        let rotated = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertEqual(rotated.utf16.count, 250_000, "Shared policy retains JS characters, not a universal byte cap")
+        XCTAssertGreaterThan(Data(rotated.utf8).count, 500_000)
+        XCTAssertTrue(rotated.contains("v1.3.4/ios-diagnostics"))
+        let invalid = Data(repeating: 0xff, count: 1_000_001)
+        try invalid.write(to: log)
+        _ = try await core.diagnosticsFileAction("logShare")
+        let retained = try Data(contentsOf: log.appendingPathExtension("unreadable"))
+        XCTAssertEqual(Data(retained.prefix(invalid.count)), invalid)
+        let suffix = Data(retained.dropFirst(invalid.count))
+        let entry = try object(String(decoding: suffix, as: UTF8.self))
+        let stamp = try XCTUnwrap(entry["ts"] as? String)
+        XCTAssertEqual(Set(entry.keys), Set(["ts", "level", "scope", "message", "context"]))
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        XCTAssertNotNil(formatter.date(from: stamp))
+        let exactMarker = Data(("{\"ts\":\"" + stamp + "\",\"level\":\"info\",\"scope\":\"native-ios\",\"message\":\"Native iOS diagnostics share requested\",\"context\":{\"releaseCheck\":\"v1.3.4/ios-diagnostics\",\"operation\":\"share\"}}\n").utf8)
+        XCTAssertEqual(suffix, exactMarker, "Shared append writes exactly one sanitized marker before unreadable trim")
+        XCTAssertEqual(retained.count, invalid.count + exactMarker.count)
+        XCTAssertEqual(try Data(contentsOf: log), Data(), "Shared ensure recreates an empty main after the appended file moves aside")
+        _ = try await core.diagnosticsFileAction("logClearChecked")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: log.path))
+        XCTAssertEqual(try Data(contentsOf: log.appendingPathExtension("unreadable")), retained)
+        await core.close()
+    }
+
+    func testDiagnostics197RealWriterRedactsAndShareBarrierSettlesEarlierLines() async throws {
+        let instrumented = try dateBundle(at: "2026-10-04T12:00:00.000Z", suffix: """
+            const original197MenuRead = MindwtrHost.menuRead;
+            MindwtrHost.menuRead = function(name, params) {
+                if (name === 'dataSettings') {
+                    MindwtrHost.logLine('Task197 diagnostic token=private-secret', JSON.stringify({password:'hunter2',url:'https://alex:pw@example.com/dav?token=abc',count:3}));
+                }
+                return original197MenuRead.call(this,name,params);
+            };
+            """)
+        let core = host(bundleURL: instrumented); _ = try await core.start()
+        _ = try await core.call("dataSetting", argumentsJSON: json([diagnostics197Request(true)]))
+        _ = try await diagnostics197Model(core)
+        let share = try object(await core.diagnosticsFileAction("logShare"))
+        let url = try await core.validatedDiagnosticsShareURL(XCTUnwrap(share["path"] as? String))
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.contains("Task197 diagnostic"))
+        XCTAssertFalse(text.contains("private-secret")); XCTAssertFalse(text.contains("hunter2"))
+        XCTAssertFalse(text.contains("alex:pw")); XCTAssertFalse(text.contains("token=abc"))
+        XCTAssertTrue(text.contains("v1.3.4/ios-diagnostics"))
+        await core.close()
+    }
+
 }

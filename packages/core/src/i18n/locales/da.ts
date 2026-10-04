@@ -1207,6 +1207,7 @@ export const daOverrides: Record<string, string> = {
     'settings.saveLog': 'Gem log',
     'settings.logMissing': 'Logfilen er ikke fundet endnu. Aktiver logning og reproducer problemet først.',
     'settings.logCleared': 'Logfilen er ryddet.',
+    'settings.logClearFailed': 'Logfilen kunne ikke ryddes.',
     'settings.shareUnavailable': 'Deling er ikke tilgængelig på denne enhed.',
     'settings.useSystem': 'Brug systemtema',
     'settings.followDevice': 'Følg indstillingerne for enhedens udseende',

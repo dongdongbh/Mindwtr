@@ -245,3 +245,174 @@ describe('diagnostics log', () => {
         await expect(log.serialize(async () => 'queued')).resolves.toBe('queued');
     });
 });
+
+describe('diagnostics checked clear', () => {
+    const strictFile = (options: Parameters<typeof fakeFile>[0] = {}) => {
+        const fixture = fakeFile(options);
+        fixture.file.isAbsent = async () => {
+            fixture.state.calls.push('isAbsent');
+            return fixture.state.text === null;
+        };
+        return fixture;
+    };
+    const logFor = (...files: DiagnosticsLogFile[]) => createDiagnosticsLog({ isEnabled: () => true, files });
+
+    it('confirms an absent main without creating a directory or reading retained siblings', async () => {
+        const { file, state } = strictFile();
+        state.aside = 'retained unreadable bytes';
+        await expect(logFor(file).clearChecked()).resolves.toEqual({ outcome: 'alreadyAbsent' });
+        expect(state.calls).toEqual(['delete', 'isAbsent']);
+        expect(state.aside).toBe('retained unreadable bytes');
+    });
+
+    it('confirms deletion without reading unreadable text or deleting retained siblings', async () => {
+        const { file, state } = strictFile();
+        state.text = 'unreadable main';
+        state.aside = 'retained unreadable bytes';
+        file.read = async () => { throw new Error('invalid UTF-8'); };
+        await expect(logFor(file).clearChecked()).resolves.toEqual({ outcome: 'cleared' });
+        expect(state.text).toBeNull();
+        expect(state.aside).toBe('retained unreadable bytes');
+        expect(state.calls).toEqual(['delete', 'isAbsent']);
+    });
+
+    it.each(['false', 'throw', 'true-with-present-target'] as const)('does not claim deletion when delete returns %s and the entry remains', async (answer) => {
+        const { file, state } = strictFile();
+        state.text = 'keep';
+        file.delete = async () => {
+            if (answer === 'throw') throw new Error('permission');
+            return answer === 'true-with-present-target';
+        };
+        await expect(logFor(file).clearChecked()).resolves.toEqual({ outcome: 'unconfirmed' });
+        expect(state.text).toBe('keep');
+    });
+
+    it('can prove final absence after deletion throws without claiming ownership of that deletion', async () => {
+        const { file, state } = strictFile();
+        state.text = 'before';
+        file.delete = async () => { state.text = null; throw new Error('late failure'); };
+        await expect(logFor(file).clearChecked()).resolves.toEqual({ outcome: 'alreadyAbsent' });
+    });
+
+    it('does not treat exists false for a directory as strict absence', async () => {
+        const { file } = strictFile();
+        file.exists = async () => false;
+        file.isAbsent = async () => false;
+        await expect(logFor(file).clearChecked()).resolves.toEqual({ outcome: 'unconfirmed' });
+    });
+
+    it('reports unavailable when every path is unavailable, including no adapters', async () => {
+        const { file, state } = strictFile({ path: null });
+        await expect(logFor(file).clearChecked()).resolves.toEqual({ outcome: 'unavailable' });
+        await expect(logFor().clearChecked()).resolves.toEqual({ outcome: 'unavailable' });
+        expect(state.calls).toEqual(['delete']);
+    });
+
+    it('leaves older adapters without a strict probe unconfirmed after deletion', async () => {
+        const { file, state } = fakeFile();
+        state.text = 'before';
+        await expect(logFor(file).clearChecked()).resolves.toEqual({ outcome: 'unconfirmed' });
+        expect(state.text).toBeNull();
+    });
+
+    it.each([1, 'true', {}])('requires literal true from a runtime probe, refusing truthy %j', async (answer) => {
+        const { file, state } = strictFile();
+        state.text = 'before';
+        // JavaScript file ports can violate the declared return type; truthiness proves no absence.
+        file.isAbsent = async () => answer as unknown as boolean;
+        await expect(logFor(file).clearChecked()).resolves.toEqual({ outcome: 'unconfirmed' });
+        expect(state.text).toBeNull();
+    });
+
+    it.each(['path', 'probe'] as const)('fails closed for an uncertain %s even after successful deletion', async (operation) => {
+        const { file, state } = strictFile();
+        state.text = 'before';
+        if (operation === 'path') file.path = async () => { throw new Error('I/O'); };
+        else file.isAbsent = async () => { throw new Error('permission'); };
+        await expect(logFor(file).clearChecked()).resolves.toEqual({ outcome: 'unconfirmed' });
+        expect(state.text).toBeNull();
+    });
+
+    it('keeps fallback deletion order when the primary is unavailable', async () => {
+        const primary = strictFile({ path: null });
+        const fallback = strictFile({ path: 'legacy/logs/mindwtr.log' });
+        fallback.state.text = 'fallback';
+        await expect(logFor(primary.file, fallback.file).clearChecked()).resolves.toEqual({ outcome: 'cleared' });
+        expect(primary.state.calls).toEqual(['delete']);
+        expect(fallback.state.calls).toEqual(['delete', 'isAbsent']);
+    });
+
+    it.each(['present', 'probe-error', 'path-error'] as const)('does not hide an unresolved %s primary behind a deleted fallback', async (failure) => {
+        const primary = strictFile();
+        const fallback = strictFile({ path: 'legacy/logs/mindwtr.log' });
+        primary.state.text = 'primary';
+        primary.file.delete = async () => false;
+        if (failure === 'probe-error') primary.file.isAbsent = async () => { throw new Error('permission'); };
+        if (failure === 'path-error') primary.file.path = async () => { throw new Error('I/O'); };
+        fallback.state.text = 'fallback';
+        await expect(logFor(primary.file, fallback.file).clearChecked()).resolves.toEqual({ outcome: 'unconfirmed' });
+        expect(primary.state.text).toBe('primary');
+        expect(fallback.state.text).toBeNull();
+    });
+
+    it.each([true, false])('stops deleting after the first success but still verifies the fallback (absent=%s)', async (absent) => {
+        const first = strictFile();
+        const fallback = strictFile({ path: 'legacy/logs/mindwtr.log' });
+        first.state.text = 'first';
+        fallback.state.text = absent ? null : 'retained distinct fallback';
+        await expect(logFor(first.file, fallback.file).clearChecked()).resolves.toEqual({ outcome: absent ? 'cleared' : 'unconfirmed' });
+        expect(fallback.state.calls).toEqual(['isAbsent']);
+        expect(fallback.state.text).toBe(absent ? null : 'retained distinct fallback');
+    });
+
+    it('verifies aliases safely without a second deletion', async () => {
+        const { file, state } = strictFile();
+        state.text = 'before';
+        await expect(logFor(file, file).clearChecked()).resolves.toEqual({ outcome: 'cleared' });
+        expect(state.calls).toEqual(['delete', 'isAbsent', 'isAbsent']);
+    });
+
+    it('keeps append, deletion, strict verification and later append in one ordered queue', async () => {
+        const { file, state } = strictFile();
+        let release!: () => void;
+        let started!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const entered = new Promise<void>((resolve) => { started = resolve; });
+        const append = file.append!;
+        file.append = async (line) => {
+            if (line.includes('earlier')) { started(); await held; }
+            return append(line);
+        };
+        const log = logFor(file);
+        const before = log.append(entry('earlier'));
+        const clear = log.clearChecked();
+        const after = log.append(entry('later'));
+        await entered;
+        expect(state.calls).not.toContain('delete');
+        release();
+        await expect(clear).resolves.toEqual({ outcome: 'cleared' });
+        await Promise.all([before, after]);
+        expect(state.text).toBe(formatDiagnosticsLogLine(entry('later')));
+        expect(state.calls).toEqual(['ensure', 'append', 'delete', 'isAbsent', 'ensure', 'append']);
+    });
+
+    it('does not poison later queue work when strict verification fails', async () => {
+        const { file, state } = strictFile();
+        file.isAbsent = async () => { throw new Error('permission'); };
+        const log = logFor(file);
+        await expect(log.clearChecked()).resolves.toEqual({ outcome: 'unconfirmed' });
+        await expect(log.append(entry('after'))).resolves.toBe('files/logs/mindwtr.log');
+        expect(state.text).toBe(formatDiagnosticsLogLine(entry('after')));
+    });
+
+    it('preserves old clear fallback behavior without paths, probes or new outcomes', async () => {
+        const first = strictFile();
+        const fallback = strictFile({ path: 'legacy/logs/mindwtr.log' });
+        first.state.text = 'first';
+        fallback.state.text = 'second';
+        await expect(logFor(first.file, fallback.file).clear()).resolves.toBeUndefined();
+        expect(first.state.calls).toEqual(['delete']);
+        expect(fallback.state.calls).toEqual([]);
+        expect(fallback.state.text).toBe('second');
+    });
+});

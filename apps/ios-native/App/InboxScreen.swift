@@ -1495,9 +1495,56 @@ struct FailureBanner: View {
             }
             .disabled(model.busy)
             .accessibilityIdentifier("persistence-retry")
+            DiagnosticsFailureAction(model: model, palette: palette)
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(16)
         .background(palette.card)
+    }
+}
+
+/// Local presentation ownership also works inside the task editor's existing sheet.
+struct DiagnosticsFailureAction: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @State private var diagnosticsOwner = UUID()
+    @State private var diagnosticsPresented = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if model.cachedFailureDiagnosticsAvailable {
+                Button {
+                    diagnosticsPresented = model.openCachedFailureDiagnostics(owner: diagnosticsOwner)
+                } label: {
+                    Text(model.diagnosticsLabels.text("title")).rnFont(14, .semibold)
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("persistence-diagnostics")
+            }
+        }
+        .sheet(isPresented: $diagnosticsPresented, onDismiss: {
+            model.closeDiagnostics(owner: diagnosticsOwner)
+        }) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text(model.diagnosticsLabels.text("title")).rnFont(20, .bold)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button(model.label("common.close")) {
+                        model.closeDiagnostics(owner: diagnosticsOwner)
+                        diagnosticsPresented = false
+                    }
+                    .frame(minWidth: 44, minHeight: 44).accessibilityIdentifier("diagnostics-close")
+                }
+                .padding(.horizontal, 16).foregroundStyle(palette.text).background(palette.card)
+                DiagnosticsCard(model: model, palette: palette, owner: diagnosticsOwner)
+            }
+            .accessibilityAction(.escape) {
+                model.closeDiagnostics(owner: diagnosticsOwner)
+                diagnosticsPresented = false
+            }
+        }
+        .onChange(of: model.diagnosticsSession) { session in
+            if session == nil || model.diagnosticsOwner != diagnosticsOwner { diagnosticsPresented = false }
+        }
     }
 }
 

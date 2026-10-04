@@ -1172,6 +1172,7 @@ export const esOverrides: Record<string, string> = {
 'settings.saveLog': "Guardar registro",
 'settings.logMissing': "Aún no hay archivo de registro. Primero, activa el registro y reproduce el problema.",
 'settings.logCleared': "Registro borrado.",
+'settings.logClearFailed': 'No se pudo borrar el archivo de registro.',
 'settings.shareUnavailable': "Compartir no está disponible en este dispositivo.",
 'settings.useSystem': "Usar tema del sistema",
 'settings.followDevice': "Utilizar ajustes de apariencia del dispositivo",

@@ -1191,6 +1191,7 @@ export const svOverrides: Record<string, string> = {
         'settings.saveLog': 'Spara logg',
         'settings.logMissing': 'Loggfilen hittades inte än. Aktivera loggning och återskapa problemet först.',
         'settings.logCleared': 'Loggfilen rensades.',
+        'settings.logClearFailed': 'Det gick inte att rensa loggfilen.',
         'settings.shareUnavailable': 'Delning är inte tillgängligt på den här enheten.',
         'settings.useSystem': 'Använd systemtema',
         'settings.followDevice': 'Följ enhetens utseendeinställningar',

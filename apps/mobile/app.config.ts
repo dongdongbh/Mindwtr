@@ -132,6 +132,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...base.ios,
       infoPlist: {
         ...base.ios?.infoPlist,
+        CFBundleSpokenName: isDevVariant ? 'Mind Water Dev' : 'Mind Water',
+        INAlternativeAppNames: [{
+          INAlternativeAppName: isDevVariant ? 'Mind Water Dev' : 'Mind Water',
+          INAlternativeAppNamePronunciationHint: isDevVariant ? 'mind water dev' : 'mind water',
+        }],
         MindwtrWatchEnabled: watchEnabled,
         MindwtrPccEvaluationEnabled: applePccEvaluationEnabled,
       },

@@ -333,6 +333,59 @@ describe('durable request receipts: the native host over SQLite', () => {
         expect(store().settings.diagnostics?.loggingEnabled).toBe(false);
     });
 
+    it('the scoped Data receipt survives a cold old-on replay after later-off without changing raw settings or receipts', async () => {
+        const env = await open({ settings: { diagnostics: { loggingEnabled: false, retained197: 'keep' } as AppData['settings']['diagnostics'] } });
+        await loadNativeRequestReceipts(env.client(), { durableCommands: ['data'] });
+        const on = { requestId: newRequestId(), edit: { type: 'debugLogging' as const, value: true } };
+        const first = await env.host.setDataSetting(on);
+        expect(first).toEqual({ ok: true, value: { changed: true, deviceWrites: [] } });
+        const off = { requestId: newRequestId(), edit: { type: 'debugLogging' as const, value: false } };
+        expect(value(await env.host.setDataSetting(off)).changed).toBe(true);
+        const receipts = await env.sql<{ method: string }>('SELECT rowid AS evidence_rowid, * FROM native_request_receipts ORDER BY rowid');
+        expect(receipts).toHaveLength(2);
+        expect(receipts.every((row) => /^data:[0-9a-f]{32}$/.test(row.method))).toBe(true);
+        const restarted = await env.restart();
+        await loadNativeRequestReceipts(env.client(), { durableCommands: ['data'] });
+        const settings = await env.sql('SELECT rowid AS evidence_rowid, * FROM settings ORDER BY rowid');
+        expect(await restarted.setDataSetting(on)).toEqual(first);
+        await flushPendingSave();
+        expect(await env.sql('SELECT rowid AS evidence_rowid, * FROM settings ORDER BY rowid')).toEqual(settings);
+        expect(await env.sql('SELECT rowid AS evidence_rowid, * FROM native_request_receipts ORDER BY rowid')).toEqual(receipts);
+        expect(store().settings.diagnostics).toEqual({ loggingEnabled: false, retained197: 'keep' });
+    });
+
+    it('the scoped Data receipt rejects reuse of a saved UUID for the opposite switch value after cold boot', async () => {
+        const env = await open({});
+        await loadNativeRequestReceipts(env.client(), { durableCommands: ['data'] });
+        const input = { requestId: newRequestId(), edit: { type: 'debugLogging' as const, value: true } };
+        expect((await env.host.setDataSetting(input)).ok).toBe(true);
+        const restarted = await env.restart();
+        await loadNativeRequestReceipts(env.client(), { durableCommands: ['data'] });
+        const settings = await env.sql('SELECT rowid AS evidence_rowid, * FROM settings');
+        const receipts = await env.sql('SELECT rowid AS evidence_rowid, * FROM native_request_receipts');
+        const refused = await restarted.setDataSetting({ ...input, edit: { type: 'debugLogging', value: false } });
+        expect(refused.ok ? null : refused.error.code).toBe('INVALID_INPUT');
+        expect(await env.sql('SELECT rowid AS evidence_rowid, * FROM settings')).toEqual(settings);
+        expect(await env.sql('SELECT rowid AS evidence_rowid, * FROM native_request_receipts')).toEqual(receipts);
+    });
+
+    it('scoped Data saves carry their receipt through rollback and automatic retry, then return the original ACK cold', async () => {
+        const trace = transactions();
+        const env = await open({}, trace.wrap);
+        await loadNativeRequestReceipts(env.client(), { durableCommands: ['data'] });
+        const input = { requestId: newRequestId(), edit: { type: 'debugLogging' as const, value: true } };
+        trace.failNextCommits(1);
+        const first = await env.host.setDataSetting(input);
+        expect(first).toEqual({ ok: true, value: { changed: true, deviceWrites: [] } });
+        expect(trace.log.filter((transaction) => transaction.statements.includes(`receipt ${input.requestId}`)).map((transaction) => transaction.committed)).toEqual([false, true]);
+        expect(await env.receiptIds()).toEqual([input.requestId]);
+        const restarted = await env.restart();
+        await loadNativeRequestReceipts(env.client(), { durableCommands: ['data'] });
+        const rows = await env.sql('SELECT rowid AS evidence_rowid, * FROM native_request_receipts');
+        expect(await restarted.setDataSetting(input)).toEqual(first);
+        expect(await env.sql('SELECT rowid AS evidence_rowid, * FROM native_request_receipts')).toEqual(rows);
+    });
+
     // An archived project's task set back to Next reactivates the project, and the store saves
     // that inside the write (before its receipt exists).
     const reactivation = {

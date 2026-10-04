@@ -1215,6 +1215,7 @@ export const en: Record<string, string> = {
         'settings.saveLog': 'Save log',
         'settings.logMissing': 'Log file not found yet. Enable logging and reproduce the issue first.',
         'settings.logCleared': 'Log file cleared.',
+        'settings.logClearFailed': 'Could not clear the log file.',
         'settings.shareUnavailable': 'Sharing is not available on this device.',
         // Mobile Settings
         'settings.useSystem': 'Use System Theme',

@@ -23,6 +23,7 @@ export const nlOverrides: Record<string, string> = {
     'task.destination': 'Bestemming',
     'common.viewOptions': 'Weergaveopties',
     'settings.regionalFormats': 'Regionale notaties',
+    'settings.logClearFailed': 'Het logbestand kon niet worden gewist.',
     'settings.keyboardAndWindow': 'Toetsenbord en venster',
     'settings.gtdMobile.openTasksIn': 'Taken openen in',
     'settings.gtdMobile.openTasksInDesc': 'Kies welk tabblad wordt gebruikt wanneer je op dit apparaat normaal op een taak tikt.',

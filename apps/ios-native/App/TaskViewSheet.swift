@@ -212,6 +212,7 @@ struct TaskViewSheet: View {
                                     .textSelection(.enabled)
                                     .accessibilityIdentifier("task-view-error")
                                 retryButton
+                                DiagnosticsFailureAction(model: model, palette: palette)
                             }
                             .id("task-view-error")
                         }

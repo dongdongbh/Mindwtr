@@ -35,6 +35,11 @@ export type DiagnosticsLogEntry = {
 /** `force` writes the line while debug logging is off. */
 export type DiagnosticsLogOptions = { force?: boolean };
 
+/** Checked Clear proves absence when the file port supports a strict entry probe. */
+export type DiagnosticsLogClearResult = {
+    outcome: 'cleared' | 'alreadyAbsent' | 'unavailable' | 'unconfirmed';
+};
+
 export const isDiagnosticsLoggingEnabled = (settings: AppData['settings'] | undefined): boolean =>
     settings?.diagnostics?.loggingEnabled === true;
 
@@ -128,6 +133,8 @@ export type DiagnosticsLogFile = {
     ensure(): Promise<string | null>;
     /** Whether the file is there (a directory in its place is not). */
     exists(): Promise<boolean>;
+    /** True only when no entry exists at the main target; a directory is present and uncertain I/O throws. */
+    isAbsent?(): Promise<boolean>;
     read(): Promise<string>;
     /** Replaces the whole file. */
     write(text: string): Promise<void>;
@@ -244,6 +251,27 @@ export function createDiagnosticsLog(options: { isEnabled: () => boolean; files:
         clear(): Promise<void> {
             return serialize(async () => {
                 if (await first(async (file) => (await file.delete()) || null)) writes = 0;
+            });
+        },
+        /** Deletes the main log, then verifies every addressable target in the same queue operation. */
+        clearChecked(): Promise<DiagnosticsLogClearResult> {
+            return serialize(async () => {
+                const deleted = await first(async (file) => (await file.delete()) || null);
+                if (deleted) writes = 0;
+                let addressable = false;
+                let confirmed = true;
+                for (const file of files) {
+                    try {
+                        if (await file.path() === null) continue;
+                        addressable = true;
+                        if (!file.isAbsent || await file.isAbsent() !== true) confirmed = false;
+                    } catch {
+                        confirmed = false;
+                    }
+                }
+                if (!confirmed) return { outcome: 'unconfirmed' };
+                if (!addressable) return { outcome: 'unavailable' };
+                return { outcome: deleted ? 'cleared' : 'alreadyAbsent' };
             });
         },
     };

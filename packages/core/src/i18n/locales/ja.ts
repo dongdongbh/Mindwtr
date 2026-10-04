@@ -1221,6 +1221,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.saveLog': 'ログを保存',
         'settings.logMissing': 'ログファイルがまだありません。ログを有効にしてから、問題を再現させてください。',
         'settings.logCleared': 'ログファイルを消去しました。',
+        'settings.logClearFailed': 'ログファイルを消去できませんでした。',
         'settings.shareUnavailable': 'この端末では共有機能を利用できません。',
         // Mobile Settings
         'settings.useSystem': 'システムのテーマを使う',

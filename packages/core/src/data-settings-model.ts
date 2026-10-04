@@ -3,7 +3,8 @@
  * sync-settings-sections.tsx SyncDiagnosticsCard; its actions in use-sync-settings-backup-actions.ts):
  * the Debug logging switch, then, while logging is on, Share log and Clear log. RN's analytics row
  * shows only in builds with the heartbeat, and its Encryption block comes with sync; neither is
- * here yet, nor the Data screen's other cards.
+ * here yet. Backup currently exposes RN's JSON, CSV and TaskNotes export actions; restore and the
+ * other transfer formats remain separate migration work.
  */
 import { isDiagnosticsLoggingEnabled } from './diagnostics-log';
 import type { AppSettings } from './types';
@@ -14,6 +15,11 @@ export type DataSettingsEdit = { type: 'debugLogging'; value: boolean };
 
 export type DataSettingsModel = {
     title: string;
+    backup: {
+        title: string; exportLabel: string; description: string; failed: string;
+        csvLabel: string; csvDescription: string; csvFailed: string;
+        tasknotesLabel: string; tasknotesDescription: string; tasknotesFailed: string;
+    };
     diagnostics: {
         title: string;
         debugLogging: { label: string; description: string; value: boolean; edit: DataSettingsEdit };
@@ -24,6 +30,7 @@ export type DataSettingsModel = {
         logMissing: string;
         shareUnavailable: string;
         logCleared: string;
+        logClearFailed: string;
     };
 };
 
@@ -31,6 +38,18 @@ export function buildDataSettingsModel(settings: AppSettings, t: Translate): Dat
     const on = isDiagnosticsLoggingEnabled(settings);
     return {
         title: t('settings.data'),
+        backup: {
+            title: t('settings.backup'),
+            exportLabel: t('settings.exportBackup'),
+            description: t('settings.exportBackupDesc'),
+            failed: t('settings.backupMobile.failedToExportBackup'),
+            csvLabel: t('settings.exportCsv'),
+            csvDescription: t('settings.exportCsvDesc'),
+            csvFailed: t('settings.exportCsvFailed'),
+            tasknotesLabel: t('settings.exportTaskNotes'),
+            tasknotesDescription: t('settings.exportTaskNotesDesc'),
+            tasknotesFailed: t('settings.exportTaskNotesFailed'),
+        },
         diagnostics: {
             title: t('settings.diagnostics'),
             debugLogging: {
@@ -45,6 +64,7 @@ export function buildDataSettingsModel(settings: AppSettings, t: Translate): Dat
             logMissing: t('settings.logMissing'),
             shareUnavailable: t('settings.shareUnavailable'),
             logCleared: t('settings.logCleared'),
+            logClearFailed: t('settings.logClearFailed'),
         },
     };
 }

@@ -6,6 +6,8 @@ import { isSelectableProjectForTaskAssignment } from './project-utils';
 import type { AppData, Project, Task } from './types';
 import { deterministicHash128, generateDeterministicUUID } from './uuid';
 import { taskEditValuesEqual } from './json-value-equality';
+import { strToU8 } from 'fflate';
+import { logInfo } from './logger';
 
 /**
  * Exact-retry bookkeeping for native host writes, shared by every contract write
@@ -237,8 +239,8 @@ export const withRequestProject = (projects: readonly Project[], id: string, tit
 export const NATIVE_UNJOURNALED_COMMANDS: ReadonlySet<string> = new Set<string>(['calendarFeedAdd', 'setAIKey', 'setAIEndpoint', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection', 'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction']);
 
 const commandOf = (payload: string): string => /^\["([^"\\]{1,64})"/.exec(payload)?.[1] ?? '';
-/** App lock's bounded non-sensitive tuple is exact; established commands keep their compact hash. */
-const fingerprintOf = (payload: string): string => commandOf(payload) === 'appLock'
+/** Bounded non-sensitive App lock/document tuples are exact; established commands keep their compact hash. */
+const fingerprintOf = (payload: string): string => ['appLock', 'backupDocument'].includes(commandOf(payload))
     ? payload : `${commandOf(payload)}:${hash128Hex(payload)}`;
 const fingerprintCommand = (value: string): string => value.startsWith('[')
     ? commandOf(value) : value.split(':', 1)[0] ?? '';
@@ -261,6 +263,52 @@ const validAppLockStoredReceipt = (row: { request_id: string; method: string; re
         && Object.prototype.hasOwnProperty.call(reply, 'value')
         && (reply as { changed?: unknown }).changed === true
         && (reply as { value?: unknown }).value === tuple[1];
+};
+
+export const MAX_NATIVE_DOCUMENT_RECEIPT_REPLY_BYTES = 64 * 1024;
+export type NativeDocumentReceiptInput = {
+    requestId: string;
+    /** Canonical JSON: ['backupDocument', 'merge' | 'restore', staged UUID, SHA256]. */
+    payload: string;
+    expectedCurrent: AppData;
+    data: AppData;
+    /** Non-null JSON, at most 64 KiB UTF-8. The caller validates its domain shape. */
+    reply: unknown;
+};
+export type NativeDocumentReceiptResult = { reply: unknown; replayed: boolean };
+
+const isCanonicalRequestId = (value: unknown): value is string => typeof value === 'string'
+    && REQUEST_ID_PATTERN.test(value) && value === value.toLowerCase();
+const isDocumentPayload = (payload: unknown): payload is string => {
+    if (typeof payload !== 'string' || payload.length > 256) return false;
+    let tuple: unknown;
+    try { tuple = JSON.parse(payload); } catch { return false; }
+    return Array.isArray(tuple) && tuple.length === 4 && tuple[0] === 'backupDocument'
+        && (tuple[1] === 'merge' || tuple[1] === 'restore') && isCanonicalRequestId(tuple[2])
+        && typeof tuple[3] === 'string' && /^[a-f0-9]{64}$/u.test(tuple[3])
+        && JSON.stringify(tuple) === payload;
+};
+const documentReplyJson = (reply: unknown): string => {
+    let json: string | undefined;
+    try { json = JSON.stringify(reply); } catch { /* Refuse unserializable input without exposing it. */ }
+    if (!json || json === 'null' || json.length > MAX_NATIVE_DOCUMENT_RECEIPT_REPLY_BYTES
+        || strToU8(json).length > MAX_NATIVE_DOCUMENT_RECEIPT_REPLY_BYTES) {
+        throw new Error('Invalid document receipt reply');
+    }
+    return json;
+};
+type DocumentReceiptRow = { request_id: string; method: string; reply: string; saved_at: string };
+const validDocumentReceiptRow = (row: DocumentReceiptRow): boolean => {
+    if (!isCanonicalRequestId(row.request_id) || !isDocumentPayload(row.method)
+        || typeof row.reply !== 'string' || row.reply.length > MAX_NATIVE_DOCUMENT_RECEIPT_REPLY_BYTES
+        || strToU8(row.reply).length > MAX_NATIVE_DOCUMENT_RECEIPT_REPLY_BYTES
+        || typeof row.saved_at !== 'string' || row.saved_at.length > 40
+        || !Number.isFinite(Date.parse(row.saved_at)) || new Date(row.saved_at).toISOString() !== row.saved_at) return false;
+    try { return documentReplyJson(JSON.parse(row.reply)) === row.reply; } catch { return false; }
+};
+const hasPendingDocumentStoreWork = (): boolean => {
+    const status = getPersistenceStatus();
+    return Boolean(status.queued || status.inFlight || status.immediate || status.retrying || status.failed);
 };
 
 // Durable receipts: the native host only (loadNativeRequestReceipts turns them on).
@@ -300,6 +348,8 @@ export async function loadNativeRequestReceipts(client: SqliteClient,
         'SELECT request_id, method, reply, saved_at FROM native_request_receipts',
     );
     durableReceipts = new Map(rows.map((row) => {
+        if (fingerprintCommand(row.method) === 'backupDocument' && !validDocumentReceiptRow(row))
+            throw new Error('Invalid saved document receipt');
         const reply: unknown = JSON.parse(row.reply);
         if (options?.durableCommands?.includes('appLock') && fingerprintCommand(row.method) === 'appLock'
             && !validAppLockStoredReceipt(row, reply)) throw new Error('Invalid saved App lock receipt');
@@ -356,10 +406,30 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
     private readonly receiptClient: SqliteClient;
     private readonly carried = new WeakMap<AppData, { ids: string[]; savedAt: string }>();
     private prerequisite: { requestId: string; fingerprint: string; originId: string; originFingerprint: string; reply: unknown } | null = null;
+    private documentBusy = false;
+    private ordinaryWrites = 0;
+    private documentReceipt: { requestId: string; payload: string; data: AppData; replyJson: string; savedAt: string } | null = null;
 
     constructor(client: SqliteClient, options?: SqliteAdapterOptions) {
-        super(client, options);
-        this.receiptClient = client;
+        let isDocumentWrite = () => false;
+        const protect = async <T,>(work: () => Promise<T>): Promise<T> => {
+            try { return await work(); }
+            catch (error) {
+                // The adapter's existing failure logger must not receive driver text containing
+                // the private document or receipt. Ordinary generation saves retain their behavior.
+                if (isDocumentWrite()) throw new Error('Document receipt storage failed');
+                throw error;
+            }
+        };
+        const receiptClient: SqliteClient = {
+            run: (sql, params) => protect(() => client.run(sql, params)),
+            all: <T,>(sql: string, params?: unknown[]) => protect(() => client.all<T>(sql, params)),
+            get: <T,>(sql: string, params?: unknown[]) => protect(() => client.get<T>(sql, params)),
+            ...(client.exec ? { exec: (sql: string) => protect(() => client.exec!(sql)) } : {}),
+        };
+        super(receiptClient, options);
+        isDocumentWrite = () => this.documentBusy;
+        this.receiptClient = receiptClient;
         const saveTask = this.saveTask;
         Object.defineProperty(this, 'saveTask', {
             get: () => (pendingReceipts.size === 0 && receiptedWritesRunning === 0 ? saveTask : undefined),
@@ -393,6 +463,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             || typeof row.saved_at !== 'string' || row.saved_at.length > 40
             || !Number.isFinite(Date.parse(row.saved_at)) || new Date(row.saved_at).toISOString() !== row.saved_at
             || typeof row.reply !== 'string') return changed();
+        if (fingerprintCommand(fingerprint) === 'backupDocument' && !validDocumentReceiptRow(row)) return changed();
         try { return { ok: true, value: JSON.parse(row.reply) as unknown }; } catch { return changed(); }
     }
 
@@ -409,7 +480,107 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         if (this.prerequisite?.requestId === requestId && this.prerequisite.fingerprint === fingerprintOf(payload)) this.prerequisite = null;
     }
 
+    /**
+     * Saves an owned document and its exact reply in one transaction, without store generations.
+     * Requires a guarded adapter and native receipt boot. Inputs are detached before the first
+     * await. The host owns the document/store barrier and must not interleave getData baseline reads.
+     * SQL is always the replay authority; the session cache cannot establish a document outcome.
+     */
+    async saveDocumentWithReceipt(input: NativeDocumentReceiptInput): Promise<NativeDocumentReceiptResult> {
+        if (this.documentBusy || this.ordinaryWrites > 0 || this.prerequisite
+            || pendingReceipts.size > 0 || receiptedWritesRunning > 0 || hasPendingDocumentStoreWork()) {
+            throw new Error('Document receipt write is busy');
+        }
+        if (!this.concurrentWritesGuarded || durableReceipts === null) {
+            throw new Error('Document receipt write requires guarded native receipt storage');
+        }
+        if (!input || !isCanonicalRequestId(input.requestId) || !isDocumentPayload(input.payload)) {
+            throw new Error('Invalid document receipt identity');
+        }
+        const { requestId, payload } = input;
+        const owner = requestPayloads.get(requestId);
+        if (owner !== undefined && owner !== payload) throw new Error('Document receipt identity belongs to another action');
+        let expectedCurrent: AppData;
+        let data: AppData;
+        let replyJson: string;
+        try {
+            expectedCurrent = JSON.parse(JSON.stringify(input.expectedCurrent)) as AppData;
+            data = JSON.parse(JSON.stringify(input.data)) as AppData;
+            replyJson = documentReplyJson(input.reply);
+            if (!expectedCurrent || !data) throw new Error('Invalid document');
+        } catch {
+            throw new Error('Invalid document receipt input');
+        }
+        this.documentBusy = true;
+        requestPayloads.set(requestId, payload);
+        let succeeded = false;
+        try {
+            const rows = await this.receiptClient.all<DocumentReceiptRow>(
+                'SELECT request_id, method, reply, saved_at FROM native_request_receipts WHERE request_id = ?', [requestId],
+            );
+            if (rows.length > 0) {
+                if (rows.length !== 1 || !validDocumentReceiptRow(rows[0])) throw new Error('Invalid saved document receipt');
+                const row = rows[0];
+                if (row.request_id !== requestId || row.method !== payload) throw new Error('Document receipt identity changed');
+                durableReceipts.set(requestId, { fingerprint: payload, reply: JSON.parse(row.reply) as unknown, savedAt: row.saved_at });
+                succeeded = true;
+                return { reply: JSON.parse(row.reply) as unknown, replayed: true };
+            }
+            // Prior success cannot authorize another application after its durable proof disappears.
+            if (durableReceipts.has(requestId)) throw new Error('Saved document receipt is missing');
+            const current = await this.getData();
+            if (!taskEditValuesEqual(current, expectedCurrent)) throw new Error('Stale document receipt baseline');
+            if (pendingReceipts.size > 0 || receiptedWritesRunning > 0 || hasPendingDocumentStoreWork()) throw new Error('Document receipt write is busy');
+            const context = { requestId, payload, data, replyJson, savedAt: new Date().toISOString() };
+            this.documentReceipt = context;
+            try { await super.saveData(data); }
+            catch (error) {
+                if (error instanceof Error && error.message.startsWith('SQLITE_BUSY:'))
+                    throw new Error('Stale document receipt baseline');
+                throw new Error('Document receipt persistence failed');
+            }
+            durableReceipts.set(requestId, { fingerprint: payload, reply: JSON.parse(replyJson) as unknown, savedAt: context.savedAt });
+            succeeded = true;
+            try {
+                logInfo('Native backup document committed', {
+                    scope: 'transfer', force: true, context: {
+                        releaseCheck: 'v1.3.4/native-backup-document',
+                        operation: (JSON.parse(payload) as unknown[])[1], outcome: 'committed',
+                    },
+                });
+            } catch { /* Diagnostics cannot reverse a proven committed outcome. */ }
+            return { reply: JSON.parse(replyJson) as unknown, replayed: false };
+        } finally {
+            this.documentReceipt = null;
+            this.documentBusy = false;
+            if (!succeeded && owner === undefined && requestPayloads.get(requestId) === payload) requestPayloads.delete(requestId);
+        }
+    }
+
+    protected override buildSaveFailureContext(data: AppData, step: string): Record<string, unknown> {
+        if (!this.documentBusy) return super.buildSaveFailureContext(data, step);
+        const count = (rows: unknown): number => Array.isArray(rows) ? rows.length : 0;
+        return { step, tasks: count(data.tasks), projects: count(data.projects),
+            sections: count(data.sections), areas: count(data.areas), people: count(data.people) };
+    }
+
     protected override async beforeCommit(write: { data: AppData } | { task: Task }): Promise<void> {
+        if (this.documentReceipt) {
+            const context = this.documentReceipt;
+            if (!('data' in write) || write.data !== context.data || pendingReceipts.size > 0
+                || receiptedWritesRunning > 0 || hasPendingDocumentStoreWork())
+                throw new Error('Document receipt write ownership changed');
+            try {
+                // Plain INSERT is deliberate: any in-transaction duplicate rolls back the document.
+                await this.receiptClient.run(
+                    'INSERT INTO native_request_receipts (request_id, method, reply, saved_at) VALUES (?, ?, ?, ?)',
+                    [context.requestId, context.payload, context.replyJson, context.savedAt],
+                );
+            } catch {
+                throw new Error('Document receipt insert failed');
+            }
+            return;
+        }
         // A single task's save runs only while no receipt is pending (see saveTask above).
         if (!('data' in write)) return;
         const generation = getSaveSnapshotGeneration(write.data);
@@ -435,21 +606,33 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
     }
 
     override async saveData(data: AppData): Promise<void> {
-        await super.saveData(data);
-        // Committed: those receipts are durable. After a rollback they stay pending for the next save.
-        const carried = this.carried.get(data);
-        this.carried.delete(data);
-        for (const id of carried?.ids ?? []) {
-            const receipt = pendingReceipts.get(id);
-            if (!receipt) continue;
-            pendingReceipts.delete(id);
-            durableReceipts?.set(id, { fingerprint: receipt.fingerprint, reply: receipt.reply, savedAt: carried!.savedAt });
-            if (this.prerequisite?.requestId === id && this.prerequisite.fingerprint === receipt.fingerprint) this.prerequisite = null;
-        }
+        if (this.documentBusy) throw new Error('Document receipt write is busy');
+        this.ordinaryWrites += 1;
+        try {
+            await super.saveData(data);
+            // Committed: those receipts are durable. After a rollback they stay pending for the next save.
+            const carried = this.carried.get(data);
+            this.carried.delete(data);
+            for (const id of carried?.ids ?? []) {
+                const receipt = pendingReceipts.get(id);
+                if (!receipt) continue;
+                pendingReceipts.delete(id);
+                durableReceipts?.set(id, { fingerprint: receipt.fingerprint, reply: receipt.reply, savedAt: carried!.savedAt });
+                if (this.prerequisite?.requestId === id && this.prerequisite.fingerprint === receipt.fingerprint) this.prerequisite = null;
+            }
+        } finally { this.ordinaryWrites -= 1; }
+    }
+
+    override async saveTask(task: Task): Promise<void> {
+        if (this.documentBusy) throw new Error('Document receipt write is busy');
+        this.ordinaryWrites += 1;
+        try { await super.saveTask(task); }
+        finally { this.ordinaryWrites -= 1; }
     }
 
     /** Complete a receipt after its data was already proven saved, without rewriting projected memory. */
     async commitReceiptOnly(requestId: string, payload: string): Promise<boolean> {
+        if (this.documentBusy) throw new Error('Document receipt write is busy');
         const pending = pendingReceipts.get(requestId);
         if (!pending || pending.fingerprint !== fingerprintOf(payload)) return false;
         const savedAt = new Date().toISOString();

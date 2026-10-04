@@ -892,6 +892,7 @@ export const deOverrides: Record<string, string> = {
         'settings.saveLog': 'Protokoll speichern',
         'settings.logMissing': 'Noch keine Protokolldatei. Aktiviere die Protokollierung und reproduziere das Problem.',
         'settings.logCleared': 'Protokoll gelöscht.',
+        'settings.logClearFailed': 'Die Protokolldatei konnte nicht gelöscht werden.',
         'settings.shareUnavailable': 'Teilen ist auf diesem Gerät nicht verfügbar.',
         'settings.useSystem': 'Systemdesign verwenden',
         'settings.followDevice': 'Geräteeinstellung folgen',

@@ -1191,6 +1191,7 @@ export const faOverrides: Record<string, string> = {
         'settings.saveLog': 'ذخیره ثبت',
         'settings.logMissing': 'فایل ثبت هنوز یافت نشد. ابتدا ثبت رویداد را فعال کرده و مشکل را دوباره ایجاد کنید.',
         'settings.logCleared': 'فایل ثبت پاک شد.',
+        'settings.logClearFailed': 'پاک کردن فایل گزارش ممکن نشد.',
         'settings.shareUnavailable': 'اشتراک‌گذاری در این دستگاه در دسترس نیست.',
         'settings.useSystem': 'استفاده از تم سیستم',
         'settings.followDevice': 'پیروی از تنظیمات ظاهری دستگاه',

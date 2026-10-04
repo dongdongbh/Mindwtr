@@ -22210,4 +22210,226 @@ extension FoundationUITests {
             task196Clean(app); app.terminate()
         }
     }
+    private func task197Data(_ app: XCUIApplication) {
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        boardTap(app, "tab-menu"); boardTap(app, "menu-settings")
+        task192Reveal(app, "settings-data", buttons: true, scrollID: "settings-scroll")
+        boardTap(app, "settings-data")
+        boardEnabled(app.switches["diagnostics-debug-logging"], timeout: 30)
+        XCTAssertTrue(app.staticTexts["diagnostics-title"].exists)
+    }
+
+    private func task197Observe(_ app: XCUIApplication, _ phase: String) {
+        let capture = XCTAttachment(screenshot: app.screenshot())
+        capture.name = "Task197 " + phase; capture.lifetime = .keepAlways; add(capture)
+    }
+
+    private func task197ShareCancel(_ app: XCUIApplication) {
+        boardTap(app, "diagnostics-share")
+        let close = app.buttons.matching(identifier: "header.closeButton").firstMatch
+        boardEnabled(close, timeout: 30)
+        task197Observe(app, "OS Share file sheet")
+        boardTap(app, "header.closeButton")
+        XCTAssertTrue(close.waitForNonExistence(timeout: 30))
+        boardEnabled(app.buttons["diagnostics-clear"], timeout: 30)
+    }
+
+    func testTask200TaskNotesLargestText() {
+        task198BackupFlow("014d89a5-ed6c-4638-a1f2-cad067d6f6fd", largest: true, tasknotes: true)
+    }
+
+    func testTask200TaskNotesNormal() {
+        task198BackupFlow("9fb6db95-8caa-495c-aee2-039dc495865f", tasknotes: true)
+    }
+
+    func testTask199CSVExportLargestText() {
+        task198BackupFlow("27081d30-a8da-4ba8-9917-ce89e4b87b37", largest: true, csv: true)
+    }
+
+    func testTask199CSVExportNormal() {
+        task198BackupFlow("782625fd-3ad5-4fcd-a56a-5e9caa9055cb", csv: true)
+    }
+
+    func testTask198BackupLargestText() {
+        task198BackupFlow("29dca0e0-05ee-4663-bf63-badce42f92c7", largest: true)
+    }
+
+    func testTask198BackupArabicRTL() {
+        task198BackupFlow("4c32b6ad-ed21-45d2-ab28-d216e69a8bb6", rtl: true)
+    }
+
+    func testTask198BackupCloseDiscardsLateFile() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = task192Arguments("739d2345-4101-4354-8c6f-1d41b4880292") + ["--native-backup-export-hold-once"]
+        app.launch(); task197Data(app); boardTap(app, "backup-disclosure"); boardTap(app, "data-transfer-export")
+        let state = app.staticTexts["backup-export-test-state"]
+        expectation(for: NSPredicate(format: "label == %@", "held"), evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+        boardTap(app, "diagnostics-back"); boardTap(app, "settings-back"); task197Data(app)
+        expectation(for: NSPredicate(format: "label == %@", "discarded"), evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+        XCTAssertFalse(app.buttons["header.closeButton"].exists)
+        XCTAssertFalse(app.buttons["data-transfer-export"].exists)
+        XCTAssertFalse(app.staticTexts["backup-export-error"].exists)
+        app.terminate()
+    }
+
+    private func task198BackupFlow(_ library: String, rtl: Bool = false, largest: Bool = false, csv: Bool = false, tasknotes: Bool = false) {
+        let exportID = tasknotes ? "data-transfer-export-tasknotes" : (csv ? "data-transfer-export-csv" : "data-transfer-export")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = task192Arguments(library, rtl: rtl, largest: largest)
+        app.launch()
+        if rtl {
+            task97Open(app); task97Picker(app, "language"); task97Choose(app, "ar")
+            boardTap(app, "general-back"); boardTap(app, "settings-back")
+        }
+        task197Data(app)
+        if rtl { XCTAssertEqual(app.buttons["backup-disclosure"].label, "نسخة احتياطية") }
+        XCTAssertFalse(app.buttons[exportID].exists)
+        boardTap(app, "backup-disclosure")
+        task192Reveal(app, exportID, buttons: true, scrollID: "diagnostics-scroll")
+        boardEnabled(app.buttons[exportID], timeout: 30)
+        if rtl { XCTAssertTrue(app.buttons[exportID].label.contains("تصدير نسخة احتياطية")) }
+        let expanded = XCTAttachment(screenshot: app.screenshot())
+        expanded.name = tasknotes ? "Task200 expanded TaskNotes" : csv ? "Task199 expanded CSV" : "Task198 expanded Backup"; expanded.lifetime = .keepAlways; add(expanded)
+        boardTap(app, exportID)
+        let close = app.buttons["header.closeButton"]
+        boardEnabled(close, timeout: 30)
+        let sheet = XCTAttachment(screenshot: app.screenshot())
+        sheet.name = tasknotes ? "Task200 ZIP share sheet" : csv ? "Task199 CSV share sheet" : "Task198 JSON share sheet"; sheet.lifetime = .keepAlways; add(sheet)
+        if !close.isHittable {
+            expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: close)
+            waitForExpectations(timeout: 10)
+        }
+        let closeDetails = XCTAttachment(string: close.debugDescription)
+        closeDetails.name = "Task198 observed Close control"; closeDetails.lifetime = .keepAlways; add(closeDetails)
+        close.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(close.waitForNonExistence(timeout: 30))
+        boardEnabled(app.buttons[exportID], timeout: 30)
+        XCTAssertFalse(app.staticTexts["backup-export-error"].exists)
+        boardTap(app, "diagnostics-back"); boardTap(app, "settings-back")
+        app.terminate(); app.launch(); task197Data(app)
+        XCTAssertFalse(app.buttons[exportID].exists)
+        XCTAssertFalse(app.staticTexts["backup-export-error"].exists)
+        app.terminate()
+    }
+
+    func testTask197DiagnosticsToggleShareClearAndCold() {
+        task197NormalFlow("098fea92-4dd4-4be7-806d-61d5c4f50ae1")
+    }
+    func testTask197DiagnosticsLargestDark() {
+        task197NormalFlow("b3a22a49-3ee4-449f-b8f8-7082190b8e52", largest: true)
+    }
+    func testTask197DiagnosticsArabicRTL() {
+        task197NormalFlow("b0e26680-759d-4edd-b263-81200c1f4c1d", rtl: true)
+    }
+    private func task197NormalFlow(_ library: String, rtl: Bool = false, largest: Bool = false) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = task192Arguments(library, rtl: rtl, largest: largest)
+        app.launch()
+        if rtl {
+            // Arabic requires the shared explicit Language setting, not a system-locale hint.
+            task97Open(app); task97Picker(app, "language"); task97Choose(app, "ar")
+            task197Observe(app, "Arabic Language setup settled")
+            boardTap(app, "general-back"); boardTap(app, "settings-back")
+        }
+        task197Data(app)
+        if rtl { XCTAssertEqual(app.staticTexts["diagnostics-title"].label, "التشخيص") }
+        let logging = app.switches["diagnostics-debug-logging"]
+        XCTAssertEqual(logging.value as? String, "0")
+        XCTAssertFalse(app.buttons["diagnostics-share"].exists); XCTAssertFalse(app.buttons["diagnostics-clear"].exists)
+        logging.tap(); boardEnabled(app.buttons["diagnostics-share"], timeout: 30)
+        XCTAssertEqual(logging.value as? String, "1")
+        if rtl {
+            XCTAssertTrue(app.buttons["diagnostics-share"].label.contains("سجل المشاركة"))
+            XCTAssertEqual(app.buttons["diagnostics-clear"].label, "مسح السجل")
+        }
+        task197Observe(app, "Data enabled settled")
+        task197ShareCancel(app)
+        boardTap(app, "diagnostics-clear")
+        let message = app.staticTexts["diagnostics-message"]
+        XCTAssertTrue(message.waitForExistence(timeout: 20))
+        XCTAssertEqual(message.label, rtl ? "تم مسح ملف السجل." : "Log file cleared.")
+        task197Observe(app, "checked Clear confirmed")
+        logging.tap()
+        expectation(for: NSPredicate(format: "value == %@", "0"), evaluatedWith: logging)
+        waitForExpectations(timeout: 30)
+        XCTAssertFalse(app.buttons["diagnostics-share"].exists); XCTAssertFalse(app.buttons["diagnostics-clear"].exists)
+        boardTap(app, "diagnostics-back"); boardTap(app, "settings-back")
+        app.terminate(); app.launch(); task197Data(app)
+        XCTAssertEqual(logging.value as? String, "0")
+        XCTAssertFalse(app.buttons["diagnostics-share"].exists)
+        XCTAssertFalse(app.staticTexts["diagnostics-message"].exists)
+        task197Observe(app, "cold Data off")
+        app.terminate()
+    }
+
+    func testTask197CachedDiagnosticsPreservesPendingTaskRetry() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = task192Arguments("57bfbb37-04e6-4881-a6e7-0281e812e54b")
+        app.launch(); task197Data(app)
+        app.switches["diagnostics-debug-logging"].tap()
+        boardEnabled(app.buttons["diagnostics-share"], timeout: 30)
+        boardTap(app, "diagnostics-back"); boardTap(app, "settings-back")
+        boardTap(app, "task-title-task197-diagnostics-01"); boardTap(app, "task-mode-edit")
+        let title = app.textFields["task-editor-title"]
+        boardEnabled(title); replaceProjectNotesText(title, with: "Task197 blocked draft")
+        boardTap(app, "task-editor-save")
+        let failure = app.staticTexts["task-view-error"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 30)); XCTAssertFalse(failure.label.isEmpty)
+        let originalError = failure.label
+        boardEnabled(app.buttons["task-view-retry"], timeout: 30)
+        boardEnabled(app.buttons["persistence-diagnostics"], timeout: 30)
+        task197Observe(app, "task Save owed before file actions")
+        boardTap(app, "persistence-diagnostics")
+        boardEnabled(app.buttons["diagnostics-share"], timeout: 30)
+        XCTAssertFalse(app.switches["diagnostics-debug-logging"].isEnabled)
+        task197ShareCancel(app)
+        boardTap(app, "diagnostics-clear")
+        XCTAssertTrue(app.staticTexts["diagnostics-message"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.staticTexts["diagnostics-message"].label, "Log file cleared.")
+        task197Observe(app, "task owed after Share cancel and Clear")
+        boardTap(app, "diagnostics-close")
+        XCTAssertTrue(app.staticTexts["diagnostics-title"].waitForNonExistence(timeout: 20))
+        XCTAssertEqual(title.value as? String, "Task197 blocked draft")
+        XCTAssertEqual(failure.label, originalError)
+        XCTAssertFalse(app.buttons["task-editor-save"].isEnabled)
+        boardEnabled(app.buttons["task-view-retry"])
+        app.buttons["task-view-retry"].tap()
+        boardEnabled(app.buttons["persistence-diagnostics"], timeout: 30)
+        XCTAssertEqual(title.value as? String, "Task197 blocked draft")
+        XCTAssertFalse(failure.label.isEmpty)
+        task197Observe(app, "original task Retry still owed")
+        app.terminate()
+    }
+
+    func testTask197DiagnosticsCloseRejectsLateShareReply() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = task192Arguments("6d7af833-ce13-4bc8-ac2f-2c580c6296ba") + ["--native-diagnostics-share-hold-once"]
+        app.launch(); task197Data(app)
+        app.switches["diagnostics-debug-logging"].tap()
+        boardEnabled(app.buttons["diagnostics-share"], timeout: 30)
+        boardTap(app, "diagnostics-share")
+        let state = app.staticTexts["diagnostics-test-share-state"]
+        expectation(for: NSPredicate(format: "label == %@", "held"), evaluatedWith: state)
+        waitForExpectations(timeout: 20)
+        task197Observe(app, "actual Share reply held")
+        boardTap(app, "diagnostics-back")
+        boardEnabled(app.buttons["settings-data"]); boardTap(app, "settings-data")
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "discarded"), evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+        XCTAssertTrue(state.label.contains("held")); XCTAssertTrue(state.label.contains("delivered"))
+        XCTAssertFalse(app.buttons.matching(identifier: "header.closeButton").firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["diagnostics-message"].exists)
+        boardEnabled(app.buttons["diagnostics-share"])
+        task197Observe(app, "old Share delivered after reopen and discarded")
+        task197ShareCancel(app)
+        boardTap(app, "diagnostics-back"); app.terminate()
+    }
+
 }

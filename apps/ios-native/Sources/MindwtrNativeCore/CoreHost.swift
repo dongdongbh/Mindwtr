@@ -42,6 +42,23 @@ public final class CoreHost: @unchecked Sendable {
         try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
 
+    /// Initialized file actions cannot activate, replay or acknowledge domain work.
+    public func diagnosticsFileAction(_ method: String) async throws -> String {
+        try await perform { try $0.diagnosticsFileAction(method) }
+    }
+
+    public func validatedDiagnosticsShareURL(_ path: String) async throws -> URL {
+        try await perform { try $0.validatedDiagnosticsShareURL(path) }
+    }
+
+    public func prepareDataBackup(format: NativeBackupFormat = .json) async throws -> NativeBackupExport {
+        try await perform { try $0.prepareDataBackup(format: format) }
+    }
+
+    public func discardDataBackup(_ id: UUID) async {
+        _ = try? await perform { $0.backupExportFile.discard(id) }
+    }
+
     public func readEditorDraft() async throws -> EditorDraftSnapshot? {
         try await perform { try $0.readEditorDraft() }
     }
@@ -118,6 +135,8 @@ private final class Engine: @unchecked Sendable {
     private let queue: DispatchQueue
     private let databaseURL: URL
     private let bundleURL: URL
+    private let diagnosticsFile: NativeDiagnosticsLogFile
+    let backupExportFile: NativeBackupExportFile
     private let journalURL: URL
     private let editorDrafts: EditorDraftStore
     private let legacyStorage: LegacyRNStorage?
@@ -192,6 +211,7 @@ private final class Engine: @unchecked Sendable {
     private var startupProjectSectionOrderResult: String?
     private var startupAppLockResult: String?
     private var startupGtdWorkflowResult: String?
+    private var startupDataSettingResult: String?
     private var startupGeneralPreferenceResult: String?
     private var startupTaxonomyResult: String?
     private var startupPersonEditResult: String?
@@ -236,6 +256,7 @@ private final class Engine: @unchecked Sendable {
     #endif
 
     private static let methods: [String: Int] = [
+        "dataSetting": 1,
         "window": 3, "inboxView": 1, "focus": 1, "focusWindow": 4, "theme": 1, "areaFilter": 0, "setAreaFilter": 1,
         "captureOpen": 0, "captureView": 1, "captureEdit": 1, "captureSubmit": 1,
         "language": 2, "languageSaved": 2, "strings": 1, "complete": 1, "taskView": 1, "taskShare": 1, "taskOpenTab": 1, "taskViewReferenceTarget": 1, "editorModel": 1, "taskEditorDraftDirection": 1, "taskEditorResumeCheck": 1, "taskAttachmentList": 1, "taskAttachmentOpen": 1, "taskAttachmentLinks": 1, "taskAttachmentRemove": 1, "editDraft": 1, "saveDraft": 1, "search": 1,
@@ -311,7 +332,7 @@ private final class Engine: @unchecked Sendable {
         "inboxCommit": 1, "inboxSkip": 1, "inboxAfterCommit": 1,
         "checklistEdit": 1, "checklistSave": 1, "checklistReset": 1,
     ]
-    private static let mutations: Set<String> = ["referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
+    private static let mutations: Set<String> = ["dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
 
@@ -347,6 +368,8 @@ private final class Engine: @unchecked Sendable {
         self.queue = queue
         self.databaseURL = databaseURL
         self.bundleURL = bundleURL
+        diagnosticsFile = NativeDiagnosticsLogFile(libraryRoot: databaseURL.deletingLastPathComponent())
+        backupExportFile = NativeBackupExportFile(libraryRoot: databaseURL.deletingLastPathComponent())
         self.legacyStorage = legacyStorage
         journalURL = databaseURL.appendingPathExtension("pending.json")
         editorDrafts = EditorDraftStore(databaseURL: databaseURL)
@@ -372,6 +395,7 @@ private final class Engine: @unchecked Sendable {
         switch saved.terminal {
         case .success(let value):
             _ = try NativeJSON.jsonObject(with: Data(value.utf8), options: [.fragmentsAllowed])
+            if saved.method == "dataSetting" { try validateDataSettingAcknowledgment(value) }
         case .rejected(let message):
             guard isDefiniteRejection(message, method: saved.method) else { throw HostFailure("Invalid terminal command journal") }
         case nil: break
@@ -393,6 +417,8 @@ private final class Engine: @unchecked Sendable {
             try DurableFile.sync(databaseURL.deletingLastPathComponent().deletingLastPathComponent(), directory: true)
             lockFD = open(databaseURL.appendingPathExtension("host-lock").path, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
             guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { throw HostFailure("Native database is already in use or cannot be locked") }
+            // Optional cache cleanup cannot block startup or change an owed command.
+            try? backupExportFile.discardInterruptedExports()
             if pending == nil { pending = try loadPendingJournal() }
             guard let runtime = JSContext() else { throw HostFailure("Cannot create JavaScriptCore runtime") }
             context = runtime
@@ -752,6 +778,7 @@ private final class Engine: @unchecked Sendable {
         let recoveringProjectSectionOrder = pending?.method == "projectSectionOrderCommit"
         let recoveringAppLock = pending?.method == "appLockCommit"
         let recoveringGtdWorkflow = pending?.method == "gtdWorkflowCommit"
+        let recoveringDataSetting = pending?.method == "dataSetting"
         let recoveringGeneralPreference = pending?.method == "generalPreferenceCommit"
         let recoveringTaxonomy = pending?.method == "manageTaxonomyCommit"
         let recoveringPersonEdit = pending?.method == "managePersonEditCommit"
@@ -849,6 +876,7 @@ private final class Engine: @unchecked Sendable {
         if recoveringProjectSectionOrder, let terminal, case .success(let value) = terminal { startupProjectSectionOrderResult = value }
         if recoveringAppLock, let terminal, case .success(let value) = terminal { startupAppLockResult = value }
         if recoveringGtdWorkflow, let terminal, case .success(let value) = terminal { startupGtdWorkflowResult = value }
+        if recoveringDataSetting, let terminal, case .success(let value) = terminal { startupDataSettingResult = value }
         if recoveringGeneralPreference, let terminal, case .success(let value) = terminal { startupGeneralPreferenceResult = value }
         if recoveringTaxonomy, let terminal, case .success(let value) = terminal { startupTaxonomyResult = value }
         if recoveringPersonEdit, let terminal, case .success(let value) = terminal { startupPersonEditResult = value }
@@ -904,7 +932,7 @@ private final class Engine: @unchecked Sendable {
         let recoveredSomedaySections = startupSomedaySectionCreateResult ?? startupSomedaySectionRenameResult
             ?? startupSomedaySectionDeleteResult ?? startupSomedaySectionOrderResult
             ?? startupSomedaySectionTaskResult
-        let recoveredManage = startupGtdWorkflowResult ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? startupUnassignedAreaColorResult ?? startupPersonCreateResult
+        let recoveredManage = startupDataSettingResult ?? startupGtdWorkflowResult ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? startupUnassignedAreaColorResult ?? startupPersonCreateResult
             ?? startupPersonDeleteResult ?? startupPersonEditResult ?? startupTaxonomyResult
         let recoveredDoneRows = startupDoneTaskCompletedAtResult ?? startupDoneTaskStatusResult
         let recoveredHistoryRows = startupArchiveTaskCompletedAtResult ?? recoveredDoneRows
@@ -983,6 +1011,7 @@ private final class Engine: @unchecked Sendable {
                 : startupPersonCreateResult != nil ? "managePersonCreateCommit"
                 : startupAppLockResult != nil ? "appLockCommit"
                 : startupGtdWorkflowResult != nil ? "gtdWorkflowCommit"
+                : startupDataSettingResult != nil ? "dataSetting"
                 : startupGeneralPreferenceResult != nil ? "generalPreferenceCommit"
                 : startupTaxonomyResult != nil ? "manageTaxonomyCommit"
                 : startupPersonEditResult != nil ? "managePersonEditCommit"
@@ -1075,6 +1104,7 @@ private final class Engine: @unchecked Sendable {
         startupProjectSectionOrderResult = nil
         startupAppLockResult = nil
         startupGtdWorkflowResult = nil
+        startupDataSettingResult = nil
         startupGeneralPreferenceResult = nil
         startupTaxonomyResult = nil
         startupPersonEditResult = nil
@@ -1213,6 +1243,52 @@ private final class Engine: @unchecked Sendable {
             try editorDrafts.removeMatching(attempt)
         }
         return value
+    }
+
+    func diagnosticsFileAction(_ method: String) throws -> String {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard started, !closed, !recoveryActivationPending,
+              ["logShare", "logClearChecked"].contains(method) else {
+            throw HostFailure("Diagnostics file action unavailable")
+        }
+        // No pending check or mutation here: the file queue is independent from
+        // an already initialized host's exact owed domain command.
+        return try invoke(method, arguments: [])
+    }
+
+    func validatedDiagnosticsShareURL(_ path: String) throws -> URL {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard started, !closed, !recoveryActivationPending else { throw HostFailure("Diagnostics file action unavailable") }
+        return try diagnosticsFile.validatedShareURL(path)
+    }
+
+    func prepareDataBackup(format: NativeBackupFormat = .json) throws -> NativeBackupExport {
+        // Use the normal read gate. Unlike Diagnostics, export cannot bypass pending work.
+        let method: String
+        switch format {
+        case .json: method = "dataBackup"
+        case .csv: method = "dataCsvExport"
+        case .tasknotes: method = "dataTaskNotesExport"
+        }
+        let encoded = try call("menuRead", argumentsJSON: "[\"\(method)\",\"{}\"]")
+        guard let reply = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+              Set(reply.keys) == Set(["fileName", "content", "encoding"]),
+              let fileName = reply["fileName"] as? String, let content = reply["content"] as? String,
+              let encoding = reply["encoding"] as? String else {
+            throw HostFailure("Backup reply unavailable")
+        }
+        let bytes: Data
+        if format == .tasknotes {
+            guard encoding == "base64", let decoded = Data(base64Encoded: content),
+                  fileName.hasSuffix("-tasknotes.zip") else { throw HostFailure("Backup reply unavailable") }
+            bytes = decoded
+        } else {
+            guard encoding == "utf8", fileName.hasSuffix("." + format.rawValue) else { throw HostFailure("Backup reply unavailable") }
+            bytes = Data(content.utf8)
+        }
+        let prepared = try backupExportFile.prepare(fileName: fileName, bytes: bytes)
+        _ = try? invoke("backupExportPrepared", arguments: [format.rawValue])
+        return prepared
     }
 
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?) throws -> String {
@@ -3687,6 +3763,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func finish(_ command: PendingCommand, with terminal: TerminalResult) throws -> TerminalResult {
+        if command.method == "dataSetting", case .success(let value) = terminal {
+            try validateDataSettingAcknowledgment(value)
+        }
         if command.method == "referenceTasksMoveCommit" {
             _ = try invoke("referenceTasksMoveValidate", arguments: referenceTasksMoveJournalArguments(command))
             if case .success(let value) = terminal {
@@ -7474,6 +7553,10 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func journalArguments(_ command: PendingCommand, checkingEditorSnapshot: Bool = true) throws -> [Any] {
+        if command.method == "dataSetting" {
+            guard command.editorDraft == nil else { throw HostFailure("Invalid Data setting journal") }
+            return try arguments(command.method, command.argumentsJSON)
+        }
         if command.method == "referenceTasksMoveCommit" { return try referenceTasksMoveJournalArguments(command) }
         if command.method == "referenceTasksAddTagCommit" { return try referenceTasksAddTagJournalArguments(command) }
         if command.method == "referenceTasksRemoveTagCommit" { return try referenceTasksRemoveTagJournalArguments(command) }
@@ -8604,6 +8687,7 @@ private final class Engine: @unchecked Sendable {
                 }
             } else if !(argument is String) { throw HostFailure("Core arguments must be strings") }
         }
+        if method == "dataSetting" { try validateDataSettingArguments(args, json) }
         try validateTaskReadArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         try validateListAndInboxArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         try validateProjectCollectionArguments(method, args, json, allowPreparedDates: allowPreparedDates)
@@ -8614,7 +8698,59 @@ private final class Engine: @unchecked Sendable {
         return args
     }
 
+    private func validateDataSettingArguments(_ args: [Any], _ transport: String) throws {
+        guard transport.utf8.count <= 2_048, let raw = args.first as? String, raw.utf8.count <= 1_024,
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == Set(["requestId", "edit"]), let id = request["requestId"] as? String,
+              id.utf8.count == 36, UUID(uuidString: id) != nil,
+              let edit = request["edit"] as? [String: Any], Set(edit.keys) == Set(["type", "value"]),
+              edit["type"] as? String == "debugLogging", Self.isBoolean(edit["value"]) else {
+            throw HostFailure("INVALID_INPUT: Invalid Data setting request")
+        }
+        guard try dataSettingHasExactKeyTokens(raw, expected: ["requestId", "edit", "type", "value"]) else {
+            throw HostFailure("INVALID_INPUT: Invalid Data setting request keys")
+        }
+    }
+
+    private func validateDataSettingAcknowledgment(_ value: String) throws {
+        guard let result = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(result.keys) == Set(["changed", "deviceWrites"]), Self.isBoolean(result["changed"]),
+              let writes = result["deviceWrites"] as? [Any], writes.isEmpty else {
+            throw HostFailure("Malformed Data setting acknowledgment")
+        }
+        guard try dataSettingHasExactKeyTokens(value, expected: ["changed", "deviceWrites"]) else {
+            throw HostFailure("Malformed Data setting acknowledgment")
+        }
+    }
+
+    /// Syntax/placement is checked by NativeJSON and the fixed schemas above.
+    /// These schemas have no valid repeated key at any level; Foundation alone
+    /// would silently collapse duplicates, including escaped equivalent names.
+    private func dataSettingHasExactKeyTokens(_ raw: String, expected: Set<String>) throws -> Bool {
+        let bytes = Array(raw.utf8)
+        var index = 0, keys: [String] = []
+        while index < bytes.count {
+            guard bytes[index] == 0x22 else { index += 1; continue }
+            let start = index
+            index += 1
+            while index < bytes.count {
+                if bytes[index] == 0x5c { index += 2; continue }
+                if bytes[index] == 0x22 { index += 1; break }
+                index += 1
+            }
+            let end = index
+            var next = end
+            while next < bytes.count, [0x20, 0x09, 0x0a, 0x0d].contains(bytes[next]) { next += 1 }
+            if next < bytes.count, bytes[next] == 0x3a {
+                guard let key = try NativeJSON.jsonObject(with: Data(bytes[start..<end]), options: [.fragmentsAllowed]) as? String else { return false }
+                keys.append(key)
+            }
+        }
+        return keys.count == expected.count && Set(keys) == expected
+    }
+
     private func validateArgumentTransportSize(_ method: String, _ json: String) throws {
+        if method == "dataSetting", json.utf8.count > 2_048 { throw HostFailure("INVALID_INPUT: Data setting request is too large") }
         if Self.historyTaskWritePrefix(method) == "referenceProjectNextAction", json.utf8.count > 12_610_000 {
             throw HostFailure("INVALID_INPUT: Next action request is too large")
         }
@@ -10364,11 +10500,12 @@ private final class Engine: @unchecked Sendable {
             }
         }
         if method == "menuRead" {
-            guard let name = args[0] as? String, ["more", "savedSearch", "projects", "projectDetailView", "projectTaskOrderView", "projectDetailFilterView", "projectDetailFilterOptions", "waiting", "someday", "reference", "history", "done", "bulk", "archive", "archiveTokens", "trash", "contexts", "focus", "focusSection", "focusControls", "collection", "reviewOverview", "dailyReview", "weeklyReview", "weeklyReviewList", "calendar", "calendarItem", "calendarPreferences", "board", "boardList", "settingsMenu", "generalSettings", "manageSettings", "manageAreas", "managePeople", "manageContexts", "manageTags", "managePersonCreateCheck", "manageTaxonomyCheck", "managePersonEditCheck", "somedaySections"].contains(name),
+            guard let name = args[0] as? String, ["more", "savedSearch", "projects", "projectDetailView", "projectTaskOrderView", "projectDetailFilterView", "projectDetailFilterOptions", "waiting", "someday", "reference", "history", "done", "bulk", "archive", "archiveTokens", "trash", "contexts", "focus", "focusSection", "focusControls", "collection", "reviewOverview", "dailyReview", "weeklyReview", "weeklyReviewList", "calendar", "calendarItem", "calendarPreferences", "board", "boardList", "settingsMenu", "dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport", "generalSettings", "manageSettings", "manageAreas", "managePeople", "manageContexts", "manageTags", "managePersonCreateCheck", "manageTaxonomyCheck", "managePersonEditCheck", "somedaySections"].contains(name),
                   let json = args[1] as? String,
                   let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
                 throw HostFailure("Unsupported native menu read or JSON object input")
             }
+            if ["dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport"].contains(name), !input.isEmpty { throw HostFailure("INVALID_INPUT: Unsupported Data settings read") }
             if name == "bulk" {
                 let referenceSelection = input["list"] as? String == "reference"
                 // Both lists expose only the revision-bound Remove tag picker validated below.
@@ -10737,7 +10874,17 @@ private final class Engine: @unchecked Sendable {
     private func invoke(_ method: String, arguments: [Any]) throws -> String {
         guard let context, let host = context.objectForKeyedSubscript("MindwtrHost") else { throw HostFailure("Core runtime unavailable") }
         context.exception = nil
-        let ticket = host.invokeMethod(method, withArguments: arguments)
+        let ticket: JSValue?
+        if method == "dataSetting" {
+            guard arguments.count == 1, let originalRequest = arguments.first as? String else {
+                throw HostFailure("INVALID_INPUT: Invalid Data setting request")
+            }
+            // The journal retains its original method and raw request. The
+            // shared host exposes this exact existing command through its menu dispatcher.
+            ticket = host.invokeMethod("menuCommand", withArguments: ["dataSetting", originalRequest])
+        } else {
+            ticket = host.invokeMethod(method, withArguments: arguments)
+        }
         try checkException()
         guard let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true else {
             throw HostFailure("Malformed core request ticket")
@@ -10783,6 +10930,10 @@ private final class Engine: @unchecked Sendable {
         let exec: @convention(block) (String) -> String? = { [weak self] sql in
             guard let self else { return "!MindwtrNativeError:Native database unavailable" }
             return self.guarded { _ = try self.requireDatabase().execute(sql); return nil }
+        }
+        let logFile: @convention(block) (JSValue, JSValue) -> String = { [weak self] operation, text in
+            guard let self, operation.isString, text.isString else { return "!MindwtrNativeError:Diagnostics file operation unavailable" }
+            return self.guarded { try self.diagnosticsFile.perform(operation.toString(), text: text.toString()) } ?? ""
         }
         let now: @convention(block) () -> Double = { ProcessInfo.processInfo.systemUptime * 1_000 }
         let random: @convention(block) (Int) -> String = { length in
@@ -10880,7 +11031,7 @@ private final class Engine: @unchecked Sendable {
         }
         let bridge = JSValue(newObjectIn: context)!
         for (name, block) in ["sqlRun": run as Any, "sqlAll": all as Any, "sqlExec": exec as Any,
-                              "nowMs": now as Any, "randomBytes": random as Any, "rnStateCommit": rnState as Any, "log": log as Any] {
+                              "nowMs": now as Any, "randomBytes": random as Any, "rnStateCommit": rnState as Any, "log": log as Any, "logFile": logFile as Any] {
             bridge.setObject(block, forKeyedSubscript: name as NSString)
         }
         context.setObject(bridge, forKeyedSubscript: "__mindwtrNative" as NSString)

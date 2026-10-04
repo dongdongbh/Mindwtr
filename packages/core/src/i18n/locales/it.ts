@@ -937,6 +937,7 @@ export const itOverrides: Record<string, string> = {
         'settings.saveLog': 'Salva log',
         'settings.logMissing': 'File di log non ancora presente. Abilita il log e riproduci prima il problema.',
         'settings.logCleared': 'File di log cancellato.',
+        'settings.logClearFailed': 'Impossibile cancellare il file di log.',
         'settings.shareUnavailable': 'La condivisione non è disponibile su questo dispositivo.',
         // Mobile Settings
         'settings.useSystem': 'Usa tema di sistema',

@@ -1165,6 +1165,7 @@ export const zhHant: Record<string, string> = {
         'settings.saveLog': '儲存日誌',
         'settings.logMissing': '日誌尚未生成，請先開啓日誌並復現問題。',
         'settings.logCleared': '日誌已清除。',
+        'settings.logClearFailed': '無法清除日誌檔案。',
         'settings.shareUnavailable': '此設備不支持分享。',
         'settings.useSystem': '跟隨系統',
         'settings.followDevice': '跟隨設備外觀設置',

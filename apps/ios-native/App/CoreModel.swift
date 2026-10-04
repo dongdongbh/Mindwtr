@@ -2,6 +2,7 @@ import Foundation
 import MindwtrNativeCore
 import SwiftUI
 import UIKit
+import Combine
 
 #if DEBUG && targetEnvironment(simulator)
 private struct SimulatedSomedayDeleteRefusal: LocalizedError {
@@ -20,6 +21,12 @@ private struct SimulatedManageAreaRefusal: LocalizedError {
     var errorDescription: String? { "STALE_REVISION: Area changed; read it again" }
 }
 #endif
+
+struct DiagnosticsSharePayload: Identifiable {
+    let id: UUID
+    let owner: UUID
+    let url: URL
+}
 
 struct TaskSharePayload: Identifiable {
     let id = UUID()
@@ -289,6 +296,43 @@ final class CoreModel: ObservableObject {
         ready && selectedSurface == .settings && settingsGtdPresented && !busy && !retryNeeded
             && !gtdWorkflowPending && gtdWorkflowReadError == nil && !(settingsGtdArchivePresented ? gtdArchive : settingsGtdTaskEditorPresented ? gtdTaskEditor : settingsGtdCapturePresented ? gtdCapture : settingsGtdInboxPresented ? gtdInbox : settingsGtdReviewPresented ? gtdReview : gtdWorkflow).isEmpty
     }
+    @Published private(set) var settingsDataPresented = false
+    @Published private(set) var dataSettings: CoreObject = [:]
+    @Published private(set) var diagnosticsSession: UUID?
+    @Published private(set) var diagnosticsOwner: UUID?
+    @Published private(set) var diagnosticsFileBusy = false
+    @Published private(set) var diagnosticsMessage: String?
+    @Published private(set) var diagnosticsReadError: String?
+    @Published private(set) var diagnosticsShare: DiagnosticsSharePayload?
+    @Published private(set) var backupShare: NativeBackupExport?
+    @Published private(set) var backupExportBusy = false
+    @Published private(set) var backupExportError: String?
+    private var backupShareHost: CoreHost?
+    let settingsDiagnosticsOwner = UUID()
+    private var diagnosticsCacheHost: ObjectIdentifier?
+    private var diagnosticsLockObserver: AnyCancellable?
+    #if DEBUG && targetEnvironment(simulator)
+    @Published private(set) var diagnosticsShareTestState = ""
+    private var diagnosticsShareTestHoldOnce = false
+    @Published private(set) var backupExportTestState = ""
+    private var backupExportTestHoldOnce = false
+    #endif
+    private var dataSettingRequest: String?
+    private var dataSettingAwaitingRefresh = false
+    var diagnosticsLabels: CoreObject { dataSettings.object("diagnostics") }
+    var cachedFailureDiagnosticsAvailable: Bool {
+        ready && !appLock.concealed && !busy && retryNeeded && diagnosticsCacheIsCurrent
+            && diagnosticsOwner == nil
+    }
+    private var diagnosticsCacheIsCurrent: Bool {
+        host.map { diagnosticsCacheHost == ObjectIdentifier($0) } == true && !dataSettings.isEmpty
+    }
+    var diagnosticsToggleEnabled: Bool {
+        ready && !appLock.concealed && settingsDataPresented && !busy && !retryNeeded
+            && dataSettingRequest == nil && !dataSettingAwaitingRefresh && !diagnosticsFileBusy
+            && diagnosticsCacheIsCurrent && diagnosticsReadError == nil
+    }
+
     @Published private(set) var settingsGeneralPresented = false
     @Published private(set) var generalSettings: CoreObject = [:]
     let appLock = AppLockController()
@@ -711,7 +755,13 @@ final class CoreModel: ObservableObject {
     @Published private(set) var notice: String?
     @Published var bulkConfirm: CoreObject = [:]
 
-    private var host: CoreHost?
+    private var host: CoreHost? {
+        didSet {
+            if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
+                invalidateDiagnostics(dropCache: true)
+            }
+        }
+    }
     private var reviewOverviewParams: CoreObject = ["scope": "due"]
     private var reviewOverviewDepth = 50
     private var reviewGuideDepth = 50
@@ -2817,6 +2867,8 @@ final class CoreModel: ObservableObject {
                     manageAreaEditOptionsTestReadFailures = arguments.contains("--native-manage-area-edit-options-failure") ? 1 : 0
                     manageAreaEditTestReadFailures = arguments.contains("--native-manage-area-edit-read-failure") ? 2 : 0
                     manageAreaEditTestRefusals = arguments.contains("--native-manage-area-edit-refusal") ? 1 : 0
+                    diagnosticsShareTestHoldOnce = arguments.contains("--native-diagnostics-share-hold-once")
+                    backupExportTestHoldOnce = arguments.contains("--native-backup-export-hold-once")
                     taskRecoveryResolverTestFailure = arguments.contains("--native-task116-resolver-failure-once")
                     #endif
                     host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle)
@@ -3044,6 +3096,9 @@ final class CoreModel: ObservableObject {
                 } else if recovery.object("result").text("type") == "taskEditorReset" {
                     gtdTaskEditorFieldId = nil
                 }
+            } else if recovery.text("method") == "dataSetting" {
+                selectedSurface = .settings
+                settingsDataPresented = true
             } else if ["generalPreferenceCommit", "appLockCommit"].contains(recovery.text("method")) {
                 selectedSurface = .settings
                 settingsGeneralPresented = true
@@ -3242,6 +3297,8 @@ final class CoreModel: ObservableObject {
         settingsReadError = nil
         settingsSearch = ""
         settingsGeneralPresented = false
+        settingsDataPresented = false
+        invalidateDiagnostics()
         settingsGtdPresented = false
         settingsGtdArchivePresented = false
         settingsGtdReviewPresented = false
@@ -3628,6 +3685,260 @@ final class CoreModel: ObservableObject {
         defer { finishOperation() }
         do { try await readGtdSettings(); gtdWorkflowError = nil }
         catch { gtdWorkflowReadError = error.localizedDescription }
+    }
+
+    private func observeDiagnosticsConcealment() {
+        guard diagnosticsLockObserver == nil else { return }
+        diagnosticsLockObserver = appLock.$enabled.combineLatest(appLock.$locked).sink { [weak self] enabled, locked in
+            if enabled == nil || locked { self?.invalidateDiagnostics(dropCache: true) }
+        }
+    }
+
+    private func beginDiagnostics(owner: UUID) {
+        observeDiagnosticsConcealment()
+        invalidateDiagnostics()
+        diagnosticsOwner = owner
+        diagnosticsSession = UUID()
+    }
+
+    func invalidateDiagnostics(dropCache: Bool = false) {
+        dismissBackupShare()
+        backupExportBusy = false
+        backupExportError = nil
+        diagnosticsSession = nil
+        diagnosticsOwner = nil
+        diagnosticsShare = nil
+        diagnosticsMessage = nil
+        diagnosticsFileBusy = false
+        if dropCache {
+            diagnosticsCacheHost = nil
+            dataSettings = [:]
+            settingsDataPresented = false
+        }
+    }
+
+    func openCachedFailureDiagnostics(owner: UUID) -> Bool {
+        guard cachedFailureDiagnosticsAvailable else { return false }
+        beginDiagnostics(owner: owner)
+        return true
+    }
+
+    func closeDiagnostics(owner: UUID) {
+        guard diagnosticsOwner == owner else { return }
+        invalidateDiagnostics()
+        if owner == settingsDiagnosticsOwner { settingsDataPresented = false }
+        // The original domain error, request and retry context are untouched.
+    }
+
+    func diagnosticsCurrent(owner: UUID, session: UUID) -> Bool {
+        ready && !appLock.concealed && diagnosticsOwner == owner && diagnosticsSession == session
+            && diagnosticsCacheIsCurrent
+    }
+
+    func diagnosticsFileActionsEnabled(owner: UUID) -> Bool {
+        diagnosticsOwner == owner && diagnosticsSession != nil && diagnosticsCacheIsCurrent
+            && ready && !appLock.concealed && !busy && !diagnosticsFileBusy && diagnosticsShare == nil
+            && !backupExportBusy && backupShare == nil
+    }
+
+    var backupExportEnabled: Bool {
+        settingsDataPresented && diagnosticsOwner == settingsDiagnosticsOwner
+            && diagnosticsFileActionsEnabled(owner: settingsDiagnosticsOwner)
+            && !retryNeeded && diagnosticsReadError == nil && dataSettingRequest == nil
+            && !dataSettingAwaitingRefresh
+    }
+
+    func exportDataBackup(format: NativeBackupFormat = .json) async {
+        guard backupExportEnabled, let session = diagnosticsSession, let currentHost = host else { return }
+        backupExportBusy = true
+        backupExportError = nil
+        defer {
+            if host === currentHost, diagnosticsCurrent(owner: settingsDiagnosticsOwner, session: session) {
+                backupExportBusy = false
+            }
+        }
+        do {
+            let prepared = try await currentHost.prepareDataBackup(format: format)
+            #if DEBUG && targetEnvironment(simulator)
+            if backupExportTestHoldOnce {
+                backupExportTestHoldOnce = false
+                backupExportTestState = "held"
+                let until = ProcessInfo.processInfo.systemUptime + 900
+                while (diagnosticsSession == nil || diagnosticsSession == session), host === currentHost,
+                      !appLock.concealed, ProcessInfo.processInfo.systemUptime < until, !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 20_000_000)
+                }
+            }
+            #endif
+            guard host === currentHost, settingsDataPresented,
+                  diagnosticsCurrent(owner: settingsDiagnosticsOwner, session: session), !retryNeeded, !Task.isCancelled else {
+                await currentHost.discardDataBackup(prepared.id)
+                #if DEBUG && targetEnvironment(simulator)
+                if backupExportTestState == "held" { backupExportTestState = "discarded" }
+                #endif
+                return
+            }
+            backupShareHost = currentHost
+            backupShare = prepared
+        } catch {
+            if host === currentHost, diagnosticsCurrent(owner: settingsDiagnosticsOwner, session: session) {
+                let failureField: String
+                switch format {
+                case .json: failureField = "failed"
+                case .csv: failureField = "csvFailed"
+                case .tasknotes: failureField = "tasknotesFailed"
+                }
+                backupExportError = dataSettings.object("backup").text(failureField)
+            }
+        }
+    }
+
+    func dismissBackupShare() {
+        if let prepared = backupShare, let owner = backupShareHost {
+            Task { await owner.discardDataBackup(prepared.id) }
+        }
+        backupShare = nil
+        backupShareHost = nil
+    }
+
+    func openDataSettings() async {
+        guard ready, selectedSurface == .settings, !busy, !retryNeeded, !appLock.concealed,
+              !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        settingsDataPresented = true
+        diagnosticsReadError = nil
+        beginDiagnostics(owner: settingsDiagnosticsOwner)
+        busy = true
+        defer { finishOperation() }
+        do { try await readDataSettings() }
+        catch { diagnosticsReadError = error.localizedDescription }
+    }
+
+    private func readDataSettings() async throws {
+        guard let currentHost = host, let session = diagnosticsSession, !appLock.concealed else { throw CocoaError(.coderInvalidValue) }
+        let result = try await query("menuRead", ["dataSettings", "{}"])
+        let labels = result.object("diagnostics")
+        let backup = result.object("backup")
+        guard result["version"] is NSNumber, !result.text("revision").isEmpty, !result.text("title").isEmpty,
+              ["title", "exportLabel", "description", "failed", "csvLabel", "csvDescription", "csvFailed", "tasknotesLabel", "tasknotesDescription", "tasknotesFailed"].allSatisfy({ backup[$0] is String && !backup.text($0).isEmpty }),
+              !labels.text("title").isEmpty, labels.object("debugLogging")["value"] is Bool,
+              ["toastTitle", "logMissing", "shareUnavailable", "logCleared", "logClearFailed"].allSatisfy({ labels[$0] is String }),
+              labels["shareLog"] is NSNull || labels["shareLog"] is CoreObject,
+              labels["clearLog"] is NSNull || labels["clearLog"] is CoreObject else { throw CocoaError(.coderReadCorrupt) }
+        guard host === currentHost, !appLock.concealed, session == diagnosticsSession else { return }
+        dataSettings = result
+        diagnosticsCacheHost = ObjectIdentifier(currentHost)
+        diagnosticsReadError = nil
+        dataSettingAwaitingRefresh = false
+    }
+
+    func retryDataSettingsRead() async {
+        if retryNeeded { await retry(); return }
+        guard settingsDataPresented, !busy, !appLock.concealed else { return }
+        busy = true
+        defer { finishOperation() }
+        do { try await readDataSettings() }
+        catch { diagnosticsReadError = error.localizedDescription }
+    }
+
+    func setDiagnosticsDebugLogging(_ value: Bool) async {
+        guard diagnosticsToggleEnabled else { return }
+        busy = true
+        defer { finishOperation() }
+        do {
+            let request = try json(["requestId": UUID().uuidString.lowercased(),
+                                    "edit": ["type": "debugLogging", "value": value]])
+            dataSettingRequest = request
+            try acknowledgeDataSetting(await query("dataSetting", [request]))
+        } catch { handleDataSettingError(error); return }
+        if settingsDataPresented, diagnosticsSession != nil {
+            do { try await readDataSettings() }
+            catch { diagnosticsReadError = error.localizedDescription }
+        }
+    }
+
+    private func acknowledgeDataSetting(_ result: CoreObject) throws {
+        guard dataSettingRequest != nil, Set(result.keys) == Set(["changed", "deviceWrites"]),
+              let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
+              let writes = result["deviceWrites"] as? [Any], writes.isEmpty else { throw CocoaError(.coderReadCorrupt) }
+        dataSettingRequest = nil
+        dataSettingAwaitingRefresh = true
+        retryNeeded = false
+        error = nil
+    }
+
+    private func handleDataSettingError(_ failure: Error) {
+        diagnosticsReadError = failure.localizedDescription
+        if isDefiniteRejection(failure) {
+            dataSettingRequest = nil
+            dataSettingAwaitingRefresh = true
+            retryNeeded = false
+        } else { retryNeeded = dataSettingRequest != nil }
+        error = failure.localizedDescription
+    }
+
+    func shareDiagnostics(owner: UUID) async {
+        guard diagnosticsFileActionsEnabled(owner: owner), let session = diagnosticsSession, let currentHost = host else { return }
+        diagnosticsFileBusy = true
+        diagnosticsMessage = nil
+        defer { if diagnosticsCurrent(owner: owner, session: session) { diagnosticsFileBusy = false } }
+        do {
+            let reply = try decode(await currentHost.diagnosticsFileAction("logShare"))
+            guard Set(reply.keys) == Set(["path"]), reply["path"] is NSNull || reply["path"] is String else { throw CocoaError(.coderReadCorrupt) }
+            #if DEBUG && targetEnvironment(simulator)
+            if diagnosticsShareTestHoldOnce {
+                diagnosticsShareTestHoldOnce = false
+                diagnosticsShareTestState = "held"
+                let until = ProcessInfo.processInfo.systemUptime + 900
+                // Keep the actual settled reply across close/reopen. The normal
+                // host/library/concealment/session fence below still decides delivery.
+                while (diagnosticsSession == nil || diagnosticsSession == session), host === currentHost,
+                      !appLock.concealed, ProcessInfo.processInfo.systemUptime < until, !Task.isCancelled {
+                    try await Task.sleep(nanoseconds: 20_000_000)
+                }
+                diagnosticsShareTestState += "\ndelivered"
+            }
+            #endif
+            guard let path = reply["path"] as? String else {
+                if diagnosticsCurrent(owner: owner, session: session) { diagnosticsMessage = diagnosticsLabels.text("logMissing") }
+                return
+            }
+            let url = try await currentHost.validatedDiagnosticsShareURL(path)
+            guard host === currentHost, diagnosticsCurrent(owner: owner, session: session) else {
+                #if DEBUG && targetEnvironment(simulator)
+                if diagnosticsShareTestState.contains("delivered") { diagnosticsShareTestState += "\ndiscarded" }
+                #endif
+                return
+            }
+            diagnosticsShare = DiagnosticsSharePayload(id: session, owner: owner, url: url)
+        } catch {
+            if host === currentHost, diagnosticsCurrent(owner: owner, session: session) {
+                diagnosticsMessage = diagnosticsLabels.text("shareUnavailable")
+            }
+        }
+    }
+
+    func dismissDiagnosticsShare(owner: UUID) {
+        guard diagnosticsShare?.owner == owner else { return }
+        diagnosticsShare = nil
+    }
+
+    func clearDiagnostics(owner: UUID) async {
+        guard diagnosticsFileActionsEnabled(owner: owner), let session = diagnosticsSession, let currentHost = host else { return }
+        diagnosticsFileBusy = true
+        diagnosticsMessage = nil
+        defer { if diagnosticsCurrent(owner: owner, session: session) { diagnosticsFileBusy = false } }
+        do {
+            let reply = try decode(await currentHost.diagnosticsFileAction("logClearChecked"))
+            guard Set(reply.keys) == Set(["outcome"]), ["cleared", "alreadyAbsent", "unavailable", "unconfirmed"].contains(reply.text("outcome")) else { throw CocoaError(.coderReadCorrupt) }
+            guard host === currentHost, diagnosticsCurrent(owner: owner, session: session) else { return }
+            diagnosticsMessage = diagnosticsLabels.text(["cleared", "alreadyAbsent"].contains(reply.text("outcome")) ? "logCleared" : "logClearFailed")
+        } catch {
+            if host === currentHost, diagnosticsCurrent(owner: owner, session: session) {
+                diagnosticsMessage = diagnosticsLabels.text("logClearFailed")
+            }
+        }
     }
 
     func openGeneralSettings() async {
@@ -19958,6 +20269,15 @@ final class CoreModel: ObservableObject {
         }
         do {
             let acknowledgment = try await host!.retryPending()
+            if dataSettingRequest != nil {
+                guard let acknowledgment else { throw CocoaError(.coderReadCorrupt) }
+                try acknowledgeDataSetting(decode(acknowledgment))
+                if settingsDataPresented {
+                    do { try await readDataSettings() }
+                    catch { diagnosticsReadError = error.localizedDescription }
+                }
+                return
+            }
             if let request = referenceProjectNextActionRequest {
                 let outcome = try await query("referenceProjectNextActionRetryOutcome", [request])
                 if Set(outcome.keys) == Set(["kind"]), outcome.text("kind") == "unproven" {
@@ -21282,6 +21602,10 @@ final class CoreModel: ObservableObject {
                 await handleGtdWorkflowError(error)
                 return
             }
+            if dataSettingRequest != nil {
+                handleDataSettingError(error)
+                return
+            }
             if generalPreferenceRequest != nil {
                 await handleGeneralPreferenceError(error)
                 return
@@ -22086,6 +22410,11 @@ final class CoreModel: ObservableObject {
             if settingsGtdPresented {
                 do { try await readGtdSettings() }
                 catch { gtdWorkflowReadError = error.localizedDescription; throw error }
+            }
+            if settingsDataPresented {
+                if diagnosticsSession == nil { beginDiagnostics(owner: settingsDiagnosticsOwner) }
+                do { try await readDataSettings() }
+                catch { diagnosticsReadError = error.localizedDescription; throw error }
             }
             if settingsGeneralPresented {
                 do { try await readGeneralSettings() }

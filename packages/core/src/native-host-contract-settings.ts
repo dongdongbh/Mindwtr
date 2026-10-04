@@ -62,6 +62,12 @@
  * import cycle between the two files is safe.
  */
 import { AREA_PRESET_COLORS, DEFAULT_AREA_COLOR } from './color-constants';
+import { createBackupFileName, serializeBackupData } from './backup-transfer';
+import { bytesToBase64 } from './base64-bytes';
+import { serializeMindwtrCsv } from './mindwtr-csv-export';
+import { buildTaskNotesExportZip } from './tasknotes-export';
+import { getInMemoryAppDataSnapshot } from './sync-client-helpers';
+import { isSandboxMode, isWorkspaceTransitionActive } from './sandbox';
 import { canUseJalaliCalendar, createDateFormatter, getSystemWeekStart, normalizeClockTimeInput, type DateFormattingConfig } from './date';
 import { buildDataSettingsModel, buildDataSettingsUpdate, isDataSettingStored, type DataSettingsEdit, type DataSettingsModel } from './data-settings-model';
 import {
@@ -126,7 +132,7 @@ import {
     type SettingsMenuRow,
     type SettingsSyncBadgeState,
 } from './settings-menu-model';
-import { useTaskStore } from './store';
+import { getPersistenceStatus, useTaskStore } from './store';
 import { normalizeTagId } from './store-helpers';
 import { formatTagIdPreservingCase } from './store-projects/shared';
 import { DEFAULT_TASK_EDITOR_ORDER, isTaskEditorSectionableField, TASK_EDITOR_SECTION_ORDER } from './task-editor-layout';
@@ -964,6 +970,40 @@ export function createSettingsMethods(deps: SettingsDeps) {
             if (!ready.ok) return ready;
             const model = buildDataSettingsModel(useTaskStore.getState().settings, deps.t());
             return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, revision: manageRevision(), ...model } };
+        },
+
+        /** RN's export snapshot and serializers. Never flushes or acknowledges an owed save. */
+        getDataBackup(format: 'json' | 'csv' | 'tasknotes' = 'json'): NativeHostResult<{ fileName: string; content: string; encoding: 'utf8' | 'base64' }> {
+            if (format !== 'json' && format !== 'csv' && format !== 'tasknotes') return fail('INVALID_INPUT', 'Unsupported export format');
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (isSandboxMode() || isWorkspaceTransitionActive()) {
+                return fail('NOT_READY', 'Backup export requires a stable personal workspace');
+            }
+            const persistence = getPersistenceStatus();
+            if (persistence.queued || persistence.inFlight || persistence.immediate || persistence.retrying || persistence.failed) {
+                return fail('NOT_READY', 'Backup export is unavailable while saving is pending');
+            }
+            try {
+                const snapshot = getInMemoryAppDataSnapshot();
+                if (format === 'tasknotes') {
+                    return { ok: true, value: {
+                        fileName: createBackupFileName().replace(/\.json$/u, '-tasknotes.zip'),
+                        content: bytesToBase64(buildTaskNotesExportZip(snapshot).zip),
+                        encoding: 'base64',
+                    } };
+                }
+                return { ok: true, value: {
+                    fileName: createBackupFileName().replace(/\.json$/u, format === 'csv' ? '.csv' : '.json'),
+                    content: format === 'csv'
+                        ? serializeMindwtrCsv(snapshot)
+                        : serializeBackupData(snapshot),
+                    encoding: 'utf8',
+                } };
+            } catch {
+                // Serialization errors can contain data; the host receives only a fixed message.
+                return fail('ACTION_FAILED', 'Could not prepare the backup');
+            }
         },
 
         /**

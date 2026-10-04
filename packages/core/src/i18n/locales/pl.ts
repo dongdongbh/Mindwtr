@@ -840,6 +840,7 @@ export const plOverrides: Record<string, string> = {
         'settings.saveLog': 'Zapisz log',
         'settings.logMissing': 'Plik logu nie został jeszcze utworzony. Najpierw włącz logowanie i odtwórz problem.',
         'settings.logCleared': 'Plik logu został wyczyszczony.',
+        'settings.logClearFailed': 'Nie udało się wyczyścić pliku dziennika.',
         'settings.shareUnavailable': 'Udostępnianie nie jest dostępne na tym urządzeniu.',
         'settings.useSystem': 'Użyj motywu systemowego',
         'settings.followDevice': 'Zgodnie z wyglądem urządzenia',

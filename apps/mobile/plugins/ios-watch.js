@@ -124,6 +124,7 @@ const configurationSettings = ({
   INFOPLIST_FILE: `"${target}/Info.plist"`,
   LD_RUNPATH_SEARCH_PATHS: '"$(inherited) @executable_path/Frameworks"',
   MARKETING_VERSION: `"${marketingVersion}"`,
+  MINDWTR_SPOKEN_NAME: hostBundleIdentifier.endsWith('.dev') ? '"Mind Water Dev"' : '"Mind Water"',
   MINDWTR_HOST_BUNDLE_IDENTIFIER: `"${hostBundleIdentifier}"`,
   MINDWTR_WATCH_APP_GROUP: `"${appGroup}"`,
   PRODUCT_BUNDLE_IDENTIFIER: `"${bundleIdentifier}"`,

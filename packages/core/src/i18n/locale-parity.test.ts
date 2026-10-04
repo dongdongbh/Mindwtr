@@ -254,7 +254,7 @@ describe('locale parity', () => {
 
     it.each(nonLatinOverrideLocales)('does not ship mixed English fragments in %s', (lang) => {
         const translations = translationsByLocale[lang];
-        const mixedEnglish = Object.keys(translations).filter((key) => hasTranslatableEnglishText(translations[key]));
+        const mixedEnglish = Object.keys(translations).filter((key) => hasTranslatableEnglishText(translations[key], key));
         expect(mixedEnglish).toEqual([]);
     });
 

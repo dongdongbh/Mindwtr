@@ -21,6 +21,11 @@ describe('app.config APP_VARIANT', () => {
     vi.stubEnv('APP_VARIANT', '');
     const config = await loadConfig();
     expect(config.name).toBe('Mindwtr');
+    expect(config.ios?.infoPlist?.CFBundleSpokenName).toBe('Mind Water');
+    expect(config.ios?.infoPlist?.INAlternativeAppNames).toEqual([{
+      INAlternativeAppName: 'Mind Water',
+      INAlternativeAppNamePronunciationHint: 'mind water',
+    }]);
     expect(config.android?.package).toBe('tech.dongdongbh.mindwtr');
     expect(config.ios?.bundleIdentifier).toBe('tech.dongdongbh.mindwtr');
     expect(widgetLabels(config)).toEqual(['Mindwtr']);
@@ -30,6 +35,11 @@ describe('app.config APP_VARIANT', () => {
     vi.stubEnv('APP_VARIANT', 'development');
     const config = await loadConfig();
     expect(config.name).toBe('Mindwtr Dev');
+    expect(config.ios?.infoPlist?.CFBundleSpokenName).toBe('Mind Water Dev');
+    expect(config.ios?.infoPlist?.INAlternativeAppNames).toEqual([{
+      INAlternativeAppName: 'Mind Water Dev',
+      INAlternativeAppNamePronunciationHint: 'mind water dev',
+    }]);
     expect(config.android?.package).toBe('tech.dongdongbh.mindwtr.dev');
     expect(config.ios?.bundleIdentifier).toBe('tech.dongdongbh.mindwtr.dev');
     expect(config.scheme).toBe('mindwtr');

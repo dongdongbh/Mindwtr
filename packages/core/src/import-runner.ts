@@ -6,6 +6,7 @@ import { prepareRestoredBackupDataForSync, validateBackupJson, type BackupValida
 import {
     runDataTransferTransaction,
     type DataTransferStaleDetails,
+    type DataTransferApplication,
 } from './data-transfer-transaction';
 import {
     applyDgtImport,
@@ -340,6 +341,18 @@ export function parseImportSource<S extends ImportSourceId>(
     } as ImportSourceParseResultMap[S];
 }
 
+/** Shared import policy for native hosts that persist a prepared document with an
+ * atomic request receipt. This only computes the application; callers still own
+ * the serialized write barrier, recovery snapshot, persistence and canonical reload.
+ */
+export function applyImportSource<S extends ImportSourceId>(
+    source: S,
+    currentData: AppData,
+    parsed: ImportTypeMap[S]['parsed'],
+): DataTransferApplication<ImportTypeMap[S]['result']> {
+    return IMPORT_DESCRIPTORS[source].apply(currentData, parsed);
+}
+
 // Closing this on `source` (rather than two free type parameters the caller had to spell out)
 // lets `parsed`'s and the return value's types be inferred from the source id literal itself —
 // `ImportTypeMap[S]` is exact per source, so every cast this function used to need to bridge
@@ -361,7 +374,7 @@ export async function runImport<S extends ImportSourceId>(
         const transaction = await runDataTransferTransaction({
             ...boundaries,
             operation: descriptor.operation,
-            apply: (currentData: AppData) => descriptor.apply(currentData, parsed),
+            apply: (currentData: AppData) => applyImportSource(source, currentData, parsed),
         });
         const result = transaction.result;
         void log.logInfo(descriptor.completeLabel, {

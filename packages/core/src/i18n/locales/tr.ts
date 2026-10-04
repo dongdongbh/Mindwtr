@@ -853,6 +853,7 @@ export const trOverrides: Record<string, string> = {
         'settings.saveLog': 'Günlüğü kaydet',
         'settings.logMissing': 'Günlük dosyası henüz bulunamadı. Günlüğe kaydetmeyi etkinleştirin ve önce sorunu yeniden oluşturun.',
         'settings.logCleared': 'Günlük dosyası temizlendi.',
+        'settings.logClearFailed': 'Günlük dosyası temizlenemedi.',
         'settings.shareUnavailable': 'Bu cihazda paylaşım kullanılamıyor.',
         'settings.useSystem': 'Sistem Temasını Kullan',
         'settings.followDevice': 'Cihaz görünüm ayarlarını takip edin',
