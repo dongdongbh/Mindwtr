@@ -243,6 +243,14 @@ export const allowedEnglishMirrorKeysByLocale: Record<string, readonly string[]>
         'settings.localApiToken',
         'settings.networkProxyUrl',
     ],
+    ru: [
+    'settings.feedbackOpenGitHubDiscussion',
+    'settings.feedbackOpenGitHubIssue',
+    'settings.eink',
+    'settings.sepia',
+    'settings.oled',
+    'settings.appleRemindersImport.appleReminders',
+],
 };
 
 const translatableEnglishPattern = /[A-Za-z]{3,}/;
