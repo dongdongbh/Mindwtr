@@ -754,6 +754,8 @@ class CoreHost(
                        val done: CompletableFuture<JSONObject>) {
         var id = ""
         var deadlineAt = 0L
+        /** Its deadline check, cancelled once it is answered (D9 review: no check outlives its call). */
+        var deadlineCheck: ScheduledFuture<*>? = null
     }
 
     /** Calls whose operation has not answered yet, in start order; engine thread only. */
@@ -773,6 +775,7 @@ class CoreHost(
 
     /** [call]'s reply [result]: the debug hooks after it, its journal entry settled, then its caller answered; engine thread. */
     private fun finish(call: Call, result: JSONObject) {
+        call.deadlineCheck?.cancel(false)
         if (call.entry != null) {
             debugDelay("delay_after_ms")
             journalStop(call.stop, "after", call.entry)
@@ -799,7 +802,7 @@ class CoreHost(
         } else {
             calls += call
             runCatching {
-                executor.schedule({ pollCalls() }, call.deadlineMs, TimeUnit.MILLISECONDS)
+                call.deadlineCheck = executor.schedule({ pollCalls() }, call.deadlineMs, TimeUnit.MILLISECONDS)
                 executor.execute { idlePump() }
             }
         }
@@ -830,6 +833,7 @@ class CoreHost(
      * the failure is reported. One that still has not ended stops the host: no JS runs again, so it never resumes.
      */
     private fun expire(call: Call) {
+        call.deadlineCheck?.cancel(false)
         call("cancel", call.id)
         if (pumpUntil(call.id, DRAIN_MS) == null) {
             val reason = "Core host stopped: ${call.method} did not end after its deadline"
@@ -899,13 +903,24 @@ class CoreHost(
         pumpAt = Long.MAX_VALUE
         val engine = context ?: return
         if (stopped != null) return
-        // One bounded turn (D9): the answers and due timers taken while the turn is under PUMP_TURN_MS; what is left waits for
-        // the next turn, queued behind the host calls that came meanwhile.
-        runCatching { traced("core:idlePump") { global(engine, "__pumpTimers").call(PUMP_TURN_MS) } }.onFailure { Log.w(TAG, "Native Android idle pump failed error=${it.javaClass.simpleName}") }
+        // One bounded turn (D9): one answer or due timer at a time (__pumpOne), each timed with the promise jobs it set off
+        // (they run before the call returns), until PUMP_TURN_MS has passed. What is left waits for the next turn, queued
+        // behind the host calls that came meanwhile.
+        val turnStart = SystemClock.uptimeMillis()
+        var ran = 0
+        runCatching {
+            traced("core:idlePump") {
+                val one = global(engine, "__pumpOne")
+                do {
+                    ran = (one.call() as? Number)?.toInt() ?: 0
+                } while (ran > 0 && SystemClock.uptimeMillis() - turnStart < PUMP_TURN_MS)
+            }
+        }.onFailure { Log.w(TAG, "Native Android idle pump failed error=${it.javaClass.simpleName}") }
         settleWatched()
         pollCalls()
         if (context == null || stopped != null) return
-        if (global(engine, "__pumpMore").call() == true) runCatching { executor.execute { idlePump() } }
+        // The turn ended on its budget with an item just run: there may be more, so the next turn is queued now.
+        if (ran > 0) runCatching { executor.execute { idlePump() } }
         schedulePump()
     }
 

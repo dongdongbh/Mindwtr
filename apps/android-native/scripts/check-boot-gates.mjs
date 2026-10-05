@@ -404,27 +404,37 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     run("fetch('https://dav.example/later')");
     assert.equal(sent.at(-1).url, 'https://dav.example/later', 'calls reach the host again once it resumes them');
 
-    // D9: one bounded pump turn (CoreHost.idlePump) takes answers and due timers only while its budget lasts; the first item
-    // always runs, and __pumpMore says what was left for the next turn. Unbounded (no budget: a nested call's loop, iOS) is as before.
+    // D9: a bounded idle pump turn (CoreHost.idlePump) takes one answer or due timer at a time (__pumpOne) and times each with
+    // the promise jobs it set off, which run before the call returns; the turn ends once its budget is spent. Review (Codex 8):
+    // fifty cheap timers whose promise continuations take 10 ms each fill one turn with one timer, not all fifty.
     net.__pumpTimers();
-    run('[1, 2, 3].forEach((n) => setTimeout(() => { globalThis.ranTimers = (globalThis.ranTimers || 0) + 1; __mindwtrNative.tick(5); }, 0))');
     bridge.tick = (ms) => { clock += ms; };
-    assert.equal(net.__pumpTimers(8), 2, 'two timers fit an 8 ms turn at 5 ms each');
-    assert.equal(net.__pumpMore(), true);
-    assert.equal(net.__nextTimerDelay(), 0, 'the timer left is still due');
-    assert.equal(net.__pumpTimers(8), 1);
-    assert.equal(net.__pumpMore(), false);
+    run('globalThis.continued = 0; for (let i = 0; i < 50; i += 1) setTimeout(() => { Promise.resolve().then(() => { globalThis.continued += 1; __mindwtrNative.tick(10); }); }, 0)');
+    const turn = async () => {
+        const start = clock;
+        let ran = 0;
+        let taken = 0;
+        do {
+            ran = net.__pumpOne();
+            await new Promise((done) => setImmediate(done));
+            taken += ran;
+        } while (ran > 0 && clock - start < 8);
+        return taken;
+    };
+    assert.equal(await turn(), 1, 'one 10 ms continuation spends an 8 ms turn');
+    assert.equal(run('continued'), 1);
+    assert.equal(net.__nextTimerDelay(), 0, 'the other timers are still due, for the next turns');
+    let turns = 1;
+    while (net.__nextTimerDelay() === 0) { await turn(); turns += 1; }
+    assert.equal(run('continued'), 50);
+    assert.equal(turns, 50);
+    // Answers too: one per item, and a cancelled call's late answer counts as taken but settles nothing.
     const slow = run("[fetch('https://dav.example/s1'), fetch('https://dav.example/s2')]");
     for (const id of [String(ids - 1), String(ids)]) answer({ id, status: 200, statusText: 'OK', url: 'https://dav.example/s', redirected: false, headers: [], base64: '' });
-    const realNext = bridge.ioNext;
-    bridge.ioNext = () => { clock += 10; return realNext(); };
-    assert.equal(net.__pumpTimers(8), 1, 'a 10 ms answer spends the turn: the second waits');
-    assert.equal(net.__pumpMore(), true);
-    assert.equal(net.__pumpTimers(8), 1);
-    bridge.ioNext = realNext;
+    assert.equal(net.__pumpOne(), 1);
+    assert.equal(net.__pumpOne(), 1);
+    assert.equal(net.__pumpOne(), 0, 'nothing left');
     assert.equal((await Promise.all(slow)).length, 2);
-    assert.equal(net.__pumpTimers(), 0);
-    assert.equal(net.__pumpMore(), false);
 }
 
 // S4b: sync encryption's primitives on the host's crypto calls (host-polyfills.js __mindwtrCryptoCall, host-sync.ts
@@ -1026,8 +1036,9 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
     // or stops the host, as a nested one.
     assert.match(coreHost, /if \(Thread\.currentThread\(\) === engineThread\) \{\s+stopped\?\.let \{ throw IllegalStateException\(it\) \}\s+finish\(begin\(method, args, deadlineMs, done\), answer\(method, args, deadlineMs\)\)/);
     assert.match(coreHost, /onEngineQueued \{\s+stopped\?\.let \{ throw IllegalStateException\(it\) \}\s+start\(begin\(method, args, deadlineMs, done\)\)\s+\}/);
-    assert.match(coreHost, /private fun expire\(call: Call\) \{\s+call\("cancel", call\.id\)\s+if \(pumpUntil\(call\.id, DRAIN_MS\) == null\) \{[\s\S]{0,300}?stopped = reason[\s\S]{0,300}?closeOnEngine\(\)\s+return\s+\}\s+checkNotNull\(context\)\.globalObject\.getJSFunction\("__resumeHostCalls"\)\.call\(\)\s+schedulePump\(\)\s+call\.done\.completeExceptionally\(IllegalStateException\("Core \$\{call\.method\} timed out"\)\)/);
-    assert.match(coreHost, /calls \+= call\s+runCatching \{\s+executor\.schedule\(\{ pollCalls\(\) \}, call\.deadlineMs, TimeUnit\.MILLISECONDS\)/, 'a waiting call is checked at its deadline even with no pump due');
+    assert.match(coreHost, /private fun expire\(call: Call\) \{\s+call\.deadlineCheck\?\.cancel\(false\)\s+call\("cancel", call\.id\)\s+if \(pumpUntil\(call\.id, DRAIN_MS\) == null\) \{[\s\S]{0,300}?stopped = reason[\s\S]{0,300}?closeOnEngine\(\)\s+return\s+\}\s+checkNotNull\(context\)\.globalObject\.getJSFunction\("__resumeHostCalls"\)\.call\(\)\s+schedulePump\(\)\s+call\.done\.completeExceptionally\(IllegalStateException\("Core \$\{call\.method\} timed out"\)\)/);
+    assert.match(coreHost, /calls \+= call\s+runCatching \{\s+call\.deadlineCheck = executor\.schedule\(\{ pollCalls\(\) \}, call\.deadlineMs, TimeUnit\.MILLISECONDS\)/, 'a waiting call is checked at its deadline even with no pump due');
+    assert.match(coreHost, /private fun finish\(call: Call, result: JSONObject\) \{\s+call\.deadlineCheck\?\.cancel\(false\)/, 'an answered call\'s deadline check is cancelled');
     assert.match(coreHost, /val answer = pumpUntil\(id, deadlineMs\) \?: run \{[^}]*?call\("cancel", id\)\s*if \(pumpUntil\(id, DRAIN_MS\) == null\) \{[^}]*?stopped = reason[^}]*?closeOnEngine\(\)\s*throw IllegalStateException\(reason\)\s*\}\s*checkNotNull\(context\)\.globalObject\.getJSFunction\("__resumeHostCalls"\)\.call\(\)\s*schedulePump\(\)\s*throw IllegalStateException\("Core \$method timed out"\)/);
     assert.equal(coreHost.match(/pumpUntil\(/g).length, 4, 'a call pumps itself only through pumpUntil: a nested one, and a drain');
     assert.match(coreHost, /callAsync\("netCheck", port, deadlineMs = NETWORK_DEADLINE_MS\)/);
@@ -1312,7 +1323,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     // and the replay; nothing else calls a host method.
     const callAsyncFn = coreHost.slice(coreHost.indexOf('private fun callAsync('), coreHost.indexOf('private fun answer('));
     assert.match(callAsyncFn, /private fun begin\([^)]*\): Call \{\s+val entry = if \(method in WriteJournal\.WRITES\) checkNotNull\(journal\)\.append\(method, args\.toList\(\)\) else null/);
-    assert.match(callAsyncFn, /private fun finish\(call: Call, result: JSONObject\) \{\s+if \(call\.entry != null\) \{\s+debugDelay\("delay_after_ms"\)\s+journalStop\(call\.stop, "after", call\.entry\)\s+\}\s+try \{\s+if \(call\.method in WriteJournal\.WRITES\) settle\(call\.entry, result, replay = false\)/);
+    assert.match(callAsyncFn, /private fun finish\(call: Call, result: JSONObject\) \{\s+call\.deadlineCheck\?\.cancel\(false\)\s+if \(call\.entry != null\) \{\s+debugDelay\("delay_after_ms"\)\s+journalStop\(call\.stop, "after", call\.entry\)\s+\}\s+try \{\s+if \(call\.method in WriteJournal\.WRITES\) settle\(call\.entry, result, replay = false\)/);
     assert.equal(callAsyncFn.match(/\bcall\(call\.method, \*call\.args\)/g).length, 1, 'start() starts a call\'s operation, after begin() journaled it');
     assert.match(callAsyncFn, /if \(entry != null\) \{\s+checkNotNull\(sqlite\)\.failCommits = debugFault\("fail_commit"\) == "1"\s+debugDelay\("delay_before_ms"\)\s+journalStop\(stop, "before", entry\)\s+\}/);
     assert.equal(coreHost.match(/\banswer\(/g).length, 3, 'answer(): its definition, callAsync and replayJournal');

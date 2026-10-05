@@ -71,44 +71,40 @@
         ioPending.set(String(id), { settle: settle, cancel: cancel });
         return String(id);
     };
-    // A bounded turn (CoreHost.idlePump, D9) stops taking answers and timers once its budget is spent; __pumpMore then says
-    // whether any was left for the next turn.
-    var turnEnd = Infinity;
-    var turnCut = false;
-    var turnSpent = function () {
-        if (turnEnd === Infinity || global.__nowMs() < turnEnd) return false;
-        turnCut = true;
-        return true;
+    // Takes one queued answer: 1 when it settled a call, 0 when its call was cancelled, null when none is queued (or the host refused).
+    var pumpIoOne = function () {
+        var text;
+        try { text = hostCall(native().ioNext()); } catch (error) { global.__hostLog('host call error: ' + error); return null; }
+        if (!text) return null;
+        ioOpen -= 1;
+        var answer = JSON.parse(text);
+        // The body comes apart from its answer, so no copy of it is wrapped in JSON: base64, or a fetch body's text when the
+        // host found it strict UTF-8 (`utf8`, HostIo.read) and decoded it off this thread.
+        // A body the bridge could not hand over fails its own call; it never strands it.
+        if (answer.body) {
+            try {
+                var payload = traced('io:body', function () { return hostCall(native().ioBody()); });
+                // A text body comes after a "T" (HostIo.read), so its own first characters can never read as an error.
+                if (answer.utf8 && payload.charAt(0) === 'T') answer.utf8Text = payload.slice(1);
+                else if (answer.utf8) throw new TypeError('the host sent an unreadable body');
+                else answer.base64 = payload;
+            } catch (error) {
+                global.__hostLog('host call error: ' + error);
+                answer = { id: answer.id, error: 'Network request failed: the host sent an unreadable body' };
+            }
+        }
+        var entry = ioPending.get(answer.id);
+        ioPending.delete(answer.id);
+        // A cancelled call's late answer has no promise left to settle.
+        if (!entry) return 0;
+        try { entry.settle(answer); } catch (error) { global.__hostLog('host call error: ' + error); }
+        return 1;
     };
     var pumpIo = function () {
         var settled = 0;
-        while (ioOpen > 0 && !turnSpent()) {
-            var text;
-            try { text = hostCall(native().ioNext()); } catch (error) { global.__hostLog('host call error: ' + error); break; }
-            if (!text) break;
-            ioOpen -= 1;
-            var answer = JSON.parse(text);
-            // The body comes apart from its answer, so no copy of it is wrapped in JSON: base64, or a fetch body's text when the
-            // host found it strict UTF-8 (`utf8`, HostIo.read) and decoded it off this thread.
-            // A body the bridge could not hand over fails its own call; it never strands it.
-            if (answer.body) {
-                try {
-                    var payload = traced('io:body', function () { return hostCall(native().ioBody()); });
-                    // A text body comes after a "T" (HostIo.read), so its own first characters can never read as an error.
-                    if (answer.utf8 && payload.charAt(0) === 'T') answer.utf8Text = payload.slice(1);
-                    else if (answer.utf8) throw new TypeError('the host sent an unreadable body');
-                    else answer.base64 = payload;
-                } catch (error) {
-                    global.__hostLog('host call error: ' + error);
-                    answer = { id: answer.id, error: 'Network request failed: the host sent an unreadable body' };
-                }
-            }
-            var entry = ioPending.get(answer.id);
-            ioPending.delete(answer.id);
-            // A cancelled call's late answer has no promise left to settle.
-            if (!entry) continue;
-            try { entry.settle(answer); } catch (error) { global.__hostLog('host call error: ' + error); }
-            settled += 1;
+        for (var taken = 0; ioOpen > 0 && taken !== null; ) {
+            taken = pumpIoOne();
+            if (taken) settled += taken;
         }
         return settled;
     };
@@ -124,35 +120,39 @@
     };
     global.__resumeHostCalls = function () { refusing = null; };
 
-    /**
-     * Settles every host call already answered, then runs every timer already due. Returns how many of both. With [budgetMs],
-     * one bounded turn: it takes nothing more once that much time has passed (the first item always runs).
-     */
-    global.__pumpTimers = function (budgetMs) {
-        turnCut = false;
-        turnEnd = typeof budgetMs === 'number' ? global.__nowMs() + budgetMs : Infinity;
-        var ran = 0;
-        try {
-            ran = pumpIo();
-            var now = global.__nowMs();
-            var due = [];
-            timers.forEach(function (timer, id) { if (timer.at <= now) due.push([id, timer]); });
-            due.sort(function (a, b) { return a[1].at - b[1].at; });
-            for (var i = 0; i < due.length && !(ran > 0 && turnSpent()); i += 1) {
-                var id = due[i][0];
-                var timer = due[i][1];
-                if (timer.repeat > 0) timer.at = now + timer.repeat; else timers.delete(id);
-                try { timer.fn.apply(null, timer.args); } catch (error) { global.__hostLog('timer error: ' + error); }
-                ran += 1;
-            }
-        } finally {
-            turnEnd = Infinity;
+    var runTimer = function (id, timer, now) {
+        if (timer.repeat > 0) timer.at = now + timer.repeat; else timers.delete(id);
+        try { timer.fn.apply(null, timer.args); } catch (error) { global.__hostLog('timer error: ' + error); }
+    };
+
+    /** Settles every host call already answered, then runs every timer already due. Returns how many of both. */
+    global.__pumpTimers = function () {
+        var ran = pumpIo();
+        var now = global.__nowMs();
+        var due = [];
+        timers.forEach(function (timer, id) { if (timer.at <= now) due.push([id, timer]); });
+        due.sort(function (a, b) { return a[1].at - b[1].at; });
+        for (var i = 0; i < due.length; i += 1) {
+            runTimer(due[i][0], due[i][1], now);
+            ran += 1;
         }
         return ran;
     };
 
-    /** Whether the last bounded turn left answers or timers it had no time for. */
-    global.__pumpMore = function () { return turnCut; };
+    /**
+     * One item of a bounded idle pump turn (CoreHost.idlePump, D9): one queued host-call answer, else the earliest due timer.
+     * 1 when it ran one, 0 when nothing was waiting. The host times each call with the promise jobs it set off (they run
+     * before the call returns), and stops the turn once its budget is spent.
+     */
+    global.__pumpOne = function () {
+        if (ioOpen > 0 && pumpIoOne() !== null) return 1;
+        var now = global.__nowMs();
+        var next = null;
+        timers.forEach(function (timer, id) { if (timer.at <= now && (next === null || timer.at < next[1].at)) next = [id, timer]; });
+        if (next === null) return 0;
+        runTimer(next[0], next[1], now);
+        return 1;
+    };
 
     /** Milliseconds until the next timer is due, or -1 when none is waiting. */
     global.__nextTimerDelay = function () {
