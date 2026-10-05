@@ -4,13 +4,14 @@
 //       RN's AsyncStorage file (databases/RKStorage) holding only a WebDAV sync setting for this computer's folder on
 //       127.0.0.1:<port> (no user, no password, plain http allowed). Seed it with the database:
 //       measure-startup-device.mjs seed <serial> <pkg> <seed.apk> <benchmark.apk> <db> <this file>.
-//   node measure-merge-device.mjs run <serial> <pkg> <label> <out dir> [samples=10] [changes=250] [taps=on] [push=off]
+//   node measure-merge-device.mjs run <serial> <pkg> <label> <out dir> [samples=10] [changes=250] [taps=on] [push=off] [start=cold]
 //       Serves an in-memory WebDAV folder (sync-harness.mjs serveWebdav, no auth) on 127.0.0.1:18781 through adb reverse.
 //       A first cold start uploads the library and a second one settles it; neither is measured. Then each sample: the folder's
 //       document gets `changes` tasks edited on this computer (title, a newer rev and updatedAt), the app starts cold under
 //       Perfetto, and its boot sync merges them. With push on, one more task goes back to an older revision in the folder,
 //       so the phone's newer copy wins the merge and the cycle writes the document back (otherwise the merged document
-//       equals the folder's and the remote write is skipped). With taps on, the phone taps the Focus and Inbox tabs in turn every
+//       equals the folder's and the remote write is skipped). With start=resume the process lives on between samples: the
+//       folder is edited, HOME, then the app comes back (its resume sync, in a process that has synced and saved before). With taps on, the phone taps the Focus and Inbox tabs in turn every
 //       ~0.6 s from launch: each tap starts a core read, so the trace shows how long a screen command waits while sync runs.
 //       Traces go to <out dir>/<label>-<n>.perfetto-trace, the summary to <out dir>/<label>.json.
 //   node measure-merge-device.mjs analyze <trace>...
@@ -60,12 +61,13 @@ if (command === 'rkstorage') {
     sqlite3(out, `CREATE TABLE catalystLocalStorage (key TEXT PRIMARY KEY, value TEXT NOT NULL); ${rows.map(([k, v]) => `INSERT INTO catalystLocalStorage VALUES ('${k}', '${v}');`).join(' ')} PRAGMA user_version = 1;`);
     console.log(`wrote ${out}`);
 } else if (command === 'run') {
-    const [serial, pkg, label, outDir, samplesText = '10', changesText = '250', tapsText = 'on', pushText = 'off'] = args;
+    const [serial, pkg, label, outDir, samplesText = '10', changesText = '250', tapsText = 'on', pushText = 'off', startText = 'cold'] = args;
     if (!pkg.endsWith('.benchmark')) throw new Error(`REFUSED: ${pkg} is not a benchmark package`);
     const samples = Number(samplesText);
     const changes = Number(changesText);
     const taps = tapsText === 'on';
     const push = pushText === 'on';
+    const resume = startText === 'resume';
     const adb = (...a) => execFileSync(ADB, ['-s', serial, ...a], { maxBuffer: 256 << 20 }).toString('utf8');
     const sh = (c) => adb('shell', c).replace(/\r/g, '').trim();
     const activity = `${pkg}/${pkg}.MainActivity`;
@@ -163,14 +165,21 @@ duration_ms: 16000
         battery: sh('dumpsys battery').split('\n').filter((l) => /level|temperature|powered/.test(l)).map((l) => l.trim()),
         thermal: sh('dumpsys thermalservice').split('\n').find((l) => /Thermal Status/.test(l))?.trim(),
     });
-    const report = { label, pkg, serial, samples, changes, taps, push, targets, before: conditions(), runs: [] };
+    const report = { label, pkg, serial, samples, changes, taps, push, resume, targets, before: conditions(), runs: [] };
     for (let round = 1; round <= samples; round += 1) {
+        // resume: a live process that has finished its own sync (a cold start's, the first time).
+        if (resume && !sh(`pidof ${pkg} || true`)) {
+            if (!await cycleEnded(await launchCold())) throw new Error('resume: the cold start before the sample did not sync');
+            await sleep(3000);
+        }
         const remote = editRemote(round);
-        sh(`am force-stop ${pkg}`);
+        if (!resume) sh(`am force-stop ${pkg}`);
         await sleep(1000);
         const remoteTrace = `/data/misc/perfetto-traces/${pkg}-merge.perfetto-trace`;
         execFileSync(ADB, ['-s', serial, 'shell', `perfetto --txt -c - -o ${remoteTrace} --background`], { input: config });
         await sleep(2000);
+        // resume: leaving asks for a sync that waits while the app is away; coming back runs it.
+        if (resume) { sh('input keyevent KEYCODE_HOME'); await sleep(1500); }
         const since = phoneTime();
         // The taps run on the phone, from launch: Focus, Inbox, Focus, ... (each tab's show reads it from core).
         let tapper = null;
