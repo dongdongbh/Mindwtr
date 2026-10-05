@@ -447,7 +447,8 @@ describe('mobile sync-service runtime', () => {
       const remote = await io.readRemote();
       let data = remote ?? local;
       const prepared = await io.prepareRemoteWrite?.(data);
-      data = prepared ?? data;
+      // Core's PREPARED_UNCHANGED (a symbol) keeps the document as it is.
+      data = prepared && typeof prepared === 'object' ? prepared : data;
       await io.writeLocal(data);
       await io.writeRemote(data);
       return { status: 'success', stats: emptyStats, data };
