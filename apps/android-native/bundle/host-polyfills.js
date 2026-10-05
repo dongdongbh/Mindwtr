@@ -79,8 +79,12 @@
             if (!text) break;
             ioOpen -= 1;
             var answer = JSON.parse(text);
-            // The body comes apart from its answer, so no copy of it is wrapped in JSON.
-            if (answer.body) answer.base64 = traced('io:body', function () { return hostCall(native().ioBody()); });
+            // The body comes apart from its answer, so no copy of it is wrapped in JSON: base64, or a fetch body's text when the
+            // host found it strict UTF-8 (`utf8`, HostIo.read) and decoded it off this thread.
+            if (answer.body) {
+                var payload = traced('io:body', function () { return hostCall(native().ioBody()); });
+                if (answer.utf8) answer.utf8Text = payload; else answer.base64 = payload;
+            }
             var entry = ioPending.get(answer.id);
             ioPending.delete(answer.id);
             // A cancelled call's late answer has no promise left to settle.
@@ -625,8 +629,10 @@
             this.bodyUsed = false;
             this._bytes = body == null ? new Uint8Array(0) : typeof body === 'string' ? new global.TextEncoder().encode(body) : bytesOf(body).slice();
         };
+        // A fetch body the host decoded keeps only its text until someone asks for bytes: valid UTF-8 encodes back exactly.
         var readBody = function (response) {
             response.bodyUsed = true;
+            if (response._bytes === undefined) response._bytes = new global.TextEncoder().encode(response._text);
             return response._bytes;
         };
         var responseProto = global.Response.prototype;
@@ -638,6 +644,10 @@
         // Fatal: a body that is not UTF-8 rejects rather than reading as other text.
         responseProto.text = function () {
             var response = this;
+            if (response._text !== undefined) {
+                response.bodyUsed = true;
+                return Promise.resolve(response._text);
+            }
             return new Promise(function (resolve) { resolve(new global.TextDecoder('utf-8', { fatal: true }).decode(readBody(response))); });
         };
         responseProto.json = function () { return this.text().then(function (text) { return JSON.parse(text); }); };
@@ -647,6 +657,8 @@
             copy.redirected = this.redirected;
             copy.type = this.type;
             copy._bytes = this._bytes;
+            copy._text = this._text;
+            copy.mindwtrDecodedTextBytes = this.mindwtrDecodedTextBytes;
             return copy;
         };
     }
@@ -690,7 +702,14 @@
                         response.url = answer.url;
                         response.redirected = answer.redirected;
                         response.type = 'basic';
-                        response._bytes = traced('io:fromBase64', function () { return fromBase64(answer.base64); });
+                        if (answer.utf8) {
+                            // Core's readDecodedResponseText (http-utils.ts) reads this text under its byte limit.
+                            response._text = answer.utf8Text;
+                            response._bytes = undefined;
+                            response.mindwtrDecodedTextBytes = answer.bytes;
+                        } else {
+                            response._bytes = traced('io:fromBase64', function () { return fromBase64(answer.base64); });
+                        }
                         resolve(response);
                     } catch (error) {
                         reject(error);

@@ -8,11 +8,24 @@ import { deriveSyncKeyMaterial } from './sync-crypto';
 
 const FAST_KDF = { mKib: 8, t: 1, p: 1 };
 
-/** Minimal in-memory fake WebDAV server: GET/PUT keyed by URL, byte-accurate. */
-function createFakeWebdavServer() {
+/** Strict UTF-8 as the native hosts decode it (HostIo.read), or null. */
+const strictUtf8 = (bytes: Uint8Array): string | null => {
+    try {
+        return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch {
+        return null;
+    }
+};
+
+/**
+ * Minimal in-memory fake WebDAV server: GET/PUT keyed by URL, byte-accurate. With [decodedText], a GET answers as the native
+ * hosts' fetch does: a strict UTF-8 body comes decoded, with its size in bytes (`mindwtrDecodedTextBytes`).
+ */
+function createFakeWebdavServer({ decodedText = false } = {}) {
     const files = new Map<string, Uint8Array>();
     const versions = new Map<string, number>();
     const requests: { url: string; method: string; headers: Headers }[] = [];
+    const byteReads: string[] = [];
     const fetcher = async (url: string | URL, init?: RequestInit): Promise<Response> => {
         const key = String(url);
         const method = init?.method ?? 'GET';
@@ -23,12 +36,17 @@ function createFakeWebdavServer() {
             if (!bytes) {
                 return { ok: false, status: 404, statusText: 'Not Found', headers: { get: () => null } as unknown as Headers, text: async () => '', arrayBuffer: async () => new ArrayBuffer(0) } as Response;
             }
+            const text = decodedText ? strictUtf8(bytes) : null;
             return {
                 ok: true,
                 status: 200,
                 headers: new Headers({ etag: `"v${versions.get(key) ?? 1}"` }),
-                text: async () => new TextDecoder().decode(bytes),
-                arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+                ...(text !== null ? { mindwtrDecodedTextBytes: bytes.length } : {}),
+                text: async () => text ?? new TextDecoder().decode(bytes),
+                arrayBuffer: async () => {
+                    byteReads.push(key);
+                    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+                },
             } as Response;
         }
         if (method === 'PUT') {
@@ -52,7 +70,7 @@ function createFakeWebdavServer() {
         }
         throw new Error(`unsupported method ${method} in fake webdav server`);
     };
-    return { files, fetcher, requests };
+    return { files, fetcher, requests, byteReads };
 }
 
 const URL_ = 'https://example.com/dav/data.json';
@@ -93,6 +111,41 @@ describe('webdav sync-document encryption', () => {
         expect(new TextDecoder().decode(files.get(URL_)!)).toBe(JSON.stringify(data, null, 2));
         const result = await webdavGetSyncDocument<typeof data>(URL_, { fetcher });
         expect(result).toEqual({ state: 'data', data, exists: true, strongEtag: '"v1"' });
+    });
+
+    it('reads a plaintext document from the host-decoded text, never its bytes (a BOM still dropped)', async () => {
+        const { files, fetcher, byteReads } = createFakeWebdavServer({ decodedText: true });
+        files.set(URL_, new TextEncoder().encode('\ufeff{"tasks":[{"title":"Grüße 😀"}]}'));
+        const result = await webdavGetSyncDocument(URL_, { fetcher });
+        expect(result).toEqual({ state: 'data', data: { tasks: [{ title: 'Grüße 😀' }] }, exists: true, strongEtag: '"v1"' });
+        expect(byteReads).toEqual([]);
+    });
+
+    it('reads a host-decoded body that starts with the artifact magic from its exact bytes, as before', async () => {
+        const body = new TextEncoder().encode('MWENC1 is not a header');
+        const outcomes = [];
+        for (const decodedText of [false, true]) {
+            const { files, fetcher, byteReads } = createFakeWebdavServer({ decodedText });
+            files.set(URL_, body);
+            outcomes.push(await webdavGetSyncDocument(URL_, { fetcher }).catch((error: Error) => error.message));
+            expect(byteReads).toEqual([URL_]);
+        }
+        expect(outcomes[1]).toEqual(outcomes[0]);
+    });
+
+    it('an encrypted artifact at the plain name is found the same with a host-decoded fetch', async () => {
+        const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(4), FAST_KDF);
+        const sealer = createFakeWebdavServer();
+        await webdavPutSyncDocument(URL_, { tasks: [] }, { fetcher: sealer.fetcher, material, expectedEtag: null });
+        const ciphertext = sealer.files.get(`${URL_}.enc`)!;
+        const outcomes = [];
+        for (const decodedText of [false, true]) {
+            const { files, fetcher } = createFakeWebdavServer({ decodedText });
+            files.set(URL_, ciphertext);
+            outcomes.push(await webdavGetSyncDocument(URL_, { fetcher }));
+        }
+        expect(outcomes[1]).toEqual(outcomes[0]);
+        expect(outcomes[1].state).toBe('encrypted-no-key');
     });
 
     it('an off-state device discovers an encrypted-but-plaintext-deleted remote instead of treating it as empty', async () => {

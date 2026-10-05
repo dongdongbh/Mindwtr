@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit
  * what waited is dropped: a secret's value, a derived key or plaintext must not outlive the host in a queue nobody drains.
  */
 class HostAnswers {
-    /** An answer's JSON, and its body as base64 apart from it, so no copy of the body is wrapped in JSON. */
+    /** An answer's JSON, and its body (base64, or a fetch body's text: HostIo.read) apart from it, so no copy of the body is wrapped in JSON. */
     class Answer(val json: String, val body: String? = null)
 
     private val lock = Any()

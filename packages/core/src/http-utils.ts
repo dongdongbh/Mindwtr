@@ -382,6 +382,22 @@ export const readResponseBody = async (
     return toArrayBuffer(concatChunks(chunks, received));
 };
 
+/**
+ * The native hosts' fetch (host-polyfills.js) decodes a body that is strict UTF-8 off the engine thread and marks the
+ * response with the body's size in bytes (after gzip). Its text under the same byte limit, or null for any other response:
+ * read that one's bytes.
+ */
+export const readDecodedResponseText = async (
+    res: Response,
+    limitBytes: number,
+    signal?: AbortSignal,
+): Promise<string | null> => {
+    const bytes = (res as { mindwtrDecodedTextBytes?: unknown }).mindwtrDecodedTextBytes;
+    if (typeof bytes !== 'number') return null;
+    if (bytes > limitBytes) throw new ResponseTooLargeError(limitBytes);
+    return await waitForAbort(res.text(), signal);
+};
+
 /** Text counterpart of {@link readResponseBody}: `res.text()` is unbounded. Streams when
  *  the response exposes a body or arrayBuffer, so a lying content-length still aborts
  *  mid-read; a response offering only `text()` is length-checked after the fact. */
@@ -395,6 +411,8 @@ export const readResponseText = async (
         cancelUnlockedResponseBody(res);
         throw new ResponseTooLargeError(limitBytes);
     }
+    const decoded = await readDecodedResponseText(res, limitBytes, signal);
+    if (decoded !== null) return decoded;
     if (res.body || typeof res.arrayBuffer === 'function') {
         return new TextDecoder().decode(await readResponseBody(res, undefined, limitBytes, signal));
     }

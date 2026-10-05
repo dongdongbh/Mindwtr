@@ -175,6 +175,9 @@ function isValidKdfParams(params: SyncCryptoKdfParams): boolean {
     );
 }
 
+/** The artifact magic as text: a strict UTF-8 body that does not start with it is plaintext ({@link inspectSyncArtifact}). */
+export const SYNC_ARTIFACT_MAGIC_TEXT = String.fromCharCode(...MAGIC);
+
 function hasMagic(bytes: Uint8Array): boolean {
     if (bytes.length < MAGIC.length) return false;
     for (let i = 0; i < MAGIC.length; i += 1) {

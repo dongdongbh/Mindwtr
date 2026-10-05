@@ -6,6 +6,7 @@ import {
     isConnectionAllowed,
     MAX_DOWNLOAD_BYTES,
     readResponseBody,
+    readResponseText,
     ResponseTooLargeError,
     SUSPENDED_REQUEST_MESSAGE,
     SYNC_LOCAL_INSECURE_URL_OPTIONS,
@@ -628,6 +629,33 @@ describe('fetchWithTimeout', () => {
         )).rejects.toThrow(
             'error sending request for url (https://files.internal/mindwtr/attachments/) (caused by: client error (Connect) -> invalid peer certificate: UnknownIssuer)',
         );
+    });
+});
+
+describe('readResponseText with a host-decoded body', () => {
+    // The native hosts' Response (host-polyfills.js): the text already decoded off the engine thread, its size in bytes beside it.
+    const decoded = (text: string) => {
+        const arrayBuffer = vi.fn(async () => new TextEncoder().encode(text).buffer as ArrayBuffer);
+        const res = {
+            headers: { get: () => null },
+            mindwtrDecodedTextBytes: new TextEncoder().encode(text).length,
+            text: async () => text,
+            arrayBuffer,
+        } as unknown as Response;
+        return { res, arrayBuffer };
+    };
+
+    it('reads the decoded text without asking for its bytes', async () => {
+        const { res, arrayBuffer } = decoded('{"a":"Grüße 😀"}');
+        await expect(readResponseText(res, 1024)).resolves.toBe('{"a":"Grüße 😀"}');
+        expect(arrayBuffer).not.toHaveBeenCalled();
+    });
+
+    it('applies a smaller caller limit to the bytes, not the characters', async () => {
+        // 40 characters, 80 bytes: a limit of 50 refuses it, as reading its bytes would.
+        const { res } = decoded('é'.repeat(40));
+        await expect(readResponseText(res, 50)).rejects.toBeInstanceOf(ResponseTooLargeError);
+        await expect(readResponseText(res, 80)).resolves.toBe('é'.repeat(40));
     });
 });
 

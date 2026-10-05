@@ -344,6 +344,33 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     assert.deepEqual([...new Uint8Array(await looseResponse.clone().arrayBuffer())], [0x20, 0xe2, 0x20]);
     assert.deepEqual(await failure(looseResponse.clone().text()), { name: 'TypeError', message: 'The encoded data was not valid for encoding utf-8' });
     assert.deepEqual(await failure(looseResponse.json()), { name: 'TypeError', message: 'The encoded data was not valid for encoding utf-8' });
+    // D9 A2: a body the host decoded (HostIo.read: strict UTF-8, `utf8` with its byte count) arrives as text. text() and json()
+    // read it, core's readDecodedResponseText finds its bytes, and arrayBuffer() and a clone give the exact bytes back (a BOM, an
+    // astral character and a NUL included).
+    const decodedValue = '\ufeff{"t":"Grüße ✓ 😀\u0000"}';
+    const decodedBytes = Buffer.from(decodedValue, 'utf8');
+    const decoded = run("fetch('https://dav.example/decoded')");
+    answer({ id: String(ids), status: 200, statusText: 'OK', url: 'https://dav.example/decoded', redirected: false, headers: [], utf8: true, bytes: decodedBytes.length, base64: decodedValue });
+    net.__pumpTimers();
+    const decodedResponse = await decoded;
+    assert.equal(decodedResponse.mindwtrDecodedTextBytes, decodedBytes.length);
+    assert.equal(await decodedResponse.clone().text(), decodedValue);
+    assert.ok(Buffer.from(await decodedResponse.clone().arrayBuffer()).equals(decodedBytes), 'bytes from decoded text are exact');
+    assert.equal(await decodedResponse.text(), decodedValue);
+    assert.equal(decodedResponse.bodyUsed, true);
+    assert.equal(looseResponse.mindwtrDecodedTextBytes, undefined, 'a base64 body is not marked decoded');
+    // The host's decoder and the polyfill's fatal one agree on the shared cases (StrictUtf8Test reads the same file). The file's
+    // answers are Node's own fatal decoder with the BOM kept, as the polyfill keeps it.
+    const parity = JSON.parse(readFileSync(resolve(app, 'scripts/utf8-parity-cases.json'), 'utf8'));
+    net.parity = parity.map(({ hex }) => new Uint8Array(Buffer.from(hex, 'hex')));
+    parity.forEach(({ hex, text: expected }, i) => {
+        let reference = null;
+        try { reference = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.from(hex, 'hex')); } catch { /* malformed */ }
+        assert.equal(expected, reference, `utf8-parity-cases.json is Node's answer for ${hex}`);
+        let polyfill = null;
+        try { polyfill = run(`new TextDecoder().decode(parity[${i}])`); } catch { /* malformed */ }
+        assert.equal(polyfill, expected, `the polyfill decodes ${hex} as the file says`);
+    });
 
     // Review 2: the host's deadline passed. Every open fetch rejects with an AbortError and is cancelled at the host, and a
     // new fetch or secret call is refused (it never reaches the host) until the host resumes calls.

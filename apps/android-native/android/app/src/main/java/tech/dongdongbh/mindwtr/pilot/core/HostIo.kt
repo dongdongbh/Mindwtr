@@ -62,8 +62,8 @@ class HostIo(context: Context) {
     private val noRedirects = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
     /**
      * The largest body buffered: core's largest limit, [MAX_SYNC_DOCUMENT_BYTES], bounded by this process's heap. At its
-     * peak a body is held about four times over (the bytes, the base64 bytes, the base64 string, the queued answer), so a
-     * fifth of the heap leaves room for the app. Core still applies its own limit for the call (an attachment's 100 MiB,
+     * peak a body is held about four times over (the bytes, the base64 bytes or the text, the string, the queued answer), so
+     * a fifth of the heap leaves room for the app. Core still applies its own limit for the call (an attachment's 100 MiB,
      * an error body's 64 KiB). The net check lowers it in a debug build (`debug.mindwtr.native.net_max_bytes`).
      */
     // ponytail: a heap fraction estimates the peak; stream large bodies to a file and hand JS a handle if documents outgrow it.
@@ -93,7 +93,9 @@ class HostIo(context: Context) {
     /**
      * Starts `fetch`: [json] is `{ url, method, headers: [[name, value]], text? | base64?, redirect }`, the body as text
      * (sent as UTF-8) or as base64 bytes. Returns the call's id; its answer is `{ id, status, statusText, url, redirected,
-     * headers, body: true }` with the body from [body], or `{ id, error }`.
+     * headers, body: true, bytes, utf8? }` with the body from [body], or `{ id, error }`. `bytes` is the body's size after
+     * gzip; with `utf8` the body is the text of a strict UTF-8 body ([StrictUtf8], decoded on OkHttp's thread so the engine
+     * never decodes it), else base64.
      */
     fun fetch(json: String): String {
         val request = JSONObject(json)
@@ -275,7 +277,7 @@ class HostIo(context: Context) {
         return answer.json
     }
 
-    /** The body of the answer [next] returned last, as base64; the polyfill asks right after [next]. */
+    /** The body of the answer [next] returned last: base64, or text when its answer says `utf8`; the polyfill asks right after [next]. */
     fun body(): String = answers.body()
 
     fun close() {
@@ -311,10 +313,12 @@ class HostIo(context: Context) {
         }
         val headers = JSONArray()
         response.headers.forEach { (name, value) -> headers.put(JSONArray().put(name).put(value)) }
+        val raw = bytes.readByteArray()
+        val text = StrictUtf8.decodeOrNull(raw)
         val json = JSONObject().put("id", id).put("status", response.code).put("statusText", response.message)
             .put("url", response.request.url.toString()).put("redirected", response.priorResponse != null)
-            .put("headers", headers).put("body", true).toString()
-        return Answer(json, Base64.encodeToString(bytes.readByteArray(), Base64.NO_WRAP))
+            .put("headers", headers).put("body", true).put("bytes", raw.size).apply { if (text != null) put("utf8", true) }.toString()
+        return Answer(json, text ?: Base64.encodeToString(raw, Base64.NO_WRAP))
     }
 
     /**
