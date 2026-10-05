@@ -339,6 +339,8 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot }) =>
     };
     const device = {
         name, keyValue, secrets, events, lines, files,
+        /** Live task rows straight from this device's database: id, title, status, rev. */
+        tasks: () => database.prepare("SELECT id, title, status, rev FROM tasks WHERE COALESCE(deletedAt, '') = '' ORDER BY id").all().map((row) => ({ ...row })),
         call,
         stop: () => { clearInterval(pump); database.close(); },
         /** Boots on an empty database, reports the network online, and starts sync as ProcessCoreHost does. */
