@@ -420,8 +420,10 @@ describe('guarded Reference bulk Move status', () => {
     });
 
     it('records actual RN invalid-FK failure and refuses invalid empty-project peer authority before preparing a native journal', async () => {
-        clock(); const setup = async () => {
-            const sqlite = await openSqliteHost({ tasks: [task('source', { title: 'Shared source', recurrence: { rule: 'daily', seriesId: 'projectless' }, dueDate: '2026-10-03' }),
+        // React Native's adapter (no concurrent-write guard) rewrites every row on its first save, so the invalid peer fails it.
+        // The guarded native adapter compares with its full read and writes only what changed; its own refusal is checked below.
+        clock(); const setup = async (open: typeof openHost = openSqliteHost) => {
+            const sqlite = await open({ tasks: [task('source', { title: 'Shared source', recurrence: { rule: 'daily', seriesId: 'projectless' }, dueDate: '2026-10-03' }),
                 task('empty-peer', { title: 'Shared source', recurrence: { rule: 'daily', seriesId: 'projectless' }, dueDate: '2026-10-04' }),
                 task('null-peer', { title: 'Other peer' })], settings: { deviceId: DEVICE, analyticsProfileId: REQUEST_ID } });
             await canonical(); await sqlite.client().run('PRAGMA foreign_keys = OFF');
@@ -429,7 +431,7 @@ describe('guarded Reference bulk Move status', () => {
             await sqlite.client().run('UPDATE tasks SET projectId = NULL WHERE id = ?', ['null-peer']);
             await sqlite.client().run('PRAGMA foreign_keys = ON'); await sqlite.restart(undefined, { recoveryLoad: true }); return sqlite;
         };
-        const rn = await setup(); let expected;
+        const rn = await setup(openHost); let expected;
         try { const generated = ids(); expect(await useTaskStore.getState().batchMoveTasks(['source'], 'done')).toEqual({ success: true });
             expected = rows(); expect(generated).toHaveBeenCalledTimes(1); expect(expected.tasks).toHaveLength(3);
             expect(expected.tasks.find((row) => row.id === 'source')?.status).toBe('done');
