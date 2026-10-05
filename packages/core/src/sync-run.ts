@@ -35,11 +35,10 @@ import {
     findPendingAttachmentUploads,
     hasPendingSyncSideEffects,
     isLocalPersistEquivalent,
+    fingerprintStableSyncJson,
     toStableSyncJson,
 } from './sync-helpers';
 import {
-    areRemoteSyncDocumentsEqual,
-    computeRemoteSyncDocumentFingerprint,
     parseSyncDocument,
     toRemoteSyncDocument,
 } from './sync-document';
@@ -1113,18 +1112,17 @@ class SharedSyncRunMachine {
             assertNoPendingAttachmentUploads(data);
         }
         const remoteDocument = toRemoteSyncDocument(data);
-        const previousRemoteDocument = state.remoteDataForCompare
-            ? toRemoteSyncDocument(state.remoteDataForCompare)
-            : null;
+        const previousRemoteData = state.remoteDataForCompare;
         const remoteNeedsTombstoneCompaction = state.remoteDataForCompare
             ? hasUncompactedPurgedTombstones(state.remoteDataForCompare)
             : false;
         if (!this.options.activationProbe
-            && previousRemoteDocument
+            && previousRemoteData
             && !remoteNeedsTombstoneCompaction
             && !state.remoteLegacyAttachmentsChanged
             && this.requireIo().requiresRemoteRepair?.() !== true
-            && traceSection('sync:remoteCompare', () => areRemoteSyncDocumentsEqual(previousRemoteDocument, remoteDocument))) {
+            // areRemoteSyncDocumentsEqual over the two remote documents, through the memoized stable JSON.
+            && traceSection('sync:remoteCompare', () => this.stableDocument(previousRemoteData).json === this.stableDocument(data).json)) {
             if (this.backend !== 'cloudkit') {
                 this.notifier.tracePayload?.('remote-write-skipped-unchanged', remoteDocument, { backend: this.backend });
             }
@@ -1351,7 +1349,7 @@ class SharedSyncRunMachine {
         // write records. Comparing documents here serialized both sides in
         // full to reach the identical verdict.
         const localFingerprint = this.localDocumentFingerprint(localData);
-        const remoteFingerprint = computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(remoteData));
+        const remoteFingerprint = this.documentFingerprint(remoteData);
         if (localFingerprint !== remoteFingerprint) return null;
 
         await this.recordFastSyncState(localData, { allowRemoteFingerprintRead: false });
@@ -1415,9 +1413,36 @@ class SharedSyncRunMachine {
     private localDocumentFingerprint(data: AppData): string {
         const cached = this.state.localDocumentFingerprint;
         if (cached && cached.data === data) return cached.fingerprint;
-        const fingerprint = traceSection('sync:localFingerprint', () => computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(data)));
+        const fingerprint = this.documentFingerprint(data);
         this.state.localDocumentFingerprint = { data, fingerprint };
         return fingerprint;
+    }
+
+    /**
+     * A snapshot's remote document as stable sync JSON (the form both
+     * computeRemoteSyncDocumentFingerprint and areRemoteSyncDocumentsEqual
+     * (sync-document.ts) serialize), and its fingerprint,
+     * memoized on the snapshot's identity for this run. Sync never changes a
+     * snapshot in place (every step makes a new object), so the same object
+     * is the same document: the read check's remote document is the one the
+     * write compares against, and the document the write compares is the one
+     * the fast-sync record fingerprints.
+     */
+    private readonly stableDocuments = new WeakMap<AppData, { json: string; fingerprint?: string }>();
+
+    private stableDocument(data: AppData): { json: string; fingerprint?: string } {
+        let entry = this.stableDocuments.get(data);
+        if (!entry) {
+            entry = { json: traceSection('sync:stableJson', () => toStableSyncJson(toRemoteSyncDocument(data))) };
+            this.stableDocuments.set(data, entry);
+        }
+        return entry;
+    }
+
+    private documentFingerprint(data: AppData): string {
+        const entry = this.stableDocument(data);
+        entry.fingerprint ??= traceSection('sync:fingerprint', () => fingerprintStableSyncJson(entry.json));
+        return entry.fingerprint;
     }
 
     /** Mirror of the remote write's `remote-write-skipped-unchanged` guard:
@@ -1515,21 +1540,22 @@ class SharedSyncRunMachine {
     }
 
     /** Candidate attachment proof, or the normal final pending-upload pass,
-     *  immediately before the merged document is written remotely. */
-    private async prepareRemoteWriteData(data: AppData): Promise<AppData> {
+     *  immediately before the merged document is written remotely. Nothing
+     *  back when no pass ran, so the cycle need not validate it again. */
+    private async prepareRemoteWriteData(data: AppData): Promise<AppData | void> {
         if (this.options.activationProbe) {
             // A device with no attachment storage (the web app) can never
             // download or upload a file, so it has nothing to prove: the
             // records stay unavailable here exactly as every later cycle keeps
             // them. Demanding proof refused every setup against a location
             // that held attachments (#1119).
-            if (!this.policy.attachmentPhasesEnabled) return data;
+            if (!this.policy.attachmentPhasesEnabled) return;
             const activationSnapshot = prepareActivationAttachmentSnapshot(
                 data,
                 this.state.remoteDataForCompare,
                 this.state.localDataCache?.data ?? null,
             );
-            if (activationSnapshot.count === 0) return data;
+            if (activationSnapshot.count === 0) return;
             const io = this.requireIo();
             if (!io.syncAttachments) {
                 throw new Error('Candidate backend cannot prove attachments');
@@ -1661,9 +1687,9 @@ class SharedSyncRunMachine {
             return provenData;
         }
         const pendingUploads = findPendingAttachmentUploads(data);
-        if (pendingUploads.length === 0) return data;
+        if (pendingUploads.length === 0) return;
         const io = this.requireIo();
-        if (!io.syncAttachments) return data;
+        if (!io.syncAttachments) return;
 
         this.setStep('attachments_finalize');
         await this.yieldToUi();

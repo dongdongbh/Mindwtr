@@ -445,6 +445,12 @@ export class SqliteAdapter {
     // check without scanning every persisted row under BEGIN IMMEDIATE.
     private lastObservedExternalChangeEpoch: number | undefined;
     private lastSaveDataStats: SqliteSaveDataStats | null = null;
+    // Entity writes this adapter has started (saveTask, saveData), committed or not.
+    private writesStarted = 0;
+    // The rows of the last consistent full read (getData), by reference, while no write has started since. A save with no
+    // fingerprints of its own (the first after a cold start) compares its rows with these instead of rewriting every row.
+    // Only with rejectConcurrentWrites: that save checks inside its transaction that no other connection committed since.
+    private lastReadRows: { tables: Map<string, Record<string, unknown>[]>; settingsJson: string | null; writesStarted: number } | null = null;
 
     constructor(client: SqliteClient, options: SqliteAdapterOptions = {}) {
         this.client = client;
@@ -1093,6 +1099,14 @@ export class SqliteAdapter {
             snapshotRows = await loadSnapshotRows();
         }
         const [tasksRows, projectsRows, sectionsRows, areasRows, peopleRows, settingsRow, savedFilterRows] = snapshotRows;
+        this.lastReadRows = this.rejectConcurrentWrites ? {
+            tables: new Map<string, Record<string, unknown>[]>([
+                ['tasks', tasksRows], ['projects', projectsRows], ['sections', sectionsRows], ['areas', areasRows],
+                ['people', peopleRows], ['saved_filters', savedFilterRows],
+            ]),
+            settingsJson: typeof settingsRow?.data === 'string' ? settingsRow.data : null,
+            writesStarted: this.writesStarted,
+        } : null;
 
         const tasks: Task[] = tasksRows.map((row) => {
             if (!options?.rawTasks) return this.mapTaskRow(row);
@@ -1269,8 +1283,29 @@ export class SqliteAdapter {
         return buildSqliteSaveFailureContext(data, step);
     }
 
+    /**
+     * Fingerprints of the rows the last full read saw, in the form saveData compares (each row's upsert columns as JSON): the
+     * rows on disk then. Null once any write started since, or when there was no such read. Used once.
+     */
+    private fingerprintsFromLastRead(): { tables: Map<string, Map<string, string>>; settingsJson: string | null } | null {
+        const read = this.lastReadRows;
+        this.lastReadRows = null;
+        if (!read || read.writesStarted !== this.writesStarted) return null;
+        const columnsByTable: Record<string, readonly string[]> = {
+            tasks: TASK_UPSERT_COLUMNS, projects: PROJECT_UPSERT_COLUMNS, sections: SECTION_UPSERT_COLUMNS,
+            areas: AREA_UPSERT_COLUMNS, people: PERSON_UPSERT_COLUMNS, saved_filters: SAVED_FILTER_UPSERT_COLUMNS,
+        };
+        const tables = new Map<string, Map<string, string>>();
+        for (const [table, rows] of read.tables) {
+            const columns = columnsByTable[table];
+            tables.set(table, new Map(rows.map((row) => [String(row.id), JSON.stringify(columns.map((column) => row[column]))])));
+        }
+        return { tables, settingsJson: read.settingsJson };
+    }
+
     async saveTask(task: Task): Promise<void> {
         await this.ensureSchema();
+        this.writesStarted += 1;
         await this.client.run('BEGIN IMMEDIATE');
         try {
             await this.assertObservedSnapshotUnchanged();
@@ -1315,7 +1350,10 @@ export class SqliteAdapter {
             + (data.sections?.length ?? 0)
             + (data.areas?.length ?? 0)
             + (data.people?.length ?? 0);
-        const previousSave = this.lastSavedFingerprints;
+        // A cold start's first save has no fingerprints of its own: the last full read's rows stand in for them. The
+        // transaction below refuses the save if another connection committed since that read.
+        const previousSave = this.lastSavedFingerprints ?? this.fingerprintsFromLastRead();
+        this.writesStarted += 1;
         const previousKnownRows = this.lastKnownRowVersions;
         const nextSave: { tables: Map<string, Map<string, string>>; settingsJson: string | null } = {
             tables: new Map(),

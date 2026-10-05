@@ -406,10 +406,10 @@ const hashStableSyncJson = (value: string): string => {
     return `${(left >>> 0).toString(16).padStart(8, '0')}${(right >>> 0).toString(16).padStart(8, '0')}`;
 };
 
-export const computeStableValueFingerprint = (value: unknown): string => {
-    const json = toStableSyncJson(value);
-    return `stable-v2:${json.length}:${hashStableSyncJson(json)}`;
-};
+/** The fingerprint of stable JSON already made by {@link toStableSyncJson}. */
+export const fingerprintStableSyncJson = (json: string): string => `stable-v2:${json.length}:${hashStableSyncJson(json)}`;
+
+export const computeStableValueFingerprint = (value: unknown): string => fingerprintStableSyncJson(toStableSyncJson(value));
 
 export const computeSyncPayloadFingerprint = (data: AppData): string =>
     computeStableValueFingerprint(sanitizeAppDataForRemote(data));
