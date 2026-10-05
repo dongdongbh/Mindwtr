@@ -71,9 +71,18 @@
         ioPending.set(String(id), { settle: settle, cancel: cancel });
         return String(id);
     };
+    // A bounded turn (CoreHost.idlePump, D9) stops taking answers and timers once its budget is spent; __pumpMore then says
+    // whether any was left for the next turn.
+    var turnEnd = Infinity;
+    var turnCut = false;
+    var turnSpent = function () {
+        if (turnEnd === Infinity || global.__nowMs() < turnEnd) return false;
+        turnCut = true;
+        return true;
+    };
     var pumpIo = function () {
         var settled = 0;
-        while (ioOpen > 0) {
+        while (ioOpen > 0 && !turnSpent()) {
             var text;
             try { text = hostCall(native().ioNext()); } catch (error) { global.__hostLog('host call error: ' + error); break; }
             if (!text) break;
@@ -106,22 +115,35 @@
     };
     global.__resumeHostCalls = function () { refusing = null; };
 
-    /** Settles every host call already answered, then runs every timer already due. Returns how many of both. */
-    global.__pumpTimers = function () {
-        var ran = pumpIo();
-        var now = global.__nowMs();
-        var due = [];
-        timers.forEach(function (timer, id) { if (timer.at <= now) due.push([id, timer]); });
-        due.sort(function (a, b) { return a[1].at - b[1].at; });
-        for (var i = 0; i < due.length; i += 1) {
-            var id = due[i][0];
-            var timer = due[i][1];
-            if (timer.repeat > 0) timer.at = now + timer.repeat; else timers.delete(id);
-            try { timer.fn.apply(null, timer.args); } catch (error) { global.__hostLog('timer error: ' + error); }
-            ran += 1;
+    /**
+     * Settles every host call already answered, then runs every timer already due. Returns how many of both. With [budgetMs],
+     * one bounded turn: it takes nothing more once that much time has passed (the first item always runs).
+     */
+    global.__pumpTimers = function (budgetMs) {
+        turnCut = false;
+        turnEnd = typeof budgetMs === 'number' ? global.__nowMs() + budgetMs : Infinity;
+        var ran = 0;
+        try {
+            ran = pumpIo();
+            var now = global.__nowMs();
+            var due = [];
+            timers.forEach(function (timer, id) { if (timer.at <= now) due.push([id, timer]); });
+            due.sort(function (a, b) { return a[1].at - b[1].at; });
+            for (var i = 0; i < due.length && !(ran > 0 && turnSpent()); i += 1) {
+                var id = due[i][0];
+                var timer = due[i][1];
+                if (timer.repeat > 0) timer.at = now + timer.repeat; else timers.delete(id);
+                try { timer.fn.apply(null, timer.args); } catch (error) { global.__hostLog('timer error: ' + error); }
+                ran += 1;
+            }
+        } finally {
+            turnEnd = Infinity;
         }
         return ran;
     };
+
+    /** Whether the last bounded turn left answers or timers it had no time for. */
+    global.__pumpMore = function () { return turnCut; };
 
     /** Milliseconds until the next timer is due, or -1 when none is waiting. */
     global.__nextTimerDelay = function () {
