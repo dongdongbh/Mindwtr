@@ -17,7 +17,8 @@
 //   node measure-merge-device.mjs analyze <trace>...
 //       Per trace: the sync's engine-thread sections (sync:*, io:*, sql:*), the engine's uninterrupted blocks during sync,
 //       the engine thread's states, and each screen command's wait (core:wait on its own thread) with its queue time and the
-//       tap before it.
+//       tap before it. With --budget=<ms> it exits 1 unless the p90 tap-to-answer of the taps whose wait began inside the
+//       sync's span is at most <ms> (D9's target is 300); no such tap also fails.
 //
 // Every phone command runs inside the coordinator's lock: flock -o -w 14400 /home/dd/scratch/s23.lock node ...
 // Only the benchmark package (its own application id): the dev app's data is never touched.
@@ -225,8 +226,10 @@ duration_ms: 16000
         } finally { rmSync(file, { force: true }); }
     };
     const engine = `(SELECT utid FROM thread JOIN process USING (upid) WHERE thread.name = 'mindwtr-core' AND process.name GLOB '${PKG_GLOB}' ORDER BY thread.start_ts DESC LIMIT 1)`;
+    const budgetArg = args.find((a) => a.startsWith('--budget='));
+    const budgetMs = budgetArg ? Number(budgetArg.slice('--budget='.length)) : null;
     const results = [];
-    for (const trace of args) {
+    for (const trace of args.filter((a) => a !== budgetArg)) {
         // The sync's span on the engine: its first and last sync:* section.
         const [span] = query(trace, `
 SELECT MIN(s.ts) AS start, MAX(s.ts + s.dur) AS end FROM slice s JOIN thread_track tt ON s.track_id = tt.id
@@ -296,9 +299,15 @@ SELECT round((ts - ${span.start}) / 1e6, 1) AS atSyncMs, replace(replace(msg, ',
         tapsDuringSync: tapWaits(true),
         tapsOutsideSync: tapWaits(false),
         // Every host call that waited while sync work ran on the engine (taps, the screens' own reads, workers).
+        // A tap whose wait began inside the sync's span (its first to last sync section), whatever ran in the wait.
+        tapsInSyncSpan: stats(ok.flatMap((r) => r.waits.filter((w) => w.tapToAnswerMs != null && w.atSyncMs >= 0 && w.atSyncMs <= r.syncSpanMs).map((w) => w.tapToAnswerMs))),
         callsDuringSync: { n: waits.filter((w) => w.syncWorkMs > 10).length, waitMs: stats(waits.filter((w) => w.syncWorkMs > 10).map((w) => w.waitMs)), syncWorkMs: stats(waits.filter((w) => w.syncWorkMs > 10).map((w) => w.syncWorkMs)) },
     };
     console.log(JSON.stringify({ summary, results }, null, 2));
+    if (budgetMs !== null && !(summary.tapsInSyncSpan.p90 <= budgetMs)) {
+        console.error(`budget failed: tap in sync span p90 ${summary.tapsInSyncSpan.p90 ?? 'none'} ms > ${budgetMs} ms (n ${summary.tapsInSyncSpan.n})`);
+        process.exitCode = 1;
+    }
 } else {
     console.error('usage: rkstorage | run | analyze (see the header)');
     process.exit(2);
