@@ -50,6 +50,7 @@ import { normalizeAppData } from './sync-normalization';
 import { isWebdavInvalidJsonError } from './retry-utils';
 import { isRemoteSyncBackend } from './sync-service-utils';
 import { cloneAppData } from './sync-runtime-utils';
+import { traceSection, traceSectionAsync } from './perf-trace';
 import { buildMergeSummaryLog, buildPendingAttachmentUploadLogExtra } from './sync-log-utils';
 import { CLOCK_SKEW_THRESHOLD_MS } from './sync-types';
 import { appendSyncHistory, mergeAppData, performSyncCycle } from './sync';
@@ -894,7 +895,7 @@ class SharedSyncRunMachine {
             });
             return carried.data;
         }
-        const inMemorySnapshot = this.store.getInMemorySnapshot();
+        const inMemorySnapshot = traceSection('sync:storeSnapshot', () => this.store.getInMemorySnapshot());
         // The persisted-vs-in-memory reconcile is a full-library merge — the
         // single most expensive step of an idle cycle at whale scale — and after
         // the flush at cycle start the two sides are almost always identical.
@@ -934,10 +935,10 @@ class SharedSyncRunMachine {
                 tasks: String(baseData.tasks.length),
             });
         } else {
-            const persisted = await this.storage.readPersistedLocal();
+            const persisted = await traceSectionAsync('sync:readPersisted', () => this.storage.readPersistedLocal());
             const reconcileStart = Date.now();
-            const aligned = computeSyncChangeFingerprint(persisted) === computeSyncChangeFingerprint(inMemorySnapshot);
-            const reconciled = aligned ? persisted : mergeAppData(persisted, inMemorySnapshot);
+            const aligned = traceSection('sync:reconcileCheck', () => computeSyncChangeFingerprint(persisted) === computeSyncChangeFingerprint(inMemorySnapshot));
+            const reconciled = aligned ? persisted : traceSection('sync:reconcileMerge', () => mergeAppData(persisted, inMemorySnapshot));
             baseData = restoreDeviceLocalAiSettings(reconciled, inMemorySnapshot);
             // A restored endpoint means this snapshot holds content the disk copy
             // does not, so it can no longer stand in for the disk document.
@@ -972,7 +973,7 @@ class SharedSyncRunMachine {
 
     private async persistLocalDataWithTracking(data: AppData): Promise<AppData> {
         await this.assertRemoteMutationFenceHeld();
-        const persisted = await this.storage.persistLocal(data) ?? data;
+        const persisted = await traceSectionAsync('sync:saveData', () => this.storage.persistLocal(data)) ?? data;
         this.ensureLocalSnapshotFresh(persisted);
         // Disk has moved past the snapshot this cycle read, so it is no longer
         // a baseline for the unchanged-write guard.
@@ -1027,7 +1028,7 @@ class SharedSyncRunMachine {
             // A genuinely absent remote stays merge-neutral. Every document
             // otherwise enters through the shared validation/normalization
             // seam before code that assumes all AppData arrays are present.
-            const parsed = raw == null ? null : parseSyncDocument(raw, 'remote');
+            const parsed = raw == null ? null : traceSection('sync:parseRemote', () => parseSyncDocument(raw, 'remote'));
             this.state.remoteLegacyAttachmentsChanged = parsed?.ok === true
                 && parsed.legacyAttachmentsChanged === true;
             if (parsed && !parsed.ok) {
@@ -1123,7 +1124,7 @@ class SharedSyncRunMachine {
             && !remoteNeedsTombstoneCompaction
             && !state.remoteLegacyAttachmentsChanged
             && this.requireIo().requiresRemoteRepair?.() !== true
-            && areRemoteSyncDocumentsEqual(previousRemoteDocument, remoteDocument)) {
+            && traceSection('sync:remoteCompare', () => areRemoteSyncDocumentsEqual(previousRemoteDocument, remoteDocument))) {
             if (this.backend !== 'cloudkit') {
                 this.notifier.tracePayload?.('remote-write-skipped-unchanged', remoteDocument, { backend: this.backend });
             }
@@ -1414,7 +1415,7 @@ class SharedSyncRunMachine {
     private localDocumentFingerprint(data: AppData): string {
         const cached = this.state.localDocumentFingerprint;
         if (cached && cached.data === data) return cached.fingerprint;
-        const fingerprint = computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(data));
+        const fingerprint = traceSection('sync:localFingerprint', () => computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(data)));
         this.state.localDocumentFingerprint = { data, fingerprint };
         return fingerprint;
     }
@@ -1802,7 +1803,7 @@ class SharedSyncRunMachine {
             flushPendingLocalBeforeRetryRead: () => this.options.activationProbe
                 ? Promise.resolve()
                 : this.store.flushPendingSave(),
-            isLocalPersistUnchanged: (data) => this.isLocalPersistUnchanged(data),
+            isLocalPersistUnchanged: (data) => traceSection('sync:unchangedCheck', () => this.isLocalPersistUnchanged(data)),
             persistSyncStatusOnly: async (data) => {
                 this.notifier.logInfo('Sync local write skipped; merged document matches stored', {
                     backend: this.backend,

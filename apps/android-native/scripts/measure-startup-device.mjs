@@ -2,9 +2,10 @@
 //
 //   node measure-startup-device.mjs fixture <tasks> <out.db>
 //       A synthetic database made by core's own SqliteAdapter from scripts/performance/fixture.mjs (needs host `bun`).
-//   node measure-startup-device.mjs seed <serial> <pkg> <seed.apk> <benchmark.apk> <db file | empty>
-//       Installs the debuggable twin (build type benchmarkSeed), puts the database in place with run-as, then installs the
-//       benchmark build over it (same id and key: the data stays). Only for the benchmark package: never the dev app's data.
+//   node measure-startup-device.mjs seed <serial> <pkg> <seed.apk> <benchmark.apk> <db file | empty> [RKStorage file]
+//       Installs the debuggable twin (build type benchmarkSeed), puts the database (and RN's AsyncStorage file, when given:
+//       measure-merge-device.mjs's sync settings) in place with run-as, then installs the benchmark build over it (same id and
+//       key: the data stays). Only for the benchmark package: never the dev app's data.
 //   node measure-startup-device.mjs run <serial> <pkg> <label> <out dir> [runs=10] [modes=cold,warm,hot] [compile=keep]
 //       `runs` samples per mode after one discarded warm-up. cold = force-stop; warm = a new task on the live process (the
 //       Activity and its screen are made again, the host is reused); hot = HOME, then launch. Each sample: am start -W's
@@ -63,7 +64,7 @@ if (command === 'fixture') {
         console.log(f.id + ' tasks=' + back.tasks.length);
     `], { stdio: 'inherit', env: { ...process.env, OUT: resolve(out), COUNT: count } });
 } else if (command === 'seed') {
-    const [serial, pkg, seedApk, benchApk, db] = args;
+    const [serial, pkg, seedApk, benchApk, db, rkStorage] = args;
     if (!pkg.endsWith('.benchmark')) throw new Error(`REFUSED: ${pkg} is not a benchmark package`);
     const { adb, sh } = device(serial);
     adb('install', '-r', seedApk);
@@ -77,6 +78,13 @@ if (command === 'fixture') {
         const staged = `/data/local/tmp/${pkg}.seed.db`;
         adb('push', db, staged);
         try { runAs(`cp ${staged} files/${DB}`); } finally { sh(`rm -f ${staged}`); }
+    }
+    if (rkStorage) {
+        const staged = `/data/local/tmp/${pkg}.seed.rk`;
+        adb('push', rkStorage, staged);
+        runAs('rm -rf databases');
+        runAs('mkdir -p databases');
+        try { runAs(`cp ${staged} databases/RKStorage`); } finally { sh(`rm -f ${staged}`); }
     }
     adb('install', '-r', benchApk);
     console.log(`seeded ${pkg} with ${db}`);

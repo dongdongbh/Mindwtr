@@ -1,4 +1,5 @@
 import { isDropboxUnauthorizedError, DropboxConflictError } from './dropbox';
+import { traceSection } from './perf-trace';
 import { normalizeCloudUrl, normalizeWebdavUrl } from './sync-helpers';
 import { normalizeRemoteWriteResult } from './sync-run';
 import { SyncRemoteWriteConflict, type SyncBackendIO, type SyncEncryptionPosture, type SyncRunAttachmentHelpers } from './sync-run-ports';
@@ -350,7 +351,7 @@ export function createSyncBackendIO(
                 try {
                     const remote = await readWebdavDocument();
                     webdavDocumentVersion = { exists: remote.exists, strongEtag: remote.strongEtag };
-                    webdavDocumentSnapshot = snapshotWebdavRead(remote);
+                    webdavDocumentSnapshot = traceSection('sync:readSnapshot', () => snapshotWebdavRead(remote));
                     // A plaintext endpoint that answered this read without a strong ETag cannot
                     // support the conditional write the cycle would otherwise demand — whatever
                     // the capability probe concluded earlier (#1113's observational posture, and

@@ -148,8 +148,9 @@ class CoreHost(
             check(shutdown == null) { "Core host is closed" }
             executor.submit(Callable { work() })
         }
-        // Rethrow the engine's own exception: callers match "SAVE_FAILED" on its message.
-        return try { task.get() } catch (failure: ExecutionException) { throw failure.cause ?: failure }
+        // Rethrow the engine's own exception: callers match "SAVE_FAILED" on its message. The caller's wait, queue and run, as a
+        // trace section (merge profiling: how long a screen's call waits behind the engine's other work).
+        return try { traced("core:wait") { task.get() } } catch (failure: ExecutionException) { throw failure.cause ?: failure }
     }
 
     private fun call(method: String, vararg args: Any?): Any? = onEngine {
@@ -791,7 +792,7 @@ class CoreHost(
         pumpAt = Long.MAX_VALUE
         val engine = context ?: return
         if (stopped != null) return
-        runCatching { global(engine, "__pumpTimers").call() }.onFailure { Log.w(TAG, "Native Android idle pump failed error=${it.javaClass.simpleName}") }
+        runCatching { traced("core:idlePump") { global(engine, "__pumpTimers").call() } }.onFailure { Log.w(TAG, "Native Android idle pump failed error=${it.javaClass.simpleName}") }
         settleWatched()
         schedulePump()
     }
@@ -914,7 +915,7 @@ class CoreHost(
         val nextDelay = engine.globalObject.getJSFunction("__nextTimerDelay")
         val deadline = System.currentTimeMillis() + ms
         while (System.currentTimeMillis() < deadline) {
-            pump.call()
+            traced("core:pump") { pump.call() }
             (call("poll", id) as String?)?.let { return it }
             val delay = (nextDelay.call() as? Number)?.toLong() ?: 1L
             // An open fetch or secret call wakes the loop as soon as its answer is queued.

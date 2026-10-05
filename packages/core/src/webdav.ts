@@ -16,6 +16,7 @@ import {
     toUint8Array,
 } from './http-utils';
 import { logWarn } from './logger';
+import { traceSection } from './perf-trace';
 import {
     decryptRemoteArtifactOrThrow,
     detectForeignSaltArtifact,
@@ -509,7 +510,7 @@ export async function webdavPutJson(
     headers['Content-Type'] = headers['Content-Type'] || 'application/json';
     headers[WEBDAV_AUTOMKCOL_HEADER] = headers[WEBDAV_AUTOMKCOL_HEADER] || '1';
 
-    const payload = JSON.stringify(data, null, 2);
+    const payload = traceSection('sync:serialize', () => JSON.stringify(data, null, 2));
     const sendPut = async (): Promise<WebDavPutResponse> => fetchWebdavPutAndConsumeError(
         url,
         {
@@ -758,7 +759,7 @@ export async function webdavGetSyncDocument<T>(
         try {
             return {
                 state: 'data',
-                data: JSON.parse(new TextDecoder().decode(plaintext)) as T,
+                data: traceSection('sync:jsonParse', () => JSON.parse(traceSection('sync:utf8Decode', () => new TextDecoder().decode(plaintext)))) as T,
                 exists: true,
                 strongEtag: remote.strongEtag,
             };
@@ -785,13 +786,13 @@ export async function webdavGetSyncDocument<T>(
         if (inspected.kind === 'unsupported') {
             return unexpectedWebdavArtifact(inspected.reason);
         }
-        const text = new TextDecoder().decode(remote.bytes);
+        const text = traceSection('sync:utf8Decode', () => new TextDecoder().decode(remote.bytes!));
         const normalizedBody = text.startsWith(UTF8_BOM) ? text.slice(1).trim() : text.trim();
         if (normalizedBody) {
             try {
                 return {
                     state: 'data',
-                    data: JSON.parse(normalizedBody) as T,
+                    data: traceSection('sync:jsonParse', () => JSON.parse(normalizedBody)) as T,
                     exists: true,
                     strongEtag: remote.strongEtag,
                 };

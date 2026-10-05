@@ -36,6 +36,7 @@ import { flushPendingSave, useTaskStore } from './store';
 import { isSandboxMode, isWorkspaceTransitionActive } from './sandbox';
 import { performSyncCycle } from './sync';
 import { isSecretConfigKey } from './sync-secret-storage';
+import { traceSectionAsync } from './perf-trace';
 import { redactSyncText } from './sync-settings-model';
 import { createWebdavSyncRateLimitController } from './sync-rate-limit';
 import type { WebdavCapabilityProofStore } from './webdav-capability-proof';
@@ -1907,7 +1908,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
           // still reaches the store through persistSyncStatus.
           const refreshStartedAt = Date.now();
           if (!info.localWriteSkipped) {
-            await core.useTaskStore.getState().fetchData({ silent: true, preloadedData: mergedData });
+            await traceSectionAsync('sync:storeApply', () => core.useTaskStore.getState().fetchData({ silent: true, preloadedData: mergedData }));
             // The refresh alone never publishes this cycle's status: the store keeps its
             // previous settings object whenever the incoming one differs only in the
             // volatile lastSync* keys (reuseSettingsIfEquivalent, #766), so the Sync

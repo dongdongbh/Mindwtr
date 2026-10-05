@@ -13,6 +13,12 @@
     // the last line of host-entry.ts closes.
     var tracer = global.__mindwtrNative && typeof global.__mindwtrNative.trace === 'function' ? global.__mindwtrNative : null;
     if (tracer) tracer.trace('js:polyfills');
+    // A trace section around [work] (sync profiling: a large fetch body's bridge crossing and decoding).
+    var traced = function (name, work) {
+        if (!tracer) return work();
+        tracer.trace(name);
+        try { return work(); } finally { tracer.trace(''); }
+    };
     var used = Object.create(null);
     var mark = function (name) { used[name] = (used[name] || 0) + 1; };
     global.__hostUse = used;
@@ -74,7 +80,7 @@
             ioOpen -= 1;
             var answer = JSON.parse(text);
             // The body comes apart from its answer, so no copy of it is wrapped in JSON.
-            if (answer.body) answer.base64 = hostCall(native().ioBody());
+            if (answer.body) answer.base64 = traced('io:body', function () { return hostCall(native().ioBody()); });
             var entry = ioPending.get(answer.id);
             ioPending.delete(answer.id);
             // A cancelled call's late answer has no promise left to settle.
@@ -676,7 +682,7 @@
                     reject(reason);
                 };
                 var onAbort = function () { cancel(signal.reason); };
-                var id = startIo(hostCall(native().netFetch(JSON.stringify(payload))), function (answer) {
+                var id = startIo(traced('io:fetchStart', function () { return hostCall(native().netFetch(JSON.stringify(payload))); }), function (answer) {
                     signal.removeEventListener('abort', onAbort);
                     try {
                         if (answer.error !== undefined) throw new TypeError(answer.error);
@@ -684,7 +690,7 @@
                         response.url = answer.url;
                         response.redirected = answer.redirected;
                         response.type = 'basic';
-                        response._bytes = fromBase64(answer.base64);
+                        response._bytes = traced('io:fromBase64', function () { return fromBase64(answer.base64); });
                         resolve(response);
                     } catch (error) {
                         reject(error);

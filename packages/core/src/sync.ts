@@ -26,6 +26,7 @@ import {
     validateMergedSyncData,
 } from './sync-normalization';
 import { parseSyncDocument } from './sync-document';
+import { traceSection } from './perf-trace';
 import { mergeSettingsForSync } from './sync-merge-settings';
 import {
     chooseDeterministicWinner,
@@ -1329,12 +1330,13 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
     const readLocalDataForSync = async (): Promise<AppData> => {
         io.onStep?.('read-local');
         await yieldToUi();
-        const localDocument = parseSyncDocument(await io.readLocal(), 'local');
+        const rawLocal = await io.readLocal();
+        const localDocument = traceSection('sync:parseLocal', () => parseSyncDocument(rawLocal, 'local'));
         if (!localDocument.ok) {
             const sample = localDocument.errors.slice(0, 3).join('; ');
             throw new Error(`Invalid local sync payload: ${sample}`);
         }
-        return purgeExpiredTombstones(localDocument.data, nowIso, io.tombstoneRetentionDays).data;
+        return traceSection('sync:purge', () => purgeExpiredTombstones(localDocument.data, nowIso, io.tombstoneRetentionDays).data);
     };
 
     let localData = await readLocalDataForSync();
@@ -1369,7 +1371,8 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
 
     io.onStep?.('read-remote');
     await yieldToUi();
-    const remoteDocument = parseSyncDocument(await io.readRemote() ?? {}, 'remote');
+    const rawRemote = await io.readRemote() ?? {};
+    const remoteDocument = traceSection('sync:parseRemote', () => parseSyncDocument(rawRemote, 'remote'));
     if (!remoteDocument.ok) {
         const sample = remoteDocument.errors.slice(0, 3).join('; ');
         logWarn('Invalid remote sync payload shape', {
@@ -1381,7 +1384,7 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
         });
         throw new Error(`Invalid remote sync payload: ${sample}`);
     }
-    const remoteData = purgeExpiredTombstones(remoteDocument.data, nowIso, io.tombstoneRetentionDays).data;
+    const remoteData = traceSection('sync:purge', () => purgeExpiredTombstones(remoteDocument.data, nowIso, io.tombstoneRetentionDays).data);
 
     io.onStep?.('merge');
     await yieldToUi();
@@ -1397,10 +1400,10 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
     const mergeStartedAt = performance.now();
     const mergeResult: MergeResult = skipMerge
         ? { data: localData, stats: createLocalOnlyMergeStats(localData) }
-        : mergeAppDataWithStats(localData, remoteData, {
+        : traceSection('sync:merge', () => mergeAppDataWithStats(localData, remoteData, {
             nowIso,
             preferIncomingAttachmentCloudKeys: io.preferIncomingAttachmentCloudKeys,
-        });
+        }));
     if (!skipMerge) {
         logInfo('Full sync merge completed', {
             scope: 'sync',
@@ -1470,9 +1473,9 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
                 && remoteProjectIds.has(section.projectId))
             .map((section) => section.id),
     );
-    const pruned = purgeExpiredTombstones(nextMergedData, nowIso, io.tombstoneRetentionDays, {
+    const pruned = traceSection('sync:purge', () => purgeExpiredTombstones(nextMergedData, nowIso, io.tombstoneRetentionDays, {
         peerPurgedSectionIds,
-    });
+    }));
     if (
         pruned.removedTaskTombstones > 0
         || pruned.removedProjectTombstones > 0
@@ -1498,7 +1501,7 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
         });
     }
     let finalData = pruned.data;
-    const validationErrors = validateMergedSyncData(finalData);
+    const validationErrors = traceSection('sync:validate', () => validateMergedSyncData(finalData));
     if (validationErrors.length > 0) {
         const sample = validationErrors.slice(0, 3).join('; ');
         logWarn('Sync merge validation failed', {
@@ -1514,7 +1517,7 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
     if (typeof io.prepareRemoteWrite === 'function') {
         const preparedData = await io.prepareRemoteWrite(finalData);
         finalData = preparedData ?? finalData;
-        const preparedValidationErrors = validateMergedSyncData(finalData);
+        const preparedValidationErrors = traceSection('sync:validate', () => validateMergedSyncData(finalData));
         if (preparedValidationErrors.length > 0) {
             const sample = preparedValidationErrors.slice(0, 3).join('; ');
             logWarn('Sync remote-write preparation validation failed', {

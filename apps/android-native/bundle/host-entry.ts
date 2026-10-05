@@ -155,6 +155,10 @@ const traceStep = (name: string) => {
     tracedStep = name !== '';
     if (tracedStep) bridge.trace(name);
 };
+// Core's own trace sections (perf-trace.ts: the sync cycle's steps) go to the same bridge call.
+if ((globalThis.__mindwtrNative as NativeBridge | undefined)?.trace) {
+    globalThis.__mindwtrTraceSection = (name: string) => { native().trace?.(name); };
+}
 
 const sqlite: SqliteClient = {
     run: async (sql, params) => { checked(native().sqlRun(sql, JSON.stringify(params ?? []))); },
