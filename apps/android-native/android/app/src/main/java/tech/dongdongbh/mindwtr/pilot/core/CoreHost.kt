@@ -743,7 +743,8 @@ class CoreHost(
         return traced("core:wait") {
             onEngineQueued {
                 stopped?.let { throw IllegalStateException(it) }
-                start(begin(method, args, deadlineMs, done))
+                // A journaled write waits for the write before it (writeQueue); a read starts now.
+                begin(method, args, deadlineMs, done).let { if (writeQueue.admit(it)) start(it) }
             }
             wait()
         }
@@ -760,6 +761,20 @@ class CoreHost(
 
     /** Calls whose operation has not answered yet, in start order; engine thread only. */
     private val calls = ArrayList<Call>()
+
+    /** Journaled writes start one at a time, in the journal's order (D9a review); engine thread only. */
+    private val writeQueue = WriteQueue<Call> { it.entry != null }
+
+    /** [call] ended: the write waiting behind it starts in the engine's next task (never inside this call's own poll). */
+    private fun startNextWrite(call: Call) {
+        val next = writeQueue.ended(call) ?: return
+        runCatching {
+            executor.execute {
+                if (stopped == null && context != null) start(next)
+                else next.done.completeExceptionally(IllegalStateException(stopped ?: "Core host is closed"))
+            }
+        }.onFailure { next.done.completeExceptionally(it) }
+    }
 
     /** [method]'s journal entry on disk (a write) and the debug hooks before its send; engine thread. */
     private fun begin(method: String, args: Array<out Any?>, deadlineMs: Long, done: CompletableFuture<JSONObject>): Call {
@@ -787,6 +802,7 @@ class CoreHost(
         } catch (failure: Throwable) {
             call.done.completeExceptionally(failure)
         }
+        startNextWrite(call)
     }
 
     /**
@@ -846,6 +862,7 @@ class CoreHost(
         checkNotNull(context).globalObject.getJSFunction("__resumeHostCalls").call()
         schedulePump()
         call.done.completeExceptionally(IllegalStateException("Core ${call.method} timed out"))
+        startNextWrite(call)
     }
 
     /**
@@ -1062,6 +1079,7 @@ class CoreHost(
         watched.clear()
         calls.forEach { it.done.completeExceptionally(IllegalStateException(stopped ?: "Core host is closed")) }
         calls.clear()
+        writeQueue.close().forEach { it.done.completeExceptionally(IllegalStateException(stopped ?: "Core host is closed")) }
         io.close()
         try {
             sqlite?.close()

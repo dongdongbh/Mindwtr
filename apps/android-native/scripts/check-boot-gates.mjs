@@ -1035,7 +1035,13 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
     // from the pump's turns, so it never holds the engine while the operation waits. Past its deadline it is cancelled, drained,
     // or stops the host, as a nested one.
     assert.match(coreHost, /if \(Thread\.currentThread\(\) === engineThread\) \{\s+stopped\?\.let \{ throw IllegalStateException\(it\) \}\s+finish\(begin\(method, args, deadlineMs, done\), answer\(method, args, deadlineMs\)\)/);
-    assert.match(coreHost, /onEngineQueued \{\s+stopped\?\.let \{ throw IllegalStateException\(it\) \}\s+start\(begin\(method, args, deadlineMs, done\)\)\s+\}/);
+    // D9a review: a journaled write starts only after the write before it answered (WriteQueue, JVM-tested), reads at once;
+    // each ending call starts the next waiting write, and a closing host fails the writes that never started.
+    assert.match(coreHost, /onEngineQueued \{\s+stopped\?\.let \{ throw IllegalStateException\(it\) \}[^}]*?begin\(method, args, deadlineMs, done\)\.let \{ if \(writeQueue\.admit\(it\)\) start\(it\) \}\s+\}/);
+    assert.match(coreHost, /private val writeQueue = WriteQueue<Call> \{ it\.entry != null \}/);
+    assert.match(coreHost, /call\.done\.completeExceptionally\(failure\)\s+\}\s+startNextWrite\(call\)\s+\}/, 'an answered write starts the next');
+    assert.match(coreHost, /timed out"\)\)\s+startNextWrite\(call\)\s+\}/, 'a timed-out write starts the next');
+    assert.match(coreHost, /writeQueue\.close\(\)\.forEach \{ it\.done\.completeExceptionally/);
     assert.match(coreHost, /private fun expire\(call: Call\) \{\s+call\.deadlineCheck\?\.cancel\(false\)\s+call\("cancel", call\.id\)\s+if \(pumpUntil\(call\.id, DRAIN_MS\) == null\) \{[\s\S]{0,300}?stopped = reason[\s\S]{0,300}?closeOnEngine\(\)\s+return\s+\}\s+checkNotNull\(context\)\.globalObject\.getJSFunction\("__resumeHostCalls"\)\.call\(\)\s+schedulePump\(\)\s+call\.done\.completeExceptionally\(IllegalStateException\("Core \$\{call\.method\} timed out"\)\)/);
     assert.match(coreHost, /calls \+= call\s+runCatching \{\s+call\.deadlineCheck = executor\.schedule\(\{ pollCalls\(\) \}, call\.deadlineMs, TimeUnit\.MILLISECONDS\)/, 'a waiting call is checked at its deadline even with no pump due');
     assert.match(coreHost, /private fun finish\(call: Call, result: JSONObject\) \{\s+call\.deadlineCheck\?\.cancel\(false\)/, 'an answered call\'s deadline check is cancelled');
