@@ -33,6 +33,14 @@ export const SECRET_KEY = 'mindwtr_native_net_check';
 /** The response limit the check sets through `debug.mindwtr.native.net_max_bytes` (HostIo's own is bounded by the heap). */
 export const LIMIT_BYTES = 64 * 1024;
 export const DOC = { check: 'net', text: 'Grüße ✓ 😀' };
+/** D9 A2: bodies the app reads back through the real bridge, by name: bytes exactly, and text when they are UTF-8. */
+export const BODIES = {
+    nul: Buffer.from([0x61, 0x00, 0x62]),
+    marker: Buffer.from('!MindwtrNativeError:not an error'),
+    astral: Buffer.from('😀 Grüße \u{10ffff} 𝄞'),
+    bom: Buffer.from('\ufeff{"a":1}'),
+    invalid: Buffer.from([0x20, 0xe2, 0x20]),
+};
 
 /**
  * [steps], run once on the first of: the check's end, Ctrl-C (SIGINT) or SIGTERM. A signal then exits with 128 + its
@@ -121,6 +129,9 @@ export const serve = (port, readSecretFile) => {
             } else if (key === 'GET /cut/utf8.json') {
                 // Not UTF-8: E2 alone, then C0 A0 (an overlong space). Read loosely, this body trims to nothing.
                 res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': 6 }).end(Buffer.from([0x20, 0xe2, 0x20, 0xc0, 0xa0, 0x0a]));
+            } else if (req.method === 'GET' && BODIES[req.url.replace('/body/', '')] && req.url.startsWith('/body/')) {
+                const bytes = BODIES[req.url.replace('/body/', '')];
+                res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': bytes.length }).end(bytes);
             } else if (key === 'HEAD /gz/data.json') {
                 // A HEAD labelled gzip, as a compressing server answers it: no body to decode.
                 res.writeHead(200, { ETag: '"gz"', 'Content-Type': 'application/json', 'Content-Encoding': 'gzip', 'Content-Length': 40 }).end();
@@ -187,6 +198,12 @@ export const verify = async (steps, state, secretFile, log, { check, fail }) => 
     for (const [cut, error] of cuts) {
         check(step(`cut-${cut}`).ok === false && error.test(step(`cut-${cut}`).error) && saw(`GET /cut/${cut}.json`).length === 1,
             `a ${cut} body makes core's sync read reject (${failedWith(`cut-${cut}`)})`);
+    }
+    // Every body crossed the bridge exactly, as bytes and (UTF-8 ones) as text; the one that is not UTF-8 has no text.
+    for (const [name, bytes] of Object.entries(BODIES)) {
+        const read = step('bodies').value?.[name];
+        const text = name === 'invalid' ? undefined : bytes.toString('utf8');
+        check(read?.hex === bytes.toString('hex') && read?.text === text, `the ${name} body read back exactly (${JSON.stringify(read)})`);
     }
     const firstCut = seen.findIndex((entry) => entry.key.includes('/cut/'));
     check(seen.filter((entry) => entry.key.includes('/cut/')).length === cuts.length && seen.slice(firstCut).every((entry) => entry.key.startsWith('GET ')),

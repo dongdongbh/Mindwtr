@@ -594,6 +594,19 @@ const runNetCheck = async (port: string) => {
     // Core's sync document read must throw: an empty or partial body would read as a missing remote, which sync writes over.
     // A body that is not UTF-8 must throw too, not read as other text (E2 alone once read as a space, so an empty body).
     for (const cut of ['half', 'reset', 'oversize', 'stream', 'gzip', 'utf8']) await step(`cut-${cut}`, () => webdavGetSyncDocument(`${base}/cut/${cut}.json`));
+    // D9 A2: bodies through the real bridge, each read back as bytes (hex) and, when it is UTF-8, as text: a NUL, text that
+    // starts like a bridge error, astral characters, a BOM, and bytes that are not UTF-8.
+    await step('bodies', async () => {
+        const out: Record<string, { hex: string; text?: string }> = {};
+        for (const name of ['nul', 'marker', 'astral', 'bom', 'invalid']) {
+            const res = await fetch(`${base}/body/${name}`);
+            const bytes = new Uint8Array(await res.clone().arrayBuffer());
+            let text: string | undefined;
+            try { text = await res.text(); } catch { text = undefined; }
+            out[name] = { hex: Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(''), ...(text === undefined ? {} : { text }) };
+        }
+        return out;
+    });
     await step('abort', () => {
         const controller = new AbortController();
         setTimeout(() => controller.abort(), 500);

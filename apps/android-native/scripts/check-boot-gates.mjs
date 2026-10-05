@@ -350,7 +350,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     const decodedValue = '\ufeff{"t":"Grüße ✓ 😀\u0000"}';
     const decodedBytes = Buffer.from(decodedValue, 'utf8');
     const decoded = run("fetch('https://dav.example/decoded')");
-    answer({ id: String(ids), status: 200, statusText: 'OK', url: 'https://dav.example/decoded', redirected: false, headers: [], utf8: true, bytes: decodedBytes.length, base64: decodedValue });
+    answer({ id: String(ids), status: 200, statusText: 'OK', url: 'https://dav.example/decoded', redirected: false, headers: [], utf8: true, bytes: decodedBytes.length, base64: `T${decodedValue}` });
     net.__pumpTimers();
     const decodedResponse = await decoded;
     assert.equal(decodedResponse.mindwtrDecodedTextBytes, decodedBytes.length);
@@ -359,6 +359,17 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     assert.equal(await decodedResponse.text(), decodedValue);
     assert.equal(decodedResponse.bodyUsed, true);
     assert.equal(looseResponse.mindwtrDecodedTextBytes, undefined, 'a base64 body is not marked decoded');
+    // Review (Codex 1): a text body that starts like a bridge error is still the body, and a body the bridge cannot hand over
+    // fails its own fetch instead of stranding it.
+    const markerText = '!MindwtrNativeError:not an error';
+    const marker = run("fetch('https://dav.example/marker')");
+    answer({ id: String(ids), status: 200, statusText: 'OK', url: 'https://dav.example/marker', redirected: false, headers: [], utf8: true, bytes: markerText.length, base64: `T${markerText}` });
+    net.__pumpTimers();
+    assert.equal(await (await marker).text(), markerText);
+    const broken = run("fetch('https://dav.example/broken')");
+    answer({ id: String(ids), status: 200, statusText: 'OK', url: 'https://dav.example/broken', redirected: false, headers: [], body: true, base64: '!MindwtrNativeError:Answers closed' });
+    net.__pumpTimers();
+    assert.deepEqual(await failure(broken), { name: 'TypeError', message: 'Network request failed: the host sent an unreadable body' });
     // The host's decoder and the polyfill's fatal one agree on the shared cases (StrictUtf8Test reads the same file). The file's
     // answers are Node's own fatal decoder with the BOM kept, as the polyfill keeps it.
     const parity = JSON.parse(readFileSync(resolve(app, 'scripts/utf8-parity-cases.json'), 'utf8'));

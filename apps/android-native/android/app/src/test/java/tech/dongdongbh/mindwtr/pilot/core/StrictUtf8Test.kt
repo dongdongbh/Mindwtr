@@ -31,6 +31,14 @@ class StrictUtf8Test {
         }
     }
 
+    @Test fun aNulKeepsItsBytes() {
+        // The bridge passes strings as modified UTF-8: NUL would arrive as U+FFFD, so a body with one stays bytes.
+        val bytes = byteArrayOf(0x61, 0, 0x62)
+        assertEquals("a\u0000b", StrictUtf8.decodeOrNull(bytes))
+        assertNull(StrictUtf8.bridgeTextOrNull(bytes))
+        assertEquals("ab", StrictUtf8.bridgeTextOrNull(byteArrayOf(0x61, 0x62)))
+    }
+
     @Test fun keepsALeadingBomAndJsonEscapes() {
         assertEquals("\uFEFF{}", StrictUtf8.decodeOrNull(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte(), '{'.code.toByte(), '}'.code.toByte())))
         assertEquals("\"\\ud800\"", StrictUtf8.decodeOrNull("\"\\ud800\"".toByteArray()))

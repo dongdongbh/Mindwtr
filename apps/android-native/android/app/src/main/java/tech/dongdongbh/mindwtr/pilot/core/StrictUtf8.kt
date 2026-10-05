@@ -10,6 +10,12 @@ object StrictUtf8 {
     /** [bytes] as text, or null when they are not strict UTF-8 (the caller then keeps the bytes). */
     fun decodeOrNull(bytes: ByteArray): String? = if (valid(bytes)) String(bytes, Charsets.UTF_8) else null
 
+    /**
+     * [bytes] as text that crosses the QuickJS bridge exactly, or null (send the bytes): strict UTF-8 with no NUL. The bridge
+     * passes strings as modified UTF-8, where NUL is the two bytes C0 80, which QuickJS reads as U+FFFD.
+     */
+    fun bridgeTextOrNull(bytes: ByteArray): String? = if (bytes.contains(0)) null else decodeOrNull(bytes)
+
     fun valid(bytes: ByteArray): Boolean {
         var i = 0
         val size = bytes.size

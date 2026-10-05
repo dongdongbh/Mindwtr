@@ -90,9 +90,18 @@
             var answer = JSON.parse(text);
             // The body comes apart from its answer, so no copy of it is wrapped in JSON: base64, or a fetch body's text when the
             // host found it strict UTF-8 (`utf8`, HostIo.read) and decoded it off this thread.
+            // A body the bridge could not hand over fails its own call; it never strands it.
             if (answer.body) {
-                var payload = traced('io:body', function () { return hostCall(native().ioBody()); });
-                if (answer.utf8) answer.utf8Text = payload; else answer.base64 = payload;
+                try {
+                    var payload = traced('io:body', function () { return hostCall(native().ioBody()); });
+                    // A text body comes after a "T" (HostIo.read), so its own first characters can never read as an error.
+                    if (answer.utf8 && payload.charAt(0) === 'T') answer.utf8Text = payload.slice(1);
+                    else if (answer.utf8) throw new TypeError('the host sent an unreadable body');
+                    else answer.base64 = payload;
+                } catch (error) {
+                    global.__hostLog('host call error: ' + error);
+                    answer = { id: answer.id, error: 'Network request failed: the host sent an unreadable body' };
+                }
             }
             var entry = ioPending.get(answer.id);
             ioPending.delete(answer.id);

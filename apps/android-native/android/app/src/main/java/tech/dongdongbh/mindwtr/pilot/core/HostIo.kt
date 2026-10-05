@@ -94,8 +94,8 @@ class HostIo(context: Context) {
      * Starts `fetch`: [json] is `{ url, method, headers: [[name, value]], text? | base64?, redirect }`, the body as text
      * (sent as UTF-8) or as base64 bytes. Returns the call's id; its answer is `{ id, status, statusText, url, redirected,
      * headers, body: true, bytes, utf8? }` with the body from [body], or `{ id, error }`. `bytes` is the body's size after
-     * gzip; with `utf8` the body is the text of a strict UTF-8 body ([StrictUtf8], decoded on OkHttp's thread so the engine
-     * never decodes it), else base64.
+     * gzip; with `utf8` the body is "T" and the text of a strict UTF-8 body with no NUL ([StrictUtf8.bridgeTextOrNull],
+     * decoded on OkHttp's thread so the engine never decodes it), else base64.
      */
     fun fetch(json: String): String {
         val request = JSONObject(json)
@@ -314,11 +314,12 @@ class HostIo(context: Context) {
         val headers = JSONArray()
         response.headers.forEach { (name, value) -> headers.put(JSONArray().put(name).put(value)) }
         val raw = bytes.readByteArray()
-        val text = StrictUtf8.decodeOrNull(raw)
+        val text = StrictUtf8.bridgeTextOrNull(raw)
         val json = JSONObject().put("id", id).put("status", response.code).put("statusText", response.message)
             .put("url", response.request.url.toString()).put("redirected", response.priorResponse != null)
             .put("headers", headers).put("body", true).put("bytes", raw.size).apply { if (text != null) put("utf8", true) }.toString()
-        return Answer(json, text ?: Base64.encodeToString(raw, Base64.NO_WRAP))
+        // A text body goes with a leading "T", so no body (one starting "!MindwtrNativeError:") ever reads as a bridge error.
+        return Answer(json, if (text != null) "T$text" else Base64.encodeToString(raw, Base64.NO_WRAP))
     }
 
     /**
