@@ -93,13 +93,19 @@ export const SYNC_REPAIR_REV_BY = 'sync-repair';
 
 export type SyncStep = 'read-local' | 'read-remote' | 'merge' | 'write-local' | 'write-remote';
 
+/**
+ * prepareRemoteWrite's answer when no preparation ran and the document is untouched: the cycle then keeps the validation it
+ * already made. Any other answer (a new document, or nothing) is validated again.
+ */
+export const PREPARED_UNCHANGED: unique symbol = Symbol('mindwtr.sync.preparedUnchanged');
+
 export type SyncCycleIO = {
     readLocal: () => Promise<AppData>;
     readRemote: () => Promise<AppData | null | undefined>;
     writeLocal: (data: AppData) => Promise<AppData | void>;
     clearPendingRemoteWriteAfterLocalAbort?: (pendingAt: string) => Promise<void>;
     flushPendingLocalBeforeRetryRead?: () => Promise<void>;
-    prepareRemoteWrite?: (data: AppData) => Promise<AppData | void>;
+    prepareRemoteWrite?: (data: AppData) => Promise<AppData | void | typeof PREPARED_UNCHANGED>;
     writeRemote: (data: AppData) => Promise<void>;
     /** True when persisting `data` locally would change nothing durable — the
      *  stored document already carries this content and differs only in the

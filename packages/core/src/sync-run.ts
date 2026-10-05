@@ -7,7 +7,7 @@ import {
     SyncFileLockUnavailableError,
 } from './sync-service-utils';
 import type { FastSyncState } from './sync-fast-sync';
-import type { SyncCycleIO, SyncCycleResult, SyncHistoryEntry } from './sync-types';
+import { PREPARED_UNCHANGED, type SyncCycleIO, type SyncCycleResult, type SyncHistoryEntry } from './sync-types';
 import type {
     SyncBackendIO,
     SyncRemoteWriteOutcome,
@@ -1540,22 +1540,22 @@ class SharedSyncRunMachine {
     }
 
     /** Candidate attachment proof, or the normal final pending-upload pass,
-     *  immediately before the merged document is written remotely. Nothing
-     *  back when no pass ran, so the cycle need not validate it again. */
-    private async prepareRemoteWriteData(data: AppData): Promise<AppData | void> {
+     *  immediately before the merged document is written remotely.
+     *  PREPARED_UNCHANGED when no pass ran: the cycle need not validate again. */
+    private async prepareRemoteWriteData(data: AppData): Promise<AppData | typeof PREPARED_UNCHANGED> {
         if (this.options.activationProbe) {
             // A device with no attachment storage (the web app) can never
             // download or upload a file, so it has nothing to prove: the
             // records stay unavailable here exactly as every later cycle keeps
             // them. Demanding proof refused every setup against a location
             // that held attachments (#1119).
-            if (!this.policy.attachmentPhasesEnabled) return;
+            if (!this.policy.attachmentPhasesEnabled) return PREPARED_UNCHANGED;
             const activationSnapshot = prepareActivationAttachmentSnapshot(
                 data,
                 this.state.remoteDataForCompare,
                 this.state.localDataCache?.data ?? null,
             );
-            if (activationSnapshot.count === 0) return;
+            if (activationSnapshot.count === 0) return PREPARED_UNCHANGED;
             const io = this.requireIo();
             if (!io.syncAttachments) {
                 throw new Error('Candidate backend cannot prove attachments');
@@ -1687,9 +1687,9 @@ class SharedSyncRunMachine {
             return provenData;
         }
         const pendingUploads = findPendingAttachmentUploads(data);
-        if (pendingUploads.length === 0) return;
+        if (pendingUploads.length === 0) return PREPARED_UNCHANGED;
         const io = this.requireIo();
-        if (!io.syncAttachments) return;
+        if (!io.syncAttachments) return PREPARED_UNCHANGED;
 
         this.setStep('attachments_finalize');
         await this.yieldToUi();

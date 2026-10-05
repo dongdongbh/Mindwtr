@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { performSyncCycle } from './sync';
+import { PREPARED_UNCHANGED } from './sync-types';
 import { createSyncCycleExecutor } from './sync-cycle';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
 import { applyProjectLifecycleTransition } from './store-helpers';
@@ -1058,6 +1059,34 @@ describe('performSyncCycle', () => {
         expect(remoteWriteData?.tasks[0].attachments?.[0].cloudKey).toBe('attachments/att-1.txt');
         expect(localWrites[0].settings.pendingRemoteWriteAt).toBe('2026-01-01T00:00:00.000Z');
         expect(localWrites[1].settings.pendingRemoteWriteRetryAt).toBe('2026-01-01T00:00:05.000Z');
+    });
+
+    it('validates again after a preparation that changed the document in place and answered nothing', async () => {
+        let remoteWrites = 0;
+        await expect(performSyncCycle({
+            readLocal: async () => mockAppData([createMockTask('task-1', '2024-01-01T00:00:00.000Z')]),
+            readRemote: async () => mockAppData(),
+            writeLocal: async () => undefined,
+            // A callback that changes the document in place: a task pointing at a project nobody has.
+            prepareRemoteWrite: async (data) => {
+                data.tasks[0] = { ...data.tasks[0], projectId: 'missing-project' };
+            },
+            writeRemote: async () => { remoteWrites += 1; },
+            now: () => '2026-01-01T00:00:00.000Z',
+        })).rejects.toThrow(/Sync validation failed/);
+        expect(remoteWrites).toBe(0);
+    });
+
+    it('skips the second validation only when preparation says it changed nothing', async () => {
+        const result = await performSyncCycle({
+            readLocal: async () => mockAppData([createMockTask('task-1', '2024-01-01T00:00:00.000Z')]),
+            readRemote: async () => mockAppData(),
+            writeLocal: async () => undefined,
+            prepareRemoteWrite: async () => PREPARED_UNCHANGED,
+            writeRemote: async () => undefined,
+            now: () => '2026-01-01T00:00:00.000Z',
+        });
+        expect(result.status).toBe('success');
     });
 
     it('pauses pending remote write recovery until the retry window expires', async () => {

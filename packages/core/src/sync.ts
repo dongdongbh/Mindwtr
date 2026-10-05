@@ -1,6 +1,7 @@
 import type { AppData, Attachment, Area, Person, Project, Task } from './types';
 import { logInfo, logWarn } from './logger';
 import {
+    PREPARED_UNCHANGED,
     type ClockSkewWarning,
     type ConflictReason,
     type EntityMergeStats,
@@ -1516,11 +1517,12 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
 
     if (typeof io.prepareRemoteWrite === 'function') {
         const preparedData = await io.prepareRemoteWrite(finalData);
-        // Nothing back means no preparation ran: the document is the one validated above.
-        finalData = preparedData ?? finalData;
-        const preparedValidationErrors = preparedData
-            ? traceSection('sync:validate', () => validateMergedSyncData(finalData))
-            : [];
+        // Only an explicit "unchanged" keeps the validation above; a new document or no answer is validated again.
+        const unchanged = preparedData === PREPARED_UNCHANGED;
+        if (preparedData && !unchanged) finalData = preparedData;
+        const preparedValidationErrors = unchanged
+            ? []
+            : traceSection('sync:validate', () => validateMergedSyncData(finalData));
         if (preparedValidationErrors.length > 0) {
             const sample = preparedValidationErrors.slice(0, 3).join('; ');
             logWarn('Sync remote-write preparation validation failed', {
