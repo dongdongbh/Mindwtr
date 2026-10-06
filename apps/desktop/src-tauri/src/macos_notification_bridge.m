@@ -1,67 +1,136 @@
 #import <Foundation/Foundation.h>
-#import <stdbool.h>
+#import <UserNotifications/UserNotifications.h>
+#import <string.h>
 
-// A task's reminders replace one another instead of stacking. `tauri-plugin-notification`
-// (notify-rust, mac-notification-sys) gives no notification an identifier, so every reminder is
-// a new one. NSUserNotification keys a delivered notification by `identifier`: the task's
-// earlier notification is removed and the new one delivered under the same identifier, so the
-// task keeps one notification and the reminder alerts again. Deprecated, like the plugin's own
-// backend, but it needs no new permission.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-
-@interface MindwtrReplacingNotificationDelegate : NSObject <NSUserNotificationCenterDelegate>
+@interface MindwtrReplacingNotificationDelegate : NSObject <UNUserNotificationCenterDelegate>
+@property (atomic, strong) id<UNUserNotificationCenterDelegate> previous;
 @end
 
 @implementation MindwtrReplacingNotificationDelegate
-// Without this, a reminder that fires while Mindwtr is frontmost goes straight to the
-// Notification Center with no banner (mac-notification-sys' delegate presents it too).
-- (BOOL)userNotificationCenter:(NSUserNotificationCenter *)center
-     shouldPresentNotification:(NSUserNotification *)notification {
-    return YES;
+- (void)userNotificationCenter:(UNUserNotificationCenter *)center
+      willPresentNotification:(UNNotification *)notification
+        withCompletionHandler:(void (^)(UNNotificationPresentationOptions))completion {
+    UNNotificationPresentationOptions options = 0;
+    if ([notification.request.content.userInfo[@"mindwtrReplacingReminder"] boolValue]) {
+        options = UNNotificationPresentationOptionSound;
+        if (@available(macOS 11.0, *)) {
+            options |= UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList;
+        } else {
+            options |= UNNotificationPresentationOptionAlert;
+        }
+    }
+    id<UNUserNotificationCenterDelegate> previous = self.previous;
+    if ([previous respondsToSelector:_cmd]) {
+        [previous userNotificationCenter:center willPresentNotification:notification
+                  withCompletionHandler:^(UNNotificationPresentationOptions priorOptions) {
+            completion(priorOptions | options);
+        }];
+    } else {
+        completion(options);
+    }
+}
+
+- (void)userNotificationCenter:(UNUserNotificationCenter *)center
+ didReceiveNotificationResponse:(UNNotificationResponse *)response
+          withCompletionHandler:(void (^)(void))completion {
+    id<UNUserNotificationCenterDelegate> previous = self.previous;
+    if ([previous respondsToSelector:_cmd]) {
+        [previous userNotificationCenter:center didReceiveNotificationResponse:response
+                  withCompletionHandler:completion];
+    } else {
+        completion();
+    }
+}
+
+- (void)userNotificationCenter:(UNUserNotificationCenter *)center
+  openSettingsForNotification:(UNNotification *)notification {
+    id<UNUserNotificationCenterDelegate> previous = self.previous;
+    if ([previous respondsToSelector:_cmd]) {
+        [previous userNotificationCenter:center openSettingsForNotification:notification];
+    }
 }
 @end
 
-// Returns false when no notification center is available, so the caller can fall back to the
-// plugin and still show the reminder.
-bool mindwtr_macos_send_replacing_notification(const char *title, const char *body, const char *identifier) {
-    if (title == NULL || identifier == NULL) {
-        return false;
+// Called on Rust's blocking pool, never the UI/runtime thread. NULL means the native add
+// completed successfully; an allocated error string belongs to the Rust caller.
+char *mindwtr_macos_send_replacing_notification(const char *title, const char *body, const char *identifier) {
+    if (title == NULL || identifier == NULL || [NSThread isMainThread]) {
+        return strdup("Invalid notification call");
     }
     @autoreleasepool {
-        NSUserNotificationCenter *center = [NSUserNotificationCenter defaultUserNotificationCenter];
-        if (center == nil) {
-            return false;
+        NSString *tag = [NSString stringWithUTF8String:identifier];
+        NSString *titleText = [NSString stringWithUTF8String:title];
+        NSString *bodyText = body == NULL ? @"" : [NSString stringWithUTF8String:body];
+        if (tag.length == 0 || titleText.length == 0 || bodyText == nil) {
+            return strdup("Invalid notification text");
         }
-        // The center keeps its delegate weakly.
-        static MindwtrReplacingNotificationDelegate *delegate = nil;
+        NSBundle *bundle = [NSBundle mainBundle];
+        if (bundle.bundleIdentifier.length == 0 || ![bundle.bundleURL.pathExtension isEqualToString:@"app"]) {
+            return strdup("The notification center needs an app bundle");
+        }
+        UNUserNotificationCenter *center;
+        @try {
+            center = [UNUserNotificationCenter currentNotificationCenter];
+        } @catch (NSException *exception) {
+            // An unbundled `tauri dev` executable has no notification-center identity.
+            return strdup("The notification center needs an app bundle");
+        }
+        if (center == nil) {
+            return strdup("The notification center is unavailable");
+        }
+        static MindwtrReplacingNotificationDelegate *delegate;
+        static NSLock *sendLock;
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
             delegate = [[MindwtrReplacingNotificationDelegate alloc] init];
+            sendLock = [[NSLock alloc] init];
         });
-        center.delegate = delegate;
-
-        NSString *key = [NSString stringWithUTF8String:identifier];
-        NSString *titleText = [NSString stringWithUTF8String:title];
-        if (key == nil || titleText == nil) {
-            return false;
-        }
-        for (NSUserNotification *delivered in center.deliveredNotifications) {
-            if ([delivered.identifier isEqualToString:key]) {
-                [center removeDeliveredNotification:delivered];
+        // ponytail: serialize sends globally; per-tag locks only if reminder throughput matters.
+        [sendLock lock];
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            if (center.delegate != delegate) {
+                delegate.previous = center.delegate;
+                center.delegate = delegate;
             }
+        });
+
+        // The desktop plugin reports Granted without checking macOS authorization.
+        dispatch_semaphore_t finished = dispatch_semaphore_create(0);
+        __block BOOL granted = NO;
+        __block NSError *nativeError = nil;
+        [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound)
+                             completionHandler:^(BOOL allowed, NSError *error) {
+            granted = allowed;
+            nativeError = error;
+            dispatch_semaphore_signal(finished);
+        }];
+        dispatch_semaphore_wait(finished, DISPATCH_TIME_FOREVER);
+        if (!granted || nativeError != nil) {
+            [sendLock unlock];
+            if (nativeError == nil) return strdup("Notification permission denied");
+            return strdup([[NSString stringWithFormat:@"Notification authorization failed (code %ld)",
+                            (long)nativeError.code] UTF8String]);
         }
 
-        NSUserNotification *notification = [[NSUserNotification alloc] init];
-        notification.identifier = key;
-        notification.title = titleText;
-        if (body != NULL) {
-            notification.informativeText = [NSString stringWithUTF8String:body];
+        UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
+        content.title = titleText;
+        content.body = bodyText;
+        content.sound = [UNNotificationSound defaultSound];
+        content.userInfo = @{@"mindwtrReplacingReminder": @YES};
+        UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:tag content:content trigger:nil];
+        // Remove only this task's delivered reminder so the replacement alerts again.
+        [center removeDeliveredNotificationsWithIdentifiers:@[tag]];
+        [center addNotificationRequest:request withCompletionHandler:^(NSError *error) {
+            nativeError = error;
+            dispatch_semaphore_signal(finished);
+        }];
+        dispatch_semaphore_wait(finished, DISPATCH_TIME_FOREVER);
+        [sendLock unlock];
+        if (nativeError != nil) {
+            // Include the native code, never payload text or localized descriptions.
+            return strdup([[NSString stringWithFormat:@"Notification delivery failed (code %ld)",
+                            (long)nativeError.code] UTF8String]);
         }
-        notification.soundName = NSUserNotificationDefaultSoundName;
-        [center deliverNotification:notification];
-        return true;
+        return NULL;
     }
 }
-
-#pragma clang diagnostic pop

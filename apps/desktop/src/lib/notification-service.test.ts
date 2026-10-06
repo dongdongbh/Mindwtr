@@ -8,6 +8,7 @@ const runtimeMock = vi.hoisted(() => ({
     isFlatpakRuntime: vi.fn(() => false),
     isLinuxRuntime: vi.fn(() => false),
     isWindowsRuntime: vi.fn(() => false),
+    isMacRuntime: vi.fn(() => false),
 }));
 const pluginMock = vi.hoisted(() => ({
     sendNotification: vi.fn(),
@@ -316,6 +317,7 @@ describe('Linux native notification path (#1232)', () => {
         runtimeMock.isFlatpakRuntime.mockReturnValue(false);
         runtimeMock.isLinuxRuntime.mockReturnValue(true);
         runtimeMock.isWindowsRuntime.mockReturnValue(false);
+        runtimeMock.isMacRuntime.mockReturnValue(false);
         useTaskStore.setState({ settings: { notificationsEnabled: true } });
     });
 
@@ -428,6 +430,7 @@ describe('Windows packaged notification path (#1146)', () => {
         runtimeMock.isFlatpakRuntime.mockReturnValue(false);
         runtimeMock.isLinuxRuntime.mockReturnValue(false);
         runtimeMock.isWindowsRuntime.mockReturnValue(false);
+        runtimeMock.isMacRuntime.mockReturnValue(false);
         useTaskStore.setState({ settings: { notificationsEnabled: true } });
     });
 
@@ -437,6 +440,7 @@ describe('Windows packaged notification path (#1146)', () => {
         runtimeMock.isTauriRuntime.mockReturnValue(false);
         runtimeMock.isLinuxRuntime.mockReturnValue(false);
         runtimeMock.isWindowsRuntime.mockReturnValue(false);
+        runtimeMock.isMacRuntime.mockReturnValue(false);
         useTaskStore.setState(initialStoreState, true);
     });
 
@@ -549,6 +553,7 @@ describe('a task\'s reminders replace its notification', () => {
         runtimeMock.isTauriRuntime.mockReturnValue(false);
         runtimeMock.isLinuxRuntime.mockReturnValue(false);
         runtimeMock.isWindowsRuntime.mockReturnValue(false);
+        runtimeMock.isMacRuntime.mockReturnValue(false);
     });
 
     // The module dedupes each reminder it sent, so every test fires its own day.
@@ -586,7 +591,7 @@ describe('a task\'s reminders replace its notification', () => {
         expect(sent.every((call) => call.args.tag === tag)).toBe(true);
     });
 
-    it('tags the packaged Windows toast', async () => {
+    it('preserves packaged Windows delivery without replacement', async () => {
         runtimeMock.isTauriRuntime.mockReturnValue(true);
         runtimeMock.isWindowsRuntime.mockReturnValue(true);
         const calls = captureInvokes();
@@ -595,13 +600,13 @@ describe('a task\'s reminders replace its notification', () => {
 
         const sent = calls.filter((call) => call.command === 'send_windows_packaged_notification');
         expect(sent.length).toBeGreaterThanOrEqual(2);
-        expect(sent.every((call) => call.args.tag === tag)).toBe(true);
+        expect(sent.every((call) => call.args.tag === undefined)).toBe(true);
         expect(pluginMock.sendNotification).not.toHaveBeenCalled();
     });
 
-    it('replaces through the native command on unpackaged Windows, and falls back to the plugin when it fails', async () => {
+    it('replaces through the native command on macOS, and falls back to the plugin when it fails', async () => {
         runtimeMock.isTauriRuntime.mockReturnValue(true);
-        runtimeMock.isWindowsRuntime.mockReturnValue(true);
+        runtimeMock.isMacRuntime.mockReturnValue(true);
         let calls = captureInvokes('send_windows_packaged_notification');
         await sendDesktopImmediateNotification('Prepare report');
         // An immediate notification has no task: no replacing command.

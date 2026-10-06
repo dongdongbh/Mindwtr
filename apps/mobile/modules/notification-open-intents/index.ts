@@ -23,6 +23,7 @@ type NotificationOpenIntentsModule = {
 
 type AlarmNotificationModule = {
   consumePendingNotificationOpenPayload?: () => Promise<Record<string, unknown> | null>;
+  cancelTaskReminderNotifications?: (taskId: string) => Promise<void>;
 };
 
 const nativeModule = Platform.OS === 'android'
@@ -99,6 +100,13 @@ export async function acknowledgeNotificationCompletion(actionId: string): Promi
     throw new Error('Completion acknowledgement unavailable');
   }
   nativeModule.acknowledgeCompletion(actionId);
+}
+
+export async function cancelTaskReminderNotifications(taskId: string): Promise<void> {
+  if (Platform.OS !== 'ios' || !alarmNotificationModule?.cancelTaskReminderNotifications) {
+    throw new Error('Task reminder cancellation unavailable');
+  }
+  await alarmNotificationModule.cancelTaskReminderNotifications(taskId);
 }
 
 export async function ensureReminderNotificationChannel(channelId: string, channelName: string): Promise<void> {

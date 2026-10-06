@@ -1271,7 +1271,7 @@ ${helper}
     }
   }, 30_000);
 
-  it('keeps the iOS Done call although the complete-action patch rewrites its handler on every pass', () => {
+  it('exposes iOS task reminder cancellation after saving without eager Done cancellation, across prebuilds', () => {
     if (!fs.existsSync(installedAlarmPackage)) return;
     const { tmpRoot, read } = patchInstalledPackage();
     try {
@@ -1279,14 +1279,33 @@ ${helper}
       applyPatches(path.join(tmpRoot, 'apps', 'mobile'), PATCHES);
       const module = read('ios', 'RnAlarmNotification.m');
       const completeBranch = module.slice(module.indexOf('isEqualToString:@"COMPLETE_ACTION"'), module.indexOf('isEqualToString:@"SNOOZE_ACTION"'));
-      expect(completeBranch.match(/mindwtrRemoveTaskReminders\(response\.notification\);/g)).toHaveLength(1);
-      expect(module.match(/static void mindwtrRemoveTaskReminders\(/g)).toHaveLength(1);
+      expect(completeBranch).not.toContain('mindwtrRemoveTaskReminders');
+      expect(module.match(/RCT_EXPORT_METHOD\(cancelTaskReminderNotifications:/g)).toHaveLength(1);
+      expect(module.match(/static BOOL mindwtrIsReminderOfTask\(/g)).toHaveLength(1);
       expect(module).toContain('[(NSString *)kind hasPrefix:@"task-"]');
+      expect(module).toContain('[(NSString *)kind isEqualToString:@"pomodoro"]) return NO;');
+      expect(module).toContain('dispatch_group_notify(group, dispatch_get_main_queue(), ^{ resolve(nil); });');
       expect(applyAlarmIosCompleteCancelsTaskPatchToSource(module)).toBe(module);
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it('upgrades the earlier iOS eager-cancel patch to saved completion cancellation', () => {
+    const input = `// Mindwtr task reminder cancel: old injected helper
+static BOOL mindwtrIsReminderOfTask() { return YES; }
+static void mindwtrRemoveTaskReminders() {}
+static NSString *stringify(NSDictionary *notification) {
+}
+           mindwtrRemoveTaskReminders(response.notification);
+RCT_EXPORT_METHOD(removeAllFiredNotifications){
+}`;
+    const output = applyAlarmIosCompleteCancelsTaskPatchToSource(input);
+    expect(output).not.toContain('mindwtrRemoveTaskReminders');
+    expect(output.match(/static BOOL mindwtrIsReminderOfTask\(/g)).toHaveLength(1);
+    expect(output.match(/RCT_EXPORT_METHOD\(cancelTaskReminderNotifications:/g)).toHaveLength(1);
+    expect(applyAlarmIosCompleteCancelsTaskPatchToSource(output)).toBe(output);
+  });
 
   it('keeps the Gradle compatibility rewrite in place', () => {
     const input = `apply plugin: 'maven'

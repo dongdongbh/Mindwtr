@@ -1,6 +1,8 @@
 // Reminder alarms check for the isolated native Android development app (pass B3, R1 native).
 //
 //   node apps/android-native/scripts/check-reminders-device.mjs <adb-serial> [apk]
+//   Add --replacement-only for real base/due-repeat replacement, old-owner cancellation and latest Snooze/Done,
+//   using existing notification permission and alarm access; phone settings stay unchanged.
 //
 // Installs the debug APK with `install -r` (existing development data stays) and checks, from `dumpsys alarm`, `dumpsys
 // notification`, the shade, and the app's own files (the database, its journal and RN's RKStorage alarm map, pulled through
@@ -31,14 +33,15 @@
 // app and leaves the device on its home screen. Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { check, connect, evidenced, fail, inEditor, Stopped, tab, tagged } from './device.mjs';
 
-const [serial, apkArg] = process.argv.slice(2);
+const replacementOnly = process.argv.includes('--replacement-only');
+const [serial, apkArg] = process.argv.slice(2).filter((arg) => arg !== '--replacement-only');
 if (!serial) {
-    console.error('usage: node check-reminders-device.mjs <adb-serial> [apk]');
+    console.error('usage: node check-reminders-device.mjs <adb-serial> [apk] [--replacement-only]');
     process.exit(2);
 }
 const app = resolve(import.meta.dirname, '..');
@@ -165,7 +168,7 @@ const coreDetails = (keys, nowMs) => {
  * pushed back over the app's, its WAL removed. [recurringId] repeats daily; task reminders are set to [reminders] (null: the key
  * removed, as an unset setting). Answers the setting as it was.
  */
-const editDb = (recurringId, reminders) => {
+const editDb = (recurringId, reminders, repeatId) => {
     if (pid()) fail('the app must be stopped to edit its database');
     const db = pullDb();
     const before = execFileSync('bun', ['-e', `
@@ -173,13 +176,14 @@ const editDb = (recurringId, reminders) => {
         const db = new Database(process.env.CHECK_DB);
         const { value } = db.query("SELECT json_extract(data, '$.notificationsEnabled') AS value FROM settings WHERE id = 1").get() ?? {};
         if (process.env.CHECK_ID) db.query("UPDATE tasks SET recurrence = ? WHERE id = ?").run(JSON.stringify({ rule: 'daily', strategy: 'strict' }), process.env.CHECK_ID);
+        if (process.env.CHECK_REPEAT_ID) db.query("UPDATE tasks SET repeatReminderMinutes = 5 WHERE id = ?").run(process.env.CHECK_REPEAT_ID);
         const setting = JSON.parse(process.env.CHECK_SETTING);
         if (setting === null) db.query("UPDATE settings SET data = json_remove(data, '$.notificationsEnabled') WHERE id = 1").run();
         else db.query("UPDATE settings SET data = json_set(data, '$.notificationsEnabled', json(?)) WHERE id = 1").run(String(setting));
         db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
         db.close();
         console.log(value === undefined || value === null ? 'null' : String(Boolean(value)));
-    `], { encoding: 'utf8', env: { ...process.env, CHECK_DB: db, CHECK_ID: recurringId ?? '', CHECK_SETTING: JSON.stringify(reminders) } }).trim();
+    `], { encoding: 'utf8', env: { ...process.env, CHECK_DB: db, CHECK_ID: recurringId ?? '', CHECK_REPEAT_ID: repeatId ?? '', CHECK_SETTING: JSON.stringify(reminders) } }).trim();
     const next = `files/${DB}.reminders-new`;
     adbRaw('push', db, STAGED);
     try {
@@ -209,6 +213,8 @@ const notifications = () => sh('dumpsys notification --noredact').split(/\n(?=\s
     .filter((block) => block.includes(`pkg=${PKG}`))
     .map((block) => ({
         id: Number(/tech\.dongdongbh\.mindwtr\.reminderAlarmId=\w+ \((-?\d+)\)/.exec(block)?.[1] ?? /\bid=(-?\d+)/.exec(block)?.[1]),
+        slotId: Number(/\bid=(-?\d+)/.exec(block)?.[1]),
+        tag: /\btag=([^\s,)]+)/.exec(block)?.[1] ?? '',
         channel: /(?:mChannelId|channelId|channel)=([\w.-]+)/.exec(block)?.[1] ?? '',
         title: /android\.title=\w+ \((.*)\)/.exec(block)?.[1] ?? '',
         text: /android\.text=\w+ \((.*)\)/.exec(block)?.[1] ?? '',
@@ -311,10 +317,68 @@ const restore = async () => {
             reminderSetting = undefined;
         }
     } catch (error) { console.error(`RESTORE FAILED: task reminders are still on in the development data (${error.message})`); process.exitCode = 1; }
-    try { sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM ${exactMode}`); } catch { /* device gone */ }
+    try { if (!replacementOnly) sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM ${exactMode}`); } catch { /* device gone */ }
     try { if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME'); } catch { /* device gone */ }
-    try { sh(`settings put system accelerometer_rotation ${originalAccelerometer === 'null' ? 1 : originalAccelerometer}`); } catch { /* device gone */ }
+    try { if (!replacementOnly) sh(`settings put system accelerometer_rotation ${originalAccelerometer === 'null' ? 1 : originalAccelerometer}`); } catch { /* device gone */ }
     try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
+};
+
+/** Real base/due-repeat alarms, latest buttons, and cancellation of the old alarm after replacement. No phone settings changed. */
+const replacementCheck = async () => {
+    check(/android\.permission\.POST_NOTIFICATIONS: granted=true/.test(sh(`dumpsys package ${PKG}`)), 'native Dev already has notification permission');
+    console.log(`info - existing native Dev exact-alarm access: ${exactMode} (left unchanged)`);
+    await killApp();
+    const at = phoneNow() + 60_000;
+    const names = [title(1), title(2)];
+    for (const name of names) capture(name, { dueDate: new Date(at).toISOString() });
+    await launchAndPlan();
+    const ids = names.map((name) => stored(name)[0].id);
+    ids.forEach((id) => openTasks.add(id));
+    await killApp();
+    reminderSetting = editDb(null, true, ids[0]);
+    await launchAndPlan();
+    const key = `task:${ids[0]}`;
+    const map = alarmMap();
+    const oldId = map[key]?.id;
+    const latestId = map[`${key}:r1`]?.id;
+    check(Number.isInteger(oldId) && Number.isInteger(latestId) && oldId !== latestId, 'base and due-repeat have distinct alarm ids');
+    sh('input keyevent KEYCODE_HOME');
+    const [first] = await waitUntil('the base reminder', () => shown(names[0]).length ? shown(names[0]) : null, 240_000);
+    await waitUntil('the other task reminder', () => shown(names[1]).length === 1, 30_000);
+    check(first.id === oldId && first.slotId === 1 && first.tag !== 'null', 'base notification uses its task tag and slot id 1');
+    check(shown(names[1])[0].tag !== first.tag, 'different tasks have different notification slots');
+    console.log('info - waiting for the real 5-minute due-repeat alarm');
+    const latest = await waitUntil('the due-repeat replacement', () => shown(names[0]).find((item) => item.id === latestId), 480_000);
+    check(shown(names[0]).length === 1 && latest.tag === first.tag && latest.slotId === 1, 'due-repeat replaced the base notification in the same task slot');
+    check(latest.channel === CHANNEL && latest.actions.join(',') === 'COMPLETE,SNOOZE,DISMISS', 'replacement retains the reminder channel and all latest actions');
+    sh('cmd statusbar expand-notifications');
+    await sleep(1500);
+    writeFileSync(resolve(work, 'replacement-shade.png'), adbRaw('exec-out', 'screencap', '-p'));
+    closeShade();
+    const marker = 'releaseCheck=v1.3.5/native-reminder-replacement operation=cancelled taggedRemoved=0';
+    const cancellations = count(allLogs(), marker);
+    sh(`am broadcast -f 0x20 -n ${RESCHEDULE} -a ${DEBUG_RESCHEDULE} --ei cancelReminderId ${oldId}`);
+    await waitUntil('the old alarm cancellation diagnostic', () => count(allLogs(), marker) > cancellations);
+    check(shown(names[0]).length === 1 && shown(names[0])[0].id === latestId, 'cancelling the old alarm leaves its replacement visible');
+    setProp('snooze_minutes', '0.25');
+    const snoozes = () => count(allLogs(), 'Native Android core work', '"job":"reminderSnooze","outcome":"success"');
+    const beforeSnooze = snoozes();
+    await tapInShade(names[0], 'SNOOZE');
+    await waitUntil('the latest Snooze action', () => snoozes() > beforeSnooze);
+    closeShade();
+    check(shown(names[0]).length === 0 && shown(names[1]).length === 1, 'Snooze removes only its current task slot');
+    const snoozed = await waitUntil('the snoozed reminder', () => shown(names[0]).find((item) => item.id >= 2 ** 30), 180_000);
+    check(snoozed.tag === first.tag && shown(names[0]).length === 1, 'Snooze returns in the same task slot under its new alarm id');
+    const beforeDone = stored(names[0])[0];
+    await tapInShade(names[0], 'COMPLETE');
+    await waitUntil('the latest Done action', () => stored(names[0])[0].status === 'done');
+    closeShade();
+    check(stored(names[0])[0].rev === beforeDone.rev + 1 && shown(names[0]).length === 0 && shown(names[1]).length === 1,
+        'Done stores once and removes only its task notification');
+    openTasks.delete(ids[0]);
+    check(count(allLogs(), marker) > cancellations, 'fresh native cancellation diagnostic ran without removing the replacement');
+    writeFileSync(resolve(work, 'replacement-check.log'), allLogs().split('\n').filter((line) => line.includes('releaseCheck=v1.3.5/native-reminder-replacement')).join('\n'));
+    console.log('Reminder replacement device check passed');
 };
 
 try {
@@ -325,6 +389,9 @@ try {
     const beforeInstall = front();
     if (!beforeInstall.includes(`${PKG}/`) && !beforeInstall.includes(`${home}/`)) throw new Stopped(`another app is in front: ${beforeInstall.trim()}`);
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
+    if (replacementOnly) {
+        await replacementCheck();
+    } else {
     sh(`pm grant ${PKG} android.permission.POST_NOTIFICATIONS`);
     // Exact alarms off for (1) and (2) (Android 14 gives a new install none); this run sets the access back at the end.
     sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM deny`);
@@ -581,6 +648,7 @@ try {
     }
 
     console.log('Reminders device check passed');
+    }
 } catch (error) {
     evidenced(error);
     try {

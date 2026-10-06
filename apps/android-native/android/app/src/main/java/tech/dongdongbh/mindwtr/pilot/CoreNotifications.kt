@@ -11,9 +11,11 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONObject
+import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import java.util.UUID
 
 /**
@@ -78,13 +80,18 @@ internal object CoreNotifications {
      * Removes what alarm [id] put in the tray: a notification under its own id, or its task's slot while [id] is still the reminder
      * shown there. A reminder that a later one of its task replaced is gone already, and the later one stays.
      */
-    fun cancelReminder(context: Context, id: Int) {
+    fun cancelReminder(context: Context, id: Int): Unit = synchronized(ReminderAlarms.LOCK) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.cancel(id)
+        var taggedRemoved = 0
         for (shown in manager.activeNotifications) {
             if (shown.tag == null || NotificationCompat.getChannelId(shown.notification) != REMINDER_CHANNEL) continue
-            if (reminderAlarmId(shown) == id) manager.cancel(shown.tag, shown.id)
+            if (reminderAlarmId(shown) == id) {
+                manager.cancel(shown.tag, shown.id)
+                taggedRemoved += 1
+            }
         }
+        Log.i(CoreHost.TAG, "Native Android reminder slot releaseCheck=v1.3.5/native-reminder-replacement operation=cancelled taggedRemoved=$taggedRemoved")
     }
 
     /**

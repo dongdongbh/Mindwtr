@@ -30,6 +30,7 @@ fn main() {
             .flag("-fobjc-arc")
             .compile("mindwtr_macos_notification_bridge");
         println!("cargo:rustc-link-lib=framework=Foundation");
+        println!("cargo:rustc-link-lib=framework=UserNotifications");
         println!("cargo:rustc-link-lib=framework=AppKit");
         println!("cargo:rustc-link-lib=framework=EventKit");
         println!("cargo:rustc-link-lib=framework=CloudKit");

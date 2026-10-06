@@ -146,16 +146,15 @@ mod imp {
             let body = body.unwrap_or_default();
             // A daemon that no longer shows the replaced notification (closed, expired) shows this
             // one as new, which is what a reminder wants too.
-            let replaces_id = match tag {
-                Some(tag) => self
-                    .replaced_ids
-                    .lock()
-                    .await
-                    .get(tag)
-                    .copied()
-                    .unwrap_or(0),
-                None => 0,
+            // ponytail: serialize tagged sends globally; use per-tag locks if reminder throughput
+            // matters. Keep lookup, Notify and update together so concurrent reminders cannot stack.
+            let mut replaced_ids = match tag {
+                Some(_) => Some(self.replaced_ids.lock().await),
+                None => None,
             };
+            let replaces_id = tag
+                .and_then(|tag| replaced_ids.as_ref()?.get(tag).copied())
+                .unwrap_or(0);
             let id: u32 = proxy
                 .call(
                     "Notify",
@@ -172,9 +171,14 @@ mod imp {
                 )
                 .await
                 .map_err(|error| classify_zbus_error(&error))?;
-            if let Some(tag) = tag {
-                self.replaced_ids.lock().await.insert(tag.to_string(), id);
+            if let (Some(tag), Some(replaced_ids)) = (tag, replaced_ids.as_mut()) {
+                replaced_ids.insert(tag.to_string(), id);
             }
+            log::info!(
+                "Linux notification acknowledged tagged={} replaced={} extra.releaseCheck=v1.3.5/linux-notification-replacement",
+                tag.is_some(),
+                replaces_id != 0
+            );
 
             Ok(())
         }
@@ -432,6 +436,35 @@ mod imp {
                 .collect();
             // The mock daemon answers every Notify with id 41.
             assert_eq!(replaced, vec![0, 41, 0, 0]);
+        }
+
+        #[ignore = "requires an isolated session bus"]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn concurrent_reminders_with_the_same_tag_do_not_stack() {
+            assert_isolated_session();
+            let (_service, state, calls, received) =
+                mock_service(MockBehavior::Delay(Duration::from_millis(50))).await;
+            let tag = Some("mindwtr-reminder:task:concurrent".to_string());
+
+            let (first, second) = tokio::join!(
+                send_notification(&state, "Due".to_string(), None, tag.clone()),
+                send_notification(&state, "Repeat".to_string(), None, tag.clone())
+            );
+            first.expect("first concurrent Notify acknowledgement");
+            second.expect("second concurrent Notify acknowledgement");
+            send_notification(&state, "Next repeat".to_string(), None, tag)
+                .await
+                .expect("subsequent Notify acknowledgement");
+
+            let replaced: Vec<u32> = received
+                .lock()
+                .await
+                .iter()
+                .map(|notification| notification.replaces_id)
+                .collect();
+            assert_eq!(replaced, vec![0, 42, 42]);
+            assert_eq!(calls.load(Ordering::SeqCst), 3);
+            assert_eq!(state.connection_creations.load(Ordering::SeqCst), 1);
         }
 
         #[ignore = "requires an isolated session bus"]

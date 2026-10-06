@@ -500,6 +500,11 @@ class ReminderRescheduleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
         if (action !in ACTIONS && !(action == DEBUG_RESCHEDULE && BuildConfig.DEBUG)) return
+        // Device check only: cancellation after another alarm replaced the old alarm's task slot.
+        if (action == DEBUG_RESCHEDULE && BuildConfig.DEBUG && intent.hasExtra("cancelReminderId")) {
+            CoreNotifications.cancelReminder(context, intent.getIntExtra("cancelReminderId", 0))
+            return
+        }
         Log.i(CoreHost.TAG, "Native Android reminders reschedule action=$action")
         // Held until WorkManager stored the job: a process that ends first would lose the remake until the next start.
         runCatching { CoreWork.enqueueDurably(this, context, CoreJob.REMINDERS, mapOf("mode" to "rebuild")) }
