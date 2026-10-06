@@ -17,10 +17,12 @@ import { isAttachmentPresenceRepairCandidate, repairMissingRemoteAttachments } f
 import {
   applyAttachmentPatches,
   collectAttachmentsById,
+  assertBufferedAttachmentUploadSize,
   isAttachmentUploadAdmissionError,
   MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
   reportProgress,
   validateAttachmentHash,
+  WebdavHostUploadLimitError,
   type AttachmentDownloadExpectation,
 } from './attachment-transfer';
 import { markAttachmentUnrecoverable, validateAttachmentForUpload } from './attachment-validation';
@@ -147,6 +149,9 @@ export type MobileAttachmentBackendsHost = {
     | 'retainFileSyncAttachmentPublicationForInvalidTarget'
   >;
   log: Pick<MobileSyncLogPort, 'sanitize'>;
+  /** Optional plaintext-byte admission for a host's buffered WebDAV transport.
+   * The caller reserves encryption-envelope bytes inside its own wire limit. */
+  maxWebdavBufferedUploadBytes?: number;
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
 };
 
@@ -214,8 +219,13 @@ const isAbortLikeError = (error: unknown, signal?: AbortSignal): boolean => (
 export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHost) => {
   const core: MobileAttachmentBackendsCoreFunctions = { ...CORE_FUNCTIONS, ...host.core };
   const { fs, files, common, installer } = host;
+  const maxWebdavBufferedUploadBytes = host.maxWebdavBufferedUploadBytes;
+  if (maxWebdavBufferedUploadBytes !== undefined
+    && (!Number.isSafeInteger(maxWebdavBufferedUploadBytes) || maxWebdavBufferedUploadBytes <= 0)) {
+    throw new Error('WebDAV buffered upload capability is invalid');
+  }
 
-  const syncWebdavAttachments = async (
+  const runWebdavAttachmentPass = async (
     appData: AppData,
     webDavConfig: MobileWebDavStoredConfig,
     baseSyncUrl: string,
@@ -305,7 +315,9 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     // Every pass writes only to per-attachment copies and records them here; the patches are
     // folded into a fresh document at the end. `attachmentsById` is updated alongside so a
     // later pass reads the earlier pass's values.
-    const allPatches = await common.migrateAttachmentsLocallyBeforeSync(attachmentsById, signal);
+    const allPatches = await common.migrateAttachmentsLocallyBeforeSync(
+      attachmentsById, signal, maxWebdavBufferedUploadBytes,
+    );
 
     let abortedByRateLimit = false;
     const presenceCandidates: Attachment[] = [];
@@ -440,10 +452,15 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       getLocalFileStat: (path) => files.statAttachmentFile(path),
       computeLocalFileHash: (path) => files.computeAttachmentFileHash(path),
       contentChangePhase: options.phase,
+      maxBufferedUploadBytes: maxWebdavBufferedUploadBytes,
+      assertUploadStat: maxWebdavBufferedUploadBytes === undefined ? undefined : (stat) => {
+        assertBufferedAttachmentUploadSize(stat?.size ?? NaN, maxWebdavBufferedUploadBytes);
+      },
       isFatalError: (error) => (
         isAttachmentSyncAbortError(error, signal)
         || isSyncRemoteMutationFenceError(error)
         || isWebdavRemoteWriteConflictError(error)
+        || (maxWebdavBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error))
       ),
       policy: {
         shouldSkip: () => abortedByRateLimit,
@@ -737,6 +754,26 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       mutated: didMutate ? 'true' : 'false',
     });
     return didMutate ? nextData : false;
+  };
+
+  const syncWebdavAttachments = async (
+    ...args: Parameters<typeof runWebdavAttachmentPass>
+  ): Promise<AppData | false> => {
+    try {
+      return await runWebdavAttachmentPass(...args);
+    } catch (error) {
+      if (maxWebdavBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) {
+        try {
+          files.logAttachmentWarn('WebDAV host upload admission refused', undefined, {
+            releaseCheck: 'v1.3.5/webdav-host-upload-limit', operation: 'upload', outcome: 'refused',
+          });
+        } catch {
+          // Diagnostics must not replace the fatal admission refusal.
+        }
+        throw new WebdavHostUploadLimitError();
+      }
+      throw error;
+    }
   };
 
   const syncCloudAttachments = async (

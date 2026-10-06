@@ -4,6 +4,7 @@ import { computeSha256Hex } from './attachment-hash';
 import { buildFileSyncGenerationCloudKey } from './attachment-paths';
 import { DropboxConflictError, DropboxFileNotFoundError } from './dropbox';
 import { WebDavRemoteWriteConflictError } from './webdav';
+import { WebdavHostUploadLimitError } from './attachment-transfer';
 import { createMobileAttachmentFiles, type MobileAttachmentSafPort } from './mobile-attachment-files';
 import { createMobileAttachmentCommon, type MobileAttachmentUploadTask } from './mobile-attachment-common';
 import { createMobileAttachmentBackends, type MobileAttachmentBackendsCoreFunctions } from './mobile-attachment-backends';
@@ -52,6 +53,7 @@ const setup = (options: {
   saf?: MobileAttachmentSafPort;
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
   createUploadTask?: () => MobileAttachmentUploadTask | null;
+  maxWebdavBufferedUploadBytes?: number;
 } = {}) => {
   const memory = createMemoryFileSystem({ saf: options.saf });
   const { storage } = createMemoryStorage();
@@ -107,9 +109,10 @@ const setup = (options: {
     common,
     installer,
     log,
+    maxWebdavBufferedUploadBytes: options.maxWebdavBufferedUploadBytes,
     core: { withRetry: (operation) => operation(), ...options.core },
   });
-  return { backends, memory, lines, installer, order };
+  return { backends, memory, lines, installer, order, files, common };
 };
 
 const webdavConfig = { url: `${BASE_URL}/data.json`, username: 'user', password: 'pw' };
@@ -131,6 +134,214 @@ describe('WebDAV attachment pass', () => {
     }));
     return requests;
   };
+
+  it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects an invalid optional host upload capability (%s) at construction', (limit) => {
+      expect(() => setup({ maxWebdavBufferedUploadBytes: limit }))
+        .toThrow('WebDAV buffered upload capability is invalid');
+    },
+  );
+
+  it('accepts the exact plaintext cap using actual stat rather than stale attachment size', async () => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory, lines } = setup({ maxWebdavBufferedUploadBytes: LOCAL.byteLength });
+    memory.put(LOCAL_URI, LOCAL);
+
+    const result = await backends.syncWebdavAttachments(
+      withAttachment(fileAttachment({ size: 1 })), webdavConfig, BASE_URL,
+    );
+
+    expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
+    expect(attachmentOf(result)?.contentSize).toBe(LOCAL.byteLength);
+    expect(requests.filter((request) => request.method === 'PUT')).toHaveLength(1);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
+  });
+
+  it.each([
+    ['first upload', {}, undefined],
+    ['pending post-merge upload', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), pendingContentUpload: true }, 'post-merge'],
+    ['pending prepare identity', { cloudKey: 'attachments/att-1.txt', pendingContentUpload: true }, 'prepare'],
+    ['prepare content hash', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), contentSize: 1, contentMtimeMs: 0 }, 'prepare'],
+  ] as const)('refuses a >16MiB source before reads/copies/writes for %s', async (_name, overrides, phase) => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory, lines, files } = setup({
+      maxWebdavBufferedUploadBytes: 8 * 1024 * 1024,
+      // Keep the remote generation selected so prepare really reaches content hashing.
+      core: { webdavFileExists: async () => true },
+    });
+    memory.put(LOCAL_URI, LOCAL);
+    const getInfo = memory.fs.getInfo;
+    vi.spyOn(memory.fs, 'getInfo').mockImplementation(async (uri) => {
+      const info = await getInfo(uri);
+      return uri === LOCAL_URI ? { ...info, size: 16 * 1024 * 1024 + 1 } : info;
+    });
+    const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+    const input = withAttachment(fileAttachment({ ...overrides, size: 1 }));
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { phase }))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect(hash).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+    expect(requests.filter((request) => ['MKCOL', 'PUT', 'DELETE'].includes(request.method))).toEqual([]);
+    expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toEqual([{
+      level: 'warn', message: 'WebDAV host upload admission refused',
+      extra: { releaseCheck: 'v1.3.5/webdav-host-upload-limit', operation: 'upload', outcome: 'refused' },
+    }]);
+  });
+
+  it.each([undefined, 'prepare'] as const)('refuses unavailable source size before reads in phase %s', async (phase) => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory, files } = setup({ maxWebdavBufferedUploadBytes: LOCAL.byteLength });
+    memory.put(LOCAL_URI, LOCAL);
+    vi.spyOn(files, 'statAttachmentFile').mockResolvedValue(null);
+    const input = withAttachment(fileAttachment(phase ? { cloudKey: 'attachments/att-1.txt', pendingContentUpload: true } : {}));
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { phase }))
+      .rejects.toThrow('WebDAV attachment upload cannot be admitted by this host transport');
+
+    expect(input).toEqual(before);
+    expect(memory.calls.filter((call) => /^(readBytes|copy|sha256) /.test(call))).toEqual([]);
+    expect(requests.filter((request) => ['MKCOL', 'PUT'].includes(request.method))).toEqual([]);
+  });
+
+  it('refuses an oversized local migration before copying the source', async () => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory } = setup({ maxWebdavBufferedUploadBytes: 3 });
+    const foreignUri = 'file:///data/files/provider-copy.txt';
+    memory.put(foreignUri, LOCAL);
+    const input = withAttachment(fileAttachment({ uri: foreignUri, size: 1 }));
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.calls.filter((call) => /^(readBytes|copy|sha256) /.test(call))).toEqual([]);
+    expect(requests).toEqual([]);
+  });
+
+  it('refuses a local migration with unavailable size before copying or reading', async () => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory, files } = setup({ maxWebdavBufferedUploadBytes: LOCAL.byteLength });
+    const foreignUri = 'file:///data/files/provider-copy.txt';
+    memory.put(foreignUri, LOCAL);
+    vi.spyOn(files, 'statAttachmentFile').mockResolvedValue(null);
+    const input = withAttachment(fileAttachment({ uri: foreignUri }));
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.calls.filter((call) => /^(readBytes|copy|sha256) /.test(call))).toEqual([]);
+    expect(requests).toEqual([]);
+  });
+
+  it('refuses snapshot growth before hashing or remote mutation and removes only its scratch copy', async () => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory, files } = setup({ maxWebdavBufferedUploadBytes: LOCAL.byteLength });
+    memory.put(LOCAL_URI, LOCAL);
+    const copy = memory.fs.copy;
+    vi.spyOn(memory.fs, 'copy').mockImplementation(async (from, to) => {
+      await copy(from, to);
+      memory.put(to, new Uint8Array(LOCAL.byteLength + 1));
+    });
+    const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+    const input = withAttachment(fileAttachment());
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect([...memory.files.keys()]).toEqual([LOCAL_URI]);
+    expect(hash).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|sha256) /.test(call))).toEqual([]);
+    expect(requests).toEqual([]);
+  });
+
+  it('aborts without returning earlier patches after a confirmed upload then an oversized source', async () => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory } = setup({ maxWebdavBufferedUploadBytes: LOCAL.byteLength });
+    const secondUri = `${MANAGED}att-2.txt`;
+    memory.put(LOCAL_URI, LOCAL);
+    memory.put(secondUri, new Uint8Array(LOCAL.byteLength + 1));
+    const input = withAttachment(fileAttachment());
+    input.tasks[0].attachments!.push(fileAttachment({ id: 'att-2', uri: secondUri, title: 'second.txt' }));
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(requests.filter((request) => request.method === 'PUT')).toHaveLength(1);
+    expect(input).toEqual(before);
+    expect([...memory.files.keys()].sort()).toEqual([LOCAL_URI, secondUri].sort());
+  });
+
+  it('checks the bytes of a snapshot that grows after its stat before hashing/uploading', async () => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory } = setup({ maxWebdavBufferedUploadBytes: LOCAL.byteLength });
+    memory.put(LOCAL_URI, LOCAL);
+    const read = memory.fs.readBytes;
+    vi.spyOn(memory.fs, 'readBytes').mockImplementation(async (uri) => {
+      if (uri.includes('mindwtr-upload-')) return new Uint8Array(LOCAL.byteLength + 1);
+      return read(uri);
+    });
+    const input = withAttachment(fileAttachment());
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect([...memory.files.keys()]).toEqual([LOCAL_URI]);
+    expect(requests).toEqual([]);
+  });
+
+  it('retains the existing uncapped RN upload behavior when capability is absent', async () => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory, lines } = setup();
+    memory.put(LOCAL_URI, LOCAL);
+
+    const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL);
+
+    expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
+    expect(requests.filter((request) => request.method === 'PUT')).toHaveLength(1);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
+  });
+
+  it('keeps an unchanged cloud attachment above the host cap without hashing or uploading', async () => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory, files, lines } = setup({
+      maxWebdavBufferedUploadBytes: 4,
+      core: { webdavFileExists: async () => true },
+    });
+    memory.put(LOCAL_URI, LOCAL);
+    const current = { mtimeMs: 1234, size: 16 * 1024 * 1024 + 1 };
+    vi.spyOn(files, 'statAttachmentFile').mockResolvedValue(current);
+    const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+    const input = withAttachment(fileAttachment({
+      cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64),
+      contentMtimeMs: current.mtimeMs, contentSize: current.size,
+    }));
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { phase: 'prepare' }))
+      .resolves.toBe(false);
+
+    expect(input).toEqual(before);
+    expect(hash).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(readBytes|copy|sha256) /.test(call))).toEqual([]);
+    expect(requests).toEqual([]);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
+  });
 
   it('sends a new upload with If-None-Match: * and records the cloud key only after the PUT', async () => {
     const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
