@@ -74,7 +74,17 @@
             ioOpen -= 1;
             var answer = JSON.parse(text);
             // The body comes apart from its answer, so no copy of it is wrapped in JSON.
-            if (answer.body) answer.base64 = hostCall(native().ioBody());
+            if (answer.body) {
+                try { answer.base64 = hostCall(native().ioBody()); }
+                catch (_error) {
+                    // Close can win after metadata. Settle that request rather than
+                    // stranding it after ioOpen was decremented; never expose bytes/errors.
+                    answer.body = false;
+                    answer.error = 'I/O response body is unavailable';
+                    delete answer.errorCode;
+                    delete answer.limitBytes;
+                }
+            }
             var entry = ioPending.get(answer.id);
             ioPending.delete(answer.id);
             // A cancelled call's late answer has no promise left to settle.
@@ -679,7 +689,16 @@
                 var id = startIo(hostCall(native().netFetch(JSON.stringify(payload))), function (answer) {
                     signal.removeEventListener('abort', onAbort);
                     try {
-                        if (answer.error !== undefined) throw new TypeError(answer.error);
+                        if (answer.error !== undefined) {
+                            var failure = new TypeError(answer.error);
+                            if (answer.errorCode === 'response-too-large'
+                                && Number.isSafeInteger(answer.limitBytes) && answer.limitBytes > 0) {
+                                failure = new TypeError('Response exceeds the ' + answer.limitBytes + ' byte download limit');
+                                failure.code = 'response-too-large';
+                                failure.limitBytes = answer.limitBytes;
+                            }
+                            throw failure;
+                        }
                         var response = new global.Response(null, { status: answer.status, statusText: answer.statusText, headers: answer.headers });
                         response.url = answer.url;
                         response.redirected = answer.redirected;

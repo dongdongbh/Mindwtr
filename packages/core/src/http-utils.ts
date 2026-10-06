@@ -313,6 +313,18 @@ export class ResponseTooLargeError extends Error {
     }
 }
 
+/** A native transport refused its buffered body; ordinary RN reader limits stay separate. */
+export const isHostResponseTooLargeError = (
+    error: unknown,
+): error is Error & { code: 'response-too-large'; limitBytes: number } => {
+    if (!(error instanceof Error)) return false;
+    const fields = error as Error & { code?: unknown; limitBytes?: unknown };
+    return fields.code === 'response-too-large'
+        && typeof fields.limitBytes === 'number'
+        && Number.isSafeInteger(fields.limitBytes)
+        && fields.limitBytes > 0;
+};
+
 const cancelUnlockedResponseBody = (res: Response): void => {
     const body = res.body;
     if (!body || body.locked || res.bodyUsed) return;

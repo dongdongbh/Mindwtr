@@ -56,17 +56,23 @@ public final class CoreHost: @unchecked Sendable {
     private let engine: Engine
     private let localAttachmentRequests = NativeAttachmentLocalRequests()
 
-    public init(databaseURL: URL, bundleURL: URL) {
-        engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL, localRequests: localAttachmentRequests)
+    public init(databaseURL: URL, bundleURL: URL,
+                deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
+        engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL,
+                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests)
     }
 
     #if DEBUG
-    public convenience init(databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage) {
-        self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: HostIOFaults(), legacyStorage: legacyStorage)
+    public convenience init(databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage,
+                            deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
+        self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: HostIOFaults(),
+                  legacyStorage: legacyStorage, deviceStorage: deviceStorage)
     }
 
-    init(databaseURL: URL, bundleURL: URL, faults: HostIOFaults, legacyStorage: LegacyRNStorage? = nil) {
-        engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL, legacyStorage: legacyStorage, localRequests: localAttachmentRequests)
+    init(databaseURL: URL, bundleURL: URL, faults: HostIOFaults, legacyStorage: LegacyRNStorage? = nil,
+         deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
+        engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL, legacyStorage: legacyStorage,
+                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests)
         engine.faults = faults
     }
     #endif
@@ -695,13 +701,16 @@ private final class Engine: @unchecked Sendable {
     private let journalURL: URL
     private let editorDrafts: EditorDraftStore
     private let legacyStorage: LegacyRNStorage?
+    private let deviceStorageLocation: (containerURL: URL, bundleIdentifier: String)?
+    private var deviceStorage: NativeDeviceKV?
     private var context: JSContext?
     private var database: SQLiteBridge?
     private var attachmentJobs: NativeAttachmentFileJobs?
     private let localRequests: NativeAttachmentLocalRequests
     private var httpJobs: NativeHTTPJobs?
     private var secretJobs: NativeSecretJobs?
-    private enum IOBodySource { case file, http }
+    private var cryptoJobs: NativeCryptoJobs?
+    private enum IOBodySource { case file, http, crypto }
     private var ioBodySource: IOBodySource?
     private var preferredIO = 1
     private var attachmentGeneration: UInt64 = 0
@@ -984,7 +993,8 @@ private final class Engine: @unchecked Sendable {
         return true
     }
 
-    init(queue: DispatchQueue, databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage? = nil, localRequests: NativeAttachmentLocalRequests) {
+    init(queue: DispatchQueue, databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage? = nil,
+         deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil, localRequests: NativeAttachmentLocalRequests) {
         self.queue = queue
         self.localRequests = localRequests
         self.databaseURL = databaseURL
@@ -994,6 +1004,7 @@ private final class Engine: @unchecked Sendable {
         backupImportFile = NativeBackupImportFile(libraryRoot: databaseURL.deletingLastPathComponent())
         backupOperationFiles = NativeBackupOperationFiles(libraryRoot: databaseURL.deletingLastPathComponent())
         self.legacyStorage = legacyStorage
+        self.deviceStorageLocation = deviceStorage
         journalURL = databaseURL.appendingPathExtension("pending.json")
         editorDrafts = EditorDraftStore(databaseURL: databaseURL)
     }
@@ -1056,6 +1067,14 @@ private final class Engine: @unchecked Sendable {
             try DurableFile.sync(databaseURL.deletingLastPathComponent().deletingLastPathComponent(), directory: true)
             lockFD = open(databaseURL.appendingPathExtension("host-lock").path, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
             guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { throw HostFailure("Native database is already in use or cannot be locked") }
+            // Device storage is explicitly opted in; an unavailable namespace
+            // leaves a refusing port, never an empty fallback or failed boot.
+            if let location = deviceStorageLocation {
+                deviceStorage = try? NativeDeviceKV(containerURL: location.containerURL, bundleIdentifier: location.bundleIdentifier)
+                #if DEBUG
+                if let deviceStorage { faults?.configureDeviceStorage?(deviceStorage) }
+                #endif
+            }
             // Optional platform capability: failure leaves attachments unbound,
             // never prevents database recovery or leaks the exclusive lock.
             attachmentJobs = try? NativeAttachmentFileJobs(libraryRoot: databaseURL.deletingLastPathComponent())
@@ -1065,9 +1084,12 @@ private final class Engine: @unchecked Sendable {
             if let httpJobs { faults?.configureHTTPJobs?(httpJobs) }
             secretJobs = try NativeSecretJobs(registry: localRequests, faults: faults)
             if let secretJobs { faults?.configureSecretJobs?(secretJobs) }
+            cryptoJobs = NativeCryptoJobs(registry: localRequests, faults: faults)
+            if let cryptoJobs { faults?.configureCryptoJobs?(cryptoJobs) }
             #else
             httpJobs = NativeHTTPJobs(registry: localRequests)
             secretJobs = NativeSecretJobs(registry: localRequests)
+            cryptoJobs = NativeCryptoJobs(registry: localRequests)
             #endif
             let httpGeneration = attachmentGeneration
             httpJobs?.setWake { [weak self] in
@@ -1078,6 +1100,13 @@ private final class Engine: @unchecked Sendable {
                 }
             }
             secretJobs?.setWake { [weak self] in
+                guard let self else { return }
+                self.queue.async { [weak self] in
+                    guard let self, self.attachmentGeneration == httpGeneration else { return }
+                    self.scheduleAttachmentIdle(immediate: true)
+                }
+            }
+            cryptoJobs?.setWake { [weak self] in
                 guard let self else { return }
                 self.queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == httpGeneration else { return }
@@ -15857,7 +15886,7 @@ private final class Engine: @unchecked Sendable {
 
     private func scheduleAttachmentIdle(immediate: Bool = false) {
         guard started, !closed, !invoking, !recoveryActivationPending, pending == nil,
-              attachmentJobs != nil || httpJobs != nil || secretJobs != nil, let context else { return }
+              attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil, let context else { return }
         let delay = immediate ? 0 : context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? -1
         guard delay.isFinite, delay >= 0 else { return }
         // One scheduled idle turn per generation; completions can move a timer
@@ -15900,6 +15929,89 @@ private final class Engine: @unchecked Sendable {
         return result
     }
 
+    private static var deviceStorageInvalid: HostFailure { HostFailure("Device settings input is invalid") }
+    private static var deviceStorageUnavailable: HostFailure { HostFailure("Device settings storage is unavailable") }
+    private static let deviceStorageFrameLimit = 12 * 1024 * 1024
+
+    private func requireDeviceStorageAdmission() throws -> NativeDeviceKV {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard started, !closed, !recoveryActivationPending, pending == nil,
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
+            throw Self.deviceStorageUnavailable
+        }
+        try requireNoAttachmentDraft()
+        guard let deviceStorage else { throw Self.deviceStorageUnavailable }
+        return deviceStorage
+    }
+    private static func deviceStorageText(_ value: JSValue) throws -> String {
+        guard value.isString, let text = value.toString(), text.utf8.count <= deviceStorageFrameLimit else {
+            throw deviceStorageInvalid
+        }
+        return text
+    }
+    private static func deviceStorageKeys(_ value: JSValue) throws -> [String] {
+        let text = try deviceStorageText(value)
+        guard let keys = try? NativeJSON.jsonObject(with: Data(text.utf8)) as? [String], keys.count <= 64 else {
+            throw deviceStorageInvalid
+        }
+        return keys
+    }
+    private static func deviceStoragePairs(_ value: JSValue) throws -> [(String, String)] {
+        let text = try deviceStorageText(value)
+        guard let pairs = try? NativeJSON.jsonObject(with: Data(text.utf8)) as? [[Any]], pairs.count <= 64 else {
+            throw deviceStorageInvalid
+        }
+        return try pairs.map { pair in
+            guard pair.count == 2, let key = pair[0] as? String, let value = pair[1] as? String else {
+                throw deviceStorageInvalid
+            }
+            return (key, value)
+        }
+    }
+    private static func deviceStorageJSON(_ value: [Any], strings: [String]) throws -> String {
+        var decoded = 0
+        for string in strings {
+            let size = string.utf8.count, next = decoded.addingReportingOverflow(string.utf8.count)
+            guard size <= 1024 * 1024, !next.overflow, next.partialValue <= 8 * 1024 * 1024 else {
+                throw deviceStorageUnavailable
+            }
+            decoded = next.partialValue
+        }
+        let bytes = try JSONSerialization.data(withJSONObject: value)
+        guard bytes.count <= deviceStorageFrameLimit else { throw deviceStorageUnavailable }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+    private func deviceStorageResult(legacySecretRemoval: () -> Bool = { false }, _ work: () throws -> String?) -> String? {
+        dispatchPrecondition(condition: .onQueue(queue))
+        do {
+            let result = try work()
+            let retiredSecret = legacySecretRemoval()
+            guard let runtime = context else { throw Self.deviceStorageUnavailable }
+            let generation = attachmentGeneration
+            queue.async { [weak self, weak runtime] in
+                guard let self, let runtime, self.attachmentGeneration == generation,
+                      self.context === runtime, self.started, !self.closed, !self.invoking else { return }
+                _ = runtime.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeDeviceStorageDelivered", withArguments: [])
+                runtime.exception = nil
+                if retiredSecret {
+                    _ = runtime.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeLegacySecretRetirementDelivered", withArguments: [])
+                    runtime.exception = nil
+                }
+                self.scheduleAttachmentIdle(immediate: true)
+                #if DEBUG
+                self.faults?.commandDiagnostic?("deviceStorageDelivered")
+                if retiredSecret { self.faults?.commandDiagnostic?("legacySecretRetirementDelivered") }
+                #endif
+            }
+            return result
+        } catch {
+            // No filesystem exception, setting name or stored value crosses JSC.
+            let failure = (error as? HostFailure)?.message == Self.deviceStorageInvalid.message
+                ? Self.deviceStorageInvalid : Self.deviceStorageUnavailable
+            return "!MindwtrNativeError:" + failure.message
+        }
+    }
+
     private func requireHTTPAdmission() throws {
         dispatchPrecondition(condition: .onQueue(queue))
         guard started, !closed, !recoveryActivationPending, pending == nil,
@@ -15914,6 +16026,15 @@ private final class Engine: @unchecked Sendable {
         guard started, !closed, !recoveryActivationPending, pending == nil,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
             throw HostFailure("Secure storage bridge is unavailable")
+        }
+        try requireNoAttachmentDraft()
+    }
+
+    private func requireCryptoAdmission() throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard started, !closed, !recoveryActivationPending, pending == nil,
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
+            throw HostFailure("Crypto bridge is unavailable")
         }
         try requireNoAttachmentDraft()
     }
@@ -15936,7 +16057,7 @@ private final class Engine: @unchecked Sendable {
         }
         func secret() throws -> String? {
             guard let answer = try secretJobs?.next() else { return nil }
-            preferredIO = 0
+            preferredIO = 3
             if answer.completed {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
@@ -15952,10 +16073,17 @@ private final class Engine: @unchecked Sendable {
             }
             return answer.json
         }
+        func crypto() throws -> String? {
+            guard let answer = try cryptoJobs?.next() else { return nil }
+            if answer.body { ioBodySource = .crypto }
+            preferredIO = 0
+            return answer.json
+        }
         switch preferredIO {
-        case 1: return try http() ?? secret() ?? file() ?? ""
-        case 2: return try secret() ?? file() ?? http() ?? ""
-        default: return try file() ?? http() ?? secret() ?? ""
+        case 1: return try http() ?? secret() ?? crypto() ?? file() ?? ""
+        case 2: return try secret() ?? crypto() ?? file() ?? http() ?? ""
+        case 3: return try crypto() ?? file() ?? http() ?? secret() ?? ""
+        default: return try file() ?? http() ?? secret() ?? crypto() ?? ""
         }
     }
 
@@ -15981,6 +16109,23 @@ private final class Engine: @unchecked Sendable {
                     self.scheduleAttachmentIdle(immediate: true)
                     #if DEBUG
                     self.faults?.commandDiagnostic?("httpDelivered")
+                    #endif
+                }
+            }
+            return result.base64
+        case .crypto:
+            guard let jobs = cryptoJobs else { throw HostFailure("I/O response body is unavailable") }
+            let result = try jobs.body()
+            if result.completed {
+                let generation = attachmentGeneration
+                queue.async { [weak self] in
+                    guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
+                          !self.invoking, let context = self.context else { return }
+                    _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeCryptoDelivered", withArguments: [])
+                    context.exception = nil
+                    self.scheduleAttachmentIdle(immediate: true)
+                    #if DEBUG
+                    self.faults?.commandDiagnostic?("cryptoDelivered")
                     #endif
                 }
             }
@@ -16124,6 +16269,14 @@ private final class Engine: @unchecked Sendable {
                 return try jobs.submit(json)
             } ?? "!MindwtrNativeError:Secure storage bridge is unavailable"
         }
+        let cryptoCall: @convention(block) (JSValue) -> String = { [weak self] request in
+            guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Crypto request is invalid" }
+            return self.guarded {
+                try self.requireCryptoAdmission()
+                guard let jobs = self.cryptoJobs else { throw HostFailure("Crypto bridge is unavailable") }
+                return try jobs.submit(json)
+            } ?? "!MindwtrNativeError:Crypto bridge is unavailable"
+        }
         let next: @convention(block) () -> String = { [weak self] in
             self?.guarded { try self?.nextIO() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
         }
@@ -16131,8 +16284,63 @@ private final class Engine: @unchecked Sendable {
             self?.guarded { try self?.ioBody() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
         }
         for (name, block) in ["netFetch": netFetch as Any, "netAbort": netAbort as Any, "secretCall": secretCall as Any,
-                              "ioNext": next as Any, "ioBody": body as Any] {
+                              "cryptoCall": cryptoCall as Any, "ioNext": next as Any, "ioBody": body as Any] {
             bridge.setObject(block, forKeyedSubscript: name as NSString)
+        }
+        if deviceStorageLocation != nil {
+            let get: @convention(block) (JSValue) -> String = { [weak self] key in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                return self.deviceStorageResult {
+                    let key = try Self.deviceStorageText(key), store = try self.requireDeviceStorageAdmission()
+                    let value = try store.get(key)
+                    return try Self.deviceStorageJSON([value.map { $0 as Any } ?? NSNull()], strings: value.map { [$0] } ?? [])
+                } ?? "!MindwtrNativeError:Device settings storage is unavailable"
+            }
+            let set: @convention(block) (JSValue, JSValue) -> String? = { [weak self] key, value in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                return self.deviceStorageResult {
+                    let key = try Self.deviceStorageText(key), value = try Self.deviceStorageText(value)
+                    try self.requireDeviceStorageAdmission().set(key, value); return nil
+                }
+            }
+            let remove: @convention(block) (JSValue) -> String? = { [weak self] key in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                var retiredSecret = false
+                return self.deviceStorageResult(legacySecretRemoval: { retiredSecret }) {
+                    let key = try Self.deviceStorageText(key)
+                    try self.requireDeviceStorageAdmission().remove(key)
+                    retiredSecret = NativeDeviceKV.isLegacySecretRemoval([key]); return nil
+                }
+            }
+            let multiGet: @convention(block) (JSValue) -> String = { [weak self] keys in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                return self.deviceStorageResult {
+                    let keys = try Self.deviceStorageKeys(keys), store = try self.requireDeviceStorageAdmission()
+                    let pairs = try store.multiGet(keys)
+                    let strings = pairs.flatMap { pair in [pair.0] + (pair.1.map { [$0] } ?? []) }
+                    return try Self.deviceStorageJSON(pairs.map { [$0.0, $0.1.map { $0 as Any } ?? NSNull()] }, strings: strings)
+                } ?? "!MindwtrNativeError:Device settings storage is unavailable"
+            }
+            let multiSet: @convention(block) (JSValue) -> String? = { [weak self] pairs in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                return self.deviceStorageResult {
+                    let pairs = try Self.deviceStoragePairs(pairs)
+                    try self.requireDeviceStorageAdmission().multiSet(pairs); return nil
+                }
+            }
+            let multiRemove: @convention(block) (JSValue) -> String? = { [weak self] keys in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                var retiredSecret = false
+                return self.deviceStorageResult(legacySecretRemoval: { retiredSecret }) {
+                    let keys = try Self.deviceStorageKeys(keys)
+                    try self.requireDeviceStorageAdmission().multiRemove(keys)
+                    retiredSecret = NativeDeviceKV.isLegacySecretRemoval(keys); return nil
+                }
+            }
+            for (name, block) in ["kvGet": get as Any, "kvSet": set as Any, "kvRemove": remove as Any,
+                                  "kvMultiGet": multiGet as Any, "kvMultiSet": multiSet as Any, "kvMultiRemove": multiRemove as Any] {
+                bridge.setObject(block, forKeyedSubscript: name as NSString)
+            }
         }
         if let jobs = attachmentJobs {
             let fileCall: @convention(block) (JSValue) -> String = { [weak self] request in
@@ -16185,6 +16393,8 @@ private final class Engine: @unchecked Sendable {
         // No file/installer worker survives release of the library lock.
         httpJobs?.shutdown(); httpJobs = nil
         secretJobs?.shutdown(); secretJobs = nil
+        cryptoJobs?.shutdown(); cryptoJobs = nil
+        deviceStorage?.close(); deviceStorage = nil
         ioBodySource = nil
         attachmentJobs?.shutdown(); attachmentJobs = nil
         providerCopy = nil

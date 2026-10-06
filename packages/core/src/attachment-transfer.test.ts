@@ -82,6 +82,34 @@ const deepFreeze = <T>(value: T): T => {
 };
 
 describe('runAttachmentTransferLifecycle', () => {
+    it('checks final immutable snapshot size before upload and disposes a refused snapshot', async () => {
+        const attachment = makeAttachment({});
+        const before = structuredClone(attachment);
+        const dispose = vi.fn(async () => undefined);
+        const onUpload = vi.fn();
+
+        await expect(runLifecycle({
+            attachmentsById: new Map([[attachment.id, attachment]]),
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
+            getLocalFileStat: vi.fn(async () => ({ mtimeMs: 1000, size: 10 })),
+            maxBufferedUploadBytes: 10,
+            assertUploadStat: (stat) => assertBufferedAttachmentUploadSize(stat?.size ?? NaN, 10),
+            createUploadSnapshot: vi.fn(async () => ({
+                sourcePath: '/private/upload-copy', fileHash: 'ab'.repeat(32),
+                stat: { mtimeMs: 1000, size: 11 }, dispose,
+            })),
+            onUpload,
+            onUploadError: vi.fn(),
+            onDownload: vi.fn(),
+            onDownloadError: vi.fn(),
+            isFatalError: (error) => error instanceof AttachmentUploadTooLargeError,
+        })).rejects.toBeInstanceOf(AttachmentUploadTooLargeError);
+
+        expect(onUpload).not.toHaveBeenCalled();
+        expect(dispose).toHaveBeenCalledOnce();
+        expect(attachment).toEqual(before);
+    });
+
     it('rejects an oversized buffered upload before snapshot creation without changing pending metadata', async () => {
         const attachment = makeAttachment({
             cloudKey: 'attachments/attachment-1.txt',

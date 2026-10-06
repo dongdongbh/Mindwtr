@@ -1,4 +1,5 @@
 import { sleep } from './async-utils';
+import { isHostResponseTooLargeError } from './http-utils';
 
 export type RetryOptions = {
     maxAttempts?: number;
@@ -23,6 +24,7 @@ const extractStatus = (error: unknown): number | null => {
 };
 
 export const isRetryableError = (error: unknown): boolean => {
+    if (isHostResponseTooLargeError(error)) return false;
     const status = extractStatus(error);
     if (status === 401 || status === 403 || status === 404) return false;
     if (status === 429) return true;
@@ -44,6 +46,7 @@ export const isRetryableError = (error: unknown): boolean => {
 };
 
 export const isWebdavInvalidJsonError = (error: unknown): boolean => {
+    if (isHostResponseTooLargeError(error)) return false;
     const message = error instanceof Error ? error.message : String(error || '');
     const normalized = message.toLowerCase();
     return (

@@ -214,6 +214,12 @@ export function normalizeAttachmentCleanupUri(uri?: string): string | undefined 
     } catch {
         // Keep the undecoded spelling; malformed user paths must not abort GC.
     }
+    // KEEP-only equivalence for the fixed iOS data-container alias. Never use
+    // this reference identity to rewrite the URI passed to a file operation.
+    path = path.replace(
+        /^\/private(?=\/var\/mobile\/Containers\/Data\/Application\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/)/,
+        '',
+    );
     return /^[a-z]:\//i.test(path) ? path.toLowerCase() : path;
 }
 
