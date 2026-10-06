@@ -29,6 +29,7 @@
 import {
     buildReminderSchedule,
     getProjectReviewReminderIntent,
+    getReminderNotificationTag,
     getTaskReminderPlan,
     hasActiveMobileNotificationFeature,
     type ReminderScheduleDiagnostics,
@@ -156,6 +157,9 @@ export function buildReminderAlarmDetails(key: string, config: ReminderAlarmConf
         interval_value: 1,
         use_big_text: true,
         vibrate: false,
+        // Android posts under (tag, one id), iOS uses it as the thread: each reminder of a task
+        // replaces the task's notification instead of adding another one.
+        tag: getReminderNotificationTag(key),
         data: {
             ...(config.data ?? {}),
             alarmKey: key,

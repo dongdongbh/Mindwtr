@@ -1,4 +1,5 @@
 import { sanitizeAttachmentCloudKeyForSyncMerge } from './sync-normalization';
+import { logInfo } from './logger';
 
 const DAV_NAMESPACE = 'DAV:';
 
@@ -129,5 +130,9 @@ export const parseWebdavAttachmentInventory = (
     if (!matchedCollection) {
         throw new Error('WebDAV attachment inventory did not identify the requested collection');
     }
+    logInfo('WebDAV attachment inventory validated', {
+        scope: 'sync',
+        context: { releaseCheck: 'v1.3.5/webdav-href-resolution', count: keys.size },
+    });
     return Array.from(keys).sort();
 };

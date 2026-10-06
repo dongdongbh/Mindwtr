@@ -15,7 +15,7 @@ import { SyncRemoteWriteConflict } from './sync-run-ports';
 import { clearIdleSyncCycleSnapshot, normalizeRemoteWriteResult, runSharedSyncCycle } from './sync-run';
 import { normalizeAppData } from './sync-normalization';
 import { cloneAppData } from './sync-runtime-utils';
-import { parseSyncDocument, toRemoteSyncDocument } from './sync-document';
+import { computeRemoteSyncDocumentFingerprint, parseSyncDocument, toRemoteSyncDocument } from './sync-document';
 import { toStableSyncJson } from './sync-helpers';
 import type { FastSyncState } from './sync-fast-sync';
 import {
@@ -32,7 +32,13 @@ import {
     type SyncRemoteMutationFenceLease,
 } from './sync-remote-fence';
 import { AttachmentUploadTooLargeError } from './attachment-transfer';
+import { createMobileAttachmentFiles } from './mobile-attachment-files';
+import { createMobileAttachmentCommon } from './mobile-attachment-common';
+import { createMobileAttachmentBackends } from './mobile-attachment-backends';
+import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 import { SyncEncryptionPartlyEncryptedError } from './sync-encryption';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
+import { LocalSyncAbort } from './sync-client-helpers';
 
 // Each harness stands up its own fake store, so the process-wide idle-cycle
 // snapshot (keyed on sync scope + the store's change stamp, unique inside a
@@ -1887,6 +1893,152 @@ describe('runSharedSyncCycle', () => {
         expect(vi.mocked(io.writeRemote).mock.calls.length).toBe(writesAfterFirst);
     });
 
+    describe('fresh cleanup survives unchanged Sync guards', () => {
+        const localWithTombstone = (owner: 'task' | 'project'): AppData => {
+            const attachment = {
+                id: 'attachment-cleanup-fast-check',
+                kind: 'file' as const,
+                title: 'Private deleted file',
+                uri: 'file:///managed/private-deleted.txt',
+                localStatus: 'available' as const,
+                createdAt: STAMP,
+                updatedAt: STAMP,
+                deletedAt: STAMP,
+            };
+            const task = createTask('t-cleanup-fast-check', 'Private cleanup task');
+            if (owner === 'task') task.attachments = [attachment];
+            const local = createData([task], {
+                attachments: { lastCleanupAt: new Date().toISOString() },
+            });
+            if (owner === 'project') {
+                local.projects = [{
+                    id: 'p-cleanup-fast-check', title: 'Private cleanup project', status: 'active',
+                    color: '#3b82f6', order: 0, tagIds: [], attachments: [attachment],
+                    createdAt: STAMP, updatedAt: STAMP,
+                }];
+            }
+            return local;
+        };
+        const cleanupHook = () => vi.fn(async (data: AppData) => {
+            const cleaned = cloneAppData(data);
+            for (const owner of [...cleaned.tasks, ...cleaned.projects]) {
+                for (const attachment of owner.attachments ?? []) {
+                    if (attachment.deletedAt) attachment.localStatus = 'missing';
+                }
+            }
+            return { data: cleaned, invalidateFastSyncState: false };
+        });
+        const seedMatchedCache = (bundle: ReturnType<typeof createHarness>, local: AppData, scope: string,
+                                  localFingerprint = computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(local))) => {
+            bundle.harness.fastStates.set(scope, {
+                scope, localFingerprint,
+                remoteFingerprint: `remote-fp-${JSON.stringify(local.tasks.map((task) => task.id).sort())}`,
+                checkedAt: NOW.toISOString(),
+            });
+        };
+        const markerExtra = {
+            releaseCheck: 'v1.3.5/sync-cleanup-fast-check', operation: 'attachment-cleanup', outcome: 'required',
+        };
+
+        it.each([
+            ['manual', 'task'], ['manual', 'project'], ['cached', 'task'], ['cached', 'project'],
+        ] as const)('runs fresh %s cleanup for a %s despite matched fingerprints, then skips processed state', async (mode, owner) => {
+            const local = localWithTombstone(owner), runAttachmentCleanup = cleanupHook();
+            const scope = mode === 'cached' ? `scope-cleanup-${owner}` : null;
+            const bundle = createHarness({
+                local, remote: toRemoteSyncDocument(cloneAppData(local)), backend: 'webdav', fastSyncScope: scope,
+                policy: { enableReadCheckSkip: true }, hooks: { runAttachmentCleanup },
+            });
+            if (scope) seedMatchedCache(bundle, local, scope);
+
+            const first = await bundle.run({ manual: mode === 'manual' });
+
+            expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+            expect(first.success).toBe(true);
+            expect(first.skipped).toBeUndefined();
+            expect(bundle.io.readRemote).toHaveBeenCalledTimes(1);
+            expect([...bundle.harness.persisted.tasks, ...bundle.harness.persisted.projects]
+                .flatMap((item) => item.attachments ?? []).map((attachment) => attachment.localStatus)).toEqual(['missing']);
+            const markers = bundle.harness.infos.filter((info) => info.extra?.releaseCheck === markerExtra.releaseCheck);
+            expect(markers.length).toBeGreaterThan(0);
+            expect(markers.length).toBeLessThanOrEqual(3);
+            for (const info of markers) {
+                expect(info).toEqual({ message: 'Sync fast check retained fresh attachment cleanup', extra: markerExtra });
+            }
+            bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+            const second = await bundle.run({ manual: mode === 'manual' });
+
+            expect(second).toMatchObject({ success: true, skipped: 'unchanged' });
+            expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+            expect(bundle.harness.infos.filter((info) => info.extra?.releaseCheck === markerExtra.releaseCheck)).toHaveLength(markers.length);
+        });
+
+        it.each([
+            ['manual', 'disabled'], ['manual', 'absent'], ['cached', 'disabled'], ['cached', 'absent'],
+        ] as const)('preserves %s unchanged skip when attachment cleanup is %s', async (mode, control) => {
+            const local = localWithTombstone('task'), runAttachmentCleanup = cleanupHook();
+            const scope = mode === 'cached' ? 'scope-cleanup-unavailable' : null;
+            const bundle = createHarness({
+                local, remote: toRemoteSyncDocument(cloneAppData(local)), fastSyncScope: scope,
+                policy: { enableReadCheckSkip: true, attachmentPhasesEnabled: control !== 'disabled' },
+                hooks: control === 'absent' ? {} : { runAttachmentCleanup },
+            });
+            if (scope) seedMatchedCache(bundle, local, scope);
+
+            expect(await bundle.run({ manual: mode === 'manual' })).toMatchObject({ success: true, skipped: 'unchanged' });
+            expect(runAttachmentCleanup).not.toHaveBeenCalled();
+            expect(bundle.io.readRemote).toHaveBeenCalledTimes(mode === 'manual' ? 1 : 0);
+            expect(bundle.harness.infos.filter((info) => info.extra?.releaseCheck === markerExtra.releaseCheck)).toEqual([]);
+            expect(bundle.harness.persisted.tasks[0].attachments?.[0]?.localStatus).toBe('available');
+        });
+
+        it('refuses the local-only upload fast path while fresh cleanup still needs the full remote read', async () => {
+            const local = localWithTombstone('task'), runAttachmentCleanup = cleanupHook();
+            const adoptRemoteFingerprintForWrite = vi.fn(() => true), scope = 'scope-cleanup-local-only';
+            const bundle = createHarness({
+                local, remote: toRemoteSyncDocument(cloneAppData(local)), backend: 'webdav', fastSyncScope: scope,
+                policy: { preSyncAttachmentsBeforeFastCheck: true },
+                io: { adoptRemoteFingerprintForWrite }, hooks: { runAttachmentCleanup },
+            });
+            seedMatchedCache(bundle, local, scope, 'an-earlier-local-document');
+
+            expect((await bundle.run()).success).toBe(true);
+            expect(bundle.io.readRemote).toHaveBeenCalledTimes(1);
+            expect(adoptRemoteFingerprintForWrite).not.toHaveBeenCalled();
+            expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not record a matched fast state while a cleanup hook leaves fresh work unresolved', async () => {
+            const local = localWithTombstone('project'), runAttachmentCleanup = vi.fn(async () => null);
+            const bundle = createHarness({
+                local, remote: toRemoteSyncDocument(cloneAppData(local)), backend: 'webdav',
+                fastSyncScope: 'scope-cleanup-still-fresh', hooks: { runAttachmentCleanup },
+            });
+
+            expect((await bundle.run()).success).toBe(true);
+            expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+            expect(bundle.storage.writeFastSyncState).not.toHaveBeenCalled();
+            expect(bundle.harness.fastStates.size).toBe(0);
+        });
+
+        it('keeps fresh cleanup eligible when its fixed diagnostic throws', async () => {
+            const local = localWithTombstone('task'), runAttachmentCleanup = cleanupHook();
+            const bundle = createHarness({
+                local, remote: toRemoteSyncDocument(cloneAppData(local)), manual: true,
+                policy: { enableReadCheckSkip: true }, hooks: { runAttachmentCleanup },
+            });
+            const original = bundle.notifier.logInfo;
+            vi.spyOn(bundle.notifier, 'logInfo').mockImplementation((message, extra) => {
+                if (extra?.releaseCheck === markerExtra.releaseCheck) throw new Error('Synthetic logger refusal');
+                original(message, extra);
+            });
+
+            expect((await bundle.run()).success).toBe(true);
+            expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+            expect(bundle.harness.persisted.tasks[0].attachments?.[0]?.localStatus).toBe('missing');
+        });
+    });
+
     it('rewrites legacy full tombstones once before treating sync as unchanged', async () => {
         const local = createData([{
             id: 'purged-task',
@@ -2612,6 +2764,183 @@ describe('runSharedSyncCycle', () => {
         expect(failResult.error).toContain('download failed');
     });
 
+    it.each([
+        ['prepare', 'ordinary'], ['post-merge', 'ordinary'],
+        ['prepare', 'throwing'], ['post-merge', 'throwing'],
+    ] as const)(
+        'fails the real bounded WebDAV %s pass with %s diagnostic under warning policy', async (phase, diagnostic) => {
+            const memory = createMemoryFileSystem();
+            const { log, lines } = createRecordingLog();
+            const warn = log.warn;
+            const logWarning = vi.spyOn(log, 'warn').mockImplementation((message, context) => {
+                if (diagnostic === 'throwing'
+                    && context?.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit') {
+                    throw new Error('Diagnostic sink is unavailable');
+                }
+                warn(message, context);
+            });
+            const files = createMobileAttachmentFiles({
+                fs: memory.fs, storage: createMemoryStorage().storage,
+                getSecureConfigValue: async () => null, log,
+                core: { isSandboxMode: () => false },
+            });
+            const installer = {} as never;
+            const common = createMobileAttachmentCommon({
+                fs: memory.fs, files, installer, crypto: {} as never,
+                encryption: { logSyncEncryptionEvent: async () => undefined },
+                installerMayBeMissing: () => false, timersPaused: () => true,
+                uploads: { createUploadTask: () => null },
+            });
+            const webdavMakeDirectory = vi.fn(async () => undefined);
+            const webdavPutFileVersioned = vi.fn(async () => undefined);
+            const backends = createMobileAttachmentBackends({
+                fs: memory.fs, files, common, installer, log,
+                maxWebdavBufferedUploadBytes: 4,
+                core: { webdavMakeDirectory, webdavPutFileVersioned, webdavFileExists: async () => true },
+            });
+            const uri = `${MANAGED}bounded.txt`;
+            memory.put(uri, new Uint8Array(5));
+            const local = createData([{
+                ...createTask('t-local', 'Local task'),
+                attachments: [{
+                    id: 'bounded', kind: 'file', title: 'private filename.txt', uri,
+                    size: 1, localStatus: 'available', createdAt: STAMP, updatedAt: STAMP,
+                    ...(diagnostic === 'throwing'
+                        ? { cloudKey: 'attachments/bounded.txt', fileHash: 'a'.repeat(64), contentSize: 1, contentMtimeMs: 0 }
+                        : phase === 'prepare' ? { pendingContentUpload: true } : {}),
+                }],
+            }]);
+            const before = structuredClone(local);
+            const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+                if (helpers.phase !== phase) return false;
+                return backends.syncWebdavAttachments(data, { url: 'https://dav.example/data.json' },
+                    'https://dav.example', undefined, { phase: helpers.phase });
+            });
+            const bundle = createHarness({
+                backend: 'webdav', local, remote: cloneAppData(local),
+                io: { syncAttachments },
+                hooks: { shouldRunAttachmentPhase: vi.fn(async (_data, selected) => selected === phase) },
+                policy: { postMergeAttachmentErrorPolicy: 'warn' },
+            });
+
+            const result = await bundle.run();
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('WebDAV attachment upload cannot be admitted by this host transport');
+            expect(result.error).not.toContain('Diagnostic sink is unavailable');
+            expect(result.fileAttachmentUploadBlocked).toBeUndefined();
+            expect(result.hadAttachmentWarning).not.toBe(true);
+            expect(bundle.harness.warnings.some((warning) => (
+                warning.message === 'Attachment pre-sync warning' || warning.message === 'Attachment sync warning'
+            ))).toBe(false);
+            expect(syncAttachments.mock.calls.some((call) => call[1].phase === phase)).toBe(true);
+            expect(local).toEqual(before);
+            expect(bundle.harness.persisted.tasks[0].attachments).toEqual(before.tasks[0].attachments);
+            expect(webdavMakeDirectory).not.toHaveBeenCalled();
+            expect(webdavPutFileVersioned).not.toHaveBeenCalled();
+            expect(memory.calls.filter((call) => /^(readBytes|copy|sha256) /.test(call))).toEqual([]);
+            expect(logWarning.mock.calls.filter((call) => call[1]?.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit'))
+                .toHaveLength(1);
+            expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit'))
+                .toHaveLength(diagnostic === 'throwing' ? 0 : 1);
+        },
+    );
+
+    it.each([
+        ['prepare', 'ordinary'], ['post-merge', 'ordinary'],
+        ['prepare', 'throwing'], ['post-merge', 'throwing'],
+    ] as const)(
+        'fails the real WebDAV host-response cap in %s with %s diagnostic under warning policy', async (phase, diagnostic) => {
+            const error = Object.assign(new TypeError('Response exceeds the 8 byte download limit'), {
+                code: 'response-too-large', limitBytes: 8,
+            });
+            const fetcher = vi.fn().mockRejectedValue(error);
+            vi.stubGlobal('fetch', fetcher);
+            try {
+                const memory = createMemoryFileSystem();
+                const { log, lines } = createRecordingLog();
+                const warn = log.warn;
+                const logWarning = vi.spyOn(log, 'warn').mockImplementation((message, context) => {
+                    if (diagnostic === 'throwing'
+                        && context?.extra?.releaseCheck === 'v1.3.5/webdav-host-download-limit') {
+                        throw new Error('Diagnostic sink is unavailable');
+                    }
+                    warn(message, context);
+                });
+                const files = createMobileAttachmentFiles({
+                    fs: memory.fs, storage: createMemoryStorage().storage,
+                    getSecureConfigValue: async () => null, log,
+                    core: { isSandboxMode: () => false },
+                });
+                const installGeneration = vi.fn();
+                const installer = { installAttachmentFileGeneration: installGeneration } as never;
+                const common = createMobileAttachmentCommon({
+                    fs: memory.fs, files, installer, crypto: {} as never,
+                    encryption: { logSyncEncryptionEvent: async () => undefined },
+                    installerMayBeMissing: () => false, timersPaused: () => true,
+                    uploads: { createUploadTask: () => null },
+                });
+                const open = vi.spyOn(common, 'openAttachmentBytesFromDownload');
+                const install = vi.spyOn(common, 'installAttachmentDownloadBytes');
+                const backends = createMobileAttachmentBackends({
+                    fs: memory.fs, files, common, installer, log,
+                    core: { withRetry: (operation) => operation() },
+                });
+                const uri = `${MANAGED}bounded.txt`;
+                const local = createData([{
+                    ...createTask('t-local', 'Local task'),
+                    attachments: [{
+                        id: 'bounded', kind: 'file', title: 'private filename.txt', uri,
+                        cloudKey: 'attachments/bounded.txt', fileHash: 'a'.repeat(64),
+                        size: 1, localStatus: 'available', createdAt: STAMP, updatedAt: STAMP,
+                    }],
+                }]);
+                const before = structuredClone(local);
+                const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+                    if (helpers.phase !== phase) return false;
+                    return backends.syncWebdavAttachments(data, { url: 'https://dav.example/data.json' },
+                        'https://dav.example', undefined, { phase: helpers.phase });
+                });
+                const bundle = createHarness({
+                    backend: 'webdav', local, remote: cloneAppData(local),
+                    io: { syncAttachments },
+                    hooks: { shouldRunAttachmentPhase: vi.fn(async (_data, selected) => selected === phase) },
+                    policy: { postMergeAttachmentErrorPolicy: 'warn' },
+                });
+
+                const result = await bundle.run();
+
+                expect(result.success).toBe(false);
+                expect(result.error).toContain(error.message);
+                expect(result.error).not.toContain('Diagnostic sink is unavailable');
+                expect(result.fileAttachmentUploadBlocked).toBeUndefined();
+                expect(result.hadAttachmentWarning).not.toBe(true);
+                expect(bundle.harness.warnings.some((warning) => (
+                    warning.message === 'Attachment pre-sync warning' || warning.message === 'Attachment sync warning'
+                ))).toBe(false);
+                expect(syncAttachments.mock.calls.some((call) => call[1].phase === phase)).toBe(true);
+                // The actual shared webdavGetFile/fetch timeout path rejected before a Response existed.
+                expect(fetcher).toHaveBeenCalledTimes(1);
+                expect(fetcher).toHaveBeenCalledWith('https://dav.example/attachments/bounded.txt',
+                    expect.objectContaining({ method: 'GET' }));
+                expect(local).toEqual(before);
+                expect(bundle.harness.persisted.tasks[0].attachments).toEqual(before.tasks[0].attachments);
+                expect(open).not.toHaveBeenCalled();
+                expect(install).not.toHaveBeenCalled();
+                expect(installGeneration).not.toHaveBeenCalled();
+                expect(memory.files.size).toBe(0);
+                expect(memory.calls.filter((call) => /^(readBytes|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+                expect(logWarning.mock.calls.filter((call) => call[1]?.extra?.releaseCheck === 'v1.3.5/webdav-host-download-limit'))
+                    .toHaveLength(1);
+                expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-download-limit'))
+                    .toHaveLength(diagnostic === 'throwing' ? 0 : 1);
+                if (phase === 'prepare') expect(bundle.io.writeRemote).not.toHaveBeenCalled();
+            } finally {
+                vi.unstubAllGlobals();
+            }
+        },
+    );
+
     it('runs the periodic attachment cleanup through the platform hook and persists its result', async () => {
         const local = createData([createTask('t-local', 'Local task')], {
             attachments: { lastCleanupAt: '2026-01-01T00:00:00.000Z' },
@@ -2634,6 +2963,108 @@ describe('runSharedSyncCycle', () => {
         expect(harness.persisted.settings.attachments?.lastCleanupAt).toBe(NOW.toISOString());
         // invalidateFastSyncState suppressed the fast-state record.
         expect(harness.fastStates.size).toBe(0);
+    });
+
+    it('propagates unconfirmed native cleanup without any post-error work or remote lease release', async () => {
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        const lease = createFenceLease({ release: vi.fn().mockRejectedValue(new Error('Release must not run')) });
+        const local = createData([createTask('t-local', 'Local task')], {
+            attachments: { lastCleanupAt: '2026-01-01T00:00:00.000Z' },
+        });
+        let atCleanup: (() => void) | undefined;
+        const runAttachmentCleanup = vi.fn(async () => { atCleanup!(); throw fatal; });
+        const bundle = createHarness({
+            local, remote: createData([createTask('t-remote', 'Remote task')]), fastSyncScope: 'fatal-scope',
+            io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+            hooks: {
+                runAttachmentCleanup,
+                handleRunErrorBeforeRequeue: vi.fn(async () => null),
+                handleRunErrorAfterRequeue: vi.fn(async () => null),
+            },
+        });
+        const { harness, io, storage, store, hooks, notifier, run } = bundle;
+        const afterError = [
+            vi.mocked(storage.persistLocal), vi.mocked(storage.persistSyncStatus), vi.mocked(storage.writeFastSyncState),
+            vi.mocked(storage.persistExternalCalendars), vi.mocked(io.writeRemote), vi.mocked(io.readRemote),
+            vi.mocked(hooks.handleRunErrorBeforeRequeue!), vi.mocked(hooks.handleRunErrorAfterRequeue!),
+            vi.mocked(hooks.finalizeErrorStatus), vi.mocked(hooks.finalizeSuccess),
+            vi.mocked(hooks.requestFollowUp), vi.mocked(hooks.requestFollowUpAfter!),
+            vi.mocked(notifier.logSyncError), vi.mocked(notifier.logMergeSummary),
+            vi.spyOn(notifier, 'logInfo'), vi.spyOn(notifier, 'logWarning'), vi.spyOn(notifier, 'logWarningExtra'),
+            vi.spyOn(notifier, 'onDiagnostic'), vi.spyOn(notifier, 'setStep'), vi.spyOn(store, 'setUiError'),
+            vi.mocked(lease.assertHeld), vi.mocked(lease.renew), vi.mocked(lease.retryAfterMs),
+        ];
+        let acknowledged: AppData | undefined;
+        atCleanup = () => {
+            expect(io.acquireRemoteMutationFence).toHaveBeenCalledTimes(1);
+            expect(lease.assertHeld).toHaveBeenCalled();
+            expect(storage.persistLocal).toHaveBeenCalled();
+            expect(io.writeRemote).toHaveBeenCalled();
+            acknowledged = cloneAppData(harness.persisted);
+            expect(acknowledged.tasks.map((task) => task.id)).toEqual(expect.arrayContaining(['t-local', 't-remote']));
+            for (const callback of afterError) callback.mockClear();
+        };
+
+        await expect(run()).rejects.toBe(fatal);
+
+        expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+        expect(lease.release).not.toHaveBeenCalled();
+        for (const callback of afterError) expect(callback).not.toHaveBeenCalled();
+        expect(harness.persisted).toEqual(acknowledged);
+        expect(harness.remote?.tasks.map((task) => task.id)).toEqual(expect.arrayContaining(['t-local', 't-remote']));
+    });
+
+    it('keeps LocalSyncAbort cleanup requeue bookkeeping and ordinary lease release', async () => {
+        const abort = new LocalSyncAbort('local-data-changed');
+        const lease = createFenceLease();
+        const { harness, hooks, run } = createHarness({
+            local: createData([createTask('t-local', 'Local task')], { attachments: { lastCleanupAt: '2026-01-01T00:00:00.000Z' } }),
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+            hooks: { runAttachmentCleanup: vi.fn(async () => { throw abort; }), handleRunErrorBeforeRequeue: vi.fn(async () => null) },
+        });
+
+        await expect(run()).resolves.toMatchObject({ success: true, skipped: 'requeued' });
+
+        expect(hooks.handleRunErrorBeforeRequeue).toHaveBeenCalledWith(abort, expect.anything());
+        expect(harness.infos).toEqual(expect.arrayContaining([expect.objectContaining({ message: 'Sync cycle requeued' })]));
+        expect(harness.diagnostics).toContain('requeued');
+        expect(lease.release).toHaveBeenCalledTimes(1);
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+        expect(hooks.finalizeSuccess).not.toHaveBeenCalled();
+    });
+
+    it('keeps ordinary cleanup failure handling and lease release for a same-name plain Error', async () => {
+        const ordinary = Object.assign(new Error('Ordinary cleanup refusal'), { name: 'NativeAttachmentCleanupUnconfirmedError' });
+        const lease = createFenceLease();
+        const { hooks, notifier, run } = createHarness({
+            local: createData([createTask('t-local', 'Local task')], { attachments: { lastCleanupAt: '2026-01-01T00:00:00.000Z' } }),
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+            hooks: { runAttachmentCleanup: vi.fn(async () => { throw ordinary; }) },
+        });
+
+        await expect(run()).resolves.toMatchObject({ success: false });
+
+        expect(notifier.logSyncError).toHaveBeenCalledWith(ordinary, expect.anything());
+        expect(hooks.finalizeErrorStatus).toHaveBeenCalledTimes(1);
+        expect(lease.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases an ordinary successful cleanup lease and finalizes success', async () => {
+        const lease = createFenceLease();
+        const { hooks, run } = createHarness({
+            local: createData([createTask('t-local', 'Local task')], { attachments: { lastCleanupAt: '2026-01-01T00:00:00.000Z' } }),
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+            hooks: { runAttachmentCleanup: vi.fn(async () => null) },
+        });
+
+        await expect(run()).resolves.toMatchObject({ success: true });
+
+        expect(hooks.runAttachmentCleanup).toHaveBeenCalledTimes(1);
+        expect(hooks.finalizeSuccess).toHaveBeenCalledTimes(1);
+        expect(lease.release).toHaveBeenCalledTimes(1);
     });
 
     it('runs cleanup before the interval elapses when an attachment was just removed (#1064)', async () => {

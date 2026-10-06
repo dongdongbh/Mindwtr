@@ -4,6 +4,9 @@ import {
     PENDING_CAPTURES_DIRECTORY,
     PENDING_CAPTURE_LAST_APPLIED_STORAGE_KEY,
     NATIVE_HOST_CONTRACT_VERSION,
+    NativeAttachmentCleanupUnconfirmedError,
+    SYNC_BACKEND_KEY,
+    generateUUID,
     NATIVE_REMINDER_STATE_STORAGE_KEY,
     REMINDER_ALARM_MAP_STORAGE_KEY,
     REMINDER_NOTIFICATION_CHANNEL_NAME,
@@ -33,6 +36,8 @@ import {
     completeNativeAttachmentDraftAdd, completeNativeAttachmentDraftAddV4,
     prepareNativeAttachmentDraftDiscardCandidates,
     prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4,
+    prepareNativeAttachmentCleanupWitness,
+    isNativeAttachmentCleanupWitnessEligible,
     isAttachmentFileInUse,
     planAttachmentOpen,
     getAttachmentResolutionMessage,
@@ -86,7 +91,7 @@ import {
 import { createNativeAI } from './host-ai';
 import { createNativeLocalAttachmentsForHost } from './host-attachments';
 import { createNativeReminders } from './host-reminders';
-import { createNativeSync, type NativeSync } from './host-sync';
+import { createNativeSync, type NativeSync, type NativeSyncBindings } from './host-sync';
 import { createWidgetPublisher, type WidgetInputs } from './host-widgets';
 
 type NativeBridge = {
@@ -324,39 +329,45 @@ const submit = (work: (signal: AbortSignal) => Promise<unknown>): string => {
 };
 
 /**
- * Sync (host-sync.ts), on a host with RN's AsyncStorage bridge (Android). The iOS host and the gates' stand-in bridge have
- * none, so their contract has no Settings › Sync device, as before.
+ * Automatic Sync belongs to the Android host. iOS foreground Sync is explicitly
+ * bound on demand; device storage alone never activates Sync, AI or attachment ownership.
  */
 /** The Android build's flavor (D8, CoreHost's BuildConfig.FOSS; absent elsewhere): as RN's FOSS_BUILD, it hides Dropbox and defaults speech to Whisper. */
 const isFossBuild = globalThis.__mindwtrFossBuild === true;
+const nativeSyncBindings: NativeSyncBindings = {
+    keyValue,
+    secrets: {
+        getSecret: (key) => (globalThis.__mindwtrSyncSecrets as HostSecrets).getSecret(key),
+        setSecret: (key, value, accessibility) => (globalThis.__mindwtrSyncSecrets as HostSecrets).setSecret(key, value, accessibility),
+        deleteSecret: (key) => (globalThis.__mindwtrSyncSecrets as HostSecrets).deleteSecret(key),
+    },
+    localData: () => {
+        if (!bootAdapter) throw new Error('Native storage is not loaded yet');
+        return bootAdapter;
+    },
+    networkState: () => networkState,
+    appendLog: async (entry, force) => {
+        try { native().log(`${entry.level}: [${entry.scope}] ${entry.message}${entry.context ? ` ${JSON.stringify(entry.context)}` : ''}`); } catch { /* logcat is best effort */ }
+        return diagnosticsLog.append(entry, { force });
+    },
+    translate: (key) => {
+        const result = contract.getStrings({ keys: [key] });
+        return result.ok ? result.value.strings[key] ?? key : key;
+    },
+    emit: (event) => { checked(native().hostEvent(JSON.stringify(event))); },
+    trace: (line) => { try { native().log(line); } catch { /* logcat is best effort */ } },
+    scheduleBackgroundSync: (on) => { const bridge = native(); if (bridge.bgSyncSchedule) checked(bridge.bgSyncSchedule(on)); },
+    isFossBuild,
+};
 // kvMultiGet, not kvGet: the gates' stand-in bridge has kvGet and kvSet for the queue's record, and no sync.
-const nativeSync: NativeSync | null = typeof (globalThis.__mindwtrNative as { kvMultiGet?: unknown } | undefined)?.kvMultiGet === 'function'
-    ? createNativeSync({
-        keyValue,
-        secrets: {
-            getSecret: (key) => (globalThis.__mindwtrSyncSecrets as HostSecrets).getSecret(key),
-            setSecret: (key, value) => (globalThis.__mindwtrSyncSecrets as HostSecrets).setSecret(key, value),
-            deleteSecret: (key) => (globalThis.__mindwtrSyncSecrets as HostSecrets).deleteSecret(key),
-        },
-        localData: () => {
-            if (!bootAdapter) throw new Error('Native storage is not loaded yet');
-            return bootAdapter;
-        },
-        networkState: () => networkState,
-        appendLog: async (entry, force) => {
-            try { native().log(`${entry.level}: [${entry.scope}] ${entry.message}${entry.context ? ` ${JSON.stringify(entry.context)}` : ''}`); } catch { /* logcat is best effort */ }
-            return diagnosticsLog.append(entry, { force });
-        },
-        translate: (key) => {
-            const result = contract.getStrings({ keys: [key] });
-            return result.ok ? result.value.strings[key] ?? key : key;
-        },
-        emit: (event) => { checked(native().hostEvent(JSON.stringify(event))); },
-        trace: (line) => { try { native().log(line); } catch { /* logcat is best effort */ } },
-        scheduleBackgroundSync: (on) => { const bridge = native(); if (bridge.bgSyncSchedule) checked(bridge.bgSyncSchedule(on)); },
-        isFossBuild,
-    })
+// iOS device storage is not permission to replace its local attachment owner or start Sync/AI.
+const nativeSync: NativeSync | null = globalThis.__mindwtrHostPlatform !== 'ios'
+    && typeof (globalThis.__mindwtrNative as { kvMultiGet?: unknown } | undefined)?.kvMultiGet === 'function'
+    ? createNativeSync(nativeSyncBindings)
     : null;
+let iosManualSync: NativeSync | null = null;
+let iosCleanupCallback: ((requestJSON: string) => unknown) | null = null;
+let iosForegroundFailure: NativeAttachmentCleanupUnconfirmedError | null = null;
 /** The device's network state as Kotlin last reported it (HostNetwork.kt); unknown until then, which never reads as offline. */
 let networkState: { isConnected: boolean | null; isInternetReachable: boolean | null } = { isConnected: null, isInternetReachable: null };
 const requireSync = (): NativeSync => {
@@ -382,7 +393,7 @@ const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwt
 
 const localAttachments = nativeSync ? null : createNativeLocalAttachmentsForHost();
 const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contractHost;
-const contract = createNativeHostContract({ ...(nativeSync ? { syncSettings: nativeSync.settingsHost } : {}), ...(nativeAI ? { ai: nativeAI } : {}),
+const contract = createNativeHostContract({ get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
     ...(attachmentsHost ? { attachments: attachmentsHost } : {}) });
 
 /**
@@ -549,7 +560,7 @@ const requireSaved = () => {
 /** host-polyfills.js's secret calls (SecretStore.kt). */
 type HostSecrets = {
     getSecret(key: string): Promise<string | null>;
-    setSecret(key: string, value: string): Promise<void>;
+    setSecret(key: string, value: string, accessibility?: 'after-first-unlock' | 'when-unlocked'): Promise<void>;
     deleteSecret(key: string): Promise<void>;
 };
 
@@ -1039,6 +1050,13 @@ const attachmentDraftJson = (json: string): unknown => {
     } catch { /* A parser excerpt could expose draft content or a picked path. */ }
     throw new Error('INVALID_INPUT');
 };
+const attachmentCleanupJson = (json: string, maxBytes: number): unknown => {
+    try {
+        if (typeof json === 'string' && json.length <= maxBytes
+            && new TextEncoder().encode(json).byteLength <= maxBytes) return JSON.parse(json);
+    } catch { /* Never expose raw durable rows or parser excerpts. */ }
+    throw new Error('INVALID_INPUT');
+};
 const attachmentDiscardInvalid = (): Error => new Error('INVALID_INPUT: Invalid attachment Discard handoff');
 const attachmentDiscardNotReady = (): Error => new Error('NOT_READY: Attachment Discard requires settled native storage');
 const attachmentDiscardInput = (json: string): { version: 1; requestId: string; targetURI: string } => {
@@ -1237,6 +1255,50 @@ const attachmentDraftDependencies = {
 };
 
 globalThis.MindwtrHost = {
+    /** Private fixed canonical plaintext retirement receipt; no secret inputs. */
+    nativeLegacySecretRetirementDelivered(): void {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter
+            || isSandboxMode() || isWorkspaceTransitionActive()) return;
+        try {
+            logInfo('Native iOS legacy secret retirement delivered', {
+                scope: 'native-ios', force: true,
+                context: { releaseCheck: 'v1.3.5/ios-legacy-secret-retirement', operation: 'legacy-secret-retirement', outcome: 'delivered' },
+            });
+        } catch { /* A fixed diagnostic never changes the storage result. */ }
+    },
+    /** Private fixed storage receipt; never carries a setting name or value. */
+    nativeDeviceStorageDelivered(): void {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter
+            || isSandboxMode() || isWorkspaceTransitionActive()) return;
+        try {
+            logInfo('Native iOS device storage result delivered', {
+                scope: 'native-ios', force: true,
+                context: { releaseCheck: 'v1.3.5/ios-device-storage', operation: 'device-storage', outcome: 'delivered' },
+            });
+        } catch { /* A fixed diagnostic never changes the storage result. */ }
+    },
+    /** Private fixed primitive receipt; never carries input or derived bytes. */
+    nativeCryptoDelivered(): void {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter
+            || isSandboxMode() || isWorkspaceTransitionActive()) return;
+        try {
+            logInfo('Native iOS crypto result delivered', {
+                scope: 'native-ios', force: true,
+                context: { releaseCheck: 'v1.3.5/ios-sync-crypto', operation: 'sync-crypto', outcome: 'delivered' },
+            });
+        } catch { /* A fixed diagnostic never changes the primitive result. */ }
+    },
+    /** Private fixed receipt; never carries a credential or account. */
+    nativeSecretDelivered(): void {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter
+            || isSandboxMode() || isWorkspaceTransitionActive()) return;
+        try {
+            logInfo('Native iOS secure storage operation delivered', {
+                scope: 'native-ios', force: true,
+                context: { releaseCheck: 'v1.3.5/ios-secure-storage', operation: 'secure-storage', outcome: 'delivered' },
+            });
+        } catch { /* A fixed diagnostic never changes the transport result. */ }
+    },
     /** Private fixed transport receipt; no request data or domain authority. */
     nativeHTTPDelivered(): void {
         if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter
@@ -3498,6 +3560,26 @@ globalThis.MindwtrHost = {
             return prepareNativeAttachmentDraftDiscardCandidatesV3(attachmentDraftJson(json));
         });
     },
+    /** Pure pre-hydration cleanup policy; only native callbacks carry physical authority. */
+    attachmentCleanupPrepare(projectionJSON: string, candidateJSON: string): string {
+        if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT');
+        return JSON.stringify(prepareNativeAttachmentCleanupWitness(
+            attachmentCleanupJson(projectionJSON, 16 * 1024 * 1024), attachmentCleanupJson(candidateJSON, 32 * 1024),
+        ));
+    },
+    attachmentCleanupRetire(projectionJSON: string, witnessJSON: string,
+        retainedCallback: () => string, retireCallback: () => string): string {
+        if (globalThis.__mindwtrHostPlatform !== 'ios'
+            || typeof retainedCallback !== 'function' || typeof retireCallback !== 'function') throw new Error('INVALID_INPUT');
+        const eligible = isNativeAttachmentCleanupWitnessEligible(
+            attachmentCleanupJson(projectionJSON, 16 * 1024 * 1024), attachmentCleanupJson(witnessJSON, 128 * 1024),
+        );
+        const result: unknown = eligible ? retireCallback() : retainedCallback();
+        if (typeof result !== 'string' || result.length > 1024 || new TextEncoder().encode(result).byteLength > 1024) {
+            throw new Error('INVALID_INPUT');
+        }
+        return result;
+    },
     /** Private, synchronous final handoff; native passes ephemeral proof-bound callbacks. */
     attachmentDraftDiscardRetire(json: string, keepCallback: () => string, retireCallback: () => string): string {
         return retireAttachmentDiscard(json, keepCallback, retireCallback);
@@ -3579,11 +3661,12 @@ globalThis.MindwtrHost = {
             const projectFileAdd = operation === 'project-file-add' && ['saved', 'abandoned'].includes(outcome);
             const projectFileHash = operation === 'project-file-hash' && outcome === 'saved';
             const taskFileHash = operation === 'task-file-hash' && outcome === 'saved';
+            const ownedCleanup = operation === 'cleanup-owned-retirement' && ['removed', 'absent', 'retained'].includes(outcome);
             const editorAcknowledged = ['editor-add', 'editor-remove', 'editor-save', 'editor-discard', 'editor-recover'].includes(operation) && outcome === 'confirmed';
-            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash && !ownedCleanup
                 || !(['add', 'checkpoint', 'save'].includes(operation) && ['confirmed', 'replayed'].includes(outcome)
                     || operation === 'discard' && outcome === 'retained'
-                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash)) return {};
+                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash || ownedCleanup)) return {};
             try {
                 if (completeSave && outcome === 'domainSaved') await diagnosticsLog.append({
                     ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
@@ -3595,6 +3678,7 @@ globalThis.MindwtrHost = {
                 await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                     message: 'Native iOS attachment draft acknowledged',
                     context: { ...(editorAcknowledged ? { releaseCheck: 'v1.3.5/ios-editor-owned-attachments' }
+                        : ownedCleanup ? { releaseCheck: 'v1.3.5/ios-cleanup-owned-retirement' }
                         : fileOpen ? { releaseCheck: 'v1.3.5/ios-local-file-open' }
                         : projectFileOpen ? { releaseCheck: 'v1.3.5/ios-project-local-file-open' }
                         : relocatedOpen ? { releaseCheck: 'v1.3.5/ios-relocated-file-open', surface: operation === 'relocated-task-file-open' ? 'task' : 'project' }
@@ -3677,6 +3761,74 @@ globalThis.MindwtrHost = {
         (globalThis.__cancelHostCalls as (message: string) => void)('The host operation timed out');
         pending.get(Number(idText))?.controller.abort(Object.assign(new Error('The host operation timed out'), { name: 'AbortError' }));
         return null;
+    },
+    /** Only CoreHost.foregroundSync supplies this invocation-scoped physical cleanup callback. */
+    iosForegroundSync(name: string, json: string, cleanup: unknown): string {
+        return submit(async () => {
+            if (iosForegroundFailure) throw iosForegroundFailure;
+            const unavailable = () => new Error('NOT_READY: Foreground sync is unavailable');
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments || nativeSync || !bootAdapter
+                || iosCleanupCallback || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
+                || typeof native().kvMultiGet !== 'function' || !globalThis.__mindwtrSyncSecrets) throw unavailable();
+            const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
+                'saveSyncBackend', 'syncNow', 'testSyncConnection'];
+            if (!commands.includes(name) || typeof json !== 'string' || new TextEncoder().encode(json).byteLength > 128 * 1024) {
+                throw new Error('INVALID_INPUT: Invalid foreground sync request');
+            }
+            let input: Record<string, unknown>;
+            try { input = JSON.parse(json) as Record<string, unknown>; }
+            catch { throw new Error('INVALID_INPUT: Invalid foreground sync request'); }
+            if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('INVALID_INPUT: Invalid foreground sync request');
+            const refused = { ok: false as const, error: { code: 'ACTION_FAILED' as const,
+                message: 'This sync provider is not available in native iOS yet; the stored configuration is unchanged' } };
+            if (name === 'selectSyncBackend' && input.option !== 'off' && input.option !== 'webdav'
+                || ['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name)
+                    && (!input.webdav || input.selfHosted !== undefined)) return refused;
+            requireSaved();
+            const persistence = getPersistenceStatus();
+            if (persistence.failed || persistence.queued || persistence.inFlight || persistence.immediate || persistence.retrying) throw unavailable();
+            iosCleanupCallback = cleanup as (requestJSON: string) => unknown;
+            try {
+                const stored = (await keyValue.get(SYNC_BACKEND_KEY))?.trim();
+                if (stored && stored !== 'off' && stored !== 'webdav') return refused;
+                iosManualSync ??= createNativeSync({ ...nativeSyncBindings, emit: () => {}, trace: () => {}, scheduleBackgroundSync: () => {},
+                    retireLocalAttachment: async (attachmentID, targetURI, keep) => {
+                        if (keep()) return false;
+                        const requestID = generateUUID();
+                        try {
+                            if (!iosCleanupCallback) throw new NativeAttachmentCleanupUnconfirmedError();
+                            const reply = iosCleanupCallback(JSON.stringify({ version: 1, requestID, attachmentID, targetURI }));
+                            if (typeof reply !== 'string' || new TextEncoder().encode(reply).byteLength > 1024) throw new Error();
+                            const result = JSON.parse(reply) as Record<string, unknown>;
+                            if (!result || typeof result !== 'object' || Array.isArray(result)
+                                || Object.keys(result).length !== 3 || result.version !== 1 || result.requestID !== requestID
+                                || !['removed', 'absent', 'retained'].includes(result.outcome as string)) throw new Error();
+                            return result.outcome !== 'retained';
+                        } catch { throw new NativeAttachmentCleanupUnconfirmedError(); }
+                    },
+                });
+                const result = name === 'syncSettings' ? contract.getSyncSettings(input)
+                    : await MENU_COMMANDS[name as SyncScreenCommand](input as never);
+                // Offer only the providers admitted by this entry; all labels and field policy remain core's.
+                if (result.ok && result.value && typeof result.value === 'object' && 'backend' in result.value) {
+                    // The command union includes non-view replies; only the two view commands reach this branch.
+                    if (name === 'syncSettings' || name === 'openSyncSettings') {
+                        const model = result.value as import('../../../packages/core/src/native-host-contract-settings-sync').NativeSyncSettings;
+                        model.backend.options = model.backend.options.filter(({ option }) => option === 'off' || option === 'webdav');
+                    }
+                }
+                try {
+                    await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                        message: 'Native iOS foreground Sync command settled',
+                        context: { releaseCheck: 'v1.3.5/ios-foreground-sync', operation: name, outcome: 'settled' },
+                    }, { force: true });
+                } catch { /* A diagnostic cannot change the settled command result. */ }
+                return result;
+            } catch (error) {
+                if (error instanceof NativeAttachmentCleanupUnconfirmedError) iosForegroundFailure = error;
+                throw error;
+            } finally { iosCleanupCallback = null; }
+        });
     },
     /** `name` is one of MENU_COMMANDS; `json` is that command's input. Its request or capture UUID makes a retry exact. */
     menuCommand(name: string, json: string): string {

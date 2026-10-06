@@ -36,6 +36,7 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         var unsupportedEncoding = false
         var hops = 0
         var error: String?
+        var responseTooLarge = false
         var cancelled = false
         var finished = false
         init(id: String, registryID: UUID, token: NativeAttachmentCancellation, method: String,
@@ -150,7 +151,7 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
     }
 
     func abort(_ id: String) {
-        condition.lock(); let job = jobs[id]; job?.cancelled = true; condition.unlock()
+        condition.lock(); let job = jobs[id]; job?.cancelled = true; job?.responseTooLarge = false; condition.unlock()
         job?.task.cancel()
     }
 
@@ -159,9 +160,12 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         condition.lock(); defer { condition.unlock() }
         guard taken == nil else { throw failure("HTTP response body is unavailable") }
         guard !ready.isEmpty, let job = jobs[ready.removeFirst()] else { return nil }
-        let input: [String: Any]
+        var input: [String: Any]
         if let error = job.error {
             input = ["id": job.id, "error": error]
+            if job.responseTooLarge {
+                input["errorCode"] = "response-too-large"; input["limitBytes"] = byteLimit
+            }
             jobs.removeValue(forKey: job.id)
         } else if let response = job.response, let url = response.url {
             input = ["id": job.id, "status": response.statusCode, "statusText": "", "url": url.absoluteString,
@@ -223,7 +227,9 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
             }
             let encoding = value("content-encoding", in: response)?.trimmingCharacters(in: .whitespaces).lowercased()
             job.unsupportedEncoding = encoding != nil && encoding != "identity"
-            if !job.bodyless, let length = job.expectedLength, length > Int64(byteLimit) { job.error = "Response exceeds the \(byteLimit) byte download limit" }
+            if !job.bodyless, let length = job.expectedLength, length > Int64(byteLimit) {
+                job.error = "Response exceeds the \(byteLimit) byte download limit"; job.responseTooLarge = true
+            }
             if job.error == nil { disposition = .allow }
         }
         condition.unlock(); completionHandler(disposition)
@@ -234,7 +240,9 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         var cancel = false
         if let job = job(dataTask), !job.finished, !job.cancelled, job.error == nil, !job.bodyless {
             if job.unsupportedEncoding { job.error = "HTTP response encoding is unsupported"; cancel = true }
-            else if data.count > byteLimit - job.data.count { job.error = "Response exceeds the \(byteLimit) byte download limit"; cancel = true }
+            else if data.count > byteLimit - job.data.count {
+                job.error = "Response exceeds the \(byteLimit) byte download limit"; job.responseTooLarge = true; cancel = true
+            }
             else { job.data.append(data) }
         }
         condition.unlock(); if cancel { dataTask.cancel() }
@@ -246,7 +254,7 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         #endif
         condition.lock()
         guard let job = job(task), !job.finished else { condition.unlock(); return }
-        if job.cancelled { job.error = "Request cancelled" }
+        if job.cancelled { job.error = "Request cancelled"; job.responseTooLarge = false }
         else if job.error == nil {
             if let error { job.error = (error as NSError).code == NSURLErrorTimedOut ? "Network request failed: request timed out" : "Network request failed" }
             else if job.response == nil || (!job.bodyless && job.expectedLength != nil && job.expectedLength != Int64(job.data.count)) { job.error = "Network request failed" }

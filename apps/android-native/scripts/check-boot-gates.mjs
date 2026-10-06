@@ -13,6 +13,31 @@ const consoleState = {
 };
 vm.runInNewContext(readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8'), consoleState);
 assert.doesNotThrow(() => consoleState.console.info('saved'));
+// A body refused after metadata still settles its promise and lets the next reply drain.
+{
+    let sequence = 0, body = 0;
+    const answers = [];
+    const state = { __mindwtrNative: {
+            nowMs: () => 0,
+            log: () => { throw new Error('Body refusals must not log private exceptions'); },
+            cryptoCall: () => { const id = String(++sequence); answers.push(JSON.stringify({ id, body: true })); return id; },
+            ioNext: () => answers.shift() ?? '',
+            ioBody: () => {
+                if (++body === 1) throw new Error('private body exception');
+                if (body === 2) return '!MindwtrNativeError:private body status';
+                return 'AQ==';
+            },
+        },
+    };
+    vm.runInNewContext(readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8'), state);
+    const first = assert.rejects(state.__mindwtrCryptoCall({ op: 'aesGcmSeal' }), /^Error: I\/O response body is unavailable$/);
+    const second = assert.rejects(state.__mindwtrCryptoCall({ op: 'aesGcmSeal' }), /^Error: I\/O response body is unavailable$/);
+    const third = state.__mindwtrCryptoCall({ op: 'aesGcmSeal' });
+    assert.equal(state.__pumpTimers(), 3);
+    await Promise.all([first, second]);
+    assert.deepEqual(Array.from(await third), [1]);
+    assert.equal(state.__pumpTimers(), 0);
+}
 // The URL polyfill parses a person's mailto: and tel: links as the platform URL does, so their open button shows.
 for (const text of ['mailto:alex@example.com', 'tel:+1-555-0100', 'MAILTO:bea@example.com?subject=Hi', 'javascript:alert(1)', 'obsidian://people/alex', 'https://bea.example/fail']) {
     const parts = (url) => [url.protocol, url.pathname, url.search, url.hash, url.host, String(url)];
@@ -162,9 +187,11 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     let taken = '';
     const aborted = [];
     const store = new Map();
+    const secretRequests = [];
     let clock = 0;
     let ids = 0;
     let nextCalls = 0;
+    let bodyCalls = 0;
     const bridge = {
         log() {},
         nowMs: () => clock,
@@ -176,7 +203,9 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
         },
         netAbort(id) { aborted.push(id); return null; },
         secretCall(json) {
-            const { op, key, value } = JSON.parse(json);
+            const request = JSON.parse(json);
+            secretRequests.push(request);
+            const { op, key, value } = request;
             if (!/^[\w.-]+$/.test(key)) return '!MindwtrNativeError:Invalid secret key';
             const id = String(++ids);
             if (op === 'set') store.set(key, value);
@@ -190,7 +219,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
             taken = next?.body ?? '';
             return next?.json ?? '';
         },
-        ioBody() { return taken; },
+        ioBody() { bodyCalls += 1; return taken; },
     };
     const net = vm.createContext({ console: { info() {} }, Intl: undefined, __mindwtrNative: bridge });
     vm.runInContext(readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8'), net);
@@ -256,6 +285,35 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
         assert.equal(outcome.status, 'rejected', `case ${i} rejects`);
         assert.deepEqual([outcome.reason.name, outcome.reason.message], ['TypeError', cases[i][1]], `case ${i}`);
     });
+    // Only a structured native cap reply marks the rejected Error. English text,
+    // malformed metadata and an ordinary remote JSON body confer no authority.
+    const capBeforeBody = bodyCalls;
+    const capReply = run("fetch('https://dav.example/capped')");
+    answer({ id: String(ids), error: 'Native cap fixture', errorCode: 'response-too-large', limitBytes: 4 });
+    net.__pumpTimers();
+    const capError = await capReply.then(() => assert.fail('native cap must reject'), (error) => error);
+    assert.deepEqual([capError.name, capError.message, capError.code, capError.limitBytes],
+        ['TypeError', 'Response exceeds the 4 byte download limit', 'response-too-large', 4]);
+    assert.equal(bodyCalls, capBeforeBody, 'a coded refusal has no native body');
+    for (const fields of [
+        {}, { errorCode: 'response-too-large' }, { errorCode: 'response-too-large', limitBytes: '4' },
+        { errorCode: 'response-too-large', limitBytes: 0 }, { errorCode: 'response-too-large', limitBytes: -1 },
+        { errorCode: 'response-too-large', limitBytes: 1.5 }, { errorCode: 'response-too-large', limitBytes: Number.MAX_SAFE_INTEGER + 1 },
+        { errorCode: 'other', limitBytes: 4 },
+    ]) {
+        const pending = run("fetch('https://dav.example/unmarked')");
+        answer({ id: String(ids), error: 'Response exceeds the 4 byte download limit', ...fields });
+        net.__pumpTimers();
+        const error = await pending.then(() => assert.fail('malformed cap reply must reject'), (value) => value);
+        assert.deepEqual([error.name, error.message, error.code ?? null, error.limitBytes ?? null],
+            ['TypeError', 'Response exceeds the 4 byte download limit', null, null]);
+    }
+    const remoteMarker = run("fetch('https://dav.example/remote-marker')");
+    answer({ id: String(ids), ...whole('eyJlcnJvckNvZGUiOiJyZXNwb25zZS10b28tbGFyZ2UiLCJsaW1pdEJ5dGVzIjo0fQ==') });
+    net.__pumpTimers();
+    const remoteResponse = await remoteMarker;
+    assert.equal(remoteResponse.code, undefined);
+    assert.deepEqual(plain(await remoteResponse.json()), { errorCode: 'response-too-large', limitBytes: 4 });
     // Whole base64 with its padding reads back exactly, the empty body included.
     const padded = run("['', 'QQ==', 'QUI=', 'QUJD'].map((_, i) => fetch('https://dav.example/pad/' + i))");
     ['', 'QQ==', 'QUI=', 'QUJD'].forEach((base64, i) => answer({ id: String(ids - 3 + i), ...whole(base64) }));
@@ -288,7 +346,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     net.__pumpTimers();
     assert.deepEqual(await failure(timed), { name: 'TimeoutError', message: 'The operation timed out.' });
     assert.equal(aborted.length, 3);
-    for (const id of aborted) answer({ id, error: 'Request cancelled' });
+    for (const id of aborted) answer({ id, error: 'Request cancelled', errorCode: 'response-too-large', limitBytes: 4 });
     assert.equal(net.__pumpTimers(), 0, 'a cancelled call\'s late answer settles nothing');
     const asked = nextCalls;
     net.__pumpTimers();
@@ -369,7 +427,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     const broken = run("fetch('https://dav.example/broken')");
     answer({ id: String(ids), status: 200, statusText: 'OK', url: 'https://dav.example/broken', redirected: false, headers: [], body: true, base64: '!MindwtrNativeError:Answers closed' });
     net.__pumpTimers();
-    assert.deepEqual(await failure(broken), { name: 'TypeError', message: 'Network request failed: the host sent an unreadable body' });
+    assert.deepEqual(await failure(broken), { name: 'TypeError', message: 'I/O response body is unavailable' });
     // The host's decoder and the polyfill's fatal one agree on the shared cases (StrictUtf8Test reads the same file). The file's
     // answers are Node's own fatal decoder with the BOM kept, as the polyfill keeps it.
     const parity = JSON.parse(readFileSync(resolve(app, 'scripts/utf8-parity-cases.json'), 'utf8'));
@@ -400,6 +458,17 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     net.__pumpTimers();
     assert.equal(await syncSaved, undefined);
     assert.equal(store.get('mindwtr_cloud_token'), 'drained', 'a sync secret write reaches the host while another call drains');
+    net.__mindwtrHostPlatform = 'ios';
+    const iosClass = net.__mindwtrSyncSecrets.setSecret('fixture', 'synthetic', 'after-first-unlock');
+    net.__pumpTimers(); await iosClass;
+    assert.deepEqual(secretRequests.at(-1), { op: 'set', key: 'fixture', value: 'synthetic', accessibility: 'after-first-unlock' });
+    const iosDefault = net.__mindwtrSyncSecrets.setSecret('fixture', 'synthetic');
+    net.__pumpTimers(); await iosDefault;
+    assert.equal(Object.hasOwn(secretRequests.at(-1), 'accessibility'), false, 'Old iOS two-argument payload is unchanged');
+    net.__mindwtrHostPlatform = 'android';
+    const androidClass = net.__mindwtrSyncSecrets.setSecret('fixture', 'synthetic', 'after-first-unlock');
+    net.__pumpTimers(); await androidClass;
+    assert.equal(Object.hasOwn(secretRequests.at(-1), 'accessibility'), false, 'Android wire keeps its single existing class');
     net.__resumeHostCalls();
     run("fetch('https://dav.example/later')");
     assert.equal(sent.at(-1).url, 'https://dav.example/later', 'calls reach the host again once it resumes them');
@@ -564,7 +633,8 @@ const sqliteBridge = readFileSync(resolve(app, 'android/app/src/main/java/tech/d
 const hostEntry = readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8');
 assert.match(hostEntry, /new ValidatedSqliteAdapter\(sqlite, \{ rejectConcurrentWrites: true \}\)/);
 // Review 11: sync's service, its Save commit and its screen use the secrets no other call's deadline refuses.
-assert.equal(/createNativeSync\(\{[\s\S]*?localData:/.exec(hostEntry)[0].match(/__mindwtrSyncSecrets/g)?.length, 3, 'sync binds the unrefused secrets');
+assert.equal(/const nativeSyncBindings: NativeSyncBindings = \{[\s\S]*?localData:/.exec(hostEntry)?.[0].match(/__mindwtrSyncSecrets/g)?.length, 3, 'sync binds the unrefused secrets');
+assert.match(hostEntry, /createNativeSync\(nativeSyncBindings\)/);
 // Durable request receipts: core's adapter commits a write's receipt in its data's transaction (the hook right before
 // COMMIT in both data saves, into native_request_receipts), and boot loads them before activation and the journal's replay.
 {
@@ -1203,7 +1273,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
-    assert.match(hostEntry, /createNativeHostContract\(\{ \.\.\.\(nativeSync \? \{ syncSettings: nativeSync\.settingsHost \} : \{\}\), \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*\.\.\.\(attachmentsHost \? \{ attachments: attachmentsHost \} : \{\}\) \}\)/);
+    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*\.\.\.\(attachmentsHost \? \{ attachments: attachmentsHost \} : \{\}\) \}\)/);
     assert.match(host, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];/);
     // An entry replays only while it fits its write as host-entry takes it (WriteJournal.SHAPES): a JSON object for `json`, a
     // boolean for a boolean, a Menu command for menuCommand's name, text for the rest; MENU names exactly host-entry's
@@ -3555,6 +3625,7 @@ export { validateNativeAttachmentDraftBeginV3, validateNativeAttachmentDraftLine
     prepareNativeAttachmentDraftAddV3, prepareNativeAttachmentDraftRemoveV3,
     readNativeAttachmentDraftRemoveFrozen } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft.ts'))};
 export { prepareNativeAttachmentDraftDiscardCandidates, prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4 } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft-discard.ts'))};
+export { prepareNativeAttachmentCleanupWitness, isNativeAttachmentCleanupWitnessEligible } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};
 import { createOwnedEditorFileEditTaskDraftSaveMethods as createRealMixedSaveMethods } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract-owned-file-edit-save.ts'))};
 import { createNativeHostContract as createRealCompleteContract } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract.ts'))};
 import { NativeReceiptSqliteAdapter as RealCompleteAdapter } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-request-receipts.ts'))};
@@ -4072,7 +4143,7 @@ const poll = async (state, id) => {
         state.__mindwtrNative.ioBody = () => '';
     };
     const local = makeState(0, [], 'ios', configureHTTP);
-    assert.deepEqual(Object.keys(local.contractBindings), []);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), []);
     assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
     local.MindwtrHost.nativeHTTPDelivered();
     assert.equal(local.logText, null, 'No preboot transport receipt');
@@ -4101,6 +4172,99 @@ const poll = async (state, id) => {
         assert.equal(other.httpCalls, 0);
     }
 }
+// Secret and crypto ports alone leave KV/sync/AI absent. Their fixed receipts
+// use the existing forced Diagnostics writer without executing a primitive.
+for (const [bridge, receipt, operation] of [
+    ['secretCall', 'nativeSecretDelivered', 'secure-storage'],
+    ['cryptoCall', 'nativeCryptoDelivered', 'sync-crypto'],
+]) {
+    const configurePort = (state) => {
+        state.primitiveCalls = 0;
+        state.__mindwtrNative[bridge] = () => { state.primitiveCalls++; throw new Error('Unexpected startup native primitive'); };
+        state.__mindwtrNative.ioNext = () => '';
+        state.__mindwtrNative.ioBody = () => '';
+    };
+    const local = makeState(0, [], 'ios', configurePort);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), []);
+    assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
+    local.MindwtrHost[receipt]();
+    assert.equal(local.logText, null, 'No preboot native primitive receipt');
+    assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
+    assert.equal(local.primitiveCalls, 0, 'Installing the native bridge performs no startup operation');
+    local.settings = { diagnostics: { loggingEnabled: false } };
+    local.MindwtrHost[receipt]();
+    await poll(local, local.MindwtrHost.logShare());
+    const lines = local.logText.split('\n').filter((line) => line.includes(`v1.3.5/ios-${operation}`));
+    assert.equal(lines.length, 1, 'Forced native primitive marker survives disabled logging');
+    assert.deepEqual(JSON.parse(lines[0]).context, {
+        releaseCheck: `v1.3.5/ios-${operation}`, operation, outcome: 'delivered',
+    });
+    const before = local.logText;
+    for (const field of ['sandbox', 'workspaceTransition']) {
+        local[field] = true; local.MindwtrHost[receipt](); local[field] = false;
+    }
+    await new Promise((tick) => setImmediate(tick));
+    assert.equal(local.logText, before, 'Unsettled workspace emits no native primitive receipt');
+    for (const platform of ['android', undefined]) {
+        const other = makeState(0, [], platform, configurePort);
+        assert.equal((await poll(other, other.MindwtrHost.boot())).ok, true);
+        const prior = other.logText;
+        other.MindwtrHost[receipt](); await new Promise((tick) => setImmediate(tick));
+        assert.equal(other.logText, prior, 'Invalid platform emits no native primitive marker');
+        assert.equal(other.primitiveCalls, 0);
+    }
+}
+// Explicit iOS KV presence remains a transport capability, not Sync activation.
+// Its fixed successful-delivery sink is forced, but never records settings data.
+{
+    const receipts = [
+        ['nativeDeviceStorageDelivered', 'ios-device-storage', 'device-storage'],
+        ['nativeLegacySecretRetirementDelivered', 'ios-legacy-secret-retirement', 'legacy-secret-retirement'],
+    ];
+    const names = ['kvGet', 'kvSet', 'kvRemove', 'kvMultiGet', 'kvMultiSet', 'kvMultiRemove'];
+    const configureKV = (state) => {
+        state.kvBridgeCalls = 0;
+        for (const name of names) state.__mindwtrNative[name] = () => {
+            state.kvBridgeCalls++; throw new Error('Unexpected startup device storage');
+        };
+    };
+    const local = makeState(0, [], 'ios', configureKV);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), [], 'KV does not enable iOS Sync or AI');
+    for (const name of names) assert.equal(typeof local.__mindwtrNative[name], 'function');
+    for (const [method] of receipts) local.MindwtrHost[method]();
+    assert.equal(local.logText, null, 'No preboot device storage receipt');
+    assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
+    assert.equal(local.kvBridgeCalls, 0, 'Explicit storage bridge performs no startup request');
+    local.settings = { diagnostics: { loggingEnabled: false } };
+    for (const [method] of receipts) local.MindwtrHost[method]();
+    await poll(local, local.MindwtrHost.logShare());
+    for (const [, slug, operation] of receipts) {
+        const lines = local.logText.split('\n').filter((line) => line.includes(`v1.3.5/${slug}`));
+        assert.equal(lines.length, 1, 'Forced fixed storage marker survives disabled logging');
+        assert.deepEqual(JSON.parse(lines[0]).context, {
+            releaseCheck: `v1.3.5/${slug}`, operation, outcome: 'delivered',
+        });
+    }
+    const before = local.logText;
+    for (const field of ['sandbox', 'workspaceTransition']) {
+        local[field] = true; for (const [method] of receipts) local.MindwtrHost[method](); local[field] = false;
+    }
+    await new Promise((tick) => setImmediate(tick));
+    assert.equal(local.logText, before, 'Unsettled workspace emits no device storage receipt');
+    local.logFailure = 'synthetic diagnostic failure';
+    assert.doesNotThrow(() => local.MindwtrHost.nativeLegacySecretRetirementDelivered());
+    await new Promise((tick) => setImmediate(tick));
+    assert.equal(local.logText, before, 'Logging failure does not emit or throw a retirement receipt');
+    local.logFailure = null;
+    for (const platform of ['android', undefined]) {
+        const other = makeState(0, [], platform);
+        assert.equal((await poll(other, other.MindwtrHost.boot())).ok, true);
+        const prior = other.logText;
+        for (const [method] of receipts) other.MindwtrHost[method](); await new Promise((tick) => setImmediate(tick));
+        assert.equal(other.logText, prior, 'Invalid platform emits no device storage receipt');
+        assert.equal(typeof other.__mindwtrNative.kvMultiGet, 'undefined');
+    }
+}
 // Production host-entry selects independent local attachment policy only for
 // complete iOS file capabilities. No kvMultiGet, sync settings, AI or backend
 // constructor is supplied; readiness and diagnostic acknowledgments are real.
@@ -4113,7 +4277,7 @@ const poll = async (state, id) => {
         state.__mindwtrInstallerCall = async () => null;
     };
     const local = makeState(0, [], 'ios', configureLocal);
-    assert.deepEqual(Object.keys(local.contractBindings), ['attachments'], 'local capability enables neither Sync nor AI');
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['attachments'], 'local capability enables neither Sync nor AI');
     assert.equal(local.localShaInstallCount, 1, 'successful local construction installs native SHA once');
     assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
     const owner = { kind: 'task', taskId: 'task215', attachments: [] };
@@ -4159,7 +4323,7 @@ const poll = async (state, id) => {
             if (variant === 'partial') delete state.__mindwtrNative.ioBody;
             if (variant === 'refused') state.__mindwtrNative.fileDirectories = () => '!MindwtrNativeError:fixed unavailable';
         });
-        assert.deepEqual(Object.keys(unavailable.contractBindings), [], `${variant} capability offers no local fallback`);
+        assert.deepEqual(Object.keys(unavailable.contractBindings).filter((name) => unavailable.contractBindings[name] !== undefined), [], `${variant} capability offers no local fallback`);
         assert.equal(unavailable.localShaInstallCount, 0, 'failed optional discovery leaves SHA binding unchanged');
         assert.equal((await poll(unavailable, unavailable.MindwtrHost.boot())).ok, true, 'optional local failure does not fail boot');
     }
@@ -5380,6 +5544,20 @@ const poll = async (state, id) => {
         });
         assert.equal((await poll(unavailable, unavailable.MindwtrHost.boot())).ok, true);
         refused(unavailable);
+    });
+    await check('iOS KV presence preserves local attachment authority and does not activate Sync or AI', async () => {
+        let calls = 0;
+        const local = makeState(0, [], 'ios', (state) => {
+            configureLocal(state);
+            for (const name of ['kvMultiGet', 'kvMultiSet', 'kvMultiRemove', 'secretCall', 'cryptoCall', 'netFetch', 'bgSyncSchedule']) {
+                state.__mindwtrNative[name] = () => { calls++; throw new Error('Unexpected device service activation'); };
+            }
+        });
+        assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['attachments']);
+        assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
+        assert.equal(local.localShaInstallCount, 1);
+        assert.equal(call(local), '{"outcome":"removed"}', 'existing synchronous local Discard remains admitted');
+        assert.equal(calls, 0);
     });
     await check('nativeSync gate stays explicit with local-only construction', () => {
         const entry = readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8');

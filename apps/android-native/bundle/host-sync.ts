@@ -1,5 +1,5 @@
 /**
- * Sync on the Android host: core's mobile sync service, its automatic triggers and Settings › Sync's device, bound to this
+ * Native Sync: core's mobile sync service and Settings › Sync's device, bound to this
  * host's ports as React Native's lib/sync-service.ts, the root layout's sync effects and the Sync screen bind them. Every rule
  * is core's (mobile-sync-service.ts, mobile-sync-triggers.ts, native-host-contract-settings-sync.ts); this file only binds:
  *
@@ -18,11 +18,14 @@
  *
  * Not on this host yet, and refused the way core refuses an unbound port: Dropbox (S4) and File Sync's folder (S5). The fence
  * owner stays `mindwtr-mobile` and the device keys keep RN's names, so an upgraded RN user's configuration and deviceId carry over.
+ * iOS construction is explicit and foreground-only; host-entry's activation gate remains closed. A future entry must admit
+ * supported stored providers before opening settings or executing requests. This factory does not alter those stored choices.
  */
 import { DOMParser } from '@xmldom/xmldom';
-import { createNativeAttachments, nativeFileChannels } from './host-attachments';
+import { createNativeAttachments, nativeFileChannels, type NativeAttachmentBindings } from './host-attachments';
 import {
     MOBILE_BACKGROUND_SYNC_DEADLINE_MS,
+    NativeAttachmentCleanupUnconfirmedError,
     SETTINGS_SYNC_BADGE_COLORS,
     SYNC_BACKEND_KEY,
     SyncCryptoAuthError,
@@ -61,6 +64,7 @@ import {
     type SyncBadgeState,
     type SyncCryptoPrimitives,
     type SyncSecretStoragePort,
+    type SyncSecretAccessibility,
 } from '@mindwtr/core';
 
 /** host-entry.ts's AsyncStorage over RnKeyValue.kt. */
@@ -75,7 +79,7 @@ export type HostKeyValue = {
 export type NativeSyncBindings = {
     keyValue: HostKeyValue;
     /** host-polyfills.js's secret calls (SecretStore.kt, expo-secure-store's format). */
-    secrets: { getSecret(key: string): Promise<string | null>; setSecret(key: string, value: string): Promise<void>; deleteSecret(key: string): Promise<void> };
+    secrets: { getSecret(key: string): Promise<string | null>; setSecret(key: string, value: string, accessibility?: SyncSecretAccessibility): Promise<void>; deleteSecret(key: string): Promise<void> };
     /** The boot's validated SQLite adapter: the local snapshot a cycle reads and saves. */
     localData: () => { getData(): Promise<AppData>; saveData(data: AppData): Promise<void> };
     /** The device's network state now (HostNetwork.kt), as expo-network reads it. */
@@ -92,6 +96,8 @@ export type NativeSyncBindings = {
     scheduleBackgroundSync: (on: boolean) => void;
     /** The build's flavor (BuildConfig.FOSS): a FOSS build hides Dropbox, as RN's FOSS_BUILD does. */
     isFossBuild: boolean;
+    /** Selected durable cleanup ownership, required by the explicit iOS foreground factory. */
+    retireLocalAttachment?: NativeAttachmentBindings['retireLocalAttachment'];
 };
 
 /** host-polyfills.js's sync crypto call (HostCrypto.kt); absent where the host has no crypto (the gates' stand-in). */
@@ -155,6 +161,14 @@ const unavailable = (what: string) => async (): Promise<never> => {
 };
 
 export const createNativeSync = (bindings: NativeSyncBindings) => {
+    const platform = globalThis.__mindwtrHostPlatform === 'ios' ? 'ios' : 'android';
+    if (platform === 'ios' && typeof bindings.retireLocalAttachment !== 'function') {
+        throw new Error('Foreground sync requires owned attachment cleanup on this iOS build');
+    }
+    const channels = nativeFileChannels();
+    if (platform === 'ios' && !channels) {
+        throw new Error('Foreground sync requires native attachment files on this iOS build');
+    }
     const { keyValue } = bindings;
     const storage = {
         getItem: (key: string) => keyValue.get(key),
@@ -172,7 +186,9 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     const secretStorage: SyncSecretStoragePort = {
         isAvailable: async () => true,
         getItem: (key) => bindings.secrets.getSecret(key),
-        setItem: (key, value) => bindings.secrets.setSecret(key, value),
+        setItem: (key, value, accessibility) => platform === 'ios'
+            ? bindings.secrets.setSecret(key, value, accessibility)
+            : bindings.secrets.setSecret(key, value),
         deleteItem: (key) => bindings.secrets.deleteSecret(key),
     };
     const secureConfig = createSecureSyncConfigStore({ storage, secrets: secretStorage, vault: createSyncSecretVault(secretStorage) });
@@ -209,7 +225,6 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     const networkListeners = new Set<(state: MobileSyncNetworkState) => void>();
 
     // Attachments (host-attachments.ts) on the host's files, with sync's own stores, keystore, log and encryption state.
-    const channels = nativeFileChannels();
     const attachments = channels ? createNativeAttachments({
         storage,
         getSecureConfigValue: (key) => secureConfig.getSecureConfigValue(key),
@@ -219,6 +234,8 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             sanitize: (message) => sanitizeLogMessage(message),
         },
         crypto,
+        retireLocalAttachment: bindings.retireLocalAttachment,
+        maxWebdavBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         encryption: {
             logSyncEncryptionEvent: (event, extra, options) => encryptionState.logSyncEncryptionEvent(event, extra, options),
             getSyncEncryptionMaterial: () => encryptionState.getSyncEncryptionMaterial(),
@@ -229,7 +246,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     const service = createMobileSyncService<never>({
         storage,
         getSecureConfigValue: (key) => secureConfig.getSecureConfigValue(key),
-        platform: { os: () => 'android', isFossBuild: bindings.isFossBuild, dropboxAppKey: () => '' },
+        platform: { os: () => platform, isFossBuild: bindings.isFossBuild, dropboxAppKey: () => '' },
         network: {
             getState: async () => bindings.networkState(),
             subscribe: (listener) => {
@@ -330,6 +347,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     let configured = false;
     let cycles = 0;
     let lastEvent = '';
+    let fatalCleanupError: NativeAttachmentCleanupUnconfirmedError | null = null;
     const badge = (): SyncBadgeState => {
         const settings = useTaskStore.getState().settings;
         return resolveSyncBadgeState({
@@ -345,6 +363,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         return { type: 'sync', badge: current, color: current === 'hidden' ? null : SETTINGS_SYNC_BADGE_COLORS[current], cycles };
     };
     const emitState = () => {
+        if (fatalCleanupError) return;
         const event = state();
         const text = JSON.stringify(event);
         if (text === lastEvent) return;
@@ -354,9 +373,13 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     };
     /** RN's useMobileSyncBadge reads the configuration again on every screen change and sync status change. */
     const refreshConfigured = async () => {
+        if (fatalCleanupError) return;
         try {
-            configured = (await service.getMobileSyncConfigurationStatus()).configured;
-        } catch {
+            const nextConfigured = (await service.getMobileSyncConfigurationStatus()).configured;
+            if (fatalCleanupError) return;
+            configured = nextConfigured;
+        } catch (error) {
+            if (fatalCleanupError || error instanceof NativeAttachmentCleanupUnconfirmedError) return;
             configured = false;
         }
         emitState();
@@ -364,11 +387,17 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     /** Every cycle, automatic or from the Sync screen, goes through here, so Kotlin reads its lists again once one ends. */
     const performSync: NativeSyncSettingsHost['performSync'] = async (syncPathOverride, options) => {
+        if (fatalCleanupError) throw fatalCleanupError;
         try {
             return await service.performMobileSync(syncPathOverride, options);
+        } catch (error) {
+            if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
+            throw error;
         } finally {
-            cycles += 1;
-            void refreshConfigured();
+            if (!fatalCleanupError) {
+                cycles += 1;
+                void refreshConfigured();
+            }
         }
     };
 
@@ -384,8 +413,11 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         return shouldScheduleMobileBackgroundSync({ schedulerAvailable: true, configured, backend });
     };
     const reconcileBackgroundSync = async () => {
+        if (fatalCleanupError) throw fatalCleanupError;
+        if (platform === 'ios') return;
         void refreshConfigured();
         const on = await backgroundSyncWanted();
+        if (fatalCleanupError) throw fatalCleanupError;
         // Kotlin answers once WorkManager stored it (bounded); a refusal throws to the caller, and the next reconcile tries again.
         bindings.scheduleBackgroundSync(on);
         bindings.trace(`Native Android background sync schedule=${on ? 'on' : 'off'}`);
@@ -425,7 +457,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     // ---- Settings › Sync's device (native-host-contract-settings-sync.ts) ----
 
     const settingsHost: NativeSyncSettingsHost = {
-        platform: { os: 'android', isFossBuild: bindings.isFossBuild, dropboxAppKey: '' },
+        platform: { os: platform, cloudKitAvailable: false, isFossBuild: bindings.isFossBuild, dropboxAppKey: '' },
         storage: {
             multiGet: (keys) => keyValue.multiGet(keys),
             setItem: (key, value) => keyValue.set(key, value),
@@ -494,6 +526,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
          * (RN's startup requestSync(0)). [appState] is 'active' or 'background'.
          */
         start(appState: string) {
+            if (platform === 'ios') throw new Error('Automatic sync is not available on this iOS build');
             if (triggers) return state();
             triggers = createMobileSyncTriggers({
                 initialAppState: appState,
@@ -541,6 +574,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
          * should run again.
          */
         async backgroundSync(trigger: MobileBackgroundSyncTrigger, stored: number, deadlineMs = 0) {
+            if (platform === 'ios') throw new Error('Background sync is not available on this iOS build');
             imported += stored;
             shortDeadlineMs = deadlineMs > 0 && deadlineMs < MOBILE_BACKGROUND_SYNC_DEADLINE_MS ? deadlineMs : null;
             if (trigger === 'capture') await runner.runCapture();

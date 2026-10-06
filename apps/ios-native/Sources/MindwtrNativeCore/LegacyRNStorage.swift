@@ -22,6 +22,7 @@ public struct LegacyRNStorage {
     private let source: Store?
     private let storeCopies: [Store]
     private let nonemptyStoreCount: Int
+    private let consumedSnapshotBytes: Int
     private var values: [Data: String] { source?.values ?? [:] }
     var hasStoredValues: Bool { !values.isEmpty }
     #if DEBUG
@@ -67,9 +68,27 @@ public struct LegacyRNStorage {
         source = selected
         storeCopies = copies
         nonemptyStoreCount = nonemptyCount
+        consumedSnapshotBytes = Self.snapshotLimit - remaining
     }
 
     public func value(forKey key: String) throws -> String? { values[Data(key.utf8)] }
+
+    // Read-only reuse for the internal current-namespace settings store. This
+    // grants no legacy migration or authority-marker mutation permission.
+    struct DeviceNamespaceSnapshot {
+        let manifest: Data?
+        let values: [Data: String]
+        let hasPopulatedLegacyCopy: Bool
+        let consumedBytes: Int
+    }
+    func deviceNamespaceSnapshot() -> DeviceNamespaceSnapshot {
+        let canonical = containerURL.appendingPathComponent("Library/Application Support")
+            .appendingPathComponent(bundleIdentifier).appendingPathComponent("RCTAsyncLocalStorage_V1/manifest.json")
+        let current = storeCopies.first { $0.manifestURL == canonical }
+        return DeviceNamespaceSnapshot(manifest: current?.manifest, values: current?.values ?? [:],
+            hasPopulatedLegacyCopy: storeCopies.contains { $0.manifestURL != canonical && !$0.values.isEmpty },
+            consumedBytes: consumedSnapshotBytes)
+    }
 
     /// Exact wire shape consumed by the shared host's LegacyState. Empty strings
     /// still count as present; backup parsing and import decisions belong to core.
@@ -177,6 +196,16 @@ public struct LegacyRNStorage {
         left.count == right.count && left.allSatisfy { key, value in right[key]?.utf8.elementsEqual(value.utf8) == true }
     }
 
+    // RN's NSString file reader consumes one UTF-8 encoding marker. Foundation's
+    // String(data:) differs by OS; use it only to reject malformed input here.
+    static func decodeExternalUTF8(_ data: Data) -> String? {
+        guard String(data: data, encoding: .utf8) != nil else { return nil }
+        if data.starts(with: [0xEF, 0xBB, 0xBF]) {
+            return String(decoding: data.dropFirst(3), as: UTF8.self)
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     private static func directory(root: URL, components: [String]) throws -> URL? {
         var current = root
         for component in components {
@@ -217,7 +246,7 @@ public struct LegacyRNStorage {
                 // Format compatibility with RNCAsyncStorage, not a security hash.
                 let name = Insecure.MD5.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
                 let data = try readFile(directory.appendingPathComponent(name), limit: snapshotLimit, remaining: &remaining)
-                guard let text = String(data: data, encoding: .utf8) else {
+                guard let text = decodeExternalUTF8(data) else {
                     throw HostFailure("Legacy storage value is not UTF-8")
                 }
                 result[Data(key.utf8)] = text

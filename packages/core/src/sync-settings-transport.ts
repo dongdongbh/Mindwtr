@@ -27,6 +27,7 @@ import {
     type MobileSyncConfigurationTransactionDependencies,
 } from './mobile-sync-configuration-transaction';
 import type { MobileDropboxSyncCredentials, MobileSyncConfigOverride } from './mobile-sync-service';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import {
     coerceSupportedBackend,
     getMobileCloudRequestOptions,
@@ -282,7 +283,9 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
     let stagedDropboxCredentials: MobileDropboxSyncCredentials | null = null;
 
     const reconcileBackgroundSyncRegistration = () => {
-        void host.reconcileBackgroundSync().catch(logError);
+        void host.reconcileBackgroundSync().catch((error) => {
+            if (!(error instanceof NativeAttachmentCleanupUnconfirmedError)) logError(error);
+        });
     };
 
     const probeWebdavCompatibilityForCurrentEncryptionPosture = async (
@@ -978,6 +981,7 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
         } = state;
         core.addBreadcrumb('sync:manual');
         set({ isSyncing: true });
+        let cleanupUnconfirmed = false;
         let activationCleanupDeferred: 'remote' | 'file' | null = null;
         const showRemoteFenceFeedback = (deferred: 'busy' | 'cleanup') => {
             showSettingsWarning(
@@ -1387,6 +1391,10 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
                 throw new Error(result.error || 'Unknown error');
             }
         } catch (error) {
+            if (error instanceof NativeAttachmentCleanupUnconfirmedError) {
+                cleanupUnconfirmed = true;
+                throw error;
+            }
             const message = String(error);
             if (/temporary Inbox location|re-select a folder in Settings -> (?:Data & Sync|Sync)|Cannot access the selected sync file/i.test(message)) {
                 showSettingsWarning(
@@ -1404,7 +1412,7 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
                     : redact(p.getSyncFailureToastMessage(error)),
             );
         } finally {
-            set({ isSyncing: false });
+            if (!cleanupUnconfirmed) set({ isSyncing: false });
         }
     };
 

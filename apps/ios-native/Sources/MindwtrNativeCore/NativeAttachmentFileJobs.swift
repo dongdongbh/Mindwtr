@@ -191,16 +191,19 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
     private enum Work: Sendable {
         case raw(String, installer: Bool)
         case draft(NativeAttachmentDraftFileRequest)
+        case ownedBaseline(String, NativeAttachmentFiles.BaselineAttachmentProof, @Sendable () throws -> Void)
         var isInstaller: Bool {
             switch self {
             case .raw(_, let installer): return installer
             case .draft(let request): return request.isInstaller
+            case .ownedBaseline: return false
             }
         }
         var isDraft: Bool {
             switch self {
             case .raw: return false
             case .draft: return true
+            case .ownedBaseline: return true
             }
         }
     }
@@ -240,6 +243,10 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         get { files.afterRetirementUnlink }
         set { files.afterRetirementUnlink = newValue }
     }
+    var beforeRetirementSync: (() throws -> Void)? {
+        get { files.beforeRetirementSync }
+        set { files.beforeRetirementSync = newValue }
+    }
     var counters: (jobs: Int, bytes: Int) {
         lock.lock(); defer { lock.unlock() }; return (jobs.count, reservedBytes)
     }
@@ -268,6 +275,14 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
 
     func submitDraft(_ request: NativeAttachmentDraftFileRequest) throws -> String {
         try enqueue(.draft(request), inputBytes: request.encodedInputSize(), replyReservation: 64 * 1024)
+    }
+
+    /// Native-only immutable journal lease; no raw JSON request can grant it.
+    func submitBaselineRetirement(attachmentID: String, proof: NativeAttachmentFiles.BaselineAttachmentProof,
+                                  ownershipBytes: Int, checkOwnership: @escaping @Sendable () throws -> Void) throws -> String {
+        guard ownershipBytes >= 0, ownershipBytes <= 8 * 1024 * 1024 else { throw NativeAttachmentFileJobsError.capacity }
+        let count = try NativeAttachmentDraftFileRequest.retireBaseline(attachmentID: attachmentID, proof: proof).encodedInputSize()
+        return try enqueue(.ownedBaseline(attachmentID, proof, checkOwnership), inputBytes: count + ownershipBytes, replyReservation: 64 * 1024)
     }
 
     private func enqueue(_ work: Work, inputBytes: Int, replyReservation: Int) throws -> String {
@@ -305,6 +320,10 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
                     value = reply.value ?? NSNull(); bytes = reply.bytes
                 case .draft(let request):
                     value = try executeDraft(request, token: token); bytes = nil
+                case .ownedBaseline(let attachmentID, let proof, let ownership):
+                    value = ["status": try files.retireBaselineAttachment(attachmentID: attachmentID, proof: proof,
+                        checkCancellation: token.check, checkOwnership: ownership).rawValue]
+                    bytes = nil
                 }
                 var envelope: [String: Any] = ["id": id, "value": value]
                 if bytes != nil { envelope["body"] = true }

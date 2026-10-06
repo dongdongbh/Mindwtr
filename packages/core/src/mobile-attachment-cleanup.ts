@@ -7,9 +7,10 @@
 // file is deleted only inside the managed attachments directories; a WebDAV delete is versioned
 // (no strong ETag, no delete); File Sync keeps remote bytes, because another peer may reselect a
 // generation before its document CAS.
-import type { AppData } from './types';
+import type { AppData, Attachment } from './types';
 import { ATTACHMENTS_DIR_NAME, getBaseSyncUrl, getCloudBaseUrl } from './attachment-paths';
 import { runAttachmentCleanupLifecycle } from './attachment-cleanup';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import { decodeUriSafe } from './async-utils';
 import { cloudDeleteFile } from './cloud';
 import { DropboxConflictError } from './dropbox';
@@ -34,7 +35,8 @@ export type MobileAttachmentCleanupCoreFunctions = {
 };
 
 export type MobileAttachmentCleanupHost = {
-  fs: Pick<MobileAttachmentFileSystemPort, 'documentDirectory' | 'cacheDirectory' | 'delete'>;
+  fs: Pick<MobileAttachmentFileSystemPort, 'documentDirectory' | 'cacheDirectory' | 'delete' | 'deleteUnlessKept'>;
+  retireLocalAttachment?(attachmentID: string, targetURI: string, keep: () => boolean): Promise<boolean>;
   /** A Dropbox write conflict must end the cycle instead of being logged and skipped. */
   isDropboxConflictError?(error: unknown): boolean;
   core?: Partial<MobileAttachmentCleanupCoreFunctions>;
@@ -69,8 +71,8 @@ export const runMobileAttachmentCleanup = async (
       });
   };
 
-  const deleteAttachmentFile = async (uri: string | undefined): Promise<void> => {
-    const safeUri = sanitizeAttachmentUriForSyncMerge(uri);
+  const deleteAttachmentFile = async (attachment: Attachment): Promise<void> => {
+    const safeUri = sanitizeAttachmentUriForSyncMerge(attachment.uri);
     if (!safeUri) return;
     if (safeUri.startsWith('content://') || /^https?:\/\//i.test(safeUri)) return;
     const decodedUri = decodeUriSafe(safeUri);
@@ -80,8 +82,28 @@ export const runMobileAttachmentCleanup = async (
     }
     try {
       options.ensureLocalSnapshotFresh();
-      await host.fs.delete(safeUri);
+      if (host.retireLocalAttachment || host.fs.deleteUnlessKept) {
+        const keep = () => {
+          // The lifecycle checked live references; freshness binds that same snapshot.
+          options.ensureLocalSnapshotFresh();
+          return false;
+        };
+        const removed = host.retireLocalAttachment
+          ? await host.retireLocalAttachment(attachment.id, safeUri, keep)
+          : await host.fs.deleteUnlessKept!(safeUri, keep);
+        try {
+          options.logSyncInfo('Attachment cleanup freshness guarded', {
+            releaseCheck: 'v1.3.5/native-cleanup-freshness',
+            outcome: removed ? 'removed' : 'retained',
+          });
+        } catch {
+          // Logging must not change the acknowledged file operation.
+        }
+      } else {
+        await host.fs.delete(safeUri);
+      }
     } catch (error) {
+      if (error instanceof NativeAttachmentCleanupUnconfirmedError) throw error;
       if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
       options.logSyncWarning('Failed to delete attachment file', error);
     }
@@ -149,7 +171,7 @@ export const runMobileAttachmentCleanup = async (
     maxAttachmentTargets: ATTACHMENT_CLEANUP_BATCH_LIMIT,
     beforeEachAttachment: options.ensureLocalSnapshotFresh,
     beforeEachRemoteDelete: options.ensureLocalSnapshotFresh,
-    deleteLocalAttachment: (attachment) => deleteAttachmentFile(attachment.uri),
+    deleteLocalAttachment: deleteAttachmentFile,
     deleteRemoteAttachment,
     // File Sync folders are replicated independently. Without a distributed
     // GC tombstone, another peer can reselect any existing generation before

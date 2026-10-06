@@ -771,6 +771,67 @@ describe('applyAttachmentCleanupResult', () => {
 describe('runAttachmentCleanupLifecycle', () => {
     const now = '2026-07-14T12:00:00.000Z';
 
+    it.each([
+        ['task', false], ['task', true], ['project', false], ['project', true],
+    ] as const)('keeps an iOS data-container alias referenced by a %s (softDeleted=%s)', async (owner, softDeleted) => {
+        const container = '/var/mobile/Containers/Data/Application/A1111111-B222-4333-8444-555555555555/';
+        const plain = `file://${container}Library/Application%20Support/attachments/shared.pdf`;
+        const alias = `file:///private${container}Library/Application Support/attachments/shared.pdf`;
+        const targetURI = owner === 'task' ? alias : plain;
+        const referenceURI = owner === 'task' ? plain : alias;
+        const attachment: Attachment = { id: 'orphan', kind: 'file', title: 'shared', uri: targetURI, createdAt: now, updatedAt: now };
+        const data = buildData();
+        data.tasks.push({
+            id: 'purged', title: 'Purged', status: 'done', contexts: [], createdAt: now, updatedAt: now,
+            deletedAt: now, purgedAt: now, attachments: [attachment],
+        });
+        const live = {
+            id: 'live', title: 'Live', createdAt: now, updatedAt: now,
+            ...(softDeleted ? { deletedAt: now } : {}),
+            attachments: [{ ...attachment, id: 'live-copy', uri: referenceURI }],
+        };
+        if (owner === 'task') data.tasks.push({ ...live, status: 'next', contexts: [] });
+        else data.projects.push({ ...live, status: 'active', color: '#2563eb', order: 0, tagIds: [] });
+        const deleteLocalAttachment = vi.fn(async () => undefined);
+
+        const result = await runAttachmentCleanupLifecycle({ appData: data, now: () => now, deleteLocalAttachment });
+
+        expect(deleteLocalAttachment).not.toHaveBeenCalled();
+        expect(result.appData.tasks[0].attachments).toEqual([]);
+        const kept = owner === 'task' ? result.appData.tasks[1] : result.appData.projects[0];
+        expect(kept).toEqual(owner === 'task' ? data.tasks[1] : data.projects[0]);
+        expect(kept.attachments?.[0]?.uri).toBe(referenceURI);
+    });
+
+    it.each([
+        { label: 'different container', target: '/var/mobile/Containers/Data/Application/A1111111-B222-4333-8444-555555555555/Library/attachments/file.pdf', reference: '/private/var/mobile/Containers/Data/Application/B1111111-B222-4333-8444-555555555555/Library/attachments/file.pdf' },
+        { label: 'non-UUID container', target: '/var/mobile/Containers/Data/Application/not-a-uuid/Library/attachments/file.pdf', reference: '/private/var/mobile/Containers/Data/Application/not-a-uuid/Library/attachments/file.pdf' },
+        { label: 'arbitrary private prefix', target: '/var/other/attachments/file.pdf', reference: '/private/var/other/attachments/file.pdf' },
+        { label: 'purged parent', purged: true },
+        { label: 'deleted attachment', deleted: true },
+    ])('preserves cleanup eligibility for $label and passes the original IO URI', async (scenario) => {
+        const path = '/var/mobile/Containers/Data/Application/A1111111-B222-4333-8444-555555555555/Library/attachments/file.pdf';
+        const targetURI = `file://${scenario.target ?? path}`;
+        const referenceURI = `file://${scenario.reference ?? `/private${path}`}`;
+        const attachment: Attachment = { id: 'orphan', kind: 'file', title: 'file', uri: targetURI, createdAt: now, updatedAt: now };
+        const data = buildData();
+        data.tasks.push({
+            id: 'purged', title: 'Purged', status: 'done', contexts: [], createdAt: now, updatedAt: now,
+            deletedAt: now, purgedAt: now, attachments: [attachment],
+        });
+        data.projects.push({
+            id: 'reference', title: 'Reference', status: 'active', color: '#2563eb', order: 0, tagIds: [],
+            createdAt: now, updatedAt: now, ...(scenario.purged ? { deletedAt: now, purgedAt: now } : {}),
+            attachments: [{ ...attachment, id: 'other', uri: referenceURI, ...(scenario.deleted ? { deletedAt: now } : {}) }],
+        });
+        const deleteLocalAttachment = vi.fn(async () => undefined);
+
+        await runAttachmentCleanupLifecycle({ appData: data, now: () => now, deleteLocalAttachment });
+
+        expect(deleteLocalAttachment).toHaveBeenCalledWith(attachment);
+        expect(attachment.uri).toBe(targetURI);
+    });
+
     it('does not delete a Windows path alias still referenced with different casing', async () => {
         const data = buildData();
         data.tasks.push(

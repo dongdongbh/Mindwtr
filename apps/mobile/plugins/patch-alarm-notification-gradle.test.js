@@ -49,6 +49,23 @@ const applyAlarmIosColdStartHeaderPatchToSource = transformFor('alarm-ios-cold-s
 const applyAlarmIosUniqueIdentifierPatchToSource = transformFor('alarm-ios-unique-identifier');
 const applyAlarmIosDeletePendingPatchToSource = transformFor('alarm-ios-delete-pending-arg');
 const applyAlarmIosPendingKindPatchToSource = transformFor('alarm-ios-pending-kind');
+const applyAlarmReminderSlotPatchToSource = transformFor('alarm-reminder-slot');
+const applyAlarmReminderActionsUtilPatchToSource = transformFor('alarm-reminder-actions-util');
+const applyAlarmReminderActionsReceiverPatchToSource = transformFor('alarm-reminder-actions-receiver');
+
+const installedAlarmPackage = path.join(testDirectory, '..', '..', '..', 'node_modules', 'react-native-alarm-notification');
+
+// The installed package with the whole registry applied, as the prebuild leaves it.
+const patchInstalledPackage = () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alarm-patch-chain-'));
+  const projectRoot = path.join(tmpRoot, 'apps', 'mobile');
+  fs.mkdirSync(projectRoot, { recursive: true });
+  fs.mkdirSync(path.join(tmpRoot, 'node_modules'), { recursive: true });
+  fs.cpSync(installedAlarmPackage, path.join(tmpRoot, 'node_modules', 'react-native-alarm-notification'), { recursive: true });
+  applyPatches(projectRoot, PATCHES);
+  const read = (...segments) => fs.readFileSync(path.join(tmpRoot, 'node_modules', 'react-native-alarm-notification', ...segments), 'utf8');
+  return { tmpRoot, read };
+};
 
 it('guards a stale one-shot before native delivery and consumes a fired row', () => {
   const util = transformFor('alarm-stale-once-util')(`class AlarmUtil {
@@ -1040,6 +1057,202 @@ RCT_EXPORT_METHOD(removeFiredNotification: (NSInteger)id){
     expect(applyAlarmIosDeletePendingPatchToSource(output)).toBe(output);
   });
 
+  it('posts a task\'s reminders into one replaceable slot and routes every cancel path through it', () => {
+    if (!fs.existsSync(installedAlarmPackage)) return;
+    const { tmpRoot, read } = patchInstalledPackage();
+    try {
+      const util = read('android', 'src', 'main', 'java', 'com', 'emekalites', 'react', 'alarm', 'notification', 'AlarmUtil.java');
+      expect(util).toContain('postReminderNotification(mNotificationManager, alarm.getTag(), notificationID, notification);');
+      expect(util).toContain('cancelPostedNotification(firedNotificationId);');
+      expect(util).toContain('cancelPostedNotification(alarm.getAlarmId());');
+      expect(util).toMatch(/void clearNotification\(int notificationId\) \{\n {8}cancelPostedNotification\(notificationId\);/);
+      // Every tray post and cancel goes through the slot helpers; only they touch the manager by id.
+      const outsideHelpers = util.replace(util.slice(util.indexOf('    // Mindwtr reminder notification slots'), util.indexOf('    void removeFiredNotification(int id) {')), '');
+      expect(outsideHelpers).not.toMatch(/\.notify\(/);
+      expect(outsideHelpers).not.toMatch(/getNotificationManager\(\)\.cancel\(/);
+      expect(applyAlarmReminderSlotPatchToSource(util)).toBe(util);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('replaces a task\'s shown reminder and clears its slot only while that reminder is the one shown (compiled)', () => {
+    if (!fs.existsSync(installedAlarmPackage)) return;
+    const { tmpRoot, read } = patchInstalledPackage();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alarm-java-slot-'));
+    try {
+      const util = read('android', 'src', 'main', 'java', 'com', 'emekalites', 'react', 'alarm', 'notification', 'AlarmUtil.java');
+      const helpersStart = util.indexOf('    // Mindwtr reminder notification slots');
+      // The slot helpers alone: the task reminder actions after them need the alarm database.
+      const helpersEnd = [util.indexOf('    // Mindwtr task reminder actions'), util.indexOf('    void removeFiredNotification(int id) {')]
+        .filter((index) => index > helpersStart)
+        .reduce((first, index) => Math.min(first, index));
+      const helpers = util.slice(helpersStart, helpersEnd);
+      fs.mkdirSync(path.join(dir, 'android', 'content'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'android', 'content', 'SharedPreferences.java'), `package android.content;
+public interface SharedPreferences {
+  boolean contains(String key); int getInt(String key, int fallback); String getString(String key, String fallback); Editor edit();
+  interface Editor { Editor putInt(String key, int value); Editor putString(String key, String value); Editor remove(String key); Editor clear(); boolean commit(); }
+}`);
+      fs.writeFileSync(path.join(dir, 'AlarmUtil.java'), `import java.util.*;
+class Notification {}
+class NotificationManager {
+  final List<String> log = new ArrayList<>();
+  void notify(int id, Notification n) { log.add("notify " + id); }
+  void notify(String tag, int id, Notification n) { log.add("notify " + tag + " " + id); }
+  void cancel(int id) { log.add("cancel " + id); }
+  void cancel(String tag, int id) { log.add("cancel " + tag + " " + id); }
+}
+class Prefs implements android.content.SharedPreferences {
+  final Map<String, Object> values = new HashMap<>();
+  public boolean contains(String key) { return values.containsKey(key); }
+  public int getInt(String key, int fallback) { Object v = values.get(key); return v == null ? fallback : (Integer) v; }
+  public String getString(String key, String fallback) { Object v = values.get(key); return v == null ? fallback : (String) v; }
+  public Editor edit() {
+    final Map<String, Object> puts = new HashMap<>(); final Set<String> removes = new HashSet<>(); final boolean[] clear = { false };
+    return new Editor() {
+      public Editor putInt(String k, int v) { puts.put(k, v); removes.remove(k); return this; }
+      public Editor putString(String k, String v) { puts.put(k, v); removes.remove(k); return this; }
+      public Editor remove(String k) { removes.add(k); puts.remove(k); return this; }
+      public Editor clear() { clear[0] = true; return this; }
+      public boolean commit() { if (clear[0]) values.clear(); for (String k : removes) values.remove(k); values.putAll(puts); return true; }
+    };
+  }
+}
+class Context {
+  static final int MODE_PRIVATE = 0;
+  final Prefs prefs = new Prefs();
+  Prefs getSharedPreferences(String name, int mode) { return prefs; }
+}
+public class AlarmUtil {
+  final Context mContext = new Context();
+  final NotificationManager manager = new NotificationManager();
+  NotificationManager getNotificationManager() { return manager; }
+${helpers}
+  void expect(String... entries) {
+    if (!manager.log.equals(Arrays.asList(entries))) throw new AssertionError(manager.log + " != " + Arrays.asList(entries));
+    manager.log.clear();
+  }
+  public static void main(String[] args) {
+    AlarmUtil u = new AlarmUtil();
+    Notification n = new Notification();
+    u.postReminderNotification(u.manager, "", 5, n);
+    u.expect("notify 5");
+    u.postReminderNotification(u.manager, "mindwtr-reminder:task:a", 10, n);
+    u.postReminderNotification(u.manager, "mindwtr-reminder:task:a", 11, n);
+    u.expect("notify mindwtr-reminder:task:a 1", "notify mindwtr-reminder:task:a 1");
+    if (u.mContext.prefs.contains("slot:10")) throw new AssertionError("replaced reminder stays in the ledger");
+    u.postReminderNotification(u.manager, "mindwtr-reminder:task:b", 20, n);
+    u.expect("notify mindwtr-reminder:task:b 1");
+    u.cancelPostedNotification(10);
+    u.expect("cancel 10");
+    u.cancelPostedNotification(11);
+    u.expect("cancel 11", "cancel mindwtr-reminder:task:a 1");
+    u.cancelPostedNotification(11);
+    u.expect("cancel 11");
+    u.cancelPostedNotification(5);
+    u.expect("cancel 5");
+    u.cancelPostedNotification(20);
+    u.expect("cancel 20", "cancel mindwtr-reminder:task:b 1");
+    if (!u.mContext.prefs.values.isEmpty()) throw new AssertionError("ledger not empty: " + u.mContext.prefs.values);
+  }
+}`);
+      const compile = spawnSync('javac', ['android/content/SharedPreferences.java', 'AlarmUtil.java'], { cwd: dir, encoding: 'utf8' });
+      expect(compile.status, compile.stderr).toBe(0);
+      const run = spawnSync('java', ['AlarmUtil'], { cwd: dir, encoding: 'utf8' });
+      expect(run.status, run.stderr).toBe(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('throws naming the anchor when a reminder slot cancel path drifts', () => {
+    const source = `    void snoozeAlarm(AlarmModel alarm) {
+        getNotificationManager().cancel(firedNotificationId);
+    }
+    void removeFiredNotification(int id) {
+    }
+`;
+    expect(() => applyAlarmReminderSlotPatchToSource(source)).toThrow(/alarm-reminder-slot: expected anchor not found/);
+    expect(applyAlarmReminderSlotPatchToSource('class AlarmUtil {}')).toBe('class AlarmUtil {}');
+  });
+
+  it('makes Snooze from the intent\'s alarm and makes Done cancel the task\'s other reminders', () => {
+    if (!fs.existsSync(installedAlarmPackage)) return;
+    const { tmpRoot, read } = patchInstalledPackage();
+    try {
+      const javaDir = ['android', 'src', 'main', 'java', 'com', 'emekalites', 'react', 'alarm', 'notification'];
+      const util = read(...javaDir, 'AlarmUtil.java');
+      const receiver = read(...javaDir, 'AlarmReceiver.java');
+      expect(util).toContain('snoozeIntent.putExtra("SnoozeAlarm", new com.google.gson.Gson().toJson(alarm));');
+      expect(util).toContain('completeIntent.putExtra("ReminderTag", alarm.getTag() == null ? "" : alarm.getTag());');
+
+      // Snooze: a live row first, then the intent's alarm, and only without either a plain dismiss.
+      const snoozeCase = receiver.slice(receiver.indexOf('case Constants.NOTIFICATION_ACTION_SNOOZE:'), receiver.indexOf('case Constants.NOTIFICATION_ACTION_COMPLETE:'));
+      const order = ['alarmUtil.snoozeAlarm(alarm);', 'alarmUtil.snoozeAlarm(carried);', 'alarmUtil.clearNotification('].map((call) => snoozeCase.indexOf(call));
+      expect(order.every((index) => index >= 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+
+      // Every receipt is committed before alarm cancellation and warm/cold delivery.
+      const completeCase = receiver.slice(receiver.indexOf('case Constants.NOTIFICATION_ACTION_COMPLETE:'), receiver.indexOf('case Constants.NOTIFICATION_ACTION_DISMISS:'));
+      const persistIndex = completeCase.indexOf('NotificationOpenPayloadStore.persistCompletion(context, pendingPayload)');
+      expect(persistIndex).toBeGreaterThan(-1);
+      for (const operation of ['NotificationOpenPayloadStore.cache(', 'alarmUtil.removeFiredNotification(', 'alarmUtil.cancelAlarm(', 'cancelTaskReminders(', 'emit("OnNotificationOpened"', 'context.startActivity(']) {
+        expect(completeCase.indexOf(operation), operation).toBeGreaterThan(persistIndex);
+      }
+      expect(completeCase).toContain('payload.putString("actionId", completionReceipt);');
+      expect(receiver.match(/persistCompletion/g)).toHaveLength(1);
+
+      expect(applyAlarmReminderActionsUtilPatchToSource(util)).toBe(util);
+      expect(applyAlarmReminderActionsReceiverPatchToSource(receiver)).toBe(receiver);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('matches Done to the same task\'s reminders only, never the Pomodoro alert (compiled)', () => {
+    if (!fs.existsSync(installedAlarmPackage)) return;
+    const { tmpRoot, read } = patchInstalledPackage();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alarm-java-task-'));
+    try {
+      const util = read('android', 'src', 'main', 'java', 'com', 'emekalites', 'react', 'alarm', 'notification', 'AlarmUtil.java');
+      const start = util.indexOf('    static boolean isReminderOfTask(');
+      const helper = util.slice(start, util.indexOf('\n    }\n', start) + 7);
+      fs.writeFileSync(path.join(dir, 'TaskMatch.java'), `public class TaskMatch {
+${helper}
+  static void check(boolean ok, String what) { if (!ok) throw new AssertionError(what); }
+  public static void main(String[] args) {
+    String tag = "mindwtr-reminder:task:a";
+    check(isReminderOfTask(tag, null, tag, "a"), "same tag");
+    check(!isReminderOfTask("mindwtr-reminder:task:b", "taskId==>b;;kind==>task-reminder;;", tag, "a"), "other task");
+    check(isReminderOfTask("", "taskId==>a;;kind==>task-reminder;;alarmKey==>task:a:r3;;", tag, "a"), "untagged repeat of the task");
+    check(isReminderOfTask(null, "kind==>task-review;;taskId==>a;;", "", "a"), "review reminder of the task");
+    check(!isReminderOfTask("", "kind==>pomodoro;;taskId==>a;;", tag, "a"), "Pomodoro alert");
+    check(!isReminderOfTask("", "taskId==>ab;;kind==>task-reminder;;", tag, "a"), "id prefix");
+    check(!isReminderOfTask("", null, "", ""), "nothing to match");
+    check(!isReminderOfTask("", "taskId==>a;;kind==>task-reminder;;", "", null), "no task id");
+  }
+}`);
+      const compile = spawnSync('javac', ['TaskMatch.java'], { cwd: dir, encoding: 'utf8' });
+      expect(compile.status, compile.stderr).toBe(0);
+      const run = spawnSync('java', ['TaskMatch'], { cwd: dir, encoding: 'utf8' });
+      expect(run.status, run.stderr).toBe(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('throws naming the anchor when a reminder action anchor drifts', () => {
+    const util = `    void removeFiredNotification(int id) {
+    }
+`;
+    expect(() => applyAlarmReminderActionsUtilPatchToSource(util)).toThrow(/alarm-reminder-actions-util: expected anchor not found/);
+    const receiver = 'switch (action) { case Constants.NOTIFICATION_ACTION_COMPLETE: break; }';
+    expect(() => applyAlarmReminderActionsReceiverPatchToSource(receiver)).toThrow(/alarm-reminder-actions-receiver: expected anchor not found/);
+  });
+
   it('keeps the Gradle compatibility rewrite in place', () => {
     const input = `apply plugin: 'maven'
 buildscript {
@@ -1120,6 +1333,13 @@ describe('PATCHES registry completeness', () => {
     // Added for the expired-then-withdrawn reminder: dropping it leaves a
     // delivered reminder in the tray after its task is completed.
     ['ANModule.java', 'applyAlarmDeliveredNotificationModulePatchToSource'],
+    // Added for repeat reminders: dropping either brings back one notification
+    // per occurrence (a 10-minute repeat stacks six an hour) instead of one per task.
+    ['AlarmUtil.java', 'applyAlarmReminderSlotPatchToSource'],
+    // Added for the reminder buttons: dropping one brings back a Snooze that never
+    // reminds again, or a Done after which the task's next repeat still fires.
+    ['AlarmUtil.java', 'applyAlarmReminderActionsUtilPatchToSource'],
+    ['AlarmReceiver.java', 'applyAlarmReminderActionsReceiverPatchToSource'],
   ];
 
   it('has exactly one registry entry per original call site — none dropped in the collapse', () => {
@@ -1133,7 +1353,7 @@ describe('PATCHES registry completeness', () => {
   });
 
   it('every entry declares required/firstMatchOnly explicitly', () => {
-    expect(PATCHES).toHaveLength(26);
+    expect(PATCHES).toHaveLength(29);
     for (const patch of PATCHES) {
       expect(typeof patch.id).toBe('string');
       expect(typeof patch.required).toBe('boolean');
@@ -1377,6 +1597,9 @@ describe('pristine react-native-alarm-notification@1.8.0 fixture (#1028 correcti
       expect(utilOut1).toContain('snoozeIntent.putExtra("NotificationId", notificationID);');
       expect(utilOut1).toContain('dismissIntent.putExtra("NotificationId", notificationID);');
       expect(utilOut1).toContain('void clearNotification(int notificationId)');
+      expect(utilOut1).toContain('// Mindwtr reminder notification slots');
+      expect(utilOut1).toContain('// Mindwtr task reminder actions');
+      expect(receiverOut1).toContain('cancelTaskReminders(reminderTag');
       expect(receiverOut1).toContain('Log.d(TAG, "ACTION_SNOOZE id="');
       expect(receiverOut1).toContain('Log.d(TAG, "ACTION_COMPLETE id="');
       expect(receiverOut1).toContain('Log.d(TAG, "ACTION_DISMISS id="');

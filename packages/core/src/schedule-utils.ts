@@ -144,6 +144,23 @@ export function getDueReminderRepeatTimes(task: Task, options: ScheduleOptions =
     return times;
 }
 
+const REMINDER_NOTIFICATION_TAG_PREFIX = 'mindwtr-reminder:';
+
+/**
+ * The notification slot a reminder posts into: one per task (or project, or digest), so a
+ * task's start, due and every due-time repeat replace the one notification already shown and
+ * alert again, instead of stacking one notification per occurrence. `key` is a reminder key
+ * (`task:<id>`, `task:<id>:r<n>`, `project:<id>`, `digest:<kind>`).
+ */
+export function getReminderNotificationTag(key: string): string {
+    const base = key.startsWith('task:') ? key.replace(/:r\d+$/, '') : key;
+    return `${REMINDER_NOTIFICATION_TAG_PREFIX}${base}`;
+}
+
+export function getTaskReminderNotificationTag(taskId: string): string {
+    return getReminderNotificationTag(`task:${taskId}`);
+}
+
 export function getTaskReminderPlan(
     task: Task,
     now: Date = new Date(),

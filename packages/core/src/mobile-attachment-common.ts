@@ -511,6 +511,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     sourcePath: string,
     attachment: Attachment,
     maxBufferedUploadBytes?: number,
+    assertUploadStat?: AttachmentTransferLifecycleOptions['assertUploadStat'],
   ) => {
     const baseDir = fs.cacheDirectory() || fs.documentDirectory();
     if (!baseDir) return null;
@@ -543,7 +544,10 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
       const [staged, sourceStatAfter] = await Promise.all([
         hostHashed
           ? files.computeAttachmentFileHash(stagedPath).then((fileHash) => ({ fileHash, size: stagedStat!.size }))
-          : files.readFileAsBytes(stagedPath).then(async (stagedBytes) => ({ fileHash: await computeSha256Hex(stagedBytes), size: stagedBytes.byteLength })),
+          : files.readFileAsBytes(stagedPath).then(async (stagedBytes) => {
+            assertUploadStat?.({ size: stagedBytes.byteLength, mtimeMs: stagedStat?.mtimeMs ?? 0 });
+            return { fileHash: await computeSha256Hex(stagedBytes), size: stagedBytes.byteLength };
+          }),
         sourcePath.startsWith('content://') ? Promise.resolve(null) : files.statAttachmentFile(sourcePath),
       ]);
       const { fileHash } = staged;
@@ -613,6 +617,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
         sourcePath,
         attachment,
         options.maxBufferedUploadBytes,
+        options.assertUploadStat,
       ),
       requireUploadSnapshot: true,
     });
@@ -790,7 +795,8 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
    */
   const migrateAttachmentsLocallyBeforeSync = async (
     attachmentsById: Map<string, Attachment>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    maxBufferedUploadBytes?: number,
   ): Promise<Map<string, Attachment>> => {
     const migrateAttachmentLocally = files.createAttachmentLocalMigrationLimiter();
     const patches = new Map<string, Attachment>();
@@ -805,6 +811,10 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
           continue;
         }
         if (presence === 'confirmed-not-found') continue;
+        if (maxBufferedUploadBytes !== undefined) {
+          const stat = await files.statAttachmentFile(attachment.uri || '');
+          assertBufferedAttachmentUploadSize(stat?.size ?? NaN, maxBufferedUploadBytes);
+        }
       }
       const result = await migrateAttachmentLocally(attachment);
       if (result.migrated) {

@@ -82,15 +82,24 @@
         // host found it strict UTF-8 (`utf8`, HostIo.read) and decoded it off this thread.
         // A body the bridge could not hand over fails its own call; it never strands it.
         if (answer.body) {
+            var payload = null;
             try {
-                var payload = traced('io:body', function () { return hostCall(native().ioBody()); });
+                payload = traced('io:body', function () { return hostCall(native().ioBody()); });
+            } catch (_error) {
+                // Close can win after metadata. Settle that request rather than
+                // stranding it after ioOpen was decremented; never expose bytes/errors.
+                answer.body = false;
+                answer.error = 'I/O response body is unavailable';
+                delete answer.errorCode;
+                delete answer.limitBytes;
+            }
+            if (payload !== null) {
                 // A text body comes after a "T" (HostIo.read), so its own first characters can never read as an error.
                 if (answer.utf8 && payload.charAt(0) === 'T') answer.utf8Text = payload.slice(1);
-                else if (answer.utf8) throw new TypeError('the host sent an unreadable body');
-                else answer.base64 = payload;
-            } catch (error) {
-                global.__hostLog('host call error: ' + error);
-                answer = { id: answer.id, error: 'Network request failed: the host sent an unreadable body' };
+                else if (answer.utf8) {
+                    global.__hostLog('host call error: the host sent an unreadable body');
+                    answer = { id: answer.id, error: 'Network request failed: the host sent an unreadable body' };
+                } else answer.base64 = payload;
             }
         }
         var entry = ioPending.get(answer.id);
@@ -728,7 +737,16 @@
                 var id = startIo(traced('io:fetchStart', function () { return hostCall(native().netFetch(JSON.stringify(payload))); }), function (answer) {
                     signal.removeEventListener('abort', onAbort);
                     try {
-                        if (answer.error !== undefined) throw new TypeError(answer.error);
+                        if (answer.error !== undefined) {
+                            var failure = new TypeError(answer.error);
+                            if (answer.errorCode === 'response-too-large'
+                                && Number.isSafeInteger(answer.limitBytes) && answer.limitBytes > 0) {
+                                failure = new TypeError('Response exceeds the ' + answer.limitBytes + ' byte download limit');
+                                failure.code = 'response-too-large';
+                                failure.limitBytes = answer.limitBytes;
+                            }
+                            throw failure;
+                        }
                         var response = new global.Response(null, { status: answer.status, statusText: answer.statusText, headers: answer.headers });
                         response.url = answer.url;
                         response.redirected = answer.redirected;
@@ -755,10 +773,12 @@
     // The host's secure storage (SecretStore.kt: RN's expo-secure-store items in
     // the Android Keystore, under RN's key names), for the credentials core's
     // sync and AI settings keep. Each call runs off the engine thread.
-    var secretCall = function (op, key, value, refuse) {
+    var secretCall = function (op, key, value, refuse, accessibility) {
         return new Promise(function (resolve, reject) {
             if (refuse) refuseIfCancelled();
-            startIo(hostCall(native().secretCall(JSON.stringify({ op: op, key: String(key), value: value }))), function (answer) {
+            var payload = { op: op, key: String(key), value: value };
+            if (op === 'set' && global.__mindwtrHostPlatform === 'ios' && accessibility !== undefined) payload.accessibility = accessibility;
+            startIo(hostCall(native().secretCall(JSON.stringify(payload))), function (answer) {
                 if (answer.error !== undefined) reject(new Error(answer.error));
                 else resolve(op === 'get' ? answer.value : undefined);
             });
@@ -768,10 +788,10 @@
         return {
             /** The value saved under [key], or null. */
             getSecret: function (key) { mark('secrets'); return secretCall('get', key, undefined, refuse); },
-            setSecret: function (key, value) {
+            setSecret: function (key, value, accessibility) {
                 mark('secrets');
                 if (typeof value !== 'string') return Promise.reject(new TypeError('A secret value must be a string'));
-                return secretCall('set', key, value, refuse);
+                return secretCall('set', key, value, refuse, accessibility);
             },
             deleteSecret: function (key) { mark('secrets'); return secretCall('delete', key, undefined, refuse); },
         };

@@ -1,43 +1,60 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import {
     BACKGROUND_SYNC_FAILURE_STATE_KEY,
+    NativeAttachmentCleanupUnconfirmedError,
     SYNC_BACKEND_KEY,
     WEBDAV_URL_KEY,
+    resetForTests,
+    setSha256HexProvider,
     setLogger,
+    type AppData,
 } from '@mindwtr/core';
 import { createDeadlineFetch, createNativeSync } from './host-sync';
+import type { NativeAttachmentBindings } from './host-attachments';
+import { createMemoryFileSystem, CACHE, DOCUMENTS, MANAGED } from '../../../packages/core/src/__fixtures__/mobile-attachment-fakes';
 
 // The native app's background sync binding (S4a): core's runner and schedule decision on the host's ports.
 const globals = globalThis as unknown as Record<string, unknown>;
 const realFetch = globalThis.fetch;
+const nativeGlobals = ['__mindwtrHostPlatform', '__mindwtrNative', '__mindwtrFileCall', '__mindwtrInstallerCall'];
+const originalGlobals = new Map(nativeGlobals.map((name) => [name, globals[name]]));
 
-const host = (stored: Record<string, string> = {}, refuseSchedule = false) => {
+const host = (stored: Record<string, string> = {}, refuseSchedule = false, getData?: () => Promise<AppData>,
+    retireLocalAttachment?: NativeAttachmentBindings['retireLocalAttachment']) => {
     const kv = new Map(Object.entries(stored));
     const schedules: boolean[] = [];
     const lines: string[] = [];
     const traces: string[] = [];
-    const sync = createNativeSync({
+    const calls: string[] = [];
+    const bindings: Parameters<typeof createNativeSync>[0] = {
         keyValue: {
-            get: async (key) => kv.get(key) ?? null,
-            set: async (key, value) => { kv.set(key, value); },
-            remove: async (key) => { kv.delete(key); },
-            multiGet: async (keys) => keys.map((key) => [key, kv.get(key) ?? null] as [string, string | null]),
-            multiSet: async (pairs) => { for (const [key, value] of pairs) kv.set(key, value); },
+            get: async (key) => { calls.push('get'); return kv.get(key) ?? null; },
+            set: async (key, value) => { calls.push('set'); kv.set(key, value); },
+            remove: async (key) => { calls.push('remove'); kv.delete(key); },
+            multiGet: async (keys) => { calls.push('multiGet'); return keys.map((key) => [key, kv.get(key) ?? null] as [string, string | null]); },
+            multiSet: async (pairs) => { calls.push('multiSet'); for (const [key, value] of pairs) kv.set(key, value); },
         },
-        secrets: { getSecret: async () => null, setSecret: async () => undefined, deleteSecret: async () => undefined },
-        localData: () => ({ getData: async () => { throw new Error('no local data in this test'); }, saveData: async () => undefined }),
-        networkState: () => ({ isConnected: true, isInternetReachable: true }),
-        appendLog: async (entry) => { lines.push(entry.message); return null; },
+        secrets: {
+            getSecret: async () => { calls.push('getSecret'); return null; },
+            setSecret: async () => { calls.push('setSecret'); },
+            deleteSecret: async () => { calls.push('deleteSecret'); },
+        },
+        localData: () => ({ getData: getData ?? (async () => { throw new Error('no local data in this test'); }), saveData: async () => undefined }),
+        networkState: () => { calls.push('networkState'); return { isConnected: true, isInternetReachable: true }; },
+        appendLog: async (entry) => { calls.push('appendLog'); lines.push(entry.message); return null; },
         translate: (key) => key,
-        emit: () => undefined,
-        trace: (line) => { traces.push(line); },
+        emit: () => { calls.push('emit'); },
+        trace: (line) => { calls.push('trace'); traces.push(line); },
         scheduleBackgroundSync: (on) => {
             if (refuseSchedule) throw new Error('WorkManager did not store the work');
+            calls.push('schedule');
             schedules.push(on);
         },
         isFossBuild: false,
-    });
-    return { sync, kv, schedules, lines, traces };
+        retireLocalAttachment,
+    };
+    const sync = createNativeSync(bindings);
+    return { sync, kv, schedules, lines, traces, calls, bindings };
 };
 
 const fetches: string[] = [];
@@ -52,9 +69,263 @@ afterEach(() => {
     fetches.length = 0;
     delete globals.__mindwtrCryptoCall;
     setLogger(null);
+    setSha256HexProvider(null);
+    for (const name of nativeGlobals) {
+        const original = originalGlobals.get(name);
+        if (original === undefined) delete globals[name];
+        else globals[name] = original;
+    }
+});
+
+/** The same file-call wire read by nativeFileChannels, over existing memory files. */
+const iosFiles = () => {
+    setLogger(() => undefined);
+    const memory = createMemoryFileSystem();
+    const calls: string[] = [];
+    globals.__mindwtrHostPlatform = 'ios';
+    globals.__mindwtrNative = {
+        fileDirectories: () => JSON.stringify({ document: DOCUMENTS, cache: CACHE }),
+        fileDeleteNow: () => { calls.push('deleteNow'); throw new Error('Unexpected raw delete'); },
+    };
+    globals.__mindwtrFileCall = async (request: Record<string, unknown>) => {
+        const op = String(request.op);
+        const uri = String(request.uri ?? '');
+        calls.push(op);
+        switch (op) {
+            case 'getInfo': return memory.fs.getInfo(uri);
+            case 'makeDirectory': return memory.fs.makeDirectory(uri);
+            case 'readDirectory': return memory.fs.readDirectory(uri);
+            case 'barrier': case 'syncParent': return null;
+            default: throw new Error('Unexpected fixture file operation');
+        }
+    };
+    globals.__mindwtrInstallerCall = async () => { calls.push('installer'); throw new Error('Unexpected installer operation'); };
+    return { memory, calls };
+};
+
+describe('explicit iOS foreground sync factory', () => {
+    it('requires the selected cleanup callback and actual file channels instead of admitting no-op cleanup', () => {
+        iosFiles();
+        expect(() => host()).toThrow('Foreground sync requires owned attachment cleanup on this iOS build');
+        delete globals.__mindwtrFileCall;
+        expect(() => host({}, false, undefined, async () => false)).toThrow('Foreground sync requires native attachment files on this iOS build');
+    });
+
+    it('captures iOS without reading configuration and refuses automatic/background work while normal reconcile does nothing', async () => {
+        const files = iosFiles();
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'cloudkit', untouched: 'fixture' }, false, undefined, async () => false);
+        expect(fixture.sync.settingsHost.platform).toMatchObject({ os: 'ios', cloudKitAvailable: false });
+        expect(fixture.sync.attachmentsHost).not.toBeNull();
+        expect(fixture.calls).toEqual([]);
+        expect(files.calls).toEqual([]);
+        globals.__mindwtrHostPlatform = 'android';
+        expect(fixture.sync.settingsHost.platform.os).toBe('ios');
+        expect(() => fixture.sync.start('active')).toThrow('Automatic sync is not available on this iOS build');
+        await expect(fixture.sync.backgroundSync('scheduled', 0)).rejects.toThrow('Background sync is not available on this iOS build');
+        await expect(fixture.sync.backgroundSync('capture', 1)).rejects.toThrow('Background sync is not available on this iOS build');
+        await fixture.sync.settingsHost.reconcileBackgroundSync();
+        expect(fixture.calls).toEqual([]);
+        expect(fixture.schedules).toEqual([]);
+        expect(fixture.traces).toEqual([]);
+        expect(files.calls).toEqual([]);
+        expect([...fixture.kv]).toEqual([[SYNC_BACKEND_KEY, 'cloudkit'], ['untouched', 'fixture']]);
+    });
+
+    it('keeps the Android default for every platform value other than exact ios', async () => {
+        globals.__mindwtrHostPlatform = 'IOS';
+        const fixture = host();
+        expect(fixture.sync.settingsHost.platform.os).toBe('android');
+        expect(fixture.sync.attachmentsHost).toBeNull();
+        await fixture.sync.settingsHost.reconcileBackgroundSync();
+        expect(fixture.schedules).toEqual([false]);
+    });
+
+    it('passes the selected Task identity through the real cleanup lifecycle and preserves its fatal fence on iOS', async () => {
+        resetForTests();
+        const files = iosFiles();
+        const date = '2026-10-06T00:00:00.000Z';
+        const attachmentId = '00000000-0000-4000-8000-000000000315';
+        const uri = `${MANAGED}${attachmentId}.txt`;
+        const data: AppData = { tasks: [{ id: 'purged-task', title: 'Fixture', status: 'done', tags: [], contexts: [],
+            createdAt: date, updatedAt: date, deletedAt: date, purgedAt: date,
+            attachments: [{ id: attachmentId, kind: 'file', title: 'fixture.txt', uri, createdAt: date, updatedAt: date }] }],
+            projects: [], sections: [], areas: [], settings: {} };
+        const before = structuredClone(data);
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        const retire = mock(async (_id: string, _uri: string, keep: () => boolean) => {
+            expect(keep()).toBe(false);
+            throw fatal;
+        });
+        files.memory.put(uri, new Uint8Array([1, 2, 3]));
+        globalThis.fetch = (async () => new Response(JSON.stringify(data), { status: 200, headers: { ETag: '"fixture"' } })) as typeof fetch;
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json' }, false,
+            async () => structuredClone(data), retire);
+        const result = await fixture.sync.settingsHost.performSync(undefined, { manual: true }).catch((error: unknown) => error);
+        expect(retire).toHaveBeenCalledWith(attachmentId, uri, expect.any(Function));
+        expect(result).toBe(fatal);
+        const at = fixture.calls.length;
+        await expect(fixture.sync.settingsHost.reconcileBackgroundSync()).rejects.toBe(fatal);
+        expect(fixture.calls.slice(at)).toEqual([]);
+        expect(files.calls).not.toContain('deleteNow');
+        expect(files.memory.read(uri)).toEqual(new Uint8Array([1, 2, 3]));
+        expect(data).toEqual(before);
+        resetForTests();
+    });
+
+    it('propagates the exact 8 MiB cap to real WebDAV attachment admission before snapshot or upload IO', async () => {
+        resetForTests();
+        const files = iosFiles();
+        const date = '2026-10-06T00:00:00.000Z';
+        const id = '00000000-0000-4000-8000-000000000316';
+        const uri = `${MANAGED}${id}.txt`;
+        const size = 8 * 1024 * 1024 + 1;
+        const getInfo = files.memory.fs.getInfo;
+        files.memory.fs.getInfo = async (target) => target === uri ? { exists: true, size, modificationTime: 1 } : getInfo(target);
+        const data: AppData = { tasks: [{ id: 'live-task', title: 'Fixture', status: 'inbox', tags: [], contexts: [],
+            createdAt: date, updatedAt: date, attachments: [{ id, kind: 'file', title: 'fixture.txt', uri, size, createdAt: date, updatedAt: date }] }],
+            projects: [], sections: [], areas: [], settings: {} };
+        const sent: string[] = [];
+        globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            sent.push(init?.method ?? 'GET');
+            if (init?.method === 'PROPFIND') {
+                return new Response(`<d:multistatus xmlns:d="DAV:"><d:response><d:href>${String(_input)}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>`, { status: 207 });
+            }
+            return new Response('', { status: init?.method === 'MKCOL' ? 201 : 404 });
+        }) as typeof fetch;
+        const retire = mock(async () => false);
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json' }, false,
+            async () => structuredClone(data), retire);
+        expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({
+            success: false, error: 'WebdavHostUploadLimitError: WebDAV attachment upload cannot be admitted by this host transport',
+        });
+        expect(files.calls).not.toContain('copy');
+        expect(files.calls).not.toContain('sha256File');
+        expect(files.calls).not.toContain('readBytes');
+        expect(files.calls).not.toContain('readBytesRange');
+        expect(files.calls).not.toContain('installer');
+        expect(sent).not.toContain('PUT');
+        expect(retire).not.toHaveBeenCalled();
+        resetForTests();
+    });
 });
 
 describe('native background sync binding', () => {
+    it('manual sync preserves fatal cleanup identity without a cycle increment or any post-fatal host work', async () => {
+        globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch;
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        let at!: { cycles: number; calls: number; lines: number; traces: number; kv: [string, string][] };
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://dav.example.com' }, false, async () => {
+            at = { cycles: fixture.sync.state().cycles, calls: fixture.calls.length, lines: fixture.lines.length,
+                traces: fixture.traces.length, kv: [...fixture.kv] };
+            throw fatal;
+        });
+        const result = await fixture.sync.settingsHost.performSync(undefined, { manual: true }).catch((error: unknown) => error);
+        expect(at).toBeDefined();
+        expect(result).toBe(fatal);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(fixture.sync.state().cycles).toBe(at.cycles);
+        expect(fixture.calls.slice(at.calls)).toEqual([]);
+        expect(fixture.lines.slice(at.lines)).toEqual([]);
+        expect(fixture.traces.slice(at.traces)).toEqual([]);
+        expect([...fixture.kv]).toEqual(at.kv);
+    });
+
+    it('manual sync with an ordinary same-name error retains the normal cycle and configuration refresh', async () => {
+        globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch;
+        let read = false;
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://dav.example.com' }, false, async () => {
+            read = true;
+            throw Object.assign(new Error('ordinary local read failure'), { name: 'NativeAttachmentCleanupUnconfirmedError' });
+        });
+        expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({ success: false });
+        expect(read).toBe(true);
+        expect(fixture.sync.state().cycles).toBe(1);
+        await fixture.sync.settingsHost.reconcileBackgroundSync();
+        expect(fixture.calls).toContain('get');
+        expect(fixture.traces.some((line) => line.includes('cycles=1'))).toBe(true);
+    });
+
+    it('a successful disabled manual cycle refreshes configuration and emits its new cycle count', async () => {
+        const { sync, traces } = host();
+        expect(await sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({ success: true });
+        expect(sync.state().cycles).toBe(1);
+        await sync.settingsHost.reconcileBackgroundSync();
+        expect(traces.some((line) => line.includes('cycles=1'))).toBe(true);
+    });
+
+    for (const completion of ['resolve', 'reject'] as const) {
+        it(`fences earlier configuration refresh and scheduling when held reads ${completion} after a fatal manual sync`, async () => {
+            globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch;
+            const fatal = new NativeAttachmentCleanupUnconfirmedError();
+            const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://dav.example.com' }, false, async () => { throw fatal; });
+            const held: { resolve: (value: string | null) => void; reject: (error: Error) => void }[] = [];
+            let allEntered!: () => void;
+            const entered = new Promise<void>((resolve) => { allEntered = resolve; });
+            let holding = true;
+            const get = fixture.bindings.keyValue.get;
+            fixture.bindings.keyValue.get = async (key) => {
+                const value = await get(key);
+                if (holding && key === WEBDAV_URL_KEY) {
+                    return new Promise<string | null>((resolve, reject) => {
+                        held.push({ resolve, reject });
+                        if (held.length === 3) allEntered();
+                    });
+                }
+                return value;
+            };
+            // Successful verification's finally refresh uses this same path; an Off
+            // cycle admits it here without a second synthetic remote-write fixture.
+            expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true, configOverride: { backend: 'off' } })).toMatchObject({ success: true });
+            const reconcile = fixture.sync.settingsHost.reconcileBackgroundSync().catch((error: unknown) => error);
+            await entered;
+            holding = false;
+            await expect(fixture.sync.settingsHost.performSync(undefined, { manual: true })).rejects.toBe(fatal);
+            const at = { calls: fixture.calls.length, schedules: fixture.schedules.length, lines: fixture.lines.length,
+                traces: fixture.traces.length, state: fixture.sync.state() };
+            expect(held).toHaveLength(3);
+            for (const read of held) {
+                if (completion === 'resolve') read.resolve('https://dav.example.com');
+                else read.reject(fatal);
+            }
+            expect(await reconcile).toBe(fatal);
+            await Promise.resolve();
+            expect(fixture.calls.slice(at.calls)).toEqual([]);
+            expect(fixture.schedules.slice(at.schedules)).toEqual([]);
+            expect(fixture.lines.slice(at.lines)).toEqual([]);
+            expect(fixture.traces.slice(at.traces)).toEqual([]);
+            expect(fixture.sync.state()).toEqual(at.state);
+            expect(fixture.sync.state().cycles).toBe(1);
+            await expect(fixture.sync.settingsHost.reconcileBackgroundSync()).rejects.toBe(fatal);
+            expect(fixture.calls.slice(at.calls)).toEqual([]);
+        });
+    }
+
+    it('keeps the ordinary fallback emission when an earlier refresh read rejects', async () => {
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://dav.example.com' });
+        const held: ((error: Error) => void)[] = [];
+        let allEntered!: () => void;
+        const entered = new Promise<void>((resolve) => { allEntered = resolve; });
+        const get = fixture.bindings.keyValue.get;
+        fixture.bindings.keyValue.get = async (key) => {
+            const value = await get(key);
+            if (key === WEBDAV_URL_KEY) return new Promise<string | null>((_resolve, reject) => {
+                held.push(reject);
+                if (held.length === 2) allEntered();
+            });
+            return value;
+        };
+        const ordinary = new Error('ordinary configuration read failure');
+        const reconcile = fixture.sync.settingsHost.reconcileBackgroundSync().catch((error: unknown) => error);
+        await entered;
+        for (const reject of held) reject(ordinary);
+        expect(await reconcile).toBe(ordinary);
+        await Promise.resolve();
+        expect(fixture.traces).toContain('Native Android sync state badge=hidden cycles=0');
+        expect(fixture.calls).toContain('emit');
+        expect(fixture.schedules).toEqual([]);
+    });
+
     it('schedules the background job only for a configured WebDAV or cloud backend (core\'s decision)', async () => {
         const off = host();
         await off.sync.settingsHost.reconcileBackgroundSync();

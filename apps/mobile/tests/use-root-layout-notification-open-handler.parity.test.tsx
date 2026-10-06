@@ -51,6 +51,7 @@ vi.mock('@/lib/notification-service', () => ({
 
 vi.mock('@/modules/notification-open-intents', () => ({
   consumePendingNotificationOpenPayload: async () => null,
+  peekPendingNotificationCompletions: async () => [],
 }));
 
 vi.mock('@/lib/app-log', () => ({

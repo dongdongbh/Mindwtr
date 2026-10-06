@@ -25,8 +25,10 @@ import type {
 import { SyncRemoteWriteConflict } from './sync-run-ports';
 import { LocalSyncAbort, ensureFreshLocalSyncSnapshot, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup } from './sync-client-helpers';
 import { hasFreshAttachmentCleanupWork } from './attachment-cleanup';
-import { isAttachmentUploadTooLargeError } from './attachment-transfer';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
+import { isAttachmentUploadTooLargeError, isWebdavHostUploadLimitError } from './attachment-transfer';
 import { isSyncEncryptionPartlyEncryptedError } from './sync-encryption';
+import { isHostResponseTooLargeError } from './http-utils';
 import { flushPendingSave, useTaskStore } from './store';
 import {
     assertNoPendingAttachmentContentReplacements,
@@ -617,14 +619,20 @@ class SharedSyncRunMachine {
     async run(): Promise<SyncRunResult> {
         let result!: SyncRunResult;
         let cleanupRetryAfterMs: number | null = null;
+        let cleanupUnconfirmed = false;
         try {
             try {
                 result = await this.runPhases();
             } catch (error) {
+                if (error instanceof NativeAttachmentCleanupUnconfirmedError) {
+                    cleanupUnconfirmed = true;
+                    throw error;
+                }
                 result = await this.handleRunError(error);
             }
         } finally {
-            cleanupRetryAfterMs = await this.releaseRemoteMutationFence();
+            // A retained native cleanup owner forbids another remote request; the lease expires naturally.
+            if (!cleanupUnconfirmed) cleanupRetryAfterMs = await this.releaseRemoteMutationFence();
         }
         if (cleanupRetryAfterMs !== null) {
             result.remoteFenceDeferred = 'cleanup';
@@ -1183,6 +1191,21 @@ class SharedSyncRunMachine {
         }
     }
 
+    private hasPendingCycleSideEffects(data: AppData): boolean {
+        if (hasPendingSyncSideEffects(data)) return true;
+        if (!this.policy.attachmentPhasesEnabled
+            || !this.hooks.runAttachmentCleanup
+            || !hasFreshAttachmentCleanupWork(data)) return false;
+        try {
+            this.notifier.logInfo('Sync fast check retained fresh attachment cleanup', {
+                releaseCheck: 'v1.3.5/sync-cleanup-fast-check',
+                operation: 'attachment-cleanup',
+                outcome: 'required',
+            });
+        } catch { /* Diagnostics must not suppress required cleanup. */ }
+        return true;
+    }
+
     private async trySkipUnchangedFastSync(): Promise<SyncRunResult | null> {
         // User-initiated sync: never trust the cached fingerprint pair, so a
         // stale cached fingerprint can't hide remote data.
@@ -1194,7 +1217,7 @@ class SharedSyncRunMachine {
         if (this.state.preSyncedLocalData || this.hooks.hasDeferredAttachmentWork?.()) return null;
         const localData = await this.readLocalDataForSyncCycle();
         this.ensureLocalSnapshotFresh();
-        if (hasPendingSyncSideEffects(localData)) return null;
+        if (this.hasPendingCycleSideEffects(localData)) return null;
 
         const localFingerprint = this.localDocumentFingerprint(localData);
         const cached = await this.readFastSyncState(scope);
@@ -1294,7 +1317,7 @@ class SharedSyncRunMachine {
         this.ensureLocalSnapshotFresh();
         // Pending remote write marker, pending attachment uploads, pending
         // remote deletes: all need the full cycle's read.
-        if (hasPendingSyncSideEffects(localData)) return false;
+        if (this.hasPendingCycleSideEffects(localData)) return false;
 
         const cached = await this.readFastSyncState(scope);
         if (!cached) return false;
@@ -1335,7 +1358,7 @@ class SharedSyncRunMachine {
         if (this.state.preSyncedLocalData || this.hooks.hasDeferredAttachmentWork?.()) return null;
         const localData = await this.readLocalDataForSyncCycle();
         this.ensureLocalSnapshotFresh();
-        if (hasPendingSyncSideEffects(localData)) return null;
+        if (this.hasPendingCycleSideEffects(localData)) return null;
 
         const remoteData = await this.readRemoteForCycle();
         this.ensureLocalSnapshotFresh();
@@ -1366,7 +1389,7 @@ class SharedSyncRunMachine {
         options: { allowRemoteFingerprintRead?: boolean } = {},
     ): Promise<void> {
         const scope = this.state.fastSyncScope;
-        if (!scope || hasPendingSyncSideEffects(data)) return;
+        if (!scope || this.hasPendingCycleSideEffects(data)) return;
         if (this.store.getLastDataChangeAt() > this.state.localSnapshotChangeAt) return;
         if (this.state.lastRemoteWriteMergedServerData) return;
 
@@ -1529,6 +1552,8 @@ class SharedSyncRunMachine {
             if (isSyncRemoteMutationFenceError(error)) throw error;
             // A refusal to mix plaintext into a partly encrypted location ends the cycle; it is never a warning.
             if (isSyncEncryptionPartlyEncryptedError(error)) throw error;
+            if (isWebdavHostUploadLimitError(error)) throw error;
+            if (isHostResponseTooLargeError(error)) throw error;
             if (this.hooks.isCycleAborted?.()) throw error;
             if (isAttachmentUploadTooLargeError(error)) {
                 this.state.fileAttachmentUploadBlocked = 'too-large';
@@ -1768,6 +1793,8 @@ class SharedSyncRunMachine {
             if (isSyncRemoteMutationFenceError(error)) throw error;
             // A refusal to mix plaintext into a partly encrypted location ends the cycle; it is never a warning.
             if (isSyncEncryptionPartlyEncryptedError(error)) throw error;
+            if (isWebdavHostUploadLimitError(error)) throw error;
+            if (isHostResponseTooLargeError(error)) throw error;
             if (isAttachmentUploadTooLargeError(error)) {
                 this.state.fileAttachmentUploadBlocked = 'too-large';
                 return currentData;
