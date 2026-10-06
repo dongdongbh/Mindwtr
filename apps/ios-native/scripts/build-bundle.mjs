@@ -5,10 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const android = resolve(app, '../android-native/bundle');
-mkdirSync(resolve(app, 'Resources'), { recursive: true });
+const cryptoTest = process.argv.includes('--crypto-test');
+const output = resolve(app, cryptoTest ? '.build/crypto-test-host.js' : 'Resources/core-host.js');
+mkdirSync(dirname(output), { recursive: true });
 await build({
-    entryPoints: [resolve(android, 'host-entry.ts')],
-    outfile: resolve(app, 'Resources/core-host.js'),
+    entryPoints: [cryptoTest ? resolve(app, 'bundle/crypto-test-entry.ts') : resolve(android, 'host-entry.ts')],
+    outfile: output,
     bundle: true,
     alias: { '@mindwtr/core': resolve(app, '../../packages/core/src/index.ts') },
     tsconfigRaw: {},

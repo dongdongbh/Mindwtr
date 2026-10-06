@@ -74,7 +74,15 @@
             ioOpen -= 1;
             var answer = JSON.parse(text);
             // The body comes apart from its answer, so no copy of it is wrapped in JSON.
-            if (answer.body) answer.base64 = hostCall(native().ioBody());
+            if (answer.body) {
+                try { answer.base64 = hostCall(native().ioBody()); }
+                catch (_error) {
+                    // Close can win after metadata. Settle that request rather than
+                    // stranding it after ioOpen was decremented; never expose bytes/errors.
+                    answer.body = false;
+                    answer.error = 'I/O response body is unavailable';
+                }
+            }
             var entry = ioPending.get(answer.id);
             ioPending.delete(answer.id);
             // A cancelled call's late answer has no promise left to settle.

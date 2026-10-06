@@ -701,7 +701,8 @@ private final class Engine: @unchecked Sendable {
     private let localRequests: NativeAttachmentLocalRequests
     private var httpJobs: NativeHTTPJobs?
     private var secretJobs: NativeSecretJobs?
-    private enum IOBodySource { case file, http }
+    private var cryptoJobs: NativeCryptoJobs?
+    private enum IOBodySource { case file, http, crypto }
     private var ioBodySource: IOBodySource?
     private var preferredIO = 1
     private var attachmentGeneration: UInt64 = 0
@@ -1065,9 +1066,12 @@ private final class Engine: @unchecked Sendable {
             if let httpJobs { faults?.configureHTTPJobs?(httpJobs) }
             secretJobs = try NativeSecretJobs(registry: localRequests, faults: faults)
             if let secretJobs { faults?.configureSecretJobs?(secretJobs) }
+            cryptoJobs = NativeCryptoJobs(registry: localRequests, faults: faults)
+            if let cryptoJobs { faults?.configureCryptoJobs?(cryptoJobs) }
             #else
             httpJobs = NativeHTTPJobs(registry: localRequests)
             secretJobs = NativeSecretJobs(registry: localRequests)
+            cryptoJobs = NativeCryptoJobs(registry: localRequests)
             #endif
             let httpGeneration = attachmentGeneration
             httpJobs?.setWake { [weak self] in
@@ -1078,6 +1082,13 @@ private final class Engine: @unchecked Sendable {
                 }
             }
             secretJobs?.setWake { [weak self] in
+                guard let self else { return }
+                self.queue.async { [weak self] in
+                    guard let self, self.attachmentGeneration == httpGeneration else { return }
+                    self.scheduleAttachmentIdle(immediate: true)
+                }
+            }
+            cryptoJobs?.setWake { [weak self] in
                 guard let self else { return }
                 self.queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == httpGeneration else { return }
@@ -15857,7 +15868,7 @@ private final class Engine: @unchecked Sendable {
 
     private func scheduleAttachmentIdle(immediate: Bool = false) {
         guard started, !closed, !invoking, !recoveryActivationPending, pending == nil,
-              attachmentJobs != nil || httpJobs != nil || secretJobs != nil, let context else { return }
+              attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil, let context else { return }
         let delay = immediate ? 0 : context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? -1
         guard delay.isFinite, delay >= 0 else { return }
         // One scheduled idle turn per generation; completions can move a timer
@@ -15918,6 +15929,15 @@ private final class Engine: @unchecked Sendable {
         try requireNoAttachmentDraft()
     }
 
+    private func requireCryptoAdmission() throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard started, !closed, !recoveryActivationPending, pending == nil,
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
+            throw HostFailure("Crypto bridge is unavailable")
+        }
+        try requireNoAttachmentDraft()
+    }
+
     private func nextIO() throws -> String {
         guard ioBodySource == nil else { throw HostFailure("I/O response body is unavailable") }
         func file() -> String? {
@@ -15936,7 +15956,7 @@ private final class Engine: @unchecked Sendable {
         }
         func secret() throws -> String? {
             guard let answer = try secretJobs?.next() else { return nil }
-            preferredIO = 0
+            preferredIO = 3
             if answer.completed {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
@@ -15952,10 +15972,17 @@ private final class Engine: @unchecked Sendable {
             }
             return answer.json
         }
+        func crypto() throws -> String? {
+            guard let answer = try cryptoJobs?.next() else { return nil }
+            if answer.body { ioBodySource = .crypto }
+            preferredIO = 0
+            return answer.json
+        }
         switch preferredIO {
-        case 1: return try http() ?? secret() ?? file() ?? ""
-        case 2: return try secret() ?? file() ?? http() ?? ""
-        default: return try file() ?? http() ?? secret() ?? ""
+        case 1: return try http() ?? secret() ?? crypto() ?? file() ?? ""
+        case 2: return try secret() ?? crypto() ?? file() ?? http() ?? ""
+        case 3: return try crypto() ?? file() ?? http() ?? secret() ?? ""
+        default: return try file() ?? http() ?? secret() ?? crypto() ?? ""
         }
     }
 
@@ -15981,6 +16008,23 @@ private final class Engine: @unchecked Sendable {
                     self.scheduleAttachmentIdle(immediate: true)
                     #if DEBUG
                     self.faults?.commandDiagnostic?("httpDelivered")
+                    #endif
+                }
+            }
+            return result.base64
+        case .crypto:
+            guard let jobs = cryptoJobs else { throw HostFailure("I/O response body is unavailable") }
+            let result = try jobs.body()
+            if result.completed {
+                let generation = attachmentGeneration
+                queue.async { [weak self] in
+                    guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
+                          !self.invoking, let context = self.context else { return }
+                    _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeCryptoDelivered", withArguments: [])
+                    context.exception = nil
+                    self.scheduleAttachmentIdle(immediate: true)
+                    #if DEBUG
+                    self.faults?.commandDiagnostic?("cryptoDelivered")
                     #endif
                 }
             }
@@ -16124,6 +16168,14 @@ private final class Engine: @unchecked Sendable {
                 return try jobs.submit(json)
             } ?? "!MindwtrNativeError:Secure storage bridge is unavailable"
         }
+        let cryptoCall: @convention(block) (JSValue) -> String = { [weak self] request in
+            guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Crypto request is invalid" }
+            return self.guarded {
+                try self.requireCryptoAdmission()
+                guard let jobs = self.cryptoJobs else { throw HostFailure("Crypto bridge is unavailable") }
+                return try jobs.submit(json)
+            } ?? "!MindwtrNativeError:Crypto bridge is unavailable"
+        }
         let next: @convention(block) () -> String = { [weak self] in
             self?.guarded { try self?.nextIO() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
         }
@@ -16131,7 +16183,7 @@ private final class Engine: @unchecked Sendable {
             self?.guarded { try self?.ioBody() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
         }
         for (name, block) in ["netFetch": netFetch as Any, "netAbort": netAbort as Any, "secretCall": secretCall as Any,
-                              "ioNext": next as Any, "ioBody": body as Any] {
+                              "cryptoCall": cryptoCall as Any, "ioNext": next as Any, "ioBody": body as Any] {
             bridge.setObject(block, forKeyedSubscript: name as NSString)
         }
         if let jobs = attachmentJobs {
@@ -16185,6 +16237,7 @@ private final class Engine: @unchecked Sendable {
         // No file/installer worker survives release of the library lock.
         httpJobs?.shutdown(); httpJobs = nil
         secretJobs?.shutdown(); secretJobs = nil
+        cryptoJobs?.shutdown(); cryptoJobs = nil
         ioBodySource = nil
         attachmentJobs?.shutdown(); attachmentJobs = nil
         providerCopy = nil

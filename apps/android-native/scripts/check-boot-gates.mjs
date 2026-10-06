@@ -13,6 +13,31 @@ const consoleState = {
 };
 vm.runInNewContext(readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8'), consoleState);
 assert.doesNotThrow(() => consoleState.console.info('saved'));
+// A body refused after metadata still settles its promise and lets the next reply drain.
+{
+    let sequence = 0, body = 0;
+    const answers = [];
+    const state = { __mindwtrNative: {
+            nowMs: () => 0,
+            log: () => { throw new Error('Body refusals must not log private exceptions'); },
+            cryptoCall: () => { const id = String(++sequence); answers.push(JSON.stringify({ id, body: true })); return id; },
+            ioNext: () => answers.shift() ?? '',
+            ioBody: () => {
+                if (++body === 1) throw new Error('private body exception');
+                if (body === 2) return '!MindwtrNativeError:private body status';
+                return 'AQ==';
+            },
+        },
+    };
+    vm.runInNewContext(readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8'), state);
+    const first = assert.rejects(state.__mindwtrCryptoCall({ op: 'aesGcmSeal' }), /^Error: I\/O response body is unavailable$/);
+    const second = assert.rejects(state.__mindwtrCryptoCall({ op: 'aesGcmSeal' }), /^Error: I\/O response body is unavailable$/);
+    const third = state.__mindwtrCryptoCall({ op: 'aesGcmSeal' });
+    assert.equal(state.__pumpTimers(), 3);
+    await Promise.all([first, second]);
+    assert.deepEqual(Array.from(await third), [1]);
+    assert.equal(state.__pumpTimers(), 0);
+}
 // The URL polyfill parses a person's mailto: and tel: links as the platform URL does, so their open button shows.
 for (const text of ['mailto:alex@example.com', 'tel:+1-555-0100', 'MAILTO:bea@example.com?subject=Hi', 'javascript:alert(1)', 'obsidian://people/alex', 'https://bea.example/fail']) {
     const parts = (url) => [url.protocol, url.pathname, url.search, url.hash, url.host, String(url)];
@@ -4029,43 +4054,46 @@ const poll = async (state, id) => {
         assert.equal(other.httpCalls, 0);
     }
 }
-// Secure storage alone also leaves KV/sync/AI absent; the fixed success marker
-// does not read an account and uses the existing forced Diagnostics writer.
-{
-    const configureSecrets = (state) => {
-        state.secretCalls = 0;
-        state.__mindwtrNative.secretCall = () => { state.secretCalls++; throw new Error('Unexpected startup secure storage'); };
+// Secret and crypto ports alone leave KV/sync/AI absent. Their fixed receipts
+// use the existing forced Diagnostics writer without executing a primitive.
+for (const [bridge, receipt, operation] of [
+    ['secretCall', 'nativeSecretDelivered', 'secure-storage'],
+    ['cryptoCall', 'nativeCryptoDelivered', 'sync-crypto'],
+]) {
+    const configurePort = (state) => {
+        state.primitiveCalls = 0;
+        state.__mindwtrNative[bridge] = () => { state.primitiveCalls++; throw new Error('Unexpected startup native primitive'); };
         state.__mindwtrNative.ioNext = () => '';
         state.__mindwtrNative.ioBody = () => '';
     };
-    const local = makeState(0, [], 'ios', configureSecrets);
+    const local = makeState(0, [], 'ios', configurePort);
     assert.deepEqual(Object.keys(local.contractBindings), []);
     assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
-    local.MindwtrHost.nativeSecretDelivered();
-    assert.equal(local.logText, null, 'No preboot secure storage receipt');
+    local.MindwtrHost[receipt]();
+    assert.equal(local.logText, null, 'No preboot native primitive receipt');
     assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
-    assert.equal(local.secretCalls, 0, 'Installing the secret bridge performs no startup operation');
+    assert.equal(local.primitiveCalls, 0, 'Installing the native bridge performs no startup operation');
     local.settings = { diagnostics: { loggingEnabled: false } };
-    local.MindwtrHost.nativeSecretDelivered();
+    local.MindwtrHost[receipt]();
     await poll(local, local.MindwtrHost.logShare());
-    const lines = local.logText.split('\n').filter((line) => line.includes('v1.3.5/ios-secure-storage'));
-    assert.equal(lines.length, 1, 'Forced secure storage marker survives disabled logging');
+    const lines = local.logText.split('\n').filter((line) => line.includes(`v1.3.5/ios-${operation}`));
+    assert.equal(lines.length, 1, 'Forced native primitive marker survives disabled logging');
     assert.deepEqual(JSON.parse(lines[0]).context, {
-        releaseCheck: 'v1.3.5/ios-secure-storage', operation: 'secure-storage', outcome: 'delivered',
+        releaseCheck: `v1.3.5/ios-${operation}`, operation, outcome: 'delivered',
     });
     const before = local.logText;
     for (const field of ['sandbox', 'workspaceTransition']) {
-        local[field] = true; local.MindwtrHost.nativeSecretDelivered(); local[field] = false;
+        local[field] = true; local.MindwtrHost[receipt](); local[field] = false;
     }
     await new Promise((tick) => setImmediate(tick));
-    assert.equal(local.logText, before, 'Unsettled workspace emits no secure storage receipt');
+    assert.equal(local.logText, before, 'Unsettled workspace emits no native primitive receipt');
     for (const platform of ['android', undefined]) {
-        const other = makeState(0, [], platform, configureSecrets);
+        const other = makeState(0, [], platform, configurePort);
         assert.equal((await poll(other, other.MindwtrHost.boot())).ok, true);
         const prior = other.logText;
-        other.MindwtrHost.nativeSecretDelivered(); await new Promise((tick) => setImmediate(tick));
-        assert.equal(other.logText, prior, 'Invalid platform emits no secure storage marker');
-        assert.equal(other.secretCalls, 0);
+        other.MindwtrHost[receipt](); await new Promise((tick) => setImmediate(tick));
+        assert.equal(other.logText, prior, 'Invalid platform emits no native primitive marker');
+        assert.equal(other.primitiveCalls, 0);
     }
 }
 // Production host-entry selects independent local attachment policy only for

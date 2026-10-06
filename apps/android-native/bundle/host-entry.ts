@@ -1220,6 +1220,17 @@ const attachmentDraftDependencies = {
 };
 
 globalThis.MindwtrHost = {
+    /** Private fixed primitive receipt; never carries input or derived bytes. */
+    nativeCryptoDelivered(): void {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter
+            || isSandboxMode() || isWorkspaceTransitionActive()) return;
+        try {
+            logInfo('Native iOS crypto result delivered', {
+                scope: 'native-ios', force: true,
+                context: { releaseCheck: 'v1.3.5/ios-sync-crypto', operation: 'sync-crypto', outcome: 'delivered' },
+            });
+        } catch { /* A fixed diagnostic never changes the primitive result. */ }
+    },
     /** Private fixed receipt; never carries a credential or account. */
     nativeSecretDelivered(): void {
         if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter

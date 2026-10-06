@@ -13,7 +13,7 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
-    // ios-local-attachment-host, ios-attachment-draft-owned, ios-http-transport and ios-secure-storage reuse releaseCheck, operation, and outcome below.
+    // ios-local-attachment-host, ios-attachment-draft-owned, ios-http-transport, ios-secure-storage and ios-sync-crypto reuse releaseCheck, operation, and outcome below.
     // automation concurrent-write replay; capture routing reuses outcome below.
     'retryCount',
     // deferred-attachment-pass: which pass owes the deferred pre-sync phase's work.

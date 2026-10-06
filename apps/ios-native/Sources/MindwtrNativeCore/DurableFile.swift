@@ -78,5 +78,9 @@ final class HostIOFaults {
     var secretBeforeOperation: ((String, String) -> Void)?
     var secretAfterOperation: ((String, String) -> Void)?
     var configureSecretJobs: ((NativeSecretJobs) -> Void)?
+    var cryptoBeforeOperation: ((String) -> Void)?
+    var cryptoAfterOperation: ((String) -> Void)?
+    var cryptoArgon2Unavailable: (() -> Bool)?
+    var configureCryptoJobs: ((NativeCryptoJobs) -> Void)?
 }
 #endif
