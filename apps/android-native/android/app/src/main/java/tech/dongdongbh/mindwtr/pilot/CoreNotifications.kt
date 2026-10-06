@@ -34,6 +34,8 @@ internal object CoreNotifications {
 
     /** The id every tagged reminder posts under, beside its tag (core's getReminderNotificationTag: one per task). */
     private const val REMINDER_SLOT_ID = 1
+    /** Android enqueues notify asynchronously; its active snapshot may still name the previous alarm. Guarded by the reminder lock. */
+    private val reminderOwners = mutableMapOf<String, Int>()
 
     /** Posts [details] now; false when Android drops it (no notification permission, Android 13+). */
     fun post(context: Context, details: JSONObject): Boolean {
@@ -70,7 +72,12 @@ internal object CoreNotifications {
         // occurrence: a task's start, due and due-time repeats share the tag. An untagged one posts under the alarm's id.
         val tag = details.optString("tag")
         val manager = context.getSystemService(NotificationManager::class.java)
-        if (tag.isEmpty()) manager.notify(id, builder.build()) else manager.notify(tag, REMINDER_SLOT_ID, builder.build())
+        synchronized(ReminderAlarms.LOCK) {
+            if (tag.isEmpty()) manager.notify(id, builder.build()) else {
+                manager.notify(tag, REMINDER_SLOT_ID, builder.build())
+                reminderOwners[tag] = id
+            }
+        }
     }
 
     /** The alarm a shown reminder notification belongs to (the one shown in its task's slot), by the id it was posted for. */
@@ -84,13 +91,21 @@ internal object CoreNotifications {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.cancel(id)
         var taggedRemoved = 0
+        for ((tag, owner) in reminderOwners) {
+            if (owner == id) {
+                manager.cancel(tag, REMINDER_SLOT_ID)
+                taggedRemoved += 1
+            }
+        }
         for (shown in manager.activeNotifications) {
             if (shown.tag == null || NotificationCompat.getChannelId(shown.notification) != REMINDER_CHANNEL) continue
+            if (shown.tag in reminderOwners) continue
             if (reminderAlarmId(shown) == id) {
                 manager.cancel(shown.tag, shown.id)
                 taggedRemoved += 1
             }
         }
+        reminderOwners.entries.removeAll { it.value == id }
         Log.i(CoreHost.TAG, "Native Android reminder slot releaseCheck=v1.3.5/native-reminder-replacement operation=cancelled taggedRemoved=$taggedRemoved")
     }
 

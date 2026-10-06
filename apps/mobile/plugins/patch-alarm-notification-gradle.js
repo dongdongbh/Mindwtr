@@ -1534,7 +1534,7 @@ const applyAlarmIosReminderThreadPatchToSource = (original) => {
             content.threadIdentifier = contentInfo.threadIdentifier;`)
     .replace(removeAllMarker, `// Mindwtr reminder threads: keeps only the newest delivered notification of
 // each reminder thread, so a task's earlier reminders leave the tray.
-RCT_EXPORT_METHOD(collapseDeliveredReminderNotifications){
+RCT_EXPORT_METHOD(collapseDeliveredReminderNotifications:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject){
     if (@available(iOS 10.0, *)) {
         UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
         [center getDeliveredNotificationsWithCompletionHandler:^(NSArray<UNNotification *> * _Nonnull notifications) {
@@ -1556,73 +1556,14 @@ RCT_EXPORT_METHOD(collapseDeliveredReminderNotifications){
             if (superseded.count > 0) {
                 [center removeDeliveredNotificationsWithIdentifiers:superseded];
             }
+            resolve(@(superseded.count));
         }];
+    } else {
+        resolve(@0);
     }
 }
 
 ${removeAllMarker}`);
-};
-
-// JS calls this only after task completion is durably saved. The tapped request
-// can be dismissed immediately, but sibling pending reminders must survive a failed save.
-const applyAlarmIosCompleteCancelsTaskPatchToSource = (original) => {
-  const helperMarker = 'static NSString *stringify(NSDictionary *notification) {';
-  const methodMarker = 'RCT_EXPORT_METHOD(removeAllFiredNotifications){';
-  if (!original.includes(helperMarker) || !original.includes(methodMarker)) return original;
-  let next = original.replace(/           mindwtrRemoveTaskReminders\(response\.notification\);\n/g, '');
-  // Upgrade a previously patched dependency as well as a clean prebuild.
-  next = next.replace(/\/\/ Mindwtr task reminder cancel:[\s\S]*?(?=static NSString \*stringify\(NSDictionary \*notification\) \{)/, '');
-  if (next.includes('RCT_EXPORT_METHOD(cancelTaskReminderNotifications:')) return next;
-  return next
-    .replace(helperMarker, `// Mindwtr saved task reminder cancel: matches task threads and legacy task reminders only.
-API_AVAILABLE(ios(10.0))
-static BOOL mindwtrIsReminderOfTask(UNNotificationContent *other, NSString *thread, NSString *taskId) {
-    id data = other.userInfo[@"data"];
-    NSDictionary *payload = [data isKindOfClass:[NSDictionary class]] ? (NSDictionary *)data : nil;
-    id kind = payload[@"kind"];
-    if ([kind isKindOfClass:[NSString class]] && [(NSString *)kind isEqualToString:@"pomodoro"]) return NO;
-    if ([other.threadIdentifier isEqualToString:thread]) return YES;
-    return [payload[@"taskId"] isEqual:taskId]
-        && [kind isKindOfClass:[NSString class]] && [(NSString *)kind hasPrefix:@"task-"];
-}
-
-${helperMarker}`)
-    .replace(methodMarker, `RCT_EXPORT_METHOD(cancelTaskReminderNotifications:(NSString *)taskId
-                  resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject) {
-    if (![taskId isKindOfClass:[NSString class]] || taskId.length == 0) {
-        reject(@"invalid_task_id", @"A task identifier is required", nil);
-        return;
-    }
-    if (@available(iOS 10.0, *)) {
-        NSString *thread = [@"mindwtr-reminder:task:" stringByAppendingString:taskId];
-        UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
-        dispatch_group_t group = dispatch_group_create();
-        dispatch_group_enter(group);
-        [center getPendingNotificationRequestsWithCompletionHandler:^(NSArray<UNNotificationRequest *> * _Nonnull requests) {
-            NSMutableArray<NSString *> *identifiers = [NSMutableArray array];
-            for (UNNotificationRequest *request in requests) {
-                if (mindwtrIsReminderOfTask(request.content, thread, taskId)) [identifiers addObject:request.identifier];
-            }
-            if (identifiers.count > 0) [center removePendingNotificationRequestsWithIdentifiers:identifiers];
-            dispatch_group_leave(group);
-        }];
-        dispatch_group_enter(group);
-        [center getDeliveredNotificationsWithCompletionHandler:^(NSArray<UNNotification *> * _Nonnull delivered) {
-            NSMutableArray<NSString *> *identifiers = [NSMutableArray array];
-            for (UNNotification *shown in delivered) {
-                if (mindwtrIsReminderOfTask(shown.request.content, thread, taskId)) [identifiers addObject:shown.request.identifier];
-            }
-            if (identifiers.count > 0) [center removeDeliveredNotificationsWithIdentifiers:identifiers];
-            dispatch_group_leave(group);
-        }];
-        dispatch_group_notify(group, dispatch_get_main_queue(), ^{ resolve(nil); });
-    } else {
-        reject(@"unsupported_platform", @"Notification cancellation unavailable", nil);
-    }
-}
-
-${methodMarker}`);
 };
 
 const logPatchedCandidate = (label, candidate) => {
@@ -2023,16 +1964,7 @@ const PATCHES = [
     appliedMarker: '// Mindwtr reminder threads',
   },
 
-  {
-    id: 'alarm-ios-complete-cancels-task',
-    platform: 'ios',
-    getCandidates: iosSourceCandidates,
-    transform: applyAlarmIosCompleteCancelsTaskPatchToSource,
-    required: true,
-    // Must run after alarm-ios-complete-action: removes its old eager cancellation call.
-    firstMatchOnly: true,
-    appliedMarker: 'RCT_EXPORT_METHOD(cancelTaskReminderNotifications:',
-  },
+
 
 ];
 

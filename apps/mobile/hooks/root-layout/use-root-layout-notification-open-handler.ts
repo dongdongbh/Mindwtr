@@ -10,7 +10,7 @@ import {
 
 import { logInfo, logWarn } from '@/lib/app-log';
 import { setNotificationOpenHandler } from '@/lib/notification-service';
-import { acknowledgeNotificationCompletion, cancelTaskReminderNotifications, peekPendingNotificationCompletions, consumePendingNotificationOpenPayload } from '@/modules/notification-open-intents';
+import { acknowledgeNotificationCompletion, peekPendingNotificationCompletions, consumePendingNotificationOpenPayload } from '@/modules/notification-open-intents';
 
 // Outcome evidence for #1028: a received action that changes nothing must say
 // why, or the log can't separate a lost tap from a deliberately ignored one.
@@ -137,31 +137,12 @@ export function useRootLayoutNotificationOpenHandler({
                 const state = useTaskStore.getState();
                 const task = state._tasksById?.get(taskId) ?? state.tasks?.find((item) => item.id === taskId);
                 const blocker = getReminderCompletionBlocker(task);
-                if (blocker && (blocker !== 'not-actionable' || task?.status !== 'done')) {
+                if (blocker) {
                     logNotificationOutcome('Complete action dropped', { taskId, reason: blocker });
                     return;
                 }
-                void (async () => {
-                    try {
-                        if (!blocker) {
-                            const { result } = await runWithImmediateSaveTracking(() => state.updateTask(taskId, { ...REMINDER_COMPLETE_UPDATE }));
-                            if (!result.success) throw new Error('Completion update failed');
-                        } else {
-                            // Retry a failed save without completing a recurring task twice.
-                            await state.persistSnapshot();
-                        }
-                        await flushPendingSave();
-                        await cancelTaskReminderNotifications(taskId);
-                        logNotificationOutcome('Done action saved and task reminders cancelled', {
-                            releaseCheck: 'v1.3.5/ios-reminder-completion', outcome: 'saved-and-cancelled',
-                        });
-                    } catch {
-                        handledCompleteActionsRef.current.delete(actionKey);
-                        void logWarn('[Local Notifications] Done action save or cancellation failed', {
-                            scope: 'notifications', extra: { releaseCheck: 'v1.3.5/ios-reminder-completion', outcome: 'failed' },
-                        });
-                    }
-                })();
+                logNotificationOutcome('Complete action applied', { taskId });
+                state.updateTask(taskId, { ...REMINDER_COMPLETE_UPDATE }).catch(() => undefined);
                 return;
             }
             case 'review':

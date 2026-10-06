@@ -502,6 +502,7 @@ class ReminderRescheduleReceiver : BroadcastReceiver() {
         if (action !in ACTIONS && !(action == DEBUG_RESCHEDULE && BuildConfig.DEBUG)) return
         // Device check only: cancellation after another alarm replaced the old alarm's task slot.
         if (action == DEBUG_RESCHEDULE && BuildConfig.DEBUG && intent.hasExtra("cancelReminderId")) {
+            intent.getStringExtra("replacementAlarm")?.let { CoreNotifications.postReminder(context, JSONObject(it)) }
             CoreNotifications.cancelReminder(context, intent.getIntExtra("cancelReminderId", 0))
             return
         }

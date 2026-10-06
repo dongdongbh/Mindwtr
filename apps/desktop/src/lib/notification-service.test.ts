@@ -591,7 +591,7 @@ describe('a task\'s reminders replace its notification', () => {
         expect(sent.every((call) => call.args.tag === tag)).toBe(true);
     });
 
-    it('preserves packaged Windows delivery without replacement', async () => {
+    it('tags the packaged Windows toast', async () => {
         runtimeMock.isTauriRuntime.mockReturnValue(true);
         runtimeMock.isWindowsRuntime.mockReturnValue(true);
         const calls = captureInvokes();
@@ -600,7 +600,7 @@ describe('a task\'s reminders replace its notification', () => {
 
         const sent = calls.filter((call) => call.command === 'send_windows_packaged_notification');
         expect(sent.length).toBeGreaterThanOrEqual(2);
-        expect(sent.every((call) => call.args.tag === undefined)).toBe(true);
+        expect(sent.every((call) => call.args.tag === tag)).toBe(true);
         expect(pluginMock.sendNotification).not.toHaveBeenCalled();
     });
 
@@ -623,6 +623,29 @@ describe('a task\'s reminders replace its notification', () => {
         stopDesktopNotifications();
         calls = captureInvokes('send_windows_packaged_notification', 'send_replacing_notification');
         await fireDueThenRepeat(new Date(2026, 7, 3, 9, 0, 0, 0));
+        expect(calls.some((call) => call.command === 'send_replacing_notification')).toBe(true);
+        expect(pluginMock.sendNotification.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('replaces through the native command on unpackaged Windows, and falls back to the plugin when it fails', async () => {
+        runtimeMock.isTauriRuntime.mockReturnValue(true);
+        runtimeMock.isWindowsRuntime.mockReturnValue(true);
+        let calls = captureInvokes('send_windows_packaged_notification');
+        await sendDesktopImmediateNotification('Prepare report');
+        // An immediate notification has no task: no replacing command.
+        expect(calls.map((call) => call.command)).not.toContain('send_replacing_notification');
+        expect(pluginMock.sendNotification).toHaveBeenCalledTimes(1);
+        pluginMock.sendNotification.mockClear();
+
+        await fireDueThenRepeat(new Date(2026, 7, 6, 9, 0, 0, 0));
+        const replaced = calls.filter((call) => call.command === 'send_replacing_notification');
+        expect(replaced.length).toBeGreaterThanOrEqual(2);
+        expect(replaced.every((call) => call.args.tag === tag)).toBe(true);
+        expect(pluginMock.sendNotification).not.toHaveBeenCalled();
+
+        stopDesktopNotifications();
+        calls = captureInvokes('send_windows_packaged_notification', 'send_replacing_notification');
+        await fireDueThenRepeat(new Date(2026, 7, 7, 9, 0, 0, 0));
         expect(calls.some((call) => call.command === 'send_replacing_notification')).toBe(true);
         expect(pluginMock.sendNotification.mock.calls.length).toBeGreaterThanOrEqual(2);
     });

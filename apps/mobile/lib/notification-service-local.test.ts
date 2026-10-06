@@ -753,12 +753,16 @@ describe('notification-service-local', () => {
 
   it('collapses each task\'s delivered iOS reminders to the newest on every cycle', async () => {
     mockPlatform.OS = 'ios';
+    mockAlarmCollapseDeliveredReminderNotifications.mockResolvedValue(2);
     mockStoreState.tasks = [
       { id: 'call', title: 'Call back', dueDate: new Date(Date.now() - 15 * 60 * 1000).toISOString(), repeatReminderMinutes: 10 },
     ];
 
     await startLocalMobileNotifications();
     expect(mockAlarmCollapseDeliveredReminderNotifications).toHaveBeenCalledTimes(1);
+    expect(mockLogInfo).toHaveBeenCalledWith(expect.stringContaining('Delivered reminder threads collapsed'), expect.objectContaining({
+      extra: expect.objectContaining({ releaseCheck: 'v1.3.5/ios-reminder-threads', count: 2 }),
+    }));
 
     // The app returning to the foreground starts the service again: one more cycle, one more collapse.
     await startLocalMobileNotifications();

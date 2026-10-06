@@ -84,7 +84,7 @@ type AlarmNotificationsApi = {
   removeFiredNotification: (id: AlarmId) => void;
   removeAllFiredNotifications: () => void;
   /** iOS (patched): keeps only the newest delivered notification of each reminder thread. */
-  collapseDeliveredReminderNotifications?: () => void;
+  collapseDeliveredReminderNotifications?: () => Promise<number>;
   getScheduledAlarms?: () => Promise<unknown>;
   requestPermissions?: (permissions: { alert: boolean; badge: boolean; sound: boolean }) => Promise<unknown>;
 };
@@ -649,10 +649,13 @@ async function withdrawDeliveredReminders(
 // replaces. iOS cannot replace a delivered notification from a pending one, so its reminders
 // share the task's thread and each cycle (every app start or foreground among them) removes
 // all but the newest delivered notification of each task.
-function collapseDeliveredReminderThreads(api: AlarmNotificationsApi): void {
+async function collapseDeliveredReminderThreads(api: AlarmNotificationsApi): Promise<void> {
   if (Platform.OS !== 'ios' || typeof api.collapseDeliveredReminderNotifications !== 'function') return;
   try {
-    api.collapseDeliveredReminderNotifications();
+    const count = await api.collapseDeliveredReminderNotifications();
+    if (typeof count === 'number') logNotificationInfo('Delivered reminder threads collapsed', {
+      releaseCheck: 'v1.3.5/ios-reminder-threads', count,
+    });
   } catch (error) {
     logNotificationWarn('Failed to collapse delivered reminders', { error: error instanceof Error ? error.message : String(error) });
   }
@@ -753,7 +756,7 @@ async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteS
     tasks: new Map(tasks.map((task) => [task.id, task])),
     projects: new Map(projects.map((project) => [project.id, project])),
   }, now.getTime());
-  collapseDeliveredReminderThreads(api);
+  await collapseDeliveredReminderThreads(api);
   if (!taskRemindersEnabled) {
     const morningDigestEnabled = recurringRequests.some((request) => request.key === 'digest:morning');
     const eveningDigestEnabled = recurringRequests.some((request) => request.key === 'digest:evening');

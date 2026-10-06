@@ -259,13 +259,14 @@ async function handleLinuxNotification(title: string, body?: string, tag?: strin
  * error, so Store users saw no reminder toasts at all (#1146). The command reports "not
  * packaged" on every other Windows install, and those fall through to the plugin as before.
  */
-async function sendWindowsPackagedNotification(title: string, body?: string): Promise<boolean> {
+async function sendWindowsPackagedNotification(title: string, body?: string, tag?: string): Promise<boolean> {
     if (!isTauriRuntime() || !isWindowsRuntime()) return false;
 
     try {
         await invokeNative('send_windows_packaged_notification', {
             title,
             body: body?.trim() ? body : undefined,
+            tag,
         });
         return true;
     } catch (error) {
@@ -275,10 +276,10 @@ async function sendWindowsPackagedNotification(title: string, body?: string): Pr
 }
 
 /**
- * A macOS reminder that replaces its task's notification where the plugin can only add one. On any error the plugin shows it instead, as one more notification.
+ * A macOS or unpackaged Windows reminder that replaces its task's notification. On any error the plugin shows it instead, as one more notification.
  */
 async function sendReplacingNotification(title: string, body: string | undefined, tag: string): Promise<boolean> {
-    if (!isTauriRuntime() || !isMacRuntime()) return false;
+    if (!isTauriRuntime() || (!isMacRuntime() && !isWindowsRuntime())) return false;
 
     try {
         await invokeNative('send_replacing_notification', {
@@ -303,7 +304,7 @@ async function sendNotification(title: string, body?: string, tag?: string) {
         return;
     }
 
-    if (await sendWindowsPackagedNotification(title, body)) {
+    if (await sendWindowsPackagedNotification(title, body, tag)) {
         logNotificationSent('windows-packaged');
         return;
     }

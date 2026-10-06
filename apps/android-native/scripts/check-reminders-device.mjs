@@ -1,7 +1,7 @@
 // Reminder alarms check for the isolated native Android development app (pass B3, R1 native).
 //
 //   node apps/android-native/scripts/check-reminders-device.mjs <adb-serial> [apk]
-//   Add --replacement-only for real base/due-repeat replacement, old-owner cancellation and latest Snooze/Done,
+//   Add --replacement-only for a real base alarm, immediate native due-repeat replacement plus old-owner cancellation, and latest Snooze/Done,
 //   using existing notification permission and alarm access; phone settings stay unchanged.
 //
 // Installs the debug APK with `install -r` (existing development data stays) and checks, from `dumpsys alarm`, `dumpsys
@@ -323,18 +323,21 @@ const restore = async () => {
     try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
 };
 
-/** Real base/due-repeat alarms, latest buttons, and cancellation of the old alarm after replacement. No phone settings changed. */
+/** A real base alarm, core's due-repeat details posted then old-owner cancellation in one native callback, and latest buttons. */
 const replacementCheck = async () => {
     check(/android\.permission\.POST_NOTIFICATIONS: granted=true/.test(sh(`dumpsys package ${PKG}`)), 'native Dev already has notification permission');
     console.log(`info - existing native Dev exact-alarm access: ${exactMode} (left unchanged)`);
-    await killApp();
+    // Package replacement can start a reschedule worker immediately; stop Dev before seeding its isolated test data.
+    sh(`am force-stop ${PKG}`);
+    await waitUntil('native Dev stopped before seeding', () => !pid());
     const at = phoneNow() + 60_000;
     const names = [title(1), title(2)];
     for (const name of names) capture(name, { dueDate: new Date(at).toISOString() });
     await launchAndPlan();
     const ids = names.map((name) => stored(name)[0].id);
     ids.forEach((id) => openTasks.add(id));
-    await killApp();
+    sh(`am force-stop ${PKG}`);
+    await waitUntil('native Dev stopped before the database edit', () => !pid());
     reminderSetting = editDb(null, true, ids[0]);
     await launchAndPlan();
     const key = `task:${ids[0]}`;
@@ -347,18 +350,20 @@ const replacementCheck = async () => {
     await waitUntil('the other task reminder', () => shown(names[1]).length === 1, 30_000);
     check(first.id === oldId && first.slotId === 1 && first.tag !== 'null', 'base notification uses its task tag and slot id 1');
     check(shown(names[1])[0].tag !== first.tag, 'different tasks have different notification slots');
-    console.log('info - waiting for the real 5-minute due-repeat alarm');
-    const latest = await waitUntil('the due-repeat replacement', () => shown(names[0]).find((item) => item.id === latestId), 480_000);
+    const replacementAlarm = JSON.stringify({ key: `${key}:r1`, id: latestId, fireAtMs: at + 300_000, repeat: 'once',
+        details: coreDetails([`${key}:r1`], at - 1000)[`${key}:r1`], channelName: 'Mindwtr reminders', replacing: null });
+    const marker = 'releaseCheck=v1.3.5/native-reminder-replacement operation=cancelled taggedRemoved=0';
+    const cancellations = count(allLogs(), marker);
+    // No visibility wait between B's notify and A's cancel: Android still may report A while B is queued.
+    sh(`am broadcast -f 0x20 -n ${RESCHEDULE} -a ${DEBUG_RESCHEDULE} --ei cancelReminderId ${oldId} --es replacementAlarm '${replacementAlarm.replaceAll("'", "'\\''")}'`);
+    await waitUntil('the immediate old alarm cancellation diagnostic', () => count(allLogs(), marker) > cancellations);
+    const latest = await waitUntil('the due-repeat replacement after old-owner cancellation', () => shown(names[0]).find((item) => item.id === latestId));
     check(shown(names[0]).length === 1 && latest.tag === first.tag && latest.slotId === 1, 'due-repeat replaced the base notification in the same task slot');
     check(latest.channel === CHANNEL && latest.actions.join(',') === 'COMPLETE,SNOOZE,DISMISS', 'replacement retains the reminder channel and all latest actions');
     sh('cmd statusbar expand-notifications');
     await sleep(1500);
     writeFileSync(resolve(work, 'replacement-shade.png'), adbRaw('exec-out', 'screencap', '-p'));
     closeShade();
-    const marker = 'releaseCheck=v1.3.5/native-reminder-replacement operation=cancelled taggedRemoved=0';
-    const cancellations = count(allLogs(), marker);
-    sh(`am broadcast -f 0x20 -n ${RESCHEDULE} -a ${DEBUG_RESCHEDULE} --ei cancelReminderId ${oldId}`);
-    await waitUntil('the old alarm cancellation diagnostic', () => count(allLogs(), marker) > cancellations);
     check(shown(names[0]).length === 1 && shown(names[0])[0].id === latestId, 'cancelling the old alarm leaves its replacement visible');
     setProp('snooze_minutes', '0.25');
     const snoozes = () => count(allLogs(), 'Native Android core work', '"job":"reminderSnooze","outcome":"success"');
