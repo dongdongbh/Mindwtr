@@ -52,6 +52,7 @@ export type NativeAttachmentBindings = {
     fetch?: typeof fetch;
     dropboxAuth?: Pick<MobileSyncDropboxAuthPort, 'getValidAccessToken' | 'forceRefreshAccessToken'>;
     getDropboxClientId?: () => Promise<string>;
+    maxWebdavBufferedUploadBytes?: number;
 };
 
 declare const globalThis: Record<string, unknown>;
@@ -187,6 +188,7 @@ export const createNativeAttachments = (bindings: NativeAttachmentBindings, chan
         common,
         installer,
         log: { sanitize: (message) => bindings.log.sanitize(message) },
+        maxWebdavBufferedUploadBytes: bindings.maxWebdavBufferedUploadBytes,
     });
 
     /** Sync's attachment passes (core's mobile sync service), as RN's lib/sync-service.ts binds them. */

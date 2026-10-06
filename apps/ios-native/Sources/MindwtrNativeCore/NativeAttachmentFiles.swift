@@ -800,7 +800,9 @@ final class NativeAttachmentFiles {
     /// Only a separately journaled candidate and latest shared keep decision
     /// may call this typed facade. An observation of absence is not a proof.
     func retireBaselineAttachment(attachmentID: String, proof: BaselineAttachmentProof,
-                                  checkCancellation: () throws -> Void = {}) throws -> BaselineAttachmentRetirementOutcome {
+                                  checkCancellation: () throws -> Void = {},
+                                  checkOwnership: () throws -> Void = {}) throws -> BaselineAttachmentRetirementOutcome {
+        try checkOwnership()
         guard Self.validBaselineAttachmentID(attachmentID), !proof.targetURI.isEmpty,
               proof.targetURI.utf8.count <= 16 * 1024, !proof.targetURI.utf8.contains(0),
               Self.validDigest(proof.sha256), proof.size >= 0, proof.size <= 9_007_199_254_740_991,
@@ -811,7 +813,7 @@ final class NativeAttachmentFiles {
         let outcome = try retireGeneration(path: Reference(cache: false, components: ["attachments", leaf]),
             proof: PublishedAttachmentProof(sha256: proof.sha256, size: proof.size,
                 identity: proof.identity, directoryIdentity: proof.directoryIdentity),
-            retainDifferent: true, checkCancellation: checkCancellation)
+            retainDifferent: true, checkCancellation: checkCancellation, checkOwnership: checkOwnership)
         let diagnostic = outcome == .removed ? "removed" : outcome == .absent ? "absent" : "retained"
         NSLog("Native iOS attachment baseline file settled releaseCheck=v1.3.5/ios-baseline-file-settled outcome=%@", diagnostic)
         return outcome
@@ -820,13 +822,16 @@ final class NativeAttachmentFiles {
     // One descriptor-bound retirement engine. Legacy publication mode retains
     // its refusal/hook order; only baseline mode can positively keep a generation.
     private func retireGeneration(path: Reference, proof: PublishedAttachmentProof, retainDifferent: Bool,
-                                  checkCancellation: () throws -> Void) throws -> BaselineAttachmentRetirementOutcome {
+                                  checkCancellation: () throws -> Void,
+                                  checkOwnership: () throws -> Void = {}) throws -> BaselineAttachmentRetirementOutcome {
+        try checkOwnership()
         try checkCancellation()
         let parent: Parent
         do { parent = try openParent(path) }
         catch { throw NativeAttachmentFilesError.unavailable }
         defer { Darwin.close(parent.fd) }
         func validateParent() throws {
+            try checkOwnership()
             try verify(parent, path: path)
             guard try Self.token(Self.identity(parent.fd)) == proof.directoryIdentity else {
                 throw NativeAttachmentFilesError.unavailable
@@ -900,6 +905,7 @@ final class NativeAttachmentFiles {
             throw NativeAttachmentFilesError.unavailable
         }
         #if DEBUG
+        try checkOwnership()
         try beforeRetirementUnlink?()
         #endif
         // The final cancellation/identity check and unlink have no intervening
@@ -907,6 +913,7 @@ final class NativeAttachmentFiles {
         try check()
         guard Darwin.unlinkat(parent.fd, parent.leaf, 0) == 0 else { throw NativeAttachmentFilesError.unavailable }
         do {
+            try checkOwnership()
             #if DEBUG
             try afterRetirementUnlink?()
             #endif

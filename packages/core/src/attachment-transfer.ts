@@ -94,6 +94,19 @@ export class AttachmentUploadSizeUnavailableError extends Error {
     }
 }
 
+/** An opt-in WebDAV host cannot safely buffer this upload. Unlike File Sync's
+ * size refusal, this aborts the run rather than reporting a successful blocked pass. */
+export class WebdavHostUploadLimitError extends Error {
+    constructor() {
+        super('WebDAV attachment upload cannot be admitted by this host transport');
+        this.name = 'WebdavHostUploadLimitError';
+    }
+}
+
+export const isWebdavHostUploadLimitError = (error: unknown): error is WebdavHostUploadLimitError => (
+    error instanceof WebdavHostUploadLimitError
+);
+
 export const isAttachmentUploadTooLargeError = (
     error: unknown,
 ): error is AttachmentUploadTooLargeError => error instanceof AttachmentUploadTooLargeError;
@@ -277,6 +290,9 @@ export type AttachmentTransferLifecycleOptions = {
      * Checked against an authoritative local stat before hashing or snapshot reads.
      * Omitted by streaming/remote backends; File Sync supplies the wire-safe cap. */
     maxBufferedUploadBytes?: number;
+    /** Optional host admission, including an unavailable stat. Called only before
+     * upload/candidate reads; omitted callers retain their existing stat policy. */
+    assertUploadStat?: (stat: LocalFileStat | null) => void;
     /** Only invoked when the cheap stat compare already mismatched. */
     computeLocalFileHash?: (path: string, attachment: Attachment) => Promise<string | null>;
     /** Prepare one immutable upload source and its digest. When present, the
@@ -406,8 +422,9 @@ export async function runAttachmentTransferLifecycle(
     const patches = new Map<string, Attachment>();
     const hasCloudCopy = options.hasCloudCopy ?? ((attachment: Attachment) => Boolean(attachment.cloudKey));
     const resolveLocalPath = options.resolveLocalPath ?? defaultResolveLocalPath;
-    const assertUploadStatAllowed = (stat: LocalFileStat): void => {
-        if (options.maxBufferedUploadBytes === undefined) return;
+    const assertUploadStatAllowed = (stat: LocalFileStat | null): void => {
+        options.assertUploadStat?.(stat);
+        if (!stat || options.maxBufferedUploadBytes === undefined) return;
         assertBufferedAttachmentUploadSize(stat.size, options.maxBufferedUploadBytes);
     };
 
@@ -458,7 +475,7 @@ export async function runAttachmentTransferLifecycle(
     ): Promise<boolean> => {
         if (options.getLocalFileStat) {
             const uploadStat = await options.getLocalFileStat(localPath, attachment).catch(() => null);
-            if (uploadStat) assertUploadStatAllowed(uploadStat);
+            assertUploadStatAllowed(uploadStat);
         }
         const snapshot = options.createUploadSnapshot
             ? await options.createUploadSnapshot(localPath, attachment)
@@ -469,6 +486,7 @@ export async function runAttachmentTransferLifecycle(
         }
 
         try {
+            options.assertUploadStat?.(snapshot.stat);
             const snapshotHash = snapshot.fileHash.trim().toLowerCase();
             const normalizedExpectedHash = expectedHash?.trim().toLowerCase();
             if (!isSha256Hex(snapshotHash)
@@ -503,7 +521,7 @@ export async function runAttachmentTransferLifecycle(
         if (!options.createUploadSnapshot) return false;
         if (options.getLocalFileStat) {
             const candidateStat = await options.getLocalFileStat(localPath, attachment).catch(() => null);
-            if (candidateStat) assertUploadStatAllowed(candidateStat);
+            assertUploadStatAllowed(candidateStat);
         }
         const snapshot = await options.createUploadSnapshot(localPath, attachment);
         if (!snapshot) return false;
@@ -745,12 +763,15 @@ export async function runAttachmentTransferLifecycle(
         // this is a no-op and behaviour is unchanged from before this feature.
         if (hasCloudCopy(attachment) && mayReadForSync && options.getLocalFileStat && options.contentChangePhase) {
             const stat = await options.getLocalFileStat(localPath, attachment).catch(() => null);
+            // Opt-in host admission can keep an unchanged cloud generation without
+            // reading it. Preserve older buffered backends' eager stat-cap policy.
+            if (!stat || !options.assertUploadStat) assertUploadStatAllowed(stat);
             if (stat) {
-                assertUploadStatAllowed(stat);
                 const check = await checkAttachmentContentChange(
                     attachment,
                     stat,
                     () => {
+                        if (options.assertUploadStat) assertUploadStatAllowed(stat);
                         if (unhashableStats.get(attachment.id) === statMarker(stat)) return Promise.resolve(null);
                         return options.computeLocalFileHash ? options.computeLocalFileHash(localPath, attachment) : Promise.resolve(null);
                     },

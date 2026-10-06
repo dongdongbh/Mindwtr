@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isRetryableWebdavReadError, isWebdavInvalidJsonError, withRetry } from './retry-utils';
+import { isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, withRetry } from './retry-utils';
 
 describe('withRetry', () => {
     it('returns on first success', async () => {
@@ -54,6 +54,35 @@ describe('withRetry', () => {
         const fn = vi.fn().mockRejectedValue(error);
         await expect(withRetry(fn, { maxAttempts: 3, baseDelayMs: 0 })).rejects.toBe(error);
         expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ['network timeout', { status: 429 }],
+        ['failed to fetch', { response: { status: 503 } }],
+        ['WebDAV GET failed: invalid JSON (Unexpected end of input)', { statusCode: 500 }],
+    ])('never retries a host cap hidden behind %s', async (message, status) => {
+        const error = Object.assign(new TypeError(message), status, {
+            code: 'response-too-large', limitBytes: 8,
+        });
+        expect(isRetryableError(error)).toBe(false);
+        expect(isRetryableWebdavReadError(error)).toBe(false);
+        expect(isWebdavInvalidJsonError(error)).toBe(false);
+        const operation = vi.fn().mockRejectedValue(error);
+        const onRetry = vi.fn();
+        await expect(withRetry(operation, {
+            maxAttempts: 3, baseDelayMs: 0, shouldRetry: isRetryableWebdavReadError, onRetry,
+        })).rejects.toBe(error);
+        expect(operation).toHaveBeenCalledTimes(1);
+        expect(onRetry).not.toHaveBeenCalled();
+    });
+
+    it('keeps malformed host metadata on the existing retry policy', () => {
+        expect(isRetryableError(Object.assign(new TypeError('network timeout'), {
+            code: 'response-too-large', limitBytes: '8',
+        }))).toBe(true);
+        expect(isRetryableWebdavReadError(Object.assign(new Error('invalid WebDAV response'), {
+            code: 'other', limitBytes: 8,
+        }))).toBe(true);
     });
 
     it('applies jitter to exponential delay when enabled', async () => {

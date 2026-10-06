@@ -17,10 +17,12 @@ import { isAttachmentPresenceRepairCandidate, repairMissingRemoteAttachments } f
 import {
   applyAttachmentPatches,
   collectAttachmentsById,
+  assertBufferedAttachmentUploadSize,
   isAttachmentUploadAdmissionError,
   MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
   reportProgress,
   validateAttachmentHash,
+  WebdavHostUploadLimitError,
   type AttachmentDownloadExpectation,
 } from './attachment-transfer';
 import { markAttachmentUnrecoverable, validateAttachmentForUpload } from './attachment-validation';
@@ -35,7 +37,7 @@ import {
   listDropboxFolderFiles,
   uploadDropboxFileVersioned,
 } from './dropbox';
-import { isAbortError, refuseWriteRedirect } from './http-utils';
+import { isAbortError, isHostResponseTooLargeError, refuseWriteRedirect } from './http-utils';
 import { withRetry } from './retry-utils';
 import type { SyncKeyMaterial } from './sync-crypto';
 import { isSyncRemoteMutationFenceError } from './sync-remote-fence';
@@ -147,6 +149,9 @@ export type MobileAttachmentBackendsHost = {
     | 'retainFileSyncAttachmentPublicationForInvalidTarget'
   >;
   log: Pick<MobileSyncLogPort, 'sanitize'>;
+  /** Optional plaintext-byte admission for a host's buffered WebDAV transport.
+   * The caller reserves encryption-envelope bytes inside its own wire limit. */
+  maxWebdavBufferedUploadBytes?: number;
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
 };
 
@@ -214,8 +219,13 @@ const isAbortLikeError = (error: unknown, signal?: AbortSignal): boolean => (
 export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHost) => {
   const core: MobileAttachmentBackendsCoreFunctions = { ...CORE_FUNCTIONS, ...host.core };
   const { fs, files, common, installer } = host;
+  const maxWebdavBufferedUploadBytes = host.maxWebdavBufferedUploadBytes;
+  if (maxWebdavBufferedUploadBytes !== undefined
+    && (!Number.isSafeInteger(maxWebdavBufferedUploadBytes) || maxWebdavBufferedUploadBytes <= 0)) {
+    throw new Error('WebDAV buffered upload capability is invalid');
+  }
 
-  const syncWebdavAttachments = async (
+  const runWebdavAttachmentPass = async (
     appData: AppData,
     webDavConfig: MobileWebDavStoredConfig,
     baseSyncUrl: string,
@@ -275,6 +285,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         });
       } catch (error) {
         if (isAttachmentSyncAbortError(error, signal)) throw error;
+        if (isHostResponseTooLargeError(error)) throw error;
         if (isSyncRemoteMutationFenceError(error)) throw error;
         files.logAttachmentWarn('Failed to ensure WebDAV attachments directory', error);
       }
@@ -305,7 +316,9 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     // Every pass writes only to per-attachment copies and records them here; the patches are
     // folded into a fresh document at the end. `attachmentsById` is updated alongside so a
     // later pass reads the earlier pass's values.
-    const allPatches = await common.migrateAttachmentsLocallyBeforeSync(attachmentsById, signal);
+    const allPatches = await common.migrateAttachmentsLocallyBeforeSync(
+      attachmentsById, signal, maxWebdavBufferedUploadBytes,
+    );
 
     let abortedByRateLimit = false;
     const presenceCandidates: Attachment[] = [];
@@ -366,6 +379,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             return remoteExists;
           } catch (error) {
             if (isAttachmentSyncAbortError(error, signal)) throw error;
+            if (isHostResponseTooLargeError(error)) throw error;
             if (isSyncRemoteMutationFenceError(error) || isWebdavRemoteWriteConflictError(error)) throw error;
             if (handleRateLimit(error)) abortedByRateLimit = true;
             else files.logAttachmentWarn('WebDAV attachment remote check failed', error);
@@ -440,10 +454,16 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       getLocalFileStat: (path) => files.statAttachmentFile(path),
       computeLocalFileHash: (path) => files.computeAttachmentFileHash(path),
       contentChangePhase: options.phase,
+      maxBufferedUploadBytes: maxWebdavBufferedUploadBytes,
+      assertUploadStat: maxWebdavBufferedUploadBytes === undefined ? undefined : (stat) => {
+        assertBufferedAttachmentUploadSize(stat?.size ?? NaN, maxWebdavBufferedUploadBytes);
+      },
       isFatalError: (error) => (
         isAttachmentSyncAbortError(error, signal)
+        || isHostResponseTooLargeError(error)
         || isSyncRemoteMutationFenceError(error)
         || isWebdavRemoteWriteConflictError(error)
+        || (maxWebdavBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error))
       ),
       policy: {
         shouldSkip: () => abortedByRateLimit,
@@ -592,6 +612,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
               // file here. A 412 now says some file exists, not that it holds these bytes (another
               // writer may have created it), so it is recorded only when the same HEAD proof finds
               // it; otherwise it stays unsynced and the next sync sends it as an overwrite.
+              if (isHostResponseTooLargeError(error)) throw error;
               if (!(uploadedWithFileSystem && getErrorStatus(error) === 412)) throw error;
               const stored = await findUploadAtUrl();
               if (!stored.confirmed) {
@@ -615,6 +636,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           return true;
         } catch (error) {
           if (isAttachmentSyncAbortError(error, signal)) throw error;
+          if (isHostResponseTooLargeError(error)) throw error;
           if (isSyncRemoteMutationFenceError(error) || isWebdavRemoteWriteConflictError(error)) throw error;
           if (handleRateLimit(error)) {
             abortedByRateLimit = true;
@@ -663,6 +685,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           }, WEBDAV_ATTACHMENT_RETRY_OPTIONS);
         } catch (error) {
           if (isAttachmentSyncAbortError(error, signal)) throw error;
+          if (isHostResponseTooLargeError(error)) throw error;
           if (handleRateLimit(error)) {
             abortedByRateLimit = true;
             return false;
@@ -737,6 +760,36 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       mutated: didMutate ? 'true' : 'false',
     });
     return didMutate ? nextData : false;
+  };
+
+  const syncWebdavAttachments = async (
+    ...args: Parameters<typeof runWebdavAttachmentPass>
+  ): Promise<AppData | false> => {
+    try {
+      return await runWebdavAttachmentPass(...args);
+    } catch (error) {
+      if (isHostResponseTooLargeError(error)) {
+        try {
+          files.logAttachmentWarn('WebDAV host download limit refused', undefined, {
+            releaseCheck: 'v1.3.5/webdav-host-download-limit', operation: 'download', outcome: 'refused',
+          });
+        } catch {
+          // Diagnostics must not replace the original fatal transport refusal.
+        }
+        throw error;
+      }
+      if (maxWebdavBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) {
+        try {
+          files.logAttachmentWarn('WebDAV host upload admission refused', undefined, {
+            releaseCheck: 'v1.3.5/webdav-host-upload-limit', operation: 'upload', outcome: 'refused',
+          });
+        } catch {
+          // Diagnostics must not replace the fatal admission refusal.
+        }
+        throw new WebdavHostUploadLimitError();
+      }
+      throw error;
+    }
   };
 
   const syncCloudAttachments = async (

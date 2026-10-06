@@ -229,6 +229,7 @@ export * from './attachment-presence-repair';
 export * from './attachment-paths';
 export * from './attachment-draft-settlement';
 export * from './attachment-cleanup';
+export * from './native-attachment-cleanup';
 export * from './ics';
 export * from './external-calendar-colors';
 export * from './task-relative-start';

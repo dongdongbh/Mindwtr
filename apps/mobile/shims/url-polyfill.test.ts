@@ -1,4 +1,6 @@
 import { createRequire } from 'node:module';
+import { DOMParser } from '@xmldom/xmldom';
+import { parseWebdavAttachmentInventory } from '../../../packages/core/src/webdav-attachment-inventory';
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { probeWebdavSyncCompatibility, webdavGetSyncDocument } from '@mindwtr/core';
 
@@ -37,6 +39,39 @@ describe('URL Polyfill Shim', () => {
     test('exports URL and URLSearchParams', () => {
         expect(shim.URL).toBeDefined();
         expect(shim.URLSearchParams).toBeDefined();
+    });
+
+    test('fallback resolves DAV references and keeps inventory confinement (#1342)', () => {
+        globalThis.URL = undefined as unknown as typeof URL;
+        const FallbackURL = loadFreshUrlPolyfill().URL as unknown as typeof URL;
+        const base = 'https://dav.example.test/remote.php/dav/files/account/mindwtr/attachments/';
+        const path = '/remote.php/dav/files/account/mindwtr/attachments/';
+        for (const href of [base, path, 'a.pdf', './a.pdf', '../attachments/a.pdf',
+            '//dav.example.test' + path, '?download=1', '#fragment', '',
+            '../../outside/', '%2e%2e/outside/', '/other/../folder/', 'folder/..']) {
+            const expected = new originalURL(href, base);
+            const actual = new FallbackURL(href, base);
+            expect([actual.href, actual.origin, actual.pathname, actual.search, actual.hash])
+                .toEqual([expected.href, expected.origin, expected.pathname, expected.search, expected.hash]);
+        }
+        const response = (href: string, collection = false) => `<d:response><d:href>${href}</d:href>`
+            + `<d:propstat><d:prop><d:resourcetype>${collection ? '<d:collection/>' : ''}</d:resourcetype>`
+            + '</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>';
+        const inventory = (child?: string) => '<d:multistatus xmlns:d="DAV:">'
+            + response(path, true) + (child ? response(child) : '') + '</d:multistatus>';
+        const parse = (xml: string) => parseWebdavAttachmentInventory(xml, base, source => ({
+            document: new DOMParser().parseFromString(source, 'application/xml') as unknown as Document,
+        }));
+        expect(parse(inventory())).toEqual([]);
+        expect(parse(inventory(path + 'example.pdf'))).toEqual(['attachments/example.pdf']);
+        for (const child of ['example.pdf', base + 'example.pdf', './example.pdf']) {
+            expect(parse(inventory(child))).toEqual(['attachments/example.pdf']);
+        }
+        for (const child of ['../outside.pdf', '%2e%2e/outside.pdf', '/elsewhere/example.pdf',
+            'https://other.example.test' + path + 'example.pdf',
+            '//other.example.test' + path + 'example.pdf', 'example.pdf?download=1', 'example.pdf#fragment']) {
+            expect(() => parse(inventory(child))).toThrow(/WebDAV attachment inventory/);
+        }
     });
 
     test('fallback URL resolves an absolute path against the bases expo-router uses', async () => {
