@@ -97,6 +97,25 @@ final class LegacyRNStorageTests: XCTestCase {
         }
     }
 
+    func testExternalBackupBOMMatchesRNFileReaderWithoutChangingBytes() throws {
+        let directory = try store(["mindwtr-data": NSNull()])
+        let external = directory.appendingPathComponent("d59baf067e1f6acb9879d4a44c5bc756")
+        for markerCount in 0...2 {
+            let raw = Data(Array(repeating: [UInt8](arrayLiteral: 0xEF, 0xBB, 0xBF), count: markerCount).flatMap { $0 })
+                + Data("{\"tasks\":[],\"text\":\"été e\u{301} 🧠\"}".utf8)
+            try raw.write(to: external)
+            let before = try bytes()
+            var encoding: UInt = 0
+            let expected = try NSString(contentsOfFile: external.path, usedEncoding: &encoding) as String
+            XCTAssertEqual(encoding, String.Encoding.utf8.rawValue, "markers=\(markerCount)")
+            let expectedBytes = Data(expected.utf8)
+            let loaded = try reader()
+            let actual = Data(try loaded.bootState().backupJSON.utf8)
+            XCTAssertEqual(actual, expectedBytes, "markers=\(markerCount), RN expected UTF8 \(Array(expectedBytes)); backup actual UTF8 \(Array(actual))")
+            XCTAssertEqual(try bytes(), before)
+        }
+    }
+
     func testMarkersUsePresenceAndAreNeverCleared() throws {
         try store([
             "mindwtr-data:json-ahead-of-sqlite": "",

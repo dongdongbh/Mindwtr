@@ -4096,6 +4096,46 @@ for (const [bridge, receipt, operation] of [
         assert.equal(other.primitiveCalls, 0);
     }
 }
+// Explicit iOS KV presence remains a transport capability, not Sync activation.
+// Its fixed successful-delivery sink is forced, but never records settings data.
+{
+    const names = ['kvGet', 'kvSet', 'kvRemove', 'kvMultiGet', 'kvMultiSet', 'kvMultiRemove'];
+    const configureKV = (state) => {
+        state.kvBridgeCalls = 0;
+        for (const name of names) state.__mindwtrNative[name] = () => {
+            state.kvBridgeCalls++; throw new Error('Unexpected startup device storage');
+        };
+    };
+    const local = makeState(0, [], 'ios', configureKV);
+    assert.deepEqual(Object.keys(local.contractBindings), [], 'KV does not enable iOS Sync or AI');
+    for (const name of names) assert.equal(typeof local.__mindwtrNative[name], 'function');
+    local.MindwtrHost.nativeDeviceStorageDelivered();
+    assert.equal(local.logText, null, 'No preboot device storage receipt');
+    assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
+    assert.equal(local.kvBridgeCalls, 0, 'Explicit storage bridge performs no startup request');
+    local.settings = { diagnostics: { loggingEnabled: false } };
+    local.MindwtrHost.nativeDeviceStorageDelivered();
+    await poll(local, local.MindwtrHost.logShare());
+    const lines = local.logText.split('\n').filter((line) => line.includes('v1.3.5/ios-device-storage'));
+    assert.equal(lines.length, 1, 'Forced device storage marker survives disabled logging');
+    assert.deepEqual(JSON.parse(lines[0]).context, {
+        releaseCheck: 'v1.3.5/ios-device-storage', operation: 'device-storage', outcome: 'delivered',
+    });
+    const before = local.logText;
+    for (const field of ['sandbox', 'workspaceTransition']) {
+        local[field] = true; local.MindwtrHost.nativeDeviceStorageDelivered(); local[field] = false;
+    }
+    await new Promise((tick) => setImmediate(tick));
+    assert.equal(local.logText, before, 'Unsettled workspace emits no device storage receipt');
+    for (const platform of ['android', undefined]) {
+        const other = makeState(0, [], platform);
+        assert.equal((await poll(other, other.MindwtrHost.boot())).ok, true);
+        const prior = other.logText;
+        other.MindwtrHost.nativeDeviceStorageDelivered(); await new Promise((tick) => setImmediate(tick));
+        assert.equal(other.logText, prior, 'Invalid platform emits no device storage receipt');
+        assert.equal(typeof other.__mindwtrNative.kvMultiGet, 'undefined');
+    }
+}
 // Production host-entry selects independent local attachment policy only for
 // complete iOS file capabilities. No kvMultiGet, sync settings, AI or backend
 // constructor is supplied; readiness and diagnostic acknowledgments are real.
@@ -5375,6 +5415,20 @@ for (const [bridge, receipt, operation] of [
         });
         assert.equal((await poll(unavailable, unavailable.MindwtrHost.boot())).ok, true);
         refused(unavailable);
+    });
+    await check('iOS KV presence preserves local attachment authority and does not activate Sync or AI', async () => {
+        let calls = 0;
+        const local = makeState(0, [], 'ios', (state) => {
+            configureLocal(state);
+            for (const name of ['kvMultiGet', 'kvMultiSet', 'kvMultiRemove', 'secretCall', 'cryptoCall', 'netFetch', 'bgSyncSchedule']) {
+                state.__mindwtrNative[name] = () => { calls++; throw new Error('Unexpected device service activation'); };
+            }
+        });
+        assert.deepEqual(Object.keys(local.contractBindings), ['attachments']);
+        assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
+        assert.equal(local.localShaInstallCount, 1);
+        assert.equal(call(local), '{"outcome":"removed"}', 'existing synchronous local Discard remains admitted');
+        assert.equal(calls, 0);
     });
     await check('nativeSync gate stays explicit with local-only construction', () => {
         const entry = readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8');

@@ -320,13 +320,15 @@ const submit = (work: (signal: AbortSignal) => Promise<unknown>): string => {
 };
 
 /**
- * Sync (host-sync.ts), on a host with RN's AsyncStorage bridge (Android). The iOS host and the gates' stand-in bridge have
- * none, so their contract has no Settings › Sync device, as before.
+ * Sync (host-sync.ts) currently belongs to the Android host. iOS device storage alone
+ * must not activate Sync, AI or remote attachment ownership.
  */
 /** The Android build's flavor (D8, CoreHost's BuildConfig.FOSS; absent elsewhere): as RN's FOSS_BUILD, it hides Dropbox and defaults speech to Whisper. */
 const isFossBuild = globalThis.__mindwtrFossBuild === true;
 // kvMultiGet, not kvGet: the gates' stand-in bridge has kvGet and kvSet for the queue's record, and no sync.
-const nativeSync: NativeSync | null = typeof (globalThis.__mindwtrNative as { kvMultiGet?: unknown } | undefined)?.kvMultiGet === 'function'
+// iOS device storage is not permission to replace its local attachment owner or start Sync/AI.
+const nativeSync: NativeSync | null = globalThis.__mindwtrHostPlatform !== 'ios'
+    && typeof (globalThis.__mindwtrNative as { kvMultiGet?: unknown } | undefined)?.kvMultiGet === 'function'
     ? createNativeSync({
         keyValue,
         secrets: {
@@ -1220,6 +1222,17 @@ const attachmentDraftDependencies = {
 };
 
 globalThis.MindwtrHost = {
+    /** Private fixed storage receipt; never carries a setting name or value. */
+    nativeDeviceStorageDelivered(): void {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter
+            || isSandboxMode() || isWorkspaceTransitionActive()) return;
+        try {
+            logInfo('Native iOS device storage result delivered', {
+                scope: 'native-ios', force: true,
+                context: { releaseCheck: 'v1.3.5/ios-device-storage', operation: 'device-storage', outcome: 'delivered' },
+            });
+        } catch { /* A fixed diagnostic never changes the storage result. */ }
+    },
     /** Private fixed primitive receipt; never carries input or derived bytes. */
     nativeCryptoDelivered(): void {
         if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter
