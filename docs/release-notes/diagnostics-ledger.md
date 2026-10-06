@@ -30,6 +30,8 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ## v1.3.5 (add before tagging, trim in the release after)
 
+- **`v1.3.5/webdav-href-resolution`** — `packages/core/src/webdav-attachment-inventory.ts`. `WebDAV attachment inventory validated` with `count` proves the returned folder and attachment hrefs passed namespace, status, origin and path checks. For #1342, sync on mobile and share Diagnostics showing this line instead of an unmatched-href error; it proves inventory parsing, not completion of the whole sync. No URLs, names or attachment identifiers are logged.
+
 - **`v1.3.5/reminder-done-durable`** — `apps/mobile/hooks/root-layout/use-root-layout-notification-open-handler.ts`, Android Done replay. Messages: `Done action stored` (`outcome=stored`) after a non-destructive native receipt read; `Done action saved and acknowledged` (`outcome=completed`, `task-not-found`, `task-deleted`, or `not-actionable`) only after the store save and native acknowledgement succeed. Failures report `Done action retained for retry` (`retained`) or `Done queue retained for retry` (`unreadable`), keep receipts, and retry on foreground. Tester: tap Done while warm and while closed, reopen after process death, and expect a saved/acknowledged line with the task still done after a restart; a stored line alone does not prove task persistence. Fields: `releaseCheck`, `outcome`; no task text or identifiers.
 
 

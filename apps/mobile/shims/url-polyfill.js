@@ -83,6 +83,36 @@ class FallbackURLSearchParams {
     }
 }
 
+// Resolve references before parsing components. Concatenating base + input makes
+// even an absolute Nextcloud DAV href point inside the requested folder (#1342).
+const resolveHref = (input, base) => {
+    const value = String(input || '');
+    if (!base || /^[a-z][a-z0-9.+-]*:/i.test(value)) return value;
+    const baseHref = String(base);
+    const match = baseHref.match(/^([a-z][a-z0-9.+-]*:)(\/\/[^/?#]*)?([^?#]*)(\?[^#]*)?/i);
+    if (!match) throw new TypeError('Invalid base URL');
+    const [, protocol, authority = '', basePath, baseSearch = ''] = match;
+    if (value.startsWith('//')) return protocol + value;
+    const prefix = protocol + authority;
+    if (!value || value.startsWith('#')) return prefix + basePath + baseSearch + value;
+    if (value.startsWith('?')) return prefix + basePath + value;
+    const suffixAt = value.search(/[?#]/);
+    const path = suffixAt < 0 ? value : value.slice(0, suffixAt);
+    const suffix = suffixAt < 0 ? '' : value.slice(suffixAt);
+    const joined = path.startsWith('/') ? path
+        : (basePath.slice(0, basePath.lastIndexOf('/') + 1) || (authority ? '/' : '')) + path;
+    const segments = [];
+    const parts = joined.split('/');
+    for (const [index, part] of parts.entries()) {
+        const dot = part.replace(/%2e/ig, '.');
+        if (dot === '.' || dot === '..') {
+            if (dot === '..' && segments.length > 1) segments.pop();
+            if (index === parts.length - 1) segments.push('');
+        } else segments.push(part);
+    }
+    return prefix + segments.join('/') + suffix;
+};
+
 class FallbackURL {
     // `href` is the stored input, and `pathname`/`search` edits do not change
     // it (same as React Native's URL). Deriving href from the components broke
@@ -90,7 +120,7 @@ class FallbackURL {
     // '//focus' and navigation reset in a loop), so sync code derives sibling
     // URLs by string instead of mutating a URL (#1132).
     constructor(url, base) {
-        const href = base ? new FallbackURL(base).href + String(url || '') : String(url || '');
+        const href = resolveHref(url, base);
         this.href = href;
         const match = href.match(/^(?:([a-z0-9.+-]+:))?(?:\/\/([^\/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?/i);
         this.protocol = match ? (match[1] || '') : '';
