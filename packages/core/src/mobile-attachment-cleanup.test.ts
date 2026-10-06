@@ -90,11 +90,82 @@ describe('mobile attachment cleanup', () => {
     inside.memory.put(`${MANAGED}orphan.pdf`, new Uint8Array([1]));
     await inside.run();
     expect(inside.memory.read(`${MANAGED}orphan.pdf`)).toBeUndefined();
+    expect(inside.options.logSyncInfo).not.toHaveBeenCalled();
 
     const outside = setup(purgedTaskWith({ uri: 'file:///storage/Download/orphan.pdf' }), { backend: 'off' });
     outside.memory.put('file:///storage/Download/orphan.pdf', new Uint8Array([1]));
     await outside.run();
     expect(outside.memory.read('file:///storage/Download/orphan.pdf')).toEqual(new Uint8Array([1]));
+  });
+
+  it('aborts after a native file barrier changes the snapshot, without deleting or processing the target', async () => {
+    const uri = `${MANAGED}orphan.pdf`;
+    const data = purgedTaskWith({ uri });
+    const before = structuredClone(data);
+    const abort = Object.assign(new Error('Snapshot changed'), { name: 'LocalSyncAbort' });
+    let fresh = true;
+    let finalGuardReached = false;
+    const ensureLocalSnapshotFresh = vi.fn(() => { if (!fresh) throw abort; });
+    const { run, memory, options } = setup(data, { backend: 'off', ensureLocalSnapshotFresh });
+    memory.put(uri, new Uint8Array([1, 2, 3]));
+    memory.fs.deleteUnlessKept = vi.fn(async (target, keep) => {
+      await Promise.resolve();
+      fresh = false;
+      finalGuardReached = true;
+      if (keep()) return false;
+      await memory.fs.delete(target);
+      return true;
+    });
+
+    await expect(run()).rejects.toBe(abort);
+
+    expect(finalGuardReached).toBe(true);
+    expect(memory.read(uri)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(memory.calls).not.toContain(`delete ${uri}`);
+    expect(data).toEqual(before);
+    expect(options.logSyncInfo).not.toHaveBeenCalled();
+    expect(options.logSyncWarning).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('acknowledges the guarded primitive result removed=%s using the original URI', async (removed) => {
+    const uri = `${MANAGED}encoded%20name.pdf`;
+    const { run, memory, options } = setup(purgedTaskWith({ uri }), { backend: 'off' });
+    memory.put(uri, new Uint8Array([1]));
+    const guardedDelete = vi.fn(async (target: string, keep: () => boolean) => {
+      await Promise.resolve();
+      expect(keep()).toBe(false);
+      if (removed) await memory.fs.delete(target);
+      return removed;
+    });
+    memory.fs.deleteUnlessKept = guardedDelete;
+
+    const result = await run();
+
+    expect(guardedDelete).toHaveBeenCalledWith(uri, expect.any(Function));
+    expect(memory.read(uri)).toEqual(removed ? undefined : new Uint8Array([1]));
+    expect(result.appData.tasks[0].attachments).toEqual([]);
+    expect(options.logSyncInfo).toHaveBeenCalledWith('Attachment cleanup freshness guarded', {
+      releaseCheck: 'v1.3.5/native-cleanup-freshness', outcome: removed ? 'removed' : 'retained',
+    });
+  });
+
+  it('preserves successful guarded deletion when diagnostic logging throws', async () => {
+    const uri = `${MANAGED}orphan.pdf`;
+    const { run, memory, options } = setup(purgedTaskWith({ uri }), {
+      backend: 'off', logSyncInfo: vi.fn(() => { throw new Error('Synthetic logging failure'); }),
+    });
+    memory.put(uri, new Uint8Array([1]));
+    memory.fs.deleteUnlessKept = async (target, keep) => {
+      if (keep()) return false;
+      await memory.fs.delete(target);
+      return true;
+    };
+
+    const result = await run();
+
+    expect(memory.read(uri)).toBeUndefined();
+    expect(result.appData.tasks[0].attachments).toEqual([]);
+    expect(options.logSyncWarning).not.toHaveBeenCalled();
   });
 
   it('keeps File Sync bytes: another peer may still reselect that generation', async () => {

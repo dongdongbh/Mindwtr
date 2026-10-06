@@ -34,7 +34,7 @@ export type MobileAttachmentCleanupCoreFunctions = {
 };
 
 export type MobileAttachmentCleanupHost = {
-  fs: Pick<MobileAttachmentFileSystemPort, 'documentDirectory' | 'cacheDirectory' | 'delete'>;
+  fs: Pick<MobileAttachmentFileSystemPort, 'documentDirectory' | 'cacheDirectory' | 'delete' | 'deleteUnlessKept'>;
   /** A Dropbox write conflict must end the cycle instead of being logged and skipped. */
   isDropboxConflictError?(error: unknown): boolean;
   core?: Partial<MobileAttachmentCleanupCoreFunctions>;
@@ -80,7 +80,23 @@ export const runMobileAttachmentCleanup = async (
     }
     try {
       options.ensureLocalSnapshotFresh();
-      await host.fs.delete(safeUri);
+      if (host.fs.deleteUnlessKept) {
+        const removed = await host.fs.deleteUnlessKept(safeUri, () => {
+          // The lifecycle checked live references; freshness binds that same snapshot.
+          options.ensureLocalSnapshotFresh();
+          return false;
+        });
+        try {
+          options.logSyncInfo('Attachment cleanup freshness guarded', {
+            releaseCheck: 'v1.3.5/native-cleanup-freshness',
+            outcome: removed ? 'removed' : 'retained',
+          });
+        } catch {
+          // Logging must not change the acknowledged file operation.
+        }
+      } else {
+        await host.fs.delete(safeUri);
+      }
     } catch (error) {
       if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
       options.logSyncWarning('Failed to delete attachment file', error);

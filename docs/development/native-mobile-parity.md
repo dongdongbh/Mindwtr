@@ -2208,3 +2208,14 @@ Validation: 332 focused shared-core tests, typecheck, scoped lint and boot gates
 These tests use intercepted URLSession responses and isolated development libraries. They do not establish real-backend acceptance, ordinary App Sync integration, cleanup ownership or RN-sized streaming parity.
 
 A final test-only correction replaced an async semaphore wait with an XCTest expectation; the affected HTTP cancellation test passed again without the warning. The ordinary development app was rebuilt and restored without a reset. All 21 database tables and preferences remained identical to the pre-test snapshot, with no journal sidecars.
+
+
+### iOS cleanup snapshot freshness prerequisite (2026-10-06, Tasks305–306)
+
+Shared mobile cleanup now uses the existing optional guarded-deletion primitive when the host provides it. Its file barrier finishes before a final synchronous snapshot-freshness check and unlink on the Engine turn. A local edit during the wait aborts cleanup without returning processed metadata. Hosts without that primitive retain their existing deletion path. The existing reference comparison also recognizes the fixed iOS `/var` and `/private/var` aliases within the same application-container UUID; it only retains files and never rewrites an I/O path or rebases another container. Task and Project references under soft-deleted parents still keep their bytes.
+
+Validation: both affected core suites passed all 52 tests, with typecheck and scoped lint passing. The maintained private native harness passed all three tests on macOS JavaScriptCore and the signed iPhone 12 running iOS 17.5.1, with zero skips. A real shared `saveDraft` made a new live reference to the same bytes durable while the native barrier waited; cleanup then raised `LocalSyncAbort`, performed no deletion, and retained the saved reference and bytes after reopening the host. An unchanged tombstone exercised actual unlink and returned the expected cleanup document without persisting it. A live Project reference under a soft-deleted parent retained the file; the phone test verified that both distinct Apple URI spellings resolved to the same physical file. Successful and retained cases compared every durable database table, and the fixed `v1.3.5/native-cleanup-freshness` marker passed persisted-log privacy checks. Independent bounded source review: SHIP.
+
+This remains a private factory prerequisite. Durable cleanup-candidate ownership, changed physical-generation retention, cold cleanup retry and ordinary foreground Sync integration remain open. The first phone installation was rejected because the private build invocation applied an app bundle ID to package frameworks; removing that global override corrected installation without changing application source or test assertions.
+
+The ordinary development app was rebuilt and restored without a reset. All 21 database tables and preferences matched the pre-test snapshot, with no journal sidecars.
