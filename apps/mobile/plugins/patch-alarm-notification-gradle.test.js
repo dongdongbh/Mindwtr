@@ -49,6 +49,8 @@ const applyAlarmIosColdStartHeaderPatchToSource = transformFor('alarm-ios-cold-s
 const applyAlarmIosUniqueIdentifierPatchToSource = transformFor('alarm-ios-unique-identifier');
 const applyAlarmIosDeletePendingPatchToSource = transformFor('alarm-ios-delete-pending-arg');
 const applyAlarmIosPendingKindPatchToSource = transformFor('alarm-ios-pending-kind');
+const applyAlarmIosReminderThreadPatchToSource = transformFor('alarm-ios-reminder-thread');
+const applyAlarmIosCompleteCancelsTaskPatchToSource = transformFor('alarm-ios-complete-cancels-task');
 const applyAlarmReminderSlotPatchToSource = transformFor('alarm-reminder-slot');
 const applyAlarmReminderActionsUtilPatchToSource = transformFor('alarm-reminder-actions-util');
 const applyAlarmReminderActionsReceiverPatchToSource = transformFor('alarm-reminder-actions-receiver');
@@ -1253,6 +1255,39 @@ ${helper}
     expect(() => applyAlarmReminderActionsReceiverPatchToSource(receiver)).toThrow(/alarm-reminder-actions-receiver: expected anchor not found/);
   });
 
+  it('threads a task\'s iOS reminders together and collapses each thread to its newest delivery', () => {
+    if (!fs.existsSync(installedAlarmPackage)) return;
+    const { tmpRoot, read } = patchInstalledPackage();
+    try {
+      const module = read('ios', 'RnAlarmNotification.m');
+      // scheduleAlarm and sendNotification take the tag; the repeat re-arm and snooze keep it.
+      expect(module.match(/content\.threadIdentifier = details\[@"tag"\];/g)).toHaveLength(2);
+      expect(module.match(/content\.threadIdentifier = contentInfo\.threadIdentifier;/g)).toHaveLength(2);
+      expect(module).toContain('RCT_EXPORT_METHOD(collapseDeliveredReminderNotifications){');
+      expect(module).toContain('if (![thread hasPrefix:@"mindwtr-reminder:"]) continue;');
+      expect(applyAlarmIosReminderThreadPatchToSource(module)).toBe(module);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('keeps the iOS Done call although the complete-action patch rewrites its handler on every pass', () => {
+    if (!fs.existsSync(installedAlarmPackage)) return;
+    const { tmpRoot, read } = patchInstalledPackage();
+    try {
+      // patchInstalledPackage ran one pass; a second prebuild runs the registry again on the patched files.
+      applyPatches(path.join(tmpRoot, 'apps', 'mobile'), PATCHES);
+      const module = read('ios', 'RnAlarmNotification.m');
+      const completeBranch = module.slice(module.indexOf('isEqualToString:@"COMPLETE_ACTION"'), module.indexOf('isEqualToString:@"SNOOZE_ACTION"'));
+      expect(completeBranch.match(/mindwtrRemoveTaskReminders\(response\.notification\);/g)).toHaveLength(1);
+      expect(module.match(/static void mindwtrRemoveTaskReminders\(/g)).toHaveLength(1);
+      expect(module).toContain('[(NSString *)kind hasPrefix:@"task-"]');
+      expect(applyAlarmIosCompleteCancelsTaskPatchToSource(module)).toBe(module);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it('keeps the Gradle compatibility rewrite in place', () => {
     const input = `apply plugin: 'maven'
 buildscript {
@@ -1322,6 +1357,8 @@ describe('PATCHES registry completeness', () => {
     // original sites: dropping it silently restores the duplicate-reminder leak.
     ['RnAlarmNotification.m', 'applyAlarmIosDeletePendingPatchToSource'],
     ['RnAlarmNotification.m', 'applyAlarmIosPendingKindPatchToSource'],
+    ['RnAlarmNotification.m', 'applyAlarmIosReminderThreadPatchToSource'],
+    ['RnAlarmNotification.m', 'applyAlarmIosCompleteCancelsTaskPatchToSource'],
     // Added for #1028: dropping either silently restores the dead-row silent
     // no-op on a notification action tap.
     ['AlarmUtil.java', 'applyAlarmDeadRowUtilPatchToSource'],
@@ -1353,7 +1390,7 @@ describe('PATCHES registry completeness', () => {
   });
 
   it('every entry declares required/firstMatchOnly explicitly', () => {
-    expect(PATCHES).toHaveLength(29);
+    expect(PATCHES).toHaveLength(31);
     for (const patch of PATCHES) {
       expect(typeof patch.id).toBe('string');
       expect(typeof patch.required).toBe('boolean');

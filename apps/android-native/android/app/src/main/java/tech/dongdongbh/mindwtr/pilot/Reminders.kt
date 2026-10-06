@@ -327,7 +327,7 @@ internal class ReminderAlarms(
 
     override fun ledger(): String = synchronized(LOCK) {
         val shown = notifications.activeNotifications.filter { NotificationCompat.getChannelId(it.notification) == CoreNotifications.REMINDER_CHANNEL }
-            .map { it.id }
+            .map(CoreNotifications::reminderAlarmId)
         JSONObject().put("fired", JSONArray(ReminderLedger.of(context).fired())).put("shown", JSONArray(shown)).toString()
     }
 
@@ -351,7 +351,7 @@ internal class ReminderAlarms(
         checkpointed = true
     }
 
-    override fun removeDelivered(id: Int) = notifications.cancel(id)
+    override fun removeDelivered(id: Int) = CoreNotifications.cancelReminder(context, id)
 
     override fun record(cancelled: List<Int>, armed: List<Pair<Int, Long>>) = ReminderLedger.of(context).record(cancelled, armed)
 
@@ -463,7 +463,7 @@ class ReminderActionReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.getIntExtra(EXTRA_ID, 0)
-        val dismiss = { context.getSystemService(NotificationManager::class.java).cancel(id) }
+        val dismiss = { CoreNotifications.cancelReminder(context, id) }
         runCatching {
             when (intent.action) {
                 DISMISS -> dismiss()

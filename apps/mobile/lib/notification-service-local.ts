@@ -83,6 +83,8 @@ type AlarmNotificationsApi = {
   deleteRepeatingAlarm: (id: AlarmId) => void;
   removeFiredNotification: (id: AlarmId) => void;
   removeAllFiredNotifications: () => void;
+  /** iOS (patched): keeps only the newest delivered notification of each reminder thread. */
+  collapseDeliveredReminderNotifications?: () => void;
   getScheduledAlarms?: () => Promise<unknown>;
   requestPermissions?: (permissions: { alert: boolean; badge: boolean; sound: boolean }) => Promise<unknown>;
 };
@@ -643,6 +645,19 @@ async function withdrawDeliveredReminders(
   }
 }
 
+// Android posts every reminder of a task into one notification, which the next reminder
+// replaces. iOS cannot replace a delivered notification from a pending one, so its reminders
+// share the task's thread and each cycle (every app start or foreground among them) removes
+// all but the newest delivered notification of each task.
+function collapseDeliveredReminderThreads(api: AlarmNotificationsApi): void {
+  if (Platform.OS !== 'ios' || typeof api.collapseDeliveredReminderNotifications !== 'function') return;
+  try {
+    api.collapseDeliveredReminderNotifications();
+  } catch (error) {
+    logNotificationWarn('Failed to collapse delivered reminders', { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 function scheduleOneShotTopUp(api: AlarmNotificationsApi, delayMs: number | null): void {
   clearOneShotTopUpTimer();
   if (delayMs === null) return;
@@ -738,6 +753,7 @@ async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteS
     tasks: new Map(tasks.map((task) => [task.id, task])),
     projects: new Map(projects.map((project) => [project.id, project])),
   }, now.getTime());
+  collapseDeliveredReminderThreads(api);
   if (!taskRemindersEnabled) {
     const morningDigestEnabled = recurringRequests.some((request) => request.key === 'digest:morning');
     const eveningDigestEnabled = recurringRequests.some((request) => request.key === 'digest:evening');

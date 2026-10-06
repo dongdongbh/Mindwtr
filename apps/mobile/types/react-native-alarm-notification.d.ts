@@ -10,6 +10,7 @@ declare module 'react-native-alarm-notification' {
     stopAlarmSound: () => void;
     removeFiredNotification: (id: number) => void;
     removeAllFiredNotifications: () => void;
+    collapseDeliveredReminderNotifications?: () => void;
     getScheduledAlarms: () => Promise<Array<Record<string, unknown>>>;
     consumePendingNotificationOpenPayload?: () => Promise<Record<string, unknown> | null>;
     requestPermissions?: (permissions: { alert: boolean; badge: boolean; sound: boolean }) => Promise<unknown>;

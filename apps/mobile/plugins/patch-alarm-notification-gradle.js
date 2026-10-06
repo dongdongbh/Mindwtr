@@ -1513,6 +1513,115 @@ const applyAlarmIosPendingKindPatchToSource = (original) => {
   );
 };
 
+// iOS cannot replace a delivered notification from a pending one: two pending
+// requests may not share an identifier (#888), and no app code runs when a
+// local notification is delivered in the background. So a task's reminders get
+// the task's `tag` as their thread (Notification Center stacks them as one),
+// snooze and the repeat re-arm keep it, and JS collapses each reminder thread
+// to its newest delivered notification on every reminder cycle.
+const applyAlarmIosReminderThreadPatchToSource = (original) => {
+  if (original.includes('// Mindwtr reminder threads')) return original;
+  const removeAllMarker = 'RCT_EXPORT_METHOD(removeAllFiredNotifications){';
+  const detailsBody = 'content.body = [NSString localizedUserNotificationStringForKey:details[@"message"] arguments:nil];';
+  const copiedBody = 'content.body = contentInfo.body;';
+  if (!original.includes(removeAllMarker) || !original.includes(detailsBody) || !original.includes(copiedBody)) return original;
+  return original
+    .split(detailsBody).join(`${detailsBody}
+            if ([details[@"tag"] isKindOfClass:[NSString class]] && [(NSString *)details[@"tag"] length] > 0) {
+                content.threadIdentifier = details[@"tag"];
+            }`)
+    .split(copiedBody).join(`${copiedBody}
+            content.threadIdentifier = contentInfo.threadIdentifier;`)
+    .replace(removeAllMarker, `// Mindwtr reminder threads: keeps only the newest delivered notification of
+// each reminder thread, so a task's earlier reminders leave the tray.
+RCT_EXPORT_METHOD(collapseDeliveredReminderNotifications){
+    if (@available(iOS 10.0, *)) {
+        UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+        [center getDeliveredNotificationsWithCompletionHandler:^(NSArray<UNNotification *> * _Nonnull notifications) {
+            NSMutableDictionary<NSString *, UNNotification *> *newest = [NSMutableDictionary dictionary];
+            NSMutableArray<NSString *> *superseded = [NSMutableArray array];
+            for (UNNotification *notification in notifications) {
+                NSString *thread = notification.request.content.threadIdentifier;
+                if (![thread hasPrefix:@"mindwtr-reminder:"]) continue;
+                UNNotification *kept = newest[thread];
+                if (kept == nil) {
+                    newest[thread] = notification;
+                } else if ([notification.date compare:kept.date] == NSOrderedDescending) {
+                    [superseded addObject:kept.request.identifier];
+                    newest[thread] = notification;
+                } else {
+                    [superseded addObject:notification.request.identifier];
+                }
+            }
+            if (superseded.count > 0) {
+                [center removeDeliveredNotificationsWithIdentifiers:superseded];
+            }
+        }];
+    }
+}
+
+${removeAllMarker}`);
+};
+
+// Done on an iOS reminder removed only that one request: the task's remaining
+// due-time repeats stayed pending until JS next ran a reminder cycle. Remove
+// every pending and delivered reminder of the task: the same thread (one per
+// task), or, for a request made before threads, a task reminder with the same
+// taskId (never the Pomodoro alert). alarm-ios-complete-action rewrites the
+// whole response handler on every pass, so the call is checked (and added
+// again) on its own, after the helper.
+const IOS_COMPLETE_CANCELS_TASK_CALL = '           mindwtrRemoveTaskReminders(response.notification);\n';
+const applyAlarmIosCompleteCancelsTaskPatchToSource = (original) => {
+  const helperMarker = 'static NSString *stringify(NSDictionary *notification) {';
+  const completeMarker = '           [[UNUserNotificationCenter currentNotificationCenter] removePendingNotificationRequestsWithIdentifiers:@[response.notification.request.identifier]];\n';
+  if (!original.includes(helperMarker) || !original.includes(completeMarker)) return original;
+  let next = original;
+  if (!next.includes(IOS_COMPLETE_CANCELS_TASK_CALL)) {
+    next = next.replace(completeMarker, `${completeMarker}${IOS_COMPLETE_CANCELS_TASK_CALL}`);
+  }
+  if (next.includes('// Mindwtr task reminder cancel')) return next;
+  return next
+    .replace(helperMarker, `// Mindwtr task reminder cancel: whether a request is a reminder of the task Done was tapped for.
+API_AVAILABLE(ios(10.0))
+static BOOL mindwtrIsReminderOfTask(UNNotificationContent *other, NSString *thread, NSString *taskId) {
+    if ([thread hasPrefix:@"mindwtr-reminder:task:"] && [other.threadIdentifier isEqualToString:thread]) return YES;
+    if (taskId.length == 0) return NO;
+    id data = other.userInfo[@"data"];
+    if (![data isKindOfClass:[NSDictionary class]]) return NO;
+    id kind = [(NSDictionary *)data objectForKey:@"kind"];
+    return [[(NSDictionary *)data objectForKey:@"taskId"] isEqual:taskId]
+        && [kind isKindOfClass:[NSString class]] && [(NSString *)kind hasPrefix:@"task-"];
+}
+
+// Done on a task's reminder: the task's other reminders (its remaining due-time repeats,
+// a snooze) are removed, pending and delivered.
+API_AVAILABLE(ios(10.0))
+static void mindwtrRemoveTaskReminders(UNNotification *notification) {
+    UNNotificationContent *content = notification.request.content;
+    NSString *thread = content.threadIdentifier;
+    id data = content.userInfo[@"data"];
+    id taskIdValue = [data isKindOfClass:[NSDictionary class]] ? [(NSDictionary *)data objectForKey:@"taskId"] : nil;
+    NSString *taskId = [taskIdValue isKindOfClass:[NSString class]] ? (NSString *)taskIdValue : nil;
+    UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+    [center getPendingNotificationRequestsWithCompletionHandler:^(NSArray<UNNotificationRequest *> * _Nonnull requests) {
+        NSMutableArray<NSString *> *identifiers = [NSMutableArray array];
+        for (UNNotificationRequest *request in requests) {
+            if (mindwtrIsReminderOfTask(request.content, thread, taskId)) [identifiers addObject:request.identifier];
+        }
+        if (identifiers.count > 0) [center removePendingNotificationRequestsWithIdentifiers:identifiers];
+    }];
+    [center getDeliveredNotificationsWithCompletionHandler:^(NSArray<UNNotification *> * _Nonnull delivered) {
+        NSMutableArray<NSString *> *identifiers = [NSMutableArray array];
+        for (UNNotification *shown in delivered) {
+            if (mindwtrIsReminderOfTask(shown.request.content, thread, taskId)) [identifiers addObject:shown.request.identifier];
+        }
+        if (identifiers.count > 0) [center removeDeliveredNotificationsWithIdentifiers:identifiers];
+    }];
+}
+
+${helperMarker}`);
+};
+
 const logPatchedCandidate = (label, candidate) => {
   console.log(`[${label}] patched ${candidate}`);
 };
@@ -1899,6 +2008,27 @@ const PATCHES = [
     required: true,
     firstMatchOnly: true,
     appliedMarker: '// Mindwtr pending notification kind',
+  },
+
+  {
+    id: 'alarm-ios-reminder-thread',
+    platform: 'ios',
+    getCandidates: iosSourceCandidates,
+    transform: applyAlarmIosReminderThreadPatchToSource,
+    required: true,
+    firstMatchOnly: true,
+    appliedMarker: '// Mindwtr reminder threads',
+  },
+
+  {
+    id: 'alarm-ios-complete-cancels-task',
+    platform: 'ios',
+    getCandidates: iosSourceCandidates,
+    transform: applyAlarmIosCompleteCancelsTaskPatchToSource,
+    required: true,
+    // Must run after alarm-ios-complete-action: it extends the COMPLETE_ACTION branch.
+    firstMatchOnly: true,
+    appliedMarker: 'mindwtrRemoveTaskReminders(response.notification);',
   },
 
 ];

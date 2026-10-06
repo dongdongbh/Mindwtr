@@ -201,11 +201,14 @@ const alarms = () => sh('dumpsys alarm').split(/\n(?=\s*(?:RTC_WAKEUP|RTC|ELAPSE
     .filter((block) => block.includes(`*walarm*:${FIRE}`) && block.includes(PKG))
     .map((block) => ({ at: Number(/origWhen[= ](\d+)/.exec(block)?.[1] ?? NaN), exact: /\bwindow[= ]0\b/.test(block), block }));
 const alarmsAt = (ms) => alarms().filter((alarm) => alarm.at === ms);
-/** This app's notifications (`dumpsys notification --noredact`): id, channel, title, text and button labels. */
+/**
+ * This app's notifications (`dumpsys notification --noredact`): id, channel, title, text and button labels. A reminder's id is the
+ * alarm it was posted for (CoreNotifications' extra): every reminder of a task shares one slot (tag, id 1), the latest replacing the last.
+ */
 const notifications = () => sh('dumpsys notification --noredact').split(/\n(?=\s*NotificationRecord\()/)
     .filter((block) => block.includes(`pkg=${PKG}`))
     .map((block) => ({
-        id: Number(/\bid=(-?\d+)/.exec(block)?.[1]),
+        id: Number(/tech\.dongdongbh\.mindwtr\.reminderAlarmId=\w+ \((-?\d+)\)/.exec(block)?.[1] ?? /\bid=(-?\d+)/.exec(block)?.[1]),
         channel: /(?:mChannelId|channelId|channel)=([\w.-]+)/.exec(block)?.[1] ?? '',
         title: /android\.title=\w+ \((.*)\)/.exec(block)?.[1] ?? '',
         text: /android\.text=\w+ \((.*)\)/.exec(block)?.[1] ?? '',
