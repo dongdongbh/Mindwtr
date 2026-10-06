@@ -1,7 +1,7 @@
 // Reminder alarms check for the isolated native Android development app (pass B3, R1 native).
 //
 //   node apps/android-native/scripts/check-reminders-device.mjs <adb-serial> [apk]
-//   Add --replacement-only for a real base alarm, immediate native due-repeat replacement plus old-owner cancellation, and latest Snooze/Done,
+//   Add --replacement-only for injected native deliveries using core-planned details, immediate replacement plus old-owner cancellation, and latest Snooze/Done,
 //   using existing notification permission and alarm access; phone settings stay unchanged.
 //
 // Installs the debug APK with `install -r` (existing development data stays) and checks, from `dumpsys alarm`, `dumpsys
@@ -247,10 +247,13 @@ const tapInShade = async (text, label) => {
             ?? current.find((node) => (node.text ?? '').toUpperCase() === label && center(node)[1] > y && center(node)[1] < y + 500);
     };
     let button = near(nodes);
-    if (!button) {
+    for (let attempt = 0; !button && attempt < 3; attempt += 1) {
         // Folded: Android's expand button on that notification's row, else a downward drag on its title.
-        const [x, y] = center(titleNode);
-        const expand = nodes.find((node) => /expand_button|expand_button_touch/.test(node['resource-id'] ?? '') && Math.abs(center(node)[1] - y) < 120);
+        // An app group can unfold first, leaving the task's own notification folded.
+        const [x, y] = center(nodes.find((node) => node.text === text) ?? fail(`the notification "${text}" is no longer in the shade`));
+        const expand = nodes.filter((node) => /\/expand_button$/.test(node['resource-id'] ?? '') && node.clickable === 'true'
+            && node['content-desc'] === 'Expand' && Math.abs(center(node)[1] - y) < 140)
+            .sort((left, right) => Math.abs(center(left)[1] - y) - Math.abs(center(right)[1] - y))[0];
         if (expand) sh(`input tap ${Math.round(center(expand)[0])} ${Math.round(center(expand)[1])}`);
         else sh(`input swipe ${Math.round(x)} ${Math.round(y)} ${Math.round(x)} ${Math.round(y + 400)} 300`);
         await sleep(1200);
@@ -323,16 +326,16 @@ const restore = async () => {
     try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
 };
 
-/** A real base alarm, core's due-repeat details posted then old-owner cancellation in one native callback, and latest buttons. */
+/** Injected native deliveries from the actual core plan; alarm timing belongs to the full check. Phone settings stay unchanged. */
 const replacementCheck = async () => {
     check(/android\.permission\.POST_NOTIFICATIONS: granted=true/.test(sh(`dumpsys package ${PKG}`)), 'native Dev already has notification permission');
     console.log(`info - existing native Dev exact-alarm access: ${exactMode} (left unchanged)`);
     // Package replacement can start a reschedule worker immediately; stop Dev before seeding its isolated test data.
     sh(`am force-stop ${PKG}`);
     await waitUntil('native Dev stopped before seeding', () => !pid());
-    const at = phoneNow() + 60_000;
+    const at = Math.ceil((phoneNow() + 90_000) / 60_000) * 60_000;
     const names = [title(1), title(2)];
-    for (const name of names) capture(name, { dueDate: new Date(at).toISOString() });
+    for (const name of names) capture(`${name} /due:${clock(at)}`);
     await launchAndPlan();
     const ids = names.map((name) => stored(name)[0].id);
     ids.forEach((id) => openTasks.add(id));
@@ -345,17 +348,25 @@ const replacementCheck = async () => {
     const oldId = map[key]?.id;
     const latestId = map[`${key}:r1`]?.id;
     check(Number.isInteger(oldId) && Number.isInteger(latestId) && oldId !== latestId, 'base and due-repeat have distinct alarm ids');
+    const expected = coreDetails([key, `${key}:r1`, `task:${ids[1]}`], at - 1000);
+    const plannedAlarm = (alarmKey, id, fireAtMs) => ({ key: alarmKey, id, fireAtMs, repeat: 'once',
+        details: expected[alarmKey], channelName: 'Mindwtr reminders', replacing: null });
+    const postNative = (alarm, cancelId = 0) => {
+        const text = JSON.stringify(alarm).replaceAll("'", "'\\''");
+        sh(`am broadcast -f 0x20 -n ${RESCHEDULE} -a ${DEBUG_RESCHEDULE} --ei cancelReminderId ${cancelId} --es replacementAlarm '${text}'`);
+    };
+    console.log('info - injecting core-planned details through the native notification API; natural inexact alarm timing is not tested');
+    postNative(plannedAlarm(key, oldId, at));
+    postNative(plannedAlarm(`task:${ids[1]}`, map[`task:${ids[1]}`].id, at));
     sh('input keyevent KEYCODE_HOME');
-    const [first] = await waitUntil('the base reminder', () => shown(names[0]).length ? shown(names[0]) : null, 240_000);
+    const [first] = await waitUntil('the injected base reminder', () => shown(names[0]).length ? shown(names[0]) : null);
     await waitUntil('the other task reminder', () => shown(names[1]).length === 1, 30_000);
     check(first.id === oldId && first.slotId === 1 && first.tag !== 'null', 'base notification uses its task tag and slot id 1');
     check(shown(names[1])[0].tag !== first.tag, 'different tasks have different notification slots');
-    const replacementAlarm = JSON.stringify({ key: `${key}:r1`, id: latestId, fireAtMs: at + 300_000, repeat: 'once',
-        details: coreDetails([`${key}:r1`], at - 1000)[`${key}:r1`], channelName: 'Mindwtr reminders', replacing: null });
     const marker = 'releaseCheck=v1.3.5/native-reminder-replacement operation=cancelled taggedRemoved=0';
     const cancellations = count(allLogs(), marker);
     // No visibility wait between B's notify and A's cancel: Android still may report A while B is queued.
-    sh(`am broadcast -f 0x20 -n ${RESCHEDULE} -a ${DEBUG_RESCHEDULE} --ei cancelReminderId ${oldId} --es replacementAlarm '${replacementAlarm.replaceAll("'", "'\\''")}'`);
+    postNative(plannedAlarm(`${key}:r1`, latestId, at + 300_000), oldId);
     await waitUntil('the immediate old alarm cancellation diagnostic', () => count(allLogs(), marker) > cancellations);
     const latest = await waitUntil('the due-repeat replacement after old-owner cancellation', () => shown(names[0]).find((item) => item.id === latestId));
     check(shown(names[0]).length === 1 && latest.tag === first.tag && latest.slotId === 1, 'due-repeat replaced the base notification in the same task slot');
@@ -372,7 +383,11 @@ const replacementCheck = async () => {
     await waitUntil('the latest Snooze action', () => snoozes() > beforeSnooze);
     closeShade();
     check(shown(names[0]).length === 0 && shown(names[1]).length === 1, 'Snooze removes only its current task slot');
-    const snoozed = await waitUntil('the snoozed reminder', () => shown(names[0]).find((item) => item.id >= 2 ** 30), 180_000);
+    const [snoozeKey, snooze] = Object.entries(nativeState()).find(([, item]) => item.kind === 'snooze' && item.details?.data?.taskId === ids[0])
+        ?? fail('Snooze did not persist its task alarm');
+    check(snooze.armed && snooze.id >= 2 ** 30 && alarmsAt(snooze.fireAtMs).length === 1, 'Snooze persisted and armed one alarm under its new id');
+    postNative({ key: snoozeKey, id: snooze.id, fireAtMs: snooze.fireAtMs, repeat: 'once', details: snooze.details, channelName: 'Mindwtr reminders' });
+    const snoozed = await waitUntil('the injected snoozed reminder', () => shown(names[0]).find((item) => item.id === snooze.id));
     check(snoozed.tag === first.tag && shown(names[0]).length === 1, 'Snooze returns in the same task slot under its new alarm id');
     const beforeDone = stored(names[0])[0];
     await tapInShade(names[0], 'COMPLETE');
