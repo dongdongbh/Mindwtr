@@ -1222,6 +1222,17 @@ const attachmentDraftDependencies = {
 };
 
 globalThis.MindwtrHost = {
+    /** Private fixed canonical plaintext retirement receipt; no secret inputs. */
+    nativeLegacySecretRetirementDelivered(): void {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter
+            || isSandboxMode() || isWorkspaceTransitionActive()) return;
+        try {
+            logInfo('Native iOS legacy secret retirement delivered', {
+                scope: 'native-ios', force: true,
+                context: { releaseCheck: 'v1.3.5/ios-legacy-secret-retirement', operation: 'legacy-secret-retirement', outcome: 'delivered' },
+            });
+        } catch { /* A fixed diagnostic never changes the storage result. */ }
+    },
     /** Private fixed storage receipt; never carries a setting name or value. */
     nativeDeviceStorageDelivered(): void {
         if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter

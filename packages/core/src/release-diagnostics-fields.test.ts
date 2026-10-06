@@ -13,7 +13,7 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
-    // ios-local-attachment-host, ios-attachment-draft-owned, ios-http-transport, ios-secure-storage, ios-sync-crypto and ios-device-storage reuse releaseCheck, operation, and outcome below.
+    // ios-local-attachment-host, ios-attachment-draft-owned, ios-http-transport, ios-secure-storage, ios-sync-crypto, ios-device-storage and ios-legacy-secret-retirement reuse releaseCheck, operation, and outcome below.
     // automation concurrent-write replay; capture routing reuses outcome below.
     'retryCount',
     // deferred-attachment-pass: which pass owes the deferred pre-sync phase's work.
@@ -156,6 +156,11 @@ const RELEASE_CHECK_FIELD_NAMES = [
 ];
 
 describe('release diagnostics field names', () => {
+    it('preserves the fixed iOS legacy secret retirement receipt', () => {
+        const receipt = { releaseCheck: 'v1.3.5/ios-legacy-secret-retirement', operation: 'legacy-secret-retirement', outcome: 'delivered' };
+        expect(sanitizeLogContext(receipt)).toEqual(receipt);
+    });
+
     it('preserves the fixed iOS device storage delivery receipt', () => {
         const receipt = { releaseCheck: 'v1.3.5/ios-device-storage', operation: 'device-storage', outcome: 'delivered' };
         expect(sanitizeLogContext(receipt)).toEqual(receipt);

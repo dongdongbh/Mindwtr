@@ -4099,6 +4099,10 @@ for (const [bridge, receipt, operation] of [
 // Explicit iOS KV presence remains a transport capability, not Sync activation.
 // Its fixed successful-delivery sink is forced, but never records settings data.
 {
+    const receipts = [
+        ['nativeDeviceStorageDelivered', 'ios-device-storage', 'device-storage'],
+        ['nativeLegacySecretRetirementDelivered', 'ios-legacy-secret-retirement', 'legacy-secret-retirement'],
+    ];
     const names = ['kvGet', 'kvSet', 'kvRemove', 'kvMultiGet', 'kvMultiSet', 'kvMultiRemove'];
     const configureKV = (state) => {
         state.kvBridgeCalls = 0;
@@ -4109,29 +4113,36 @@ for (const [bridge, receipt, operation] of [
     const local = makeState(0, [], 'ios', configureKV);
     assert.deepEqual(Object.keys(local.contractBindings), [], 'KV does not enable iOS Sync or AI');
     for (const name of names) assert.equal(typeof local.__mindwtrNative[name], 'function');
-    local.MindwtrHost.nativeDeviceStorageDelivered();
+    for (const [method] of receipts) local.MindwtrHost[method]();
     assert.equal(local.logText, null, 'No preboot device storage receipt');
     assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
     assert.equal(local.kvBridgeCalls, 0, 'Explicit storage bridge performs no startup request');
     local.settings = { diagnostics: { loggingEnabled: false } };
-    local.MindwtrHost.nativeDeviceStorageDelivered();
+    for (const [method] of receipts) local.MindwtrHost[method]();
     await poll(local, local.MindwtrHost.logShare());
-    const lines = local.logText.split('\n').filter((line) => line.includes('v1.3.5/ios-device-storage'));
-    assert.equal(lines.length, 1, 'Forced device storage marker survives disabled logging');
-    assert.deepEqual(JSON.parse(lines[0]).context, {
-        releaseCheck: 'v1.3.5/ios-device-storage', operation: 'device-storage', outcome: 'delivered',
-    });
+    for (const [, slug, operation] of receipts) {
+        const lines = local.logText.split('\n').filter((line) => line.includes(`v1.3.5/${slug}`));
+        assert.equal(lines.length, 1, 'Forced fixed storage marker survives disabled logging');
+        assert.deepEqual(JSON.parse(lines[0]).context, {
+            releaseCheck: `v1.3.5/${slug}`, operation, outcome: 'delivered',
+        });
+    }
     const before = local.logText;
     for (const field of ['sandbox', 'workspaceTransition']) {
-        local[field] = true; local.MindwtrHost.nativeDeviceStorageDelivered(); local[field] = false;
+        local[field] = true; for (const [method] of receipts) local.MindwtrHost[method](); local[field] = false;
     }
     await new Promise((tick) => setImmediate(tick));
     assert.equal(local.logText, before, 'Unsettled workspace emits no device storage receipt');
+    local.logFailure = 'synthetic diagnostic failure';
+    assert.doesNotThrow(() => local.MindwtrHost.nativeLegacySecretRetirementDelivered());
+    await new Promise((tick) => setImmediate(tick));
+    assert.equal(local.logText, before, 'Logging failure does not emit or throw a retirement receipt');
+    local.logFailure = null;
     for (const platform of ['android', undefined]) {
         const other = makeState(0, [], platform);
         assert.equal((await poll(other, other.MindwtrHost.boot())).ok, true);
         const prior = other.logText;
-        other.MindwtrHost.nativeDeviceStorageDelivered(); await new Promise((tick) => setImmediate(tick));
+        for (const [method] of receipts) other.MindwtrHost[method](); await new Promise((tick) => setImmediate(tick));
         assert.equal(other.logText, prior, 'Invalid platform emits no device storage receipt');
         assert.equal(typeof other.__mindwtrNative.kvMultiGet, 'undefined');
     }

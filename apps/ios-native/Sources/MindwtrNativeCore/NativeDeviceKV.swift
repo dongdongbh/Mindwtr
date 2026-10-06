@@ -22,6 +22,9 @@ final class NativeDeviceKV {
         "@mindwtr_fast_sync_state_v1", "@mindwtr_local_sync_status_v1",
         "@mindwtr_webdav_capability_proof_v1", "@mindwtr_webdav_legacy_proof_v1",
     ].map { Data($0.utf8) })
+    private static let removableSecrets: Set<Data> = Set([
+        "@mindwtr_webdav_password", "@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1",
+    ].map { Data($0.utf8) })
     private static var failure: HostFailure { HostFailure("Device settings storage is unavailable") }
     private static var invalid: HostFailure { HostFailure("Device settings input is invalid") }
 
@@ -58,14 +61,22 @@ final class NativeDeviceKV {
             lhs.bytes == rhs.bytes && lhs.value.map { Data($0.utf8) } == rhs.value.map { Data($0.utf8) }
         }
     }
+    private final class SecretRetirement {
+        let name: String
+        let file: FileBinding?
+        var removed = false
+        init(name: String, file: FileBinding?) { self.name = name; self.file = file }
+    }
     private final class Pending {
         let changes: [Change]
         let before: Snapshot
         let after: Data
         let afterValues: [Data: String]
+        let retirement: SecretRetirement?
         var fileFD: Int32 = -1
-        init(changes: [Change], before: Snapshot, after: Data, afterValues: [Data: String]) {
+        init(changes: [Change], before: Snapshot, after: Data, afterValues: [Data: String], retirement: SecretRetirement?) {
             self.changes = changes; self.before = before; self.after = after; self.afterValues = afterValues
+            self.retirement = retirement
         }
         func releaseFile() { if fileFD >= 0 { Darwin.close(fileFD); fileFD = -1 } }
         deinit { releaseFile() }
@@ -150,6 +161,9 @@ final class NativeDeviceKV {
         try mutate(changes)
     }
     func remove(_ key: String) throws { try multiRemove([key]) }
+    static func isLegacySecretRemoval(_ keys: [String]) -> Bool {
+        keys.count == 1 && removableSecrets.contains(Data(keys[0].utf8))
+    }
     func multiRemove(_ keys: [String]) throws {
         try Self.validateKeys(keys)
         let changes = keys.map { Change(key: $0, bytes: Data($0.utf8), value: nil) }
@@ -162,7 +176,7 @@ final class NativeDeviceKV {
         if let pending {
             guard pending.changes == changes else { throw Self.failure }
         } else {
-            let before = try checkedRead()
+            var before = try checkedRead()
             if changes.isEmpty { return }
             let object: NSMutableDictionary
             if let bytes = before.manifest?.bytes {
@@ -171,6 +185,44 @@ final class NativeDeviceKV {
                 }
                 object = parsed
             } else { object = NSMutableDictionary() }
+            var retirement: SecretRetirement?
+            var orphanInputBytes = 0
+            if Self.isLegacySecretRemoval(changes.map(\.key)) {
+                let selected = changes[0]
+                let name = Self.externalName(selected.key)
+                // A different live manifest reference never grants permission
+                // to retire its backing path, even if its MD5 filename collides.
+                for (key, value) in object where value is NSNull {
+                    guard let key = key as? String else { throw Self.failure }
+                    guard Data(key.utf8) == selected.bytes || Self.externalName(key) != name else { throw Self.failure }
+                }
+                var remaining = Self.snapshotLimit - (before.manifest?.bytes.count ?? 0)
+                for file in before.external.values { remaining -= file.bytes.count }
+                guard remaining >= 0 else { throw Self.failure }
+                var inputLimit = Self.snapshotLimit
+                #if DEBUG
+                if let limit = faults.snapshotByteLimit { inputLimit = min(inputLimit, max(0, limit)) }
+                #endif
+                // An unreferenced file is additional to the legacy reader's
+                // full input (including old manifests/repeated references).
+                remaining = min(remaining, max(0, inputLimit - before.consumedBytes))
+                let file = try before.external[name] ?? Self.readFile(try storeFD(), name: name,
+                    limit: Self.snapshotLimit, remaining: &remaining, optional: true)
+                if !(object.object(forKey: selected.key) is NSNull) { orphanInputBytes = file?.bytes.count ?? 0 }
+                let current = try readSnapshot()
+                guard Self.sameSnapshot(current, before) else { throw poison() }
+                try verifyFile(file, name: name)
+                retirement = SecretRetirement(name: name, file: file)
+                if before.values[selected.bytes] == nil, file == nil { return }
+                if let file, before.external[name] == nil {
+                    var external = before.external; external[name] = file
+                    before = Snapshot(manifest: before.manifest, values: before.values,
+                                      external: external, consumedBytes: before.consumedBytes)
+                    // Bind a captured orphan only after validating the original
+                    // namespace and snapshot; constructor/read never retire it.
+                    snapshot = before; retainedExternal = external
+                }
+            }
             var values = before.values
             for change in changes {
                 if let value = change.value {
@@ -187,19 +239,21 @@ final class NativeDeviceKV {
             // repeated external references. Inline/remove can only reduce that
             // contribution, so retaining it is a conservative future ceiling.
             let otherInput = before.consumedBytes - (before.manifest?.bytes.count ?? 0)
-            let futureInput = otherInput.addingReportingOverflow(after.count)
+            let withOrphan = otherInput.addingReportingOverflow(orphanInputBytes)
+            let futureInput = withOrphan.partialValue.addingReportingOverflow(after.count)
             var inputLimit = Self.snapshotLimit
             #if DEBUG
             if let limit = faults.snapshotByteLimit { inputLimit = min(inputLimit, max(0, limit)) }
             #endif
-            guard otherInput >= 0, !futureInput.overflow, futureInput.partialValue <= inputLimit else { throw Self.invalid }
+            guard otherInput >= 0, !withOrphan.overflow, !futureInput.overflow,
+                  futureInput.partialValue <= inputLimit else { throw Self.invalid }
             var retainedBytes = after.count
             for file in before.external.values {
                 let count = retainedBytes.addingReportingOverflow(file.bytes.count)
                 guard !count.overflow, count.partialValue <= Self.snapshotLimit else { throw Self.invalid }
                 retainedBytes = count.partialValue
             }
-            pending = Pending(changes: changes, before: before, after: after, afterValues: values)
+            pending = Pending(changes: changes, before: before, after: after, afterValues: values, retirement: retirement)
         }
         guard let operation = pending else { throw Self.failure }
         do {
@@ -230,8 +284,14 @@ final class NativeDeviceKV {
             try synchronize(operation)
             let acknowledged = try readSnapshot()
             guard try isOwnedAfter(acknowledged, operation: operation) else { throw poison() }
-            snapshot = acknowledged
-            retainedExternal = acknowledged.external
+            var final = acknowledged
+            if let retirement = operation.retirement {
+                try retireSecret(retirement, operation: operation)
+                final = try readSnapshot()
+                guard try isOwnedAfter(final, operation: operation) else { throw poison() }
+            }
+            snapshot = final
+            retainedExternal = final.external
             pending = nil
         } catch {
             // A fault or write error retains this operation. Namespace/file
@@ -244,6 +304,31 @@ final class NativeDeviceKV {
         }
     }
 
+    private func retireSecret(_ retirement: SecretRetirement, operation: Pending) throws {
+        #if DEBUG
+        try faults.beforeSecretUnlink?()
+        #endif
+        let current = try readSnapshot()
+        guard try isOwnedAfter(current, operation: operation) else { throw poison() }
+        try verifyNamespace()
+        if let file = retirement.file, !retirement.removed {
+            try verifyFile(file, name: retirement.name)
+            guard unlinkat(try storeFD(), retirement.name, 0) == 0 else { throw Self.failure }
+            // This state must survive a lost acknowledgment after our unlink.
+            // The held FD stays alive, but its unlinked generation is no longer
+            // required to equal the previously named single-link file.
+            retirement.removed = true
+            retainedExternal.removeValue(forKey: retirement.name)
+            #if DEBUG
+            try faults.afterSecretUnlink?()
+            #endif
+        }
+        try verifyFile(nil, name: retirement.name)
+        guard fsync(try storeFD()) == 0 else { throw Self.failure }
+        try verifyNamespace()
+        try verifyFile(nil, name: retirement.name)
+    }
+
     private func synchronize(_ operation: Pending) throws {
         try verifyNamespace()
         guard operation.fileFD >= 0, fsync(operation.fileFD) == 0,
@@ -251,9 +336,11 @@ final class NativeDeviceKV {
         try verifyNamespace()
     }
     private func isOwnedAfter(_ current: Snapshot, operation: Pending) throws -> Bool {
+        var external = operation.before.external
+        if let retirement = operation.retirement, retirement.removed { external.removeValue(forKey: retirement.name) }
         guard let manifest = current.manifest, manifest.bytes == operation.after,
               Self.sameValues(current.values, operation.afterValues),
-              Self.sameExternal(current.external, operation.before.external) else { return false }
+              Self.sameExternal(current.external, external) else { return false }
         guard operation.fileFD >= 0 else { return false }
         let owned = try Self.fileStat(operation.fileFD)
         guard Identity(owned) == Identity(manifest.generation) else { throw poison() }
@@ -287,7 +374,7 @@ final class NativeDeviceKV {
                 guard let entries = try NativeJSON.jsonObject(with: bytes) as? NSDictionary else { throw Self.failure }
                 for (key, value) in entries where value is NSNull {
                     guard let key = key as? String else { throw Self.failure }
-                    let name = Insecure.MD5.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+                    let name = Self.externalName(key)
                     if external[name] == nil {
                         guard let file = try Self.readFile(try storeFD(), name: name, limit: Self.snapshotLimit,
                                                           remaining: &remaining, optional: false) else { throw Self.failure }
@@ -312,6 +399,9 @@ final class NativeDeviceKV {
                 }
                 guard let current = external[name], current.bytes == original.bytes,
                       Self.sameGeneration(current.generation, original.generation) else { throw Self.failure }
+            }
+            if let retirement = pending?.retirement, retirement.removed || retirement.file == nil {
+                try verifyFile(nil, name: retirement.name)
             }
             try verifyNamespace()
             try verifyFile(manifest, name: Self.manifestName)
@@ -441,15 +531,19 @@ final class NativeDeviceKV {
     }
     private static func validateChanges(_ changes: [Change]) throws {
         try validateKeys(changes.map(\.key))
+        let secretRemoval = changes.count == 1 && changes[0].value == nil && isLegacySecretRemoval(changes.map(\.key))
         var count = 0
         for change in changes {
-            guard writable.contains(change.bytes), (change.value?.utf8.count ?? 0) <= valueLimit else { throw invalid }
+            guard (writable.contains(change.bytes) || secretRemoval), (change.value?.utf8.count ?? 0) <= valueLimit else { throw invalid }
             for size in [change.bytes.count, change.value?.utf8.count ?? 0] {
                 let next = count.addingReportingOverflow(size)
                 guard !next.overflow, next.partialValue <= mutationLimit else { throw invalid }
                 count = next.partialValue
             }
         }
+    }
+    private static func externalName(_ key: String) -> String {
+        Insecure.MD5.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -459,6 +553,8 @@ final class NativeDeviceKVFaults {
     var beforePromotion: (() throws -> Void)?
     var afterPromotion: (() throws -> Void)?
     var beforeReadback: (() throws -> Void)?
+    var beforeSecretUnlink: (() throws -> Void)?
+    var afterSecretUnlink: (() throws -> Void)?
     // A smaller IO read ceiling for bounded tests; release limits are unchanged.
     var snapshotByteLimit: Int?
 }

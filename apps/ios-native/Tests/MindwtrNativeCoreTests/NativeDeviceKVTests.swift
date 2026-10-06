@@ -204,24 +204,22 @@ final class NativeDeviceKVTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: old.appendingPathComponent("manifest.json")), oldBytes)
     }
 
-    func testExactAllowlistAndDeniedRecordsNeverChange() throws {
-        let denied = ["@mindwtr_webdav_password", "@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1",
-            "mindwtr-ai-provider-consent-v1", "mindwtr-ai-key_openai", "mindwtr-data", "gtd-data",
+    func testExactWriteAllowlistAndSecretRemoveOnlyAdmission() throws {
+        let removeOnly = ["@mindwtr_webdav_password", "@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1"]
+        let denied = ["mindwtr-ai-provider-consent-v1", "mindwtr-ai-key_openai", "mindwtr-data", "gtd-data",
             "mindwtr-data:json-ahead-of-sqlite", "mindwtr-data:sqlite-json-reconcile-v1",
             "@mindwtr_attachment_presence_reconcile_v1", "@mindwtr/file-sync-publication-reservations-v1",
             "mindwtr-external-calendars", "@mindwtr_background_sync_failure_state_v1",
             "@mindwtr_background_sync_last_registered_interval", "@mindwtr_dropbox_last_rev",
             "@mindwtr_cloudkit_change_token", "@mindwtr_cloudkit_seeded", "@mindwtr_cloudkit_zone_created",
             "@mindwtr_sync_backend_extra", "@MINDWTR_SYNC_BACKEND", "unknown"]
-        let seedValues = Dictionary(uniqueKeysWithValues: denied.map { ($0, "\u{FEFF}preserve 🧠") })
+        let seedValues = Dictionary(uniqueKeysWithValues: (removeOnly + denied).map { ($0, "\u{FEFF}preserve 🧠") })
         try FileManager.default.createDirectory(at: namespace, withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: seedValues, options: [.sortedKeys]).write(to: manifest)
         let store = try open()
         let before = try bytes()
-        for key in denied {
-            XCTAssertThrowsError(try store.set(key, "refused"), key)
-            XCTAssertThrowsError(try store.remove(key), key)
-        }
+        for key in removeOnly + denied { XCTAssertThrowsError(try store.set(key, "refused"), key) }
+        for key in denied { XCTAssertThrowsError(try store.remove(key), key) }
         XCTAssertEqual(try bytes(), before)
         let allowed = [backend, path, "@mindwtr_sync_path_bookmark", webdav, "@mindwtr_webdav_username",
             "@mindwtr_webdav_allow_insecure_http", "@mindwtr_webdav_allow_weak_fingerprint",
@@ -230,9 +228,11 @@ final class NativeDeviceKVTests: XCTestCase {
             "@mindwtr_webdav_capability_proof_v1", "@mindwtr_webdav_legacy_proof_v1"]
         try store.multiSet(allowed.map { ($0, "opaque") })
         XCTAssertEqual(try store.multiGet(allowed).map { $0.1 }, Array(repeating: "opaque", count: allowed.count))
-        for key in denied { XCTAssertEqual(try store.get(key), "\u{FEFF}preserve 🧠") }
+        for key in removeOnly + denied { XCTAssertEqual(try store.get(key), "\u{FEFF}preserve 🧠") }
         try store.multiRemove(allowed)
         XCTAssertEqual(try store.multiGet(allowed).map { $0.1 }, Array(repeating: nil, count: allowed.count))
+        for key in removeOnly { try store.remove(key); XCTAssertNil(try store.get(key)) }
+        for key in denied { XCTAssertEqual(try store.get(key), "\u{FEFF}preserve 🧠") }
     }
 
     func testEntryKeyValueAndCombinedUTF8BoundsAreValidatedBeforeIO() throws {

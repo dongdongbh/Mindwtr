@@ -15981,10 +15981,11 @@ private final class Engine: @unchecked Sendable {
         guard bytes.count <= deviceStorageFrameLimit else { throw deviceStorageUnavailable }
         return String(decoding: bytes, as: UTF8.self)
     }
-    private func deviceStorageResult(_ work: () throws -> String?) -> String? {
+    private func deviceStorageResult(legacySecretRemoval: () -> Bool = { false }, _ work: () throws -> String?) -> String? {
         dispatchPrecondition(condition: .onQueue(queue))
         do {
             let result = try work()
+            let retiredSecret = legacySecretRemoval()
             guard let runtime = context else { throw Self.deviceStorageUnavailable }
             let generation = attachmentGeneration
             queue.async { [weak self, weak runtime] in
@@ -15992,9 +15993,14 @@ private final class Engine: @unchecked Sendable {
                       self.context === runtime, self.started, !self.closed, !self.invoking else { return }
                 _ = runtime.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeDeviceStorageDelivered", withArguments: [])
                 runtime.exception = nil
+                if retiredSecret {
+                    _ = runtime.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeLegacySecretRetirementDelivered", withArguments: [])
+                    runtime.exception = nil
+                }
                 self.scheduleAttachmentIdle(immediate: true)
                 #if DEBUG
                 self.faults?.commandDiagnostic?("deviceStorageDelivered")
+                if retiredSecret { self.faults?.commandDiagnostic?("legacySecretRetirementDelivered") }
                 #endif
             }
             return result
@@ -16299,9 +16305,11 @@ private final class Engine: @unchecked Sendable {
             }
             let remove: @convention(block) (JSValue) -> String? = { [weak self] key in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
-                return self.deviceStorageResult {
+                var retiredSecret = false
+                return self.deviceStorageResult(legacySecretRemoval: { retiredSecret }) {
                     let key = try Self.deviceStorageText(key)
-                    try self.requireDeviceStorageAdmission().remove(key); return nil
+                    try self.requireDeviceStorageAdmission().remove(key)
+                    retiredSecret = NativeDeviceKV.isLegacySecretRemoval([key]); return nil
                 }
             }
             let multiGet: @convention(block) (JSValue) -> String = { [weak self] keys in
@@ -16322,9 +16330,11 @@ private final class Engine: @unchecked Sendable {
             }
             let multiRemove: @convention(block) (JSValue) -> String? = { [weak self] keys in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
-                return self.deviceStorageResult {
+                var retiredSecret = false
+                return self.deviceStorageResult(legacySecretRemoval: { retiredSecret }) {
                     let keys = try Self.deviceStorageKeys(keys)
-                    try self.requireDeviceStorageAdmission().multiRemove(keys); return nil
+                    try self.requireDeviceStorageAdmission().multiRemove(keys)
+                    retiredSecret = NativeDeviceKV.isLegacySecretRemoval(keys); return nil
                 }
             }
             for (name, block) in ["kvGet": get as Any, "kvSet": set as Any, "kvRemove": remove as Any,
