@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadTranslations } from './i18n/i18n-loader';
 import {
+    buildReminderAlarmDetails,
     buildReminderAlarmSignature,
     buildReminderSnooze,
     cancelReminderAlarm,
@@ -245,6 +246,15 @@ describe('mobile reminder alarms', () => {
         const config = { title: 'Weekly review', message: 'Body', fireAt: new Date('2026-09-29T18:30:00.000Z'), repeatInterval: 'weekly' as const };
         expect(JSON.parse(buildReminderAlarmSignature(config)).fireAt).toBe('weekly:2:18:30');
         expect(buildReminderAlarmSignature({ ...config, fireAt: new Date('2026-10-06T18:30:00.000Z') })).toBe(buildReminderAlarmSignature(config));
+    });
+
+    it('posts every reminder of a task into the task\'s one notification slot', () => {
+        const config = { title: 'Call back', message: 'Due', fireAt: new Date('2026-09-28T10:20:00.000Z'), hasSnoozeAction: true };
+        const due = buildReminderAlarmDetails('task:t-1', config);
+        expect(due.tag).toBe('mindwtr-reminder:task:t-1');
+        expect(buildReminderAlarmDetails('task:t-1:r3', config).tag).toBe(due.tag);
+        expect(buildReminderAlarmDetails('task:t-2:r3', config).tag).not.toBe(due.tag);
+        expect(buildReminderSnooze(due, Date.parse('2026-09-28T10:21:00.000Z'), 'snooze:1')?.details.tag).toBe(due.tag);
     });
 
     it('snoozes as a new one-shot of the same reminder, named by the tap so a replay replaces it', () => {

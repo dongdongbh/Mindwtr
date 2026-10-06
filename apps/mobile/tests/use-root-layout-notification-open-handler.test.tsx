@@ -19,12 +19,14 @@ const {
   updateTask,
   storeTasksById,
   consumePendingNotificationOpenPayload,
+  peekPendingNotificationCompletions,
 } = vi.hoisted(() => ({
   setNotificationOpenHandler: vi.fn(),
   setHighlightTask: vi.fn(),
   updateTask: vi.fn(async () => undefined),
   storeTasksById: new Map<string, any>(),
   consumePendingNotificationOpenPayload: vi.fn<() => Promise<PendingNotificationOpenPayload>>(async () => null),
+  peekPendingNotificationCompletions: vi.fn<() => Promise<NonNullable<PendingNotificationOpenPayload>[]>>(async () => []),
 }));
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
@@ -43,6 +45,7 @@ vi.mock('@/lib/notification-service', () => ({
 
 vi.mock('@/modules/notification-open-intents', () => ({
   consumePendingNotificationOpenPayload,
+  peekPendingNotificationCompletions,
 }));
 
 type NotificationRouter = Parameters<typeof useRootLayoutNotificationOpenHandler>[0]['router'];
@@ -82,6 +85,8 @@ describe('useRootLayoutNotificationOpenHandler', () => {
     storeTasksById.clear();
     consumePendingNotificationOpenPayload.mockReset();
     consumePendingNotificationOpenPayload.mockResolvedValue(null);
+    peekPendingNotificationCompletions.mockReset();
+    peekPendingNotificationCompletions.mockResolvedValue([]);
   });
 
   it('routes review notifications to the dedicated review flows', () => {
