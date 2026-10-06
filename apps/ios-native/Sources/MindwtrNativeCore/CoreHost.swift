@@ -63,6 +63,14 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     #if DEBUG
+    /// UI fixtures must isolate Keychain accounts as well as their database and device settings.
+    public convenience init(databaseURL: URL, bundleURL: URL,
+                            deviceStorage: (containerURL: URL, bundleIdentifier: String), isolatedTestID: UUID) {
+        let faults = HostIOFaults()
+        faults.secretService = "mindwtr.native-keychain.fixture." + isolatedTestID.uuidString.lowercased()
+        self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: faults, deviceStorage: deviceStorage)
+    }
+
     public convenience init(databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage,
                             deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
         self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: HostIOFaults(),

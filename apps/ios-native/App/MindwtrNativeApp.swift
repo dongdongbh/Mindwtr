@@ -167,7 +167,19 @@ private struct AppLockRoot: View {
     var body: some View {
         Group {
             if model.ready && !lock.concealed {
-                if model.taskRecoveryGateVisible {
+                if model.settingsSyncRestartRequired {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                            .font(.system(size: 32)).accessibilityHidden(true)
+                        Text("Sync could not be confirmed. Close and reopen Mindwtr before trying again.")
+                            .rnFont(17, .semibold).multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(palette.bg).foregroundStyle(palette.text)
+                        .accessibilityIdentifier("sync-restart-gate")
+                } else if model.settingsSyncPresented {
+                    SettingsScreen(model: model, palette: palette)
+                } else if model.taskRecoveryGateVisible {
                     TaskRecoveryGate(model: model, palette: palette)
                 } else {
                     InboxScreen(model: model)
@@ -253,6 +265,7 @@ private struct AppLockRoot: View {
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
         .onAppear { lock.sceneChanged(phase) }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            model.clearSettingsSyncForPrivacy()
             model.stopTaskAudioForBackground()
             model.cancelTaskFileImport()
             model.cancelProjectFileImport()
@@ -262,6 +275,7 @@ private struct AppLockRoot: View {
         }
         .onChange(of: phase) { next in
             if next != .active {
+                model.clearSettingsSyncForPrivacy()
                 model.stopTaskAudioForBackground()
                 model.cancelTaskFileImport()
                 model.cancelProjectFileImport()
@@ -273,6 +287,7 @@ private struct AppLockRoot: View {
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
+                model.clearSettingsSyncForPrivacy()
                 model.cancelTaskFileImport()
                 model.cancelProjectFileImport()
                 model.dismissTaskShare()

@@ -106,4 +106,39 @@ final class NativeForegroundSyncTests: XCTestCase {
         XCTAssertTrue(state.recorded.isEmpty)
         XCTAssertEqual(try Data(contentsOf: manifest), before)
     }
+
+    func testIsolatedUIHostKeepsCredentialsInItsExactTestNamespace() async throws {
+        let owner = UUID(), other = UUID()
+        let account = Data("mindwtr_webdav_password".utf8)
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "mindwtr.native-keychain.fixture." + owner.uuidString.lowercased() + ":no-auth",
+            kSecAttrAccount as String: account, kSecAttrGeneric as String: account,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
+        var seed = query
+        seed[kSecValueData as String] = Data(("isolated-" + owner.uuidString).utf8)
+        seed[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        XCTAssertEqual(SecItemAdd(seed as CFDictionary, nil), errSecSuccess)
+        defer {
+            let status = SecItemDelete(query as CFDictionary)
+            XCTAssertTrue(status == errSecSuccess || status == errSecItemNotFound)
+        }
+        try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(json(["@mindwtr_sync_backend": "off"]).utf8).write(to: manifest)
+        for id in [owner, other, owner] {
+            let host = CoreHost(databaseURL: root.appendingPathComponent("core.sqlite"), bundleURL: bundle,
+                                deviceStorage: (containerURL: container, bundleIdentifier: namespace), isolatedTestID: id)
+            addTeardownBlock { await host.close() }
+            _ = try await host.start()
+            _ = try await host.foregroundSync(command: "openSyncSettings", requestJSON: "{}")
+            _ = try await host.foregroundSync(command: "selectSyncBackend", requestJSON:
+                json(["requestId": UUID().uuidString.lowercased(), "option": "webdav"]))
+            let reply = try object(await host.foregroundSync(command: "syncSettings", requestJSON: "{}"))
+            let model = try XCTUnwrap(reply["value"] as? [String: Any])
+            let panel = try XCTUnwrap(model["panel"] as? [String: Any])
+            let password = try XCTUnwrap(panel["password"] as? [String: Any])
+            let mask = try XCTUnwrap(password["mask"] as? String)
+            XCTAssertTrue(mask.isEmpty == (id == other), "Only the matching isolated host can see its stored credential")
+            await host.close()
+        }
+    }
 }

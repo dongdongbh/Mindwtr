@@ -21,13 +21,18 @@ struct SettingsScreen: View {
     @State private var personDeleteConfirmAnswered = false
     @State private var areaDeleteConfirmPresented = false
     @State private var areaDeleteConfirmAnswered = false
+    @State private var syncReloadConfirmPresented = false
+    @State private var syncBackendPending: String?
+    private enum SyncField: Hashable { case url, username, password }
+    @FocusState private var syncField: SyncField?
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Button {
                     renameFocused = false
-                    if model.settingsDataPresented { model.closeDiagnostics(owner: model.settingsDiagnosticsOwner) }
+                    if model.settingsSyncPresented { syncField = nil; Task { await model.closeSyncSettings() } }
+                    else if model.settingsDataPresented { model.closeDiagnostics(owner: model.settingsDiagnosticsOwner) }
                     else if model.settingsGtdPresented { Task { await model.closeGtdSettings(); gtdTimeFocused = false } }
                     else if model.settingsGeneralPresented { model.closeGeneralSettings() }
                     else if model.settingsManagePresented { model.closeManageSettings() }
@@ -38,22 +43,29 @@ struct SettingsScreen: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!model.settingsDataPresented && (model.busy || model.retryNeeded || model.somedaySectionRenamePending
+                .disabled(model.settingsSyncChecking || model.settingsSyncRestartRequired || (!model.settingsDataPresented && (model.busy || model.retryNeeded || model.somedaySectionRenamePending
                           || model.somedaySectionRenameAwaitingRefresh
                           || model.somedaySectionDeletePending || model.somedaySectionDeleteAwaitingRefresh
                           || model.somedaySectionOrderActive || model.unassignedAreaColorActive
                           || (model.settingsGtdPresented ? model.gtdWorkflowPending : model.generalPreferenceActive) || model.settingsTaxonomyActive || model.settingsPersonDeleteActive || model.settingsAreaDeleteActive || model.settingsAreaEditActive
-                          || model.settingsPersonCreatePresented || model.settingsPersonEditPresented))
+                          || model.settingsPersonCreatePresented || model.settingsPersonEditPresented)))
                 .accessibilityLabel(model.label("common.back"))
-                .accessibilityIdentifier(model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : "settings-back")
+                .accessibilityIdentifier(model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : "settings-back")
+                if model.settingsSyncPresented {
+                    Text(model.settingsSync.text("title").isEmpty ? "Sync" : model.settingsSync.text("title"))
+                        .rnFont(20, .bold).foregroundStyle(palette.text)
+                        .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+                } else {
                 Text(model.settingsDataPresented ? model.dataSettings.text("title") : model.settingsGtdArchivePresented ? (model.gtdArchive.text("title").isEmpty ? model.label("settings.autoArchive") : model.gtdArchive.text("title")) : model.settingsGtdTaskEditorPresented ? model.gtdTaskEditor.text("title") : model.settingsGtdCapturePresented ? (model.gtdCapture.text("title").isEmpty ? model.label("settings.captureSettings") : model.gtdCapture.text("title")) : model.settingsGtdInboxPresented ? (model.gtdInbox.text("title").isEmpty ? model.label("settings.inboxProcessing") : model.gtdInbox.text("title")) : model.settingsGtdReviewPresented ? (model.gtdReview.text("title").isEmpty ? model.label("settings.reviewSettings") : model.gtdReview.text("title")) : model.settingsGtdPresented ? (model.gtdWorkflow.text("title").isEmpty ? model.label("settings.gtd") : model.gtdWorkflow.text("title")) : model.settingsGeneralPresented ? (model.generalSettings.text("title").isEmpty ? model.label("settings.general") : model.generalSettings.text("title")) : model.settingsManagePresented ? model.manageSettings.text("title") : model.settingsMenu.text("title"))
                     .rnFont(20, .bold).foregroundStyle(palette.text)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.isHeader)
+                }
             }
             .padding(.horizontal, 12).padding(.vertical, 5)
             .background(palette.card)
-            if model.settingsDataPresented {
+            if model.settingsSyncPresented { syncContent }
+            else if model.settingsDataPresented {
                 DiagnosticsCard(model: model, palette: palette, owner: model.settingsDiagnosticsOwner)
             }
             else if model.settingsGtdArchivePresented { gtdArchiveContent }
@@ -67,6 +79,19 @@ struct SettingsScreen: View {
             else { menuContent }
         }
         .background(palette.bg)
+        .alert("Reload saved settings?", isPresented: $syncReloadConfirmPresented) {
+            Button("Continue", role: .destructive) {
+                syncField = nil
+                let option = syncBackendPending
+                syncBackendPending = nil
+                Task {
+                    if let option { await model.selectSettingsSyncBackend(option) }
+                    else { await model.reloadSyncSettings() }
+                }
+            }.accessibilityIdentifier("sync-reload-confirm")
+            Button(model.label("common.cancel"), role: .cancel) { syncBackendPending = nil }
+                .accessibilityIdentifier("sync-reload-cancel")
+        } message: { Text("Your typed Sync fields will be discarded.") }
         .alert(model.somedaySectionDeleteOptions.object("text").text("title"),
                isPresented: $deleteConfirmPresented) {
             Button(model.somedaySectionDeleteOptions.object("text").text("cancelLabel"), role: .cancel) {
@@ -190,12 +215,149 @@ struct SettingsScreen: View {
             set: { if !$0 && !model.appLock.concealed { model.closeGtdTaskEditorField() } }
         )) { gtdTaskEditorFieldSheet }
         .accessibilityAction(.escape) {
-            if model.settingsDataPresented { model.closeDiagnostics(owner: model.settingsDiagnosticsOwner) }
+            if model.settingsSyncPresented { syncField = nil; Task { await model.closeSyncSettings() } }
+            else if model.settingsDataPresented { model.closeDiagnostics(owner: model.settingsDiagnosticsOwner) }
             else if model.settingsGtdPresented { Task { await model.closeGtdSettings(); gtdTimeFocused = false } }
             else if model.settingsGeneralPresented { model.closeGeneralSettings() }
             else if model.settingsManagePresented { model.closeManageSettings() }
             else { Task { await model.closeSettings() } }
         }
+    }
+
+    private var syncContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if model.settingsSyncUnavailable {
+                    Text("Sync is unavailable in this rehearsal.").rnFont(15).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-unavailable")
+                } else {
+                    let backend = model.settingsSync.object("backend")
+                    if !backend.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(backend.text("title")).rnFont(16, .semibold).foregroundStyle(palette.text)
+                            ForEach(backend.objects("options").indices, id: \.self) { index in
+                                let option = backend.objects("options")[index]
+                                Button {
+                                    guard !option.flag("selected") else { return }
+                                    syncField = nil
+                                    if model.settingsSyncDraftDirty {
+                                        syncBackendPending = option.text("option")
+                                        syncReloadConfirmPresented = true
+                                    } else { Task { await model.selectSettingsSyncBackend(option.text("option")) } }
+                                } label: {
+                                    HStack {
+                                        Text(option.text("label")).rnFont(15, .semibold)
+                                        Spacer()
+                                        if option.flag("selected") { Image(systemName: "checkmark").accessibilityHidden(true) }
+                                    }.frame(minHeight: 44).contentShape(Rectangle())
+                                }.buttonStyle(.plain).foregroundStyle(palette.text)
+                                    .disabled(!model.settingsSyncCanEdit || model.settingsSyncChecking)
+                                    .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
+                                    .accessibilityIdentifier("sync-option-" + option.text("option"))
+                            }
+                            Text(backend.text("hint")).rnFont(13).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    let off = model.settingsSync.object("off")
+                    if !off.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(off.text("title")).rnFont(16, .semibold)
+                            Text(off.text("description")).rnFont(14).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    if model.settingsSync.object("panel").text("kind") == "webdav" { syncWebDavContent }
+                    if let failure = model.settingsSyncError {
+                        Text(failure).rnFont(14).foregroundStyle(palette.danger)
+                            .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-error")
+                    }
+                    if let status = model.settingsSyncStatus, !status.isEmpty {
+                        Text(status).rnFont(14).foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-status")
+                    }
+                    if model.settingsSyncNeedsReload {
+                        Text("Reload saved settings to review them before trying again.").rnFont(14)
+                            .foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Button {
+                        syncField = nil
+                        if model.settingsSyncDraftDirty { syncBackendPending = nil; syncReloadConfirmPresented = true }
+                        else { Task { await model.reloadSyncSettings() } }
+                    } label: {
+                        Text("Reload settings").rnFont(15, .semibold)
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }.disabled(!model.settingsSyncCanClose)
+                        .accessibilityIdentifier("sync-reload")
+                    if model.busy || model.settingsSyncChecking { ProgressView().frame(maxWidth: .infinity).padding(8) }
+                }
+            }.padding(16).foregroundStyle(palette.text)
+        }.accessibilityIdentifier("sync-screen")
+    }
+
+    private var syncWebDavContent: some View {
+        let panel = model.settingsSync.object("panel")
+        return VStack(alignment: .leading, spacing: 16) {
+            Text(panel.text("title")).rnFont(17, .semibold).accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(panel.object("url").text("label")).rnFont(14, .semibold)
+                TextField(panel.object("url").text("placeholder"), text: Binding(
+                    get: { model.settingsSyncURL }, set: { model.setSettingsSyncURL($0) }))
+                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .focused($syncField, equals: .url).rnFont(16).padding(12).frame(minHeight: 44)
+                    .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityLabel(panel.object("url").text("label")).accessibilityIdentifier("sync-url")
+                Text(panel.object("url").text("hint")).rnFont(12).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let invalid = panel.object("url")["invalid"] as? String, !invalid.isEmpty {
+                    Text(invalid).rnFont(13).foregroundStyle(palette.danger)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-url-invalid")
+                }
+                Toggle(isOn: Binding(get: { model.settingsSyncAllowInsecure }, set: { model.setSettingsSyncAllowInsecure($0) })) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(panel.object("allowInsecureHttp").text("label")).rnFont(14)
+                        Text(panel.object("allowInsecureHttp").text("hint")).rnFont(12).foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }.frame(minHeight: 44).accessibilityIdentifier("sync-allow-insecure")
+                Text(panel.object("username").text("label")).rnFont(14, .semibold)
+                TextField(panel.object("username").text("placeholder"), text: Binding(
+                    get: { model.settingsSyncUsername }, set: { model.setSettingsSyncUsername($0) }))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.username)
+                    .focused($syncField, equals: .username).rnFont(16).padding(12).frame(minHeight: 44)
+                    .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityLabel(panel.object("username").text("label")).accessibilityIdentifier("sync-username")
+                Text(panel.object("password").text("label")).rnFont(14, .semibold)
+                SecureField(panel.object("password").text("placeholder"), text: Binding(
+                    get: { model.settingsSyncPassword }, set: { model.setSettingsSyncPassword($0) }))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.password)
+                    .focused($syncField, equals: .password).rnFont(16).padding(12).frame(minHeight: 44)
+                    .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityLabel(panel.object("password").text("label")).accessibilityIdentifier("sync-password")
+            }.disabled(!model.settingsSyncCanEdit)
+            ForEach(["save", "syncNow", "test"], id: \.self) { action in
+                let state = panel.object(action)
+                Button { syncField = nil; Task { await model.performSettingsSync(action) } } label: {
+                    VStack(spacing: 4) {
+                        Text(state.text("label")).rnFont(15, .semibold)
+                        if let description = state["description"] as? String, !description.isEmpty {
+                            Text(description).rnFont(12).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }.frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(.bordered).tint(palette.tint)
+                    .disabled(!model.settingsSyncActionEnabled(action))
+                    .accessibilityIdentifier(action == "syncNow" ? "sync-now" : "sync-" + action)
+            }
+            let lastSync = panel.object("lastSync")
+            VStack(alignment: .leading, spacing: 6) {
+                Text(lastSync.text("title")).rnFont(15, .semibold)
+                Text(lastSync.text("status")).rnFont(14).foregroundStyle(palette.secondary)
+                ForEach(lastSync["lines"] as? [String] ?? [], id: \.self) { Text($0).rnFont(13).foregroundStyle(palette.secondary) }
+                if let failure = lastSync["error"] as? String {
+                    Text(failure).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var gtdContent: some View {
@@ -844,6 +1006,7 @@ struct SettingsScreen: View {
                                     else if row.text("id") == "general" { Task { await model.openGeneralSettings() } }
                                     else if row.text("id") == "data" { Task { await model.openDataSettings() } }
                                     else if row.text("id") == "gtd" { Task { await model.openGtdSettings() } }
+                                    else if row.text("id") == "sync" { Task { await model.openSyncSettings() } }
                                 } label: {
                                     HStack(spacing: 12) {
                                         Image(systemName: settingsSymbol(row.text("icon")))
@@ -863,8 +1026,8 @@ struct SettingsScreen: View {
                                     }
                                     .padding(.horizontal, 14).frame(minHeight: 60).contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain).disabled(!["manage", "general", "gtd", "data"].contains(row.text("id")) || model.busy || model.retryNeeded)
-                                .opacity(["manage", "general", "gtd", "data"].contains(row.text("id")) ? 1 : 0.55)
+                                .buttonStyle(.plain).disabled(!["manage", "general", "gtd", "data", "sync"].contains(row.text("id")) || model.busy || model.retryNeeded)
+                                .opacity(["manage", "general", "gtd", "data", "sync"].contains(row.text("id")) ? 1 : 0.55)
                                 .accessibilityLabel(row.text("accessibilityLabel").isEmpty ? row.text("title") : row.text("accessibilityLabel"))
                                 .accessibilityIdentifier("settings-" + row.text("id"))
                                 if rowIndex < groups[groupIndex].count - 1 { palette.border.frame(height: 0.5) }

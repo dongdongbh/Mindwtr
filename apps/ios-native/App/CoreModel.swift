@@ -295,6 +295,43 @@ final class CoreModel: ObservableObject {
     @Published private(set) var settingsSearch = ""
     @Published private(set) var settingsManagePresented = false
     @Published private(set) var settingsReadError: String?
+    @Published private(set) var settingsSyncPresented = false
+    @Published private(set) var settingsSync: CoreObject = [:]
+    @Published private(set) var settingsSyncURL = ""
+    @Published private(set) var settingsSyncUsername = ""
+    @Published private(set) var settingsSyncPassword = ""
+    @Published private(set) var settingsSyncAllowInsecure = false
+    @Published private(set) var settingsSyncError: String?
+    @Published private(set) var settingsSyncStatus: String?
+    @Published private(set) var settingsSyncChecking = false
+    @Published private(set) var settingsSyncNeedsReload = false
+    @Published private(set) var settingsSyncRestartRequired = false
+    private var settingsSyncAvailable = false
+    private var settingsSyncSession = UUID()
+    private var settingsSyncGeneration = 0
+    private var settingsSyncReadTask: Task<Void, Never>?
+    private var settingsSyncOpeningRevision = ""
+    private var settingsSyncValidatedURL = ""
+    private var settingsSyncOpeningURL = ""
+    private var settingsSyncOpeningUsername = ""
+    private var settingsSyncOpeningAllowInsecure = false
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    private var settingsSyncTestThrowOnce = false
+    #endif
+    var settingsSyncUnavailable: Bool { !settingsSyncAvailable }
+    var settingsSyncDraftDirty: Bool {
+        settingsSyncURL != settingsSyncOpeningURL || settingsSyncUsername != settingsSyncOpeningUsername
+            || settingsSyncAllowInsecure != settingsSyncOpeningAllowInsecure || !settingsSyncPassword.isEmpty
+    }
+    var settingsSyncCanEdit: Bool {
+        ready && settingsSyncPresented && !busy && !retryNeeded && !settingsSyncNeedsReload
+            && !settingsSyncRestartRequired && !appLock.concealed && settingsSyncAvailable && !settingsSync.isEmpty
+    }
+    var settingsSyncCanClose: Bool { !busy && !settingsSyncChecking && !settingsSyncRestartRequired }
+    func settingsSyncActionEnabled(_ action: String) -> Bool {
+        settingsSyncCanEdit && !settingsSyncChecking && settingsSyncURL == settingsSyncValidatedURL
+            && settingsSync.object("panel").object(action).flag("enabled")
+    }
     @Published private(set) var manageSettings: CoreObject = [:]
     @Published private(set) var managedSomedaySections: [CoreObject] = []
     @Published private(set) var managedSomedayTotal = 0
@@ -1020,6 +1057,8 @@ final class CoreModel: ObservableObject {
                 taskAttachmentSavedHost = nil
                 taskOwnedMenuAction = nil
                 taskOwnedMenuSelection = nil
+                clearSettingsSyncForPrivacy()
+                settingsSyncPresented = false
                 invalidateDiagnostics(dropCache: true)
             }
         }
@@ -3955,7 +3994,11 @@ final class CoreModel: ObservableObject {
                     backupExportTestHoldOnce = arguments.contains("--native-backup-export-hold-once")
                     taskRecoveryResolverTestFailure = arguments.contains("--native-task116-resolver-failure-once")
                     #endif
-                    host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle)
+                    settingsSyncTestThrowOnce = arguments.contains("--native-sync-command-throw-once")
+                    host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
+                        deviceStorage: (directory, "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased()),
+                        isolatedTestID: identifier)
+                    settingsSyncAvailable = true
                 } else if arguments.contains("--native-rn-rehearsal") {
                     // An explicitly staged copy only. Never select the live RN container.
                     let container = support.appendingPathComponent("NativeRNRehearsal", isDirectory: true)
@@ -4032,7 +4075,12 @@ final class CoreModel: ObservableObject {
                 if host == nil {
                     let directory = support.appendingPathComponent("NativeFoundation", isDirectory: true)
                     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle)
+                    guard let identifier = Bundle.main.bundleIdentifier, !identifier.isEmpty else {
+                        throw CocoaError(.fileReadCorruptFile)
+                    }
+                    host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
+                        deviceStorage: (URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true), identifier))
+                    settingsSyncAvailable = true
                 }
             }
             storedLanguage = preferenceDefaults.object(forKey: devicePreferencePrefix + "mindwtr-language") as? String ?? storedLanguage
@@ -4324,7 +4372,7 @@ final class CoreModel: ObservableObject {
     }
 
     func refresh() async {
-        guard !appLock.concealed, !savedSearchWritePresented else { return }
+        guard !appLock.concealed, !savedSearchWritePresented, !settingsSyncRestartRequired else { return }
         if taskStartupSaveReceipt != nil {
             guard !busy else { refreshRequested = true; return }
             await reconcileTaskAttachmentPresentation()
@@ -4351,6 +4399,7 @@ final class CoreModel: ObservableObject {
     }
 
     func selectSurface(_ surface: Surface) async {
+        guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
         if selectedSurface == .project { guard await flushProjectNotesEdit() else { return } }
         guard ready, !busy, !retryNeeded, !capturePresented, !areaPickerPresented, !taskPresented,
               !calendarComposerPresented, !mindSweepPresented, !processInboxPresented,
@@ -4373,6 +4422,7 @@ final class CoreModel: ObservableObject {
     }
 
     func toggleMore() async {
+        guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
         guard ready, !busy, !retryNeeded, !capturePresented, !areaPickerPresented, !taskPresented,
               !calendarComposerPresented, !mindSweepPresented, !processInboxPresented,
               !projectRenameEditing, somedaySectionRenameIndex == nil,
@@ -4428,6 +4478,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openSettings() async {
+        guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
         guard ready, !busy, !retryNeeded, !somedaySectionRenamePending,
               !somedaySectionRenameAwaitingRefresh, !somedaySectionDeleteActive,
               !somedaySectionOrderActive, !settingsAreaDeleteActive, !unassignedAreaColorActive,
@@ -4458,6 +4509,7 @@ final class CoreModel: ObservableObject {
     }
 
     func closeSettings() async {
+        guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
         guard selectedSurface == .settings, !busy, !retryNeeded,
               !somedaySectionRenamePending, !somedaySectionRenameAwaitingRefresh,
               !somedaySectionDeleteActive, !somedaySectionOrderActive, !settingsAreaDeleteActive,
@@ -4474,7 +4526,7 @@ final class CoreModel: ObservableObject {
     }
 
     func setSettingsSearch(_ value: String) {
-        guard selectedSurface == .settings, !settingsManagePresented, !retryNeeded else { return }
+        guard selectedSurface == .settings, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
         settingsSearch = value
         settingsReadError = nil
         settingsSearchGeneration += 1
@@ -4493,9 +4545,265 @@ final class CoreModel: ObservableObject {
         let result = try await query("menuRead", ["settingsMenu", try json(["query": settingsSearch])])
         guard !result.text("title").isEmpty, result["groups"] is [[CoreObject]],
               result["searchPlaceholder"] is String else { throw CocoaError(.coderReadCorrupt) }
-        guard generation == nil || settingsSearchGeneration == generation else { return }
+        guard !settingsSyncPresented, !settingsSyncRestartRequired, selectedSurface == .settings,
+              generation == nil || settingsSearchGeneration == generation else { return }
         settingsMenu = result
         settingsReadError = nil
+    }
+
+    private func settingsSyncCurrent(_ capturedHost: CoreHost, _ session: UUID) -> Bool {
+        host === capturedHost && settingsSyncSession == session && settingsSyncPresented
+            && selectedSurface == .settings && !appLock.concealed && !settingsSyncRestartRequired
+    }
+
+    // A thrown bridge call may have committed. Only a new process can release this gate.
+    private func requireSettingsSyncRestart(_ capturedHost: CoreHost) {
+        guard host === capturedHost else { return }
+        settingsSyncRestartRequired = true
+        clearSettingsSyncForPrivacy()
+        refreshRequested = false
+    }
+
+    private func callSettingsSync(_ command: String, input: CoreObject, host capturedHost: CoreHost) async -> CoreObject? {
+        do {
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if command == "testSyncConnection" && settingsSyncTestThrowOnce {
+                settingsSyncTestThrowOnce = false
+                throw CocoaError(.fileWriteUnknown)
+            }
+            #endif
+            let encoded = try json(input)
+            let result = try decode(try await capturedHost.foregroundSync(command: command, requestJSON: encoded))
+            guard result["ok"] is Bool,
+                  result.flag("ok") ? result["value"] != nil
+                    : (result.object("error")["message"] is String && result.object("error")["code"] is String) else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            return result
+        } catch {
+            requireSettingsSyncRestart(capturedHost)
+            return nil
+        }
+    }
+
+    private func settingsSyncValue(_ result: CoreObject) -> CoreObject? {
+        guard result.flag("ok") else {
+            let failure = result.object("error")
+            settingsSyncError = failure.text("message").isEmpty
+                ? label("settings.feedback.actionFailed") : failure.text("message")
+            if failure.text("code") == "STALE_REVISION" { settingsSyncNeedsReload = true }
+            return nil
+        }
+        guard let value = result["value"] as? CoreObject else {
+            if let capturedHost = host { requireSettingsSyncRestart(capturedHost) }
+            return nil
+        }
+        return value
+    }
+
+    private func adoptSettingsSync(_ view: CoreObject, resetDraft: Bool, host capturedHost: CoreHost) -> Bool {
+        guard !view.text("title").isEmpty, !view.text("configRevision").isEmpty,
+              view.object("backend")["options"] is [CoreObject],
+              view.object("backend").objects("options").allSatisfy({ ["off", "webdav"].contains($0.text("option")) }),
+              view["panel"] is NSNull || view.object("panel").text("kind") == "webdav" else {
+            requireSettingsSyncRestart(capturedHost)
+            return false
+        }
+        settingsSync = view
+        if resetDraft {
+            let panel = view.object("panel")
+            settingsSyncURL = panel.object("url").text("value")
+            settingsSyncUsername = panel.object("username").text("value")
+            settingsSyncPassword = ""
+            settingsSyncAllowInsecure = panel.object("allowInsecureHttp").flag("value")
+            settingsSyncOpeningURL = settingsSyncURL
+            settingsSyncOpeningUsername = settingsSyncUsername
+            settingsSyncOpeningAllowInsecure = settingsSyncAllowInsecure
+            settingsSyncOpeningRevision = view.text("configRevision")
+            settingsSyncValidatedURL = settingsSyncURL
+            settingsSyncNeedsReload = false
+        }
+        return true
+    }
+
+    // These messages are the shared transport's redacted user-facing toasts.
+    private func adoptSettingsSyncToasts(_ value: CoreObject) -> Bool {
+        let toasts = value.objects("toasts")
+        let failed = toasts.filter { $0.text("tone") == "error" }
+        let text: (CoreObject) -> String = { [$0.text("title"), $0.text("message")].filter { !$0.isEmpty }.joined(separator: "\n") }
+        if !failed.isEmpty { settingsSyncError = failed.map(text).joined(separator: "\n"); return false }
+        settingsSyncStatus = toasts.map(text).filter { !$0.isEmpty }.joined(separator: "\n")
+        return true
+    }
+
+    func openSyncSettings() async {
+        guard ready, selectedSurface == .settings, !busy, !retryNeeded, !settingsSyncPresented,
+              !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
+              !settingsSyncRestartRequired, !appLock.concealed else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        settingsSyncPresented = true
+        settingsSyncSession = UUID()
+        settingsSyncError = nil
+        settingsSyncStatus = nil
+        settingsSyncNeedsReload = false
+        guard settingsSyncAvailable, let capturedHost = host else { return }
+        let session = settingsSyncSession
+        busy = true
+        defer { finishOperation() }
+        guard let result = await callSettingsSync("openSyncSettings", input: [:], host: capturedHost),
+              settingsSyncCurrent(capturedHost, session), let view = settingsSyncValue(result) else { return }
+        if adoptSettingsSync(view, resetDraft: true, host: capturedHost) { _ = adoptSettingsSyncToasts(view) }
+    }
+
+    func closeSyncSettings() async {
+        guard settingsSyncPresented, settingsSyncCanClose, !appLock.concealed else { return }
+        let capturedHost = host
+        let available = settingsSyncAvailable
+        // Retire plaintext before the closing command can suspend.
+        clearSettingsSyncForPrivacy()
+        settingsSyncPresented = false
+        let closedSession = settingsSyncSession
+        guard available, let capturedHost else { return }
+        busy = true
+        defer { finishOperation() }
+        guard let result = await callSettingsSync("closeSyncSettings", input: [:], host: capturedHost),
+              host === capturedHost, settingsSyncSession == closedSession, !settingsSyncPresented,
+              !appLock.concealed, !settingsSyncRestartRequired else { return }
+        if !result.flag("ok") {
+            settingsSyncPresented = true
+            _ = settingsSyncValue(result)
+            settingsSyncNeedsReload = true
+        }
+    }
+
+    func reloadSyncSettings() async {
+        guard settingsSyncPresented, settingsSyncCanClose, settingsSyncAvailable,
+              !appLock.concealed, let capturedHost = host else { return }
+        clearSettingsSyncForPrivacy()
+        let session = settingsSyncSession
+        busy = true
+        defer { finishOperation() }
+        guard let closed = await callSettingsSync("closeSyncSettings", input: [:], host: capturedHost),
+              settingsSyncCurrent(capturedHost, session) else { return }
+        guard closed.flag("ok") else { _ = settingsSyncValue(closed); return }
+        guard let result = await callSettingsSync("openSyncSettings", input: [:], host: capturedHost),
+              settingsSyncCurrent(capturedHost, session), let view = settingsSyncValue(result) else { return }
+        if adoptSettingsSync(view, resetDraft: true, host: capturedHost) { _ = adoptSettingsSyncToasts(view) }
+    }
+
+    func clearSettingsSyncForPrivacy() {
+        settingsSyncReadTask?.cancel()
+        settingsSyncReadTask = nil
+        settingsSyncGeneration += 1
+        settingsSyncSession = UUID()
+        settingsSyncURL = ""
+        settingsSyncUsername = ""
+        settingsSyncPassword = ""
+        settingsSyncAllowInsecure = false
+        settingsSyncOpeningURL = ""
+        settingsSyncOpeningUsername = ""
+        settingsSyncOpeningAllowInsecure = false
+        settingsSyncOpeningRevision = ""
+        settingsSyncValidatedURL = ""
+        settingsSync = [:]
+        settingsSyncStatus = nil
+        settingsSyncError = nil
+        if settingsSyncPresented { settingsSyncNeedsReload = true }
+    }
+
+    func setSettingsSyncURL(_ value: String) {
+        guard settingsSyncCanEdit else { return }
+        settingsSyncURL = value
+        settingsSyncGeneration += 1
+        settingsSyncError = nil
+        scheduleSettingsSyncRead()
+    }
+    func setSettingsSyncUsername(_ value: String) {
+        guard settingsSyncCanEdit else { return }
+        settingsSyncUsername = value
+        settingsSyncError = nil
+    }
+    func setSettingsSyncPassword(_ value: String) {
+        guard settingsSyncCanEdit else { return }
+        settingsSyncPassword = value
+        settingsSyncError = nil
+    }
+    func setSettingsSyncAllowInsecure(_ value: Bool) {
+        guard settingsSyncCanEdit else { return }
+        settingsSyncAllowInsecure = value
+        settingsSyncError = nil
+    }
+
+    private func scheduleSettingsSyncRead() {
+        settingsSyncReadTask?.cancel()
+        settingsSyncReadTask = Task {
+            do { try await Task.sleep(nanoseconds: 150_000_000) } catch { return }
+            guard !Task.isCancelled, settingsSyncPresented, !settingsSyncNeedsReload,
+                  !settingsSyncRestartRequired, !busy else { return }
+            // Only cancel the delay, never an already-dispatched foreground command.
+            settingsSyncReadTask = nil
+            await readSettingsSyncModel()
+        }
+    }
+
+    private func readSettingsSyncModel(resetDraft: Bool = false) async {
+        guard settingsSyncPresented, !settingsSyncChecking, !settingsSyncNeedsReload,
+              !settingsSyncRestartRequired, !appLock.concealed, let capturedHost = host else { return }
+        let session = settingsSyncSession, generation = settingsSyncGeneration
+        let url = settingsSyncURL
+        settingsSyncChecking = true
+        defer {
+            settingsSyncChecking = false
+            if settingsSyncCurrent(capturedHost, session), generation != settingsSyncGeneration,
+               !busy, !settingsSyncNeedsReload { scheduleSettingsSyncRead() }
+        }
+        guard let result = await callSettingsSync("syncSettings", input: ["draft": ["url": url]], host: capturedHost),
+              settingsSyncCurrent(capturedHost, session), generation == settingsSyncGeneration,
+              let view = settingsSyncValue(result) else { return }
+        if adoptSettingsSync(view, resetDraft: resetDraft, host: capturedHost) { settingsSyncValidatedURL = resetDraft ? settingsSyncURL : url }
+    }
+
+    func selectSettingsSyncBackend(_ option: String) async {
+        guard settingsSyncCanEdit, !settingsSyncChecking,
+              settingsSync.object("backend").objects("options").contains(where: { $0.text("option") == option && !$0.flag("selected") }),
+              let capturedHost = host else { return }
+        let session = settingsSyncSession
+        settingsSyncReadTask?.cancel(); settingsSyncReadTask = nil
+        settingsSyncGeneration += 1
+        settingsSyncError = nil; settingsSyncStatus = nil
+        busy = true
+        defer { finishOperation() }
+        guard let result = await callSettingsSync("selectSyncBackend",
+            input: ["requestId": UUID().uuidString.lowercased(), "option": option], host: capturedHost),
+              settingsSyncCurrent(capturedHost, session), let value = settingsSyncValue(result) else { return }
+        let succeeded = adoptSettingsSyncToasts(value)
+        await readSettingsSyncModel(resetDraft: succeeded)
+    }
+
+    func performSettingsSync(_ action: String) async {
+        guard ["save", "syncNow", "test"].contains(action), settingsSyncActionEnabled(action),
+              let capturedHost = host, !settingsSyncOpeningRevision.isEmpty else { return }
+        let session = settingsSyncSession
+        let fields: CoreObject = ["url": settingsSyncURL, "username": settingsSyncUsername,
+            "password": settingsSyncPassword.isEmpty ? NSNull() : settingsSyncPassword as Any,
+            "allowInsecureHttp": settingsSyncAllowInsecure]
+        let command = action == "save" ? "saveSyncBackend" : action == "test" ? "testSyncConnection" : "syncNow"
+        var input: CoreObject = ["webdav": fields]
+        if action != "test" {
+            input["requestId"] = UUID().uuidString.lowercased()
+            input["revision"] = settingsSyncOpeningRevision
+        }
+        settingsSyncReadTask?.cancel(); settingsSyncReadTask = nil
+        settingsSyncGeneration += 1
+        settingsSyncError = nil; settingsSyncStatus = nil
+        busy = true
+        defer { finishOperation() }
+        guard let result = await callSettingsSync(command, input: input, host: capturedHost),
+              settingsSyncCurrent(capturedHost, session), let value = settingsSyncValue(result) else { return }
+        let succeeded = adoptSettingsSyncToasts(value)
+        // A known failure preserves both the fields and their opening revision.
+        await readSettingsSyncModel(resetDraft: succeeded && action != "test")
     }
 
     func openGtdSettings() async {
@@ -24551,6 +24859,11 @@ final class CoreModel: ObservableObject {
     }
 
     private func readSelectedSurface() async throws {
+        guard !settingsSyncRestartRequired else { return }
+        if selectedSurface == .settings && settingsSyncPresented {
+            if !settingsSyncNeedsReload && !settingsSyncChecking { await readSettingsSyncModel() }
+            return
+        }
         if selectedSurface == .board {
             boardReadTask?.cancel()
             boardGeneration += 1
@@ -24627,6 +24940,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func query(_ method: String, _ args: [Any] = []) async throws -> CoreObject {
+        guard !settingsSyncRestartRequired else { throw CocoaError(.userCancelled) }
         guard let host else { throw CocoaError(.coderInvalidValue) }
         #if DEBUG && targetEnvironment(simulator)
         var removeTestRead: (query: String, request: String, session: String, generation: Int)?
@@ -24968,6 +25282,7 @@ final class CoreModel: ObservableObject {
     }
     private func finishOperation() {
         busy = false
+        if settingsSyncRestartRequired { refreshRequested = false; return }
         presentQueuedReferenceProjectNextAction()
         if let id = referenceProjectNextActionEditID, ready, !retryNeeded, !taskPresented, !appLock.concealed {
             referenceProjectNextActionEditID = nil
