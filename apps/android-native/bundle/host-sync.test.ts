@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
     BACKGROUND_SYNC_FAILURE_STATE_KEY,
+    NativeAttachmentCleanupUnconfirmedError,
     SYNC_BACKEND_KEY,
     WEBDAV_URL_KEY,
     setLogger,
@@ -11,33 +12,40 @@ import { createDeadlineFetch, createNativeSync } from './host-sync';
 const globals = globalThis as unknown as Record<string, unknown>;
 const realFetch = globalThis.fetch;
 
-const host = (stored: Record<string, string> = {}, refuseSchedule = false) => {
+const host = (stored: Record<string, string> = {}, refuseSchedule = false, getData?: () => Promise<never>) => {
     const kv = new Map(Object.entries(stored));
     const schedules: boolean[] = [];
     const lines: string[] = [];
     const traces: string[] = [];
-    const sync = createNativeSync({
+    const calls: string[] = [];
+    const bindings: Parameters<typeof createNativeSync>[0] = {
         keyValue: {
-            get: async (key) => kv.get(key) ?? null,
-            set: async (key, value) => { kv.set(key, value); },
-            remove: async (key) => { kv.delete(key); },
-            multiGet: async (keys) => keys.map((key) => [key, kv.get(key) ?? null] as [string, string | null]),
-            multiSet: async (pairs) => { for (const [key, value] of pairs) kv.set(key, value); },
+            get: async (key) => { calls.push('get'); return kv.get(key) ?? null; },
+            set: async (key, value) => { calls.push('set'); kv.set(key, value); },
+            remove: async (key) => { calls.push('remove'); kv.delete(key); },
+            multiGet: async (keys) => { calls.push('multiGet'); return keys.map((key) => [key, kv.get(key) ?? null] as [string, string | null]); },
+            multiSet: async (pairs) => { calls.push('multiSet'); for (const [key, value] of pairs) kv.set(key, value); },
         },
-        secrets: { getSecret: async () => null, setSecret: async () => undefined, deleteSecret: async () => undefined },
-        localData: () => ({ getData: async () => { throw new Error('no local data in this test'); }, saveData: async () => undefined }),
-        networkState: () => ({ isConnected: true, isInternetReachable: true }),
-        appendLog: async (entry) => { lines.push(entry.message); return null; },
+        secrets: {
+            getSecret: async () => { calls.push('getSecret'); return null; },
+            setSecret: async () => { calls.push('setSecret'); },
+            deleteSecret: async () => { calls.push('deleteSecret'); },
+        },
+        localData: () => ({ getData: getData ?? (async () => { throw new Error('no local data in this test'); }), saveData: async () => undefined }),
+        networkState: () => { calls.push('networkState'); return { isConnected: true, isInternetReachable: true }; },
+        appendLog: async (entry) => { calls.push('appendLog'); lines.push(entry.message); return null; },
         translate: (key) => key,
-        emit: () => undefined,
-        trace: (line) => { traces.push(line); },
+        emit: () => { calls.push('emit'); },
+        trace: (line) => { calls.push('trace'); traces.push(line); },
         scheduleBackgroundSync: (on) => {
             if (refuseSchedule) throw new Error('WorkManager did not store the work');
+            calls.push('schedule');
             schedules.push(on);
         },
         isFossBuild: false,
-    });
-    return { sync, kv, schedules, lines, traces };
+    };
+    const sync = createNativeSync(bindings);
+    return { sync, kv, schedules, lines, traces, calls, bindings };
 };
 
 const fetches: string[] = [];
@@ -55,6 +63,122 @@ afterEach(() => {
 });
 
 describe('native background sync binding', () => {
+    it('manual sync preserves fatal cleanup identity without a cycle increment or any post-fatal host work', async () => {
+        globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch;
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        let at!: { cycles: number; calls: number; lines: number; traces: number; kv: [string, string][] };
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://dav.example.com' }, false, async () => {
+            at = { cycles: fixture.sync.state().cycles, calls: fixture.calls.length, lines: fixture.lines.length,
+                traces: fixture.traces.length, kv: [...fixture.kv] };
+            throw fatal;
+        });
+        const result = await fixture.sync.settingsHost.performSync(undefined, { manual: true }).catch((error: unknown) => error);
+        expect(at).toBeDefined();
+        expect(result).toBe(fatal);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(fixture.sync.state().cycles).toBe(at.cycles);
+        expect(fixture.calls.slice(at.calls)).toEqual([]);
+        expect(fixture.lines.slice(at.lines)).toEqual([]);
+        expect(fixture.traces.slice(at.traces)).toEqual([]);
+        expect([...fixture.kv]).toEqual(at.kv);
+    });
+
+    it('manual sync with an ordinary same-name error retains the normal cycle and configuration refresh', async () => {
+        globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch;
+        let read = false;
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://dav.example.com' }, false, async () => {
+            read = true;
+            throw Object.assign(new Error('ordinary local read failure'), { name: 'NativeAttachmentCleanupUnconfirmedError' });
+        });
+        expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({ success: false });
+        expect(read).toBe(true);
+        expect(fixture.sync.state().cycles).toBe(1);
+        await fixture.sync.settingsHost.reconcileBackgroundSync();
+        expect(fixture.calls).toContain('get');
+        expect(fixture.traces.some((line) => line.includes('cycles=1'))).toBe(true);
+    });
+
+    it('a successful disabled manual cycle refreshes configuration and emits its new cycle count', async () => {
+        const { sync, traces } = host();
+        expect(await sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({ success: true });
+        expect(sync.state().cycles).toBe(1);
+        await sync.settingsHost.reconcileBackgroundSync();
+        expect(traces.some((line) => line.includes('cycles=1'))).toBe(true);
+    });
+
+    for (const completion of ['resolve', 'reject'] as const) {
+        it(`fences earlier configuration refresh and scheduling when held reads ${completion} after a fatal manual sync`, async () => {
+            globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch;
+            const fatal = new NativeAttachmentCleanupUnconfirmedError();
+            const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://dav.example.com' }, false, async () => { throw fatal; });
+            const held: { resolve: (value: string | null) => void; reject: (error: Error) => void }[] = [];
+            let allEntered!: () => void;
+            const entered = new Promise<void>((resolve) => { allEntered = resolve; });
+            let holding = true;
+            const get = fixture.bindings.keyValue.get;
+            fixture.bindings.keyValue.get = async (key) => {
+                const value = await get(key);
+                if (holding && key === WEBDAV_URL_KEY) {
+                    return new Promise<string | null>((resolve, reject) => {
+                        held.push({ resolve, reject });
+                        if (held.length === 3) allEntered();
+                    });
+                }
+                return value;
+            };
+            // Successful verification's finally refresh uses this same path; an Off
+            // cycle admits it here without a second synthetic remote-write fixture.
+            expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true, configOverride: { backend: 'off' } })).toMatchObject({ success: true });
+            const reconcile = fixture.sync.settingsHost.reconcileBackgroundSync().catch((error: unknown) => error);
+            await entered;
+            holding = false;
+            await expect(fixture.sync.settingsHost.performSync(undefined, { manual: true })).rejects.toBe(fatal);
+            const at = { calls: fixture.calls.length, schedules: fixture.schedules.length, lines: fixture.lines.length,
+                traces: fixture.traces.length, state: fixture.sync.state() };
+            expect(held).toHaveLength(3);
+            for (const read of held) {
+                if (completion === 'resolve') read.resolve('https://dav.example.com');
+                else read.reject(fatal);
+            }
+            expect(await reconcile).toBe(fatal);
+            await Promise.resolve();
+            expect(fixture.calls.slice(at.calls)).toEqual([]);
+            expect(fixture.schedules.slice(at.schedules)).toEqual([]);
+            expect(fixture.lines.slice(at.lines)).toEqual([]);
+            expect(fixture.traces.slice(at.traces)).toEqual([]);
+            expect(fixture.sync.state()).toEqual(at.state);
+            expect(fixture.sync.state().cycles).toBe(1);
+            await expect(fixture.sync.settingsHost.reconcileBackgroundSync()).rejects.toBe(fatal);
+            expect(fixture.calls.slice(at.calls)).toEqual([]);
+        });
+    }
+
+    it('keeps the ordinary fallback emission when an earlier refresh read rejects', async () => {
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://dav.example.com' });
+        const held: ((error: Error) => void)[] = [];
+        let allEntered!: () => void;
+        const entered = new Promise<void>((resolve) => { allEntered = resolve; });
+        const get = fixture.bindings.keyValue.get;
+        fixture.bindings.keyValue.get = async (key) => {
+            const value = await get(key);
+            if (key === WEBDAV_URL_KEY) return new Promise<string | null>((_resolve, reject) => {
+                held.push(reject);
+                if (held.length === 2) allEntered();
+            });
+            return value;
+        };
+        const ordinary = new Error('ordinary configuration read failure');
+        const reconcile = fixture.sync.settingsHost.reconcileBackgroundSync().catch((error: unknown) => error);
+        await entered;
+        for (const reject of held) reject(ordinary);
+        expect(await reconcile).toBe(ordinary);
+        await Promise.resolve();
+        expect(fixture.traces).toContain('Native Android sync state badge=hidden cycles=0');
+        expect(fixture.calls).toContain('emit');
+        expect(fixture.schedules).toEqual([]);
+    });
+
     it('schedules the background job only for a configured WebDAV or cloud backend (core\'s decision)', async () => {
         const off = host();
         await off.sync.settingsHost.reconcileBackgroundSync();

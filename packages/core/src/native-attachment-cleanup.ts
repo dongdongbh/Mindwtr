@@ -6,6 +6,14 @@ import {
     type AttachmentCleanupPolicyAttachment,
 } from './attachment-cleanup';
 
+/** A retained native cleanup owner forbids further work until its exact retry settles. */
+export class NativeAttachmentCleanupUnconfirmedError extends Error {
+    constructor() {
+        super('Attachment cleanup could not be confirmed; retry the retained request');
+        this.name = 'NativeAttachmentCleanupUnconfirmedError';
+    }
+}
+
 export type NativeAttachmentCleanupRawRow = {
     id: string;
     purgedAt: string | null;

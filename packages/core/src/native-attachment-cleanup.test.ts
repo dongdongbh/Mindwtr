@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     isNativeAttachmentCleanupWitnessEligible as eligible,
     prepareNativeAttachmentCleanupWitness as prepare,
+    NativeAttachmentCleanupUnconfirmedError,
     type NativeAttachmentCleanupProjection,
     type NativeAttachmentCleanupRawRow,
 } from './native-attachment-cleanup';
@@ -18,6 +19,15 @@ const projection = (tasks: NativeAttachmentCleanupRawRow[] = [row()], projects: 
 const bytes = (value: string): number => new TextEncoder().encode(value).byteLength;
 
 describe('native bounded attachment cleanup witness', () => {
+    it('provides a distinct fixed fatal error without input or cause', () => {
+        const error = new NativeAttachmentCleanupUnconfirmedError();
+        expect(error).toBeInstanceOf(Error);
+        expect(error.name).toBe('NativeAttachmentCleanupUnconfirmedError');
+        expect(error.message).toBe('Attachment cleanup could not be confirmed; retry the retained request');
+        expect(error.cause).toBeUndefined();
+        expect(new Error(error.message)).not.toBeInstanceOf(NativeAttachmentCleanupUnconfirmedError);
+    });
+
     it.each(['task', 'project'] as const)('prepares and rechecks a %s attachment tombstone without changing input', (kind) => {
         const data = kind === 'task' ? projection() : projection([], [row()]);
         const before = JSON.stringify(data);

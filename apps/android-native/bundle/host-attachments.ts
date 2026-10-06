@@ -14,6 +14,7 @@
  */
 // Load this leaf directly across deferred store imports and the iOS core alias.
 import { createMobileAttachmentAvailability } from '../../../packages/core/src/mobile-attachment-availability';
+import type { MobileAttachmentCleanupHost } from '../../../packages/core/src/mobile-attachment-cleanup';
 import {
     CLOUD_ALLOW_INSECURE_HTTP_KEY, CLOUD_PROVIDER_KEY, CLOUD_URL_KEY,
     SYNC_BACKEND_KEY, SYNC_PATH_BOOKMARK_KEY, SYNC_PATH_KEY,
@@ -53,6 +54,7 @@ export type NativeAttachmentBindings = {
     dropboxAuth?: Pick<MobileSyncDropboxAuthPort, 'getValidAccessToken' | 'forceRefreshAccessToken'>;
     getDropboxClientId?: () => Promise<string>;
     maxWebdavBufferedUploadBytes?: number;
+    retireLocalAttachment?: MobileAttachmentCleanupHost['retireLocalAttachment'];
 };
 
 declare const globalThis: Record<string, unknown>;
@@ -201,7 +203,7 @@ export const createNativeAttachments = (bindings: NativeAttachmentBindings, chan
         cleanupTempFiles: () => files.cleanupAttachmentTempFiles(),
         hasCompletedPresenceReconciliation: () => files.hasCompletedAttachmentPresenceReconciliation(),
         hasPendingWork: (data, options) => files.hasPendingAttachmentSyncWork(data, options),
-        runCleanup: (options) => runMobileAttachmentCleanup(options, { fs }),
+        runCleanup: (options) => runMobileAttachmentCleanup(options, { fs, retireLocalAttachment: bindings.retireLocalAttachment }),
     };
 
     return { contractHost, syncPort };
