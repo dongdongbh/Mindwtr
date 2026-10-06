@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadTranslations } from './i18n/i18n-loader';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
 import { NATIVE_UNJOURNALED_COMMANDS } from './native-request-receipts';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import { en } from './i18n/locales/en';
 import {
     NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS,
@@ -768,6 +769,59 @@ const since = (dev: ReturnType<typeof createDevice>, at: ReturnType<typeof mark>
 });
 const storedConfig = (dev: ReturnType<typeof createDevice>) => ({ storage: Object.fromEntries(dev.state.storage), secrets: Object.fromEntries(dev.state.secrets) });
 const webdavFields = { url: 'https://dav.example.com/mindwtr', username: 'alice', password: null, allowInsecureHttp: false };
+
+describe('native Settings › Sync fatal cleanup boundary', () => {
+    it.each(['verification', 'first sync', 'sync now'] as const)('keeps the exact fatal object and does no post-fatal settings work during WebDAV %s', async (phase) => {
+        const { dev, contract } = await start(phase === 'sync now' ? { ...WEBDAV_STORED, os: 'ios' } : { os: 'ios' });
+        if (phase !== 'sync now') value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
+        const ports = [
+            vi.spyOn(dev.host.storage, 'multiGet'), vi.spyOn(dev.host.storage, 'setItem'),
+            vi.spyOn(dev.host.storage, 'multiSet'), vi.spyOn(dev.host.storage, 'removeItem'),
+            vi.spyOn(dev.host.secrets, 'get'), vi.spyOn(dev.host.secrets, 'set'), vi.spyOn(dev.host.secrets, 'delete'),
+            vi.spyOn(dev.host.log, 'info'), vi.spyOn(dev.host.log, 'error'),
+            vi.spyOn(dev.host, 'clearSyncConfigCache'), vi.spyOn(dev.host, 'reconcileBackgroundSync'),
+            vi.spyOn(dev.host, 'rememberWebdavCapabilityProof'), vi.spyOn(dev.host, 'addBreadcrumb'),
+            vi.spyOn(dev.host.encryption, 'getStatus'), vi.spyOn(dev.host.encryption, 'getIncompleteTransition'),
+        ];
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        let calls = 0;
+        let at!: { counts: number[]; config: ReturnType<typeof storedConfig>; device: number; writes: number; calls: number; logged: number };
+        dev.host.performSync = async () => {
+            if (phase === 'first sync' && calls++ === 0) return { success: true };
+            at = { counts: ports.map((port) => port.mock.calls.length), config: storedConfig(dev), device: dev.state.log.length,
+                writes: writes.length, calls: device.calls.length, logged: device.logged.length };
+            throw fatal;
+        };
+        const input = { requestId: generateUUID(), revision: value(contract.getSyncSettings()).configRevision,
+            webdav: { ...webdavFields, password: phase === 'sync now' ? null : 'hunter22' } };
+        const result = phase === 'sync now' ? contract.syncNow(input) : contract.saveSyncBackend(input);
+        await expect(result).rejects.toBe(fatal);
+        expect(ports.map((port) => port.mock.calls.length)).toEqual(at.counts);
+        expect(storedConfig(dev)).toEqual(at.config);
+        expect(dev.state.log.slice(at.device)).toEqual([]);
+        expect(writes.slice(at.writes)).toEqual([]);
+        expect(device.calls.slice(at.calls)).toEqual([]);
+        expect(device.logged.slice(at.logged)).toEqual([]);
+        expect(value(contract.getSyncSettings()).busy.syncing).toBe(true);
+        expect(dev.state.storage.get(SYNC_BACKEND_KEY)).toBe(phase === 'verification' ? undefined : 'webdav');
+        expect(dev.state.secrets.get(WEBDAV_PASSWORD_KEY)).toBe(phase === 'verification' ? undefined : 'hunter22');
+        // A fatal action did not produce a completed success receipt for its UUID.
+        const retry = await (phase === 'sync now' ? contract.syncNow(input) : contract.saveSyncBackend(input)).catch((error: unknown) => error);
+        if (phase === 'verification') expect(retry).toBe(fatal);
+        else expect(retry).toMatchObject({ ok: false, error: { code: phase === 'first sync' ? 'STALE_REVISION' : 'ACTION_FAILED' } });
+    });
+
+    it('keeps ordinary same-name errors on the existing toast and settled-screen path', async () => {
+        const { dev, contract } = await start({ ...WEBDAV_STORED, os: 'ios' });
+        dev.host.performSync = async () => {
+            throw Object.assign(new Error('ordinary sync failure'), { name: 'NativeAttachmentCleanupUnconfirmedError' });
+        };
+        const result = value(await contract.syncNow({ requestId: generateUUID(), revision: value(contract.getSyncSettings()).configRevision, webdav: webdavFields }));
+        expect(result.toasts).toHaveLength(1);
+        expect(result.toasts[0]).toMatchObject({ tone: 'error', message: 'Review Settings → Sync and try again.\nordinary sync failure' });
+        expect(value(contract.getSyncSettings()).busy.syncing).toBe(false);
+    });
+});
 
 describe('native host contract: Settings › Sync commands replayed after a restart', () => {
     const originalTz = process.env.TZ;

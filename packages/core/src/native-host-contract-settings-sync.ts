@@ -64,6 +64,7 @@ import type { Language } from './i18n/i18n-types';
 import { NATIVE_HOST_CONTRACT_VERSION, type NativeHostResult } from './native-host-contract';
 import { fail, isObjectRecord, isText } from './native-host-contract-menu-views';
 import { createNativeRequestReceipts, runStoreWrite, settleWrite } from './native-request-receipts';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import { useTaskStore } from './store';
 import { isSyncEncryptionCleanupDeferredError } from './sync-encryption-service';
 import type { SyncEncryptionStatus, SyncEncryptionTransitionKind } from './sync-encryption';
@@ -1041,15 +1042,22 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         if (done) return Promise.resolve({ ok: true, value: done.value });
         const result = (async (): Promise<NativeHostResult<NativeSyncCommandResult>> => {
             if (screen !== current) return fail('ACTION_FAILED', 'Settings › Sync was closed; open it again');
+            let cleanupUnconfirmed = false;
             try {
                 const refused = await run();
                 if (refused && !refused.ok) return refused;
             } catch (error) {
+                if (error instanceof NativeAttachmentCleanupUnconfirmedError) {
+                    cleanupUnconfirmed = true;
+                    throw error;
+                }
                 const message = current.transport.redactText(error instanceof Error ? error.message : String(error));
                 return fail(error instanceof SyncSettingsWriteError ? 'SAVE_FAILED' : 'ACTION_FAILED', message);
             } finally {
-                await settle(current);
-                current.configRevision = await readConfigRevision(current.host).catch(() => current.configRevision);
+                if (!cleanupUnconfirmed) {
+                    await settle(current);
+                    current.configRevision = await readConfigRevision(current.host).catch(() => current.configRevision);
+                }
             }
             const value = { toasts: takeToasts() };
             finished.set(requestId, { identity: print, value });

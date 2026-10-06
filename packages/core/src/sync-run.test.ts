@@ -37,6 +37,8 @@ import { createMobileAttachmentCommon } from './mobile-attachment-common';
 import { createMobileAttachmentBackends } from './mobile-attachment-backends';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 import { SyncEncryptionPartlyEncryptedError } from './sync-encryption';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
+import { LocalSyncAbort } from './sync-client-helpers';
 
 // Each harness stands up its own fake store, so the process-wide idle-cycle
 // snapshot (keyed on sync scope + the store's change stamp, unique inside a
@@ -2815,6 +2817,108 @@ describe('runSharedSyncCycle', () => {
         expect(harness.persisted.settings.attachments?.lastCleanupAt).toBe(NOW.toISOString());
         // invalidateFastSyncState suppressed the fast-state record.
         expect(harness.fastStates.size).toBe(0);
+    });
+
+    it('propagates unconfirmed native cleanup without any post-error work or remote lease release', async () => {
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        const lease = createFenceLease({ release: vi.fn().mockRejectedValue(new Error('Release must not run')) });
+        const local = createData([createTask('t-local', 'Local task')], {
+            attachments: { lastCleanupAt: '2026-01-01T00:00:00.000Z' },
+        });
+        let atCleanup: (() => void) | undefined;
+        const runAttachmentCleanup = vi.fn(async () => { atCleanup!(); throw fatal; });
+        const bundle = createHarness({
+            local, remote: createData([createTask('t-remote', 'Remote task')]), fastSyncScope: 'fatal-scope',
+            io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+            hooks: {
+                runAttachmentCleanup,
+                handleRunErrorBeforeRequeue: vi.fn(async () => null),
+                handleRunErrorAfterRequeue: vi.fn(async () => null),
+            },
+        });
+        const { harness, io, storage, store, hooks, notifier, run } = bundle;
+        const afterError = [
+            vi.mocked(storage.persistLocal), vi.mocked(storage.persistSyncStatus), vi.mocked(storage.writeFastSyncState),
+            vi.mocked(storage.persistExternalCalendars), vi.mocked(io.writeRemote), vi.mocked(io.readRemote),
+            vi.mocked(hooks.handleRunErrorBeforeRequeue!), vi.mocked(hooks.handleRunErrorAfterRequeue!),
+            vi.mocked(hooks.finalizeErrorStatus), vi.mocked(hooks.finalizeSuccess),
+            vi.mocked(hooks.requestFollowUp), vi.mocked(hooks.requestFollowUpAfter!),
+            vi.mocked(notifier.logSyncError), vi.mocked(notifier.logMergeSummary),
+            vi.spyOn(notifier, 'logInfo'), vi.spyOn(notifier, 'logWarning'), vi.spyOn(notifier, 'logWarningExtra'),
+            vi.spyOn(notifier, 'onDiagnostic'), vi.spyOn(notifier, 'setStep'), vi.spyOn(store, 'setUiError'),
+            vi.mocked(lease.assertHeld), vi.mocked(lease.renew), vi.mocked(lease.retryAfterMs),
+        ];
+        let acknowledged: AppData | undefined;
+        atCleanup = () => {
+            expect(io.acquireRemoteMutationFence).toHaveBeenCalledTimes(1);
+            expect(lease.assertHeld).toHaveBeenCalled();
+            expect(storage.persistLocal).toHaveBeenCalled();
+            expect(io.writeRemote).toHaveBeenCalled();
+            acknowledged = cloneAppData(harness.persisted);
+            expect(acknowledged.tasks.map((task) => task.id)).toEqual(expect.arrayContaining(['t-local', 't-remote']));
+            for (const callback of afterError) callback.mockClear();
+        };
+
+        await expect(run()).rejects.toBe(fatal);
+
+        expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+        expect(lease.release).not.toHaveBeenCalled();
+        for (const callback of afterError) expect(callback).not.toHaveBeenCalled();
+        expect(harness.persisted).toEqual(acknowledged);
+        expect(harness.remote?.tasks.map((task) => task.id)).toEqual(expect.arrayContaining(['t-local', 't-remote']));
+    });
+
+    it('keeps LocalSyncAbort cleanup requeue bookkeeping and ordinary lease release', async () => {
+        const abort = new LocalSyncAbort('local-data-changed');
+        const lease = createFenceLease();
+        const { harness, hooks, run } = createHarness({
+            local: createData([createTask('t-local', 'Local task')], { attachments: { lastCleanupAt: '2026-01-01T00:00:00.000Z' } }),
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+            hooks: { runAttachmentCleanup: vi.fn(async () => { throw abort; }), handleRunErrorBeforeRequeue: vi.fn(async () => null) },
+        });
+
+        await expect(run()).resolves.toMatchObject({ success: true, skipped: 'requeued' });
+
+        expect(hooks.handleRunErrorBeforeRequeue).toHaveBeenCalledWith(abort, expect.anything());
+        expect(harness.infos).toEqual(expect.arrayContaining([expect.objectContaining({ message: 'Sync cycle requeued' })]));
+        expect(harness.diagnostics).toContain('requeued');
+        expect(lease.release).toHaveBeenCalledTimes(1);
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+        expect(hooks.finalizeSuccess).not.toHaveBeenCalled();
+    });
+
+    it('keeps ordinary cleanup failure handling and lease release for a same-name plain Error', async () => {
+        const ordinary = Object.assign(new Error('Ordinary cleanup refusal'), { name: 'NativeAttachmentCleanupUnconfirmedError' });
+        const lease = createFenceLease();
+        const { hooks, notifier, run } = createHarness({
+            local: createData([createTask('t-local', 'Local task')], { attachments: { lastCleanupAt: '2026-01-01T00:00:00.000Z' } }),
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+            hooks: { runAttachmentCleanup: vi.fn(async () => { throw ordinary; }) },
+        });
+
+        await expect(run()).resolves.toMatchObject({ success: false });
+
+        expect(notifier.logSyncError).toHaveBeenCalledWith(ordinary, expect.anything());
+        expect(hooks.finalizeErrorStatus).toHaveBeenCalledTimes(1);
+        expect(lease.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases an ordinary successful cleanup lease and finalizes success', async () => {
+        const lease = createFenceLease();
+        const { hooks, run } = createHarness({
+            local: createData([createTask('t-local', 'Local task')], { attachments: { lastCleanupAt: '2026-01-01T00:00:00.000Z' } }),
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+            hooks: { runAttachmentCleanup: vi.fn(async () => null) },
+        });
+
+        await expect(run()).resolves.toMatchObject({ success: true });
+
+        expect(hooks.runAttachmentCleanup).toHaveBeenCalledTimes(1);
+        expect(hooks.finalizeSuccess).toHaveBeenCalledTimes(1);
+        expect(lease.release).toHaveBeenCalledTimes(1);
     });
 
     it('runs cleanup before the interval elapses when an attachment was just removed (#1064)', async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppData, Attachment } from './types';
-import { runMobileAttachmentCleanup } from './mobile-attachment-cleanup';
+import { runMobileAttachmentCleanup, type MobileAttachmentCleanupHost } from './mobile-attachment-cleanup';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import type { MobileSyncAttachmentCleanupOptions } from './mobile-sync-service';
 import { DropboxConflictError } from './dropbox';
 import { createMemoryFileSystem, MANAGED } from './__fixtures__/mobile-attachment-fakes';
@@ -34,7 +35,7 @@ const purgedTaskWith = (attachment: Partial<Attachment>): AppData => ({
   settings: {},
 });
 
-const setup = (data: AppData, overrides: Partial<MobileSyncAttachmentCleanupOptions> = {}) => {
+const setup = (data: AppData, overrides: Partial<MobileSyncAttachmentCleanupOptions> = {}, hostOverrides: Partial<MobileAttachmentCleanupHost> = {}) => {
   const memory = createMemoryFileSystem();
   const webdavHeadFile = vi.fn(async () => ({ exists: true, etag: '"v1"', fingerprint: null, lastModified: null, contentLength: null }));
   const webdavDeleteFileVersioned = vi.fn(async () => undefined);
@@ -57,6 +58,7 @@ const setup = (data: AppData, overrides: Partial<MobileSyncAttachmentCleanupOpti
   const run = () => runMobileAttachmentCleanup(options, {
     fs: memory.fs,
     core: { webdavHeadFile, webdavDeleteFileVersioned, cloudDeleteFile },
+    ...hostOverrides,
   });
   return { memory, options, run, webdavHeadFile, webdavDeleteFileVersioned, cloudDeleteFile };
 };
@@ -127,6 +129,48 @@ describe('mobile attachment cleanup', () => {
     expect(options.logSyncWarning).not.toHaveBeenCalled();
   });
 
+  it.each(['delete', 'deleteUnlessKept'] as const)('propagates unconfirmed native cleanup from %s before processing or any remote deletion', async (primitive) => {
+    const uri = `${MANAGED}orphan.pdf`;
+    const data = purgedTaskWith({ uri, cloudKey: 'attachments/orphan.pdf' });
+    const before = structuredClone(data);
+    const fatal = new NativeAttachmentCleanupUnconfirmedError();
+    const { run, memory, options, webdavHeadFile, webdavDeleteFileVersioned, cloudDeleteFile } = setup(data);
+    memory.put(uri, new Uint8Array([1, 2, 3]));
+    const refuse = vi.fn(async () => { throw fatal; });
+    memory.fs[primitive] = refuse;
+
+    await expect(run()).rejects.toBe(fatal);
+
+    expect(refuse).toHaveBeenCalledTimes(1);
+    expect(memory.read(uri)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(data).toEqual(before);
+    expect(webdavHeadFile).not.toHaveBeenCalled();
+    expect(webdavDeleteFileVersioned).not.toHaveBeenCalled();
+    expect(cloudDeleteFile).not.toHaveBeenCalled();
+    expect(options.deleteDropboxAttachment).not.toHaveBeenCalled();
+    expect(options.assertRemoteMutationFenceHeld).not.toHaveBeenCalled();
+    expect(options.logSyncInfo).not.toHaveBeenCalled();
+    expect(options.logSyncWarning).not.toHaveBeenCalled();
+  });
+
+  it.each(['Error', 'NativeAttachmentCleanupUnconfirmedError'])('preserves ordinary RN delete warning policy for a plain %s', async (name) => {
+    const uri = `${MANAGED}orphan.pdf`;
+    const data = purgedTaskWith({ uri, cloudKey: 'attachments/orphan.pdf' });
+    const before = structuredClone(data);
+    const error = Object.assign(new Error('Ordinary file refusal'), { name });
+    const { run, memory, options, webdavDeleteFileVersioned } = setup(data);
+    memory.put(uri, new Uint8Array([1]));
+    memory.fs.delete = vi.fn(async () => { throw error; });
+
+    const result = await run();
+
+    expect(options.logSyncWarning).toHaveBeenCalledWith('Failed to delete attachment file', error);
+    expect(webdavDeleteFileVersioned).toHaveBeenCalledTimes(1);
+    expect(result.appData.tasks[0].attachments).toEqual([]);
+    expect(memory.read(uri)).toEqual(new Uint8Array([1]));
+    expect(data).toEqual(before);
+  });
+
   it.each([true, false])('acknowledges the guarded primitive result removed=%s using the original URI', async (removed) => {
     const uri = `${MANAGED}encoded%20name.pdf`;
     const { run, memory, options } = setup(purgedTaskWith({ uri }), { backend: 'off' });
@@ -176,6 +220,157 @@ describe('mobile attachment cleanup', () => {
     expect(webdavHeadFile).not.toHaveBeenCalled();
     expect(cloudDeleteFile).not.toHaveBeenCalled();
     expect(result.appData.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+  });
+
+  it('passes each selected Task and Project ID even when their sanitized URI is identical', async () => {
+    const uri = `${MANAGED}not-an-attachment-id%20name.pdf`;
+    const taskID = '00000000-0000-4000-8000-000000000A14';
+    const projectID = '00000000-0000-4000-8000-000000000B14';
+    const data = purgedTaskWith({ id: taskID, uri: ` ${uri} ` });
+    data.projects = [{
+      id: 'purged-project', title: 'Purged Project', status: 'archived', order: 0,
+      tags: [], createdAt: now, updatedAt: now, deletedAt: now, purgedAt: now,
+      attachments: [{ ...data.tasks[0].attachments![0], id: projectID }],
+    }];
+    const before = structuredClone(data);
+    const ensureLocalSnapshotFresh = vi.fn();
+    const retireLocalAttachment = vi.fn(async (_id: string, _target: string, keep: () => boolean) => {
+      const checks = ensureLocalSnapshotFresh.mock.calls.length;
+      await Promise.resolve();
+      expect(keep()).toBe(false);
+      expect(ensureLocalSnapshotFresh).toHaveBeenCalledTimes(checks + 1);
+      return false;
+    });
+    const { run, memory, options } = setup(data, { backend: 'off', ensureLocalSnapshotFresh }, { retireLocalAttachment });
+    memory.put(uri, new Uint8Array([1, 2]));
+    const deleteFile = vi.spyOn(memory.fs, 'delete');
+    memory.fs.deleteUnlessKept = vi.fn(async () => true);
+
+    const result = await run();
+
+    expect(retireLocalAttachment.mock.calls.map(([id, target]) => [id, target])).toEqual([[taskID, uri], [projectID, uri]]);
+    expect(deleteFile).not.toHaveBeenCalled();
+    expect(memory.fs.deleteUnlessKept).not.toHaveBeenCalled();
+    expect(memory.read(uri)).toEqual(new Uint8Array([1, 2]));
+    expect(result.appData.tasks[0].attachments).toEqual([]);
+    expect(result.appData.projects[0].attachments).toEqual([]);
+    expect(data).toEqual(before);
+    expect(options.logSyncInfo).toHaveBeenCalledTimes(2);
+    expect(options.logSyncInfo).toHaveBeenCalledWith('Attachment cleanup freshness guarded', {
+      releaseCheck: 'v1.3.5/native-cleanup-freshness', outcome: 'retained',
+    });
+  });
+
+  it.each([true, false])('keeps RN attempted-counts-as-processed semantics for selected retirement removed=%s', async (removed) => {
+    const uri = `${MANAGED}orphan.pdf`;
+    const data = purgedTaskWith({ uri, deletedAt: now, localStatus: 'available' });
+    delete data.tasks[0].purgedAt;
+    delete data.tasks[0].deletedAt;
+    const before = structuredClone(data);
+    const retireLocalAttachment = vi.fn(async (_id: string, target: string, keep: () => boolean) => {
+      expect(keep()).toBe(false);
+      if (removed) await memory.fs.delete(target);
+      return removed;
+    });
+    const { run, memory, options } = setup(data, { backend: 'off' }, { retireLocalAttachment });
+    memory.put(uri, new Uint8Array([1]));
+    memory.fs.deleteUnlessKept = vi.fn(async () => { throw new Error('Raw guarded fallback must not run'); });
+
+    const result = await run();
+
+    expect(retireLocalAttachment).toHaveBeenCalledWith('orphan', uri, expect.any(Function));
+    expect(memory.fs.deleteUnlessKept).not.toHaveBeenCalled();
+    expect(memory.read(uri)).toEqual(removed ? undefined : new Uint8Array([1]));
+    expect(result.appData.tasks[0].attachments).toEqual([expect.objectContaining({ id: 'orphan', uri, deletedAt: now, localStatus: 'missing' })]);
+    expect(data).toEqual(before);
+    expect(options.logSyncInfo).toHaveBeenCalledWith('Attachment cleanup freshness guarded', {
+      releaseCheck: 'v1.3.5/native-cleanup-freshness', outcome: removed ? 'removed' : 'retained',
+    });
+    expect(options.logSyncWarning).not.toHaveBeenCalled();
+  });
+
+  it.each(['file:///storage/Download/orphan.pdf', 'https://example.com/orphan.pdf', 'content://provider/orphan', `${MANAGED}../orphan.pdf`])('does not give selected retirement authority for excluded URI %s', async (uri) => {
+    const retireLocalAttachment = vi.fn(async () => true);
+    const { run, memory } = setup(purgedTaskWith({ uri }), { backend: 'off' }, { retireLocalAttachment });
+    memory.put(uri, new Uint8Array([1]));
+
+    await run();
+
+    expect(retireLocalAttachment).not.toHaveBeenCalled();
+    expect(memory.read(uri)).toEqual(new Uint8Array([1]));
+    expect(memory.calls).toEqual([]);
+  });
+
+  it('rechecks freshness through the selected callback keep guard before physical retirement', async () => {
+    const uri = `${MANAGED}orphan.pdf`;
+    const data = purgedTaskWith({ uri, cloudKey: 'attachments/orphan.pdf' });
+    const before = structuredClone(data);
+    const abort = Object.assign(new Error('Snapshot changed'), { name: 'LocalSyncAbort' });
+    let fresh = true;
+    const ensureLocalSnapshotFresh = vi.fn(() => { if (!fresh) throw abort; });
+    const retireLocalAttachment = vi.fn(async (_id: string, _uri: string, keep: () => boolean) => {
+      await Promise.resolve();
+      fresh = false;
+      keep();
+      throw new Error('A stale selected callback must not reach retirement');
+    });
+    const { run, memory, options, webdavHeadFile } = setup(data, { ensureLocalSnapshotFresh }, { retireLocalAttachment });
+    memory.put(uri, new Uint8Array([1]));
+    memory.fs.deleteUnlessKept = vi.fn(async () => true);
+
+    await expect(run()).rejects.toBe(abort);
+
+    expect(retireLocalAttachment).toHaveBeenCalledTimes(1);
+    expect(memory.fs.deleteUnlessKept).not.toHaveBeenCalled();
+    expect(memory.calls).toEqual([]);
+    expect(memory.read(uri)).toEqual(new Uint8Array([1]));
+    expect(data).toEqual(before);
+    expect(webdavHeadFile).not.toHaveBeenCalled();
+    expect(options.logSyncInfo).not.toHaveBeenCalled();
+    expect(options.logSyncWarning).not.toHaveBeenCalled();
+  });
+
+  it('propagates selected retirement fatal identity without raw fallback, processing, remote work or logs', async () => {
+    const uri = `${MANAGED}orphan.pdf`;
+    const data = purgedTaskWith({ uri, cloudKey: 'attachments/orphan.pdf' });
+    const before = structuredClone(data);
+    const fatal = new NativeAttachmentCleanupUnconfirmedError();
+    const retireLocalAttachment = vi.fn(async () => { throw fatal; });
+    const { run, memory, options, webdavHeadFile, webdavDeleteFileVersioned, cloudDeleteFile } = setup(data, {}, { retireLocalAttachment });
+    memory.put(uri, new Uint8Array([1]));
+    memory.fs.deleteUnlessKept = vi.fn(async () => true);
+
+    await expect(run()).rejects.toBe(fatal);
+
+    expect(retireLocalAttachment).toHaveBeenCalledWith('orphan', uri, expect.any(Function));
+    expect(memory.fs.deleteUnlessKept).not.toHaveBeenCalled();
+    expect(memory.calls).toEqual([]);
+    expect(memory.read(uri)).toEqual(new Uint8Array([1]));
+    expect(data).toEqual(before);
+    for (const callback of [webdavHeadFile, webdavDeleteFileVersioned, cloudDeleteFile,
+      options.deleteDropboxAttachment, options.assertRemoteMutationFenceHeld, options.logSyncInfo, options.logSyncWarning]) {
+      expect(callback).not.toHaveBeenCalled();
+    }
+  });
+
+  it('warns on ordinary selected retirement failure and processes it without a raw fallback', async () => {
+    const uri = `${MANAGED}orphan.pdf`;
+    const error = new Error('Ordinary selected refusal');
+    const retireLocalAttachment = vi.fn(async () => { throw error; });
+    const { run, memory, options, webdavDeleteFileVersioned } = setup(purgedTaskWith({ uri, cloudKey: 'attachments/orphan.pdf' }), {}, { retireLocalAttachment });
+    memory.put(uri, new Uint8Array([1]));
+    memory.fs.deleteUnlessKept = vi.fn(async () => true);
+
+    const result = await run();
+
+    expect(retireLocalAttachment).toHaveBeenCalledTimes(1);
+    expect(memory.fs.deleteUnlessKept).not.toHaveBeenCalled();
+    expect(memory.calls).toEqual([]);
+    expect(memory.read(uri)).toEqual(new Uint8Array([1]));
+    expect(options.logSyncWarning).toHaveBeenCalledWith('Failed to delete attachment file', error);
+    expect(webdavDeleteFileVersioned).toHaveBeenCalledTimes(1);
+    expect(result.appData.tasks[0].attachments).toEqual([]);
+    expect(options.logSyncInfo).not.toHaveBeenCalled();
   });
 
   it('ends the cycle on a Dropbox write conflict instead of logging it', async () => {

@@ -23,6 +23,7 @@ import { DOMParser } from '@xmldom/xmldom';
 import { createNativeAttachments, nativeFileChannels } from './host-attachments';
 import {
     MOBILE_BACKGROUND_SYNC_DEADLINE_MS,
+    NativeAttachmentCleanupUnconfirmedError,
     SETTINGS_SYNC_BADGE_COLORS,
     SYNC_BACKEND_KEY,
     SyncCryptoAuthError,
@@ -333,6 +334,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     let configured = false;
     let cycles = 0;
     let lastEvent = '';
+    let fatalCleanupError: NativeAttachmentCleanupUnconfirmedError | null = null;
     const badge = (): SyncBadgeState => {
         const settings = useTaskStore.getState().settings;
         return resolveSyncBadgeState({
@@ -348,6 +350,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         return { type: 'sync', badge: current, color: current === 'hidden' ? null : SETTINGS_SYNC_BADGE_COLORS[current], cycles };
     };
     const emitState = () => {
+        if (fatalCleanupError) return;
         const event = state();
         const text = JSON.stringify(event);
         if (text === lastEvent) return;
@@ -357,9 +360,13 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     };
     /** RN's useMobileSyncBadge reads the configuration again on every screen change and sync status change. */
     const refreshConfigured = async () => {
+        if (fatalCleanupError) return;
         try {
-            configured = (await service.getMobileSyncConfigurationStatus()).configured;
-        } catch {
+            const nextConfigured = (await service.getMobileSyncConfigurationStatus()).configured;
+            if (fatalCleanupError) return;
+            configured = nextConfigured;
+        } catch (error) {
+            if (fatalCleanupError || error instanceof NativeAttachmentCleanupUnconfirmedError) return;
             configured = false;
         }
         emitState();
@@ -367,11 +374,17 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     /** Every cycle, automatic or from the Sync screen, goes through here, so Kotlin reads its lists again once one ends. */
     const performSync: NativeSyncSettingsHost['performSync'] = async (syncPathOverride, options) => {
+        if (fatalCleanupError) throw fatalCleanupError;
         try {
             return await service.performMobileSync(syncPathOverride, options);
+        } catch (error) {
+            if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
+            throw error;
         } finally {
-            cycles += 1;
-            void refreshConfigured();
+            if (!fatalCleanupError) {
+                cycles += 1;
+                void refreshConfigured();
+            }
         }
     };
 
@@ -387,8 +400,10 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         return shouldScheduleMobileBackgroundSync({ schedulerAvailable: true, configured, backend });
     };
     const reconcileBackgroundSync = async () => {
+        if (fatalCleanupError) throw fatalCleanupError;
         void refreshConfigured();
         const on = await backgroundSyncWanted();
+        if (fatalCleanupError) throw fatalCleanupError;
         // Kotlin answers once WorkManager stored it (bounded); a refusal throws to the caller, and the next reconcile tries again.
         bindings.scheduleBackgroundSync(on);
         bindings.trace(`Native Android background sync schedule=${on ? 'on' : 'off'}`);

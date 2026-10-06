@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createMobileSyncService, type MobileSyncServiceHost } from './mobile-sync-service';
 import { classifySyncFailure } from './mobile-sync-utils';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
+import { LocalSyncAbort } from './sync-client-helpers';
 import { performSyncCycle } from './sync';
 import { createSyncEncryptionStateStore, readSyncLocationScope } from './sync-encryption-local-state';
 import { createWebdavCapabilityProofStore } from './webdav-capability-proof';
@@ -501,6 +503,219 @@ describe('mobile sync service behind fake ports', () => {
     expect(result.success).toBe(true);
     expect(fake.logs.some((line) => line.message.includes('Attachment pre-sync skipped') && line.extra?.reason === 'encryption-recheck')).toBe(true);
     expect(attachmentPasses).toHaveBeenCalled();
+  });
+
+  it.each([false, true])('quarantines queued syncs and idle waiters after cleanup refusal (unsubscribe throws: %s)', async (unsubscribeThrows) => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    fake.host.core!.performSyncCycle = vi.fn(performSyncCycle);
+    fake.remote.data = {
+      ...emptyData(),
+      tasks: [{ id: 'remote-task', title: 'Remote', status: 'inbox', tags: [], contexts: [],
+        createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' }],
+    };
+    const fatal = new NativeAttachmentCleanupUnconfirmedError();
+    const remove = vi.fn(() => { if (unsubscribeThrows) throw new Error('unsubscribe unavailable'); });
+    fake.host.network.subscribe = vi.fn(() => ({ remove }));
+    const fence = { assertHeld: vi.fn(async () => undefined), renew: vi.fn(async () => undefined), release: vi.fn(async () => undefined) };
+    vi.mocked(fake.host.core!.acquireSyncRemoteMutationFence!).mockResolvedValue(fence as never);
+    // These are the ports this real shared cycle uses: after refusal only the
+    // local network subscription's removal is allowed, even if it throws.
+    const ports = [
+      fake.host.storage.getItem, fake.host.storage.setItem, fake.host.storage.removeItem,
+      vi.spyOn(fake.host, 'getSecureConfigValue'),
+      vi.spyOn(fake.host.platform, 'os'), vi.spyOn(fake.host.platform, 'dropboxAppKey'),
+      vi.spyOn(fake.host.network, 'getState'), fake.host.network.subscribe,
+      vi.spyOn(fake.host.localData, 'getData'), vi.spyOn(fake.host.localData, 'saveData'),
+      vi.spyOn(fake.host.log, 'info'), vi.spyOn(fake.host.log, 'warn'),
+      vi.spyOn(fake.host.log, 'syncError'), vi.spyOn(fake.host.log, 'sanitize'),
+      vi.spyOn(fake.host.externalCalendars, 'load'), vi.spyOn(fake.host.externalCalendars, 'save'),
+      vi.spyOn(fake.host.encryption, 'loadSyncEncryptionLocalState'),
+      vi.spyOn(fake.host.encryption, 'logSyncEncryptionEvent'),
+      vi.spyOn(fake.host.core!, 'isSandboxMode'), vi.spyOn(fake.host.core!, 'isWorkspaceTransitionActive'),
+      vi.spyOn(fake.host.core!.useTaskStore!, 'getState'), fake.host.core!.useTaskStore!.setState,
+      fake.store.setError, fake.store.fetchData, vi.spyOn(fake.host.core!, 'flushPendingSave'),
+      vi.spyOn(fake.host.core!, 'getInMemoryAppDataSnapshot'), fake.host.core!.performSyncCycle,
+      fake.host.core!.webdavGetSyncDocument, fake.host.core!.webdavPutSyncDocument, fake.host.core!.webdavHeadFile,
+      fake.host.core!.probeWebdavSyncCompatibility, fake.host.core!.acquireSyncRemoteMutationFence,
+      fake.host.fetch, fence.assertHeld, fence.renew, fence.release,
+      vi.spyOn(fake.host.attachments, 'syncWebdav'), vi.spyOn(fake.host.attachments, 'cleanupTempFiles'),
+      vi.spyOn(fake.host.attachments, 'hasPendingWork'), vi.spyOn(fake.host.attachments, 'hasCompletedPresenceReconciliation'),
+      vi.spyOn(fake.host.fileSync, 'releaseLease'),
+    ];
+    const calls = () => ports.map((port) => vi.mocked(port!).mock.calls.length);
+    const durableAndLogs = () => JSON.stringify({
+      values: [...fake.values], saved: fake.saved, remote: fake.remote, settings: fake.store.settings,
+      logs: fake.logs, syncErrors: fake.syncErrors,
+    });
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { entered = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let boundaryCalls: number[] = [];
+    let boundaryState = '';
+    fake.host.attachments.runCleanup = vi.fn(async () => {
+      entered();
+      await gate;
+      boundaryCalls = calls();
+      boundaryState = durableAndLogs();
+      throw fatal;
+    });
+    const service = createMobileSyncService(fake.host);
+    const activity: string[] = [];
+    service.subscribeMobileSyncActivityState((state) => activity.push(state));
+    const active = service.performMobileSync(undefined, { manual: true });
+    await paused;
+    expect(fake.saved.some((data) => data.tasks.some((task) => task.id === 'remote-task'))).toBe(true);
+    const queued = service.performMobileSync(undefined, { manual: true });
+    const waiter = service.waitForMobileSyncIdle();
+    // This API reports requeue before refusal, but its late rejection callback
+    // must not write a diagnostic once cleanup owns the host.
+    await expect(service.performMobileSync(undefined, {
+      configOverride: { backend: 'webdav', webdav: { url: 'https://other.example.com', username: '', password: '' } },
+    })).resolves.toEqual({ success: true, skipped: 'requeued' });
+    const settled = Promise.allSettled([active, queued, waiter]);
+    vi.useFakeTimers();
+    try {
+      release();
+      const outcomes = await settled;
+      for (const outcome of outcomes) {
+        expect(outcome.status).toBe('rejected');
+        if (outcome.status === 'rejected') expect(outcome.reason).toBe(fatal);
+      }
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(fence.release).not.toHaveBeenCalled();
+      expect(activity).toEqual(['idle', 'syncing']);
+      expect(service.abortMobileSync()).toBe(false);
+      service.clearMobileSyncConfigCache();
+      await expect(service.performMobileSync()).rejects.toBe(fatal);
+      await expect(service.getMobileSyncConfigurationStatus()).rejects.toBe(fatal);
+      await expect(service.waitForMobileSyncIdle()).rejects.toBe(fatal);
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(calls()).toEqual(boundaryCalls);
+      expect(durableAndLogs()).toBe(boundaryState);
+      expect(fake.host.core!.performSyncCycle).toHaveBeenCalledTimes(1);
+      expect(fake.host.attachments.runCleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+    fake.host.network.subscribe = () => ({ remove: () => undefined });
+    fake.host.attachments.runCleanup = async ({ appData }) => ({ appData, shouldInvalidateFastSyncState: false });
+    // Only host recreation supplies a fresh service. Clearing the cache above
+    // did not release the retained fatal owner in the original instance.
+    const fresh = createMobileSyncService(fake.host);
+    await expect(fresh.performMobileSync(undefined, { manual: true })).resolves.toMatchObject({ success: true });
+    expect(fence.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('withholds an acquired File Sync lease after fatal cleanup and preserves earlier merge writes', async () => {
+    const fake = createFakeHost();
+    const fatal = new NativeAttachmentCleanupUnconfirmedError();
+    const acquire = vi.spyOn(fake.host.fileSync, 'acquireLease');
+    const release = vi.spyOn(fake.host.fileSync, 'releaseLease');
+    const fileWrite = vi.spyOn(fake.host.fileSync, 'write');
+    let savedAtRefusal = '';
+    fake.host.attachments.runCleanup = vi.fn(async () => {
+      savedAtRefusal = JSON.stringify({ saved: fake.saved, values: [...fake.values], logs: fake.logs });
+      throw fatal;
+    });
+    const service = createMobileSyncService(fake.host);
+    await expect(service.performMobileSync(undefined, {
+      manual: true, configOverride: { backend: 'file', syncPath: 'file:///sync/data.json' },
+    })).rejects.toBe(fatal);
+    await expect(service.waitForMobileSyncIdle()).rejects.toBe(fatal);
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(fileWrite).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
+    expect(fake.saved.length).toBeGreaterThan(0);
+    expect(JSON.stringify({ saved: fake.saved, values: [...fake.values], logs: fake.logs })).toBe(savedAtRefusal);
+    expect(service.abortMobileSync()).toBe(false);
+  });
+
+  it('does not log or announce idle when a scheduled queued cycle refuses cleanup', async () => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    const fatal = new NativeAttachmentCleanupUnconfirmedError();
+    const remove = vi.fn();
+    fake.host.network.subscribe = () => ({ remove });
+    const fenceRelease = vi.fn(async () => undefined);
+    vi.mocked(fake.host.core!.acquireSyncRemoteMutationFence!).mockResolvedValue({
+      assertHeld: async () => undefined, renew: async () => undefined, release: fenceRelease,
+    } as never);
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { entered = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let boundaryState = '';
+    const state = () => JSON.stringify({ saved: fake.saved, values: [...fake.values], logs: fake.logs, syncErrors: fake.syncErrors });
+    fake.host.attachments.runCleanup = vi.fn()
+      .mockImplementationOnce(async ({ appData }) => {
+        entered();
+        await gate;
+        return { appData, shouldInvalidateFastSyncState: false };
+      })
+      .mockImplementationOnce(async () => {
+        boundaryState = state();
+        throw fatal;
+      });
+    const service = createMobileSyncService(fake.host);
+    const activity: string[] = [];
+    service.subscribeMobileSyncActivityState((value) => activity.push(value));
+    const active = service.performMobileSync(undefined, { manual: true });
+    await paused;
+    const queued = service.performMobileSync(undefined, { manual: true });
+    const idleResult = service.waitForMobileSyncIdle().then(() => 'idle', (error: unknown) => error);
+    vi.useFakeTimers();
+    try {
+      release();
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(active).resolves.toMatchObject({ success: true });
+      await expect(queued).resolves.toMatchObject({ success: true });
+      // A real remote edit prevents the read-check optimization from ending
+      // the queued cycle before its cleanup hook is reached.
+      fake.remote.data = { ...fake.remote.data!, tasks: [{
+        id: 'queued-remote-task', title: 'Changed remotely', status: 'inbox', tags: [], contexts: [],
+        createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-02T00:00:00.000Z',
+      }] };
+      fake.remote.etag += 1;
+      await vi.advanceTimersByTimeAsync(1_100);
+      expect(await idleResult).toBe(fatal);
+      expect(fake.host.attachments.runCleanup).toHaveBeenCalledTimes(2);
+      expect(fake.host.core!.performSyncCycle).toHaveBeenCalledTimes(2);
+      expect(remove).toHaveBeenCalledTimes(2);
+      expect(fenceRelease).toHaveBeenCalledTimes(1);
+      expect(activity).toEqual(['idle', 'syncing']);
+      expect(boundaryState).not.toBe('');
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(state()).toBe(boundaryState);
+      expect(fake.host.core!.performSyncCycle).toHaveBeenCalledTimes(2);
+      await expect(service.performMobileSync()).rejects.toBe(fatal);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['ordinary-same-name', 'local-abort'])('keeps %s cleanup failures recoverable and releases the File Sync lease', async (kind) => {
+    const fake = createFakeHost();
+    const error = kind === 'local-abort'
+      ? new LocalSyncAbort()
+      : Object.assign(new Error('ordinary cleanup error'), { name: 'NativeAttachmentCleanupUnconfirmedError' });
+    const release = vi.spyOn(fake.host.fileSync, 'releaseLease');
+    fake.host.attachments.runCleanup = vi.fn()
+      .mockRejectedValueOnce(error)
+      .mockImplementation(async ({ appData }) => ({ appData, shouldInvalidateFastSyncState: false }));
+    const service = createMobileSyncService(fake.host);
+    const activity: string[] = [];
+    service.subscribeMobileSyncActivityState((value) => activity.push(value));
+    const options = { manual: true, configOverride: { backend: 'file' as const, syncPath: 'file:///sync/data.json' } };
+
+    const result = await service.performMobileSync(undefined, options);
+
+    expect(result).toMatchObject(kind === 'local-abort' ? { success: true, skipped: 'requeued' } : { success: false });
+    await expect(service.waitForMobileSyncIdle()).resolves.toBeUndefined();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(activity).toEqual(['idle', 'syncing', 'idle']);
+    expect(fake.logs.some((line) => line.message === (kind === 'local-abort' ? 'Sync cycle requeued' : 'Sync failed'))).toBe(true);
+    await expect(service.performMobileSync(undefined, options)).resolves.toMatchObject({ success: true });
+    expect(release).toHaveBeenCalledTimes(2);
   });
 
   it('does nothing in sandbox mode', async () => {

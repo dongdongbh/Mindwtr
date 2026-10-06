@@ -25,6 +25,7 @@ import type {
 import { SyncRemoteWriteConflict } from './sync-run-ports';
 import { LocalSyncAbort, ensureFreshLocalSyncSnapshot, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup } from './sync-client-helpers';
 import { hasFreshAttachmentCleanupWork } from './attachment-cleanup';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import { isAttachmentUploadTooLargeError, isWebdavHostUploadLimitError } from './attachment-transfer';
 import { isSyncEncryptionPartlyEncryptedError } from './sync-encryption';
 import { isHostResponseTooLargeError } from './http-utils';
@@ -618,14 +619,20 @@ class SharedSyncRunMachine {
     async run(): Promise<SyncRunResult> {
         let result!: SyncRunResult;
         let cleanupRetryAfterMs: number | null = null;
+        let cleanupUnconfirmed = false;
         try {
             try {
                 result = await this.runPhases();
             } catch (error) {
+                if (error instanceof NativeAttachmentCleanupUnconfirmedError) {
+                    cleanupUnconfirmed = true;
+                    throw error;
+                }
                 result = await this.handleRunError(error);
             }
         } finally {
-            cleanupRetryAfterMs = await this.releaseRemoteMutationFence();
+            // A retained native cleanup owner forbids another remote request; the lease expires naturally.
+            if (!cleanupUnconfirmed) cleanupRetryAfterMs = await this.releaseRemoteMutationFence();
         }
         if (cleanupRetryAfterMs !== null) {
             result.remoteFenceDeferred = 'cleanup';
