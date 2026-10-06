@@ -1004,6 +1004,260 @@ const applyAlarmActionDeadRowPatchToSource = (original) => {
   return next;
 };
 
+// A task's reminders (start, due and every due-time repeat) used to stack: each
+// alarm posts under its own id. Core now gives every reminder of one task the
+// same `tag`, and a tagged reminder posts under (tag, one fixed id), so the next
+// one replaces the notification already shown and alerts again. The alarm's own
+// id (`alarm.getAlarmId()`) stays its post id for everything else: the action
+// intents, getNotificationId and JS's later clearNotification. A small ledger
+// maps that id to the slot it posted into, and the slot to the alarm shown in
+// it, so cancelling an alarm's notification clears the slot only while that
+// alarm is the one shown there — never a newer reminder that replaced it.
+const REMINDER_SLOT_HELPERS = `    // Mindwtr reminder notification slots
+    private static final int REMINDER_SLOT_NOTIFICATION_ID = 1;
+    private static final String REMINDER_SLOT_PREFS = "mindwtr_reminder_notification_slots";
+
+    private android.content.SharedPreferences getReminderSlotPrefs() {
+        return mContext.getSharedPreferences(REMINDER_SLOT_PREFS, Context.MODE_PRIVATE);
+    }
+
+    // Posts a tagged reminder into its slot, replacing (and alerting again over)
+    // the one shown there; an untagged notification posts under its own id.
+    private void postReminderNotification(NotificationManager manager, String tag, int notificationId, Notification notification) {
+        if (tag == null || tag.equals("")) {
+            manager.notify(notificationId, notification);
+            return;
+        }
+        synchronized (AlarmUtil.class) {
+            android.content.SharedPreferences prefs = getReminderSlotPrefs();
+            android.content.SharedPreferences.Editor editor = prefs.edit();
+            String ownerKey = "owner:" + tag;
+            if (prefs.contains(ownerKey)) {
+                int previous = prefs.getInt(ownerKey, notificationId);
+                if (previous != notificationId) editor.remove("slot:" + previous);
+            }
+            editor.putInt(ownerKey, notificationId).putString("slot:" + notificationId, tag).commit();
+            manager.notify(tag, REMINDER_SLOT_NOTIFICATION_ID, notification);
+        }
+    }
+
+    // Cancels what the alarm with this post id put in the tray: an untagged
+    // notification, or its slot while it is still the reminder shown there.
+    private void cancelPostedNotification(int notificationId) {
+        NotificationManager manager = getNotificationManager();
+        manager.cancel(notificationId);
+        synchronized (AlarmUtil.class) {
+            android.content.SharedPreferences prefs = getReminderSlotPrefs();
+            String tag = prefs.getString("slot:" + notificationId, null);
+            if (tag == null) return;
+            android.content.SharedPreferences.Editor editor = prefs.edit().remove("slot:" + notificationId);
+            String ownerKey = "owner:" + tag;
+            if (prefs.contains(ownerKey) && prefs.getInt(ownerKey, 0) == notificationId) {
+                manager.cancel(tag, REMINDER_SLOT_NOTIFICATION_ID);
+                editor.remove(ownerKey);
+            }
+            editor.commit();
+        }
+    }
+
+`;
+
+const applyAlarmReminderSlotPatchToSource = (original) => {
+  if (original.includes('// Mindwtr reminder notification slots')) return original;
+  const removeFiredMarker = '    void removeFiredNotification(int id) {';
+  if (!original.includes(removeFiredMarker)) return original;
+  let next = original.replace(removeFiredMarker, `${REMINDER_SLOT_HELPERS}${removeFiredMarker}`);
+
+  const replacements = [
+    [
+      `            String tag = alarm.getTag();
+            if (tag != null && !tag.equals("")) {
+                mNotificationManager.notify(tag, notificationID, notification);
+            } else {
+                Log.e(TAG, "notification done");
+                mNotificationManager.notify(notificationID, notification);
+            }
+`,
+      `            postReminderNotification(mNotificationManager, alarm.getTag(), notificationID, notification);
+`,
+    ],
+    [
+      `            AlarmModel alarm = getAlarmDB().getAlarm(id);
+            getNotificationManager().cancel(alarm.getAlarmId());
+`,
+      `            AlarmModel alarm = getAlarmDB().getAlarm(id);
+            cancelPostedNotification(alarm.getAlarmId());
+`,
+    ],
+    [
+      '        getNotificationManager().cancel(firedNotificationId);\n',
+      '        cancelPostedNotification(firedNotificationId);\n',
+    ],
+    [
+      `    void clearNotification(int notificationId) {
+        getNotificationManager().cancel(notificationId);
+    }
+`,
+      `    void clearNotification(int notificationId) {
+        cancelPostedNotification(notificationId);
+    }
+`,
+    ],
+    [
+      `    void removeAllFiredNotifications() {
+        getNotificationManager().cancelAll();
+    }
+`,
+      `    void removeAllFiredNotifications() {
+        getNotificationManager().cancelAll();
+        synchronized (AlarmUtil.class) {
+            getReminderSlotPrefs().edit().clear().commit();
+        }
+    }
+`,
+    ],
+  ];
+  // Each anchor is replaced on its own: one drifting upstream (or behind an
+  // earlier patch) must fail the prebuild, not leave a cancel path that misses
+  // the slot and a reminder that can never be cleared from the tray.
+  for (const [anchor, replacement] of replacements) {
+    if (!next.includes(anchor)) {
+      throw new Error(`alarm-reminder-slot: expected anchor not found: ${anchor.trim().split('\n')[0]}`);
+    }
+    next = next.replace(anchor, replacement);
+  }
+  if (next.includes('getNotificationManager().cancel(alarm.getAlarmId())') || next.includes('mNotificationManager.notify(notificationID, notification)')) {
+    throw new Error('alarm-reminder-slot: a post or cancel path still bypasses the reminder slot');
+  }
+  return next;
+};
+
+// Two notification buttons failed once a reminder cycle had reaped the fired
+// alarm's row (it does on the next app start, or 5 s after a reminder while the
+// app is in front): Snooze degraded to a plain dismiss, so it never reminded
+// again. And Done only reached JS, which cancels the task's other alarms on its
+// next cycle; JS timers stop while the app is in the background, so a task's
+// next due-time repeat still fired for the task just completed. Now the snooze
+// intent carries the alarm itself, and Done cancels the task's other armed
+// reminders natively: the same per-task tag, or, for an alarm armed before
+// tags, a task reminder with the same taskId (never the Pomodoro alert).
+const REMINDER_ACTION_HELPERS = `    // Mindwtr task reminder actions
+    // Whether an alarm (its tag, and its data as "key==>value;;" pairs) is a reminder of the
+    // task Done was tapped for.
+    static boolean isReminderOfTask(String otherTag, String otherData, String tag, String taskId) {
+        if (tag != null && !tag.equals("") && tag.equals(otherTag)) return true;
+        if (taskId == null || taskId.equals("") || otherData == null) return false;
+        String otherTaskId = null;
+        String otherKind = null;
+        for (String item : otherData.split(";;")) {
+            int separator = item.indexOf("==>");
+            if (separator < 0) continue;
+            String key = item.substring(0, separator);
+            String value = item.substring(separator + 3);
+            if (key.equals("taskId")) otherTaskId = value;
+            else if (key.equals("kind")) otherKind = value;
+        }
+        return taskId.equals(otherTaskId) && otherKind != null && otherKind.startsWith("task-");
+    }
+
+    // Done on a task's reminder: the task's other armed reminders (its remaining due-time
+    // repeats, a snooze) never fire, even while the app has not seen the Done yet.
+    int cancelTaskReminders(String tag, String taskId) {
+        int cancelled = 0;
+        for (AlarmModel other : getAlarmDB().getAlarmList(1)) {
+            if (!isReminderOfTask(other.getTag(), other.getData(), tag, taskId)) continue;
+            cancelAlarm(other, true);
+            cancelled++;
+        }
+        return cancelled;
+    }
+
+`;
+
+const replaceRequiredAnchors = (source, id, replacements) => {
+  let next = source;
+  for (const [anchor, replacement] of replacements) {
+    if (!next.includes(anchor)) {
+      throw new Error(`${id}: expected anchor not found: ${anchor.trim().split('\n')[0]}`);
+    }
+    next = next.replace(anchor, replacement);
+  }
+  return next;
+};
+
+const applyAlarmReminderActionsUtilPatchToSource = (original) => {
+  if (original.includes('// Mindwtr task reminder actions')) return original;
+  const removeFiredMarker = '    void removeFiredNotification(int id) {';
+  if (!original.includes(removeFiredMarker)) return original;
+  return replaceRequiredAnchors(original, 'alarm-reminder-actions-util', [
+    [removeFiredMarker, `${REMINDER_ACTION_HELPERS}${removeFiredMarker}`],
+    [
+      '                completeIntent.putExtra("NotificationId", notificationID);\n',
+      '                completeIntent.putExtra("NotificationId", notificationID);\n'
+        + '                completeIntent.putExtra("ReminderTag", alarm.getTag() == null ? "" : alarm.getTag());\n',
+    ],
+    [
+      '                snoozeIntent.putExtra("NotificationId", notificationID);\n',
+      '                snoozeIntent.putExtra("NotificationId", notificationID);\n'
+        + '                snoozeIntent.putExtra("SnoozeAlarm", new com.google.gson.Gson().toJson(alarm));\n',
+    ],
+  ]);
+};
+
+const applyAlarmReminderActionsReceiverPatchToSource = (original) => {
+  if (original.includes('String completionReceipt = NotificationOpenPayloadStore.persistCompletion')) return original;
+  if (!original.includes('case Constants.NOTIFICATION_ACTION_COMPLETE')) return original;
+  // Upgrade a dependency already patched by PR1346 without requiring a fresh install.
+  if (original.includes('cancelTaskReminders(reminderTag')) {
+    return replaceRequiredAnchors(original, 'alarm-reminder-actions-receiver', [[
+      '                            NotificationOpenPayloadStore.cache(pendingPayload);',
+      `                            String completionReceipt = NotificationOpenPayloadStore.persistCompletion(context, pendingPayload);
+                            pendingPayload.put("actionId", completionReceipt);
+                            payload.putString("actionId", completionReceipt);
+                            NotificationOpenPayloadStore.cache(pendingPayload);`,
+    ]]).replace('                                NotificationOpenPayloadStore.persistCompletion(context, pendingPayload);\n', '');
+  }
+  const completeStart = original.indexOf('case Constants.NOTIFICATION_ACTION_COMPLETE:');
+  const beforeComplete = original.slice(0, completeStart);
+  const patched = replaceRequiredAnchors(original.slice(completeStart), 'alarm-reminder-actions-receiver', [
+    [
+      '                            NotificationOpenPayloadStore.cache(pendingPayload);',
+      `                            String completionReceipt = NotificationOpenPayloadStore.persistCompletion(context, pendingPayload);
+                            pendingPayload.put("actionId", completionReceipt);
+                            payload.putString("actionId", completionReceipt);
+                            NotificationOpenPayloadStore.cache(pendingPayload);`,
+    ],
+    [
+      `                            alarmUtil.stopAlarmSound();
+
+                            if (ANModule.getReactAppContext() != null) {
+                                ANModule.getReactAppContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("OnNotificationOpened"`,
+      `                            alarmUtil.stopAlarmSound();
+
+                            String reminderTag = alarm != null ? alarm.getTag() : intent.getExtras().getString("ReminderTag");
+                            int cancelledReminders = alarmUtil.cancelTaskReminders(reminderTag, payload.getString("taskId"));
+                            Log.d(TAG, "ACTION_COMPLETE cancelled task reminders=" + cancelledReminders);
+
+                            if (ANModule.getReactAppContext() != null) {
+                                ANModule.getReactAppContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("OnNotificationOpened"`,
+    ],
+  ]);
+  return replaceRequiredAnchors(beforeComplete, 'alarm-reminder-actions-receiver', [
+    [
+      `                            } else if (intent.getExtras().containsKey("NotificationId")) {
+                                // Dead row: degrade snooze to dismiss instead of`,
+      `                            } else if (intent.getExtras().getString("SnoozeAlarm") != null) {
+                                // Dead row: the intent carries the fired alarm, so the
+                                // snooze is made from it instead of being dropped.
+                                AlarmModel carried = new com.google.gson.Gson().fromJson(intent.getExtras().getString("SnoozeAlarm"), AlarmModel.class);
+                                alarmUtil.snoozeAlarm(carried);
+                                Log.d(TAG, "ACTION_SNOOZE snoozed from the intent's alarm");
+                            } else if (intent.getExtras().containsKey("NotificationId")) {
+                                // Dead row: degrade snooze to dismiss instead of`,
+    ],
+  ]) + patched;
+};
+
 const getAndroidSourceCandidates = (projectRoot, fileName) => [
   path.join(projectRoot, 'node_modules', 'react-native-alarm-notification', 'android', 'src', 'main', 'java', 'com', 'emekalites', 'react', 'alarm', 'notification', fileName),
   path.join(projectRoot, '..', '..', 'node_modules', 'react-native-alarm-notification', 'android', 'src', 'main', 'java', 'com', 'emekalites', 'react', 'alarm', 'notification', fileName),
@@ -1470,6 +1724,29 @@ const PATCHES = [
     appliedMarker: 'void clearNotification(int notificationId)',
   },
   {
+    id: 'alarm-reminder-slot',
+    platform: 'android',
+    getCandidates: androidJavaCandidates('AlarmUtil.java'),
+    transform: applyAlarmReminderSlotPatchToSource,
+    required: true,
+    // Must run after alarm-timing (snooze's firedNotificationId cancel) and
+    // alarm-dead-row-util (clearNotification): it routes those cancels through
+    // the slot ledger too.
+    firstMatchOnly: false,
+    appliedMarker: '// Mindwtr reminder notification slots',
+  },
+  {
+    id: 'alarm-reminder-actions-util',
+    platform: 'android',
+    getCandidates: androidJavaCandidates('AlarmUtil.java'),
+    transform: applyAlarmReminderActionsUtilPatchToSource,
+    required: true,
+    // Must run after alarm-dead-row-util: it extends the action intents that
+    // patch gives a NotificationId extra.
+    firstMatchOnly: false,
+    appliedMarker: '// Mindwtr task reminder actions',
+  },
+  {
     id: 'alarm-audio-interface',
     platform: 'android',
     getCandidates: androidJavaCandidates('AudioInterface.java'),
@@ -1537,6 +1814,16 @@ const PATCHES = [
     // produce.
     firstMatchOnly: false,
     appliedMarker: 'Log.d(TAG, "ACTION_SNOOZE id="',
+  },
+  {
+    id: 'alarm-reminder-actions-receiver',
+    platform: 'android',
+    getCandidates: androidJavaCandidates('AlarmReceiver.java'),
+    transform: applyAlarmReminderActionsReceiverPatchToSource,
+    required: true,
+    // Must run after alarm-dead-row-actions: it extends the hardened cases.
+    firstMatchOnly: false,
+    appliedMarker: 'cancelTaskReminders(reminderTag',
   },
   {
     id: 'alarm-complete-action-constants',
@@ -1613,6 +1900,7 @@ const PATCHES = [
     firstMatchOnly: true,
     appliedMarker: '// Mindwtr pending notification kind',
   },
+
 ];
 
 // A patch is required unless it explicitly opts out.

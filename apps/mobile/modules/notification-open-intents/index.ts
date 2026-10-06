@@ -1,7 +1,8 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { NativeModules, Platform } from 'react-native';
 
-type NotificationOpenPayload = {
+export type NotificationOpenPayload = {
+  actionId?: string;
   notificationId?: string;
   actionIdentifier?: string;
   taskId?: string;
@@ -12,6 +13,8 @@ type NotificationOpenPayload = {
 
 type NotificationOpenIntentsModule = {
   consumePendingOpenPayload(): Record<string, string> | null;
+  peekPendingCompletions?: () => Record<string, string>[];
+  acknowledgeCompletion?: (actionId: string) => void;
   ensureReminderChannel?: (channelId: string, channelName: string) => void;
   showPersistentCaptureNotification?: (title: string, text: string, channelName: string) => void;
   hidePersistentCaptureNotification?: () => void;
@@ -64,6 +67,7 @@ function parseNestedPayloadData(value: unknown): Record<string, string> {
 function normalizePayload(payload: Record<string, unknown>): NotificationOpenPayload {
   const nestedData = parseNestedPayloadData(payload.data);
   return {
+    actionId: stringifyPayloadValue(payload.actionId) || nestedData.actionId,
     notificationId: stringifyPayloadValue(payload.alarmKey) || stringifyPayloadValue(payload.id) || nestedData.alarmKey || nestedData.id,
     actionIdentifier: stringifyPayloadValue(payload.actionIdentifier) || nestedData.actionIdentifier || 'open',
     taskId: stringifyPayloadValue(payload.taskId) || nestedData.taskId,
@@ -81,6 +85,20 @@ export async function consumePendingNotificationOpenPayload(): Promise<Notificat
 
   const payload = await alarmNotificationModule?.consumePendingNotificationOpenPayload?.();
   return payload ? normalizePayload(payload) : null;
+}
+
+/** Durable Android receipts, oldest first; reading never removes them. */
+export async function peekPendingNotificationCompletions(): Promise<NotificationOpenPayload[]> {
+  if (Platform.OS !== 'android') return [];
+  if (!nativeModule?.peekPendingCompletions) throw new Error('Completion replay unavailable');
+  return nativeModule.peekPendingCompletions().map(normalizePayload);
+}
+
+export async function acknowledgeNotificationCompletion(actionId: string): Promise<void> {
+  if (Platform.OS !== 'android' || !nativeModule?.acknowledgeCompletion) {
+    throw new Error('Completion acknowledgement unavailable');
+  }
+  nativeModule.acknowledgeCompletion(actionId);
 }
 
 export async function ensureReminderNotificationChannel(channelId: string, channelName: string): Promise<void> {

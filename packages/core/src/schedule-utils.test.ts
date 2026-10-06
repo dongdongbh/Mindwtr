@@ -10,6 +10,8 @@ import {
     getDueReminderRepeatTimes,
     getNextScheduledAt,
     getProjectReviewReminderIntent,
+    getReminderNotificationTag,
+    getTaskReminderNotificationTag,
     getTaskReminderPlan,
     hasActiveMobileNotificationFeature,
     isWeeklyReviewReminderEnabled,
@@ -180,6 +182,23 @@ describe('getDueReminderRepeatTimes', () => {
     it('caps by window for long intervals (60min -> 2 occurrences over 120min)', () => {
         const times = getDueReminderRepeatTimes(dueTask({ repeatReminderMinutes: 60 }));
         expect(times.map((d) => d.getTime() - dueMs)).toEqual([60 * 60_000, 120 * 60_000]);
+    });
+});
+
+describe('getReminderNotificationTag', () => {
+    it('puts a task\'s start, due and every due-time repeat into one notification slot', () => {
+        const tag = getTaskReminderNotificationTag('task-1');
+        expect(getReminderNotificationTag('task:task-1')).toBe(tag);
+        expect(getReminderNotificationTag('task:task-1:r1')).toBe(tag);
+        expect(getReminderNotificationTag('task:task-1:r8')).toBe(tag);
+        expect(getTaskReminderPlan(buildTask({ dueDate: '2026-06-17T09:00:00.000Z', repeatReminderMinutes: 10 })).repeats
+            .every((repeat) => getReminderNotificationTag(repeat.key) === getTaskReminderNotificationTag(repeat.taskId))).toBe(true);
+    });
+
+    it('keeps tasks, projects and digests in separate slots', () => {
+        const tags = ['task:a', 'task:b', 'project:a', 'digest:morning', 'digest:evening'].map(getReminderNotificationTag);
+        expect(new Set(tags).size).toBe(tags.length);
+        expect(getReminderNotificationTag('project:p:r1')).toBe('mindwtr-reminder:project:p:r1');
     });
 });
 
