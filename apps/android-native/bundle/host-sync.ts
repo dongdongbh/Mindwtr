@@ -244,6 +244,8 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     const syncFetch = createDeadlineFetch((input, init) => fetch(input, init));
     const service = createMobileSyncService<never>({
+        // iOS cleanup authority lasts for one admitted foreground invocation.
+        allowQueuedFollowUp: platform !== 'ios',
         storage,
         getSecureConfigValue: (key) => secureConfig.getSecureConfigValue(key),
         platform: { os: () => platform, isFossBuild: bindings.isFossBuild, dropboxAppKey: () => '' },
@@ -396,7 +398,8 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         } finally {
             if (!fatalCleanupError) {
                 cycles += 1;
-                void refreshConfigured();
+                if (platform === 'ios') await refreshConfigured();
+                else void refreshConfigured();
             }
         }
     };

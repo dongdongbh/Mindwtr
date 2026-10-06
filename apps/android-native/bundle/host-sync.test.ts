@@ -209,6 +209,81 @@ describe('explicit iOS foreground sync factory', () => {
     });
 });
 
+describe('invocation-owned iOS service settlement', () => {
+    for (const platform of ['ios', 'android'] as const) {
+        it(`${platform} ${platform === 'ios' ? 'defers' : 'preserves'} the ordinary remote-fence follow-up`, async () => {
+            resetForTests();
+            if (platform === 'ios') iosFiles();
+            else globals.__mindwtrHostPlatform = 'android';
+            const date = '2026-10-06T00:00:00.000Z';
+            const data: AppData = { tasks: [{ id: 'follow-up-fixture', title: 'Synthetic local Task', status: 'inbox',
+                contexts: [], tags: [], createdAt: date, updatedAt: date }], projects: [], sections: [], areas: [], settings: {} };
+            let reads = 0;
+            const serverNow = Math.floor(Date.now() / 1000) * 1000;
+            globalThis.fetch = (async (input: RequestInfo | URL) => {
+                if (String(input).endsWith('/data.json')) return new Response(JSON.stringify({
+                    tasks: [], projects: [], sections: [], areas: [], settings: {},
+                }), { status: 200, headers: { Date: new Date(serverNow).toUTCString(), ETag: '"fixture-data"' } });
+                expect(String(input)).toContain('.mindwtr-sync-fence-v1.json');
+                reads += 1;
+                if (reads !== 1) return new Response('', { status: 403 });
+                return new Response(JSON.stringify({ schema: 1, leaseId: 'synthetic-peer-lease', ownerId: 'synthetic-peer',
+                    purpose: 'ordinary-sync', expiresAt: serverNow + 1_000 }),
+                    { status: 200, headers: { Date: new Date(serverNow).toUTCString(), ETag: '"fixture-fence"' } });
+            }) as typeof fetch;
+            const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json' }, false,
+                async () => structuredClone(data), platform === 'ios' ? async () => false : undefined);
+            try {
+                await fixture.sync.settingsHost.rememberWebdavCapabilityProof({
+                    url: 'https://fixture.invalid/data.json', username: '', password: '', allowInsecureHttp: false,
+                });
+                expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({
+                    success: true, skipped: 'remoteFenceBusy', retryAfterMs: 1_000,
+                });
+                expect(reads).toBe(1);
+                const at = fixture.calls.length;
+                await new Promise((resolve) => setTimeout(resolve, 1_200));
+                expect(reads).toBe(platform === 'ios' ? 1 : 2);
+                if (platform === 'ios') {
+                    expect(fixture.calls.slice(at)).toEqual([]);
+                    expect(fixture.lines).not.toContain('Sync follow-up scheduled');
+                } else expect(fixture.lines).toContain('Sync follow-up scheduled');
+            } finally { resetForTests(); }
+        });
+
+        it(`${platform} ${platform === 'ios' ? 'awaits' : 'keeps detached'} its own configuration refresh`, async () => {
+            resetForTests();
+            if (platform === 'ios') iosFiles();
+            else globals.__mindwtrHostPlatform = 'android';
+            const fixture = host({}, false, undefined, platform === 'ios' ? async () => false : undefined);
+            let entered!: () => void, release!: () => void;
+            const reached = new Promise<void>((resolve) => { entered = resolve; });
+            const gate = new Promise<void>((resolve) => { release = resolve; });
+            const get = fixture.bindings.keyValue.get;
+            let backendReads = 0;
+            fixture.bindings.keyValue.get = async (key) => {
+                const value = await get(key);
+                if (key === SYNC_BACKEND_KEY && ++backendReads === 2) { entered(); await gate; }
+                return value;
+            };
+            let settled = false;
+            const operation = fixture.sync.settingsHost.performSync(undefined, { manual: true });
+            void operation.then(() => { settled = true; });
+            try {
+                await reached;
+                await Promise.resolve(); await Promise.resolve();
+                expect(settled).toBe(platform === 'android');
+                release();
+                expect(await operation).toMatchObject({ success: true });
+                await Promise.resolve(); await Promise.resolve();
+                expect(fixture.sync.state().cycles).toBe(1);
+            } finally {
+                release(); await operation; resetForTests();
+            }
+        });
+    }
+});
+
 describe('native background sync binding', () => {
     it('manual sync preserves fatal cleanup identity without a cycle increment or any post-fatal host work', async () => {
         globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch;

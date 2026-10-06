@@ -3803,7 +3803,7 @@ globalThis.MindwtrHost = {
                 try {
                     await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                         message: 'Native iOS foreground Sync command settled',
-                        context: { releaseCheck: 'v1.3.5/ios-foreground-sync', operation: name, outcome: 'settled' },
+                        context: { releaseCheck: 'v1.3.5/ios-foreground-sync-owned', operation: name, outcome: 'settled' },
                     }, { force: true });
                 } catch { /* A diagnostic cannot change the settled command result. */ }
                 return result;

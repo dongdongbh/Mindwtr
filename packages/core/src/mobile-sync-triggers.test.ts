@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
+import * as autoSyncController from './auto-sync-controller';
+
 import {
   createMobileSyncTriggers,
   getMobileAutoSyncCadence,
@@ -39,6 +42,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -170,6 +174,206 @@ describe('mobile sync triggers', () => {
     await vi.advanceTimersByTimeAsync(10 * 60_000);
 
     expect(ports.performSync).toHaveBeenCalledTimes(1);
+    triggers.dispose();
+  });
+
+  it('quarantines every trigger and queued timer after an unconfirmed native cleanup', async () => {
+    const fatal = new NativeAttachmentCleanupUnconfirmedError();
+    let rejectSync!: (error: unknown) => void;
+    const pendingSync = new Promise<{ success: boolean }>((_resolve, reject) => { rejectSync = reject; });
+    const fake = createPorts({
+      performSync: vi.fn(() => pendingSync),
+      getSyncChangeFingerprint: vi.fn(() => 'changed'),
+      resolveSupportedBackend: vi.fn((raw) => raw ?? 'off'),
+      isLikelyOfflineSyncError: vi.fn(() => false),
+      classifySyncFailure: vi.fn(() => 'unknown'),
+    });
+    const { ports } = fake;
+    const triggers = createMobileSyncTriggers(ports);
+    triggers.start();
+    await flush();
+    triggers.requestSync(0);
+    await flush();
+    expect(ports.performSync).toHaveBeenCalledTimes(1);
+    triggers.handleStoreChange({ lastDataChangeAt: 2 }, { lastDataChangeAt: 1 });
+    triggers.requestSync(0);
+    triggers.handleCloudKitChange();
+
+    rejectSync(fatal);
+    await flush();
+    expect(triggers.isRuntimeActive()).toBe(false);
+    expect(ports.reportError).not.toHaveBeenCalled();
+    expect(ports.logWarn).not.toHaveBeenCalled();
+    expect(ports.showSyncIssue).not.toHaveBeenCalled();
+    const callsAtFatal = Object.values(ports).filter(vi.isMockFunction).map((port) => port.mock.calls.length);
+
+    triggers.start();
+    triggers.requestSync();
+    triggers.requestSync(0);
+    triggers.handleStoreChange(
+      { lastDataChangeAt: 3, settings: { lastSyncStatus: 'success', lastSyncAt: 'later' } },
+      { lastDataChangeAt: 2 },
+    );
+    triggers.handleCloudKitChange();
+    expect(triggers.handleAppStateChange('inactive')).toBeNull();
+    expect(triggers.handleAppStateChange('background')).toBeNull();
+    expect(triggers.handleAppStateChange('active')).toBeNull();
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    expect(Object.values(ports).filter(vi.isMockFunction).map((port) => port.mock.calls.length)).toEqual(callsAtFatal);
+    expect(vi.getTimerCount()).toBe(0);
+    triggers.dispose();
+  });
+
+  it.each(['performSync', 'flushPendingSave'] as const)(
+    'propagates the exact fatal from %s through the real controller without ordinary reporting',
+    async (port) => {
+      const fatal = new NativeAttachmentCleanupUnconfirmedError();
+      const createController = autoSyncController.createAutoSyncController;
+      const runs: Promise<void>[] = [];
+      vi.spyOn(autoSyncController, 'createAutoSyncController').mockImplementation((options) => {
+        const controller = createController(options);
+        return {
+          ...controller,
+          requestAutoSync: (...args) => {
+            const run = controller.requestAutoSync(...args);
+            runs.push(run);
+            return run;
+          },
+        };
+      });
+      const { ports } = createPorts({ [port]: vi.fn(async () => { throw fatal; }) });
+      const triggers = createMobileSyncTriggers(ports);
+      triggers.start();
+      await flush();
+      triggers.requestSync(0);
+      // Observe the actual request rejection; the public trigger owns its quiet catch.
+      await expect(runs[0]).rejects.toBe(fatal);
+      await flush();
+
+      expect(triggers.isRuntimeActive()).toBe(false);
+      expect(ports.flushPendingSave).toHaveBeenCalledTimes(1);
+      expect(ports.performSync).toHaveBeenCalledTimes(port === 'performSync' ? 1 : 0);
+      expect(ports.reportError).not.toHaveBeenCalled();
+      expect(ports.logWarn).not.toHaveBeenCalled();
+      expect(ports.showSyncIssue).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      expect(runs).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+      triggers.dispose();
+    },
+  );
+
+  it.each(['resolve', 'reject'] as const)(
+    'ignores held cadence %s after fatal, including resume, request and debounce continuations',
+    async (completion) => {
+      const fatal = new NativeAttachmentCleanupUnconfirmedError();
+      let resolveBackend!: (backend: string) => void;
+      let rejectBackend!: (error: unknown) => void;
+      const backend = new Promise<string>((resolve, reject) => {
+        resolveBackend = resolve;
+        rejectBackend = reject;
+      });
+      const fingerprint = vi.fn().mockReturnValueOnce('initial').mockReturnValue('changed');
+      const { ports } = createPorts({
+        initialAppState: 'background',
+        performSync: vi.fn(async () => { throw fatal; }),
+        getSyncChangeFingerprint: fingerprint,
+        resolveSupportedBackend: vi.fn((raw) => raw ?? 'off'),
+      });
+      const triggers = createMobileSyncTriggers(ports);
+      triggers.start();
+      await flush();
+      await vi.advanceTimersByTimeAsync(6_000);
+      vi.mocked(ports.readStoredBackend).mockReturnValue(backend);
+      triggers.requestSync();
+      expect(triggers.handleAppStateChange('active')).toBe('resumed');
+      triggers.handleStoreChange({ lastDataChangeAt: 2 }, { lastDataChangeAt: 1 });
+      await vi.advanceTimersByTimeAsync(2_000);
+      // All three continuations have a real outstanding cadence port.
+      expect(ports.readStoredBackend).toHaveBeenCalledTimes(4);
+      triggers.requestSync(0);
+      await flush();
+      expect(triggers.isRuntimeActive()).toBe(false);
+      const callsAtFatal = Object.values(ports).filter(vi.isMockFunction).map((port) => port.mock.calls.length);
+
+      if (completion === 'resolve') resolveBackend('file');
+      else rejectBackend(new Error('late cadence refusal'));
+      await flush();
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      expect(Object.values(ports).filter(vi.isMockFunction).map((port) => port.mock.calls.length)).toEqual(callsAtFatal);
+      expect(ports.reportError).not.toHaveBeenCalled();
+      expect(ports.logWarn).not.toHaveBeenCalled();
+      expect(ports.showSyncIssue).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+      triggers.dispose();
+    },
+  );
+
+  it('continues an ordinary flush refusal and reports its original error', async () => {
+    const error = new Error('ordinary flush refusal');
+    const { ports } = createPorts({ flushPendingSave: vi.fn(async () => { throw error; }) });
+    const triggers = createMobileSyncTriggers(ports);
+    triggers.start();
+    triggers.requestSync(0);
+    await flush();
+
+    expect(triggers.isRuntimeActive()).toBe(true);
+    expect(ports.reportError).toHaveBeenCalledExactlyOnceWith(error);
+    expect(ports.performSync).toHaveBeenCalledTimes(1);
+    expect(ports.logWarn).not.toHaveBeenCalled();
+    triggers.dispose();
+  });
+
+  it('keeps ordinary cooldown behavior for an Error merely named like the fatal class', async () => {
+    const error = new Error('HTTP 401');
+    error.name = 'NativeAttachmentCleanupUnconfirmedError';
+    const { ports } = createPorts({ performSync: vi.fn(async () => { throw error; }) });
+    const triggers = createMobileSyncTriggers(ports);
+    triggers.start();
+    triggers.requestSync(0);
+    await flush();
+
+    expect(triggers.isRuntimeActive()).toBe(true);
+    expect(ports.showSyncIssue).toHaveBeenCalledExactlyOnceWith('auth');
+    expect(ports.logWarn).toHaveBeenCalledExactlyOnceWith('Auto-sync failed', {
+      scope: 'sync', extra: { error: String(error) },
+    });
+    expect(ports.reportError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ports.performSync).toHaveBeenCalledTimes(2);
+    expect(ports.showSyncIssue).toHaveBeenCalledTimes(1);
+    triggers.dispose();
+  });
+
+  it('does not classify or schedule an ordinary result after a late fingerprint fatal', async () => {
+    const fatal = new NativeAttachmentCleanupUnconfirmedError();
+    let shouldThrow = false;
+    let triggers: ReturnType<typeof createMobileSyncTriggers>;
+    const { ports } = createPorts({
+      performSync: vi.fn(async () => {
+        queueMicrotask(() => queueMicrotask(() => {
+          shouldThrow = true;
+          triggers.handleAppStateChange('background');
+        }));
+        return { success: false, error: 'HTTP 401' };
+      }),
+      getSyncChangeFingerprint: vi.fn(() => {
+        if (shouldThrow) throw fatal;
+        return 'initial';
+      }),
+      isLikelyOfflineSyncError: vi.fn(() => false),
+    });
+    triggers = createMobileSyncTriggers(ports);
+    triggers.start();
+    await flush();
+    triggers.requestSync(0);
+    await flush();
+    expect(triggers.isRuntimeActive()).toBe(false);
+    expect(ports.isLikelyOfflineSyncError).not.toHaveBeenCalled();
+    expect(ports.reportError).not.toHaveBeenCalled();
+    expect(ports.logWarn).not.toHaveBeenCalled();
+    expect(ports.showSyncIssue).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
     triggers.dispose();
   });
 
