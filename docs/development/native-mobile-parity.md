@@ -2198,3 +2198,13 @@ Validation: the initial five shared-core suites passed 274 tests; after the logg
 This is an unactivated upload prerequisite. Transport was intercepted by the test harness; real WebDAV backend, download, cleanup, full Sync ownership and streaming parity remain open.
 
 The ordinary development app was restored without a reset after these tests. All 21 database tables and preferences matched its pre-test snapshot, with no journal sidecars.
+
+### iOS bounded WebDAV download refusal (2026-10-06, Tasks302–303)
+
+The native HTTP response limit now carries a native-generated code and validated byte limit through the JavaScript fetch bridge. Shared WebDAV operations and both SyncRun attachment phases propagate that refusal as failure, without retrying it or treating it as absence, an unreadable attachment, or successful partial work. RN's existing unmarked response-reader errors keep their previous policy. Cancellation clears the size-limit marker; refused replies carry no response body. The fixed `v1.3.5/webdav-host-download-limit` diagnostic cannot mask the original failure if logging throws.
+
+Validation: 332 focused shared-core tests, typecheck, scoped lint and boot gates passed. The combined macOS JavaScriptCore run passed 17 tests; two pre-existing tests requiring an external wire fixture were skipped. All six selected tests passed on the signed iPhone 12 running iOS 17.5.1: four download cases and two unchanged upload regressions. The tests cover declared, absent and dishonest response lengths; unchanged local rows/bytes across failure and host recreation; remote-winner retention; and real native installation at an exact plaintext or encrypted wire limit. The encrypted fixture uses an independent CryptoKit oracle and requires native decryption and installation. An initial failure exposed missing encryption material in the private harness, corrected without weakening those assertions.
+
+These tests use intercepted URLSession responses and isolated development libraries. They do not establish real-backend acceptance, ordinary App Sync integration, cleanup ownership or RN-sized streaming parity.
+
+A final test-only correction replaced an async semaphore wait with an XCTest expectation; the affected HTTP cancellation test passed again without the warning. The ordinary development app was rebuilt and restored without a reset. All 21 database tables and preferences remained identical to the pre-test snapshot, with no journal sidecars.

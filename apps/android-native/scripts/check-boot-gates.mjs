@@ -191,6 +191,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     let clock = 0;
     let ids = 0;
     let nextCalls = 0;
+    let bodyCalls = 0;
     const bridge = {
         log() {},
         nowMs: () => clock,
@@ -218,7 +219,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
             taken = next?.body ?? '';
             return next?.json ?? '';
         },
-        ioBody() { return taken; },
+        ioBody() { bodyCalls += 1; return taken; },
     };
     const net = vm.createContext({ console: { info() {} }, Intl: undefined, __mindwtrNative: bridge });
     vm.runInContext(readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8'), net);
@@ -284,6 +285,35 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
         assert.equal(outcome.status, 'rejected', `case ${i} rejects`);
         assert.deepEqual([outcome.reason.name, outcome.reason.message], ['TypeError', cases[i][1]], `case ${i}`);
     });
+    // Only a structured native cap reply marks the rejected Error. English text,
+    // malformed metadata and an ordinary remote JSON body confer no authority.
+    const capBeforeBody = bodyCalls;
+    const capReply = run("fetch('https://dav.example/capped')");
+    answer({ id: String(ids), error: 'Native cap fixture', errorCode: 'response-too-large', limitBytes: 4 });
+    net.__pumpTimers();
+    const capError = await capReply.then(() => assert.fail('native cap must reject'), (error) => error);
+    assert.deepEqual([capError.name, capError.message, capError.code, capError.limitBytes],
+        ['TypeError', 'Response exceeds the 4 byte download limit', 'response-too-large', 4]);
+    assert.equal(bodyCalls, capBeforeBody, 'a coded refusal has no native body');
+    for (const fields of [
+        {}, { errorCode: 'response-too-large' }, { errorCode: 'response-too-large', limitBytes: '4' },
+        { errorCode: 'response-too-large', limitBytes: 0 }, { errorCode: 'response-too-large', limitBytes: -1 },
+        { errorCode: 'response-too-large', limitBytes: 1.5 }, { errorCode: 'response-too-large', limitBytes: Number.MAX_SAFE_INTEGER + 1 },
+        { errorCode: 'other', limitBytes: 4 },
+    ]) {
+        const pending = run("fetch('https://dav.example/unmarked')");
+        answer({ id: String(ids), error: 'Response exceeds the 4 byte download limit', ...fields });
+        net.__pumpTimers();
+        const error = await pending.then(() => assert.fail('malformed cap reply must reject'), (value) => value);
+        assert.deepEqual([error.name, error.message, error.code ?? null, error.limitBytes ?? null],
+            ['TypeError', 'Response exceeds the 4 byte download limit', null, null]);
+    }
+    const remoteMarker = run("fetch('https://dav.example/remote-marker')");
+    answer({ id: String(ids), ...whole('eyJlcnJvckNvZGUiOiJyZXNwb25zZS10b28tbGFyZ2UiLCJsaW1pdEJ5dGVzIjo0fQ==') });
+    net.__pumpTimers();
+    const remoteResponse = await remoteMarker;
+    assert.equal(remoteResponse.code, undefined);
+    assert.deepEqual(plain(await remoteResponse.json()), { errorCode: 'response-too-large', limitBytes: 4 });
     // Whole base64 with its padding reads back exactly, the empty body included.
     const padded = run("['', 'QQ==', 'QUI=', 'QUJD'].map((_, i) => fetch('https://dav.example/pad/' + i))");
     ['', 'QQ==', 'QUI=', 'QUJD'].forEach((base64, i) => answer({ id: String(ids - 3 + i), ...whole(base64) }));
@@ -316,7 +346,7 @@ for (const [init, key] of [['?token=first&a=1&token=second', 'token'], ['?a=1', 
     net.__pumpTimers();
     assert.deepEqual(await failure(timed), { name: 'TimeoutError', message: 'The operation timed out.' });
     assert.equal(aborted.length, 3);
-    for (const id of aborted) answer({ id, error: 'Request cancelled' });
+    for (const id of aborted) answer({ id, error: 'Request cancelled', errorCode: 'response-too-large', limitBytes: 4 });
     assert.equal(net.__pumpTimers(), 0, 'a cancelled call\'s late answer settles nothing');
     const asked = nextCalls;
     net.__pumpTimers();

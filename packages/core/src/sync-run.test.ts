@@ -2698,6 +2698,101 @@ describe('runSharedSyncCycle', () => {
         },
     );
 
+    it.each([
+        ['prepare', 'ordinary'], ['post-merge', 'ordinary'],
+        ['prepare', 'throwing'], ['post-merge', 'throwing'],
+    ] as const)(
+        'fails the real WebDAV host-response cap in %s with %s diagnostic under warning policy', async (phase, diagnostic) => {
+            const error = Object.assign(new TypeError('Response exceeds the 8 byte download limit'), {
+                code: 'response-too-large', limitBytes: 8,
+            });
+            const fetcher = vi.fn().mockRejectedValue(error);
+            vi.stubGlobal('fetch', fetcher);
+            try {
+                const memory = createMemoryFileSystem();
+                const { log, lines } = createRecordingLog();
+                const warn = log.warn;
+                const logWarning = vi.spyOn(log, 'warn').mockImplementation((message, context) => {
+                    if (diagnostic === 'throwing'
+                        && context?.extra?.releaseCheck === 'v1.3.5/webdav-host-download-limit') {
+                        throw new Error('Diagnostic sink is unavailable');
+                    }
+                    warn(message, context);
+                });
+                const files = createMobileAttachmentFiles({
+                    fs: memory.fs, storage: createMemoryStorage().storage,
+                    getSecureConfigValue: async () => null, log,
+                    core: { isSandboxMode: () => false },
+                });
+                const installGeneration = vi.fn();
+                const installer = { installAttachmentFileGeneration: installGeneration } as never;
+                const common = createMobileAttachmentCommon({
+                    fs: memory.fs, files, installer, crypto: {} as never,
+                    encryption: { logSyncEncryptionEvent: async () => undefined },
+                    installerMayBeMissing: () => false, timersPaused: () => true,
+                    uploads: { createUploadTask: () => null },
+                });
+                const open = vi.spyOn(common, 'openAttachmentBytesFromDownload');
+                const install = vi.spyOn(common, 'installAttachmentDownloadBytes');
+                const backends = createMobileAttachmentBackends({
+                    fs: memory.fs, files, common, installer, log,
+                    core: { withRetry: (operation) => operation() },
+                });
+                const uri = `${MANAGED}bounded.txt`;
+                const local = createData([{
+                    ...createTask('t-local', 'Local task'),
+                    attachments: [{
+                        id: 'bounded', kind: 'file', title: 'private filename.txt', uri,
+                        cloudKey: 'attachments/bounded.txt', fileHash: 'a'.repeat(64),
+                        size: 1, localStatus: 'available', createdAt: STAMP, updatedAt: STAMP,
+                    }],
+                }]);
+                const before = structuredClone(local);
+                const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+                    if (helpers.phase !== phase) return false;
+                    return backends.syncWebdavAttachments(data, { url: 'https://dav.example/data.json' },
+                        'https://dav.example', undefined, { phase: helpers.phase });
+                });
+                const bundle = createHarness({
+                    backend: 'webdav', local, remote: cloneAppData(local),
+                    io: { syncAttachments },
+                    hooks: { shouldRunAttachmentPhase: vi.fn(async (_data, selected) => selected === phase) },
+                    policy: { postMergeAttachmentErrorPolicy: 'warn' },
+                });
+
+                const result = await bundle.run();
+
+                expect(result.success).toBe(false);
+                expect(result.error).toContain(error.message);
+                expect(result.error).not.toContain('Diagnostic sink is unavailable');
+                expect(result.fileAttachmentUploadBlocked).toBeUndefined();
+                expect(result.hadAttachmentWarning).not.toBe(true);
+                expect(bundle.harness.warnings.some((warning) => (
+                    warning.message === 'Attachment pre-sync warning' || warning.message === 'Attachment sync warning'
+                ))).toBe(false);
+                expect(syncAttachments.mock.calls.some((call) => call[1].phase === phase)).toBe(true);
+                // The actual shared webdavGetFile/fetch timeout path rejected before a Response existed.
+                expect(fetcher).toHaveBeenCalledTimes(1);
+                expect(fetcher).toHaveBeenCalledWith('https://dav.example/attachments/bounded.txt',
+                    expect.objectContaining({ method: 'GET' }));
+                expect(local).toEqual(before);
+                expect(bundle.harness.persisted.tasks[0].attachments).toEqual(before.tasks[0].attachments);
+                expect(open).not.toHaveBeenCalled();
+                expect(install).not.toHaveBeenCalled();
+                expect(installGeneration).not.toHaveBeenCalled();
+                expect(memory.files.size).toBe(0);
+                expect(memory.calls.filter((call) => /^(readBytes|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+                expect(logWarning.mock.calls.filter((call) => call[1]?.extra?.releaseCheck === 'v1.3.5/webdav-host-download-limit'))
+                    .toHaveLength(1);
+                expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-download-limit'))
+                    .toHaveLength(diagnostic === 'throwing' ? 0 : 1);
+                if (phase === 'prepare') expect(bundle.io.writeRemote).not.toHaveBeenCalled();
+            } finally {
+                vi.unstubAllGlobals();
+            }
+        },
+    );
+
     it('runs the periodic attachment cleanup through the platform hook and persists its result', async () => {
         const local = createData([createTask('t-local', 'Local task')], {
             attachments: { lastCleanupAt: '2026-01-01T00:00:00.000Z' },

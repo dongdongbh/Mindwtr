@@ -4,6 +4,7 @@ import {
     fetchWithTimeoutAndConsume,
     isAllowedInsecureUrl,
     isConnectionAllowed,
+    isHostResponseTooLargeError,
     MAX_DOWNLOAD_BYTES,
     readResponseBody,
     ResponseTooLargeError,
@@ -12,6 +13,47 @@ import {
 } from './http-utils';
 import { DEFAULT_MAX_FILE_SIZE_BYTES } from './attachment-validation';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
+
+describe('isHostResponseTooLargeError', () => {
+    it('recognizes the native Error fields without relying on name or message', () => {
+        expect(isHostResponseTooLargeError(Object.assign(new TypeError('unrelated message'), {
+            code: 'response-too-large', limitBytes: 8 * 1024 * 1024,
+        }))).toBe(true);
+        expect(isHostResponseTooLargeError(Object.assign(new Error('network timeout'), {
+            code: 'response-too-large', limitBytes: Number.MAX_SAFE_INTEGER,
+        }))).toBe(true);
+    });
+
+    it.each([undefined, null, '8', 0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+        'refuses malformed native limit %s', (limitBytes) => {
+            expect(isHostResponseTooLargeError(Object.assign(new TypeError('Response exceeds the limit'), {
+                code: 'response-too-large', limitBytes,
+            }))).toBe(false);
+        },
+    );
+
+    it('refuses ordinary RN limits, plain objects, names, messages, and unknown codes', () => {
+        expect(isHostResponseTooLargeError(new ResponseTooLargeError(8))).toBe(false);
+        expect(isHostResponseTooLargeError({ code: 'response-too-large', limitBytes: 8 })).toBe(false);
+        expect(isHostResponseTooLargeError(Object.assign(new Error('Response exceeds the 8 byte download limit'), {
+            name: 'ResponseTooLargeError', limitBytes: 8,
+        }))).toBe(false);
+        expect(isHostResponseTooLargeError(Object.assign(new Error('refused'), {
+            code: 'RESPONSE_TOO_LARGE', limitBytes: 8,
+        }))).toBe(false);
+        expect(isHostResponseTooLargeError(null)).toBe(false);
+    });
+
+    it('preserves the original structured fetch refusal through the timeout consumer', async () => {
+        const error = Object.assign(new TypeError('Response exceeds the 8 byte download limit'), {
+            code: 'response-too-large', limitBytes: 8,
+        });
+        const consume = vi.fn();
+        await expect(fetchWithTimeoutAndConsume('https://example.com/file', {}, 1000,
+            vi.fn().mockRejectedValue(error), 'timed out', consume)).rejects.toBe(error);
+        expect(consume).not.toHaveBeenCalled();
+    });
+});
 
 describe('isAllowedInsecureUrl', () => {
     it('allows HTTPS URLs', () => {

@@ -211,22 +211,79 @@ final class NativeHTTPHostTests: XCTestCase {
             switch transport.request.url!.path {
             case "/exact": transport.reply(Data([1,2,3,4]), headers: ["Content-Length": "4"])
             case "/stream": transport.reply(Data([1,2,3,4,5]))
+            case "/dishonest": transport.reply(Data([1,2,3,4,5]), headers: ["Content-Length": "1"])
             case "/declared": transport.reply(headers: ["Content-Length": "5"])
             case "/short": transport.reply(Data([1,2]), headers: ["Content-Length": "3"])
             case "/gzip": transport.reply(Data([1]), headers: ["Content-Encoding": "gzip"])
+            case "/reset": transport.client?.urlProtocol(transport, didFailWithError: URLError(.networkConnectionLost))
+            case "/head": transport.reply(headers: ["Content-Length": "5"])
+            case "/no-content": transport.reply(status: 204, headers: ["Content-Length": "5"])
+            case "/not-modified": transport.reply(status: 304, headers: ["Content-Length": "5"])
             default: transport.reply(status: 412, headers: ["Content-Length": "0"])
             }
         }; faults.httpByteLimit = 4
         let host = try host("""
-        const base=\(try literal(base)); const errors=[];
-        for(const path of ['stream','declared','short','gzip']) { try{await fetch(base+path);errors.push('SUCCESS')}catch(e){errors.push(e.message)} }
+        const base=\(try literal(base)); const errors=[],n=__mindwtrNative,body=n.ioBody;let bodyCalls=0;
+        n.ioBody=()=>{bodyCalls++;return body()};
+        for(const path of ['stream','dishonest','declared','short','gzip','reset']) {
+          try{await fetch(base+path);errors.push({message:'SUCCESS'})}
+          catch(e){errors.push({name:e.name,message:e.message,code:e.code??null,limit:e.limitBytes??null})}
+        }
+        const failureBodyCalls=bodyCalls,bodyless=[];
+        for(const path of ['head','no-content','not-modified']) {
+          const r=await fetch(base+path,{method:path==='head'?'HEAD':'GET'});bodyless.push((await r.arrayBuffer()).byteLength);
+        }
         const exact=await fetch(base+'exact'), empty=await fetch(base+'empty');
-        return {errors,bytes:Array.from(new Uint8Array(await exact.arrayBuffer())),status:empty.status,length:(await empty.arrayBuffer()).byteLength};
+        n.ioBody=body;
+        return {errors,failureBodyCalls,bodyless,bytes:Array.from(new Uint8Array(await exact.arrayBuffer())),status:empty.status,length:(await empty.arrayBuffer()).byteLength};
         """, faults: faults)
         try await start(host); let result = try await probe(host)
-        XCTAssertEqual(result["errors"] as? [String], ["Response exceeds the 4 byte download limit", "Response exceeds the 4 byte download limit", "Network request failed", "HTTP response encoding is unsupported"])
+        let errors = try XCTUnwrap(result["errors"] as? [[String: Any]])
+        XCTAssertEqual(errors.count, 6)
+        for (index, error) in errors.enumerated() {
+            XCTAssertEqual(error["name"] as? String, "TypeError")
+            if index < 3 {
+                XCTAssertEqual(error["message"] as? String, "Response exceeds the 4 byte download limit")
+                XCTAssertEqual(error["code"] as? String, "response-too-large"); XCTAssertEqual(error["limit"] as? Int, 4)
+            } else {
+                XCTAssertTrue(error["code"] is NSNull); XCTAssertTrue(error["limit"] is NSNull)
+                XCTAssertEqual(error["message"] as? String, index == 4 ? "HTTP response encoding is unsupported" : "Network request failed")
+            }
+        }
+        XCTAssertEqual(result["failureBodyCalls"] as? Int, 0)
+        XCTAssertEqual(result["bodyless"] as? [Int], [0,0,0])
         XCTAssertEqual(result["bytes"] as? [Int], [1,2,3,4]); XCTAssertEqual(result["status"] as? Int, 412); XCTAssertEqual(result["length"] as? Int, 0)
         try await drained()
+    }
+
+    func testNativeCapReplyIsBodylessAndCancellationClearsItsMarkerBeforeDelivery() async throws {
+        for cancelled in [false, true] {
+            let entered = expectation(description: "Native cap completion boundary"), release = DispatchSemaphore(value: 0)
+            let faults = faults { $0.reply(headers: ["Content-Length": "5"]) }; faults.httpByteLimit = 4
+            let jobs = NativeHTTPJobs(registry: NativeAttachmentLocalRequests(), faults: faults)
+            defer { jobs.shutdown() }
+            jobs.beforeCompletion = { entered.fulfill(); release.wait() }
+            let id = try jobs.submit(json(["url": base, "method": "GET", "redirect": "follow", "headers": []]))
+            defer { release.signal() }
+            await fulfillment(of: [entered], timeout: 5)
+            if cancelled { jobs.abort(id) }
+            release.signal()
+            var answer: (json: String, body: Bool)?
+            for _ in 0..<500 {
+                answer = try jobs.next(); if answer != nil { break }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            let reply = try XCTUnwrap(answer), value = try object(reply.json)
+            XCTAssertFalse(reply.body); XCTAssertEqual(value["id"] as? String, id)
+            if cancelled {
+                XCTAssertEqual(Set(value.keys), ["id", "error"])
+                XCTAssertEqual(value["error"] as? String, "Request cancelled")
+            } else {
+                XCTAssertEqual(Set(value.keys), ["id", "error", "errorCode", "limitBytes"])
+                XCTAssertEqual(value["errorCode"] as? String, "response-too-large"); XCTAssertEqual(value["limitBytes"] as? Int, 4)
+            }
+            XCTAssertEqual(jobs.counters.jobs, 0); jobs.shutdown()
+        }
     }
 
     func testAbortPreservesReasonAndLateAnswerDrainsBeforeNextFetch() async throws {

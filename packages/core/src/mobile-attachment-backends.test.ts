@@ -5,6 +5,7 @@ import { buildFileSyncGenerationCloudKey } from './attachment-paths';
 import { DropboxConflictError, DropboxFileNotFoundError } from './dropbox';
 import { WebDavRemoteWriteConflictError } from './webdav';
 import { WebdavHostUploadLimitError } from './attachment-transfer';
+import { ResponseTooLargeError } from './http-utils';
 import { createMobileAttachmentFiles, type MobileAttachmentSafPort } from './mobile-attachment-files';
 import { createMobileAttachmentCommon, type MobileAttachmentUploadTask } from './mobile-attachment-common';
 import { createMobileAttachmentBackends, type MobileAttachmentBackendsCoreFunctions } from './mobile-attachment-backends';
@@ -570,6 +571,123 @@ describe('WebDAV attachment pass', () => {
         extra: { error: 'fetch failed: unexpected redirect' },
       }));
     });
+  });
+
+  it.each([
+    ['missing local', undefined], ['missing local', 404], ['missing local', 429],
+    ['remote winner', undefined], ['remote winner', 404], ['remote winner', 429],
+  ] as const)('aborts a host cap for %s without treating status %s as absence/backoff', async (target, status) => {
+    const error = Object.assign(new TypeError('Response exceeds the 8 byte download limit'), {
+      code: 'response-too-large', limitBytes: 8, status,
+    });
+    const webdavGetFile = vi.fn(async (): Promise<ArrayBuffer> => { throw error; });
+    const { backends, memory, files, common, installer, lines } = setup({
+      core: { webdavFileExists: async () => true, webdavGetFile },
+    });
+    if (target === 'remote winner') memory.put(LOCAL_URI, LOCAL);
+    const input = withAttachment(fileAttachment({
+      cloudKey: 'attachments/att-1.txt', fileHash: (await computeSha256Hex(REMOTE))!,
+      contentMtimeMs: 1, contentSize: 1,
+    }));
+    const before = structuredClone(input);
+    const open = vi.spyOn(common, 'openAttachmentBytesFromDownload');
+    const install = vi.spyOn(common, 'installAttachmentDownloadBytes');
+    const backoff = vi.spyOn(files, 'setWebdavDownloadBackoff');
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, {
+      phase: 'post-merge',
+    })).rejects.toBe(error);
+
+    expect(webdavGetFile).toHaveBeenCalledTimes(1);
+    expect(input).toEqual(before);
+    if (target === 'remote winner') expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    else expect(memory.files.has(LOCAL_URI)).toBe(false);
+    expect(open).not.toHaveBeenCalled();
+    expect(install).not.toHaveBeenCalled();
+    expect(installer.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    expect(backoff).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(writeBytes|copy|move|delete) /.test(call))).toEqual([]);
+    expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-download-limit')).toEqual([{
+      level: 'warn', message: 'WebDAV host download limit refused',
+      extra: { releaseCheck: 'v1.3.5/webdav-host-download-limit', operation: 'download', outcome: 'refused' },
+    }]);
+  });
+
+  it('keeps ordinary RN reader oversize on the existing recoverable download path', async () => {
+    const error = new ResponseTooLargeError(8);
+    const { backends, files, lines } = setup({
+      core: { webdavGetFile: async () => { throw error; } },
+    });
+    const backoff = vi.spyOn(files, 'setWebdavDownloadBackoff');
+    const input = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' }));
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL)).resolves.toBe(false);
+
+    expect(input).toEqual(before);
+    expect(backoff).toHaveBeenCalledWith('att-1', error);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-download-limit')).toBe(false);
+  });
+
+  it.each(['MKCOL', 'upload HEAD', 'PUT'] as const)('does not swallow a capped %s reply inside upload handling', async (method) => {
+    const error = Object.assign(new TypeError('network timeout'), { code: 'response-too-large', limitBytes: 8, status: 429 });
+    const webdavMakeDirectory = vi.fn(async () => { if (method === 'MKCOL') throw error; });
+    const webdavHeadFile = vi.fn(async () => {
+      if (method === 'upload HEAD') throw error;
+      return { exists: false, fingerprint: null, etag: null, lastModified: null, contentLength: null };
+    });
+    const webdavPutFileVersioned = vi.fn(async () => { throw error; });
+    const { backends, memory } = setup({ core: { webdavMakeDirectory, webdavHeadFile, webdavPutFileVersioned } });
+    memory.put(LOCAL_URI, LOCAL);
+    const input = withAttachment(fileAttachment());
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL)).rejects.toBe(error);
+
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect(webdavPutFileVersioned).toHaveBeenCalledTimes(method === 'PUT' ? 1 : 0);
+  });
+
+  it('drops accumulated presence patches when a later probe hits the host cap', async () => {
+    const error = Object.assign(new TypeError('refused'), { code: 'response-too-large', limitBytes: 8 });
+    const probe = vi.fn().mockResolvedValueOnce(false).mockRejectedValueOnce(error);
+    const { backends, memory } = setup({ core: { webdavFileExists: probe } });
+    memory.put(LOCAL_URI, LOCAL);
+    memory.put(`${MANAGED}att-2.txt`, LOCAL);
+    const input = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt' }));
+    input.tasks[0].attachments!.push(fileAttachment({ id: 'att-2', uri: `${MANAGED}att-2.txt`, cloudKey: 'attachments/att-2.txt' }));
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL)).rejects.toBe(error);
+
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect(memory.read(`${MANAGED}att-2.txt`)).toEqual(LOCAL);
+  });
+
+  it('does not use the streamed 412 fallback after a coded PUT response cap', async () => {
+    const error = Object.assign(new TypeError('refused'), { code: 'response-too-large', limitBytes: 8, status: 412 });
+    const confirm = vi.fn(async () => ({ confirmed: false, redirected: true, status: 200 }));
+    const { backends, memory } = setup({
+      createUploadTask: () => ({ uploadAsync: async () => ({ status: 201 }), cancelAsync: async () => undefined }),
+      core: {
+        webdavMakeDirectory: async () => undefined,
+        webdavHeadFile: async () => ({ exists: false, fingerprint: null, etag: null, lastModified: null, contentLength: null }),
+        webdavConfirmUploadedFile: confirm,
+        webdavPutFileVersioned: async () => { throw error; },
+      },
+    });
+    memory.put(LOCAL_URI, LOCAL);
+    const input = withAttachment(fileAttachment());
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL)).rejects.toBe(error);
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
   });
 
   it('marks the attachment unrecoverable when the remote answers 404', async () => {

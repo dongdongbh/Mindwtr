@@ -37,7 +37,7 @@ import {
   listDropboxFolderFiles,
   uploadDropboxFileVersioned,
 } from './dropbox';
-import { isAbortError, refuseWriteRedirect } from './http-utils';
+import { isAbortError, isHostResponseTooLargeError, refuseWriteRedirect } from './http-utils';
 import { withRetry } from './retry-utils';
 import type { SyncKeyMaterial } from './sync-crypto';
 import { isSyncRemoteMutationFenceError } from './sync-remote-fence';
@@ -285,6 +285,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         });
       } catch (error) {
         if (isAttachmentSyncAbortError(error, signal)) throw error;
+        if (isHostResponseTooLargeError(error)) throw error;
         if (isSyncRemoteMutationFenceError(error)) throw error;
         files.logAttachmentWarn('Failed to ensure WebDAV attachments directory', error);
       }
@@ -378,6 +379,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             return remoteExists;
           } catch (error) {
             if (isAttachmentSyncAbortError(error, signal)) throw error;
+            if (isHostResponseTooLargeError(error)) throw error;
             if (isSyncRemoteMutationFenceError(error) || isWebdavRemoteWriteConflictError(error)) throw error;
             if (handleRateLimit(error)) abortedByRateLimit = true;
             else files.logAttachmentWarn('WebDAV attachment remote check failed', error);
@@ -458,6 +460,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       },
       isFatalError: (error) => (
         isAttachmentSyncAbortError(error, signal)
+        || isHostResponseTooLargeError(error)
         || isSyncRemoteMutationFenceError(error)
         || isWebdavRemoteWriteConflictError(error)
         || (maxWebdavBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error))
@@ -609,6 +612,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
               // file here. A 412 now says some file exists, not that it holds these bytes (another
               // writer may have created it), so it is recorded only when the same HEAD proof finds
               // it; otherwise it stays unsynced and the next sync sends it as an overwrite.
+              if (isHostResponseTooLargeError(error)) throw error;
               if (!(uploadedWithFileSystem && getErrorStatus(error) === 412)) throw error;
               const stored = await findUploadAtUrl();
               if (!stored.confirmed) {
@@ -632,6 +636,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           return true;
         } catch (error) {
           if (isAttachmentSyncAbortError(error, signal)) throw error;
+          if (isHostResponseTooLargeError(error)) throw error;
           if (isSyncRemoteMutationFenceError(error) || isWebdavRemoteWriteConflictError(error)) throw error;
           if (handleRateLimit(error)) {
             abortedByRateLimit = true;
@@ -680,6 +685,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           }, WEBDAV_ATTACHMENT_RETRY_OPTIONS);
         } catch (error) {
           if (isAttachmentSyncAbortError(error, signal)) throw error;
+          if (isHostResponseTooLargeError(error)) throw error;
           if (handleRateLimit(error)) {
             abortedByRateLimit = true;
             return false;
@@ -762,6 +768,16 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     try {
       return await runWebdavAttachmentPass(...args);
     } catch (error) {
+      if (isHostResponseTooLargeError(error)) {
+        try {
+          files.logAttachmentWarn('WebDAV host download limit refused', undefined, {
+            releaseCheck: 'v1.3.5/webdav-host-download-limit', operation: 'download', outcome: 'refused',
+          });
+        } catch {
+          // Diagnostics must not replace the original fatal transport refusal.
+        }
+        throw error;
+      }
       if (maxWebdavBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) {
         try {
           files.logAttachmentWarn('WebDAV host upload admission refused', undefined, {
