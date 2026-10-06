@@ -3538,6 +3538,7 @@ export { validateNativeAttachmentDraftBeginV3, validateNativeAttachmentDraftLine
     prepareNativeAttachmentDraftAddV3, prepareNativeAttachmentDraftRemoveV3,
     readNativeAttachmentDraftRemoveFrozen } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft.ts'))};
 export { prepareNativeAttachmentDraftDiscardCandidates, prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4 } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft-discard.ts'))};
+export { prepareNativeAttachmentCleanupWitness, isNativeAttachmentCleanupWitnessEligible } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};
 import { createOwnedEditorFileEditTaskDraftSaveMethods as createRealMixedSaveMethods } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract-owned-file-edit-save.ts'))};
 import { createNativeHostContract as createRealCompleteContract } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract.ts'))};
 import { NativeReceiptSqliteAdapter as RealCompleteAdapter } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-request-receipts.ts'))};

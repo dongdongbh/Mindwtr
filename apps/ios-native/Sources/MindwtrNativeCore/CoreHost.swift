@@ -79,6 +79,17 @@ public final class CoreHost: @unchecked Sendable {
 
     public func start() async throws -> String { try await perform { try $0.start() } }
 
+    /// One physical cleanup decision; grants no attachment metadata authority.
+    public func retireAttachmentCleanup(_ requestJSON: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.retireAttachmentCleanup(requestJSON, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
     public func call(_ method: String, argumentsJSON: String = "[]") async throws -> String {
         try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
@@ -501,6 +512,54 @@ private enum TerminalResult: Codable {
 // ownership. The public facade holds only immutable references and schedules all
 // access here. No JSValue, JSContext or SQLite handle crosses this boundary.
 private final class Engine: @unchecked Sendable {
+    private static let cleanupMethod = "attachmentCleanupRetireOwned"
+    private static let cleanupFailure = HostFailure("Attachment cleanup could not be confirmed; retry the retained request")
+    private struct CleanupRequest {
+        let requestID: String
+        let attachmentID: String
+        let targetURI: String
+    }
+    private struct CleanupJournal {
+        let requestJSON: String
+        let witnessJSON: String
+        let proof: NativeAttachmentFiles.BaselineAttachmentProof
+    }
+    private final class CleanupTurn {
+        let runtime: JSContext
+        let jobs: NativeAttachmentFileJobs
+        let database: SQLiteBridge
+        let generation: UInt64
+        let expectedStarted: Bool
+        let activation: Bool
+        let requestJSON: String
+        var command: PendingCommand?
+        var journal: MixedSaveFileBinding?
+        var terminal: PendingCommand?
+        var unacknowledged = false
+        var transaction = false
+        init(runtime: JSContext, jobs: NativeAttachmentFileJobs, database: SQLiteBridge, generation: UInt64,
+             started: Bool, activation: Bool, requestJSON: String, command: PendingCommand?, journal: MixedSaveFileBinding?) {
+            self.runtime = runtime; self.jobs = jobs; self.database = database; self.generation = generation
+            expectedStarted = started; self.activation = activation; self.requestJSON = requestJSON
+            self.command = command; self.journal = journal
+            if command?.terminal != nil { terminal = command }
+        }
+    }
+    private final class CleanupCallbackLease {
+        var active = true, consumed = false, failed = false
+        var result: String?
+        var work: ((Bool) throws -> String)?
+        func enter(retained: Bool) -> String {
+            guard active, !consumed, let work else { failed = true; return "!MindwtrNativeError:Cleanup callback is unavailable" }
+            consumed = true
+            do { let value = try work(retained); result = value; return value }
+            catch { failed = true; return "!MindwtrNativeError:Cleanup callback is unavailable" }
+        }
+        func invalidate() { active = false; work = nil }
+    }
+    private var cleanupTurn: CleanupTurn?
+    private var cleanupAcknowledgement: String?
+    private var cleanupOwed: Bool { cleanupTurn != nil || pending?.method == Self.cleanupMethod }
     private static let projectFileAddMethod = "projectFileAddOwned"
     private static let projectFileAddFailure = HostFailure("Project file operation could not be confirmed; retry the retained request")
     private typealias ProjectSource = NativeAttachmentDraftStore.Source
@@ -571,7 +630,7 @@ private final class Engine: @unchecked Sendable {
         let phase: String
         var object: [String: String] { ["kind": kind, "requestId": requestId, "phase": phase] }
     }
-    private struct OwnedDiscardIdentity: Equatable {
+    private struct OwnedDiscardIdentity: Equatable, Sendable {
         let device: dev_t
         let inode: ino_t
     }
@@ -653,7 +712,7 @@ private final class Engine: @unchecked Sendable {
         let settlement: MixedSaveSettlement?
         let relocation: MixedSaveRelocation?
     }
-    private struct MixedSaveFileBinding: Equatable {
+    private struct MixedSaveFileBinding: Equatable, Sendable {
         let bytes: Data
         let identity: OwnedDiscardIdentity
     }
@@ -1026,6 +1085,9 @@ private final class Engine: @unchecked Sendable {
         guard saved.version == 2 else { throw HostFailure("Unsupported pending command journal; raw captures cannot be safely replanned") }
         if saved.method == Self.ownedDiscardMethod {
             _ = try decodeOwnedDiscardJournal(journalData, checkingNative: true)
+        } else if saved.method == Self.cleanupMethod {
+            _ = try decodeCleanupJournal(journalData)
+            guard try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes)?.bytes == journalData else { throw Self.cleanupFailure }
         } else if saved.method == Self.projectFileAddMethod {
             _ = try projectFileAddJournal(saved)
             guard try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes)?.bytes == journalData else { throw Self.projectFileAddFailure }
@@ -1058,6 +1120,7 @@ private final class Engine: @unchecked Sendable {
         guard !closed else { throw HostFailure("Core host is closed") }
         do {
             if started {
+                try denyCleanupOwner()
                 return try startupWindow()
             }
             let source = try String(contentsOf: bundleURL, encoding: .utf8)
@@ -1126,9 +1189,15 @@ private final class Engine: @unchecked Sendable {
                     }
                 }
             }
-            // Optional cache cleanup cannot block startup or change an owed command.
-            try? backupExportFile.discardInterruptedExports()
             if pending == nil { pending = try loadPendingJournal() }
+            // Cleanup recovery is decided before unrelated cache or legacy work.
+            let cleanupRecovery = pending?.method == Self.cleanupMethod
+            if cleanupRecovery {
+                var original = stat()
+                guard lstat(databaseURL.path, &original) == 0, original.st_mode & S_IFMT == S_IFREG else { throw Self.cleanupFailure }
+            }
+            // Optional cache cleanup cannot block startup or change an owed command.
+            if !cleanupRecovery { try? backupExportFile.discardInterruptedExports() }
             // An uncertain journal never authorizes garbage collection. Validate
             // every owned backup byte before boot can activate domain work.
             if let command = pending, command.method == "backupDocumentCommit" {
@@ -1137,9 +1206,9 @@ private final class Engine: @unchecked Sendable {
             let retainedBackup = try pending.flatMap { command -> String? in
                 command.method == "backupDocumentCommit" ? try backupOperationReference(command).id : nil
             }
-            try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? []))
+            if !cleanupRecovery { try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? [])) }
             // Accepted operations own their frozen plan, never the picker copy.
-            try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id }))
+            if !cleanupRecovery { try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id })) }
             guard let runtime = JSContext() else { throw HostFailure("Cannot create JavaScriptCore runtime") }
             context = runtime
             installBridge(runtime)
@@ -1423,7 +1492,7 @@ private final class Engine: @unchecked Sendable {
                 try validateSomedaySectionMoveJournal(command)
                 if case .success(let value) = command.terminal { try validateSomedaySectionMoveAcknowledgment(command, value: value) }
             }
-            let legacy = try legacyStorage?.bootState()
+            var legacy = cleanupRecovery ? nil : try legacyStorage?.bootState()
             if let legacy {
                 _ = try invoke("legacyCheck", arguments: [legacy.stateJSON, legacy.backupJSON])
                 if !FileManager.default.fileExists(atPath: databaseURL.path), legacyStorage?.hasStoredValues == true {
@@ -1442,28 +1511,47 @@ private final class Engine: @unchecked Sendable {
             #if DEBUG
             let guardedFaults = HostIOFaults()
             guardedFaults.beforeSQL = { [unowned self] sql in
+                try self.requireCleanupTurn()
                 try self.requireRetainedOrdinaryTurn(requirePreparation: true)
                 try self.requireProjectFileAddTurn()
                 try self.faults?.beforeSQL?(sql)
                 try self.requireRetainedOrdinaryTurn(requirePreparation: true)
                 try self.requireProjectFileAddTurn()
+                try self.requireCleanupTurn()
             }
             guardedFaults.afterSQL = { [unowned self] sql in
+                if let turn = self.cleanupTurn {
+                    if sql == "BEGIN IMMEDIATE" { turn.transaction = true }
+                    if sql == "ROLLBACK" { turn.transaction = false }
+                }
                 try self.faults?.afterSQL?(sql)
                 try self.requireRetainedOrdinaryTurn(requirePreparation: true)
                 try self.requireProjectFileAddTurn()
+                try self.requireCleanupTurn()
             }
-            guardedFaults.checkpoint = { [unowned self] in try self.faults?.checkpoint?() }
-            guardedFaults.afterIntegrity = { [unowned self] in try self.faults?.afterIntegrity?() }
+            guardedFaults.checkpoint = { [unowned self] in try self.requireCleanupTurn(); try self.faults?.checkpoint?(); try self.requireCleanupTurn() }
+            guardedFaults.afterIntegrity = { [unowned self] in try self.requireCleanupTurn(); try self.faults?.afterIntegrity?(); try self.requireCleanupTurn() }
             sqlite.faults = guardedFaults
             #endif
+            if cleanupRecovery, let command = pending { _ = try captureCleanupTurn(command: command) }
             try sqlite.prepareRecovery(at: databaseURL.appendingPathExtension("prewrite"))
+            if cleanupRecovery, let turn = cleanupTurn {
+                let id = UUID(), cancellation = NativeAttachmentCancellation()
+                localRequests.register(cancellation, id: id)
+                do {
+                    defer { localRequests.remove(id) }
+                    _ = try executeCleanup(turn, cancellation: cancellation)
+                }
+                legacy = try legacyStorage?.bootState()
+                if let legacy { _ = try invoke("legacyCheck", arguments: [legacy.stateJSON, legacy.backupJSON]) }
+            }
             try requireProjectFileAddTurn()
             recoveryActivationPending = pending != nil
             projectFileAddTurn?.activationPending = recoveryActivationPending
             _ = try invoke(recoveryActivationPending ? "bootRecovery" : "boot", arguments: [legacy?.stateJSON ?? "", legacy?.backupJSON ?? ""])
             try requireProjectFileAddTurn()
             started = true
+            emitCleanupAcknowledgement()
             projectFileAddTurn?.expectedStarted = true
             // A durable no-write rejection needs only cleanup, not another failed
             // startup. The interactive retry still returns its original error.
@@ -1944,6 +2032,7 @@ private final class Engine: @unchecked Sendable {
         NativeAttachmentDraftCoordinator.hasEvidence(databaseURL: databaseURL)
     }
     private func requireNoAttachmentDraft() throws {
+        try denyCleanupOwner()
         guard pending?.method != Self.projectFileAddMethod, projectFileAddTurn == nil else { throw Self.projectFileAddFailure }
         guard !attachmentDraftEvidence else { throw HostFailure("Attachment draft ownership requires exact recovery") }
     }
@@ -2124,6 +2213,7 @@ private final class Engine: @unchecked Sendable {
         try requireRetainedOrdinaryTurn()
     }
     private func requireRawAttachmentRead(_ json: String, installer: Bool = false) throws {
+        try denyCleanupOwner()
         guard attachmentDraftEvidence || pending?.method == Self.projectFileAddMethod || projectFileAddTurn != nil else { return }
         guard json.utf8.count <= (installer ? 64 * 1024 : 24 * 1024 * 1024),
               let raw = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any], let operation = raw["op"] as? String,
@@ -2135,6 +2225,7 @@ private final class Engine: @unchecked Sendable {
 
     private func attachmentDraftCoordinator() throws -> NativeAttachmentDraftCoordinator {
         dispatchPrecondition(condition: .onQueue(queue))
+        try denyCleanupOwner()
         guard providerCopy?.receipt != nil || providerCopy == nil,
               started, !closed, pending == nil, !recoveryActivationPending, let jobs = attachmentJobs else {
             throw HostFailure("Attachment draft recovery is not ready")
@@ -2555,7 +2646,9 @@ private final class Engine: @unchecked Sendable {
         try readJournalBytes(maximumBytes: Self.ownedSaveMaximumBytes, failure: Self.ownedSaveFailure, singleLink: true)
     }
     private func readJournalBytes(maximumBytes: Int?, failure: HostFailure, singleLink: Bool, url: URL? = nil) throws -> Data? {
-        let target = url ?? journalURL
+        try Self.readBoundJournalBytes(url ?? journalURL, maximumBytes: maximumBytes, failure: failure, singleLink: singleLink)
+    }
+    private static func readBoundJournalBytes(_ target: URL, maximumBytes: Int?, failure: HostFailure, singleLink: Bool) throws -> Data? {
         let fd = open(target.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         if fd < 0 {
             if errno == ENOENT { return nil }
@@ -2921,9 +3014,12 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func mixedSaveFileBinding(_ url: URL, maximumBytes: Int) throws -> MixedSaveFileBinding? {
-        let before = try ownedDiscardIdentity(url)
-        let bytes = try readJournalBytes(maximumBytes: maximumBytes, failure: Self.ownedSaveFailure, singleLink: true, url: url)
-        let after = try ownedDiscardIdentity(url)
+        try Self.boundFile(url, maximumBytes: maximumBytes)
+    }
+    private static func boundFile(_ url: URL, maximumBytes: Int) throws -> MixedSaveFileBinding? {
+        let before = try bindingIdentity(url)
+        let bytes = try readBoundJournalBytes(url, maximumBytes: maximumBytes, failure: Self.ownedSaveFailure, singleLink: true)
+        let after = try bindingIdentity(url)
         guard before == after, (bytes == nil) == (after == nil) else { throw Self.ownedSaveFailure }
         guard let bytes, let after else { return nil }
         return .init(bytes: bytes, identity: after)
@@ -3598,6 +3694,9 @@ private final class Engine: @unchecked Sendable {
         return command
     }
     private func ownedDiscardIdentity(_ url: URL) throws -> OwnedDiscardIdentity? {
+        try Self.bindingIdentity(url)
+    }
+    private static func bindingIdentity(_ url: URL) throws -> OwnedDiscardIdentity? {
         var info = stat()
         if lstat(url.path, &info) < 0 {
             if errno == ENOENT { return nil }
@@ -4955,6 +5054,7 @@ private final class Engine: @unchecked Sendable {
 
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        try denyCleanupOwner()
         if started, !closed, pending?.method == Self.projectFileAddMethod || projectFileAddTurn != nil {
             guard method == "appLockOptions", editorAttempt == nil,
                   let values = try NativeJSON.jsonObject(with: Data(argumentsJSON.utf8)) as? [String], values.count == 1,
@@ -7416,6 +7516,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func resolvePending() throws -> TerminalResult? {
+        try denyCleanupOwner()
         guard started, !closed else { throw HostFailure("Core host is not ready; retry startup") }
         guard let command = pending else { return nil }
         if command.method == Self.projectFileAddMethod { throw CoreHostProjectFileAddRecovery() }
@@ -14797,6 +14898,373 @@ private final class Engine: @unchecked Sendable {
     }
 
 
+    // Cleanup uses the existing slot but never generic command replay, store
+    // hydration, editor lineage, or a captured whole-document metadata write.
+    private static func cleanupObject(_ text: String, maximum: Int) throws -> [String: Any] {
+        guard text.utf8.count <= maximum,
+              let value = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any],
+              try cleanupUniqueKeys(text) else { throw cleanupFailure }
+        return value
+    }
+    /// NativeJSON checks syntax and preserves decoded string bytes. Foundation
+    /// collapses duplicate members, so cleanup authority checks every object
+    /// separately using the existing fixed-schema key-token reader pattern.
+    private static func cleanupUniqueKeys(_ text: String) throws -> Bool {
+        let bytes = Array(text.utf8)
+        var index = 0, objects: [Set<Data>] = []
+        while index < bytes.count {
+            if bytes[index] == 0x7b { objects.append([]); index += 1; continue }
+            if bytes[index] == 0x7d {
+                guard !objects.isEmpty else { return false }
+                objects.removeLast(); index += 1; continue
+            }
+            guard bytes[index] == 0x22 else { index += 1; continue }
+            let start = index; index += 1
+            while index < bytes.count {
+                if bytes[index] == 0x5c { index += 2; continue }
+                if bytes[index] == 0x22 { index += 1; break }
+                index += 1
+            }
+            let end = index
+            var next = end
+            while next < bytes.count, [0x20, 0x09, 0x0a, 0x0d].contains(bytes[next]) { next += 1 }
+            if next < bytes.count, bytes[next] == 0x3a {
+                guard !objects.isEmpty,
+                      let key = try NativeJSON.jsonObject(with: Data(bytes[start..<end]), options: [.fragmentsAllowed]) as? String,
+                      objects[objects.count - 1].insert(Data(key.utf8)).inserted else { return false }
+            }
+        }
+        return objects.isEmpty
+    }
+    private static func cleanupRequest(_ text: String) throws -> CleanupRequest {
+        let raw = try cleanupObject(text, maximum: 128 * 1024)
+        guard Set(raw.keys) == Set(["version", "requestID", "attachmentID", "targetURI"]), isInteger(raw["version"], equalTo: 1),
+              let id = raw["requestID"] as? String, let uuid = UUID(uuidString: id), ownedEqual(uuid.uuidString.lowercased(), id),
+              let attachment = raw["attachmentID"] as? String, NativeAttachmentFiles.validBaselineAttachmentID(attachment),
+              let uri = raw["targetURI"] as? String, !uri.isEmpty, uri.utf8.count <= 16 * 1024, !uri.utf8.contains(0) else { throw cleanupFailure }
+        return .init(requestID: id, attachmentID: attachment, targetURI: uri)
+    }
+    private static func cleanupWitness(_ text: String, request: CleanupRequest) throws {
+        let raw = try cleanupObject(text, maximum: 128 * 1024)
+        guard Set(raw.keys) == Set(["version", "parentKind", "parentID", "parentPurgedAt", "attachmentID", "targetURI", "attachmentJSON"]),
+              isInteger(raw["version"], equalTo: 1), let kind = raw["parentKind"] as? String, ["task", "project"].contains(kind),
+              let parent = raw["parentID"] as? String, NativeAttachmentFiles.validBaselineAttachmentID(parent),
+              raw["parentPurgedAt"] is NSNull || (raw["parentPurgedAt"] as? String).map({ !$0.isEmpty }) == true,
+              let id = raw["attachmentID"] as? String, ownedEqual(id, request.attachmentID),
+              let uri = raw["targetURI"] as? String, ownedEqual(uri, request.targetURI),
+              let selected = raw["attachmentJSON"] as? String else { throw cleanupFailure }
+        let attachment = try cleanupObject(selected, maximum: 64 * 1024)
+        guard let selectedID = attachment["id"] as? String, ownedEqual(selectedID, id), attachment["kind"] as? String == "file",
+              let selectedURI = attachment["uri"] as? String, ownedEqual(selectedURI, uri),
+              attachment["deletedAt"] == nil || attachment["deletedAt"] is NSNull || attachment["deletedAt"] is String else { throw cleanupFailure }
+    }
+    private static func cleanupProof(_ raw: [String: Any], request: CleanupRequest) throws -> NativeAttachmentFiles.BaselineAttachmentProof {
+        guard Set(raw.keys) == Set(["targetURI", "sha256", "size", "identity", "directoryIdentity"]),
+              let uri = raw["targetURI"] as? String, ownedEqual(uri, request.targetURI),
+              let hash = raw["sha256"] as? String, hash.utf8.count == 64,
+              hash.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+              isInteger(raw["size"]), let size = raw["size"] as? NSNumber, size.doubleValue >= 0, size.doubleValue <= 9_007_199_254_740_991,
+              let identity = raw["identity"] as? String, projectToken(identity),
+              let directory = raw["directoryIdentity"] as? String, projectToken(directory) else { throw cleanupFailure }
+        return .init(targetURI: uri, sha256: hash, size: size.int64Value, identity: identity, directoryIdentity: directory)
+    }
+    private func cleanupJournal(_ command: PendingCommand) throws -> CleanupJournal {
+        guard command.version == 2, Self.ownedEqual(command.method, Self.cleanupMethod), command.editorDraft == nil else { throw Self.cleanupFailure }
+        let raw = try Self.cleanupObject(command.argumentsJSON, maximum: Self.ownedSaveMaximumBytes)
+        guard Set(raw.keys) == Set(["version", "requestJSON", "witnessJSON", "proof"]), Self.isInteger(raw["version"], equalTo: 1),
+              let requestJSON = raw["requestJSON"] as? String, let witnessJSON = raw["witnessJSON"] as? String,
+              let proof = raw["proof"] as? [String: Any] else { throw Self.cleanupFailure }
+        let request = try Self.cleanupRequest(requestJSON)
+        try Self.cleanupWitness(witnessJSON, request: request)
+        if let terminal = command.terminal {
+            guard case .success(let result) = terminal else { throw Self.cleanupFailure }
+            _ = try Self.cleanupResult(result, request: request)
+        }
+        return .init(requestJSON: requestJSON, witnessJSON: witnessJSON, proof: try Self.cleanupProof(proof, request: request))
+    }
+    private func decodeCleanupJournal(_ data: Data) throws -> PendingCommand {
+        guard data.count <= Self.ownedSaveMaximumBytes, let raw = try NativeJSON.jsonObject(with: data) as? [String: Any],
+              let text = String(data: data, encoding: .utf8), try Self.cleanupUniqueKeys(text),
+              Set(raw.keys) == Set(["version", "method", "argumentsJSON"] + (raw["terminal"] == nil ? [] : ["terminal"])),
+              let command = try? JSONDecoder().decode(PendingCommand.self, from: data) else { throw Self.cleanupFailure }
+        if let terminal = raw["terminal"] {
+            guard let object = terminal as? [String: Any], Set(object.keys) == Set(["success"]),
+                  let success = object["success"] as? [String: Any], Set(success.keys) == Set(["_0"]), success["_0"] is String else { throw Self.cleanupFailure }
+        }
+        _ = try cleanupJournal(command)
+        return command
+    }
+    private static func cleanupResult(_ text: String, request: CleanupRequest) throws -> String {
+        let raw = try cleanupObject(text, maximum: 1024)
+        guard Set(raw.keys) == Set(["version", "requestID", "outcome"]), isInteger(raw["version"], equalTo: 1),
+              let id = raw["requestID"] as? String, ownedEqual(id, request.requestID),
+              let outcome = raw["outcome"] as? String, ["removed", "absent", "retained"].contains(outcome) else { throw cleanupFailure }
+        return outcome
+    }
+    private static func cleanupReply(_ request: CleanupRequest, outcome: String) throws -> String {
+        try ownedJSON(["version": 1, "requestID": request.requestID, "outcome": outcome])
+    }
+    private func denyCleanupOwner() throws { if cleanupOwed { throw Self.cleanupFailure } }
+    private func captureCleanupTurn(command: PendingCommand? = nil, requestJSON: String? = nil) throws -> CleanupTurn {
+        if let turn = cleanupTurn { try requireCleanupTurn(); return turn }
+        guard !closed, lockFD >= 0, !invoking, let runtime = context, let jobs = attachmentJobs, let db = database,
+              projectFileAddTurn == nil, retainedOrdinaryTurn == nil, providerCopy == nil, ordinaryMutationDepth == 0,
+              try mixedSaveFileBinding(editorDrafts.url, maximumBytes: 3_000_000) == nil,
+              try mixedSaveFileBinding(NativeAttachmentDraftStore(databaseURL: databaseURL).url, maximumBytes: Self.ownedSaveMaximumBytes) == nil else { throw Self.cleanupFailure }
+        let binding = try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes)
+        let original: String
+        if let command {
+            guard let binding, try ownedEncoded(decodeCleanupJournal(binding.bytes)) == ownedEncoded(command) else { throw Self.cleanupFailure }
+            original = try cleanupJournal(command).requestJSON
+        } else {
+            guard pending == nil, binding == nil, started, !recoveryActivationPending, let requestJSON else { throw Self.cleanupFailure }
+            original = requestJSON
+        }
+        let turn = CleanupTurn(runtime: runtime, jobs: jobs, database: db, generation: attachmentGeneration, started: started,
+            activation: recoveryActivationPending, requestJSON: original, command: command, journal: binding)
+        cleanupTurn = turn; attachmentIdlePump?.cancel(); attachmentIdlePump = nil
+        try requireCleanupTurn(); return turn
+    }
+    private func requireCleanupTurn() throws {
+        guard let turn = cleanupTurn else { return }
+        guard !closed, started == turn.expectedStarted, recoveryActivationPending == turn.activation, lockFD >= 0,
+              context === turn.runtime, database === turn.database, attachmentJobs === turn.jobs, attachmentGeneration == turn.generation,
+              projectFileAddTurn == nil, retainedOrdinaryTurn == nil, providerCopy == nil,
+              try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == turn.journal,
+              try mixedSaveFileBinding(editorDrafts.url, maximumBytes: 3_000_000) == nil,
+              try mixedSaveFileBinding(NativeAttachmentDraftStore(databaseURL: databaseURL).url, maximumBytes: Self.ownedSaveMaximumBytes) == nil else { throw Self.cleanupFailure }
+        if let command = turn.command {
+            guard let pending, try ownedEncoded(pending) == ownedEncoded(command) else { throw Self.cleanupFailure }
+        } else { guard pending == nil else { throw Self.cleanupFailure } }
+    }
+    private func cleanupBoundary(_ name: String) throws {
+        try requireCleanupTurn()
+        #if DEBUG
+        try faults?.cleanupBoundary?(name)
+        #endif
+        try requireCleanupTurn()
+    }
+    private func cleanupSchema(_ turn: CleanupTurn) throws {
+        try requireCleanupTurn()
+        let db = turn.database
+        for name in ["tasks", "projects"] {
+            let master = try NativeJSON.jsonObject(with: Data(db.execute("SELECT type FROM sqlite_master WHERE name=?", parametersJSON: Self.ownedJSON([name])).utf8)) as? [[String: Any]]
+            guard master?.count == 1, master?.first?["type"] as? String == "table" else { throw Self.cleanupFailure }
+            let info = try NativeJSON.jsonObject(with: Data(db.execute("PRAGMA table_info(\(name))").utf8)) as? [[String: Any]]
+            guard let info, Set(info.compactMap { $0["name"] as? String }).isSuperset(of: ["id", "purgedAt", "attachments"]) else { throw Self.cleanupFailure }
+        }
+        try requireCleanupTurn()
+    }
+    private func cleanupProjection(_ turn: CleanupTurn) throws -> String {
+        try cleanupSchema(turn)
+        let db = turn.database
+        let aggregate = try NativeJSON.jsonObject(with: Data(db.execute("SELECT COUNT(*) AS count,COALESCE(SUM(COALESCE(length(CAST(id AS BLOB)),0)+COALESCE(length(CAST(purgedAt AS BLOB)),0)+COALESCE(length(CAST(attachments AS BLOB)),0)),0) AS bytes,COALESCE(SUM(CASE WHEN typeof(id)!='text' OR typeof(purgedAt) NOT IN ('null','text') OR typeof(attachments) NOT IN ('null','text') THEN 1 ELSE 0 END),0) AS invalid FROM (SELECT id,purgedAt,attachments FROM tasks UNION ALL SELECT id,purgedAt,attachments FROM projects)").utf8)) as? [[String: Any]]
+        guard let totals = aggregate?.first, let count = totals["count"] as? NSNumber, let bytes = totals["bytes"] as? NSNumber,
+              let invalid = totals["invalid"] as? NSNumber, invalid.int64Value == 0,
+              count.int64Value >= 0, count.int64Value <= 100_000, bytes.int64Value >= 0, bytes.int64Value <= 8 * 1024 * 1024 else { throw Self.cleanupFailure }
+        var groups: [String: [[String: Any]]] = [:]
+        for name in ["tasks", "projects"] {
+            let raw = try db.execute("SELECT id,purgedAt,attachments FROM \(name) ORDER BY id COLLATE BINARY")
+            guard raw.utf8.count <= 16 * 1024 * 1024, let rows = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [[String: Any]] else { throw Self.cleanupFailure }
+            for row in rows {
+                guard Set(row.keys) == Set(["id", "purgedAt", "attachments"]), let id = row["id"] as? String, NativeAttachmentFiles.validBaselineAttachmentID(id),
+                      row["purgedAt"] is NSNull || (row["purgedAt"] as? String).map({ !$0.isEmpty }) == true,
+                      row["attachments"] is NSNull || row["attachments"] is String else { throw Self.cleanupFailure }
+            }
+            groups[name] = rows
+        }
+        guard (groups["tasks"]?.count ?? 0) + (groups["projects"]?.count ?? 0) == count.intValue else { throw Self.cleanupFailure }
+        let result = try Self.ownedJSON(["version": 1, "tasks": groups["tasks"]!, "projects": groups["projects"]!])
+        guard result.utf8.count <= 16 * 1024 * 1024 else { throw Self.cleanupFailure }
+        try requireCleanupTurn(); return result
+    }
+    private func cleanupDirect(_ method: String, arguments: [Any], turn: CleanupTurn) throws -> String {
+        try requireCleanupTurn()
+        guard !invoking, let host = turn.runtime.objectForKeyedSubscript("MindwtrHost") else { throw Self.cleanupFailure }
+        invoking = true; defer { invoking = false }
+        turn.runtime.exception = nil
+        let returned = host.invokeMethod(method, withArguments: arguments)
+        let failed = turn.runtime.exception != nil; turn.runtime.exception = nil
+        guard !failed, let returned, returned.isString, let text = returned.toString() else { throw Self.cleanupFailure }
+        try requireCleanupTurn(); return text
+    }
+    private func cleanupFile(_ request: NativeAttachmentDraftFileRequest, turn: CleanupTurn, cancellation: NativeAttachmentCancellation,
+                             ownedProof: NativeAttachmentFiles.BaselineAttachmentProof? = nil) throws -> [String: Any] {
+        try requireCleanupTurn(); try cancellation.check()
+        let id: String
+        if let proof = ownedProof {
+            guard let journal = turn.journal else { throw Self.cleanupFailure }
+            let journalURL = self.journalURL, editorURL = editorDrafts.url,
+                sidecarURL = NativeAttachmentDraftStore(databaseURL: databaseURL).url
+            let attachmentID = try Self.cleanupRequest(turn.requestJSON).attachmentID
+            // Immutable bytes/inode and URLs only. No Engine, JSC, database or
+            // mutable turn escapes to the file worker; close uses its token.
+            id = try turn.jobs.submitBaselineRetirement(attachmentID: attachmentID, proof: proof, ownershipBytes: journal.bytes.count) {
+                guard try Self.boundFile(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == journal,
+                      try Self.boundFile(editorURL, maximumBytes: 3_000_000) == nil,
+                      try Self.boundFile(sidecarURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil else { throw Self.cleanupFailure }
+            }
+        } else { id = try turn.jobs.submitDraft(request) }
+        do {
+            while true {
+                let raw = turn.jobs.takeDraft(id)
+                if !raw.isEmpty {
+                    turn.jobs.drain(); try requireCleanupTurn(); try cancellation.check()
+                    let answer = try Self.cleanupObject(raw, maximum: 64 * 1024)
+                    guard Set(answer.keys) == Set(["id", "value"]), answer["id"] as? String == id, let value = answer["value"] as? [String: Any] else { throw Self.cleanupFailure }
+                    return value
+                }
+                if cancellation.isCancelled { turn.jobs.abort(id) }
+                Thread.sleep(forTimeInterval: 0.001)
+            }
+        } catch {
+            turn.jobs.abort(id); turn.jobs.drain(); _ = turn.jobs.takeDraft(id)
+            throw Self.cleanupFailure
+        }
+    }
+    private func writeCleanup(_ command: PendingCommand, turn: CleanupTurn) throws {
+        try requireCleanupTurn(); _ = try cleanupJournal(command)
+        let bytes = try ownedEncoded(command)
+        guard bytes.count <= Self.ownedSaveMaximumBytes else { throw Self.cleanupFailure }
+        // Retain this exact attempted transition even if promotion loses its ACK.
+        pending = command; turn.command = command; turn.unacknowledged = true
+        #if DEBUG
+        try faults?.journalWrite?()
+        #endif
+        try requireCleanupTurn()
+        do { try DurableFile.write(bytes, to: journalURL, privateDraft: true) }
+        catch {
+            if let actual = try? mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes), actual.bytes == bytes { turn.journal = actual }
+            throw Self.cleanupFailure
+        }
+        guard let actual = try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes), actual.bytes == bytes else { throw Self.cleanupFailure }
+        turn.journal = actual; turn.unacknowledged = false
+        if command.terminal != nil { turn.terminal = command }
+        try requireCleanupTurn()
+    }
+    private func finishCleanup(_ command: PendingCommand, turn: CleanupTurn, cancellation: NativeAttachmentCancellation) throws -> String {
+        guard case .success(let result) = command.terminal else { throw Self.cleanupFailure }
+        let outcome = try Self.cleanupResult(result, request: Self.cleanupRequest(turn.requestJSON))
+        try requireCleanupTurn(); try cancellation.check(); try cleanupBoundary("beforeClear")
+        #if DEBUG
+        try faults?.journalRemove?()
+        #endif
+        try requireCleanupTurn()
+        do { try DurableFile.remove(journalURL) }
+        catch {
+            if try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil { turn.journal = nil }
+            throw Self.cleanupFailure
+        }
+        guard try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil else { throw Self.cleanupFailure }
+        turn.journal = nil; turn.command = nil; pending = nil; turn.terminal = command
+        try cleanupBoundary("afterClear")
+        cleanupTurn = nil; cleanupAcknowledgement = outcome
+        if started { emitCleanupAcknowledgement() }
+        return result
+    }
+    private func emitCleanupAcknowledgement() {
+        guard !cleanupOwed, started, !closed, let outcome = cleanupAcknowledgement else { return }
+        cleanupAcknowledgement = nil
+        _ = try? invoke("attachmentDraftAcknowledged", arguments: ["cleanup-owned-retirement", outcome])
+    }
+    private func executeCleanup(_ turn: CleanupTurn, cancellation: NativeAttachmentCancellation) throws -> String {
+        try requireCleanupTurn(); try cancellation.check()
+        try cleanupSchema(turn)
+        if turn.unacknowledged, let command = turn.command { try writeCleanup(command, turn: turn) }
+        if let terminal = turn.terminal { return try finishCleanup(terminal, turn: turn, cancellation: cancellation) }
+        do {
+            _ = try turn.database.execute("BEGIN IMMEDIATE"); turn.transaction = true
+            let projection = try cleanupProjection(turn)
+            let request = try Self.cleanupRequest(turn.requestJSON)
+            let command: PendingCommand
+            if let retained = turn.command { command = retained }
+            else {
+                let candidate = try Self.ownedJSON(["attachmentID": request.attachmentID, "targetURI": request.targetURI])
+                guard candidate.utf8.count <= 32 * 1024 else { throw Self.cleanupFailure }
+                let witness = try cleanupDirect("attachmentCleanupPrepare", arguments: [projection, candidate], turn: turn)
+                if Self.ownedEqual(witness, "null") {
+                    _ = try turn.database.execute("ROLLBACK"); turn.transaction = false
+                    try requireCleanupTurn(); cleanupTurn = nil
+                    return try Self.cleanupReply(request, outcome: "retained")
+                }
+                try Self.cleanupWitness(witness, request: request)
+                try cleanupBoundary("beforeSnapshot")
+                let observed = try cleanupFile(.snapshotBaseline(attachmentID: request.attachmentID, targetURI: request.targetURI), turn: turn, cancellation: cancellation)
+                try cleanupBoundary("afterSnapshot")
+                guard observed["kind"] as? String == "present" else {
+                    guard ["noOwnedGeneration", "unmanaged", "unsafeEntry"].contains(observed["kind"] as? String ?? ""),
+                          let uri = observed["targetURI"] as? String, Self.ownedEqual(uri, request.targetURI) else { throw Self.cleanupFailure }
+                    _ = try turn.database.execute("ROLLBACK"); turn.transaction = false
+                    try requireCleanupTurn(); cleanupTurn = nil
+                    return try Self.cleanupReply(request, outcome: "retained")
+                }
+                var rawProof = observed; rawProof.removeValue(forKey: "kind")
+                _ = try Self.cleanupProof(rawProof, request: request)
+                let arguments = try Self.ownedJSON(["version": 1, "requestJSON": turn.requestJSON, "witnessJSON": witness, "proof": rawProof])
+                command = PendingCommand(version: 2, method: Self.cleanupMethod, argumentsJSON: arguments)
+                _ = try cleanupJournal(command)
+                for outcome in ["removed", "absent", "retained"] {
+                    var future = command; future.terminal = .success(try Self.cleanupReply(request, outcome: outcome))
+                    guard try ownedEncoded(future).count <= Self.ownedSaveMaximumBytes else { throw Self.cleanupFailure }
+                }
+                pending = command; turn.command = command; turn.unacknowledged = true
+                try cleanupBoundary("beforeIntent"); try writeCleanup(command, turn: turn); try cleanupBoundary("afterIntent")
+            }
+            let captured = try cleanupJournal(command), lease = CleanupCallbackLease()
+            lease.work = { [unowned self] retained in
+                try self.requireCleanupTurn(); try cancellation.check(); try self.cleanupBoundary("beforeRetirement")
+                let outcome: String
+                if retained { outcome = "retained" }
+                else {
+                    let value = try self.cleanupFile(.retireBaseline(attachmentID: request.attachmentID, proof: captured.proof),
+                        turn: turn, cancellation: cancellation, ownedProof: captured.proof)
+                    guard Set(value.keys) == Set(["status"]), let status = value["status"] as? String,
+                          ["removed", "absent", "generationChanged", "unsafeEntry"].contains(status) else { throw Self.cleanupFailure }
+                    outcome = ["removed", "absent"].contains(status) ? status : "retained"
+                }
+                try self.cleanupBoundary("afterRetirement")
+                return try Self.cleanupReply(request, outcome: outcome)
+            }
+            defer { lease.invalidate() }
+            let keep: @convention(block) () -> String = { [weak lease] in lease?.enter(retained: true) ?? "!MindwtrNativeError:Cleanup callback is unavailable" }
+            let retire: @convention(block) () -> String = { [weak lease] in lease?.enter(retained: false) ?? "!MindwtrNativeError:Cleanup callback is unavailable" }
+            guard let keepValue = JSValue(object: keep, in: turn.runtime), let retireValue = JSValue(object: retire, in: turn.runtime) else { throw Self.cleanupFailure }
+            let result = try cleanupDirect("attachmentCleanupRetire", arguments: [projection, captured.witnessJSON, keepValue, retireValue], turn: turn)
+            guard lease.consumed, !lease.failed, let expected = lease.result, Self.ownedEqual(expected, result) else { throw Self.cleanupFailure }
+            _ = try Self.cleanupResult(result, request: request)
+            var terminal = command; terminal.terminal = .success(result)
+            try cleanupBoundary("beforeTerminal"); try writeCleanup(terminal, turn: turn); try cleanupBoundary("afterTerminal")
+            _ = try turn.database.execute("ROLLBACK"); turn.transaction = false
+            try requireCleanupTurn()
+            return try finishCleanup(terminal, turn: turn, cancellation: cancellation)
+        } catch {
+            if turn.transaction {
+                do { _ = try turn.database.execute("ROLLBACK"); turn.transaction = false }
+                catch { throw Self.cleanupFailure }
+            }
+            // No proof/intent ever escaped: a later fresh selection may retry.
+            // Once an immutable command exists the exact owner remains owed.
+            if turn.command == nil && turn.terminal == nil { cleanupTurn = nil }
+            throw Self.cleanupFailure
+        }
+    }
+    func retireAttachmentCleanup(_ requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        dispatchPrecondition(condition: .onQueue(queue))
+        do {
+            _ = try Self.cleanupRequest(requestJSON)
+            guard started, !closed, !recoveryActivationPending else { throw Self.cleanupFailure }
+            let turn: CleanupTurn
+            if let retained = cleanupTurn {
+                guard Self.ownedEqual(retained.requestJSON, requestJSON) else { throw Self.cleanupFailure }
+                try requireCleanupTurn(); turn = retained
+            } else if let command = pending {
+                guard command.method == Self.cleanupMethod, Self.ownedEqual(try cleanupJournal(command).requestJSON, requestJSON) else { throw Self.cleanupFailure }
+                turn = try captureCleanupTurn(command: command)
+            } else { turn = try captureCleanupTurn(requestJSON: requestJSON) }
+            return try executeCleanup(turn, cancellation: cancellation)
+        } catch { throw Self.cleanupFailure }
+    }
+
     // Project Add is one concrete owner in the existing command journal. The
     // immutable core envelope is never reconstructed from current row metadata.
     private static func projectObject(_ text: String, maximum: Int = 8 * 1024 * 1024) throws -> [String: Any] {
@@ -15802,6 +16270,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func invoke(_ method: String, arguments: [Any], localCancellation: NativeAttachmentCancellation? = nil) throws -> String {
+        try denyCleanupOwner()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
         guard let context, let host = context.objectForKeyedSubscript("MindwtrHost") else { throw HostFailure("Core runtime unavailable") }
@@ -15886,6 +16355,7 @@ private final class Engine: @unchecked Sendable {
 
     private func scheduleAttachmentIdle(immediate: Bool = false) {
         guard started, !closed, !invoking, !recoveryActivationPending, pending == nil,
+              !cleanupOwed,
               attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil, let context else { return }
         let delay = immediate ? 0 : context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? -1
         guard delay.isFinite, delay >= 0 else { return }
@@ -15903,7 +16373,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         guard generation == attachmentGeneration else { return }
         attachmentIdlePump = nil
-        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil, let context else { return }
+        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, let context else { return }
         _ = context.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
         // No arbitrary JS exception content enters diagnostics.
         if context.exception != nil { context.exception = nil }
@@ -15919,6 +16389,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func ordinaryGuardedSQL(_ sql: String, parameters: String? = nil) throws -> String {
+        try denyCleanupOwner()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
         let result: String
@@ -15935,6 +16406,7 @@ private final class Engine: @unchecked Sendable {
 
     private func requireDeviceStorageAdmission() throws -> NativeDeviceKV {
         dispatchPrecondition(condition: .onQueue(queue))
+        try denyCleanupOwner()
         guard started, !closed, !recoveryActivationPending, pending == nil,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
             throw Self.deviceStorageUnavailable
@@ -16014,6 +16486,7 @@ private final class Engine: @unchecked Sendable {
 
     private func requireHTTPAdmission() throws {
         dispatchPrecondition(condition: .onQueue(queue))
+        try denyCleanupOwner()
         guard started, !closed, !recoveryActivationPending, pending == nil,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
             throw HostFailure("HTTP bridge is unavailable")
@@ -16023,6 +16496,7 @@ private final class Engine: @unchecked Sendable {
 
     private func requireSecretAdmission() throws {
         dispatchPrecondition(condition: .onQueue(queue))
+        try denyCleanupOwner()
         guard started, !closed, !recoveryActivationPending, pending == nil,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
             throw HostFailure("Secure storage bridge is unavailable")
@@ -16032,6 +16506,7 @@ private final class Engine: @unchecked Sendable {
 
     private func requireCryptoAdmission() throws {
         dispatchPrecondition(condition: .onQueue(queue))
+        try denyCleanupOwner()
         guard started, !closed, !recoveryActivationPending, pending == nil,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
             throw HostFailure("Crypto bridge is unavailable")
@@ -16040,6 +16515,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func nextIO() throws -> String {
+        try denyCleanupOwner()
         guard ioBodySource == nil else { throw HostFailure("I/O response body is unavailable") }
         func file() -> String? {
             guard let answer = attachmentJobs?.next(), !answer.isEmpty else { return nil }
@@ -16062,7 +16538,7 @@ private final class Engine: @unchecked Sendable {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
-                          !self.invoking, let context = self.context else { return }
+                          !self.invoking, !self.cleanupOwed, let context = self.context else { return }
                     _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeSecretDelivered", withArguments: [])
                     context.exception = nil
                     self.scheduleAttachmentIdle(immediate: true)
@@ -16088,6 +16564,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func ioBody() throws -> String {
+        try denyCleanupOwner()
         guard let source = ioBodySource else { throw HostFailure("I/O response body is unavailable") }
         ioBodySource = nil
         switch source {
@@ -16103,7 +16580,7 @@ private final class Engine: @unchecked Sendable {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
-                          !self.invoking, let context = self.context else { return }
+                          !self.invoking, !self.cleanupOwed, let context = self.context else { return }
                     _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeHTTPDelivered", withArguments: [])
                     context.exception = nil
                     self.scheduleAttachmentIdle(immediate: true)
@@ -16120,7 +16597,7 @@ private final class Engine: @unchecked Sendable {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
-                          !self.invoking, let context = self.context else { return }
+                          !self.invoking, !self.cleanupOwed, let context = self.context else { return }
                     _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeCryptoDelivered", withArguments: [])
                     context.exception = nil
                     self.scheduleAttachmentIdle(immediate: true)
@@ -16148,10 +16625,12 @@ private final class Engine: @unchecked Sendable {
         }
         let logFile: @convention(block) (JSValue, JSValue) -> String = { [weak self] operation, text in
             guard let self, operation.isString, text.isString else { return "!MindwtrNativeError:Diagnostics file operation unavailable" }
-            return self.guarded { try self.diagnosticsFile.perform(operation.toString(), text: text.toString()) } ?? ""
+            return self.guarded { try self.denyCleanupOwner(); return try self.diagnosticsFile.perform(operation.toString(), text: text.toString()) } ?? ""
         }
         let now: @convention(block) () -> Double = { ProcessInfo.processInfo.systemUptime * 1_000 }
         let random: @convention(block) (Int) -> String = { length in
+            // Bundle evaluation needs entropy for in-memory identifiers before
+            // cold cleanup settles. This bounded helper has no durable I/O authority.
             guard (0...65_536).contains(length) else { return "!MindwtrNativeError:Invalid random byte count" }
             if length == 0 { return "[]" }
             var bytes = [UInt8](repeating: 0, count: length)
@@ -16164,6 +16643,7 @@ private final class Engine: @unchecked Sendable {
                 return "!MindwtrNativeError:Legacy app storage is unavailable in the foundation"
             }
             return self.guarded {
+                try self.denyCleanupOwner()
                 try legacy.commit(changeJSON: change, checkpointURL: self.databaseURL.appendingPathExtension("rn-state.prewrite"))
                 return nil
             }
@@ -16386,6 +16866,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func releaseRuntime() {
+        cleanupTurn = nil
         projectFileAddTurn = nil
         retainedOrdinaryTurn = nil
         attachmentGeneration &+= 1

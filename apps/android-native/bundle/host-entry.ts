@@ -33,6 +33,8 @@ import {
     completeNativeAttachmentDraftAdd, completeNativeAttachmentDraftAddV4,
     prepareNativeAttachmentDraftDiscardCandidates,
     prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4,
+    prepareNativeAttachmentCleanupWitness,
+    isNativeAttachmentCleanupWitnessEligible,
     isAttachmentFileInUse,
     planAttachmentOpen,
     getAttachmentResolutionMessage,
@@ -1022,6 +1024,13 @@ const attachmentDraftJson = (json: string): unknown => {
         if (typeof json === 'string' && json.length <= 8 * 1024 * 1024
             && new TextEncoder().encode(json).byteLength <= 8 * 1024 * 1024) return JSON.parse(json);
     } catch { /* A parser excerpt could expose draft content or a picked path. */ }
+    throw new Error('INVALID_INPUT');
+};
+const attachmentCleanupJson = (json: string, maxBytes: number): unknown => {
+    try {
+        if (typeof json === 'string' && json.length <= maxBytes
+            && new TextEncoder().encode(json).byteLength <= maxBytes) return JSON.parse(json);
+    } catch { /* Never expose raw durable rows or parser excerpts. */ }
     throw new Error('INVALID_INPUT');
 };
 const attachmentDiscardInvalid = (): Error => new Error('INVALID_INPUT: Invalid attachment Discard handoff');
@@ -3527,6 +3536,26 @@ globalThis.MindwtrHost = {
             return prepareNativeAttachmentDraftDiscardCandidatesV3(attachmentDraftJson(json));
         });
     },
+    /** Pure pre-hydration cleanup policy; only native callbacks carry physical authority. */
+    attachmentCleanupPrepare(projectionJSON: string, candidateJSON: string): string {
+        if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT');
+        return JSON.stringify(prepareNativeAttachmentCleanupWitness(
+            attachmentCleanupJson(projectionJSON, 16 * 1024 * 1024), attachmentCleanupJson(candidateJSON, 32 * 1024),
+        ));
+    },
+    attachmentCleanupRetire(projectionJSON: string, witnessJSON: string,
+        retainedCallback: () => string, retireCallback: () => string): string {
+        if (globalThis.__mindwtrHostPlatform !== 'ios'
+            || typeof retainedCallback !== 'function' || typeof retireCallback !== 'function') throw new Error('INVALID_INPUT');
+        const eligible = isNativeAttachmentCleanupWitnessEligible(
+            attachmentCleanupJson(projectionJSON, 16 * 1024 * 1024), attachmentCleanupJson(witnessJSON, 128 * 1024),
+        );
+        const result: unknown = eligible ? retireCallback() : retainedCallback();
+        if (typeof result !== 'string' || result.length > 1024 || new TextEncoder().encode(result).byteLength > 1024) {
+            throw new Error('INVALID_INPUT');
+        }
+        return result;
+    },
     /** Private, synchronous final handoff; native passes ephemeral proof-bound callbacks. */
     attachmentDraftDiscardRetire(json: string, keepCallback: () => string, retireCallback: () => string): string {
         return retireAttachmentDiscard(json, keepCallback, retireCallback);
@@ -3608,11 +3637,12 @@ globalThis.MindwtrHost = {
             const projectFileAdd = operation === 'project-file-add' && ['saved', 'abandoned'].includes(outcome);
             const projectFileHash = operation === 'project-file-hash' && outcome === 'saved';
             const taskFileHash = operation === 'task-file-hash' && outcome === 'saved';
+            const ownedCleanup = operation === 'cleanup-owned-retirement' && ['removed', 'absent', 'retained'].includes(outcome);
             const editorAcknowledged = ['editor-add', 'editor-remove', 'editor-save', 'editor-discard', 'editor-recover'].includes(operation) && outcome === 'confirmed';
-            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash && !ownedCleanup
                 || !(['add', 'checkpoint', 'save'].includes(operation) && ['confirmed', 'replayed'].includes(outcome)
                     || operation === 'discard' && outcome === 'retained'
-                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash)) return {};
+                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash || ownedCleanup)) return {};
             try {
                 if (completeSave && outcome === 'domainSaved') await diagnosticsLog.append({
                     ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
@@ -3624,6 +3654,7 @@ globalThis.MindwtrHost = {
                 await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                     message: 'Native iOS attachment draft acknowledged',
                     context: { ...(editorAcknowledged ? { releaseCheck: 'v1.3.5/ios-editor-owned-attachments' }
+                        : ownedCleanup ? { releaseCheck: 'v1.3.5/ios-cleanup-owned-retirement' }
                         : fileOpen ? { releaseCheck: 'v1.3.5/ios-local-file-open' }
                         : projectFileOpen ? { releaseCheck: 'v1.3.5/ios-project-local-file-open' }
                         : relocatedOpen ? { releaseCheck: 'v1.3.5/ios-relocated-file-open', surface: operation === 'relocated-task-file-open' ? 'task' : 'project' }

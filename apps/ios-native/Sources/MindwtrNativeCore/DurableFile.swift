@@ -106,6 +106,7 @@ final class HostIOFaults {
     var afterIntegrity: (() throws -> Void)?
     var journalWrite: (() throws -> Void)?
     var journalRemove: (() throws -> Void)?
+    var cleanupBoundary: ((String) throws -> Void)?
     var editorDraftRemove: (() throws -> Void)?
     var commandDiagnostic: ((String) -> Void)?
     var configureDeviceStorage: ((NativeDeviceKV) -> Void)?

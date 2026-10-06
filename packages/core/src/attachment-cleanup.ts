@@ -48,8 +48,18 @@ export interface CleanupResult {
     errors: Array<{ id: string; error: string }>;
 }
 
-export function findOrphanedAttachments(appData: AppData): Attachment[] {
-    const allAttachments = new Map<string, Attachment>();
+export type AttachmentCleanupPolicyAttachment = Pick<Attachment, 'id' | 'uri'> & {
+    deletedAt?: string | null;
+    cloudKey?: string | null;
+    localStatus?: Attachment['localStatus'] | null;
+};
+export type AttachmentCleanupPolicyData<T extends AttachmentCleanupPolicyAttachment> = {
+    tasks: readonly { attachments?: readonly T[]; purgedAt?: string | null }[];
+    projects: readonly { attachments?: readonly T[]; purgedAt?: string | null }[];
+};
+
+export function findOrphanedAttachments<T extends AttachmentCleanupPolicyAttachment>(appData: AttachmentCleanupPolicyData<T>): T[] {
+    const allAttachments = new Map<string, T>();
     const activeReferenceIds = new Set<string>();
 
     for (const task of appData.tasks) {
@@ -131,8 +141,8 @@ export function hasFreshAttachmentCleanupWork(appData: AppData): boolean {
         || appData.projects.some((project) => hasWork(project.attachments, Boolean(project.purgedAt)));
 }
 
-export function findDeletedAttachmentsForFileCleanup(appData: AppData): Attachment[] {
-    const deleted = new Map<string, Attachment>();
+export function findDeletedAttachmentsForFileCleanup<T extends AttachmentCleanupPolicyAttachment>(appData: AttachmentCleanupPolicyData<T>): T[] {
+    const deleted = new Map<string, T>();
 
     for (const task of appData.tasks) {
         for (const attachment of task.attachments || []) {
@@ -223,11 +233,11 @@ export function normalizeAttachmentCleanupUri(uri?: string): string | undefined 
     return /^[a-z]:\//i.test(path) ? path.toLowerCase() : path;
 }
 
-export function findLiveAttachmentResourceReferences(appData: AppData): LiveAttachmentResourceReferences {
+export function findLiveAttachmentResourceReferences(appData: AttachmentCleanupPolicyData<AttachmentCleanupPolicyAttachment>): LiveAttachmentResourceReferences {
     const localUris = new Set<string>();
     const cloudKeys = new Set<string>();
 
-    const collect = (attachments: readonly Attachment[] | undefined, parentDeleted: boolean) => {
+    const collect = (attachments: readonly AttachmentCleanupPolicyAttachment[] | undefined, parentDeleted: boolean) => {
         if (parentDeleted) return;
         for (const attachment of attachments || []) {
             if (attachment.deletedAt) continue;
@@ -251,11 +261,20 @@ export function findLiveAttachmentResourceReferences(appData: AppData): LiveAtta
 }
 
 export function isAttachmentLocalResourceReferenced(
-    attachment: Attachment,
+    attachment: Pick<Attachment, 'uri'>,
     references: LiveAttachmentResourceReferences,
 ): boolean {
     const localUri = normalizeAttachmentCleanupUri(attachment.uri);
     return Boolean(localUri && references.localUris.has(localUri));
+}
+
+/** Processed tombstones keep their metadata without granting another local delete. */
+export function shouldDeleteAttachmentLocalResource(
+    attachment: Pick<AttachmentCleanupPolicyAttachment, 'uri' | 'deletedAt' | 'localStatus'>,
+    references: LiveAttachmentResourceReferences,
+): boolean {
+    const alreadyStampedTombstone = Boolean(attachment.deletedAt) && attachment.localStatus === 'missing';
+    return !alreadyStampedTombstone && !isAttachmentLocalResourceReferenced(attachment, references);
 }
 
 export function isAttachmentCloudResourceReferenced(
@@ -417,8 +436,7 @@ export async function runAttachmentCleanupLifecycle(
             processedOrphanedIds.add(attachment.id);
         }
         await options.beforeEachAttachment?.();
-        const alreadyStampedTombstone = Boolean(attachment.deletedAt) && attachment.localStatus === 'missing';
-        if (!alreadyStampedTombstone && !isAttachmentLocalResourceReferenced(attachment, liveResourceReferences)) {
+        if (shouldDeleteAttachmentLocalResource(attachment, liveResourceReferences)) {
             await options.deleteLocalAttachment(attachment);
         }
         // Attempted counts as processed: the pre-#1064 flow dropped the record
