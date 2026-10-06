@@ -15,7 +15,7 @@ import { SyncRemoteWriteConflict } from './sync-run-ports';
 import { clearIdleSyncCycleSnapshot, normalizeRemoteWriteResult, runSharedSyncCycle } from './sync-run';
 import { normalizeAppData } from './sync-normalization';
 import { cloneAppData } from './sync-runtime-utils';
-import { parseSyncDocument, toRemoteSyncDocument } from './sync-document';
+import { computeRemoteSyncDocumentFingerprint, parseSyncDocument, toRemoteSyncDocument } from './sync-document';
 import { toStableSyncJson } from './sync-helpers';
 import type { FastSyncState } from './sync-fast-sync';
 import {
@@ -1891,6 +1891,152 @@ describe('runSharedSyncCycle', () => {
         const second = await run();
         expect(second).toMatchObject({ success: true, skipped: 'unchanged' });
         expect(vi.mocked(io.writeRemote).mock.calls.length).toBe(writesAfterFirst);
+    });
+
+    describe('fresh cleanup survives unchanged Sync guards', () => {
+        const localWithTombstone = (owner: 'task' | 'project'): AppData => {
+            const attachment = {
+                id: 'attachment-cleanup-fast-check',
+                kind: 'file' as const,
+                title: 'Private deleted file',
+                uri: 'file:///managed/private-deleted.txt',
+                localStatus: 'available' as const,
+                createdAt: STAMP,
+                updatedAt: STAMP,
+                deletedAt: STAMP,
+            };
+            const task = createTask('t-cleanup-fast-check', 'Private cleanup task');
+            if (owner === 'task') task.attachments = [attachment];
+            const local = createData([task], {
+                attachments: { lastCleanupAt: new Date().toISOString() },
+            });
+            if (owner === 'project') {
+                local.projects = [{
+                    id: 'p-cleanup-fast-check', title: 'Private cleanup project', status: 'active',
+                    color: '#3b82f6', order: 0, tagIds: [], attachments: [attachment],
+                    createdAt: STAMP, updatedAt: STAMP,
+                }];
+            }
+            return local;
+        };
+        const cleanupHook = () => vi.fn(async (data: AppData) => {
+            const cleaned = cloneAppData(data);
+            for (const owner of [...cleaned.tasks, ...cleaned.projects]) {
+                for (const attachment of owner.attachments ?? []) {
+                    if (attachment.deletedAt) attachment.localStatus = 'missing';
+                }
+            }
+            return { data: cleaned, invalidateFastSyncState: false };
+        });
+        const seedMatchedCache = (bundle: ReturnType<typeof createHarness>, local: AppData, scope: string,
+                                  localFingerprint = computeRemoteSyncDocumentFingerprint(toRemoteSyncDocument(local))) => {
+            bundle.harness.fastStates.set(scope, {
+                scope, localFingerprint,
+                remoteFingerprint: `remote-fp-${JSON.stringify(local.tasks.map((task) => task.id).sort())}`,
+                checkedAt: NOW.toISOString(),
+            });
+        };
+        const markerExtra = {
+            releaseCheck: 'v1.3.5/sync-cleanup-fast-check', operation: 'attachment-cleanup', outcome: 'required',
+        };
+
+        it.each([
+            ['manual', 'task'], ['manual', 'project'], ['cached', 'task'], ['cached', 'project'],
+        ] as const)('runs fresh %s cleanup for a %s despite matched fingerprints, then skips processed state', async (mode, owner) => {
+            const local = localWithTombstone(owner), runAttachmentCleanup = cleanupHook();
+            const scope = mode === 'cached' ? `scope-cleanup-${owner}` : null;
+            const bundle = createHarness({
+                local, remote: toRemoteSyncDocument(cloneAppData(local)), backend: 'webdav', fastSyncScope: scope,
+                policy: { enableReadCheckSkip: true }, hooks: { runAttachmentCleanup },
+            });
+            if (scope) seedMatchedCache(bundle, local, scope);
+
+            const first = await bundle.run({ manual: mode === 'manual' });
+
+            expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+            expect(first.success).toBe(true);
+            expect(first.skipped).toBeUndefined();
+            expect(bundle.io.readRemote).toHaveBeenCalledTimes(1);
+            expect([...bundle.harness.persisted.tasks, ...bundle.harness.persisted.projects]
+                .flatMap((item) => item.attachments ?? []).map((attachment) => attachment.localStatus)).toEqual(['missing']);
+            const markers = bundle.harness.infos.filter((info) => info.extra?.releaseCheck === markerExtra.releaseCheck);
+            expect(markers.length).toBeGreaterThan(0);
+            expect(markers.length).toBeLessThanOrEqual(3);
+            for (const info of markers) {
+                expect(info).toEqual({ message: 'Sync fast check retained fresh attachment cleanup', extra: markerExtra });
+            }
+            bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
+            const second = await bundle.run({ manual: mode === 'manual' });
+
+            expect(second).toMatchObject({ success: true, skipped: 'unchanged' });
+            expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+            expect(bundle.harness.infos.filter((info) => info.extra?.releaseCheck === markerExtra.releaseCheck)).toHaveLength(markers.length);
+        });
+
+        it.each([
+            ['manual', 'disabled'], ['manual', 'absent'], ['cached', 'disabled'], ['cached', 'absent'],
+        ] as const)('preserves %s unchanged skip when attachment cleanup is %s', async (mode, control) => {
+            const local = localWithTombstone('task'), runAttachmentCleanup = cleanupHook();
+            const scope = mode === 'cached' ? 'scope-cleanup-unavailable' : null;
+            const bundle = createHarness({
+                local, remote: toRemoteSyncDocument(cloneAppData(local)), fastSyncScope: scope,
+                policy: { enableReadCheckSkip: true, attachmentPhasesEnabled: control !== 'disabled' },
+                hooks: control === 'absent' ? {} : { runAttachmentCleanup },
+            });
+            if (scope) seedMatchedCache(bundle, local, scope);
+
+            expect(await bundle.run({ manual: mode === 'manual' })).toMatchObject({ success: true, skipped: 'unchanged' });
+            expect(runAttachmentCleanup).not.toHaveBeenCalled();
+            expect(bundle.io.readRemote).toHaveBeenCalledTimes(mode === 'manual' ? 1 : 0);
+            expect(bundle.harness.infos.filter((info) => info.extra?.releaseCheck === markerExtra.releaseCheck)).toEqual([]);
+            expect(bundle.harness.persisted.tasks[0].attachments?.[0]?.localStatus).toBe('available');
+        });
+
+        it('refuses the local-only upload fast path while fresh cleanup still needs the full remote read', async () => {
+            const local = localWithTombstone('task'), runAttachmentCleanup = cleanupHook();
+            const adoptRemoteFingerprintForWrite = vi.fn(() => true), scope = 'scope-cleanup-local-only';
+            const bundle = createHarness({
+                local, remote: toRemoteSyncDocument(cloneAppData(local)), backend: 'webdav', fastSyncScope: scope,
+                policy: { preSyncAttachmentsBeforeFastCheck: true },
+                io: { adoptRemoteFingerprintForWrite }, hooks: { runAttachmentCleanup },
+            });
+            seedMatchedCache(bundle, local, scope, 'an-earlier-local-document');
+
+            expect((await bundle.run()).success).toBe(true);
+            expect(bundle.io.readRemote).toHaveBeenCalledTimes(1);
+            expect(adoptRemoteFingerprintForWrite).not.toHaveBeenCalled();
+            expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not record a matched fast state while a cleanup hook leaves fresh work unresolved', async () => {
+            const local = localWithTombstone('project'), runAttachmentCleanup = vi.fn(async () => null);
+            const bundle = createHarness({
+                local, remote: toRemoteSyncDocument(cloneAppData(local)), backend: 'webdav',
+                fastSyncScope: 'scope-cleanup-still-fresh', hooks: { runAttachmentCleanup },
+            });
+
+            expect((await bundle.run()).success).toBe(true);
+            expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+            expect(bundle.storage.writeFastSyncState).not.toHaveBeenCalled();
+            expect(bundle.harness.fastStates.size).toBe(0);
+        });
+
+        it('keeps fresh cleanup eligible when its fixed diagnostic throws', async () => {
+            const local = localWithTombstone('task'), runAttachmentCleanup = cleanupHook();
+            const bundle = createHarness({
+                local, remote: toRemoteSyncDocument(cloneAppData(local)), manual: true,
+                policy: { enableReadCheckSkip: true }, hooks: { runAttachmentCleanup },
+            });
+            const original = bundle.notifier.logInfo;
+            vi.spyOn(bundle.notifier, 'logInfo').mockImplementation((message, extra) => {
+                if (extra?.releaseCheck === markerExtra.releaseCheck) throw new Error('Synthetic logger refusal');
+                original(message, extra);
+            });
+
+            expect((await bundle.run()).success).toBe(true);
+            expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+            expect(bundle.harness.persisted.tasks[0].attachments?.[0]?.localStatus).toBe('missing');
+        });
     });
 
     it('rewrites legacy full tombstones once before treating sync as unchanged', async () => {

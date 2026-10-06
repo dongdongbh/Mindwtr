@@ -1,18 +1,26 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import {
     BACKGROUND_SYNC_FAILURE_STATE_KEY,
     NativeAttachmentCleanupUnconfirmedError,
     SYNC_BACKEND_KEY,
     WEBDAV_URL_KEY,
+    resetForTests,
+    setSha256HexProvider,
     setLogger,
+    type AppData,
 } from '@mindwtr/core';
 import { createDeadlineFetch, createNativeSync } from './host-sync';
+import type { NativeAttachmentBindings } from './host-attachments';
+import { createMemoryFileSystem, CACHE, DOCUMENTS, MANAGED } from '../../../packages/core/src/__fixtures__/mobile-attachment-fakes';
 
 // The native app's background sync binding (S4a): core's runner and schedule decision on the host's ports.
 const globals = globalThis as unknown as Record<string, unknown>;
 const realFetch = globalThis.fetch;
+const nativeGlobals = ['__mindwtrHostPlatform', '__mindwtrNative', '__mindwtrFileCall', '__mindwtrInstallerCall'];
+const originalGlobals = new Map(nativeGlobals.map((name) => [name, globals[name]]));
 
-const host = (stored: Record<string, string> = {}, refuseSchedule = false, getData?: () => Promise<never>) => {
+const host = (stored: Record<string, string> = {}, refuseSchedule = false, getData?: () => Promise<AppData>,
+    retireLocalAttachment?: NativeAttachmentBindings['retireLocalAttachment']) => {
     const kv = new Map(Object.entries(stored));
     const schedules: boolean[] = [];
     const lines: string[] = [];
@@ -43,6 +51,7 @@ const host = (stored: Record<string, string> = {}, refuseSchedule = false, getDa
             schedules.push(on);
         },
         isFossBuild: false,
+        retireLocalAttachment,
     };
     const sync = createNativeSync(bindings);
     return { sync, kv, schedules, lines, traces, calls, bindings };
@@ -60,6 +69,144 @@ afterEach(() => {
     fetches.length = 0;
     delete globals.__mindwtrCryptoCall;
     setLogger(null);
+    setSha256HexProvider(null);
+    for (const name of nativeGlobals) {
+        const original = originalGlobals.get(name);
+        if (original === undefined) delete globals[name];
+        else globals[name] = original;
+    }
+});
+
+/** The same file-call wire read by nativeFileChannels, over existing memory files. */
+const iosFiles = () => {
+    setLogger(() => undefined);
+    const memory = createMemoryFileSystem();
+    const calls: string[] = [];
+    globals.__mindwtrHostPlatform = 'ios';
+    globals.__mindwtrNative = {
+        fileDirectories: () => JSON.stringify({ document: DOCUMENTS, cache: CACHE }),
+        fileDeleteNow: () => { calls.push('deleteNow'); throw new Error('Unexpected raw delete'); },
+    };
+    globals.__mindwtrFileCall = async (request: Record<string, unknown>) => {
+        const op = String(request.op);
+        const uri = String(request.uri ?? '');
+        calls.push(op);
+        switch (op) {
+            case 'getInfo': return memory.fs.getInfo(uri);
+            case 'makeDirectory': return memory.fs.makeDirectory(uri);
+            case 'readDirectory': return memory.fs.readDirectory(uri);
+            case 'barrier': case 'syncParent': return null;
+            default: throw new Error('Unexpected fixture file operation');
+        }
+    };
+    globals.__mindwtrInstallerCall = async () => { calls.push('installer'); throw new Error('Unexpected installer operation'); };
+    return { memory, calls };
+};
+
+describe('explicit iOS foreground sync factory', () => {
+    it('requires the selected cleanup callback and actual file channels instead of admitting no-op cleanup', () => {
+        iosFiles();
+        expect(() => host()).toThrow('Foreground sync requires owned attachment cleanup on this iOS build');
+        delete globals.__mindwtrFileCall;
+        expect(() => host({}, false, undefined, async () => false)).toThrow('Foreground sync requires native attachment files on this iOS build');
+    });
+
+    it('captures iOS without reading configuration and refuses automatic/background work while normal reconcile does nothing', async () => {
+        const files = iosFiles();
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'cloudkit', untouched: 'fixture' }, false, undefined, async () => false);
+        expect(fixture.sync.settingsHost.platform).toMatchObject({ os: 'ios', cloudKitAvailable: false });
+        expect(fixture.sync.attachmentsHost).not.toBeNull();
+        expect(fixture.calls).toEqual([]);
+        expect(files.calls).toEqual([]);
+        globals.__mindwtrHostPlatform = 'android';
+        expect(fixture.sync.settingsHost.platform.os).toBe('ios');
+        expect(() => fixture.sync.start('active')).toThrow('Automatic sync is not available on this iOS build');
+        await expect(fixture.sync.backgroundSync('scheduled', 0)).rejects.toThrow('Background sync is not available on this iOS build');
+        await expect(fixture.sync.backgroundSync('capture', 1)).rejects.toThrow('Background sync is not available on this iOS build');
+        await fixture.sync.settingsHost.reconcileBackgroundSync();
+        expect(fixture.calls).toEqual([]);
+        expect(fixture.schedules).toEqual([]);
+        expect(fixture.traces).toEqual([]);
+        expect(files.calls).toEqual([]);
+        expect([...fixture.kv]).toEqual([[SYNC_BACKEND_KEY, 'cloudkit'], ['untouched', 'fixture']]);
+    });
+
+    it('keeps the Android default for every platform value other than exact ios', async () => {
+        globals.__mindwtrHostPlatform = 'IOS';
+        const fixture = host();
+        expect(fixture.sync.settingsHost.platform.os).toBe('android');
+        expect(fixture.sync.attachmentsHost).toBeNull();
+        await fixture.sync.settingsHost.reconcileBackgroundSync();
+        expect(fixture.schedules).toEqual([false]);
+    });
+
+    it('passes the selected Task identity through the real cleanup lifecycle and preserves its fatal fence on iOS', async () => {
+        resetForTests();
+        const files = iosFiles();
+        const date = '2026-10-06T00:00:00.000Z';
+        const attachmentId = '00000000-0000-4000-8000-000000000315';
+        const uri = `${MANAGED}${attachmentId}.txt`;
+        const data: AppData = { tasks: [{ id: 'purged-task', title: 'Fixture', status: 'done', tags: [], contexts: [],
+            createdAt: date, updatedAt: date, deletedAt: date, purgedAt: date,
+            attachments: [{ id: attachmentId, kind: 'file', title: 'fixture.txt', uri, createdAt: date, updatedAt: date }] }],
+            projects: [], sections: [], areas: [], settings: {} };
+        const before = structuredClone(data);
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        const retire = mock(async (_id: string, _uri: string, keep: () => boolean) => {
+            expect(keep()).toBe(false);
+            throw fatal;
+        });
+        files.memory.put(uri, new Uint8Array([1, 2, 3]));
+        globalThis.fetch = (async () => new Response(JSON.stringify(data), { status: 200, headers: { ETag: '"fixture"' } })) as typeof fetch;
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json' }, false,
+            async () => structuredClone(data), retire);
+        const result = await fixture.sync.settingsHost.performSync(undefined, { manual: true }).catch((error: unknown) => error);
+        expect(retire).toHaveBeenCalledWith(attachmentId, uri, expect.any(Function));
+        expect(result).toBe(fatal);
+        const at = fixture.calls.length;
+        await expect(fixture.sync.settingsHost.reconcileBackgroundSync()).rejects.toBe(fatal);
+        expect(fixture.calls.slice(at)).toEqual([]);
+        expect(files.calls).not.toContain('deleteNow');
+        expect(files.memory.read(uri)).toEqual(new Uint8Array([1, 2, 3]));
+        expect(data).toEqual(before);
+        resetForTests();
+    });
+
+    it('propagates the exact 8 MiB cap to real WebDAV attachment admission before snapshot or upload IO', async () => {
+        resetForTests();
+        const files = iosFiles();
+        const date = '2026-10-06T00:00:00.000Z';
+        const id = '00000000-0000-4000-8000-000000000316';
+        const uri = `${MANAGED}${id}.txt`;
+        const size = 8 * 1024 * 1024 + 1;
+        const getInfo = files.memory.fs.getInfo;
+        files.memory.fs.getInfo = async (target) => target === uri ? { exists: true, size, modificationTime: 1 } : getInfo(target);
+        const data: AppData = { tasks: [{ id: 'live-task', title: 'Fixture', status: 'inbox', tags: [], contexts: [],
+            createdAt: date, updatedAt: date, attachments: [{ id, kind: 'file', title: 'fixture.txt', uri, size, createdAt: date, updatedAt: date }] }],
+            projects: [], sections: [], areas: [], settings: {} };
+        const sent: string[] = [];
+        globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            sent.push(init?.method ?? 'GET');
+            if (init?.method === 'PROPFIND') {
+                return new Response(`<d:multistatus xmlns:d="DAV:"><d:response><d:href>${String(_input)}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>`, { status: 207 });
+            }
+            return new Response('', { status: init?.method === 'MKCOL' ? 201 : 404 });
+        }) as typeof fetch;
+        const retire = mock(async () => false);
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json' }, false,
+            async () => structuredClone(data), retire);
+        expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({
+            success: false, error: 'WebdavHostUploadLimitError: WebDAV attachment upload cannot be admitted by this host transport',
+        });
+        expect(files.calls).not.toContain('copy');
+        expect(files.calls).not.toContain('sha256File');
+        expect(files.calls).not.toContain('readBytes');
+        expect(files.calls).not.toContain('readBytesRange');
+        expect(files.calls).not.toContain('installer');
+        expect(sent).not.toContain('PUT');
+        expect(retire).not.toHaveBeenCalled();
+        resetForTests();
+    });
 });
 
 describe('native background sync binding', () => {
