@@ -241,6 +241,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         crypto,
         retireLocalAttachment: bindings.retireLocalAttachment,
         maxWebdavBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
+        maxCloudBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         encryption: {
             logSyncEncryptionEvent: (event, extra, options) => encryptionState.logSyncEncryptionEvent(event, extra, options),
             getSyncEncryptionMaterial: () => encryptionState.getSyncEncryptionMaterial(),

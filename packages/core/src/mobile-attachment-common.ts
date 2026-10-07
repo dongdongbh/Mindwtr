@@ -615,6 +615,9 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
         hostHashed
           ? files.computeAttachmentFileHash(stagedPath).then((fileHash) => ({ fileHash, size: stagedStat!.size }))
           : files.readFileAsBytes(stagedPath).then(async (stagedBytes) => {
+            if (maxBufferedUploadBytes !== undefined) {
+              assertBufferedAttachmentUploadSize(stagedBytes.byteLength, maxBufferedUploadBytes);
+            }
             assertUploadStat?.({ size: stagedBytes.byteLength, mtimeMs: stagedStat?.mtimeMs ?? 0 });
             return { fileHash: await computeSha256Hex(stagedBytes), size: stagedBytes.byteLength };
           }),
@@ -702,12 +705,13 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
   const prepareBespokeAttachmentContentCandidate = async (
     attachment: Attachment,
     localPath: string,
+    maxBufferedUploadBytes?: number,
   ): Promise<boolean> => {
     if (
       attachment.pendingContentUpload === true
       && !isSha256Hex(attachment.fileHash?.trim().toLowerCase())
     ) {
-      const snapshot = await createMobileAttachmentUploadSnapshot(localPath, attachment);
+      const snapshot = await createMobileAttachmentUploadSnapshotWithLimit(localPath, attachment, maxBufferedUploadBytes);
       if (!snapshot) return false;
       try {
         const snapshotHash = snapshot.fileHash.trim().toLowerCase();
@@ -721,11 +725,17 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
       }
     }
     const stat = await files.statAttachmentFile(localPath);
-    if (!stat) return false;
+    if (!stat) {
+      if (maxBufferedUploadBytes !== undefined) throw new AttachmentUploadSizeUnavailableError();
+      return false;
+    }
     const check = await checkAttachmentContentChange(
       attachment,
       stat,
-      () => files.computeAttachmentFileHash(localPath),
+      () => {
+        if (maxBufferedUploadBytes !== undefined) assertBufferedAttachmentUploadSize(stat.size, maxBufferedUploadBytes);
+        return files.computeAttachmentFileHash(localPath);
+      },
     );
     if (!check.changed) {
       if (check.stat.mtimeMs === attachment.contentMtimeMs && check.stat.size === attachment.contentSize) {
@@ -774,17 +784,24 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
   const checkBespokeAttachmentRemoteWinner = async (
     attachment: Attachment,
     localPath: string,
+    maxBufferedUploadBytes?: number,
   ): Promise<BespokeAttachmentRemoteWinnerCheck> => {
     if (attachment.pendingContentUpload === true) {
       return { kind: 'none', metadataChanged: false };
     }
 
     const stat = await files.statAttachmentFile(localPath);
-    if (!stat) return { kind: 'none', metadataChanged: false };
+    if (!stat) {
+      if (maxBufferedUploadBytes !== undefined) throw new AttachmentUploadSizeUnavailableError();
+      return { kind: 'none', metadataChanged: false };
+    }
     const check = await checkAttachmentContentChange(
       attachment,
       stat,
-      () => files.computeAttachmentFileHash(localPath),
+      () => {
+        if (maxBufferedUploadBytes !== undefined) assertBufferedAttachmentUploadSize(stat.size, maxBufferedUploadBytes);
+        return files.computeAttachmentFileHash(localPath);
+      },
     );
     if (!check.changed) {
       const metadataChanged = check.stat.mtimeMs !== attachment.contentMtimeMs

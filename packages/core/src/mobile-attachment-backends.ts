@@ -17,6 +17,7 @@ import { isAttachmentPresenceRepairCandidate, repairMissingRemoteAttachments } f
 import {
   applyAttachmentPatches,
   collectAttachmentsById,
+  CloudHostUploadLimitError,
   assertBufferedAttachmentUploadSize,
   isAttachmentUploadAdmissionError,
   MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
@@ -152,6 +153,8 @@ export type MobileAttachmentBackendsHost = {
   /** Optional wire-byte admission for a host's buffered WebDAV transport.
    * Each pass reserves encryption-envelope bytes when material is present. */
   maxWebdavBufferedUploadBytes?: number;
+  /** Optional wire-byte admission for Cloud's plaintext buffered PUT. */
+  maxCloudBufferedUploadBytes?: number;
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
 };
 
@@ -220,9 +223,14 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
   const core: MobileAttachmentBackendsCoreFunctions = { ...CORE_FUNCTIONS, ...host.core };
   const { fs, files, common, installer } = host;
   const maxWebdavBufferedUploadBytes = host.maxWebdavBufferedUploadBytes;
+  const maxCloudBufferedUploadBytes = host.maxCloudBufferedUploadBytes;
   if (maxWebdavBufferedUploadBytes !== undefined
     && (!Number.isSafeInteger(maxWebdavBufferedUploadBytes) || maxWebdavBufferedUploadBytes <= 0)) {
     throw new Error('WebDAV buffered upload capability is invalid');
+  }
+  if (maxCloudBufferedUploadBytes !== undefined
+    && (!Number.isSafeInteger(maxCloudBufferedUploadBytes) || maxCloudBufferedUploadBytes <= 0)) {
+    throw new Error('Cloud buffered upload capability is invalid');
   }
 
   const runWebdavAttachmentPass = async (
@@ -802,7 +810,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     }
   };
 
-  const syncCloudAttachments = async (
+  const runCloudAttachmentPass = async (
     appData: AppData,
     cloudConfig: MobileCloudSyncConfig,
     baseSyncUrl: string,
@@ -814,7 +822,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     // This backend runs its own loop rather than the shared lifecycle, so it does the same
     // bookkeeping by hand: write to a per-attachment working copy, record it here, and put it
     // back into `attachmentsById`. The patches are folded into a fresh document at the end.
-    const allPatches = await common.migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal);
+    const allPatches = await common.migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal, maxCloudBufferedUploadBytes);
     const recordPatch = (attachment: Attachment): void => {
       allPatches.set(attachment.id, attachment);
       attachmentsById.set(attachment.id, attachment);
@@ -890,7 +898,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         && (attachment.cloudKey || attachment.pendingContentUpload === true)
         && mayUploadLocalFile
       ) {
-        if (await common.prepareBespokeAttachmentContentCandidate(attachment, uri)) {
+        if (await common.prepareBespokeAttachmentContentCandidate(attachment, uri, maxCloudBufferedUploadBytes)) {
           recordPatch(attachment);
         }
       }
@@ -903,7 +911,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         && mayUploadLocalFile
         && attachment.pendingContentUpload !== true
       ) {
-        const contentCheck = await common.checkBespokeAttachmentRemoteWinner(attachment, uri);
+        const contentCheck = await common.checkBespokeAttachmentRemoteWinner(attachment, uri, maxCloudBufferedUploadBytes);
         if (contentCheck.metadataChanged) recordPatch(attachment);
         if (contentCheck.kind === 'local-edit-race') {
           files.logAttachmentWarn(`Skipped remote attachment replacement after a local edit race (${attachment.id})`);
@@ -1042,7 +1050,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             shouldPropagateError = true;
             throw error;
           }
-          snapshot = await common.createMobileAttachmentUploadSnapshot(uri, attachment);
+          snapshot = await common.createMobileAttachmentUploadSnapshotWithLimit(uri, attachment, maxCloudBufferedUploadBytes);
           if (!snapshot) continue;
           if (
             attachment.pendingContentUpload === true
@@ -1074,6 +1082,9 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           assertCloudNotAborted(options.signal);
           const readResult = await files.readAttachmentBytesForUpload(snapshot.sourcePath);
           if (readResult.readFailed) throw readResult.error;
+          if (maxCloudBufferedUploadBytes !== undefined) {
+            assertBufferedAttachmentUploadSize(readResult.data.byteLength, maxCloudBufferedUploadBytes);
+          }
           const buffer = toAttachmentArrayBuffer(readResult.data);
           try {
             await options.assertRemoteMutationFenceHeld?.(CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS);
@@ -1104,6 +1115,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             totalBytes,
           });
         } catch (error) {
+          if (maxCloudBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) throw error;
           if (shouldPropagateError || isAbortLikeError(error, options.signal)) {
             // The deterministic target may have existed before this attempt. Leaving
             // an unreferenced successful PUT for orphan cleanup is safe; deleting it
@@ -1185,6 +1197,26 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
 
     const nextData = applyAttachmentPatches(appData, allPatches);
     return nextData !== appData ? nextData : false;
+  };
+
+  const syncCloudAttachments = async (
+    ...args: Parameters<typeof runCloudAttachmentPass>
+  ): Promise<AppData | false> => {
+    try {
+      return await runCloudAttachmentPass(...args);
+    } catch (error) {
+      if (maxCloudBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) {
+        try {
+          files.logAttachmentWarn('Cloud host upload admission refused', undefined, {
+            releaseCheck: 'v1.3.5/cloud-host-upload-limit', operation: 'upload', outcome: 'refused',
+          });
+        } catch {
+          // Diagnostics must not replace the fatal admission refusal.
+        }
+        throw new CloudHostUploadLimitError();
+      }
+      throw error;
+    }
   };
 
   const syncDropboxAttachments = async (

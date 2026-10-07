@@ -399,6 +399,22 @@ describe('mobile attachment common: streamed uploads', () => {
 });
 
 describe('mobile attachment common: pre-passes', () => {
+  it.each(['prepare', 'winner'] as const)('refuses optional bespoke %s hash admission before reading oversized bytes', async (kind) => {
+    const { common, memory, files } = setup();
+    const item = attachment({ cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), contentSize: 1, contentMtimeMs: 0 });
+    memory.put(item.uri!, bytes(1, 2, 3));
+    const before = { ...item };
+    const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+    const pending = kind === 'prepare'
+      ? common.prepareBespokeAttachmentContentCandidate(item, item.uri!, 2)
+      : common.checkBespokeAttachmentRemoteWinner(item, item.uri!, 2);
+
+    await expect(pending).rejects.toBeInstanceOf(AttachmentUploadTooLargeError);
+    expect(item).toEqual(before);
+    expect(hash).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(readBytes|copy|sha256) /.test(call))).toEqual([]);
+  });
+
   it('invokes optional upload stat admission before copying an empty foreign source', async () => {
     const { common, memory } = setup();
     const uri = 'file:///data/files/provider-copy.txt';

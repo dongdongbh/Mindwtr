@@ -2765,6 +2765,92 @@ describe('runSharedSyncCycle', () => {
     });
 
     it.each([
+        ['prepare', false, false], ['post-merge', false, false],
+        ['post-merge', true, false], ['post-merge', false, true],
+    ] as const)('fails the real bounded Cloud %s pass without publication after refusal or success acknowledgment (activation=%s, late winner=%s)', async (phase, activationProbe, lateWinner) => {
+        const memory = createMemoryFileSystem();
+        const { log, lines } = createRecordingLog();
+        const files = createMobileAttachmentFiles({
+            fs: memory.fs, storage: createMemoryStorage().storage,
+            getSecureConfigValue: async () => null, log, core: { isSandboxMode: () => false },
+        });
+        const installer = {} as never;
+        const common = createMobileAttachmentCommon({
+            fs: memory.fs, files, installer, crypto: {} as never,
+            encryption: { logSyncEncryptionEvent: async () => undefined },
+            installerMayBeMissing: () => false, timersPaused: () => true,
+            uploads: { createUploadTask: () => null },
+        });
+        const cloudPutFile = vi.fn(async () => undefined);
+        const backends = createMobileAttachmentBackends({
+            fs: memory.fs, files, common, installer, log, maxCloudBufferedUploadBytes: 4,
+            core: { cloudPutFile, cloudAttachmentExists: async () => true },
+        });
+        const uri = `${MANAGED}bounded.txt`;
+        memory.put(uri, new Uint8Array(5));
+        const local = createData([{
+            ...createTask('t-local', 'Local task'),
+            attachments: [{
+                id: 'bounded', kind: 'file', title: 'private filename.txt', uri,
+                size: 1, localStatus: 'available', createdAt: STAMP, updatedAt: STAMP,
+                ...(lateWinner
+                    ? { cloudKey: 'attachments/bounded.txt', fileHash: 'a'.repeat(64), contentSize: 1, contentMtimeMs: 0 }
+                    : phase === 'prepare' ? { pendingContentUpload: true } : {}),
+            }],
+        }]);
+        const before = cloneAppData(local);
+        const remote = lateWinner ? cloneAppData(local) : createData([createTask('t-remote', 'Remote task')]);
+        const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => {
+            if (helpers.phase !== phase) return false;
+            return backends.syncCloudAttachments(data, { url: 'https://cloud.example/v1/data', token: 'synthetic' },
+                'https://cloud.example/v1', { phase: helpers.phase, activationProbe: helpers.activationProbe });
+        });
+        const bundle = createHarness({
+            backend: 'cloud', local, remote, activationProbe,
+            io: { syncAttachments },
+            hooks: { shouldRunAttachmentPhase: vi.fn(async (_data, selected) => selected === phase) },
+            policy: { postMergeAttachmentErrorPolicy: 'warn' },
+        });
+        const writesAtRefusal: number[] = [];
+        const remoteAtRefusal: (AppData | null)[] = [];
+        const warn = log.warn;
+        vi.spyOn(log, 'warn').mockImplementation((message, context) => {
+            if (context?.extra?.releaseCheck === 'v1.3.5/cloud-host-upload-limit') {
+                writesAtRefusal.push(bundle.harness.callOrder.filter((call) => call === 'writeRemote').length);
+                remoteAtRefusal.push(bundle.harness.remote ? cloneAppData(bundle.harness.remote) : null);
+            }
+            warn(message, context);
+        });
+
+        const result = await bundle.run();
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Cloud attachment upload cannot be admitted by this host transport');
+        expect(result.fileAttachmentUploadBlocked).toBeUndefined();
+        expect(result.hadAttachmentWarning).not.toBe(true);
+        expect(bundle.harness.warnings.some((warning) => (
+            warning.message === 'Attachment pre-sync warning' || warning.message === 'Attachment sync warning'
+        ))).toBe(false);
+        // The late phase can follow an already published document. Require its
+        // exact prior boundary and no additional publication after refusal.
+        expect(writesAtRefusal).toEqual([lateWinner ? 1 : 0]);
+        expect(bundle.io.writeRemote).toHaveBeenCalledTimes(lateWinner ? 1 : 0);
+        expect(bundle.hooks.finalizeSuccess).not.toHaveBeenCalled();
+        expect(remoteAtRefusal).toHaveLength(1);
+        expect(bundle.harness.remote).toEqual(remoteAtRefusal[0]);
+        if (!lateWinner) expect(bundle.harness.remote).toEqual(remote);
+        expect(local).toEqual(before);
+        expect(bundle.harness.persisted.tasks.find((task) => task.id === 't-local')?.attachments).toEqual(before.tasks[0].attachments);
+        expect(cloudPutFile).not.toHaveBeenCalled();
+        expect(memory.read(uri)).toEqual(new Uint8Array(5));
+        expect(memory.calls.filter((call) => /^(readBytes|copy|sha256) /.test(call))).toEqual([]);
+        expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/cloud-host-upload-limit')).toEqual([{
+            level: 'warn', message: 'Cloud host upload admission refused',
+            extra: { releaseCheck: 'v1.3.5/cloud-host-upload-limit', operation: 'upload', outcome: 'refused' },
+        }]);
+    });
+
+    it.each([
         ['prepare', 'ordinary'], ['post-merge', 'ordinary'],
         ['prepare', 'throwing'], ['post-merge', 'throwing'],
     ] as const)(

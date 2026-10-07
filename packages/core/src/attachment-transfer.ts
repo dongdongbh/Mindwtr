@@ -107,6 +107,18 @@ export const isWebdavHostUploadLimitError = (error: unknown): error is WebdavHos
     error instanceof WebdavHostUploadLimitError
 );
 
+/** An opt-in Cloud host cannot safely buffer this upload; abort the whole pass. */
+export class CloudHostUploadLimitError extends Error {
+    constructor() {
+        super('Cloud attachment upload cannot be admitted by this host transport');
+        this.name = 'CloudHostUploadLimitError';
+    }
+}
+
+export const isCloudHostUploadLimitError = (error: unknown): error is CloudHostUploadLimitError => (
+    error instanceof CloudHostUploadLimitError
+);
+
 export const isAttachmentUploadTooLargeError = (
     error: unknown,
 ): error is AttachmentUploadTooLargeError => error instanceof AttachmentUploadTooLargeError;

@@ -237,6 +237,24 @@ const iosFiles = () => {
 };
 
 describe('explicit iOS foreground sync factory', () => {
+    it('binds cloud and WebDAV buffered upload caps only on iOS through the real attachment factory', () => {
+        const create = core.createMobileAttachmentBackends;
+        const captured: Parameters<typeof create>[] = [];
+        spyOn(core, 'createMobileAttachmentBackends').mockImplementation((options) => {
+            captured.push([options]);
+            return create(options);
+        });
+        for (const platform of ['ios', 'android']) {
+            iosFiles();
+            globals.__mindwtrHostPlatform = platform;
+            host({}, false, undefined, async () => false);
+            const options = captured.at(-1)![0];
+            expect(options.maxCloudBufferedUploadBytes).toBe(platform === 'ios' ? 8 * 1024 * 1024 : undefined);
+            expect(options.maxWebdavBufferedUploadBytes).toBe(platform === 'ios' ? 8 * 1024 * 1024 : undefined);
+        }
+        expect(captured).toHaveLength(2);
+    });
+
     it('requires the selected cleanup callback and actual file channels instead of admitting no-op cleanup', () => {
         iosFiles();
         expect(() => host()).toThrow('Foreground sync requires owned attachment cleanup on this iOS build');
