@@ -159,8 +159,8 @@ export type NativeSyncSettingsHost = {
     encryption: {
         /** Selected host capability: only unlock an existing saved WebDAV location. */
         unlockOnly?: boolean;
-        /** Internal selected host capability; production iOS does not bind it yet. */
-        mode?: 'saved-webdav-enable-unlock';
+        /** Production iOS binds Enable/Unlock; the broader saved-WebDAV mode remains internal. */
+        mode?: 'saved-webdav-enable-unlock' | 'saved-webdav';
         getStatus(): Promise<SyncEncryptionStatus>;
         getIncompleteTransition(): Promise<SyncEncryptionTransitionKind | null>;
         /** True while no durable sync backend exists (transitions then run local-only). */
@@ -842,8 +842,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             : target.type === 'typed' ? target.field === 'current'
                 : target.type === 'cancel' || target.type === 'decline' || target.type === 'retry'
     );
-    const encryptionMode = (current: Screen) => current.host.encryption.mode === 'saved-webdav-enable-unlock'
-        ? 'saved-webdav-enable-unlock' : current.host.encryption.unlockOnly === true ? 'unlock-only' : 'full';
+    const encryptionMode = (current: Screen) => current.host.encryption.mode
+        ?? (current.host.encryption.unlockOnly === true ? 'unlock-only' : 'full');
     const hasProvenWebDavBackend = (current: Screen) => {
         const proven = current.transport.getProven();
         return current.transport.getState().syncBackend === 'webdav' && proven.backend === 'webdav' && !proven.pending;
@@ -857,7 +857,21 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         return card?.state === 'off' && !card.partlyEncrypted
             && (card.incompleteTransitionKind === null || card.incompleteTransitionKind === 'enable');
     };
-    const canAbandonEnable = (current: Screen) => current.card?.getState().incompleteTransitionKind === 'enable';
+    const canChange = (current: Screen) => {
+        const card = current.card?.getState();
+        return card?.state === 'enabled' && !card.partlyEncrypted
+            && (card.incompleteTransitionKind === null || card.incompleteTransitionKind === 'change-passphrase');
+    };
+    const canDisable = (current: Screen) => {
+        const card = current.card?.getState();
+        return (card?.state === 'enabled' || card?.state === 'remote-plaintext') && !card.partlyEncrypted
+            && (card.incompleteTransitionKind === null || card.incompleteTransitionKind === 'disable');
+    };
+    const canAbandon = (current: Screen) => {
+        const kind = current.card?.getState().incompleteTransitionKind;
+        return kind === 'enable' || encryptionMode(current) === 'saved-webdav'
+            && (kind === 'disable' || kind === 'change-passphrase');
+    };
     const canRecheck = (current: Screen) => {
         const card = current.card?.getState();
         return card?.state === 'off' && card.partlyEncrypted && !card.incompleteTransition;
@@ -872,12 +886,16 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         if (target.type === 'open' || target.type === 'submit') {
             return target.flow === 'unlock' ? canUnlock(current)
                 : target.flow === 'enable' ? canEnable(current)
-                    : target.flow === 'abandon' && canAbandonEnable(current);
+                    : target.flow === 'change' ? mode === 'saved-webdav' && canChange(current)
+                        : target.flow === 'disable' ? mode === 'saved-webdav' && canDisable(current)
+                            : target.flow === 'abandon' && canAbandon(current);
         }
         if (target.type === 'typed') {
             const flow = current.card?.getState().flow;
             return flow === 'unlock' ? target.field === 'current' && canUnlock(current)
-                : flow === 'enable' && (target.field === 'next' || target.field === 'confirm') && canEnable(current);
+                : flow === 'enable' ? (target.field === 'next' || target.field === 'confirm') && canEnable(current)
+                    : flow === 'change' && mode === 'saved-webdav' && canChange(current)
+                        && (target.field === 'current' || target.field === 'next' || target.field === 'confirm');
         }
         return target.type === 'decline' ? canUnlock(current)
             : target.type === 'recheck' && canRecheck(current);
@@ -1186,7 +1204,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             const host = deps.host();
             if (!host) return fail('ACTION_FAILED', 'Sync is not available on this host yet');
             if (host.encryption.mode !== undefined
-                && (host.encryption.mode !== 'saved-webdav-enable-unlock' || host.encryption.unlockOnly !== undefined)) {
+                && ((host.encryption.mode !== 'saved-webdav-enable-unlock' && host.encryption.mode !== 'saved-webdav')
+                    || host.encryption.unlockOnly !== undefined)) {
                 return fail('ACTION_FAILED', 'The selected sync encryption mode cannot be combined with unlockOnly');
             }
             const current = await openScreen(host);
@@ -1455,8 +1474,9 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             }
             const mode = encryptionMode(current);
             const selected = mode !== 'full';
+            const savedWebDav = mode === 'saved-webdav-enable-unlock' || mode === 'saved-webdav';
             const needsRequest = type === 'submit' || type === 'decline'
-                || mode === 'saved-webdav-enable-unlock' && type === 'recheck';
+                || savedWebDav && type === 'recheck';
             if (!valid || (needsRequest ? !isRequestId(input.requestId) : input.requestId !== undefined)) {
                 return fail('INVALID_INPUT', 'An encryption card action is required; an owned submit, decline or selected recheck takes a request UUID');
             }
@@ -1474,7 +1494,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 ...(input.revision === undefined ? [] : [input.revision])];
             // A Recheck disables and can remove its own button. Its exact receipt
             // bypasses current-card admission, but still belongs to this saved target.
-            if (mode === 'saved-webdav-enable-unlock' && type === 'recheck') {
+            if (savedWebDav && type === 'recheck') {
                 const receipt = screenActionReceipt(input.requestId!, fingerprint(identity));
                 if (receipt) {
                     if ('ok' in receipt && !receipt.ok) return receipt;
@@ -1534,7 +1554,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 if (refused) return refused;
             }
             const answer = (passphrase: string | null = null) => ({ ok: true as const, value: { toasts: takeToasts(), passphrase } });
-            if (type === 'recheck' && mode !== 'saved-webdav-enable-unlock') {
+            if (type === 'recheck' && !savedWebDav) {
                 await card.recheckLocation();
                 return answer();
             }
