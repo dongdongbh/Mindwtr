@@ -266,7 +266,7 @@ private struct AppLockRoot: View {
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
         .onAppear { lock.sceneChanged(phase) }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-            model.cancelStartupSync()
+            model.cancelForegroundSync()
             model.clearSettingsSyncForPrivacy()
             model.stopTaskAudioForBackground()
             model.cancelTaskFileImport()
@@ -276,8 +276,9 @@ private struct AppLockRoot: View {
             lock.concealSnapshot()
         }
         .onChange(of: phase) { next in
+            model.observeForegroundSyncScene(next, token: startupToken)
             if next != .active {
-                model.cancelStartupSync()
+                model.cancelForegroundSync()
                 model.clearSettingsSyncForPrivacy()
                 model.stopTaskAudioForBackground()
                 model.cancelTaskFileImport()
@@ -290,7 +291,7 @@ private struct AppLockRoot: View {
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
-                model.cancelStartupSync()
+                model.cancelForegroundSync()
                 model.clearSettingsSyncForPrivacy()
                 model.cancelTaskFileImport()
                 model.cancelProjectFileImport()
@@ -300,7 +301,7 @@ private struct AppLockRoot: View {
         }
         .task(id: "\(startupToken?.uuidString ?? "")-\(phase == .active)-\(lock.concealed)") {
             guard !Task.isCancelled else { return }
-            model.requestStartupSync(token: startupToken, active: phase == .active)
+            model.requestForegroundSync(token: startupToken, active: phase == .active)
         }
         .task(id: "\(model.ready)-\(lock.nonce)-\(phase == .active)-\(lock.authenticating)") {
             guard model.ready, phase == .active else { return }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAutoSyncController } from './auto-sync-controller';
+import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 
 const createManualScheduler = (startMs = 0) => {
     let nowMs = startMs;
@@ -989,6 +990,244 @@ describe('createAutoSyncController platform policy switches', () => {
         void controller.requestAutoSync(0, 'resume');
         await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(2));
 
+        controller.dispose();
+    });
+});
+
+
+describe('createAutoSyncController invocation-owned mode', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
+
+    const ports = {
+        allowDeferredWork: false,
+        periodicSyncIntervalMs: null,
+        flushPendingSave: async () => undefined,
+        reportError: vi.fn(),
+        isRuntimeActive: () => true,
+    } as const;
+    const forbiddenTimer = () => vi.fn(() => {
+        throw new Error('A caller-owned controller must not install a timer');
+    }) as unknown as typeof setTimeout;
+
+    it('installs no timers and starts no work through void delivery methods', async () => {
+        const scheduler = createManualScheduler(100_000), setTimer = forbiddenTimer();
+        const performSync = vi.fn(async () => ({ success: true }));
+        const flushPendingSave = vi.fn(async () => undefined);
+        const refreshCadence = vi.fn(async () => undefined);
+        const controller = createAutoSyncController({
+            ...ports,
+            periodicSyncIntervalMs: undefined, // Exercise the constructor's default heartbeat.
+            performSync, flushPendingSave, refreshCadence,
+            now: scheduler.now, setTimer, clearTimer: scheduler.clearTimer,
+            minIntervalMs: 0, initialSyncDelayMs: 0,
+            debounceFirstChangeMs: 0, debounceContinuousChangeMs: 0,
+        });
+
+        controller.scheduleInitialSync();
+        controller.handleDataChange();
+        controller.handleFocus();
+        controller.handleBlur();
+        controller.handleSuspend();
+        await settle();
+        expect(setTimer).not.toHaveBeenCalled();
+        expect(refreshCadence).not.toHaveBeenCalled();
+        expect(flushPendingSave).not.toHaveBeenCalled();
+        expect(performSync).not.toHaveBeenCalled();
+        expect(controller.takePendingSuspendedRequest()).toBe(false);
+
+        await controller.requestAutoSync(0, 'startup');
+        expect(flushPendingSave).toHaveBeenCalledTimes(1);
+        expect(performSync).toHaveBeenCalledTimes(1);
+        expect(setTimer).not.toHaveBeenCalled();
+        controller.dispose();
+    });
+
+    it('drops concurrent automatic and manual calls without joining or queuing the active cycle', async () => {
+        const scheduler = createManualScheduler(10_000), setTimer = forbiddenTimer();
+        let releaseFlush!: () => void, suspended = false;
+        const heldFlush = new Promise<void>((resolve) => { releaseFlush = resolve; });
+        const flushPendingSave = vi.fn(() => heldFlush);
+        const performSync = vi.fn(async () => ({ success: true }));
+        const controller = createAutoSyncController({
+            ...ports, performSync, flushPendingSave,
+            isSuspended: () => suspended,
+            adaptivePacing: { durationMultiplier: 9, maxIntervalMs: 300_000 },
+            minIntervalMs: 0,
+            now: scheduler.now, setTimer, clearTimer: scheduler.clearTimer,
+        });
+        const first = controller.requestAutoSync(0, 'startup');
+        await waitForAssertion(() => expect(flushPendingSave).toHaveBeenCalledTimes(1));
+        suspended = true;
+        let automaticReturned = false, manualReturned = false;
+        const automatic = controller.requestAutoSync(0, 'resume').then(() => { automaticReturned = true; });
+        const manual = controller.requestSync(0).then(() => { manualReturned = true; });
+        await settle();
+        const returnedWhileHeld = { automatic: automaticReturned, manual: manualReturned };
+        const pendingSuspended = controller.takePendingSuspendedRequest();
+        releaseFlush();
+        await Promise.all([first, automatic, manual]);
+        await settle();
+        expect(returnedWhileHeld).toEqual({ automatic: true, manual: true });
+        expect(pendingSuspended).toBe(false);
+        expect(flushPendingSave).toHaveBeenCalledTimes(1);
+        expect(performSync).toHaveBeenCalledTimes(1);
+        scheduler.setNow(1_000_000); await settle();
+        expect(performSync).toHaveBeenCalledTimes(1);
+        expect(setTimer).not.toHaveBeenCalled();
+        controller.dispose();
+    });
+
+    it('retains consecutive-failure cooldowns across suspend without deadline wakeups', async () => {
+        const scheduler = createManualScheduler(10_000), setTimer = forbiddenTimer();
+        const performSync = vi.fn()
+            .mockResolvedValueOnce({ success: false, error: 'synthetic failure' })
+            .mockResolvedValueOnce({ success: false, error: 'synthetic failure' })
+            .mockResolvedValue({ success: true });
+        const onSyncFailure = vi.fn();
+        const controller = createAutoSyncController({
+            ...ports, performSync, onSyncFailure, minIntervalMs: 0,
+            autoFailureCooldownMs: 60_000, maxFailureCooldownMs: 600_000,
+            now: scheduler.now, setTimer, clearTimer: scheduler.clearTimer,
+        });
+        await controller.requestAutoSync(0, 'startup');
+        controller.handleSuspend();
+        scheduler.setNow(69_999);
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync).toHaveBeenCalledTimes(1);
+        scheduler.setNow(70_000); await settle();
+        expect(performSync, 'Reaching the deadline does not deliver a new invocation').toHaveBeenCalledTimes(1);
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync).toHaveBeenCalledTimes(2);
+        scheduler.setNow(189_999);
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync).toHaveBeenCalledTimes(2);
+        scheduler.setNow(190_000); await settle();
+        expect(performSync).toHaveBeenCalledTimes(2);
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync).toHaveBeenCalledTimes(3);
+        expect(onSyncFailure).toHaveBeenCalledTimes(2);
+        expect(setTimer).not.toHaveBeenCalled();
+        controller.dispose();
+    });
+
+    it('clears failure count and cooldown after an external manual success without changing the clock anchor', async () => {
+        const scheduler = createManualScheduler(10_000), setTimer = forbiddenTimer();
+        const performSync = vi.fn()
+            .mockResolvedValueOnce({ success: false, error: 'synthetic failure' })
+            .mockResolvedValueOnce({ success: false, error: 'synthetic failure' })
+            .mockResolvedValue({ success: true });
+        const controller = createAutoSyncController({
+            ...ports, performSync, minIntervalMs: 0, autoFailureCooldownMs: 60_000,
+            now: scheduler.now, setTimer, clearTimer: scheduler.clearTimer,
+        });
+        await controller.requestAutoSync(0, 'startup');
+        scheduler.setNow(10_500);
+        controller.notifyExternalSyncSuccess();
+        expect(controller.getLastAutoSyncAt()).toBe(10_000);
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync).toHaveBeenCalledTimes(2);
+        scheduler.setNow(70_499);
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync).toHaveBeenCalledTimes(2);
+        scheduler.setNow(70_500);
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync, 'The recovered failure starts at the base cooldown again').toHaveBeenCalledTimes(3);
+        expect(setTimer).not.toHaveBeenCalled();
+        controller.dispose();
+    });
+
+    it('keeps awaited manual recovery able to bypass and clear the automatic cooldown', async () => {
+        const scheduler = createManualScheduler(10_000), setTimer = forbiddenTimer();
+        const performSync = vi.fn()
+            .mockResolvedValueOnce({ success: false, error: 'synthetic failure' })
+            .mockResolvedValue({ success: true });
+        const controller = createAutoSyncController({
+            ...ports, performSync, minIntervalMs: 0,
+            now: scheduler.now, setTimer, clearTimer: scheduler.clearTimer,
+        });
+        await controller.requestAutoSync(0, 'startup');
+        scheduler.setNow(10_001);
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync).toHaveBeenCalledTimes(1);
+        await controller.requestSync(0);
+        expect(performSync).toHaveBeenCalledTimes(2);
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync).toHaveBeenCalledTimes(3);
+        expect(setTimer).not.toHaveBeenCalled();
+        controller.dispose();
+    });
+
+    it('retains completion anchoring and adaptive pacing without a throttle timer', async () => {
+        const scheduler = createManualScheduler(10_000), setTimer = forbiddenTimer();
+        let finishFirst!: () => void;
+        const firstResult = new Promise<{ success: boolean }>((resolve) => {
+            finishFirst = () => resolve({ success: true });
+        });
+        const performSync = vi.fn().mockReturnValueOnce(firstResult).mockResolvedValue({ success: true });
+        const controller = createAutoSyncController({
+            ...ports, performSync, minIntervalMs: 5_000,
+            adaptivePacing: { durationMultiplier: 9, maxIntervalMs: 300_000 },
+            now: scheduler.now, setTimer, clearTimer: scheduler.clearTimer,
+        });
+        const first = controller.requestAutoSync(0, 'startup');
+        await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(1));
+        scheduler.setNow(30_000); finishFirst(); await first;
+        expect(controller.getLastAutoSyncAt()).toBe(30_000);
+        scheduler.setNow(209_999);
+        await controller.requestAutoSync(undefined, 'paced');
+        expect(performSync).toHaveBeenCalledTimes(1);
+        scheduler.setNow(210_000); await settle();
+        expect(performSync).toHaveBeenCalledTimes(1);
+        await controller.requestAutoSync(undefined, 'paced');
+        expect(performSync).toHaveBeenCalledTimes(2);
+        scheduler.setNow(210_001);
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync, 'Explicit lifecycle zero still bypasses normal duration pacing').toHaveBeenCalledTimes(3);
+        expect(setTimer).not.toHaveBeenCalled();
+        controller.dispose();
+    });
+
+    it('preserves ignored-failure policy without inventing a cooldown', async () => {
+        const scheduler = createManualScheduler(10_000), setTimer = forbiddenTimer();
+        const performSync = vi.fn(async () => ({ success: false, error: 'Network request failed' }));
+        const onSyncFailure = vi.fn();
+        const controller = createAutoSyncController({
+            ...ports, performSync, onSyncFailure, minIntervalMs: 0,
+            isIgnorableFailure: (error) => error === 'Network request failed',
+            now: scheduler.now, setTimer, clearTimer: scheduler.clearTimer,
+        });
+        await controller.requestAutoSync(0, 'startup');
+        await controller.requestAutoSync(0, 'resume');
+        expect(performSync).toHaveBeenCalledTimes(2);
+        expect(onSyncFailure).not.toHaveBeenCalled();
+        expect(setTimer).not.toHaveBeenCalled();
+        controller.dispose();
+    });
+
+    it('rethrows the exact fatal preflush through reportError before any perform or completion work', async () => {
+        const scheduler = createManualScheduler(10_000), setTimer = forbiddenTimer();
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        let rejectFlush!: (error: unknown) => void;
+        const heldFlush = new Promise<void>((_, reject) => { rejectFlush = reject; });
+        const flushPendingSave = vi.fn(() => heldFlush), performSync = vi.fn(async () => ({ success: true }));
+        const reportError = vi.fn((_label: string, error: unknown) => { throw error; });
+        const logInfo = vi.fn();
+        const controller = createAutoSyncController({
+            ...ports, performSync, flushPendingSave, reportError, logInfo, minIntervalMs: 0,
+            now: scheduler.now, setTimer, clearTimer: scheduler.clearTimer,
+        });
+        const first = controller.requestAutoSync(0, 'startup');
+        await waitForAssertion(() => expect(flushPendingSave).toHaveBeenCalledTimes(1));
+        rejectFlush(fatal);
+        await expect(first).rejects.toBe(fatal);
+        await settle();
+        expect(reportError).toHaveBeenCalledExactlyOnceWith('Save failed', fatal);
+        expect(performSync).not.toHaveBeenCalled();
+        expect(logInfo.mock.calls.some(([message]) => ['Auto sync run complete', 'Auto sync cooldown'].includes(message))).toBe(false);
+        expect(setTimer).not.toHaveBeenCalled();
         controller.dispose();
     });
 });

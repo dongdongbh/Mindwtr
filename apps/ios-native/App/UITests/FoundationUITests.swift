@@ -260,6 +260,110 @@ final class FoundationUITests: XCTestCase {
         task337NoRestartGate(app, timeout: 5)
     }
 
+    private func task344BackgroundAndActivate(_ app: XCUIApplication) {
+        #if targetEnvironment(simulator)
+        XCUIDevice.shared.press(.home)
+        #else
+        // The actual Home gesture is required on the iPhone 12; the synthetic
+        // Home button does not reliably leave the current app foreground.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+        #endif
+        let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed,
+            "Resume admission requires observed actual background before activation")
+        app.activate()
+    }
+
+    func testForegroundResumeSyncUnknownCompletionBlocksEditingUntilColdRestart() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        print("Task344 foreground resume gate isolated library: " + library)
+        app.launchArguments = arguments + ["--native-resume-sync-command-throw-once"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-inbox"], timeout: 30)
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        // A clean cold launch invokes only startup. The resume-only hook must
+        // remain armed until a real background-to-foreground episode occurs.
+        task337NoRestartGate(app, timeout: 5)
+        task344BackgroundAndActivate(app)
+        task322RestartGate(app) // No Settings visit, credentials, or HTTP.
+
+        app.terminate()
+        app.launchArguments = arguments // Same storage, without the hook.
+        app.launch()
+        boardEnabled(app.buttons["tab-inbox"], timeout: 30)
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+        boardTap(app, "capture-open")
+        let capture = app.textViews["capture-input"]
+        boardEnabled(capture); capture.tap(); capture.typeText("Task344 resume editable")
+        boardTap(app, "capture-save")
+        let row = app.buttons["Task344 resume editable"]
+        boardEnabled(row, timeout: 30); row.tap(); boardTap(app, "task-mode-edit")
+        let title = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+        boardEnabled(title, timeout: 30)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" saved")
+        XCTAssertEqual(title.value as? String, "Task344 resume editable saved")
+        boardTap(app, "task-editor-save")
+        boardEnabled(app.buttons["Task344 resume editable saved"], timeout: 30)
+        task322OpenSync(app)
+        XCTAssertTrue(app.buttons["sync-option-off"].isSelected)
+    }
+
+    func testForegroundResumeSyncPreservesVisibleAndKeptTaskDraftAcrossBackgroundAndColdRestart() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        let original = "Task344 protected", draft = original + " retained draft"
+        print("Task344 retained resume draft isolated library: " + library)
+        app.launchArguments = arguments + ["--native-resume-sync-command-throw-once"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        boardTap(app, "capture-open")
+        let capture = app.textViews["capture-input"]
+        boardEnabled(capture); capture.tap(); capture.typeText(original)
+        boardTap(app, "capture-save")
+        boardEnabled(app.buttons[original], timeout: 30); app.buttons[original].tap()
+        boardTap(app, "task-mode-edit")
+        let title = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+        boardEnabled(title)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" retained draft")
+        XCTAssertEqual(title.value as? String, draft)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+
+        task344BackgroundAndActivate(app)
+        boardEnabled(title, timeout: 30)
+        XCTAssertEqual(title.value as? String, draft)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+        boardTap(app, "task-view-close"); boardTap(app, "task-editor-keep-for-later")
+        boardEnabled(app.buttons[original], timeout: 30)
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+
+        // A hidden kept draft retains its disk ownership. Actual resume and
+        // ordinary reads cannot create a delayed Sync after the editor closes.
+        task344BackgroundAndActivate(app)
+        boardEnabled(app.buttons[original], timeout: 30)
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task337NoRestartGate(app)
+        boardTap(app, "tab-inbox")
+        boardTap(app, "search-open"); boardEnabled(app.textFields["search-input"], timeout: 30)
+        boardTap(app, "search-close")
+        boardEnabled(app.buttons[original], timeout: 30)
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+
+        app.terminate(); app.launch() // Same storage; the resume-only hook remains armed.
+        boardEnabled(title, timeout: 30)
+        XCTAssertEqual(title.value as? String, draft, "The exact unsaved title must survive kept-draft cold recovery")
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+    }
+
     private func task147Mode(_ app: XCUIApplication, _ value: String) {
         task144Open(app)
         let option = app.buttons["gtd-taskOpenMode-" + value]

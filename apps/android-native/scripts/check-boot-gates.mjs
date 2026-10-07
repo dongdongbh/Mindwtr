@@ -4206,42 +4206,50 @@ for (const [bridge, receipt, operation] of [
             state.secretReads++; throw new Error('Unexpected stored secret read');
         } };
     });
-    const syncStored = (json = '{}') => poll(stored, stored.MindwtrHost.iosForegroundSync('syncStored', json, () => ''));
-    assert.match((await syncStored()).error, /^NOT_READY:/, 'Stored Sync requires activation before reading storage');
+    for (const name of ['syncStored', 'syncResume']) {
+        assert.match((await poll(stored, stored.MindwtrHost.iosForegroundSync(name, '{}', () => ''))).error, /^NOT_READY:/);
+    }
     assert.equal(stored.storedReads, 0);
     assert.equal((await poll(stored, stored.MindwtrHost.boot())).ok, true);
-    for (const input of ['null', '[]', '{', '{"revision":"r"}', '{"config":{}}', '{"password":"synthetic"}', '{"x":"' + 'x'.repeat(128 * 1024) + '"}']) {
-        assert.match((await syncStored(input)).error, /^INVALID_INPUT:/, 'Stored Sync accepts only a bounded empty object');
+    for (const name of ['syncStored', 'syncResume']) {
+        const command = (json = '{}') => poll(stored, stored.MindwtrHost.iosForegroundSync(name, json, () => ''));
+        stored.storedReads = 0;
+        stored.storedBackend = undefined;
+        for (const input of ['null', '[]', '{', '{"revision":"r"}', '{"config":{}}', '{"password":"synthetic"}', '{"x":"' + 'x'.repeat(128 * 1024) + '"}']) {
+            assert.match((await command(input)).error, /^INVALID_INPUT:/, `${name} accepts only a bounded empty object`);
+        }
+        assert.equal(stored.storedReads, 0, 'Invalid requests reach no storage port');
+        for (const flag of ['failed', 'queued', 'inFlight', 'immediate', 'retrying']) {
+            stored.persistenceStatus = { [flag]: true };
+            assert.match((await command()).error, /^NOT_READY:/, `${name} preserves strict persistence admission`);
+        }
+        stored.persistenceStatus = null;
+        for (const field of ['sandbox', 'workspaceTransition']) {
+            stored[field] = true;
+            assert.match((await command()).error, /^NOT_READY:/);
+            stored[field] = false;
+        }
+        assert.equal(stored.storedReads, 0, 'Unsettled requests reach no storage port');
+        const beforeRows = JSON.stringify(stored.fakeData);
+        const beforeLog = stored.logText;
+        for (const value of [undefined, '', 'off', ' off ']) {
+            stored.storedBackend = value;
+            assert.deepEqual(await command('  {}  '), { ok: true, value: { ok: true, value: { success: true, skipped: true } } });
+        }
+        stored.storedBackend = 'dropbox';
+        const unsupported = await command();
+        assert.equal(unsupported.ok, true);
+        assert.equal(unsupported.value.ok, false);
+        assert.equal(unsupported.value.error.code, 'ACTION_FAILED');
+        assert.equal(stored.storedBackend, 'dropbox', 'Unsupported stored provider is preserved');
+        assert.equal(stored.storedReads, 5, 'One exact provider read per admitted invocation');
+        assert.equal(stored.secretReads, 0, 'Off and unsupported runs read no secret');
+        assert.equal(JSON.stringify(stored.fakeData), beforeRows, 'Off admission writes no domain rows');
+        assert.equal(stored.logText, beforeLog, 'No configured-run settlement marker is emitted for skipped/refused admission');
+        assert.equal(stored.contractBindings.syncSettings, undefined, 'Off and unsupported runs never construct the Sync factory');
     }
-    assert.equal(stored.storedReads, 0, 'Invalid requests reach no storage port');
-    for (const flag of ['failed', 'queued', 'inFlight', 'immediate', 'retrying']) {
-        stored.persistenceStatus = { [flag]: true };
-        assert.match((await syncStored()).error, /^NOT_READY:/, 'Stored Sync preserves strict persistence admission');
-    }
-    stored.persistenceStatus = null;
-    for (const field of ['sandbox', 'workspaceTransition']) {
-        stored[field] = true;
-        assert.match((await syncStored()).error, /^NOT_READY:/);
-        stored[field] = false;
-    }
-    assert.equal(stored.storedReads, 0, 'Unsettled requests reach no storage port');
-    const beforeRows = JSON.stringify(stored.fakeData);
-    const beforeLog = stored.logText;
-    for (const value of [undefined, '', 'off', ' off ']) {
-        stored.storedBackend = value;
-        assert.deepEqual(await syncStored('  {}  '), { ok: true, value: { ok: true, value: { success: true, skipped: true } } });
-    }
-    stored.storedBackend = 'dropbox';
-    const unsupported = await syncStored();
-    assert.equal(unsupported.ok, true);
-    assert.equal(unsupported.value.ok, false);
-    assert.equal(unsupported.value.error.code, 'ACTION_FAILED');
-    assert.equal(stored.storedBackend, 'dropbox', 'Unsupported stored provider is preserved');
-    assert.equal(stored.storedReads, 5, 'One exact provider read per admitted invocation');
-    assert.equal(stored.secretReads, 0, 'Off and unsupported runs read no secret');
-    assert.equal(JSON.stringify(stored.fakeData), beforeRows, 'Off admission writes no domain rows');
-    assert.equal(stored.logText, beforeLog, 'No configured-run settlement marker is emitted for skipped/refused admission');
-    assert.equal(stored.contractBindings.syncSettings, undefined, 'Off and unsupported runs never construct the Sync factory');
+    assert.match(hostEntry, /name === 'syncResume' \? 'Native iOS resume Sync command settled'/);
+    assert.match(hostEntry, /name === 'syncResume' \? 'v1\.3\.5\/ios-resume-sync'/);
     const local = makeState(0, [], 'ios', configureLocal);
     assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['attachments'], 'local capability enables neither Sync nor AI');
     assert.equal(local.localShaInstallCount, 1, 'successful local construction installs native SHA once');

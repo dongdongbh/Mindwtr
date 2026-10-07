@@ -205,7 +205,7 @@ final class CoreModel: ObservableObject {
 
     @Published private(set) var selectedSurface: Surface = .inbox {
         didSet {
-            if selectedSurface != .inbox { startupSyncIntent = nil }
+            if selectedSurface != .inbox { foregroundSyncIntent = nil }
             if oldValue == .project && selectedSurface != .project {
                 invalidateProjectAttachmentOpen()
                 cancelProjectFileImport()
@@ -224,7 +224,7 @@ final class CoreModel: ObservableObject {
     }
     @Published private(set) var inbox: CoreObject = [:]
     @Published private(set) var processInboxPresented = false {
-        didSet { if processInboxPresented { startupSyncIntent = nil } }
+        didSet { if processInboxPresented { foregroundSyncIntent = nil } }
     }
     @Published private(set) var processInboxView: CoreObject = [:]
     @Published private(set) var processInboxNotice: CoreObject = [:]
@@ -234,7 +234,7 @@ final class CoreModel: ObservableObject {
     @Published private(set) var processInboxInputs: [String: String] = [:]
     @Published private(set) var mindSweepGuide: CoreObject = [:]
     @Published private(set) var mindSweepPresented = false {
-        didSet { if mindSweepPresented { startupSyncIntent = nil } }
+        didSet { if mindSweepPresented { foregroundSyncIntent = nil } }
     }
     @Published private(set) var mindSweepStep = -1
     @Published private(set) var mindSweepDraft = ""
@@ -296,7 +296,7 @@ final class CoreModel: ObservableObject {
     @Published private(set) var searchError: String?
     @Published private(set) var moreMenu: CoreObject = [:]
     @Published private(set) var morePresented = false {
-        didSet { if morePresented { startupSyncIntent = nil } }
+        didSet { if morePresented { foregroundSyncIntent = nil } }
     }
     @Published private(set) var settingsMenu: CoreObject = [:]
     @Published private(set) var settingsSearch = ""
@@ -442,7 +442,7 @@ final class CoreModel: ObservableObject {
     @Published private(set) var projectSectionError: String?
     @Published private(set) var projectSectionReadError: String?
     @Published private(set) var areaManagerPresented = false {
-        didSet { if areaManagerPresented { startupSyncIntent = nil } }
+        didSet { if areaManagerPresented { foregroundSyncIntent = nil } }
     }
     @Published private(set) var areaManagerProjectID: String?
     @Published private(set) var areaCreateOptions: CoreObject = [:]
@@ -942,13 +942,13 @@ final class CoreModel: ObservableObject {
     @Published private(set) var retryNeeded = false
     @Published private(set) var error: String?
     @Published var capturePresented = false {
-        didSet { if capturePresented { startupSyncIntent = nil } }
+        didSet { if capturePresented { foregroundSyncIntent = nil } }
     }
     @Published private(set) var areaPickerPresented = false {
-        didSet { if areaPickerPresented { startupSyncIntent = nil } }
+        didSet { if areaPickerPresented { foregroundSyncIntent = nil } }
     }
     @Published private(set) var taskPresented = false {
-        didSet { if taskPresented { startupSyncIntent = nil } }
+        didSet { if taskPresented { foregroundSyncIntent = nil } }
     }
     @Published private(set) var taskInitialTab = "view"
     private var taskOpeningIntent: CoreObject?
@@ -1056,36 +1056,48 @@ final class CoreModel: ObservableObject {
     @Published private(set) var contextPickerPresented = false
     @Published private(set) var notice: String?
     @Published var bulkConfirm: CoreObject = [:] {
-        didSet { if !bulkConfirm.isEmpty { startupSyncIntent = nil } }
+        didSet { if !bulkConfirm.isEmpty { foregroundSyncIntent = nil } }
     }
 
     @Published private(set) var completedStartupToken: UUID?
-    private struct StartupSyncIntent {
-        let host: CoreHost
-        var foregroundRequested = false
+    private enum ForegroundSyncReason {
+        case startup, resume
+        var command: String { self == .startup ? "syncStored" : "syncResume" }
     }
-    private struct StartupSyncOwner {
+    private struct ForegroundSyncIntent {
         let id: UUID
         let host: CoreHost
+        let startupToken: UUID
+        let reason: ForegroundSyncReason
+        var foregroundRequested = false
+    }
+    private struct ForegroundSyncOwner {
+        let id: UUID
+        let host: CoreHost
+        let startupToken: UUID
+        let reason: ForegroundSyncReason
         let generation: Int
     }
     private var startupSyncCompletedHost: CoreHost?
-    private var startupSyncIntent: StartupSyncIntent?
-    private var startupSyncOwner: StartupSyncOwner?
-    private var startupSyncTask: Task<Void, Never>?
-    private var startupSyncGeneration = 0
-    private var startupSyncSceneActive = false
+    private var foregroundSyncIntent: ForegroundSyncIntent?
+    private var foregroundSyncOwner: ForegroundSyncOwner?
+    private var foregroundSyncTask: Task<Void, Never>?
+    private var foregroundSyncGeneration = 0
+    private var foregroundSyncSceneActive = false
+    private var foregroundSyncBackgroundObserved = false
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var startupSyncTestThrowOnce = false
+    private var resumeSyncTestThrowOnce = false
     #endif
 
     private var host: CoreHost? {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
-                cancelStartupSync()
-                startupSyncIntent = nil
+                cancelForegroundSync()
+                foregroundSyncIntent = nil
                 startupSyncCompletedHost = nil
                 completedStartupToken = nil
+                foregroundSyncBackgroundObserved = false
                 cancelTaskFileImport()
                 cancelProjectFileImport()
                 invalidateTaskAttachmentOpen()
@@ -4037,6 +4049,7 @@ final class CoreModel: ObservableObject {
                     #endif
                     settingsSyncTestThrowOnce = arguments.contains("--native-sync-command-throw-once")
                     startupSyncTestThrowOnce = arguments.contains("--native-startup-sync-command-throw-once")
+                    resumeSyncTestThrowOnce = arguments.contains("--native-resume-sync-command-throw-once")
                     host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
                         deviceStorage: (directory, "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased()),
                         isolatedTestID: identifier)
@@ -4361,9 +4374,10 @@ final class CoreModel: ObservableObject {
                 // ready precedes recovery adoption; only this terminal tail can
                 // arm the one initial-Inbox opportunity for the captured host.
                 startupSyncCompletedHost = currentHost
-                startupSyncIntent = recovery.isEmpty && startupSyncInboxClean
-                    ? StartupSyncIntent(host: currentHost) : nil
-                completedStartupToken = UUID()
+                let token = UUID()
+                completedStartupToken = token
+                foregroundSyncIntent = recovery.isEmpty && foregroundSyncInboxClean
+                    ? ForegroundSyncIntent(id: UUID(), host: currentHost, startupToken: token, reason: .startup) : nil
             }
         } catch is CoreHostProjectFileAddRecovery {
             ready = false
@@ -4403,7 +4417,7 @@ final class CoreModel: ObservableObject {
         #endif
     }
 
-    private var startupSyncInboxClean: Bool {
+    private var foregroundSyncInboxClean: Bool {
         selectedSurface == .inbox && !capturePresented && !capturePending && draft.isEmpty && noteDraft.isEmpty
             && !processInboxPresented && processInboxRequest == nil && !processInboxTransitioning
             && !mindSweepPresented && mindSweepRequest == nil && mindSweepDraft.isEmpty
@@ -4425,46 +4439,68 @@ final class CoreModel: ObservableObject {
             && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
     }
 
-    // SwiftUI records only the foreground intent. This model retains the Task,
-    // so changes to busy or the view tree cannot abandon an admitted invocation.
-    func requestStartupSync(token: UUID?, active: Bool) {
-        guard !Task.isCancelled, let token, token == completedStartupToken else { return }
-        startupSyncSceneActive = active && UIApplication.shared.applicationState == .active
-        guard startupSyncSceneActive else { cancelStartupSync(); return }
-        guard startupSyncIntent != nil else { return }
-        startupSyncIntent?.foregroundRequested = true
-        admitStartupSync()
+    // Observe the actual scene episode before concealment clears presentation.
+    // Inactive/authentication alone cannot manufacture a resume opportunity.
+    func observeForegroundSyncScene(_ phase: ScenePhase, token: UUID?) {
+        if phase == .active {
+            foregroundSyncBackgroundObserved = false
+            return
+        }
+        guard phase == .background, !foregroundSyncBackgroundObserved else { return }
+        foregroundSyncBackgroundObserved = true
+        // Returning from this episode replaces any unadmitted cold intent. An
+        // admitted owner must settle; this episode never queues behind it.
+        foregroundSyncIntent = nil
+        guard foregroundSyncOwner == nil, let token, token == completedStartupToken,
+              let currentHost = host, startupSyncCompletedHost === currentHost,
+              ready, !retryNeeded, !settingsSyncRestartRequired,
+              !appLockRecoveryPending, foregroundSyncInboxClean else { return }
+        foregroundSyncIntent = ForegroundSyncIntent(id: UUID(), host: currentHost,
+            startupToken: token, reason: .resume)
     }
 
-    func cancelStartupSync() {
-        startupSyncSceneActive = false
-        startupSyncIntent?.foregroundRequested = false
-        startupSyncGeneration += 1
-        startupSyncTask?.cancel()
+    // SwiftUI requests the captured intent. This model retains the Task, so
+    // changes to busy or the view tree cannot abandon an admitted invocation.
+    func requestForegroundSync(token: UUID?, active: Bool) {
+        guard !Task.isCancelled, let token, token == completedStartupToken else { return }
+        foregroundSyncSceneActive = active && UIApplication.shared.applicationState == .active
+        guard foregroundSyncSceneActive else { cancelForegroundSync(); return }
+        guard foregroundSyncIntent != nil else { return }
+        foregroundSyncIntent?.foregroundRequested = true
+        admitForegroundSync()
+    }
+
+    func cancelForegroundSync() {
+        foregroundSyncSceneActive = false
+        foregroundSyncIntent?.foregroundRequested = false
+        foregroundSyncGeneration += 1
+        foregroundSyncTask?.cancel()
         // Cancellation consumes no new intent and releases no operation. The
         // captured host must settle before its owner may release busy.
     }
 
-    private func admitStartupSync() {
-        guard let intent = startupSyncIntent, intent.foregroundRequested else { return }
-        guard host === intent.host, ready, !retryNeeded, !settingsSyncRestartRequired,
-              !appLockRecoveryPending, startupSyncInboxClean else {
-            startupSyncIntent = nil
+    private func admitForegroundSync() {
+        guard let intent = foregroundSyncIntent, intent.foregroundRequested else { return }
+        guard host === intent.host, startupSyncCompletedHost === intent.host,
+              completedStartupToken == intent.startupToken, ready, !retryNeeded, !settingsSyncRestartRequired,
+              !appLockRecoveryPending, foregroundSyncInboxClean else {
+            foregroundSyncIntent = nil
             return
         }
-        guard startupSyncSceneActive, UIApplication.shared.applicationState == .active,
-              !appLock.concealed, !appLockActive, !busy, startupSyncOwner == nil else { return }
-        startupSyncIntent = nil
-        let owner = StartupSyncOwner(id: UUID(), host: intent.host, generation: startupSyncGeneration)
-        startupSyncOwner = owner
+        guard foregroundSyncSceneActive, UIApplication.shared.applicationState == .active,
+              !appLock.concealed, !appLockActive, !busy, foregroundSyncOwner == nil else { return }
+        foregroundSyncIntent = nil
+        let owner = ForegroundSyncOwner(id: intent.id, host: intent.host, startupToken: intent.startupToken,
+            reason: intent.reason, generation: foregroundSyncGeneration)
+        foregroundSyncOwner = owner
         busy = true
-        startupSyncTask = Task { [weak self] in
+        foregroundSyncTask = Task { [weak self] in
             guard let self else { return }
             defer {
-                if self.startupSyncOwner?.id == owner.id {
-                    let current = self.startupSyncCurrent(owner)
-                    self.startupSyncTask = nil
-                    self.startupSyncOwner = nil
+                if self.foregroundSyncOwner?.id == owner.id {
+                    let current = self.foregroundSyncCurrent(owner)
+                    self.foregroundSyncTask = nil
+                    self.foregroundSyncOwner = nil
                     if self.host === owner.host {
                         if current { self.finishOperation() }
                         else { self.busy = false; self.refreshRequested = false }
@@ -4472,37 +4508,42 @@ final class CoreModel: ObservableObject {
                 }
             }
             do {
-                guard self.startupSyncCurrent(owner) else { throw CancellationError() }
+                guard self.foregroundSyncCurrent(owner) else { throw CancellationError() }
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                if self.startupSyncTestThrowOnce {
+                if owner.reason == .startup && self.startupSyncTestThrowOnce {
                     self.startupSyncTestThrowOnce = false
                     throw CocoaError(.fileWriteUnknown)
                 }
+                if owner.reason == .resume && self.resumeSyncTestThrowOnce {
+                    self.resumeSyncTestThrowOnce = false
+                    throw CocoaError(.fileWriteUnknown)
+                }
                 #endif
-                let result = try self.decode(try await owner.host.foregroundSync(command: "syncStored", requestJSON: "{}"))
-                try self.validateStartupSyncReply(result)
+                let result = try self.decode(try await owner.host.foregroundSync(command: owner.reason.command, requestJSON: "{}"))
+                try self.validateForegroundSyncReply(result)
             } catch {
                 self.requireSettingsSyncRestart(owner.host)
                 return
             }
-            guard self.startupSyncCurrent(owner) else { return }
-            do { try await self.readInbox(startupSyncOwner: owner.id) }
+            guard self.foregroundSyncCurrent(owner) else { return }
+            do { try await self.readInbox(foregroundSyncOwner: owner.id) }
             catch {
                 // A known Sync settlement is not made unknown by a later read.
-                guard self.startupSyncCurrent(owner) else { return }
+                guard self.foregroundSyncCurrent(owner) else { return }
                 self.error = self.label("settings.feedback.actionFailed")
             }
         }
     }
 
-    private func startupSyncCurrent(_ owner: StartupSyncOwner) -> Bool {
-        host === owner.host && startupSyncOwner?.id == owner.id && startupSyncGeneration == owner.generation
-            && !Task.isCancelled && startupSyncSceneActive && UIApplication.shared.applicationState == .active
+    private func foregroundSyncCurrent(_ owner: ForegroundSyncOwner) -> Bool {
+        host === owner.host && startupSyncCompletedHost === owner.host && completedStartupToken == owner.startupToken
+            && foregroundSyncOwner?.id == owner.id && foregroundSyncGeneration == owner.generation
+            && !Task.isCancelled && foregroundSyncSceneActive && UIApplication.shared.applicationState == .active
             && ready && !retryNeeded && !settingsSyncRestartRequired && !appLock.concealed && !appLockActive
-            && !appLockRecoveryPending && startupSyncInboxClean
+            && !appLockRecoveryPending && foregroundSyncInboxClean
     }
 
-    private func validateStartupSyncReply(_ result: CoreObject) throws {
+    private func validateForegroundSyncReply(_ result: CoreObject) throws {
         guard let ok = result["ok"] as? NSNumber, CFGetTypeID(ok) == CFBooleanGetTypeID() else {
             throw CocoaError(.coderReadCorrupt)
         }
@@ -24425,19 +24466,19 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    private func readInbox(startupSyncOwner ownerID: UUID? = nil) async throws {
+    private func readInbox(foregroundSyncOwner ownerID: UUID? = nil) async throws {
         if let ownerID {
-            guard let owner = startupSyncOwner, owner.id == ownerID, startupSyncCurrent(owner) else {
+            guard let owner = foregroundSyncOwner, owner.id == ownerID, foregroundSyncCurrent(owner) else {
                 throw CancellationError()
             }
-            // The initial Inbox shares these cached projections with navigation.
-            // Publish them together only while the admitted startup owner holds.
+            // Inbox shares these cached projections with navigation. Publish
+            // them together only while the admitted foreground owner holds.
             let nextArea = try await query("areaFilter")
-            guard startupSyncCurrent(owner) else { throw CancellationError() }
+            guard foregroundSyncCurrent(owner) else { throw CancellationError() }
             let nextMore = try await query("menuRead", ["more", "{}"])
-            guard startupSyncCurrent(owner) else { throw CancellationError() }
+            guard foregroundSyncCurrent(owner) else { throw CancellationError() }
             let nextInbox = try await query("inboxView", [try json(["offset": 0, "limit": pageSize])])
-            guard startupSyncCurrent(owner) else { throw CancellationError() }
+            guard foregroundSyncCurrent(owner) else { throw CancellationError() }
             area = nextArea
             moreMenu = nextMore
             inbox = nextInbox
@@ -25469,8 +25510,8 @@ final class CoreModel: ObservableObject {
     private func finishOperation() {
         busy = false
         if settingsSyncRestartRequired { refreshRequested = false; return }
-        admitStartupSync()
-        if startupSyncOwner != nil { return }
+        admitForegroundSync()
+        if foregroundSyncOwner != nil { return }
         presentQueuedReferenceProjectNextAction()
         if let id = referenceProjectNextActionEditID, ready, !retryNeeded, !taskPresented, !appLock.concealed {
             referenceProjectNextActionEditID = nil

@@ -500,14 +500,37 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         try assertDiagnostics()
     }
 
-    func testStoredCleanupFailureRetainsOriginalAuthorityAndColdRecoveryDoesNotSync() async throws {
+    func testResumeUsesStoredCycleCompletionCadenceWithoutDeferredNetwork() async throws {
+        let original = try await configureStoredCleanupCandidate()
+        let host = core()
+        _ = try await host.start()
+        _ = try await command(host, "syncStored")
+        let afterStored = remote.recorded.count
+        let skipped = try await command(host, "syncResume")
+        XCTAssertEqual(try json(skipped), try json(["success": true, "skipped": true]))
+        XCTAssertEqual(remote.recorded.count, afterStored, "Immediate resume cannot bypass the stored cycle's shared cadence")
+        // Wait past RN's real WebDAV foreground interval. Time alone must not
+        // start a native cycle; only the next explicitly owned command may run.
+        try await Task.sleep(nanoseconds: 31_000_000_000)
+        XCTAssertEqual(remote.recorded.count, afterStored, "No timer or follow-up runs after the invocation returns")
+        let due = try await command(host, "syncResume")
+        XCTAssertEqual(due["success"] as? Bool, true)
+        XCTAssertTrue(remote.recorded.dropFirst(afterStored).contains { $0.method == "HEAD" && $0.path == "/sync/data.json" })
+        try assertCleaned(original: original); try assertConfiguration()
+        let read = try object(await host.call("menuRead", argumentsJSON: json(["dataSettings", "{}"])))
+        XCTAssertNotNil(read["diagnostics"], "Resume acknowledges persistence before returning")
+        XCTAssertEqual(try markers("v1.3.5/ios-resume-sync").count, 2, "The marker acknowledges both configured commands, not network activity")
+        await host.close()
+    }
+
+    private func assertAutomaticCleanupFailure(command name: String) async throws {
         _ = try await configureStoredCleanupCandidate()
         let boundary = ForegroundBoundaryState(), host = core(boundary: boundary)
         let beforeStart = remote.recorded.count
         _ = try await host.start(); XCTAssertEqual(remote.recorded.count, beforeStart)
         boundary.arm()
         do {
-            _ = try await command(host, "syncStored")
+            _ = try await command(host, name)
             XCTFail("An unconfirmed physical cleanup must escape the stored entry")
         } catch {
             XCTAssertEqual(error.localizedDescription, "Attachment cleanup could not be confirmed; retry the retained request")
@@ -518,10 +541,10 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: target), held.target); XCTAssertEqual(try inode(target), held.targetInode)
         XCTAssertEqual(try rows(), held.rows); XCTAssertEqual(try Data(contentsOf: manifest), held.manifest)
         XCTAssertEqual(try? Data(contentsOf: logURL), held.log); XCTAssertEqual(remote.recorded.count, held.requests)
-        XCTAssertEqual(try markers("v1.3.5/ios-stored-sync").count, 0, "A fatal cycle has no settled marker")
+        XCTAssertEqual(try markers(name == "syncStored" ? "v1.3.5/ios-stored-sync" : "v1.3.5/ios-resume-sync").count, 0, "A fatal cycle has no settled marker")
         XCTAssertEqual(try markers("v1.3.5/ios-cleanup-owned-retirement").count, 0)
         do {
-            _ = try await host.foregroundSync(command: "syncStored", requestJSON: "{}")
+            _ = try await host.foregroundSync(command: name, requestJSON: "{}")
             XCTFail("Retained cleanup authority blocks a second stored command")
         } catch {
             XCTAssertEqual(error.localizedDescription, "Attachment cleanup could not be confirmed; retry the retained request")
@@ -538,11 +561,19 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         let read = try object(await cold.call("menuRead", argumentsJSON: json(["dataSettings", "{}"])))
         XCTAssertNotNil(read["diagnostics"], "The exact cold settlement releases ordinary read admission")
         await cold.close()
-        XCTAssertEqual(try markers("v1.3.5/ios-stored-sync").count, 0)
+        XCTAssertEqual(try markers(name == "syncStored" ? "v1.3.5/ios-stored-sync" : "v1.3.5/ios-resume-sync").count, 0)
         let cleanup = try markers("v1.3.5/ios-cleanup-owned-retirement")
         XCTAssertEqual(cleanup.count, 1)
         XCTAssertEqual(cleanup.first?["context"] as? [String: String],
             ["releaseCheck": "v1.3.5/ios-cleanup-owned-retirement", "operation": "cleanup-owned-retirement", "outcome": "removed"])
+    }
+
+    func testStoredCleanupFailureRetainsOriginalAuthorityAndColdRecoveryDoesNotSync() async throws {
+        try await assertAutomaticCleanupFailure(command: "syncStored")
+    }
+
+    func testResumeCleanupFailureRetainsOriginalAuthorityAndColdRecoveryDoesNotSync() async throws {
+        try await assertAutomaticCleanupFailure(command: "syncResume")
     }
 
     func testBusyLeaseReturnsWithoutDetachedFollowUpAndLaterExplicitSyncOwnsCleanup() async throws {

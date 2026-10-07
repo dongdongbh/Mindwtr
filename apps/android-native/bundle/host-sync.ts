@@ -33,6 +33,7 @@ import {
     buildDiagnosticsLogEntry,
     classifySyncFailure,
     coerceSupportedBackend,
+    createAutoSyncController,
     createMobileBackgroundSyncRunner,
     createMobileSyncService,
     createMobileSyncTriggers,
@@ -44,6 +45,7 @@ import {
     flushPendingSave,
     generateUUID,
     getInMemorySyncChangeFingerprint,
+    getMobileAutoSyncCadence,
     getMobileWebDavRequestOptions,
     isLikelyOfflineSyncError,
     loadWebDavSyncConfig,
@@ -56,6 +58,7 @@ import {
     shouldScheduleMobileBackgroundSync,
     useTaskStore,
     type AppData,
+    type AutoSyncController,
     type DiagnosticsLogEntry,
     type MobileBackgroundSyncTrigger,
     type MobileSyncNetworkState,
@@ -387,11 +390,26 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         emitState();
     };
 
+    let iosAutomaticController: AutoSyncController | null = null;
+    type AutomaticFrame = { result: Awaited<ReturnType<NativeSyncSettingsHost['performSync']>> | null };
+    let iosAutomaticFrame: AutomaticFrame | null = null;
+
     /** Every cycle, automatic or from the Sync screen, goes through here, so Kotlin reads its lists again once one ends. */
     const performSync: NativeSyncSettingsHost['performSync'] = async (syncPathOverride, options) => {
         if (fatalCleanupError) throw fatalCleanupError;
         try {
-            return await service.performMobileSync(syncPathOverride, options);
+            const before = platform === 'ios' && options.manual && !options.activationProbe
+                ? useTaskStore.getState().settings : null;
+            const answer = await service.performMobileSync(syncPathOverride, options);
+            if (fatalCleanupError) throw fatalCleanupError;
+            if (before) {
+                const after = useTaskStore.getState().settings;
+                if ((after.lastSyncStatus === 'success' || after.lastSyncStatus === 'conflict')
+                    && (after.lastSyncStatus !== before.lastSyncStatus || after.lastSyncAt !== before.lastSyncAt)) {
+                    iosAutomaticController?.notifyExternalSyncSuccess();
+                }
+            }
+            return answer;
         } catch (error) {
             if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
             throw error;
@@ -402,6 +420,58 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                 else void refreshConfigured();
             }
         }
+    };
+
+    const automaticController = () => iosAutomaticController ??= createAutoSyncController({
+        allowDeferredWork: false,
+        periodicSyncIntervalMs: null,
+        getCadence: () => getMobileAutoSyncCadence('webdav'),
+        adaptivePacing: { durationMultiplier: 9, maxIntervalMs: 5 * 60_000 },
+        isRuntimeActive: () => !fatalCleanupError && iosAutomaticFrame !== null,
+        isIgnorableFailure: (error) => !error || isLikelyOfflineSyncError(error),
+        reportError: (_label, error) => {
+            if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
+            throw error;
+        },
+        flushPendingSave: async () => {
+            if (fatalCleanupError) throw fatalCleanupError;
+            await flushPendingSave();
+            if (fatalCleanupError) throw fatalCleanupError;
+        },
+        performSync: async () => {
+            if (fatalCleanupError) throw fatalCleanupError;
+            const frame = iosAutomaticFrame;
+            if (!frame) throw new Error('Automatic sync requires a foreground owner');
+            const answer = await performSync(undefined, { manual: false });
+            if (fatalCleanupError) throw fatalCleanupError;
+            if (iosAutomaticFrame !== frame) throw new Error('Automatic sync requires its original foreground owner');
+            frame.result = answer;
+            return answer;
+        },
+    });
+    const performStoredAutomaticSync = async (reason: 'startup' | 'resume') => {
+        if (fatalCleanupError) throw fatalCleanupError;
+        if (platform !== 'ios' || (reason !== 'startup' && reason !== 'resume')) {
+            throw new Error('Stored automatic sync is unavailable on this host');
+        }
+        if (iosAutomaticFrame) throw new Error('An automatic foreground sync is already in progress');
+        const frame: AutomaticFrame = { result: null };
+        iosAutomaticFrame = frame;
+        try {
+            const backend = (await keyValue.get(SYNC_BACKEND_KEY))?.trim();
+            if (fatalCleanupError) throw fatalCleanupError;
+            if (backend !== 'webdav') throw new Error('Stored automatic sync requires WebDAV');
+            const controller = automaticController();
+            if (reason === 'resume' && Date.now() - controller.getLastAutoSyncAt()
+                <= getMobileAutoSyncCadence(backend).foregroundMinIntervalMs) return { success: true, skipped: true };
+            await controller.requestAutoSync(0, reason);
+            if (fatalCleanupError) throw fatalCleanupError;
+            return frame.result ? { success: frame.result.success === true, skipped: Boolean(frame.result.skipped) }
+                : { success: true, skipped: true };
+        } catch (error) {
+            if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
+            throw fatalCleanupError ?? error;
+        } finally { iosAutomaticFrame = null; }
     };
 
     // ---- The background job (CoreWork's sync and capture jobs; RN's lib/background-sync-task.ts) ----
@@ -520,6 +590,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     return {
         settingsHost,
+        performStoredAutomaticSync,
         /** The editor's and the project screen's attachment IO (core's NativeAttachmentsHost); null without app files. */
         attachmentsHost: attachments?.contractHost ?? null,
         /** The badge and cycle count now. */

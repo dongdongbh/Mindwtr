@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import * as core from '@mindwtr/core';
 import {
     BACKGROUND_SYNC_FAILURE_STATE_KEY,
     NativeAttachmentCleanupUnconfirmedError,
@@ -65,6 +66,7 @@ const failingFetch = (async (input: RequestInfo | URL) => {
 }) as typeof fetch;
 
 afterEach(() => {
+    mock.restore();
     globalThis.fetch = realFetch;
     fetches.length = 0;
     delete globals.__mindwtrCryptoCall;
@@ -206,6 +208,182 @@ describe('explicit iOS foreground sync factory', () => {
         expect(sent).not.toContain('PUT');
         expect(retire).not.toHaveBeenCalled();
         resetForTests();
+    });
+});
+
+describe('event-owned iOS stored/resume pacing', () => {
+    const data = (): AppData => ({ tasks: [], projects: [], sections: [], areas: [], settings: {} });
+    const configured = (getData: () => Promise<AppData> = async () => data()) => {
+        iosFiles();
+        return host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json' },
+            false, getData, async () => false);
+    };
+    const serve = () => {
+        globalThis.fetch = (async () => new Response(JSON.stringify(data()), {
+            status: 200, headers: { ETag: '"fixture-data"' },
+        })) as typeof fetch;
+    };
+    afterEach(() => resetForTests());
+
+    it('seeds resume pacing from cold completion and uses the strict shared 30-second boundary', async () => {
+        resetForTests(); serve();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        let entered!: () => void, release!: () => void;
+        const reached = new Promise<void>((resolve) => { entered = resolve; });
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        let first = true;
+        const fixture = configured(async () => {
+            if (first) { first = false; entered(); await held; }
+            return data();
+        });
+        const operation = fixture.sync.performStoredAutomaticSync('startup');
+        await reached;
+        now += 20_000;
+        release();
+        expect(await operation).toMatchObject({ success: true });
+        expect(fixture.sync.state().cycles).toBe(1);
+        now += 30_000;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(fixture.sync.state().cycles).toBe(1);
+        now += 1;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toMatchObject({ success: true });
+        expect(fixture.sync.state().cycles).toBe(2);
+        expect(fixture.schedules).toEqual([]);
+    });
+
+    it('retains cold failure cooldown across resume and clears it only after actual manual recovery', async () => {
+        resetForTests(); globalThis.fetch = failingFetch;
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const fixture = configured();
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: false, skipped: false });
+        now += 30_001;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(fixture.sync.state().cycles).toBe(1);
+        now += 30_000;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: false, skipped: false });
+        expect(fixture.sync.state().cycles).toBe(2);
+        now += 30_001;
+        serve();
+        expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({ success: true });
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toMatchObject({ success: true });
+        expect(fixture.sync.state().cycles).toBe(4);
+    });
+
+    it('keeps shared offline skips outside automatic failure cooldown', async () => {
+        resetForTests(); serve();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const fixture = configured(async () => { throw new Error('Network request failed'); });
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: true });
+        now += 30_001;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(fixture.sync.state().cycles).toBe(2);
+    });
+
+    it('uses the real selected controller without installing timers and refuses an overlapping frame', async () => {
+        resetForTests(); serve();
+        const create = core.createAutoSyncController;
+        const timer = mock(() => { throw new Error('No deferred controller work is permitted'); });
+        spyOn(core, 'createAutoSyncController').mockImplementation((options) => {
+            expect(options.allowDeferredWork).toBe(false);
+            expect(options.periodicSyncIntervalMs).toBeNull();
+            return create({ ...options, setTimer: timer });
+        });
+        let entered!: () => void, release!: () => void;
+        const reached = new Promise<void>((resolve) => { entered = resolve; });
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const fixture = configured(async () => { entered(); await held; return data(); });
+        const operation = fixture.sync.performStoredAutomaticSync('startup');
+        await reached;
+        await expect(fixture.sync.performStoredAutomaticSync('resume')).rejects.toThrow('already in progress');
+        release();
+        expect(await operation).toMatchObject({ success: true });
+        expect(fixture.sync.state().cycles).toBe(1);
+        globalThis.fetch = failingFetch;
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: false, skipped: false });
+        expect(timer).not.toHaveBeenCalled();
+        expect(fixture.schedules).toEqual([]);
+    });
+
+    for (const fatal of [false, true]) {
+        it(`propagates the exact ${fatal ? 'fatal' : 'ordinary'} preflush error without service work`, async () => {
+            resetForTests();
+            const refusal = fatal ? new NativeAttachmentCleanupUnconfirmedError() : new Error('Synthetic flush refusal');
+            const create = core.createAutoSyncController;
+            spyOn(core, 'createAutoSyncController').mockImplementation((options) => create({
+                ...options, flushPendingSave: async () => { throw refusal; },
+            }));
+            const fixture = configured();
+            const fetch = mock(async () => { throw new Error('No HTTP after a failed flush'); });
+            globalThis.fetch = fetch as typeof globalThis.fetch;
+            await expect(fixture.sync.performStoredAutomaticSync('startup')).rejects.toBe(refusal);
+            expect(fixture.sync.state().cycles).toBe(0);
+            expect(fetch).not.toHaveBeenCalled();
+            expect(fixture.calls).toEqual(['get']);
+            if (fatal) {
+                const at = fixture.calls.length;
+                await expect(fixture.sync.performStoredAutomaticSync('resume')).rejects.toBe(refusal);
+                await expect(fixture.sync.settingsHost.performSync(undefined, { manual: true })).rejects.toBe(refusal);
+                await expect(fixture.sync.settingsHost.reconcileBackgroundSync()).rejects.toBe(refusal);
+                expect(fixture.calls.slice(at)).toEqual([]);
+            }
+        });
+    }
+
+    it('retains an actual cleanup fatal before any completion state or later port work', async () => {
+        resetForTests();
+        const files = iosFiles();
+        const date = '2026-10-06T00:00:00.000Z';
+        const id = '00000000-0000-4000-8000-000000000341';
+        const uri = `${MANAGED}${id}.txt`;
+        const snapshot: AppData = { tasks: [{ id: 'purged-automatic-task', title: 'Fixture', status: 'done', tags: [], contexts: [],
+            createdAt: date, updatedAt: date, deletedAt: date, purgedAt: date,
+            attachments: [{ id, kind: 'file', title: 'fixture.txt', uri, createdAt: date, updatedAt: date }] }],
+            projects: [], sections: [], areas: [], settings: {} };
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        files.memory.put(uri, new Uint8Array([1, 2, 3]));
+        globalThis.fetch = (async () => new Response(JSON.stringify(snapshot), {
+            status: 200, headers: { ETag: '"fixture-data"' },
+        })) as typeof fetch;
+        const retire = mock(async (_id: string, _uri: string, keep: () => boolean) => {
+            expect(keep()).toBe(false); throw fatal;
+        });
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json' }, false,
+            async () => structuredClone(snapshot), retire);
+        await expect(fixture.sync.performStoredAutomaticSync('startup')).rejects.toBe(fatal);
+        expect(retire).toHaveBeenCalledWith(id, uri, expect.any(Function));
+        expect(fixture.sync.state().cycles).toBe(0);
+        const before = [...fixture.kv], at = fixture.calls.length;
+        await expect(fixture.sync.performStoredAutomaticSync('resume')).rejects.toBe(fatal);
+        await expect(fixture.sync.settingsHost.performSync(undefined, { manual: true })).rejects.toBe(fatal);
+        expect(fixture.calls.slice(at)).toEqual([]);
+        expect([...fixture.kv]).toEqual(before);
+        expect(files.memory.read(uri)).toEqual(new Uint8Array([1, 2, 3]));
+        expect(files.calls).not.toContain('deleteNow');
+    });
+
+    it('never treats Test verification as an automatic timestamp or cooldown recovery', async () => {
+        resetForTests(); globalThis.fetch = failingFetch;
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const fixture = configured();
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: false, skipped: false });
+        now += 30_001;
+        expect(await fixture.sync.settingsHost.performSync(undefined, {
+            manual: true, activationProbe: true, configOverride: { backend: 'off' },
+        })).toMatchObject({ success: true });
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(fixture.sync.state().cycles).toBe(2);
+    });
+
+    it('refuses Android stored/resume calls without any port access', async () => {
+        globals.__mindwtrHostPlatform = 'android';
+        const fixture = host();
+        await expect(fixture.sync.performStoredAutomaticSync('startup')).rejects.toThrow('unavailable');
+        await expect(fixture.sync.performStoredAutomaticSync('resume')).rejects.toThrow('unavailable');
+        expect(fixture.calls).toEqual([]);
     });
 });
 

@@ -3754,7 +3754,7 @@ globalThis.MindwtrHost = {
                 || iosCleanupCallback || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
                 || typeof native().kvMultiGet !== 'function' || !globalThis.__mindwtrSyncSecrets) throw unavailable();
             const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
-                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored'];
+                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume'];
             if (!commands.includes(name) || typeof json !== 'string' || new TextEncoder().encode(json).byteLength > 128 * 1024) {
                 throw new Error('INVALID_INPUT: Invalid foreground sync request');
             }
@@ -3762,7 +3762,7 @@ globalThis.MindwtrHost = {
             try { input = JSON.parse(json) as Record<string, unknown>; }
             catch { throw new Error('INVALID_INPUT: Invalid foreground sync request'); }
             if (!input || typeof input !== 'object' || Array.isArray(input)
-                || name === 'syncStored' && Object.keys(input).length !== 0) throw new Error('INVALID_INPUT: Invalid foreground sync request');
+                || ['syncStored', 'syncResume'].includes(name) && Object.keys(input).length !== 0) throw new Error('INVALID_INPUT: Invalid foreground sync request');
             const refused = { ok: false as const, error: { code: 'ACTION_FAILED' as const,
                 message: 'This sync provider is not available in native iOS yet; the stored configuration is unchanged' } };
             if (name === 'selectSyncBackend' && input.option !== 'off' && input.option !== 'webdav'
@@ -3775,7 +3775,7 @@ globalThis.MindwtrHost = {
             try {
                 const stored = (await keyValue.get(SYNC_BACKEND_KEY))?.trim();
                 if (stored && stored !== 'off' && stored !== 'webdav') return refused;
-                if (name === 'syncStored' && stored !== 'webdav') return { ok: true as const, value: { success: true, skipped: true } };
+                if (['syncStored', 'syncResume'].includes(name) && stored !== 'webdav') return { ok: true as const, value: { success: true, skipped: true } };
                 iosManualSync ??= createNativeSync({ ...nativeSyncBindings, emit: () => {}, trace: () => {}, scheduleBackgroundSync: () => {},
                     retireLocalAttachment: async (attachmentID, targetURI, keep) => {
                         if (keep()) return false;
@@ -3793,8 +3793,8 @@ globalThis.MindwtrHost = {
                     },
                 });
                 let storedResult: { success: boolean; skipped: boolean } | null = null;
-                if (name === 'syncStored') {
-                    const answer = await iosManualSync.settingsHost.performSync(undefined, { manual: false });
+                if (name === 'syncStored' || name === 'syncResume') {
+                    const answer = await iosManualSync.performStoredAutomaticSync(name === 'syncStored' ? 'startup' : 'resume');
                     await flushPendingSave();
                     requireSaved();
                     const after = getPersistenceStatus();
@@ -3814,8 +3814,10 @@ globalThis.MindwtrHost = {
                 }
                 try {
                     await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
-                        message: name === 'syncStored' ? 'Native iOS stored Sync command settled' : 'Native iOS foreground Sync command settled',
-                        context: { releaseCheck: name === 'syncStored' ? 'v1.3.5/ios-stored-sync' : 'v1.3.5/ios-foreground-sync-owned', operation: name, outcome: 'settled' },
+                        message: name === 'syncStored' ? 'Native iOS stored Sync command settled'
+                            : name === 'syncResume' ? 'Native iOS resume Sync command settled' : 'Native iOS foreground Sync command settled',
+                        context: { releaseCheck: name === 'syncStored' ? 'v1.3.5/ios-stored-sync'
+                            : name === 'syncResume' ? 'v1.3.5/ios-resume-sync' : 'v1.3.5/ios-foreground-sync-owned', operation: name, outcome: 'settled' },
                     }, { force: true });
                 } catch { /* A diagnostic cannot change the settled command result. */ }
                 return result;
