@@ -2224,6 +2224,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(event, tauri::RunEvent::Reopen { .. }) {
+                show_main(app);
+                log::info!("macOS Dock reopen handled extra.releaseCheck=v1.3.5/macos-dock-reopen");
+            }
             if matches!(event, tauri::RunEvent::Exit) {
                 stop_mcp_server(&app.state::<McpServerState>());
                 crate::window_state::save(app);
