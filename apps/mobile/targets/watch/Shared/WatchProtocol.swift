@@ -14,6 +14,7 @@ enum MindwtrWatchProtocol {
         case complete
         case deferTask = "defer"
         case pomodoro
+        case checklist
     }
 
     enum PomodoroAction: String {
@@ -99,6 +100,55 @@ enum MindwtrWatchProtocol {
 struct MindwtrWatchFocusTask: Codable, Hashable, Identifiable {
     let id: String
     let title: String
+    var createdAt: String? = nil
+    var description: String? = nil
+    var checklist: [MindwtrWatchChecklistItem]? = nil
+    var detailsUnavailable: Bool? = nil
+}
+
+struct MindwtrWatchChecklistItem: Codable, Hashable {
+    let id: String
+    let title: String
+    var isCompleted: Bool
+}
+
+extension MindwtrWatchProtocol {
+    static func checklistCommand(task: MindwtrWatchFocusTask, item: MindwtrWatchChecklistItem, completed: Bool,
+                                 createdAt: Date = Date()) -> [String: Any]? {
+        guard let taskCreatedAt = task.createdAt,
+              task.checklist?.filter({ $0.id == item.id && $0.title == item.title }).count == 1 else { return nil }
+        var payload = command(kind: .checklist, taskId: task.id, createdAt: createdAt)
+        payload["taskCreatedAt"] = taskCreatedAt
+        payload["itemId"] = item.id
+        payload["itemTitle"] = item.title
+        payload["isCompleted"] = completed
+        return payload
+    }
+
+    static func overlay(_ payloads: [[String: Any]], on task: MindwtrWatchFocusTask) -> MindwtrWatchFocusTask {
+        var updated = task
+        for payload in payloads {
+            guard payload["kind"] as? String == "checklist",
+                  payload["taskId"] as? String == task.id,
+                  payload["taskCreatedAt"] as? String == task.createdAt,
+                  let itemID = payload["itemId"] as? String,
+                  let title = payload["itemTitle"] as? String,
+                  let completed = payload["isCompleted"] as? Bool,
+                  updated.checklist?.filter({ $0.id == itemID && $0.title == title }).count == 1 else { continue }
+            updated.checklist = updated.checklist?.map { item in
+                var item = item
+                if item.id == itemID && item.title == title { item.isCompleted = completed }
+                return item
+            }
+        }
+        return updated
+    }
+
+    static func timestamp(_ value: String) -> TimeInterval? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value)?.timeIntervalSince1970
+    }
 }
 
 struct MindwtrWatchPomodoro: Codable, Equatable {
@@ -156,10 +206,18 @@ struct MindwtrWatchSnapshot: Codable, Equatable {
                   !id.isEmpty,
                   let rawTitle = item["title"] as? String
             else { return nil }
-            return MindwtrWatchFocusTask(
+            var task = MindwtrWatchFocusTask(
                 id: id,
                 title: String(rawTitle.prefix(MindwtrWatchProtocol.maximumSnapshotTitleLength))
             )
+            task.createdAt = item["createdAt"] as? String
+            task.description = item["description"] as? String
+            task.detailsUnavailable = item["detailsUnavailable"] as? Bool
+            if let checklist = item["checklist"] as? [[String: Any]],
+               let data = try? JSONSerialization.data(withJSONObject: checklist) {
+                task.checklist = try? JSONDecoder().decode([MindwtrWatchChecklistItem].self, from: data)
+            }
+            return task
         }
 
         self.generatedAt = generatedAt

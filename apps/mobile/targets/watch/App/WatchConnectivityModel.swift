@@ -12,6 +12,7 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
     @Published private(set) var statusMessage: String?
     @Published private(set) var isReachable = false
     @Published var rejectedCaptureDraft: String?
+    @Published private(set) var checklistRevision = 0
 
     private let session: WCSession?
     private var inFlightCommandIds = Set<String>()
@@ -67,6 +68,22 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
 
     func complete(task: MindwtrWatchFocusTask) {
         enqueue(payload: MindwtrWatchProtocol.command(kind: .complete, taskId: task.id), transport: .command)
+    }
+
+    func displayedTask(_ task: MindwtrWatchFocusTask) -> MindwtrWatchFocusTask {
+        let current = snapshot.focus.first(where: { $0.id == task.id }) ?? task
+        return MindwtrWatchProtocol.overlay(MindwtrWatchOutbox.records().map(\.payload), on: current)
+    }
+
+    func setChecklist(task: MindwtrWatchFocusTask, item: MindwtrWatchChecklistItem, completed: Bool) {
+        // Monotonic tap ordering also covers rapid taps within one millisecond and a clock adjustment.
+        let latest = MindwtrWatchOutbox.records().compactMap { MindwtrWatchProtocol.timestamp($0.createdAt) }.max() ?? 0
+        let date = Date(timeIntervalSince1970: max(Date().timeIntervalSince1970, latest + 0.002))
+        guard let payload = MindwtrWatchProtocol.checklistCommand(task: task, item: item, completed: completed, createdAt: date) else {
+            statusMessage = String(localized: "This checklist changed. Open Mindwtr on your iPhone.")
+            return
+        }
+        if enqueue(payload: payload, transport: .command) { checklistRevision += 1 }
     }
 
     func deferUntilTomorrow(task: MindwtrWatchFocusTask) {
@@ -147,6 +164,7 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
         })
 
         for record in MindwtrWatchOutbox.records() {
+            if record.settledAt != nil { continue }
             switch record.transport {
             case .userInfo:
                 if !outstandingUserInfoIds.contains(record.id) {
@@ -183,7 +201,10 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
                 guard let self else { return }
                 self.inFlightCommandIds.remove(record.id)
                 if reply["accepted"] as? Bool == true {
-                    MindwtrWatchOutbox.remove(id: record.id, removeAudio: false)
+                    // Native acceptance only means queued on iPhone, not applied to the task store.
+                    if record.payload["kind"] as? String != "checklist" {
+                        MindwtrWatchOutbox.remove(id: record.id, removeAudio: false)
+                    }
                     self.statusMessage = String(localized: "Sent")
                 } else {
                     self.queuePersistedCommandFallback(record)
@@ -208,10 +229,23 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
 
     private func accept(applicationContext: [String: Any]) {
         guard let updated = MindwtrWatchSnapshot(applicationContext: applicationContext) else { return }
+        if let incoming = MindwtrWatchProtocol.timestamp(updated.generatedAt),
+           let current = MindwtrWatchProtocol.timestamp(snapshot.generatedAt), incoming < current { return }
         snapshot = updated
-        MindwtrWatchSnapshotStore.save(updated)
+        clearSettledChecklistCommands()
         WidgetCenter.shared.reloadAllTimelines()
         MindwtrPomodoroEndScheduler.reconcile(with: updated.pomodoro)
+    }
+
+    private func clearSettledChecklistCommands() {
+        guard MindwtrWatchSnapshotStore.save(snapshot) else { return }
+        guard let generatedAt = MindwtrWatchProtocol.timestamp(snapshot.generatedAt) else { return }
+        for record in MindwtrWatchOutbox.records() {
+            if let settledAt = record.settledAt, generatedAt >= settledAt {
+                MindwtrWatchOutbox.remove(id: record.id, removeAudio: false)
+            }
+        }
+        checklistRevision += 1
     }
 
     private func accept(receipt: [String: Any]) {
@@ -222,6 +256,26 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
               let uuid = UUID(uuidString: rawId)
         else { return }
         let id = uuid.uuidString.lowercased()
+        if let record = MindwtrWatchOutbox.records().first(where: { $0.id == id }),
+           record.payload["kind"] as? String == "checklist" {
+            guard let outcome = receipt["outcome"] as? String else { return }
+            if outcome == "applied", let settledAt = receipt["settledAt"] as? Double {
+                do {
+                    try MindwtrWatchOutbox.save(payload: record.payload, transport: record.transport, settledAt: settledAt)
+                    clearSettledChecklistCommands()
+                } catch {
+                    statusMessage = String(localized: "Couldn’t save this item. Please try again.")
+                    return
+                }
+            } else if ["stale", "missing", "terminal", "changed"].contains(outcome) {
+                MindwtrWatchOutbox.remove(id: id, removeAudio: false)
+                checklistRevision += 1
+                statusMessage = String(localized: "This checklist changed. Open Mindwtr on your iPhone.")
+                return
+            } else { return }
+            statusMessage = String(localized: "Saved on iPhone")
+            return
+        }
         let removeAudio = MindwtrWatchOutbox.records().contains { $0.id == id && $0.transport == .audio }
         MindwtrWatchOutbox.remove(id: id, removeAudio: removeAudio)
         statusMessage = String(localized: "Delivered")
@@ -229,6 +283,9 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
 }
 
 extension MindwtrWatchConnectivityModel: WCSessionDelegate {
+    nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        Task { @MainActor [weak self] in self?.accept(receipt: message) }
+    }
     nonisolated func session(
         _ session: WCSession,
         activationDidCompleteWith activationState: WCSessionActivationState,

@@ -7,6 +7,7 @@ enum MindwtrWatchPayloadKind: String, CaseIterable {
     case complete
     case deferTask = "defer"
     case pomodoro
+    case checklist
 }
 
 struct MindwtrValidatedWatchPayload {
@@ -79,6 +80,8 @@ enum MindwtrWatchPayloadValidator {
 
         let allowedKeys: Set<String>
         switch kind {
+        case .checklist:
+            allowedKeys = baseKeys.union(["taskId", "taskCreatedAt", "itemId", "itemTitle", "isCompleted"])
         case .text:
             allowedKeys = baseKeys.union(["title", "outboxRetried"])
         case .audio:
@@ -109,6 +112,17 @@ enum MindwtrWatchPayloadValidator {
         }
 
         switch kind {
+        case .checklist:
+            queue["taskId"] = try taskIdentifier(raw["taskId"])
+            queue["itemId"] = try taskIdentifier(raw["itemId"])
+            guard let taskCreatedAt = raw["taskCreatedAt"] as? String, validISO8601Timestamp(taskCreatedAt),
+                  let itemTitle = raw["itemTitle"] as? String, itemTitle.utf8.count <= 8_000,
+                  let isCompleted = strictBoolean(raw["isCompleted"]) else {
+                throw MindwtrWatchPayloadValidationError.invalidField("checklist")
+            }
+            queue["taskCreatedAt"] = taskCreatedAt
+            queue["itemTitle"] = itemTitle
+            queue["isCompleted"] = isCompleted
         case .text:
             guard let title = boundedTitle(raw["title"], maxCharacters: maxTitleCharacters, maxBytes: maxTitleBytes) else {
                 throw MindwtrWatchPayloadValidationError.invalidField("title")
@@ -160,7 +174,7 @@ enum MindwtrWatchPayloadValidator {
         }
 
         let focus: [[String: Any]] = try rawFocus.map { item in
-            guard Set(item.keys) == Set(["id", "title"]) else {
+            guard Set(item.keys).isSubset(of: ["id", "title", "createdAt", "description", "checklist", "detailsUnavailable"]) else {
                 throw MindwtrWatchPayloadValidationError.invalidField("focus")
             }
             let id = try taskIdentifier(item["id"])
@@ -171,7 +185,39 @@ enum MindwtrWatchPayloadValidator {
             ) else {
                 throw MindwtrWatchPayloadValidationError.invalidField("focus.title")
             }
-            return ["id": id, "title": title]
+            var result: [String: Any] = ["id": id, "title": title]
+            if let value = item["createdAt"] {
+                guard let date = value as? String, validISO8601Timestamp(date) else {
+                    throw MindwtrWatchPayloadValidationError.invalidField("focus.createdAt")
+                }
+                result["createdAt"] = date
+            }
+            if let value = item["description"] {
+                guard let description = value as? String, description.utf8.count <= 16 * 1024 else {
+                    throw MindwtrWatchPayloadValidationError.invalidField("focus.description")
+                }
+                result["description"] = description
+            }
+            if let value = item["checklist"] {
+                guard let checklist = value as? [[String: Any]], checklist.count <= 100 else {
+                    throw MindwtrWatchPayloadValidationError.invalidField("focus.checklist")
+                }
+                result["checklist"] = try checklist.map { entry -> [String: Any] in
+                    guard Set(entry.keys) == Set(["id", "title", "isCompleted"]),
+                          let title = entry["title"] as? String, title.utf8.count <= 8_000,
+                          let completed = strictBoolean(entry["isCompleted"]) else {
+                        throw MindwtrWatchPayloadValidationError.invalidField("focus.checklist")
+                    }
+                    return ["id": try taskIdentifier(entry["id"]), "title": title, "isCompleted": completed]
+                }
+            }
+            if let value = item["detailsUnavailable"] {
+                guard let unavailable = strictBoolean(value) else {
+                    throw MindwtrWatchPayloadValidationError.invalidField("focus.detailsUnavailable")
+                }
+                result["detailsUnavailable"] = unavailable
+            }
+            return result
         }
 
         guard let rawPomodoro = stripped["pomodoro"] as? [String: Any] else {
@@ -234,12 +280,21 @@ enum MindwtrWatchPayloadValidator {
             pomodoro["completionAlert"] = completionAlert
         }
 
-        let normalized: [String: Any] = [
+        var normalized: [String: Any] = [
             "protocolVersion": protocolVersion,
             "generatedAt": generatedAt,
             "focus": focus,
             "pomodoro": pomodoro,
         ]
+        // UTF-8 estimates on the phone are not the binary property-list wire size.
+        // Omit whole detail blocks, never a misleading partial checklist.
+        var boundedFocus = focus
+        while let data = try? PropertyListSerialization.data(fromPropertyList: normalized, format: .binary, options: 0),
+              data.count > maxApplicationContextBytes,
+              let index = boundedFocus.lastIndex(where: { $0["description"] != nil || $0["checklist"] != nil }) {
+            boundedFocus[index] = ["id": boundedFocus[index]["id"]!, "title": boundedFocus[index]["title"]!, "detailsUnavailable": true]
+            normalized["focus"] = boundedFocus
+        }
         guard PropertyListSerialization.propertyList(normalized, isValidFor: .binary),
               let encoded = try? PropertyListSerialization.data(
                 fromPropertyList: normalized,
