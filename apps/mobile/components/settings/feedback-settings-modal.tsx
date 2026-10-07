@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     KeyboardAvoidingView,
@@ -72,7 +72,10 @@ export function FeedbackSettingsModal({
         Platform.OS === 'android' ? { scrollsChildToFocus: false } : {}
     );
 
+    // Each opening is its own visit: a send from an earlier visit that ends later changes nothing here.
+    const visit = useRef(0);
     useEffect(() => {
+        visit.current += 1;
         if (!visible) return;
         setStatus('idle');
         setError(null);
@@ -100,14 +103,17 @@ export function FeedbackSettingsModal({
         }
         setStatus('sending');
         setError(null);
+        const sentIn = visit.current;
         try {
             await onSubmit(plan.input);
+            if (visit.current !== sentIn) return;
             setStatus('sent');
             setMessage('');
             setEmail('');
             setBugLocation('');
             setIncludeDiagnostics(false);
         } catch {
+            if (visit.current !== sentIn) return;
             setStatus('error');
             setError(tr('settings.feedbackFailed'));
         }
