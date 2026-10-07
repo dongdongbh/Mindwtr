@@ -282,22 +282,49 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
   });
 
   it('does not coalesce selected source tokens across concurrent invocations', async () => {
-    let sourceCount = 0;
-    const preparePlaintextDownload = vi.fn(async () => ({
-      kind: 'prepared-source' as const, sourceToken: ++sourceCount === 1 ? SOURCE_TOKEN : SECOND_SOURCE_TOKEN,
+    const firstSignal = new AbortController().signal;
+    const secondSignal = new AbortController().signal;
+    const preparePlaintextDownload = vi.fn<NonNullable<MobileAttachmentCommonHost['preparePlaintextDownload']>>(async (_input, _bytes, signal) => ({
+      kind: 'prepared-source' as const, sourceToken: signal === firstSignal ? SOURCE_TOKEN : SECOND_SOURCE_TOKEN,
     }));
     const { availability, memory, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
     const requested = remoteAttachment();
+    let releaseFirst!: (bytes: ArrayBuffer) => void;
+    const firstDownload = new Promise<ArrayBuffer>((resolve) => { releaseFirst = resolve; });
+    webdavGetFile.mockImplementation(async (_url, options) => (
+      options.signal === firstSignal ? firstDownload : toArrayBuffer(REMOTE)
+    ));
+    let firstSettled = false;
+    const first = availability.prepareAttachmentAvailableDetailed!(requested, firstSignal).then((outcome) => {
+      firstSettled = true;
+      return outcome;
+    });
+    let secondSettled = false;
+    const second = availability.prepareAttachmentAvailableDetailed!({ ...requested }, secondSignal).then((outcome) => {
+      secondSettled = true;
+      return outcome;
+    });
 
-    const outcomes = await Promise.all([
-      availability.prepareAttachmentAvailableDetailed!(requested),
-      availability.prepareAttachmentAvailableDetailed!({ ...requested }),
-    ]);
+    try {
+      await vi.waitFor(() => expect(webdavGetFile).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(secondSettled).toBe(true));
+      // Adapter arrival order is independent of invocation order (including awaited hashes).
+      await expect(second).resolves.toMatchObject({ status: 'prepared', sourceToken: SECOND_SOURCE_TOKEN });
+      expect(firstSettled).toBe(false);
+      expect(preparePlaintextDownload).toHaveBeenCalledTimes(1);
+      expect(preparePlaintextDownload).toHaveBeenNthCalledWith(1,
+        expect.objectContaining({ attachmentId: requested.id }), REMOTE, secondSignal);
+    } finally {
+      releaseFirst(toArrayBuffer(REMOTE));
+      await Promise.all([first, second]);
+    }
+    const outcomes = await Promise.all([first, second]);
 
     expect(outcomes.map((outcome) => outcome.status === 'prepared' ? outcome.sourceToken : null))
       .toEqual([SOURCE_TOKEN, SECOND_SOURCE_TOKEN]);
-    expect(webdavGetFile).toHaveBeenCalledTimes(2);
     expect(preparePlaintextDownload).toHaveBeenCalledTimes(2);
+    expect(preparePlaintextDownload).toHaveBeenNthCalledWith(2,
+      expect.objectContaining({ attachmentId: requested.id }), REMOTE, firstSignal);
     expect(mutations(memory.calls)).toEqual([]);
   });
 
