@@ -652,6 +652,109 @@ final class FoundationUITests: XCTestCase {
         // Save/Sync/Test are never invoked; this case requires no server.
     }
 
+    func testNativeSelfHostedMaintainedServerTestSaveAndColdTokenReuse() throws {
+        let library = try task371Library("INPUT", prefix: "MINDWTR_SELFHOSTED_PHONE_")
+        guard let raw = ProcessInfo.processInfo.environment["MINDWTR_SELFHOSTED_PHONE_CONFIG"] else {
+            throw XCTSkip("Private Task402 maintained-server configuration is required")
+        }
+        let prefix = "native-selfhosted-402-"
+        guard raw.utf8.count <= 2048,
+              let config = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String],
+              Set(config.keys) == Set(["url", "token"]), let url = config["url"], let token = config["token"],
+              let target = URLComponents(string: url), target.scheme == "https", let hostname = target.host,
+              hostname.range(of: #"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.trycloudflare\.com\z"#, options: .regularExpression) != nil,
+              target.user == nil, target.password == nil, target.query == nil, target.fragment == nil, target.port == nil,
+              target.percentEncodedPath == "/v1/data", url == "https://" + hostname + "/v1/data",
+              (20...512).contains(token.utf8.count), token.hasPrefix(prefix),
+              let namespace = UUID(uuidString: String(token.dropFirst(prefix.count))),
+              namespace.uuidString.lowercased() == String(token.dropFirst(prefix.count)) else {
+            XCTFail("Task402 requires only its exact temporary HTTPS tunnel route and generated synthetic token")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(), title = "Native self-hosted round trip 402"
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        // The private test-runner configuration is never copied into app arguments/environment.
+        app.launchEnvironment = [:]
+        app.launch(); defer { app.terminate() }
+        func stageForm() {
+            let option = app.buttons["sync-option-selfhosted"]
+            boardEnabled(option, timeout: 30); revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+            boardTap(app, "sync-option-selfhosted")
+            let field = app.secureTextFields["sync-token"]
+            boardEnabled(field, timeout: 30)
+            XCTAssertTrue(option.isSelected); XCTAssertFalse(app.textFields["sync-token"].exists)
+            XCTAssertFalse(app.secureTextFields["sync-password"].exists)
+            let address = app.textFields["sync-url"]
+            boardEnabled(address, timeout: 30); revealPagedElement(app, address, in: app.scrollViews["sync-screen"])
+            address.tap(); address.typeText(url)
+            XCTAssertTrue((address.value as? String) == url, "The validated private location must reach its form")
+            revealPagedElement(app, field, in: app.scrollViews["sync-screen"])
+            field.tap(); field.typeText(token)
+            XCTAssertFalse((field.value as? String ?? "").isEmpty)
+            XCTAssertNotEqual(field.value as? String, field.placeholderValue)
+            XCTAssertFalse((field.value as? String ?? "").contains(token))
+            boardEnabled(app.buttons["sync-save"], timeout: 30)
+        }
+        func completed(_ text: String) {
+            let status = app.staticTexts["sync-status"]
+            expectation(for: NSPredicate(format: "exists == true AND label == %@", text), evaluatedWith: status)
+            waitForExpectations(timeout: 60)
+            boardEnabled(app.buttons["sync-back"], timeout: 60)
+            XCTAssertFalse(app.staticTexts["sync-error"].exists)
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+            XCTAssertFalse(app.staticTexts.allElementsBoundByIndex.contains {
+                $0.label.contains(token) || ($0.value as? String ?? "").contains(token)
+            }, "No static text may expose the synthetic authority")
+        }
+        func importedTaskIdentity() -> String {
+            boardTap(app, "sync-back"); boardTap(app, "settings-back")
+            boardEnabled(app.buttons["tab-inbox"], timeout: 30); boardTap(app, "tab-inbox")
+            boardEnabled(app.buttons["search-open"], timeout: 30); boardTap(app, "search-open")
+            let search = app.textFields["search-input"]
+            boardEnabled(search, timeout: 30); replaceTextView(search, with: title)
+            let results = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "search-task-", title))
+            boardEnabled(results.firstMatch, timeout: 30); XCTAssertEqual(results.count, 1)
+            let identity = results.firstMatch.identifier
+            XCTAssertFalse(String(identity.dropFirst("search-task-".count)).isEmpty)
+            results.firstMatch.tap()
+            let viewTitle = app.staticTexts.matching(identifier: "task-view-task-title").firstMatch
+            XCTAssertTrue(viewTitle.waitForExistence(timeout: 15)); XCTAssertTrue(viewTitle.label.hasSuffix(title))
+            boardTap(app, "task-view-close"); boardTap(app, "search-close")
+            return identity
+        }
+
+        task322OpenSync(app); stageForm()
+        revealPagedElement(app, app.buttons["sync-test"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-test")
+        completed("Connection OK\nSelf-hosted endpoint is reachable.")
+        XCTAssertTrue(app.buttons["sync-option-selfhosted"].isSelected, "Test keeps the selected form staged")
+        boardTap(app, "sync-back"); task322OpenSync(app)
+        // Reopening reads stored Off: connection Test did not activate the staged form.
+        XCTAssertTrue(app.buttons["sync-option-off"].isSelected); XCTAssertFalse(app.secureTextFields["sync-token"].exists)
+        stageForm()
+        revealPagedElement(app, app.buttons["sync-save"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-save"); completed("Success\nSync completed!")
+        let acceptedIdentity = importedTaskIdentity()
+
+        app.terminate(); app.launch()
+        task371OpenSync(app, openFlow: false, backend: "selfhosted")
+        let field = app.secureTextFields["sync-token"], savedURL = app.textFields["sync-url"]
+        boardEnabled(field, timeout: 30)
+        XCTAssertFalse(app.textFields["sync-token"].exists)
+        XCTAssertTrue((savedURL.value as? String) == url, "Cold Settings must show the proven document location")
+        XCTAssertEqual(field.placeholderValue, String(repeating: "•", count: token.count))
+        XCTAssertTrue((field.value as? String ?? "").isEmpty || (field.value as? String) == field.placeholderValue)
+        XCTAssertFalse(app.staticTexts["sync-status"].exists, "The later completion must come from this explicit Sync")
+        boardEnabled(app.buttons["sync-now"], timeout: 30)
+        revealPagedElement(app, app.buttons["sync-now"], in: app.scrollViews["sync-screen"])
+        // No token setter or typing occurs after cold reopening: shared null-token reuse owns this Sync.
+        boardTap(app, "sync-now"); completed("Success\nSync completed!")
+        XCTAssertTrue(app.buttons["sync-option-selfhosted"].isSelected)
+        XCTAssertEqual(importedTaskIdentity(), acceptedIdentity)
+        // Root independently verifies the original seeded ID, phone SQLite and maintained server bytes/receipts.
+    }
+
     func testNativeSyncInvalidDraftDiscardsToOffAndColdReopenHasNoPlaintext() {
         continueAfterFailure = false
         let app = XCUIApplication(), library = UUID().uuidString.lowercased()
