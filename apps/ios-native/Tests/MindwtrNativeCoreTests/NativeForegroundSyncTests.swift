@@ -186,6 +186,9 @@ final class NativeForegroundSyncTests: XCTestCase {
     }
 
     func testIsolatedUIHostKeepsCredentialsInItsExactTestNamespace() async throws {
+        #if !os(iOS)
+        throw XCTSkip("Requires an entitled iOS app host; macOS uses a different Keychain implementation")
+        #else
         let owner = UUID(), other = UUID()
         let account = Data("mindwtr_webdav_password".utf8)
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
@@ -218,5 +221,6 @@ final class NativeForegroundSyncTests: XCTestCase {
             XCTAssertTrue(mask.isEmpty == (id == other), "Only the matching isolated host can see its stored credential")
             await host.close()
         }
+        #endif
     }
 }
