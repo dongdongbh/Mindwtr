@@ -1,9 +1,8 @@
 /**
  * Settings › Data's Diagnostics card as React Native draws it (apps/mobile/components/settings/
  * sync-settings-sections.tsx SyncDiagnosticsCard; its actions in use-sync-settings-backup-actions.ts):
- * the Debug logging switch, then, while logging is on, Share log and Clear log. RN's analytics row
- * shows only in builds with the heartbeat, and its Encryption block comes with sync; neither is
- * here yet. Backup currently exposes RN's JSON, CSV and TaskNotes export actions; restore and the
+ * the analytics opt-out (builds with the heartbeat only), the Debug logging switch, then, while
+ * logging is on, Share log and Clear log. Its Encryption block comes with sync and is not here yet. Backup currently exposes RN's JSON, CSV and TaskNotes export actions; restore and the
  * other transfer formats remain separate migration work.
  */
 import { isDiagnosticsLoggingEnabled } from './diagnostics-log';
@@ -11,7 +10,7 @@ import type { AppSettings } from './types';
 
 type Translate = (key: string) => string;
 
-export type DataSettingsEdit = { type: 'debugLogging'; value: boolean };
+export type DataSettingsEdit = { type: 'debugLogging'; value: boolean } | { type: 'analyticsOptOut'; value: boolean };
 
 export type DataSettingsModel = {
     title: string;
@@ -29,6 +28,14 @@ export type DataSettingsModel = {
     };
     diagnostics: {
         title: string;
+        /**
+         * RN's analytics switch, on while the user opted out of the heartbeat; null in a build without one. Turning it on asks
+         * `confirm` first (its cancel keeps the heartbeat).
+         */
+        analytics: {
+            label: string; description: string; value: boolean; edit: DataSettingsEdit;
+            confirm: { title: string; message: string; keepLabel: string; disableLabel: string };
+        } | null;
         debugLogging: { label: string; description: string; value: boolean; edit: DataSettingsEdit };
         shareLog: { label: string; description: string } | null;
         clearLog: { label: string } | null;
@@ -41,8 +48,10 @@ export type DataSettingsModel = {
     };
 };
 
-export function buildDataSettingsModel(settings: AppSettings, t: Translate): DataSettingsModel {
+/** `analyticsAvailable`: the build sends the heartbeat (isMobileAnalyticsHeartbeatConfigured). */
+export function buildDataSettingsModel(settings: AppSettings, t: Translate, analyticsAvailable = false): DataSettingsModel {
     const on = isDiagnosticsLoggingEnabled(settings);
+    const optedOut = analyticsAvailable && !isAnalyticsHeartbeatEnabled(settings);
     return {
         title: t('settings.data'),
         backup: {
@@ -76,6 +85,18 @@ export function buildDataSettingsModel(settings: AppSettings, t: Translate): Dat
         },
         diagnostics: {
             title: t('settings.diagnostics'),
+            analytics: analyticsAvailable ? {
+                label: t('settings.analyticsHeartbeat'),
+                description: t('settings.analyticsHeartbeatDesc'),
+                value: optedOut,
+                edit: { type: 'analyticsOptOut', value: !optedOut },
+                confirm: {
+                    title: t('settings.analyticsHeartbeatDisableTitle'),
+                    message: t('settings.analyticsHeartbeatDisableDesc'),
+                    keepLabel: t('settings.analyticsHeartbeatKeepEnabled'),
+                    disableLabel: t('settings.analyticsHeartbeatDisableConfirm'),
+                },
+            } : null,
             debugLogging: {
                 label: t('settings.debugLogging'),
                 description: t('settings.debugLoggingDesc'),
@@ -93,10 +114,21 @@ export function buildDataSettingsModel(settings: AppSettings, t: Translate): Dat
     };
 }
 
-export const isDataSettingStored = (settings: AppSettings, edit: DataSettingsEdit): boolean =>
-    isDiagnosticsLoggingEnabled(settings) === edit.value;
+/** RN's: the heartbeat is on unless the user turned it off. */
+export const isAnalyticsHeartbeatEnabled = (settings: AppSettings): boolean => settings.analytics?.heartbeatEnabled !== false;
 
-/** RN's toggleDebugLogging: the switch's value, the other diagnostics fields kept. */
-export const buildDataSettingsUpdate = (settings: AppSettings, edit: DataSettingsEdit): Partial<AppSettings> => ({
-    diagnostics: { ...(settings.diagnostics ?? {}), loggingEnabled: edit.value },
-});
+export const isDataSettingStored = (settings: AppSettings, edit: DataSettingsEdit): boolean => (
+    edit.type === 'analyticsOptOut'
+        ? !isAnalyticsHeartbeatEnabled(settings) === edit.value
+        : isDiagnosticsLoggingEnabled(settings) === edit.value
+);
+
+/**
+ * RN's toggleDebugLogging (the switch's value, the other diagnostics fields kept) and its analytics switch (heartbeatEnabled
+ * set to the opposite of the opt-out, the other analytics fields kept).
+ */
+export const buildDataSettingsUpdate = (settings: AppSettings, edit: DataSettingsEdit): Partial<AppSettings> => (
+    edit.type === 'analyticsOptOut'
+        ? { analytics: { ...(settings.analytics ?? {}), heartbeatEnabled: !edit.value } }
+        : { diagnostics: { ...(settings.diagnostics ?? {}), loggingEnabled: edit.value } }
+);

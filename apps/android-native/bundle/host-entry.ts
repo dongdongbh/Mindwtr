@@ -29,6 +29,7 @@ import {
     getBreadcrumbs,
     sanitizeForLog,
     sanitizeLogContext,
+    buildFeedbackDiagnosticsSnapshot,
     buildImmediateNotificationDetails,
     buildShortcutsSnapshot,
     buildNativeBackupDocumentResult,
@@ -120,6 +121,7 @@ import {
     webdavPutFile,
     webdavPutJson,
 } from '@mindwtr/core';
+import { createNativeAbout } from './host-about';
 import { createNativeAI } from './host-ai';
 import { createIOSCalendarHost, type CalendarCall } from '../../ios-native/bundle/host-calendar';
 import type { NativeCalendarPushLifecycle } from '../../../packages/core/src/native-host-contract-settings-calendar';
@@ -276,11 +278,10 @@ const feedbackDiagnosticEntry = (value: unknown): DiagnosticsLogEntry | null => 
 const diagnosticsLog = {
     ...diagnosticsFileLog,
     append: (...args: Parameters<typeof diagnosticsFileLog.append>) => {
+        // Every host (iOS's feedback, Android's About feedback) keeps the session, as RN's app-log appendLogLine does.
         try {
-            if (globalThis.__mindwtrHostPlatform === 'ios') {
-                const entry = feedbackDiagnosticEntry(args[0]);
-                if (entry) feedbackDiagnosticsBuffer.record(entry);
-            }
+            const entry = feedbackDiagnosticEntry(args[0]);
+            if (entry) feedbackDiagnosticsBuffer.record(entry);
         } catch { /* Volatile feedback capture cannot change ordinary logging. */ }
         return diagnosticsFileLog.append(...args);
     },
@@ -294,6 +295,16 @@ setLogger((payload) => {
         void diagnosticsLog.append(diagnosticsEntryFromLogPayload(payload), { force: payload.force });
     } catch { /* a diagnostic line must never fail its caller */ }
 });
+/**
+ * RN's collectFeedbackDiagnostics: the saved log's recent part and the buffer, failures first, within 20,000 characters, ending
+ * with the snapshot of the recent app flow. RN's retained JavaScript crash has no native counterpart.
+ */
+const collectFeedbackDiagnostics = async (): Promise<string | null> => {
+    const snapshot = buildFeedbackDiagnosticsSnapshot({
+        debugLoggingEnabled: isDiagnosticsLoggingEnabled(useTaskStore.getState().settings), breadcrumbs: getBreadcrumbs() });
+    const saved = (await diagnosticsLog.read())?.trim();
+    return buildFeedbackDiagnostics([saved ? saved.slice(-FEEDBACK_DIAGNOSTICS_SOURCE_CHARS) : null, feedbackDiagnosticsBuffer.read()], snapshot, 20_000);
+};
 
 // The pending-captures queue under the app's files folder (Kotlin's HostFiles), and the record of the last queued command
 // applied to each task in RN's RKStorage (Kotlin's RnKeyValue), durable before kvSet returns: core's ingestPendingCaptures ports.
@@ -470,6 +481,8 @@ const widgets = typeof (globalThis.__mindwtrNative as { widgetPublish?: unknown 
 
 /** Settings › AI and the AI actions (host-ai.ts), on the same host: RN's AsyncStorage and SecureStore hold what RN's do. */
 const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwtrSecrets as HostSecrets, isFossBuild) : null;
+/** Settings › About, the heartbeat and the store review prompt (host-about.ts), on the host Kotlin describes in `__mindwtrAppInfo`. */
+const nativeAbout = nativeSync ? createNativeAbout(globalThis.__mindwtrAppInfo, keyValue, generateUUID, collectFeedbackDiagnostics) : null;
 
 const localAttachments = nativeSync ? null : createNativeLocalAttachmentsForHost();
 const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contractHost;
@@ -522,7 +535,8 @@ const contract = createNativeHostContract({ reminderPlatform: globalThis.__mindw
             if (result?.status === 'available') return { status: 'available' as const, attachment: result.attachment };
             return { status: result?.status === 'generation-conflict' ? 'generation-conflict' as const : 'unavailable' as const };
         } };
-    } });
+    },
+    ...(nativeAbout ? { about: nativeAbout } : {}) });
 
 const projectAvailabilityDeps = (projectId: string): Parameters<typeof createPreparedProjectAvailabilityMethods>[0] => ({
     readiness: () => {
@@ -1011,6 +1025,9 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     },
     somedaySections: (input) => contract.getSomedaySections(input),
     dataSettings: () => contract.getDataSettings(),
+    // Settings › About (native-host-contract-about.ts): the screen, and the feedback modal's state for the draft as typed.
+    aboutSettings: (input) => contract.getAboutSettings(input),
+    aboutFeedbackCheck: (input) => contract.checkAboutFeedback(input),
     dataBackup: () => contract.getDataBackup(),
     dataCsvExport: () => contract.getDataBackup('csv'),
     dataTaskNotesExport: () => contract.getDataBackup('tasknotes'),
@@ -1083,6 +1100,18 @@ const AI_REQUESTS: Record<string, (input: never, signal: AbortSignal) => Promise
     requestTaskEditorBreakdown: (input, signal) => contract.requestTaskEditorBreakdown(input, { signal }),
     requestInboxClarify: (input, signal) => contract.requestInboxClarify(input, { signal }),
     requestWeeklyReviewAnalysis: (_input, signal) => contract.requestWeeklyReviewAnalysis({ signal }),
+};
+/**
+ * Settings › About's network and device requests (native-host-contract-about.ts): an update check (GitHub's answer), a feedback
+ * send, the day's heartbeat, the prompts' active day and the store review's gate. None is a store write, so none is journaled
+ * (a replay would send feedback or a heartbeat again); CoreHost.aboutRequest waits for them without holding the engine.
+ */
+const ABOUT_REQUESTS: Record<string, (input: never) => Promise<Reply>> = {
+    runAboutUpdateCheck: (input) => contract.runAboutUpdateCheck(input),
+    submitAboutFeedback: (input) => contract.submitAboutFeedback(input),
+    sendAboutHeartbeat: () => contract.sendAboutHeartbeat(),
+    recordAboutPromptActivity: () => contract.recordAboutPromptActivity(),
+    attemptAboutStoreReview: (input) => contract.attemptAboutStoreReview(input),
 };
 /** The Menu tab's commands, by their diagnostic operation: each passes Kotlin's input (its request or capture UUID included) unchanged. */
 const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply>> = {
@@ -4218,6 +4247,14 @@ globalThis.MindwtrHost = {
                 context: { releaseCheck: 'v1.3.5/ios-reminder-receipt-retention', outcome: retained === null ? 'conservative' : 'snapshot' },
             }, { force: true }); } catch { /* Logging cannot change an acknowledged prune. */ }
             return { pruned };
+        });
+    },
+    /** `name` is one of ABOUT_REQUESTS; `json` is that request's input. It writes only RN's AsyncStorage keys. */
+    aboutRequest(name: string, json: string): string {
+        return submit(async () => {
+            const request = ABOUT_REQUESTS[name];
+            if (!request) throw new Error(`INVALID_INPUT: no About request ${name}`);
+            return unwrap(await request(JSON.parse(json) as never));
         });
     },
     /** `name` is one of AI_REQUESTS; `json` is that request's input. It writes nothing. */

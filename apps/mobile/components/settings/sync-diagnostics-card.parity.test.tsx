@@ -18,13 +18,13 @@ const tc = { bg: '#0f172a', cardBg: '#111827', border: '#334155', text: '#f8fafc
 const noop = () => undefined;
 
 /** RN's card as drawn: its texts in order and the switch's value. */
-async function renderCard(language: 'en' | 'zh', loggingEnabled: boolean) {
+async function renderCard(language: 'en' | 'zh', loggingEnabled: boolean, analytics: 'none' | 'on' | 'optedOut' = 'none') {
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {
     tree = renderer.create(
       <SyncDiagnosticsCard
-        analyticsHeartbeatAvailable={false}
-        analyticsHeartbeatOptedOut={false}
+        analyticsHeartbeatAvailable={analytics !== 'none'}
+        analyticsHeartbeatOptedOut={analytics === 'optedOut'}
         handleClearLog={noop}
         handleShareLog={noop}
         loggingEnabled={loggingEnabled}
@@ -36,20 +36,22 @@ async function renderCard(language: 'en' | 'zh', loggingEnabled: boolean) {
     );
   });
   const texts = tree.root.findAllByType(Text).map((node) => node.props.children).filter((child): child is string => typeof child === 'string');
-  return { texts, switchOn: tree.root.findByType(Switch).props.value as boolean };
+  return { texts, switches: tree.root.findAllByType(Switch).map((node) => node.props.value as boolean) };
 }
 
 describe('Settings › Data › Diagnostics parity with core\'s model', () => {
-  it.each([['en', false], ['en', true], ['zh', true]] as const)('%s with logging %s', async (language, loggingEnabled) => {
-    const rn = await renderCard(language, loggingEnabled);
-    const { diagnostics } = buildDataSettingsModel({ diagnostics: { loggingEnabled } }, getTranslator(language));
+  it.each([['en', false, 'none'], ['en', true, 'none'], ['zh', true, 'none'], ['en', false, 'on'], ['zh', true, 'optedOut']] as const)('%s with logging %s, analytics %s', async (language, loggingEnabled, analytics) => {
+    const rn = await renderCard(language, loggingEnabled, analytics);
+    const settings = { diagnostics: { loggingEnabled }, ...(analytics === 'optedOut' ? { analytics: { heartbeatEnabled: false } } : {}) };
+    const { diagnostics } = buildDataSettingsModel(settings, getTranslator(language), analytics !== 'none');
     expect(rn.texts).toEqual([
       diagnostics.title,
+      ...(diagnostics.analytics ? [diagnostics.analytics.label, diagnostics.analytics.description] : []),
       diagnostics.debugLogging.label,
       diagnostics.debugLogging.description,
       ...(diagnostics.shareLog ? [diagnostics.shareLog.label, diagnostics.shareLog.description] : []),
       ...(diagnostics.clearLog ? [diagnostics.clearLog.label] : []),
     ]);
-    expect(rn.switchOn).toBe(diagnostics.debugLogging.value);
+    expect(rn.switches).toEqual([...(diagnostics.analytics ? [diagnostics.analytics.value] : []), diagnostics.debugLogging.value]);
   });
 });

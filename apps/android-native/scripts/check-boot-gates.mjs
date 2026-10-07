@@ -3598,7 +3598,7 @@ globalThis.hydrateTaskAttachments285 = (attachments) => hydrateTask285({ id: 'ta
 export { planAttachmentOpen, getAttachmentResolutionMessage } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-editor-model.ts'))};
 import { logInfo as realLogInfo, setLogger as setRealLogger } from ${JSON.stringify(resolve(app, '../../packages/core/src/logger.ts'))};
 export { createDiagnosticsLog, diagnosticsEntryFromLogPayload, isDiagnosticsLoggingEnabled, buildDiagnosticsLogEntry } from ${JSON.stringify(resolve(app, '../../packages/core/src/diagnostics-log.ts'))};
-export { createFeedbackDiagnosticsBuffer, buildFeedbackDiagnostics, FEEDBACK_DIAGNOSTICS_SOURCE_CHARS } from ${JSON.stringify(resolve(app, '../../packages/core/src/feedback-diagnostics.ts'))};
+export { createFeedbackDiagnosticsBuffer, buildFeedbackDiagnostics, buildFeedbackDiagnosticsSnapshot, FEEDBACK_DIAGNOSTICS_SOURCE_CHARS } from ${JSON.stringify(resolve(app, '../../packages/core/src/feedback-diagnostics.ts'))};
 export { buildFeedbackSubmissionPayload, submitFeedbackSubmission, FEEDBACK_CATEGORIES } from ${JSON.stringify(resolve(app, '../../packages/core/src/feedback.ts'))};
 export { sanitizeForLog, sanitizeLogContext } from ${JSON.stringify(resolve(app, '../../packages/core/src/log-sanitize.ts'))};
 export { getBreadcrumbs } from ${JSON.stringify(resolve(app, '../../packages/core/src/log-breadcrumbs.ts'))};

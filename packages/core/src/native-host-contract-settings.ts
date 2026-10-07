@@ -121,6 +121,8 @@ import {
     type ManageUntranslatedText,
 } from './manage-settings-model';
 import { NATIVE_HOST_CONTRACT_VERSION, type NativeHostResult } from './native-host-contract';
+import { nativeAboutHeartbeat, type NativeAboutHost } from './native-host-contract-about';
+import { resetHeartbeatOptOutMarker, sendMobileAnalyticsOptOut } from './analytics-heartbeat';
 import { fail, firstWindow, isObjectRecord, isPaging, isText, page, type NativeWindow } from './native-host-contract-menu-views';
 import { createNativeRequestReceipts, isRevision, refuseStale, revisionOf, revisionsToken, runStoreWrite, settleWrite } from './native-request-receipts';
 import { getPersonNameKey, getPersonTaskCounts } from './people';
@@ -165,10 +167,12 @@ export type SettingsDeps = {
     /** Tasks, projects, areas, people and settings generations. */
     dataRevision: () => string;
     requestIdPattern: RegExp;
+    /** Settings › About's host (native-host-contract-about.ts): the Data screen's analytics switch is there while it sends. */
+    about?: () => NativeAboutHost | null;
 };
 
 /** Settings screens the native host draws so far; draw the other rows disabled. */
-export const NATIVE_SETTINGS_SCREENS: readonly string[] = ['general', 'gtd', 'manage', 'sync', 'data', 'advanced', 'ai'];
+export const NATIVE_SETTINGS_SCREENS: readonly string[] = ['general', 'gtd', 'manage', 'sync', 'data', 'advanced', 'ai', 'about'];
 
 type NativeMenuRow<Id extends string = string> = SettingsMenuRow<Id> & { enabled: boolean };
 
@@ -345,9 +349,11 @@ function readGtdEdit(value: unknown, liveAreaIds: Set<string>): GtdSettingsEdit 
 
 const isName = (value: unknown): value is string => isText(value, 500) && value.trim().length > 0;
 
-const readDataEdit = (value: unknown): DataSettingsEdit | null => (
-    isObjectRecord(value) && Object.keys(value).length === 2 && value.type === 'debugLogging' && typeof value.value === 'boolean'
-        ? { type: 'debugLogging', value: value.value }
+/** A Data edit as a host sends it back; the analytics switch only in a build with the heartbeat. */
+const readDataEdit = (value: unknown, analyticsAvailable: boolean): DataSettingsEdit | null => (
+    isObjectRecord(value) && Object.keys(value).length === 2 && typeof value.value === 'boolean'
+        && (value.type === 'debugLogging' || (value.type === 'analyticsOptOut' && analyticsAvailable))
+        ? { type: value.type, value: value.value }
         : null
 );
 
@@ -361,6 +367,12 @@ export function createSettingsMethods(deps: SettingsDeps) {
         return deps.save();
     };
     const receipts = createNativeRequestReceipts({ save: durableSave });
+    /** The build's heartbeat, while it sends (isMobileAnalyticsHeartbeatConfigured); null without one. */
+    const heartbeat = () => {
+        const host = deps.about?.() ?? null;
+        const bound = host ? nativeAboutHeartbeat(host) : null;
+        return bound?.available ? bound : null;
+    };
 
     const manageRevision = () => `${deps.dataRevision()}:${deps.language()}`;
 
@@ -968,7 +980,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
         getDataSettings(): NativeHostResult<NativeDataSettings> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
-            const model = buildDataSettingsModel(useTaskStore.getState().settings, deps.t());
+            const model = buildDataSettingsModel(useTaskStore.getState().settings, deps.t(), heartbeat() !== null);
             return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, revision: manageRevision(), ...model } };
         },
 
@@ -1007,21 +1019,30 @@ export function createSettingsMethods(deps: SettingsDeps) {
         },
 
         /**
-         * The Debug logging switch's `edit`. Turning logging on then writes RN's forced
-         * "Debug logging enabled" line through core's logger, so the log starts with it.
+         * The Debug logging switch's or the analytics switch's `edit`. Turning logging on then writes RN's forced
+         * "Debug logging enabled" line through core's logger, so the log starts with it. Opting out of the heartbeat (after
+         * `analytics.confirm`) sends RN's one opt-out event; opting back in clears its marker.
          */
         async setDataSetting(input: { requestId: string; edit: DataSettingsEdit }): Promise<NativeHostResult<NativeSettingsWriteResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
-            const edit = isObjectRecord(input) ? readDataEdit(input.edit) : null;
+            const edit = isObjectRecord(input) ? readDataEdit(input.edit, heartbeat() !== null) : null;
             if (!edit || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)) {
-                return fail('INVALID_INPUT', 'A request UUID and the Debug logging switch\'s edit are required');
+                return fail('INVALID_INPUT', 'A request UUID and a Data switch\'s edit are required');
             }
             return receipts.run<NativeSettingsWriteResult>(input.requestId, JSON.stringify(['data', edit]), async () => {
                 const settings = useTaskStore.getState().settings;
                 if (isDataSettingStored(settings, edit)) return { ok: true, value: { changed: false, deviceWrites: [] } };
                 const written = await runStoreWrite(() => useTaskStore.getState().updateSettings(buildDataSettingsUpdate(settings, edit)));
-                if (written.ok && edit.value) logInfo('Debug logging enabled', { scope: 'diagnostics', force: true });
+                if (written.ok && edit.type === 'debugLogging' && edit.value) logInfo('Debug logging enabled', { scope: 'diagnostics', force: true });
+                // RN's analytics switch, after the setting saved: turning the heartbeat on clears the opt-out marker; opting out
+                // sends the one opt-out event. Neither waits for the network, and a replay (no change) sends nothing.
+                const bound = edit.type === 'analyticsOptOut' && written.ok ? heartbeat() : null;
+                if (bound) {
+                    const follow = edit.value ? sendMobileAnalyticsOptOut(bound.config, bound.device) : resetHeartbeatOptOutMarker(bound.device.storage);
+                    void follow.catch(() => undefined);
+                    logInfo('Native analytics opt-out changed', { scope: 'analytics', context: { releaseCheck: 'v1.3.5/native-analytics-opt-out', optedOut: String(edit.value) } });
+                }
                 return settleWrite(written, { changed: true, deviceWrites: [] });
             });
         },
