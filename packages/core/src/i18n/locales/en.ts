@@ -1,5 +1,16 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const en: Record<string, string> = {
+    "task.expandChecklist": "Turn checklist items into project tasks",
+    "task.keepChecklistDescription": "Keep the original task and its checklist inside the project.",
+    "task.expandChecklistDescription": "Create one task per checklist item, keeping their order and checked state. Move notes, attachments and dates to the new project; keep tags and contexts on the new tasks. The original goes to Trash. Focus is not copied. You can undo this conversion.",
+    "task.expandChecklistInvalid": "Expansion needs a checklist with a title on every item.",
+    "task.expandChecklistInactive": "Expansion is available for Inbox, Next and completed tasks in active projects.",
+    "task.expandChecklistSchedule": "Keep the checklist together, or remove recurrence, relative dates and task reminders before expanding it. Timed dates with reminders cannot be transferred to a project.",
+    "task.expandChecklistMetadata": "Keep the checklist together, or clear the assignee, location, time estimate and recorded time before expanding. These task details cannot be transferred to a project.",
+    "task.expandChecklistNameExists": "A project with this name already exists in the area. Choose another name to expand the checklist into a new project.",
+    "task.expandChecklistConflict": "The conversion could not proceed because its tasks or project changed. Your changes have been kept.",
+    "task.expandChecklistSaveFailed": "Could not save the conversion. Retry to save the same conversion without creating duplicates.",
+
     'settings.obsidianRequiredInlineTag': "Required inline task tag",
     'settings.obsidianRequiredInlineTagHint': "Leave empty to show all inline tasks. #task also matches #task/work. Only tags on the checkbox line count; note tags do not. New inline tasks receive this tag automatically.",
     'tray.quickAdd': "Quick Add",

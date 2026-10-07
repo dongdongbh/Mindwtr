@@ -2,6 +2,17 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Hungarian.
 export const huOverrides: Record<string, string> = {
+    "task.expandChecklist": "Ellenőrzőlista elemeinek átalakítása projektfeladatokká",
+    "task.keepChecklistDescription": "Az eredeti feladat és ellenőrzőlistája megmarad a projektben.",
+    "task.expandChecklistDescription": "Elemenként egy feladat készül, a sorrend és a jelölések megőrzésével. A jegyzetek, mellékletek és dátumok a projekthez, a címkék és kontextusok az új feladatokhoz kerülnek. Az eredeti a kukába kerül. A fókuszjelölés nem másolódik. A művelet visszavonható.",
+    "task.expandChecklistInvalid": "A lista minden elemének kell cím.",
+    "task.expandChecklistInactive": "Bejövő, következő és befejezett feladatoknál érhető el, aktív projektekben.",
+    "task.expandChecklistSchedule": "Tartsa meg a listát, vagy előbb törölje az ismétlődést, relatív dátumokat és emlékeztetőket. Az emlékeztetős időpontok nem vihetők át a projektbe.",
+    "task.expandChecklistMetadata": "Tartsa meg a listát, vagy előbb törölje a felelőst, helyszínt, becsült és rögzített időt. Ezek nem vihetők át a projektbe.",
+    "task.expandChecklistNameExists": "Már van ilyen nevű projekt a területen. Válasszon más nevet az új projekthez.",
+    "task.expandChecklistConflict": "A feladatok vagy a projekt megváltoztak, ezért az átalakítás nem folytatható. A módosítások megmaradtak.",
+    "task.expandChecklistSaveFailed": "Az átalakítást nem sikerült menteni. Az újrapróbálás ugyanazt a műveletet menti, másolatok nélkül.",
+
     'settings.obsidianRequiredInlineTag': "Kötelező címke a soron belüli feladatokhoz",
     'settings.obsidianRequiredInlineTagHint': "Üresen minden soron belüli feladat megjelenik. A #task a #task/work címkére is illeszkedik. Csak a jelölőnégyzet sorában lévő címkék számítanak, a jegyzet címkéi nem. Az új soron belüli feladatok automatikusan megkapják ezt a címkét.",
     'tray.quickAdd': "Gyors hozzáadás",

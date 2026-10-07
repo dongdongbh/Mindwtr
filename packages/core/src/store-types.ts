@@ -1,3 +1,4 @@
+import type { ChecklistProjectConversion } from './checklist-project-conversion';
 import type { ProjectTaskSummary } from './project-row-meta';
 import type { FocusStarAction } from './focus-star';
 import type { AppData, Area, Attachment, FilterCriteria, FocusGroupBy, Person, Project, SavedFilter, SavedSearch, Section, SortField, Task, TaskStatus } from './types';
@@ -700,6 +701,9 @@ export interface TaskStore {
     /** Convert a task into a section of its project; checklist items become tasks and the task is soft-deleted */
     convertTaskToSection: (id: string) => Promise<StoreActionResult>;
     /** Create or reuse a project from a task, then move the task into it */
+    convertChecklistToProject: (command: ChecklistProjectConversion) => Promise<StoreActionResult>;
+    undoChecklistToProject: (command: ChecklistProjectConversion) => Promise<StoreActionResult>;
+    /** Create or reuse a project from a task, then move the task into it. */
     promoteTaskToProject: (id: string, options?: { title?: string; color?: string; areaId?: string }) => Promise<StoreActionResult>;
     /** Reset checklist items to unchecked */
     resetTaskChecklist: (id: string) => Promise<StoreActionResult>;

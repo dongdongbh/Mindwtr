@@ -51,6 +51,7 @@ let cancelHandle: () => Promise<void>;
 let deleteHandle: () => Promise<void>;
 let resetHandle: () => Promise<void>;
 let convertToSectionHandle: () => Promise<void>;
+let promotionActions: ReturnType<typeof useTaskEditActions>;
 let shareHandle: () => Promise<void>;
 
 function SaveProbe({
@@ -87,6 +88,7 @@ function SaveProbe({
         draftLifecycle: state.draftLifecycle,
         duplicateTask: vi.fn(),
         convertTaskToSection,
+        promoteTaskToProject: useTaskStore.getState().promoteTaskToProject,
         mergedTask: baseTask,
         taskEditDraft: draft,
         formatDate: () => '',
@@ -111,6 +113,7 @@ function SaveProbe({
         titleDraftRef: state.titleDraftRef,
     } as unknown as Parameters<typeof useTaskEditActions>[0]);
 
+    promotionActions = actions;
     saveHandle = state.draftLifecycle.save;
     deleteHandle = actions.handleDeleteTask;
     cancelHandle = actions.handleCancelTask;
@@ -469,5 +472,26 @@ describe('task editor checklist actions', () => {
 
         expect(calls.setChecklist).toHaveBeenCalledWith([{ id: 'step-1', title: 'Ship it now', isCompleted: true }]);
         expect(calls.setDraftField).not.toHaveBeenCalled();
+    });
+});
+
+describe('checklist project choice', () => {
+    it.each([false, true])('only expands after explicit confirmation (%s)', async expand => {
+        const promote = vi.fn(async () => ({ success: true, id: 'project' }));
+        const convert = vi.fn(async () => ({ success: true, id: 'project' }));
+        useTaskStore.setState({ _allTasks: [baseTask], _allProjects: [], _allAreas: [], _allSections: [],
+            promoteTaskToProject: promote, convertChecklistToProject: convert });
+        const onSave = vi.fn(async () => ({ success: true }));
+        const onClose = vi.fn();
+        let tree!: renderer.ReactTestRenderer;
+        await act(async () => { tree = renderer.create(<SaveProbe onSave={onSave} onClose={onClose} showToast={vi.fn()} />); });
+        await act(async () => { promotionActions.handlePromoteTaskToProject(); });
+        expect(promotionActions.projectConversionOpen).toBe(true);
+        expect(convert).not.toHaveBeenCalled();
+        expect(promote).not.toHaveBeenCalled();
+        await act(async () => { await promotionActions.confirmProjectConversion('New project', expand); });
+        expect(expand ? convert : promote).toHaveBeenCalledTimes(1);
+        expect(expand ? promote : convert).not.toHaveBeenCalled();
+        await act(async () => { tree.unmount(); });
     });
 });

@@ -2,6 +2,17 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Spanish.
 export const esOverrides: Record<string, string> = {
+    "task.expandChecklist": "Convertir los elementos de la lista en tareas del proyecto",
+    "task.keepChecklistDescription": "Conservar la tarea original y su lista dentro del proyecto.",
+    "task.expandChecklistDescription": "Crear una tarea por elemento, conservando el orden y las marcas. Las notas, adjuntos y fechas pasan al proyecto; las etiquetas y contextos, a las tareas. El original va a la papelera. No se copia el enfoque. Se puede deshacer.",
+    "task.expandChecklistInvalid": "Cada elemento de la lista debe tener título.",
+    "task.expandChecklistInactive": "Disponible para tareas de Entrada, Próximas y completadas en proyectos activos.",
+    "task.expandChecklistSchedule": "Conserva la lista o elimina antes la repetición, las fechas relativas y los recordatorios. Las fechas con hora y recordatorio no se pueden transferir al proyecto.",
+    "task.expandChecklistMetadata": "Conserva la lista o borra antes la persona asignada, ubicación, duración estimada y tiempo registrado. Estos datos no se pueden transferir al proyecto.",
+    "task.expandChecklistNameExists": "Ya existe un proyecto con este nombre en el área. Elige otro nombre para crear un proyecto con la lista.",
+    "task.expandChecklistConflict": "Las tareas o el proyecto han cambiado. No se realizó la conversión y se conservaron tus cambios.",
+    "task.expandChecklistSaveFailed": "No se pudo guardar la conversión. Reinténtalo para guardar la misma conversión sin duplicados.",
+
     'settings.obsidianRequiredInlineTag': "Etiqueta obligatoria para tareas en línea",
     'settings.obsidianRequiredInlineTagHint': "Deja vacío para mostrar todas las tareas en línea. #task también coincide con #task/work. Solo cuentan las etiquetas de la línea de la casilla, no las de la nota. Las nuevas tareas en línea reciben esta etiqueta automáticamente.",
     'tray.quickAdd': "Añadir rápidamente",

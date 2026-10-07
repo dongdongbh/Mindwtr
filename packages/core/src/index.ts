@@ -370,3 +370,6 @@ export type { NativeAttachmentDraftAvailabilityInput, NativeAttachmentDraftAvail
     NativeAttachmentDraftLineageInputV5, NativeAttachmentDraftLineageV5 } from './native-attachment-draft';
 export { prepareNativeAttachmentDraftDiscardCandidatesV5 } from './native-attachment-draft-discard';
 export type { NativeAttachmentDraftDiscardInputV5, NativeAttachmentDraftDiscardCandidatesV5 } from './native-attachment-draft-discard';
+
+export { checklistProjectBlockReason, prepareChecklistProjectConversion } from './checklist-project-conversion';
+export type { ChecklistProjectConversion } from './checklist-project-conversion';
