@@ -168,6 +168,98 @@ final class FoundationUITests: XCTestCase {
         task322OpenSync(app)
     }
 
+    private func task337NoRestartGate(_ app: XCUIApplication, timeout: TimeInterval = 10) {
+        let gate = app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch
+        let appeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: gate)
+        appeared.isInverted = true
+        XCTAssertEqual(XCTWaiter.wait(for: [appeared], timeout: timeout), .completed,
+            "No delayed cold-start Sync may cross the current admission boundary")
+        XCTAssertFalse(gate.exists)
+    }
+
+    func testColdStartupSyncUnknownCompletionBlocksEditingWithoutOpeningSettings() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        print("Task337 cold startup gate isolated library: " + library)
+        app.launchArguments = arguments + ["--native-startup-sync-command-throw-once"]
+        app.launch(); defer { app.terminate() }
+        // The startup-only hook fires before the stored native command. No
+        // Settings action, form input, credential, or network is involved.
+        task322RestartGate(app)
+        app.terminate()
+        app.launchArguments = arguments // The same library, without the hook.
+        app.launch()
+        boardEnabled(app.buttons["tab-inbox"], timeout: 30)
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+
+        // Prove that ordinary Inbox editing is available after cold settlement.
+        boardTap(app, "capture-open")
+        let capture = app.textViews["capture-input"]
+        boardEnabled(capture); capture.tap(); capture.typeText("Task337 cold editable")
+        boardTap(app, "capture-save")
+        let row = app.buttons["Task337 cold editable"]
+        boardEnabled(row, timeout: 30); row.tap(); boardTap(app, "task-mode-edit")
+        let title = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+        boardEnabled(title, timeout: 30)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" saved")
+        XCTAssertEqual(title.value as? String, "Task337 cold editable saved")
+        boardTap(app, "task-editor-save")
+        boardEnabled(app.buttons["Task337 cold editable saved"], timeout: 30)
+        task322OpenSync(app) // A fresh library still presents stored Off.
+        XCTAssertTrue(app.buttons["sync-option-off"].isSelected)
+    }
+
+    func testColdStartupSyncPreservesRecoveredAndKeptTaskDraftAcrossRestarts() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        let original = "Task337 protected", draft = original + " retained draft"
+        print("Task337 retained startup draft isolated library: " + library)
+        app.launchArguments = arguments
+        app.launch(); defer { app.terminate() }
+        boardTap(app, "capture-open")
+        let capture = app.textViews["capture-input"]
+        boardEnabled(capture); capture.tap(); capture.typeText(original)
+        boardTap(app, "capture-save")
+        boardEnabled(app.buttons[original], timeout: 30); app.buttons[original].tap()
+        boardTap(app, "task-mode-edit")
+        let title = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+        boardEnabled(title)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" retained draft")
+        XCTAssertEqual(title.value as? String, draft)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        app.terminate()
+
+        app.launchArguments = arguments + ["--native-startup-sync-command-throw-once"]
+        app.launch()
+        // Existing recovery auto-resumes a valid protected draft. Its exact
+        // editor state is the positive proof; the gate need not stay onscreen.
+        boardEnabled(title, timeout: 30)
+        XCTAssertEqual(title.value as? String, draft)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+        boardTap(app, "task-view-close"); boardTap(app, "task-editor-keep-for-later")
+        boardEnabled(app.buttons[original], timeout: 30)
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task337NoRestartGate(app)
+
+        // Keep for later hides the editor, not its durable ownership. Ordinary
+        // Inbox/read actions and idle completion must not mint a new intent.
+        boardTap(app, "tab-inbox")
+        boardTap(app, "search-open"); boardEnabled(app.textFields["search-input"], timeout: 30)
+        boardTap(app, "search-close")
+        boardEnabled(app.buttons[original], timeout: 30)
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+        app.terminate(); app.launch() // The startup hook remains armed on this cold launch.
+        boardEnabled(title, timeout: 30)
+        XCTAssertEqual(title.value as? String, draft, "Keep for later must preserve the exact unsaved title on disk")
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+    }
+
     private func task147Mode(_ app: XCUIApplication, _ value: String) {
         task144Open(app)
         let option = app.buttons["gtd-taskOpenMode-" + value]

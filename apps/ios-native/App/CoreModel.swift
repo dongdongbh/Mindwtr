@@ -205,6 +205,7 @@ final class CoreModel: ObservableObject {
 
     @Published private(set) var selectedSurface: Surface = .inbox {
         didSet {
+            if selectedSurface != .inbox { startupSyncIntent = nil }
             if oldValue == .project && selectedSurface != .project {
                 invalidateProjectAttachmentOpen()
                 cancelProjectFileImport()
@@ -222,7 +223,9 @@ final class CoreModel: ObservableObject {
         }
     }
     @Published private(set) var inbox: CoreObject = [:]
-    @Published private(set) var processInboxPresented = false
+    @Published private(set) var processInboxPresented = false {
+        didSet { if processInboxPresented { startupSyncIntent = nil } }
+    }
     @Published private(set) var processInboxView: CoreObject = [:]
     @Published private(set) var processInboxNotice: CoreObject = [:]
     @Published private(set) var processInboxToast = ""
@@ -230,7 +233,9 @@ final class CoreModel: ObservableObject {
     @Published private(set) var processInboxReadError: String?
     @Published private(set) var processInboxInputs: [String: String] = [:]
     @Published private(set) var mindSweepGuide: CoreObject = [:]
-    @Published private(set) var mindSweepPresented = false
+    @Published private(set) var mindSweepPresented = false {
+        didSet { if mindSweepPresented { startupSyncIntent = nil } }
+    }
     @Published private(set) var mindSweepStep = -1
     @Published private(set) var mindSweepDraft = ""
     @Published private(set) var mindSweepCaptured: [String: [String]] = [:]
@@ -290,7 +295,9 @@ final class CoreModel: ObservableObject {
     @Published private(set) var searchLoading = false
     @Published private(set) var searchError: String?
     @Published private(set) var moreMenu: CoreObject = [:]
-    @Published private(set) var morePresented = false
+    @Published private(set) var morePresented = false {
+        didSet { if morePresented { startupSyncIntent = nil } }
+    }
     @Published private(set) var settingsMenu: CoreObject = [:]
     @Published private(set) var settingsSearch = ""
     @Published private(set) var settingsManagePresented = false
@@ -434,7 +441,9 @@ final class CoreModel: ObservableObject {
     @Published private(set) var projectSectionOrderOptions: CoreObject = [:]
     @Published private(set) var projectSectionError: String?
     @Published private(set) var projectSectionReadError: String?
-    @Published private(set) var areaManagerPresented = false
+    @Published private(set) var areaManagerPresented = false {
+        didSet { if areaManagerPresented { startupSyncIntent = nil } }
+    }
     @Published private(set) var areaManagerProjectID: String?
     @Published private(set) var areaCreateOptions: CoreObject = [:]
     @Published private(set) var areaCreateName = ""
@@ -932,9 +941,15 @@ final class CoreModel: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var retryNeeded = false
     @Published private(set) var error: String?
-    @Published var capturePresented = false
-    @Published private(set) var areaPickerPresented = false
-    @Published private(set) var taskPresented = false
+    @Published var capturePresented = false {
+        didSet { if capturePresented { startupSyncIntent = nil } }
+    }
+    @Published private(set) var areaPickerPresented = false {
+        didSet { if areaPickerPresented { startupSyncIntent = nil } }
+    }
+    @Published private(set) var taskPresented = false {
+        didSet { if taskPresented { startupSyncIntent = nil } }
+    }
     @Published private(set) var taskInitialTab = "view"
     private var taskOpeningIntent: CoreObject?
     @Published private(set) var taskView: CoreObject = [:]
@@ -1040,11 +1055,37 @@ final class CoreModel: ObservableObject {
     @Published var contextQuery = ""
     @Published private(set) var contextPickerPresented = false
     @Published private(set) var notice: String?
-    @Published var bulkConfirm: CoreObject = [:]
+    @Published var bulkConfirm: CoreObject = [:] {
+        didSet { if !bulkConfirm.isEmpty { startupSyncIntent = nil } }
+    }
+
+    @Published private(set) var completedStartupToken: UUID?
+    private struct StartupSyncIntent {
+        let host: CoreHost
+        var foregroundRequested = false
+    }
+    private struct StartupSyncOwner {
+        let id: UUID
+        let host: CoreHost
+        let generation: Int
+    }
+    private var startupSyncCompletedHost: CoreHost?
+    private var startupSyncIntent: StartupSyncIntent?
+    private var startupSyncOwner: StartupSyncOwner?
+    private var startupSyncTask: Task<Void, Never>?
+    private var startupSyncGeneration = 0
+    private var startupSyncSceneActive = false
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    private var startupSyncTestThrowOnce = false
+    #endif
 
     private var host: CoreHost? {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
+                cancelStartupSync()
+                startupSyncIntent = nil
+                startupSyncCompletedHost = nil
+                completedStartupToken = nil
                 cancelTaskFileImport()
                 cancelProjectFileImport()
                 invalidateTaskAttachmentOpen()
@@ -3995,6 +4036,7 @@ final class CoreModel: ObservableObject {
                     taskRecoveryResolverTestFailure = arguments.contains("--native-task116-resolver-failure-once")
                     #endif
                     settingsSyncTestThrowOnce = arguments.contains("--native-sync-command-throw-once")
+                    startupSyncTestThrowOnce = arguments.contains("--native-startup-sync-command-throw-once")
                     host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
                         deviceStorage: (directory, "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased()),
                         isolatedTestID: identifier)
@@ -4314,6 +4356,15 @@ final class CoreModel: ObservableObject {
             }
             mindSweepRecoveredResult = nil
             appLockRecoveryPending = false
+            guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
+            if startupSyncCompletedHost !== currentHost {
+                // ready precedes recovery adoption; only this terminal tail can
+                // arm the one initial-Inbox opportunity for the captured host.
+                startupSyncCompletedHost = currentHost
+                startupSyncIntent = recovery.isEmpty && startupSyncInboxClean
+                    ? StartupSyncIntent(host: currentHost) : nil
+                completedStartupToken = UUID()
+            }
         } catch is CoreHostProjectFileAddRecovery {
             ready = false
             if let currentHost = host {
@@ -4350,6 +4401,124 @@ final class CoreModel: ObservableObject {
         #else
         error = "This build is not enabled for physical-device testing."
         #endif
+    }
+
+    private var startupSyncInboxClean: Bool {
+        selectedSurface == .inbox && !capturePresented && !capturePending && draft.isEmpty && noteDraft.isEmpty
+            && !processInboxPresented && processInboxRequest == nil && !processInboxTransitioning
+            && !mindSweepPresented && mindSweepRequest == nil && mindSweepDraft.isEmpty
+            && !morePresented && !areaPickerPresented && !areaManagerPresented && bulkConfirm.isEmpty
+            && !taskPresented && taskOpeningIntent == nil && taskEditor.isEmpty && !taskSavePending
+            && !taskRecoveryAvailable && !taskRecoveryGateVisible && !taskRecoveryStartupCorrupt
+            && !taskRecoveryHydrating && !taskRecoverySaving && taskRecoveryCheckpointTask == nil
+            && taskRecoveryCheckpointError == nil && taskAttachmentCheckpointFailed == nil
+            && taskAttachmentCheckpointDesired == nil && taskStartupSaveReceipt == nil
+            && !taskAttachmentWorking && taskAttachmentSaveRequest == nil && taskAttachmentDiscardRequest == nil
+            && taskFileImportClaim == nil && taskFileImportTask == nil && taskFileImporterID == nil
+            && !taskFileImporterPresented && !taskLinkSheetActive && !taskReferenceOpening && !taskAttachmentOpening
+            && taskFileOpenPresentation == nil && taskAudioPlayer == nil && taskSharePayload == nil
+            && taskOwnedMenuSelection == nil && taskOwnedMenuAction == nil
+            && !projectFileAddPending && projectFileImportClaim == nil && projectFileImportTask == nil
+            && projectFileImporterID == nil && !projectFileImporterPresented
+            && !projectNotesEditMode && !projectNotesDirty && !projectNotesWritePending && projectNotesFlushTask == nil
+            && !savedSearchWritePresented && !settingsSyncPresented && !settingsManagePresented
+            && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+    }
+
+    // SwiftUI records only the foreground intent. This model retains the Task,
+    // so changes to busy or the view tree cannot abandon an admitted invocation.
+    func requestStartupSync(token: UUID?, active: Bool) {
+        guard !Task.isCancelled, let token, token == completedStartupToken else { return }
+        startupSyncSceneActive = active && UIApplication.shared.applicationState == .active
+        guard startupSyncSceneActive else { cancelStartupSync(); return }
+        guard startupSyncIntent != nil else { return }
+        startupSyncIntent?.foregroundRequested = true
+        admitStartupSync()
+    }
+
+    func cancelStartupSync() {
+        startupSyncSceneActive = false
+        startupSyncIntent?.foregroundRequested = false
+        startupSyncGeneration += 1
+        startupSyncTask?.cancel()
+        // Cancellation consumes no new intent and releases no operation. The
+        // captured host must settle before its owner may release busy.
+    }
+
+    private func admitStartupSync() {
+        guard let intent = startupSyncIntent, intent.foregroundRequested else { return }
+        guard host === intent.host, ready, !retryNeeded, !settingsSyncRestartRequired,
+              !appLockRecoveryPending, startupSyncInboxClean else {
+            startupSyncIntent = nil
+            return
+        }
+        guard startupSyncSceneActive, UIApplication.shared.applicationState == .active,
+              !appLock.concealed, !appLockActive, !busy, startupSyncOwner == nil else { return }
+        startupSyncIntent = nil
+        let owner = StartupSyncOwner(id: UUID(), host: intent.host, generation: startupSyncGeneration)
+        startupSyncOwner = owner
+        busy = true
+        startupSyncTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.startupSyncOwner?.id == owner.id {
+                    let current = self.startupSyncCurrent(owner)
+                    self.startupSyncTask = nil
+                    self.startupSyncOwner = nil
+                    if self.host === owner.host {
+                        if current { self.finishOperation() }
+                        else { self.busy = false; self.refreshRequested = false }
+                    }
+                }
+            }
+            do {
+                guard self.startupSyncCurrent(owner) else { throw CancellationError() }
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                if self.startupSyncTestThrowOnce {
+                    self.startupSyncTestThrowOnce = false
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                #endif
+                let result = try self.decode(try await owner.host.foregroundSync(command: "syncStored", requestJSON: "{}"))
+                try self.validateStartupSyncReply(result)
+            } catch {
+                self.requireSettingsSyncRestart(owner.host)
+                return
+            }
+            guard self.startupSyncCurrent(owner) else { return }
+            do { try await self.readInbox(startupSyncOwner: owner.id) }
+            catch {
+                // A known Sync settlement is not made unknown by a later read.
+                guard self.startupSyncCurrent(owner) else { return }
+                self.error = self.label("settings.feedback.actionFailed")
+            }
+        }
+    }
+
+    private func startupSyncCurrent(_ owner: StartupSyncOwner) -> Bool {
+        host === owner.host && startupSyncOwner?.id == owner.id && startupSyncGeneration == owner.generation
+            && !Task.isCancelled && startupSyncSceneActive && UIApplication.shared.applicationState == .active
+            && ready && !retryNeeded && !settingsSyncRestartRequired && !appLock.concealed && !appLockActive
+            && !appLockRecoveryPending && startupSyncInboxClean
+    }
+
+    private func validateStartupSyncReply(_ result: CoreObject) throws {
+        guard let ok = result["ok"] as? NSNumber, CFGetTypeID(ok) == CFBooleanGetTypeID() else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        if ok.boolValue {
+            guard Set(result.keys) == Set(["ok", "value"]), let value = result["value"] as? CoreObject,
+                  Set(value.keys) == Set(["success", "skipped"]),
+                  ["success", "skipped"].allSatisfy({ field in
+                      (value[field] as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() } == true
+                  }) else { throw CocoaError(.coderReadCorrupt) }
+        } else {
+            guard Set(result.keys) == Set(["ok", "error"]), let error = result["error"] as? CoreObject,
+                  Set(error.keys) == Set(["code", "message"]), error.text("code") == "ACTION_FAILED",
+                  error.text("message") == "This sync provider is not available in native iOS yet; the stored configuration is unchanged" else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+        }
     }
 
     func discardCorruptStartupDraft() async {
@@ -24256,7 +24425,24 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    private func readInbox() async throws {
+    private func readInbox(startupSyncOwner ownerID: UUID? = nil) async throws {
+        if let ownerID {
+            guard let owner = startupSyncOwner, owner.id == ownerID, startupSyncCurrent(owner) else {
+                throw CancellationError()
+            }
+            // The initial Inbox shares these cached projections with navigation.
+            // Publish them together only while the admitted startup owner holds.
+            let nextArea = try await query("areaFilter")
+            guard startupSyncCurrent(owner) else { throw CancellationError() }
+            let nextMore = try await query("menuRead", ["more", "{}"])
+            guard startupSyncCurrent(owner) else { throw CancellationError() }
+            let nextInbox = try await query("inboxView", [try json(["offset": 0, "limit": pageSize])])
+            guard startupSyncCurrent(owner) else { throw CancellationError() }
+            area = nextArea
+            moreMenu = nextMore
+            inbox = nextInbox
+            return
+        }
         inbox = try await query("inboxView", [try json(["offset": 0, "limit": pageSize])])
     }
 
@@ -25283,6 +25469,8 @@ final class CoreModel: ObservableObject {
     private func finishOperation() {
         busy = false
         if settingsSyncRestartRequired { refreshRequested = false; return }
+        admitStartupSync()
+        if startupSyncOwner != nil { return }
         presentQueuedReferenceProjectNextAction()
         if let id = referenceProjectNextActionEditID, ready, !retryNeeded, !taskPresented, !appLock.concealed {
             referenceProjectNextActionEditID = nil

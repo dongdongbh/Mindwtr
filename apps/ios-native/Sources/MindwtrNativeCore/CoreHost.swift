@@ -15295,7 +15295,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         do {
             try denyCleanupOwner()
-            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "syncNow", "testSyncConnection"].contains(command),
+            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "syncNow", "testSyncConnection", "syncStored"].contains(command),
                   requestJSON.utf8.count <= 128 * 1024,
                   (try? NativeJSON.jsonObject(with: Data(requestJSON.utf8))) is [String: Any],
                   started, !closed, lockFD >= 0, !recoveryActivationPending, !invoking,

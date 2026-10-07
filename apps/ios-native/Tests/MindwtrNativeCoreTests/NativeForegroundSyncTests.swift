@@ -57,9 +57,15 @@ final class NativeForegroundSyncTests: XCTestCase {
         try XCTUnwrap(NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any])
     }
 
-    private func host(backend: String) throws -> (CoreHost, ForegroundSyncReadState) {
+    private func host(backend: String?) throws -> (CoreHost, ForegroundSyncReadState) {
         try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(json(["@mindwtr_sync_backend": backend, "unknown": "preserve 🧠"]).utf8).write(to: manifest)
+        var values = ["unknown": "preserve 🧠"]
+        if let backend { values["@mindwtr_sync_backend"] = backend }
+        try Data(json(values).utf8).write(to: manifest)
+        return makeHost()
+    }
+
+    private func makeHost() -> (CoreHost, ForegroundSyncReadState) {
         let state = ForegroundSyncReadState(), faults = HostIOFaults()
         faults.secretBeforeOperation = { operation, _ in state.record(operation) }
         faults.secretStatus = { _, _ in errSecItemNotFound }
@@ -105,6 +111,66 @@ final class NativeForegroundSyncTests: XCTestCase {
         }
         XCTAssertTrue(state.recorded.isEmpty)
         XCTAssertEqual(try Data(contentsOf: manifest), before)
+    }
+
+    private func assertStoredSkip(backend: String?) async throws {
+        let (host, state) = try host(backend: backend)
+        let before = try Data(contentsOf: manifest)
+        _ = try await host.start()
+        let expected: [String: Any] = ["ok": true, "value": ["success": true, "skipped": true]]
+        let reply = try object(await host.foregroundSync(command: "syncStored", requestJSON: "{}"))
+        XCTAssertEqual(try json(reply), try json(expected), "The stored result contains only primitive booleans")
+        XCTAssertTrue(state.recorded.isEmpty, "An unconfigured stored cycle never asks for a secret")
+        XCTAssertEqual(try Data(contentsOf: manifest), before, "The no-op leaves every stored value and its encoding unchanged")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("core.sqlite.pending.json").path))
+        await host.close()
+
+        // Recreate against the existing bytes, without reseeding the manifest.
+        let (cold, coldState) = makeHost()
+        _ = try await cold.start()
+        let coldReply = try object(await cold.foregroundSync(command: "syncStored", requestJSON: "{}"))
+        XCTAssertEqual(try json(coldReply), try json(expected))
+        XCTAssertTrue(coldState.recorded.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: manifest), before)
+        await cold.close()
+    }
+
+    func testStoredOffSkipsWithoutNetworkSecretsOrConfigurationWritesAcrossColdOpen() async throws {
+        try await assertStoredSkip(backend: "off")
+    }
+
+    func testStoredAbsentBackendSkipsWithoutCreatingConfigurationAcrossColdOpen() async throws {
+        try await assertStoredSkip(backend: nil)
+    }
+
+    func testStoredRequestRejectsSuppliedFieldsBeforeWork() async throws {
+        let (host, state) = try host(backend: "webdav")
+        _ = try await host.start()
+        let before = try Data(contentsOf: manifest)
+        for input in ["[]", "null", "{\"manual\":false}", "{\"revision\":\"synthetic\"}",
+                      "{\"webdav\":{\"url\":\"https://native-fixture.invalid/data.json\",\"password\":\"synthetic-only\"}}"] {
+            do {
+                _ = try await host.foregroundSync(command: "syncStored", requestJSON: input)
+                XCTFail("Stored configuration cannot be overridden by request fields")
+            } catch {
+                XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed")
+            }
+            XCTAssertTrue(state.recorded.isEmpty)
+            XCTAssertEqual(try Data(contentsOf: manifest), before)
+        }
+        await host.close()
+    }
+
+    func testStoredUnsupportedProviderIsRefusedWithoutRewritingOrReadingSecrets() async throws {
+        let (host, state) = try host(backend: "cloudkit")
+        let before = try Data(contentsOf: manifest)
+        _ = try await host.start()
+        let response = try object(await host.foregroundSync(command: "syncStored", requestJSON: "{}"))
+        XCTAssertEqual(response["ok"] as? Bool, false)
+        XCTAssertEqual((response["error"] as? [String: Any])?["code"] as? String, "ACTION_FAILED")
+        XCTAssertTrue(state.recorded.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: manifest), before)
+        await host.close()
     }
 
     func testIsolatedUIHostKeepsCredentialsInItsExactTestNamespace() async throws {

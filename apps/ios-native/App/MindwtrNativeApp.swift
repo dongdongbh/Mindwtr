@@ -165,6 +165,7 @@ private struct AppLockRoot: View {
     private var palette: AppPalette { AppPalette(theme: model.theme, system: scheme) }
 
     var body: some View {
+        let startupToken = model.completedStartupToken
         Group {
             if model.ready && !lock.concealed {
                 if model.settingsSyncRestartRequired {
@@ -265,6 +266,7 @@ private struct AppLockRoot: View {
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
         .onAppear { lock.sceneChanged(phase) }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            model.cancelStartupSync()
             model.clearSettingsSyncForPrivacy()
             model.stopTaskAudioForBackground()
             model.cancelTaskFileImport()
@@ -275,6 +277,7 @@ private struct AppLockRoot: View {
         }
         .onChange(of: phase) { next in
             if next != .active {
+                model.cancelStartupSync()
                 model.clearSettingsSyncForPrivacy()
                 model.stopTaskAudioForBackground()
                 model.cancelTaskFileImport()
@@ -287,12 +290,17 @@ private struct AppLockRoot: View {
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
+                model.cancelStartupSync()
                 model.clearSettingsSyncForPrivacy()
                 model.cancelTaskFileImport()
                 model.cancelProjectFileImport()
                 model.dismissTaskShare()
             }
             if !concealed && phase == .active { Task { await model.refresh() } }
+        }
+        .task(id: "\(startupToken?.uuidString ?? "")-\(phase == .active)-\(lock.concealed)") {
+            guard !Task.isCancelled else { return }
+            model.requestStartupSync(token: startupToken, active: phase == .active)
         }
         .task(id: "\(model.ready)-\(lock.nonce)-\(phase == .active)-\(lock.authenticating)") {
             guard model.ready, phase == .active else { return }

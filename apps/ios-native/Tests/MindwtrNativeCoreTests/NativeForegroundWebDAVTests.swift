@@ -48,12 +48,14 @@ private final class ForegroundDAVStore: @unchecked Sendable {
     struct Reply { let status: Int; let headers: [String: String]; let body: Data }
     private struct Object { let bytes: Data; let etag: String }
     private let lock = NSLock()
+    private let expectedAuthorization: String
     private var objects: [String: Object] = [:]
     private var collections: Set<String> = ["/", "/sync/", "/sync/attachments/"]
     private var requests: [Request] = []
     private var version = 0
     private var unexpected = 0
     private var serverTime: Date?
+    init(expectedAuthorization: String) { self.expectedAuthorization = expectedAuthorization }
     var recorded: [Request] { lock.lock(); defer { lock.unlock() }; return requests }
     var unexpectedCount: Int { lock.lock(); defer { lock.unlock() }; return unexpected }
     func bytes(_ path: String) -> Data? { lock.lock(); defer { lock.unlock() }; return objects[path]?.bytes }
@@ -78,6 +80,9 @@ private final class ForegroundDAVStore: @unchecked Sendable {
             if let etag { headers["ETag"] = etag }
             return Reply(status: status, headers: headers, body: method == "HEAD" ? Data() : bytes)
         }
+        // Never retain or report a received credential. Every accepted DAV
+        // operation must carry the exact synthetic account configured by setup.
+        guard request.value(forHTTPHeaderField: "Authorization") == expectedAuthorization else { return reply(401) }
         guard url.scheme == "https", path.hasPrefix("/sync/"), request.url?.query == nil else {
             unexpected += 1; return reply(400)
         }
@@ -193,7 +198,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         hostname = "foreground-" + UUID().uuidString.lowercased() + ".invalid"
         service = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased()
         namespace = "tech.dongdongbh.mindwtr.foreground." + UUID().uuidString.lowercased()
-        remote = ForegroundDAVStore(); unexpectedBefore = ForegroundDAVProtocol.unexpectedCount
+        let authorization = "Basic " + Data(("synthetic:" + password).utf8).base64EncodedString()
+        remote = ForegroundDAVStore(expectedAuthorization: authorization); unexpectedBefore = ForegroundDAVProtocol.unexpectedCount
         ForegroundDAVProtocol.install(hostname, store: remote)
     }
     override func tearDownWithError() throws {
@@ -410,6 +416,133 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertTrue(remote.recorded.contains { $0.condition == "none:*" })
         XCTAssertTrue(remote.recorded.contains { $0.condition?.hasPrefix("match:") == true })
         XCTAssertTrue(remote.recorded.contains { $0.status == 412 }, "The real compatibility probe observes conditional conflicts")
+    }
+
+    private func configureStoredCleanupCandidate() async throws -> [String: Any] {
+        try await seed()
+        let original = try attachment()
+        // The verified settings path persists real KV/Keychain configuration.
+        // Its cycle has no candidate; only the subsequent cold stored invocation
+        // loads this newly seeded local edit and can own its cleanup.
+        let setupSQL = try SQLiteBridge(url: database)
+        _ = try setupSQL.execute("UPDATE tasks SET attachments=NULL WHERE id=?", parametersJSON: json([taskID]))
+        setupSQL.close()
+        let setup = core()
+        try await openAndTest(setup)
+        try await save(setup)
+        await setup.close()
+        let candidateSQL = try SQLiteBridge(url: database)
+        let at = ISO8601DateFormatter().string(from: Date().addingTimeInterval(1))
+        _ = try candidateSQL.execute("UPDATE tasks SET attachments=?,updatedAt=?,rev=rev+1,revBy='fixture' WHERE id=?",
+            parametersJSON: json([try json([original]), at, taskID]))
+        candidateSQL.close()
+        XCTAssertEqual(try Data(contentsOf: target), originalBytes)
+        try assertConfiguration()
+        return original
+    }
+
+    private func configurationIdentity() throws -> String {
+        let stored = try manifestObject()
+        var selected: [String: Any] = [:]
+        for name in ["@mindwtr_sync_backend", "@mindwtr_webdav_url", "@mindwtr_webdav_username",
+                     "@mindwtr_webdav_allow_insecure_http", "@mindwtr_webdav_allow_weak_fingerprint", "unknown"] {
+            if let value = stored[name] { selected[name] = value }
+        }
+        XCTAssertEqual(stored["@mindwtr_webdav_url"] as? String, endpoint)
+        XCTAssertEqual(stored["@mindwtr_webdav_username"] as? String, "synthetic")
+        return try json(selected)
+    }
+
+    func testColdStoredWebDAVSyncOwnsLocalPublicationCleanupAndDurableFastSkip() async throws {
+        let original = try await configureStoredCleanupCandidate()
+        let identity = try configurationIdentity(), boundary = ForegroundBoundaryState(), host = core(boundary: boundary)
+        let beforeStart = remote.recorded.count
+        _ = try await host.start()
+        XCTAssertEqual(remote.recorded.count, beforeStart, "Cold startup does not activate Sync")
+        let result = try await command(host, "syncStored")
+        XCTAssertEqual(try json(result), try json(["success": true, "skipped": false]), "The actual stored cycle returns only primitive booleans")
+        // This ordinary read is immediate: native admission must see the cycle's
+        // acknowledged store save, not an unflushed status/attachment patch.
+        let read = try object(await host.call("menuRead", argumentsJSON: json(["dataSettings", "{}"])))
+        XCTAssertNotNil(read["diagnostics"])
+        XCTAssertEqual(boundary.count, 1, "The stored invocation reaches the existing journaled physical callback")
+        try assertCleaned(original: original); try assertConfiguration(); try assertRemoteTask(original: original)
+        XCTAssertEqual(try configurationIdentity(), identity)
+        let status = try object(try XCTUnwrap(try manifestObject()["@mindwtr_local_sync_status_v1"] as? String))
+        XCTAssertEqual(status["lastSyncStatus"] as? String, "success")
+        XCTAssertNotNil(status["lastSyncAt"] as? String, "Successful status is durable before the stored result")
+        let storedMarkers = try markers("v1.3.5/ios-stored-sync")
+        XCTAssertEqual(storedMarkers.count, 1)
+        XCTAssertEqual(storedMarkers.first?["context"] as? [String: String],
+            ["releaseCheck": "v1.3.5/ios-stored-sync", "operation": "syncStored", "outcome": "settled"])
+        let remoteBytes = try XCTUnwrap(remote.bytes("/sync/data.json")), remoteETag = try XCTUnwrap(remote.etag("/sync/data.json"))
+        await host.close()
+
+        // A new VM has no open settings form or process-local cycle snapshot.
+        // Its unchanged stored call must use the existing persisted fast proof.
+        let coldBoundary = ForegroundBoundaryState(), cold = core(boundary: coldBoundary)
+        let beforeCold = remote.recorded.count
+        _ = try await cold.start()
+        XCTAssertEqual(remote.recorded.count, beforeCold)
+        let skipped = try await command(cold, "syncStored")
+        XCTAssertEqual(try json(skipped), try json(["success": true, "skipped": true]))
+        let skipRequests = remote.recorded.dropFirst(beforeCold)
+        XCTAssertTrue(skipRequests.contains { $0.method == "HEAD" && $0.path == "/sync/data.json" }, "The cold fast check verifies the actual remote validator")
+        XCTAssertFalse(skipRequests.contains { ["PUT", "DELETE", "MKCOL"].contains($0.method) })
+        XCTAssertEqual(coldBoundary.count, 0, "Processed tombstones acquire no fresh physical owner")
+        XCTAssertEqual(remote.bytes("/sync/data.json"), remoteBytes); XCTAssertEqual(remote.etag("/sync/data.json"), remoteETag)
+        try assertCleaned(original: original); try assertConfiguration()
+        XCTAssertEqual(try configurationIdentity(), identity)
+        let coldRead = try object(await cold.call("menuRead", argumentsJSON: json(["dataSettings", "{}"])))
+        XCTAssertNotNil(coldRead["diagnostics"])
+        await cold.close()
+        XCTAssertEqual(try markers("v1.3.5/ios-stored-sync").count, 2)
+        try assertDiagnostics()
+    }
+
+    func testStoredCleanupFailureRetainsOriginalAuthorityAndColdRecoveryDoesNotSync() async throws {
+        _ = try await configureStoredCleanupCandidate()
+        let boundary = ForegroundBoundaryState(), host = core(boundary: boundary)
+        let beforeStart = remote.recorded.count
+        _ = try await host.start(); XCTAssertEqual(remote.recorded.count, beforeStart)
+        boundary.arm()
+        do {
+            _ = try await command(host, "syncStored")
+            XCTFail("An unconfirmed physical cleanup must escape the stored entry")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "Attachment cleanup could not be confirmed; retry the retained request")
+        }
+        let held = try XCTUnwrap(boundary.captured, "The real stored cycle must reach afterIntent")
+        XCTAssertEqual(boundary.count, 1)
+        XCTAssertEqual(try Data(contentsOf: journal), held.journal); XCTAssertEqual(try inode(journal), held.journalInode)
+        XCTAssertEqual(try Data(contentsOf: target), held.target); XCTAssertEqual(try inode(target), held.targetInode)
+        XCTAssertEqual(try rows(), held.rows); XCTAssertEqual(try Data(contentsOf: manifest), held.manifest)
+        XCTAssertEqual(try? Data(contentsOf: logURL), held.log); XCTAssertEqual(remote.recorded.count, held.requests)
+        XCTAssertEqual(try markers("v1.3.5/ios-stored-sync").count, 0, "A fatal cycle has no settled marker")
+        XCTAssertEqual(try markers("v1.3.5/ios-cleanup-owned-retirement").count, 0)
+        do {
+            _ = try await host.foregroundSync(command: "syncStored", requestJSON: "{}")
+            XCTFail("Retained cleanup authority blocks a second stored command")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "Attachment cleanup could not be confirmed; retry the retained request")
+        }
+        XCTAssertEqual(remote.recorded.count, held.requests); XCTAssertEqual(try rows(), held.rows)
+        XCTAssertEqual(try Data(contentsOf: manifest), held.manifest); XCTAssertEqual(try? Data(contentsOf: logURL), held.log)
+        await host.close()
+        let cold = core(), beforeCold = remote.recorded.count
+        _ = try await cold.start()
+        XCTAssertEqual(remote.recorded.count, beforeCold, "Cold proof recovery is local; startup does not run stored Sync")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        XCTAssertEqual(try rows(), held.rows, "Recovery retires the captured bytes without inventing a shared metadata acknowledgement")
+        try assertConfiguration()
+        let read = try object(await cold.call("menuRead", argumentsJSON: json(["dataSettings", "{}"])))
+        XCTAssertNotNil(read["diagnostics"], "The exact cold settlement releases ordinary read admission")
+        await cold.close()
+        XCTAssertEqual(try markers("v1.3.5/ios-stored-sync").count, 0)
+        let cleanup = try markers("v1.3.5/ios-cleanup-owned-retirement")
+        XCTAssertEqual(cleanup.count, 1)
+        XCTAssertEqual(cleanup.first?["context"] as? [String: String],
+            ["releaseCheck": "v1.3.5/ios-cleanup-owned-retirement", "operation": "cleanup-owned-retirement", "outcome": "removed"])
     }
 
     func testBusyLeaseReturnsWithoutDetachedFollowUpAndLaterExplicitSyncOwnsCleanup() async throws {

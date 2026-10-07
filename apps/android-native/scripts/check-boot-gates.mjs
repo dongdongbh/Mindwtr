@@ -3528,6 +3528,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 }
 
 const fakeCore = `
+export { SYNC_BACKEND_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-storage-keys.ts'))};
 import { mapSqliteTaskRow as hydrateTask285 } from ${JSON.stringify(resolve(app, '../../packages/core/src/sqlite-adapter.ts'))};
 globalThis.hydrateTaskAttachments285 = (attachments) => hydrateTask285({ id: 'task285', attachments: JSON.stringify(attachments) }).attachments;
 export { planAttachmentOpen, getAttachmentResolutionMessage } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-editor-model.ts'))};
@@ -4190,6 +4191,57 @@ for (const [bridge, receipt, operation] of [
         state.__mindwtrFileCall = async () => null;
         state.__mindwtrInstallerCall = async () => null;
     };
+    // Stored Sync's empty/Off admission must not construct the throwing Sync
+    // stand-ins, read secrets, or open a form. Actual configured runs use JSC tests.
+    const stored = makeState(0, [], 'ios', (state) => {
+        configureLocal(state);
+        state.storedReads = 0; state.secretReads = 0;
+        state.__mindwtrNative.kvMultiGet = () => { throw new Error('Unexpected stored multi-read'); };
+        state.__mindwtrNative.kvGet = (key) => {
+            assert.equal(key, '@mindwtr_sync_backend');
+            state.storedReads++;
+            return JSON.stringify([state.storedBackend ?? null]);
+        };
+        state.__mindwtrSyncSecrets = { getSecret: () => {
+            state.secretReads++; throw new Error('Unexpected stored secret read');
+        } };
+    });
+    const syncStored = (json = '{}') => poll(stored, stored.MindwtrHost.iosForegroundSync('syncStored', json, () => ''));
+    assert.match((await syncStored()).error, /^NOT_READY:/, 'Stored Sync requires activation before reading storage');
+    assert.equal(stored.storedReads, 0);
+    assert.equal((await poll(stored, stored.MindwtrHost.boot())).ok, true);
+    for (const input of ['null', '[]', '{', '{"revision":"r"}', '{"config":{}}', '{"password":"synthetic"}', '{"x":"' + 'x'.repeat(128 * 1024) + '"}']) {
+        assert.match((await syncStored(input)).error, /^INVALID_INPUT:/, 'Stored Sync accepts only a bounded empty object');
+    }
+    assert.equal(stored.storedReads, 0, 'Invalid requests reach no storage port');
+    for (const flag of ['failed', 'queued', 'inFlight', 'immediate', 'retrying']) {
+        stored.persistenceStatus = { [flag]: true };
+        assert.match((await syncStored()).error, /^NOT_READY:/, 'Stored Sync preserves strict persistence admission');
+    }
+    stored.persistenceStatus = null;
+    for (const field of ['sandbox', 'workspaceTransition']) {
+        stored[field] = true;
+        assert.match((await syncStored()).error, /^NOT_READY:/);
+        stored[field] = false;
+    }
+    assert.equal(stored.storedReads, 0, 'Unsettled requests reach no storage port');
+    const beforeRows = JSON.stringify(stored.fakeData);
+    const beforeLog = stored.logText;
+    for (const value of [undefined, '', 'off', ' off ']) {
+        stored.storedBackend = value;
+        assert.deepEqual(await syncStored('  {}  '), { ok: true, value: { ok: true, value: { success: true, skipped: true } } });
+    }
+    stored.storedBackend = 'dropbox';
+    const unsupported = await syncStored();
+    assert.equal(unsupported.ok, true);
+    assert.equal(unsupported.value.ok, false);
+    assert.equal(unsupported.value.error.code, 'ACTION_FAILED');
+    assert.equal(stored.storedBackend, 'dropbox', 'Unsupported stored provider is preserved');
+    assert.equal(stored.storedReads, 5, 'One exact provider read per admitted invocation');
+    assert.equal(stored.secretReads, 0, 'Off and unsupported runs read no secret');
+    assert.equal(JSON.stringify(stored.fakeData), beforeRows, 'Off admission writes no domain rows');
+    assert.equal(stored.logText, beforeLog, 'No configured-run settlement marker is emitted for skipped/refused admission');
+    assert.equal(stored.contractBindings.syncSettings, undefined, 'Off and unsupported runs never construct the Sync factory');
     const local = makeState(0, [], 'ios', configureLocal);
     assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['attachments'], 'local capability enables neither Sync nor AI');
     assert.equal(local.localShaInstallCount, 1, 'successful local construction installs native SHA once');
