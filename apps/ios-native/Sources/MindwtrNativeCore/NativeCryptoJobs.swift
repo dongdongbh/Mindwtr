@@ -201,6 +201,9 @@ final class NativeCryptoJobs: @unchecked Sendable {
         guard !job.token.isCancelled else { throw HostFailure("I/O response body is unavailable") }
         return (encoded, true)
     }
+    /// Wait for an accepted primitive before its owning invocation releases.
+    func drain() { worker.sync {} }
+
     func shutdown() {
         lock.lock(); accepting = false; wake = nil; let current = Array(jobs.values); lock.unlock()
         current.forEach { $0.token.cancel() }

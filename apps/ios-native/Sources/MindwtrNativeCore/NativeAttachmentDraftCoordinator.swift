@@ -39,18 +39,20 @@ final class NativeAttachmentDraftCoordinator {
     private let invoke: (String, [Any]) throws -> String
     private let managedURI: String
     private let requireOwner: () throws -> Void
+    private let maximumReadBytes: Int?
     #if DEBUG
     var hooks: AttachmentDraftHostHooks?
     #endif
     private static let failure = HostFailure("Attachment draft operation could not be confirmed; retained evidence requires exact recovery")
 
-    init(databaseURL: URL, jobs: NativeAttachmentFileJobs, requireOwner: @escaping () throws -> Void = {},
+    init(databaseURL: URL, jobs: NativeAttachmentFileJobs, maximumReadBytes: Int? = nil, requireOwner: @escaping () throws -> Void = {},
          invoke: @escaping (String, [Any]) throws -> String) throws {
         store = Store(databaseURL: databaseURL)
         editor = EditorDraftStore(databaseURL: databaseURL)
         self.jobs = jobs
         self.invoke = invoke
         self.requireOwner = requireOwner
+        self.maximumReadBytes = maximumReadBytes
         let directories = try Self.object(jobs.directoriesJSON)
         guard let document = directories["document"] as? String, let root = URL(string: document) else { throw Self.failure }
         managedURI = root.appendingPathComponent("attachments", isDirectory: true).absoluteString
@@ -1009,6 +1011,172 @@ final class NativeAttachmentDraftCoordinator {
         let decided: Store.AvailabilityRecord
         let detached: Store.AvailabilityRecord
         let replyJSON: String
+    }
+    struct AvailabilityDownloadRequest {
+        let id: String
+        let session: String
+        let generation: Int
+        let attachmentID: String
+        let identity: String
+        let json: String
+    }
+    static func availabilityDownloadRequest(_ raw: String) throws -> AvailabilityDownloadRequest {
+        let value = try object(raw, limit: 64 * 1024)
+        guard Set(value.keys) == Set(["version", "requestId", "sessionID", "generation", "attachmentId", "identity"]),
+              integer(value["version"]) == 1, let id = uuid(value["requestId"]), let session = uuid(value["sessionID"]),
+              let generation = integer(value["generation"], positive: true), generation < 9_007_199_254_740_991,
+              let attachment = value["attachmentId"] as? String, !attachment.isEmpty,
+              attachment.utf16.count <= 500, attachment.utf8.count <= 2000,
+              let identity = value["identity"] as? String, !identity.isEmpty else { throw failure }
+        return .init(id: id, session: session, generation: Int(generation), attachmentID: attachment, identity: identity, json: try json(value))
+    }
+    /// A retained UUID is handled before any configuration, HTTP or source work.
+    func replayAvailabilityV5(_ request: AvailabilityDownloadRequest, cancellation: NativeAttachmentCancellation) throws -> String? {
+        try requireOwner(); try cancellation.check()
+        guard let snapshot = try store.readVersioned() else { return nil }
+        guard case .availability(let record) = snapshot.record, record.session.state == .active,
+              record.discard == nil, record.checkpointAdvance == nil,
+              Self.equal(record.session.sessionID, request.session) else { throw Self.failure }
+        guard let op = record.operations.first(where: { Self.equal($0.requestId, request.id) }) else {
+            guard record.operations.allSatisfy({ $0.phase == .checkpointed && $0.reason == nil }),
+                  record.session.checkpoint.generation == request.generation else { throw Self.failure }
+            return nil
+        }
+        guard Self.equal(op.requestJSON, request.json) else { throw Self.failure }
+        _ = try recoverV5(session: request.session, cancellation: cancellation)
+        let binding = try availabilityRead(cancellation), editorBinding = try availabilityEditor(binding.record)
+        guard let completed = binding.record.operations.first(where: { Self.equal($0.requestId, request.id) }),
+              completed.phase == .checkpointed, let reply = completed.replyJSON else { throw Self.failure }
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        return reply
+    }
+    private func downloadCheckpoint(_ request: AvailabilityDownloadRequest) throws -> EditorDraftStore.OwnedCheckpoint {
+        guard let binding = try editor.readOwnedCheckpoint(), binding.attempt == nil,
+              Self.equal(binding.snapshot.sessionID, request.session), binding.snapshot.generation == request.generation else { throw Self.failure }
+        return binding
+    }
+    func beginV5(_ request: AvailabilityDownloadRequest, cancellation: NativeAttachmentCancellation) throws {
+        jobs.drain(); try requireOwner(); try cancellation.check()
+        let editorBinding = try downloadCheckpoint(request), snapshot = editorBinding.snapshot
+        let previous = try store.readVersioned()
+        if let previous {
+            guard case .availability(let record) = previous.record, record.session.state == .active,
+                  record.discard == nil, record.checkpointAdvance == nil,
+                  record.operations.allSatisfy({ $0.phase == .checkpointed && $0.reason == nil }),
+                  Self.equal(record.session.checkpoint, snapshot) else { throw Self.failure }
+            let binding = try availabilityRead(cancellation)
+            try availabilityProjection(record, payload: snapshot.payloadJSON, binding: binding, cancellation: cancellation)
+            try requireAvailabilityEditor(binding, editorBinding, cancellation)
+            return
+        }
+        let result = try Self.object(invoke("attachmentDraftBeginV5", [Self.json(["taskID": snapshot.taskID, "payloadJSON": snapshot.payloadJSON])]))
+        try requireOwner(); try cancellation.check()
+        guard try store.readVersioned() == nil, let actual = try editor.readOwnedCheckpoint(), editorBinding.matches(actual),
+              Set(result.keys) == Set(["version", "taskID", "payloadJSON"]), Self.integer(result["version"]) == 5,
+              (result["taskID"] as? String).map({ Self.equal($0, snapshot.taskID) }) == true,
+              (result["payloadJSON"] as? String).map({ Self.equal($0, snapshot.payloadJSON) }) == true else { throw Self.failure }
+        let record = Store.AvailabilityRecord(session: .init(sessionID: request.session, taskID: snapshot.taskID,
+            state: .active, checkpoint: snapshot), operations: [])
+        try store.preflightAvailability(record)
+        let binding = try store.writeAvailabilityAcknowledged(record)
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+    }
+    /// Capacity is checked with the longest native proof tokens before GET or
+    /// cache creation, and with the actual frozen proof again before intent.
+    func preflightDownloadV5(_ request: AvailabilityDownloadRequest, selectedJSON: String, targetURI: String,
+                             cancellation: NativeAttachmentCancellation) throws {
+        try requireOwner(); try cancellation.check()
+        let editorBinding = try downloadCheckpoint(request), before = editorBinding.snapshot
+        let previous = try store.readVersioned()
+        let base: Store.AvailabilityRecord
+        if let previous {
+            guard case .availability(let record) = previous.record, record.session.state == .active,
+                  record.discard == nil, record.checkpointAdvance == nil,
+                  record.operations.allSatisfy({ $0.phase == .checkpointed && $0.reason == nil }),
+                  Self.equal(record.session.checkpoint, before) else { throw Self.failure }
+            base = record
+        } else { base = .init(session: .init(sessionID: request.session, taskID: before.taskID, state: .active, checkpoint: before), operations: []) }
+        guard base.operations.count < 128, !base.operations.contains(where: { Self.equal($0.requestId, request.id) }) else { throw Self.failure }
+        var selected = try Self.object(selectedJSON, limit: 1_000_000)
+        selected["uri"] = targetURI; selected["localStatus"] = "available"
+        let hash = (selected["fileHash"] as? String) ?? String(repeating: "f", count: 64)
+        selected["fileHash"] = hash
+        let frozenJSON = try invoke("attachmentDraftPrepareAvailability", [Self.json(["version": 1, "taskID": before.taskID,
+            "requestId": request.id, "attachmentId": request.attachmentID, "identity": request.identity,
+            "beforePayloadJSON": before.payloadJSON, "status": "available", "resolvedAttachmentJSON": Self.json(selected)])])
+        try requireOwner(); try cancellation.check()
+        guard let actual = try editor.readOwnedCheckpoint(), editorBinding.matches(actual) else { throw Self.failure }
+        if let previous { guard let actual = try store.readVersioned(), previous.matches(actual) else { throw Self.failure } }
+        else { guard try store.readVersioned() == nil else { throw Self.failure } }
+        let frozen = try Self.object(frozenJSON, limit: 2 * 1024 * 1024)
+        guard let payload = frozen["afterPayloadJSON"] as? String else { throw Self.failure }
+        let after = EditorDraftSnapshot(sessionID: before.sessionID, taskID: before.taskID, generation: before.generation + 1, payloadJSON: payload)
+        let directories = try Self.object(jobs.directoriesJSON), token = "18446744073709551615:18446744073709551615"
+        guard let cache = directories["cache"] as? String else { throw Self.failure }
+        let source = Store.Source(sourceURI: cache + "ffffffff-ffff-4fff-8fff-ffffffffffff", sha256: hash.lowercased(),
+            size: 8 * 1024 * 1024, identity: token, cacheRootIdentity: token, parentIdentity: token)
+        let op = Store.AvailabilityOperation(requestId: request.id, requestJSON: request.json, attachmentId: request.attachmentID,
+            identity: request.identity, phase: .intent, before: before, after: after, preparedJSON: frozenJSON, targetURI: targetURI,
+            resource: .owned(source: source, stage: nil, filled: nil, published: nil))
+        try preflightAvailabilityAdmission(.init(session: base.session, operations: base.operations + [op]))
+    }
+    private func preflightAvailabilityAdmission(_ record: Store.AvailabilityRecord) throws {
+        try preflightAvailabilityRecovery(record)
+        guard let op = record.operations.last else { throw Self.failure }
+        let completed = replacingAvailability(record, advancingAvailability(op, phase: .checkpointed,
+            resource: { if case .owned(let source, _, _, _) = op.resource {
+                let token = "18446744073709551615:18446744073709551615"
+                let stage = Store.Stage(uri: managedURI + ".mindwtr-install-" + op.requestId.replacingOccurrences(of: "-", with: "") + ".candidate/stage",
+                    identity: token, directoryIdentity: token, privateDirectoryIdentity: token)
+                return .owned(source: source, stage: stage, filled: .init(sha256: source.sha256, size: source.size, identity: token),
+                    published: .init(sha256: source.sha256, size: source.size, identity: token, directoryIdentity: token))
+            }; return op.resource }(), reply: try availabilityReply(op)))
+        let used = Set(completed.operations.map(\.requestId))
+        guard let discardID = (0...128).map({ String(format: "ffffffff-ffff-ffff-ffff-%012d", $0) }).first(where: { !used.contains($0) }) else { throw Self.failure }
+        let checkpoint = completed.session.checkpoint
+        let discardRequest = try Self.json(["version": 1, "requestId": discardID, "sessionID": checkpoint.sessionID, "generation": checkpoint.generation])
+        for phase in [Store.DiscardPhase.decided, .detached] {
+            let shape = try Store.AvailabilityRecord(session: .init(sessionID: checkpoint.sessionID, taskID: checkpoint.taskID,
+                state: .cleanupPending, checkpoint: checkpoint), operations: completed.operations,
+                discard: .init(requestId: discardID, requestJSON: discardRequest, expected: checkpoint, phase: phase,
+                    replyJSON: phase == .detached ? Self.json(["version": 1, "status": "cleanupPending", "requestId": discardID, "sessionID": checkpoint.sessionID]) : nil))
+            // Future capacity shapes need structural validation, not a direct
+            // transition from the current disk checkpoint to a later Discard.
+            _ = try Store.availabilityFingerprint(shape)
+            guard try JSONEncoder().encode(shape).count <= Store.maximumBytes else { throw Self.failure }
+        }
+        // Existing full Save retains both the native record and shared lineage.
+        let lineage = try Self.availabilityLineageJSON(completed, payload: checkpoint.payloadJSON, managedDirectoryURI: managedURI)
+        guard try JSONEncoder().encode(completed).count + lineage.utf8.count + checkpoint.payloadJSON.utf8.count <= Store.maximumBytes else { throw Self.failure }
+    }
+    func acceptPreparedAvailabilityV5(request: AvailabilityDownloadRequest, preparedJSON: String,
+                                     resource: Store.AvailabilityResource, cancellation: NativeAttachmentCancellation) throws -> String {
+        let binding = try availabilityRead(cancellation), record = binding.record, editorBinding = try downloadCheckpoint(request)
+        let before = editorBinding.snapshot, frozen = try Self.object(preparedJSON, limit: 2 * 1024 * 1024)
+        guard record.session.state == .active, record.discard == nil, record.checkpointAdvance == nil,
+              record.operations.count < 128, record.operations.allSatisfy({ $0.phase == .checkpointed && $0.reason == nil }),
+              !record.operations.contains(where: { Self.equal($0.requestId, request.id) }), Self.equal(record.session.checkpoint, before),
+              (frozen["beforePayloadJSON"] as? String).map({ Self.equal($0, before.payloadJSON) }) == true,
+              let payload = frozen["afterPayloadJSON"] as? String, let resolved = frozen["resolvedAttachmentJSON"] as? String else { throw Self.failure }
+        let target = (try Self.object(resolved, limit: 1_000_000))["uri"] as? String
+        let after = EditorDraftSnapshot(sessionID: before.sessionID, taskID: before.taskID, generation: before.generation + 1, payloadJSON: payload)
+        let op = Store.AvailabilityOperation(requestId: request.id, requestJSON: request.json, attachmentId: request.attachmentID,
+            identity: request.identity, phase: .intent, before: before, after: after, preparedJSON: preparedJSON,
+            targetURI: frozen["status"] as? String == "unrecoverable" ? nil : target, resource: resource)
+        let next = Store.AvailabilityRecord(session: record.session, operations: record.operations + [op])
+        _ = try availabilityPrepared(op)
+        try availabilityProjection(next, payload: after.payloadJSON, binding: binding, cancellation: cancellation)
+        try preflightAvailabilityAdmission(next)
+        try availabilityBoundary(.beforeIntent, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+        let intent = try writeAvailability(next, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+        try availabilityBoundary(.afterIntent, binding: intent, editorBinding: editorBinding, cancellation: cancellation)
+        _ = try recoverV5(session: request.session, cancellation: cancellation)
+        let settled = try availabilityRead(cancellation), currentEditor = try availabilityEditor(settled.record)
+        guard let completed = settled.record.operations.last, completed.phase == .checkpointed,
+              Self.equal(completed.requestJSON, request.json), let reply = completed.replyJSON else { throw Self.failure }
+        acknowledge("availability-checkpoint", "confirmed")
+        try requireAvailabilityEditor(settled, currentEditor, cancellation)
+        return reply
     }
     private func requireAvailability(_ binding: Store.AvailabilitySnapshot,
                                      _ cancellation: NativeAttachmentCancellation) throws {
@@ -2440,7 +2608,7 @@ final class NativeAttachmentDraftCoordinator {
     private func file(_ request: NativeAttachmentDraftFileRequest, cancellation: NativeAttachmentCancellation,
                       ignoringCancellation: Bool = false) throws -> [String: Any] {
         if !ignoringCancellation { try cancellation.check() }
-        let id = try jobs.submitDraft(request)
+        let id = try jobs.submitDraft(request, maximumReadBytes: maximumReadBytes)
         while true {
             let raw = jobs.takeDraft(id)
             if !raw.isEmpty {

@@ -189,6 +189,17 @@ public final class CoreHost: @unchecked Sendable {
         try await perform { try $0.beginAttachmentDraftV2(expectedSession: expectedSession, expectedGeneration: expectedGeneration) }
     }
     /// Begins or validates the V3 attachment owner for the exact unfrozen editor checkpoint.
+    /// Selected history5 availability; no saved Task mutation or automatic sync.
+    public func downloadTaskAttachmentV5(requestJSON: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.downloadTaskAttachmentV5(requestJSON: requestJSON, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
     public func beginAttachmentDraftV3(expectedSession: String, expectedGeneration: Int) async throws -> String {
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
@@ -831,6 +842,36 @@ private final class Engine: @unchecked Sendable {
     // A crash may leave an unproven copy <=50 MiB; total accumulation is not
     // bounded, and this library-backed cache has no guaranteed OS reclamation.
     private var providerCopy: ProviderCopyTurn?
+    private final class TaskDownloadTurn {
+        let generation: UInt64
+        let runtime: JSContext
+        let jobs: NativeAttachmentFileJobs
+        let storage: NativeDeviceKV
+        let request: NativeAttachmentDraftCoordinator.AvailabilityDownloadRequest
+        let cancellation: NativeAttachmentCancellation
+        let editor: EditorDraftStore.OwnedCheckpoint
+        let taskRowsJSON: String
+        let config: [(String, String?)]
+        var record: NativeAttachmentDraftStore.VersionedSnapshot?
+        var legacy: [(String, String?)] = []
+        var initialURL = ""
+        var originalURI = ""
+        var targetURI = ""
+        var preparing = false
+        var callbackUsed = false
+        var callbackRefused = false
+        var receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt?
+        var source: NativeAttachmentFiles.CacheSourceProof?
+        var sourceToken: String?
+        init(generation: UInt64, runtime: JSContext, jobs: NativeAttachmentFileJobs, storage: NativeDeviceKV,
+             request: NativeAttachmentDraftCoordinator.AvailabilityDownloadRequest, cancellation: NativeAttachmentCancellation,
+             editor: EditorDraftStore.OwnedCheckpoint,
+             taskRowsJSON: String, config: [(String, String?)], record: NativeAttachmentDraftStore.VersionedSnapshot?) {
+            self.generation = generation; self.runtime = runtime; self.jobs = jobs; self.storage = storage
+            self.request = request; self.cancellation = cancellation; self.editor = editor; self.taskRowsJSON = taskRowsJSON; self.config = config; self.record = record
+        }
+    }
+    private var taskDownloadTurn: TaskDownloadTurn?
     private var attachmentIdlePump: DispatchWorkItem?
     private var invoking = false
     private var foregroundCleanupCancellation: NativeAttachmentCancellation?
@@ -2077,6 +2118,7 @@ private final class Engine: @unchecked Sendable {
         NativeAttachmentDraftCoordinator.hasEvidence(databaseURL: databaseURL)
     }
     private func requireNoAttachmentDraft() throws {
+        guard taskDownloadTurn == nil else { throw Self.taskDownloadFailure }
         try denyCleanupOwner()
         guard pending?.method != Self.projectFileAddMethod, projectFileAddTurn == nil else { throw Self.projectFileAddFailure }
         guard !attachmentDraftEvidence else { throw HostFailure("Attachment draft ownership requires exact recovery") }
@@ -2266,6 +2308,25 @@ private final class Engine: @unchecked Sendable {
     }
     private func requireRawAttachmentRead(_ json: String, installer: Bool = false) throws {
         try denyCleanupOwner()
+        if let turn = taskDownloadTurn {
+            try requireTaskDownloadTurn(before: true)
+            guard turn.preparing, !installer, json.utf8.count <= 11_184_900,
+                  let raw = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any], let op = raw["op"] as? String else { throw Self.taskDownloadFailure }
+            if op == "barrier" { guard Set(raw.keys) == Set(["op"]) else { throw Self.taskDownloadFailure }; return }
+            if op == "sha256" {
+                guard Set(raw.keys) == Set(["op", "base64"]), let encoded = raw["base64"] as? String,
+                      encoded.utf8.count <= 11_184_812, encoded.utf8.allSatisfy({ $0 < 128 }),
+                      let bytes = Data(base64Encoded: encoded), bytes.count <= 8_388_608,
+                      Self.ownedEqual(bytes.base64EncodedString(), encoded) else { throw Self.taskDownloadFailure }
+                return
+            }
+            guard ["getInfo", "readBytes", "sha256File"].contains(op), Set(raw.keys) == Set(["op", "uri"]),
+                  let uri = raw["uri"] as? String, !uri.isEmpty,
+                  Self.ownedEqual(uri, turn.originalURI) || Self.ownedEqual(uri, turn.targetURI) else { throw Self.taskDownloadFailure }
+            // The selected native cap is carried into the actual opened
+            // descriptor and accumulation; no separate stat grants a read.
+            return
+        }
         guard attachmentDraftEvidence || pending?.method == Self.projectFileAddMethod || projectFileAddTurn != nil else { return }
         guard json.utf8.count <= (installer ? 64 * 1024 : 24 * 1024 * 1024),
               let raw = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any], let operation = raw["op"] as? String,
@@ -2298,7 +2359,8 @@ private final class Engine: @unchecked Sendable {
               started, !closed, pending == nil, !recoveryActivationPending, lockFD >= 0, try ownedJournalIsAbsent(),
               let runtime = context, let jobs = attachmentJobs else { throw HostFailure("Attachment draft recovery is not ready") }
         let generation = attachmentGeneration
-        let coordinator = try NativeAttachmentDraftCoordinator(databaseURL: databaseURL, jobs: jobs, requireOwner: { [unowned self] in
+        let coordinator = try NativeAttachmentDraftCoordinator(databaseURL: databaseURL, jobs: jobs,
+            maximumReadBytes: taskDownloadTurn == nil ? nil : 8_388_608, requireOwner: { [unowned self] in
             dispatchPrecondition(condition: .onQueue(self.queue))
             try cancellation.check()
             guard self.started, !self.closed, self.pending == nil, !self.recoveryActivationPending, self.lockFD >= 0,
@@ -2364,6 +2426,233 @@ private final class Engine: @unchecked Sendable {
     }
     func addAttachmentDraftV3(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         try attachmentDraftOperation { try attachmentDraftCoordinatorV3(cancellation: cancellation).addV3(requestJSON, cancellation: cancellation) }
+    }
+    private static let taskDownloadConfigKeys = ["@mindwtr_sync_backend", "@mindwtr_webdav_url", "@mindwtr_webdav_username",
+        "@mindwtr_webdav_allow_insecure_http", "@mindwtr_sync_encryption_state_v1"]
+    private static let taskDownloadLegacyKeys = Set(["@mindwtr_webdav_password", "@mindwtr_sync_encryption_key_v1"])
+    private static var taskDownloadFailure: HostFailure { HostFailure("Attachment download could not be confirmed; retained evidence requires exact recovery") }
+    private func taskDownloadRows(_ taskID: String) throws -> String {
+        let raw = try requireDatabase().execute("SELECT * FROM tasks WHERE id=?", parametersJSON: Self.ownedJSON([taskID]))
+        guard raw.utf8.count <= NativeAttachmentDraftStore.maximumBytes,
+              let rows = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [[String: Any]], rows.count == 1,
+              rows[0]["deletedAt"] is NSNull, rows[0]["purgedAt"] is NSNull else { throw Self.taskDownloadFailure }
+        return try Self.ownedJSON(rows)
+    }
+    private func requireTaskDownloadTurn(before: Bool = false) throws {
+        guard let turn = taskDownloadTurn else { return }
+        dispatchPrecondition(condition: .onQueue(queue))
+        if turn.preparing { try turn.cancellation.check() }
+        guard started, !closed, pending == nil, !recoveryActivationPending, lockFD >= 0,
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, providerCopy == nil,
+              context === turn.runtime, attachmentJobs === turn.jobs, deviceStorage === turn.storage,
+              attachmentGeneration == turn.generation, try ownedJournalIsAbsent(),
+              Self.ownedEqual(try taskDownloadRows(turn.editor.snapshot.taskID), turn.taskRowsJSON) else { throw Self.taskDownloadFailure }
+        let current = try turn.storage.multiGet(Self.taskDownloadConfigKeys)
+        guard zip(current, turn.config).allSatisfy({ Self.ownedEqual($0.0, $1.0) && Self.taskDownloadOptionalEqual($0.1, $1.1) }),
+              current.count == turn.config.count else { throw Self.taskDownloadFailure }
+        for (name, expected) in turn.legacy {
+            guard Self.taskDownloadOptionalEqual(try turn.storage.get(name), expected) else { throw Self.taskDownloadFailure }
+        }
+        if before {
+            let actual = try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned()
+            if let expected = turn.record { guard let actual, expected.matches(actual) else { throw Self.taskDownloadFailure } }
+            else { guard actual == nil else { throw Self.taskDownloadFailure } }
+            guard let actualEditor = try editorDrafts.readOwnedCheckpoint(), turn.editor.matches(actualEditor), actualEditor.attempt == nil else {
+                throw Self.taskDownloadFailure
+            }
+        }
+    }
+    private static func taskDownloadOptionalEqual(_ lhs: String?, _ rhs: String?) -> Bool {
+        switch (lhs, rhs) { case (nil, nil): return true; case (let a?, let b?): return ownedEqual(a, b); default: return false }
+    }
+    private func taskDownloadManagedURI(_ jobs: NativeAttachmentFileJobs) throws -> String {
+        guard let raw = try NativeJSON.jsonObject(with: Data(jobs.directoriesJSON.utf8)) as? [String: Any],
+              let document = raw["document"] as? String, let root = URL(string: document) else { throw Self.taskDownloadFailure }
+        return root.appendingPathComponent("attachments", isDirectory: true).absoluteString
+    }
+    private func taskDownloadManagedPath(_ uri: String, root: String) -> Bool {
+        guard let url = URL(string: uri), url.isFileURL, Self.ownedEqual(url.absoluteString, uri),
+              Self.ownedEqual(url.deletingLastPathComponent().absoluteString, root), !url.lastPathComponent.isEmpty else { return false }
+        return true
+    }
+    private func taskDownloadKnown(_ status: String, _ request: NativeAttachmentDraftCoordinator.AvailabilityDownloadRequest) throws -> String {
+        try Self.ownedJSON(["version": 1, "status": status, "requestId": request.id, "sessionID": request.session,
+            "generation": request.generation, "attachmentId": request.attachmentID])
+    }
+    private func taskDownloadSourceCallback(_ metadata: String, _ base64: String, turn: TaskDownloadTurn,
+                                            cancellation: NativeAttachmentCancellation) throws -> String {
+        guard taskDownloadTurn === turn, invoking, turn.preparing, !turn.callbackUsed else { throw Self.taskDownloadFailure }
+        turn.callbackUsed = true
+        try requireTaskDownloadTurn(before: true); try cancellation.check()
+        guard metadata.utf8.count <= 64 * 1024,
+              let value = try NativeJSON.jsonObject(with: Data(metadata.utf8)) as? [String: Any],
+              Set(value.keys) == Set(["version", "attachmentId", "targetURI", "expectation", "sha256", "size"]),
+              Self.isInteger(value["version"]), (value["version"] as? NSNumber)?.intValue == 1,
+              (value["attachmentId"] as? String).map({ Self.ownedEqual($0, turn.request.attachmentID) }) == true,
+              (value["targetURI"] as? String).map({ Self.ownedEqual($0, turn.targetURI) }) == true,
+              let expected = value["expectation"] as? [String: Any], Set(expected.keys) == Set(["kind"]), expected["kind"] as? String == "absent",
+              let hash = value["sha256"] as? String, hash.utf8.count == 64,
+              hash.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+              Self.isInteger(value["size"]), let size = value["size"] as? NSNumber,
+              (0...8_388_608).contains(size.int64Value), base64.utf8.count <= 11_184_812,
+              base64.utf8.allSatisfy({ $0 < 128 }), let bytes = Data(base64Encoded: base64), bytes.count <= 8_388_608,
+              Self.ownedEqual(bytes.base64EncodedString(), base64), bytes.count == size.intValue else { throw Self.taskDownloadFailure }
+        let captured = try turn.jobs.createPlaintextDownloadSource(bytes: bytes, cancellation: cancellation)
+        // Capture creation authority before any late cancellation or owner check.
+        turn.receipt = captured.receipt; turn.source = captured.source; turn.sourceToken = UUID().uuidString.lowercased()
+        try requireTaskDownloadTurn(before: true); try cancellation.check()
+        guard captured.source.sha256 == hash, captured.source.size == size.int64Value else { throw Self.taskDownloadFailure }
+        return try Self.ownedJSON(["kind": "prepared-source", "sourceToken": turn.sourceToken!])
+    }
+    private func finishTaskDownloadSource(_ turn: TaskDownloadTurn, completed: Bool) throws {
+        guard let receipt = turn.receipt, let source = turn.source else { return }
+        turn.jobs.drain(); try requireTaskDownloadTurn()
+        let store = NativeAttachmentDraftStore(databaseURL: databaseURL), binding = try store.readVersioned()
+        let editor = try editorDrafts.readOwnedCheckpoint()
+        guard let editor, editor.attempt == nil else { throw Self.taskDownloadFailure }
+        if completed {
+            guard let binding, case .availability(let record) = binding.record,
+                  record.session.state == .active, record.discard == nil, record.checkpointAdvance == nil,
+                  let op = record.operations.first(where: { Self.ownedEqual($0.requestId, turn.request.id) }),
+                  Self.ownedEqual(op.requestJSON, turn.request.json), op.phase == .checkpointed,
+                  Self.ownedEqual(record.session.checkpoint, editor.snapshot), case .owned(let retained, _, _, _) = op.resource,
+                  receipt.matches(.init(sourceURI: retained.sourceURI, sha256: retained.sha256, size: retained.size,
+                    identity: retained.identity, cacheRootIdentity: retained.cacheRootIdentity, parentIdentity: retained.parentIdentity)) else { throw Self.taskDownloadFailure }
+        } else {
+            // Lost write acknowledgements never establish absence of intent.
+            try requireTaskDownloadTurn(before: true)
+            if let binding {
+                guard case .availability(let record) = binding.record,
+                      !record.operations.contains(where: { Self.ownedEqual($0.requestId, turn.request.id) }) else { throw Self.taskDownloadFailure }
+            }
+        }
+        guard receipt.matches(source) else { throw Self.taskDownloadFailure }
+        func owner() throws {
+            try requireTaskDownloadTurn()
+            let actual = try store.readVersioned()
+            if let binding { guard let actual, binding.matches(actual) else { throw Self.taskDownloadFailure } }
+            else { guard actual == nil else { throw Self.taskDownloadFailure } }
+            guard let actualEditor = try editorDrafts.readOwnedCheckpoint(), editor.matches(actualEditor) else { throw Self.taskDownloadFailure }
+        }
+        try owner(); try turn.jobs.retireProviderSource(receipt, requireOwner: owner); try owner()
+    }
+    func downloadTaskAttachmentV5(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        dispatchPrecondition(condition: .onQueue(queue))
+        return try attachmentDraftOperation {
+            guard taskDownloadTurn == nil, providerCopy == nil else { throw Self.taskDownloadFailure }
+            let request = try NativeAttachmentDraftCoordinator.availabilityDownloadRequest(requestJSON)
+            let retryCoordinator = try attachmentDraftCoordinatorV3(cancellation: cancellation)
+            if let reply = try retryCoordinator.replayAvailabilityV5(request, cancellation: cancellation) { return reply }
+            guard let runtime = context, let jobs = attachmentJobs, let storage = deviceStorage,
+                  let editor = try editorDrafts.readOwnedCheckpoint(), editor.attempt == nil,
+                  Self.ownedEqual(editor.snapshot.sessionID, request.session), editor.snapshot.generation == request.generation else { throw Self.taskDownloadFailure }
+            let config = try storage.multiGet(Self.taskDownloadConfigKeys)
+            guard config.count == 5 else { throw Self.taskDownloadFailure }
+            guard config[0].1 == "webdav", let url = config[1].1, !url.isEmpty else { return try taskDownloadKnown("unavailable", request) }
+            let turn = TaskDownloadTurn(generation: attachmentGeneration, runtime: runtime, jobs: jobs, storage: storage,
+                request: request, cancellation: cancellation, editor: editor, taskRowsJSON: try taskDownloadRows(editor.snapshot.taskID), config: config,
+                record: try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned())
+            taskDownloadTurn = turn
+            defer { turn.preparing = false; taskDownloadTurn = nil; scheduleAttachmentIdle(immediate: true) }
+            do {
+                let coordinator = try attachmentDraftCoordinatorV3(cancellation: cancellation, additionalOwner: { [unowned self] in
+                    try self.requireTaskDownloadTurn(before: self.taskDownloadTurn?.preparing == true)
+                })
+                try requireTaskDownloadTurn(before: true); try cancellation.check()
+                let managed = try taskDownloadManagedURI(jobs)
+                let preflightJSON = try Self.ownedJSON(["version": 1, "taskID": editor.snapshot.taskID,
+                    "beforePayloadJSON": editor.snapshot.payloadJSON, "requestJSON": request.json,
+                    "webdavURL": url, "managedDirectoryURI": managed])
+                let preflightRaw = try invoke("attachmentDraftAvailabilityPreflight", arguments: [preflightJSON], localCancellation: cancellation)
+                try requireTaskDownloadTurn(before: true)
+                guard let preflight = try NativeJSON.jsonObject(with: Data(preflightRaw.utf8)) as? [String: Any],
+                      Set(preflight.keys) == Set(["version", "requestId", "attachmentJSON", "initialURL", "targetURI"]),
+                      Self.isInteger(preflight["version"]), (preflight["version"] as? NSNumber)?.intValue == 1,
+                      (preflight["requestId"] as? String).map({ Self.ownedEqual($0, request.id) }) == true,
+                      let attachmentJSON = preflight["attachmentJSON"] as? String, attachmentJSON.utf8.count <= 1_000_000,
+                      let selected = try NativeJSON.jsonObject(with: Data(attachmentJSON.utf8)) as? [String: Any],
+                      let initialURL = preflight["initialURL"] as? String, !initialURL.isEmpty,
+                      let target = preflight["targetURI"] as? String, taskDownloadManagedPath(target, root: managed),
+                      let original = selected["uri"] as? String else { throw Self.taskDownloadFailure }
+                guard original.isEmpty || taskDownloadManagedPath(original, root: managed) else { return try taskDownloadKnown("unavailable", request) }
+                turn.initialURL = initialURL; turn.originalURI = original; turn.targetURI = target
+                try coordinator.preflightDownloadV5(request, selectedJSON: attachmentJSON, targetURI: target, cancellation: cancellation)
+                try coordinator.beginV5(request, cancellation: cancellation)
+                turn.record = try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned()
+                try requireTaskDownloadTurn(before: true)
+                let rawConfig = try Self.ownedJSON(["backend": config[0].1.map { $0 as Any } ?? NSNull(), "url": config[1].1.map { $0 as Any } ?? NSNull(),
+                    "username": config[2].1.map { $0 as Any } ?? NSNull(), "allowInsecureHttp": config[3].1.map { $0 as Any } ?? NSNull(),
+                    "encryptionStateJSON": config[4].1.map { $0 as Any } ?? NSNull()])
+                let input = try Self.ownedJSON(["version": 1, "taskID": editor.snapshot.taskID, "beforePayloadJSON": editor.snapshot.payloadJSON,
+                    "requestJSON": request.json, "rawConfigJSON": rawConfig])
+                let block: @convention(block) (JSValue, JSValue) -> String = { [weak self, weak turn] metadata, bytes in
+                    guard let turn else { return "!MindwtrNativeError:Attachment preparation is unavailable" }
+                    guard let self, metadata.context === turn.runtime, bytes.context === turn.runtime,
+                          metadata.isString, bytes.isString, let metadata = metadata.toString(), let bytes = bytes.toString() else {
+                        turn.callbackRefused = true
+                        return "!MindwtrNativeError:Attachment preparation is unavailable"
+                    }
+                    do { return try self.taskDownloadSourceCallback(metadata, bytes, turn: turn, cancellation: cancellation) }
+                    catch { turn.callbackRefused = true; return "!MindwtrNativeError:Attachment preparation is unavailable" }
+                }
+                guard let callback = JSValue(object: block, in: runtime), runtime.exception == nil else { throw Self.taskDownloadFailure }
+                turn.preparing = true
+                let replyRaw: String
+                do { replyRaw = try invoke("iosTaskDraftPrepareAvailability", arguments: [input, callback], localCancellation: cancellation) }
+                catch { turn.preparing = false; jobs.drain(); throw error }
+                turn.preparing = false; jobs.drain()
+                try requireTaskDownloadTurn(before: true); try cancellation.check()
+                guard !turn.callbackRefused, replyRaw.utf8.count <= 2 * 1024 * 1024,
+                      let reply = try NativeJSON.jsonObject(with: Data(replyRaw.utf8)) as? [String: Any],
+                      Self.isInteger(reply["version"]), (reply["version"] as? NSNumber)?.intValue == 1,
+                      (reply["requestId"] as? String).map({ Self.ownedEqual($0, request.id) }) == true,
+                      let status = reply["status"] as? String else { throw Self.taskDownloadFailure }
+                if ["unavailable", "generation-conflict"].contains(status) {
+                    guard Set(reply.keys) == Set(["version", "requestId", "status"]), turn.receipt == nil, !turn.callbackUsed else { throw Self.taskDownloadFailure }
+                    return try taskDownloadKnown(status, request)
+                }
+                let resolvedJSON: String, resource: NativeAttachmentDraftStore.AvailabilityResource
+                if status == "prepared" {
+                    guard Set(reply.keys) == Set(["version", "requestId", "status", "attachmentJSON", "sourceToken", "sha256", "size"]),
+                          let source = turn.source, let sourceToken = turn.sourceToken, turn.receipt != nil,
+                          (reply["sourceToken"] as? String).map({ Self.ownedEqual($0, sourceToken) }) == true,
+                          (reply["sha256"] as? String).map({ Self.ownedEqual($0, source.sha256) }) == true,
+                          Self.isInteger(reply["size"]), (reply["size"] as? NSNumber)?.int64Value == source.size,
+                          let attachment = reply["attachmentJSON"] as? String else { throw Self.taskDownloadFailure }
+                    guard let resolved = try NativeJSON.jsonObject(with: Data(attachment.utf8)) as? [String: Any],
+                          (resolved["uri"] as? String).map({ Self.ownedEqual($0, target) }) == true else { throw Self.taskDownloadFailure }
+                    try jobs.requireProviderSource(turn.receipt!)
+                    resolvedJSON = attachment
+                    resource = .owned(source: .init(sourceURI: source.sourceURI, sha256: source.sha256, size: source.size, identity: source.identity,
+                        cacheRootIdentity: source.cacheRootIdentity, parentIdentity: source.parentIdentity), stage: nil, filled: nil, published: nil)
+                } else {
+                    guard ["available", "unrecoverable"].contains(status), Set(reply.keys) == Set(["version", "requestId", "status", "attachmentJSON"]),
+                          turn.receipt == nil, let attachment = reply["attachmentJSON"] as? String else { throw Self.taskDownloadFailure }
+                    resolvedJSON = attachment
+                    if status == "available" {
+                        guard let resolved = try NativeJSON.jsonObject(with: Data(attachment.utf8)) as? [String: Any], let uri = resolved["uri"] as? String,
+                              Self.ownedEqual(uri, original) || Self.ownedEqual(uri, target), !uri.isEmpty,
+                              let proof = try coordinator.snapshotFileOpen(attachmentID: request.attachmentID, targetURI: uri, cancellation: cancellation) else { throw Self.taskDownloadFailure }
+                        resource = .borrowed(proof: .init(sha256: proof.sha256, size: proof.size, identity: proof.identity, directoryIdentity: proof.directoryIdentity))
+                    } else { resource = .none }
+                }
+                guard resolvedJSON.utf8.count <= 1_000_000 else { throw Self.taskDownloadFailure }
+                let frozen = try invoke("attachmentDraftPrepareAvailability", arguments: [Self.ownedJSON(["version": 1, "taskID": editor.snapshot.taskID,
+                    "requestId": request.id, "attachmentId": request.attachmentID, "identity": request.identity,
+                    "beforePayloadJSON": editor.snapshot.payloadJSON, "status": status == "unrecoverable" ? "unrecoverable" : "available",
+                    "resolvedAttachmentJSON": resolvedJSON])], localCancellation: cancellation)
+                try requireTaskDownloadTurn(before: true)
+                let result = try coordinator.acceptPreparedAvailabilityV5(request: request, preparedJSON: frozen, resource: resource, cancellation: cancellation)
+                // Optional scratch cleanup cannot revoke the durable checkpoint ACK.
+                try? finishTaskDownloadSource(turn, completed: true)
+                return result
+            } catch {
+                turn.preparing = false
+                jobs.drain(); httpJobs?.cancelAndDrain(); secretJobs?.drain(); cryptoJobs?.drain()
+                try? finishTaskDownloadSource(turn, completed: false)
+                throw error
+            }
+        }
     }
     private func requireProviderOwner(_ turn: ProviderCopyTurn) throws {
         dispatchPrecondition(condition: .onQueue(queue))
@@ -16810,13 +17099,52 @@ private final class Engine: @unchecked Sendable {
         catch { throw HostFailure("Local attachment operation failed") }
     }
 
+    private func settleTaskDownloadTicket(_ id: String, terminalConsumed: Bool, turn: TaskDownloadTurn,
+                                          runtime: JSContext, host: JSValue) {
+        // Failure retires only this submission. Ports stay revoked while the
+        // accepted workers and the exact shared ticket reach terminal state.
+        turn.preparing = false
+        runtime.exception = nil
+        _ = host.invokeMethod("cancel", withArguments: [id])
+        runtime.exception = nil
+        attachmentJobs?.cancelAndDrain()
+        httpJobs?.cancelAndDrain()
+        secretJobs?.drain()
+        cryptoJobs?.drain()
+        if !terminalConsumed {
+            while true {
+                _ = runtime.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
+                runtime.exception = nil
+                let reply = host.invokeMethod("poll", withArguments: [id])
+                runtime.exception = nil
+                if let reply, !reply.isNull, !reply.isUndefined { break }
+                let delay = runtime.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? 1
+                runtime.exception = nil
+                Thread.sleep(forTimeInterval: delay.isFinite && delay > 0 ? min(delay, 10) / 1_000 : 0.001)
+            }
+        }
+        _ = runtime.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
+        runtime.exception = nil
+        _ = runtime.objectForKeyedSubscript("__resumeHostCalls")?.call(withArguments: [])
+        // Settlement must not replace the original owner/parse/cancel failure.
+        runtime.exception = nil
+    }
+
     private func invoke(_ method: String, arguments: [Any], localCancellation: NativeAttachmentCancellation? = nil) throws -> String {
         try denyCleanupOwner()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
+        try requireTaskDownloadTurn(before: taskDownloadTurn?.preparing == true)
         guard let context, let host = context.objectForKeyedSubscript("MindwtrHost") else { throw HostFailure("Core runtime unavailable") }
         invoking = true
         defer { invoking = false; scheduleAttachmentIdle(immediate: true) }
+        let selectedTurn = taskDownloadTurn
+        var selectedTicket: String?, selectedSucceeded = false, terminalConsumed = false
+        defer {
+            if let selectedTurn, !selectedSucceeded, let selectedTicket {
+                settleTaskDownloadTicket(selectedTicket, terminalConsumed: terminalConsumed, turn: selectedTurn, runtime: context, host: host)
+            }
+        }
         context.exception = nil
         let ticket: JSValue?
         if method == "dataSetting" {
@@ -16829,6 +17157,11 @@ private final class Engine: @unchecked Sendable {
         } else {
             ticket = host.invokeMethod(method, withArguments: arguments)
         }
+        // Capture a trusted submitted ticket before observing a synchronous
+        // exception so an accepted selected call is still cancelled and polled.
+        if selectedTurn != nil, let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true {
+            selectedTicket = id
+        }
         try checkException()
         guard let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true else {
             throw HostFailure("Malformed core request ticket")
@@ -16837,7 +17170,7 @@ private final class Engine: @unchecked Sendable {
         // Promise jobs drain whenever JSC returns from a call; timers share this queue.
         var cancelled = false
         defer {
-            if cancelled {
+            if cancelled && selectedTurn == nil {
                 attachmentJobs?.cancelAndDrain()
                 httpJobs?.cancelAndDrain()
                 secretJobs?.drain()
@@ -16862,6 +17195,7 @@ private final class Engine: @unchecked Sendable {
                     attachmentJobs?.cancelAndDrain()
                     httpJobs?.cancelAndDrain()
                     secretJobs?.drain()
+                    if selectedTurn != nil { cryptoJobs?.drain() }
                 }
             }
             if reply == nil || reply!.isNull || reply!.isUndefined {
@@ -16874,6 +17208,9 @@ private final class Engine: @unchecked Sendable {
                 try checkException()
             }
             if let reply, !reply.isNull, !reply.isUndefined {
+                // poll has already removed this ticket, even if parsing or the
+                // post-terminal owner fence refuses its returned value.
+                terminalConsumed = true
                 guard reply.isString, let json = reply.toString(),
                       let envelope = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any],
                       let ok = envelope["ok"] as? Bool else { throw HostFailure("Malformed core response") }
@@ -16884,10 +17221,14 @@ private final class Engine: @unchecked Sendable {
                 guard let value = envelope["value"] else { throw HostFailure("Core response has no value") }
                 try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
-                return String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]), as: UTF8.self)
+                try requireTaskDownloadTurn(before: taskDownloadTurn?.preparing == true)
+                let result = String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]), as: UTF8.self)
+                selectedSucceeded = true
+                return result
             }
             try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
+            try requireTaskDownloadTurn(before: taskDownloadTurn?.preparing == true)
             let delay = context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? 1
             try checkException()
             Thread.sleep(forTimeInterval: delay.isFinite && delay > 0 ? min(delay, 10) / 1_000 : 0.001)
@@ -16896,7 +17237,7 @@ private final class Engine: @unchecked Sendable {
 
     private func scheduleAttachmentIdle(immediate: Bool = false) {
         guard started, !closed, !invoking, !recoveryActivationPending, pending == nil,
-              !cleanupOwed,
+              !cleanupOwed, taskDownloadTurn == nil,
               attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil, let context else { return }
         let delay = immediate ? 0 : context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? -1
         guard delay.isFinite, delay >= 0 else { return }
@@ -16914,7 +17255,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         guard generation == attachmentGeneration else { return }
         attachmentIdlePump = nil
-        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, let context else { return }
+        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, taskDownloadTurn == nil, let context else { return }
         _ = context.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
         // No arbitrary JS exception content enters diagnostics.
         if context.exception != nil { context.exception = nil }
@@ -16931,6 +17272,7 @@ private final class Engine: @unchecked Sendable {
 
     private func ordinaryGuardedSQL(_ sql: String, parameters: String? = nil) throws -> String {
         try denyCleanupOwner()
+        guard taskDownloadTurn == nil else { throw Self.taskDownloadFailure }
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
         let result: String
@@ -16947,6 +17289,7 @@ private final class Engine: @unchecked Sendable {
 
     private func requireDeviceStorageAdmission() throws -> NativeDeviceKV {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard taskDownloadTurn == nil else { throw Self.deviceStorageUnavailable }
         try denyCleanupOwner()
         guard started, !closed, !recoveryActivationPending, pending == nil,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
@@ -16955,6 +17298,19 @@ private final class Engine: @unchecked Sendable {
         try requireNoAttachmentDraft()
         guard let deviceStorage else { throw Self.deviceStorageUnavailable }
         return deviceStorage
+    }
+    private func taskDownloadLegacyRead(_ names: [String]) throws -> [(String, String?)] {
+        guard let turn = taskDownloadTurn, turn.preparing, !names.isEmpty,
+              names.count <= 2, names.allSatisfy({ Self.taskDownloadLegacyKeys.contains($0) }) else { throw Self.deviceStorageUnavailable }
+        try requireTaskDownloadTurn(before: true)
+        let values = try turn.storage.multiGet(names)
+        for (name, value) in values {
+            if let existing = turn.legacy.first(where: { Self.ownedEqual($0.0, name) }) {
+                guard Self.taskDownloadOptionalEqual(existing.1, value) else { throw Self.deviceStorageUnavailable }
+            } else { turn.legacy.append((name, value)) }
+        }
+        try requireTaskDownloadTurn(before: true)
+        return values
     }
     private static func deviceStorageText(_ value: JSValue) throws -> String {
         guard value.isString, let text = value.toString(), text.utf8.count <= deviceStorageFrameLimit else {
@@ -16998,6 +17354,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         do {
             let result = try work()
+            if taskDownloadTurn != nil { return result }
             let retiredSecret = legacySecretRemoval()
             guard let runtime = context else { throw Self.deviceStorageUnavailable }
             let generation = attachmentGeneration
@@ -17025,9 +17382,18 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
-    private func requireHTTPAdmission() throws {
+    private func requireHTTPAdmission(_ input: String) throws {
         dispatchPrecondition(condition: .onQueue(queue))
         try denyCleanupOwner()
+        if let turn = taskDownloadTurn {
+            guard input.utf8.count <= 12 * 1024 * 1024 else { throw Self.taskDownloadFailure }
+            try requireTaskDownloadTurn(before: true)
+            guard turn.preparing else { throw Self.taskDownloadFailure }
+            guard let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any],
+                  let url = raw["url"] as? String, Self.ownedEqual(url, turn.initialURL),
+                  raw["method"] as? String == "GET", raw["text"] == nil, raw["base64"] == nil else { throw Self.taskDownloadFailure }
+            return
+        }
         guard started, !closed, !recoveryActivationPending, pending == nil,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
             throw HostFailure("HTTP bridge is unavailable")
@@ -17035,9 +17401,18 @@ private final class Engine: @unchecked Sendable {
         try requireNoAttachmentDraft()
     }
 
-    private func requireSecretAdmission() throws {
+    private func requireSecretAdmission(_ input: String) throws {
         dispatchPrecondition(condition: .onQueue(queue))
         try denyCleanupOwner()
+        if let turn = taskDownloadTurn {
+            guard input.utf8.count <= 512 * 1024 else { throw Self.taskDownloadFailure }
+            try requireTaskDownloadTurn(before: true)
+            guard turn.preparing else { throw Self.taskDownloadFailure }
+            guard let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any],
+                  Set(raw.keys) == Set(["op", "key"]), raw["op"] as? String == "get", let account = raw["key"] as? String,
+                  ["mindwtr_webdav_password", "mindwtr_sync_encryption_key_v1"].contains(account) else { throw Self.taskDownloadFailure }
+            return
+        }
         guard started, !closed, !recoveryActivationPending, pending == nil,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
             throw HostFailure("Secure storage bridge is unavailable")
@@ -17045,9 +17420,16 @@ private final class Engine: @unchecked Sendable {
         try requireNoAttachmentDraft()
     }
 
-    private func requireCryptoAdmission() throws {
+    private func requireCryptoAdmission(_ input: String) throws {
         dispatchPrecondition(condition: .onQueue(queue))
         try denyCleanupOwner()
+        if let turn = taskDownloadTurn {
+            guard input.utf8.count <= 12 * 1024 * 1024 else { throw Self.taskDownloadFailure }
+            try requireTaskDownloadTurn(before: true)
+            guard turn.preparing else { throw Self.taskDownloadFailure }
+            guard let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any], raw["op"] as? String == "aesGcmOpen" else { throw Self.taskDownloadFailure }
+            return
+        }
         guard started, !closed, !recoveryActivationPending, pending == nil,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, lockFD >= 0 else {
             throw HostFailure("Crypto bridge is unavailable")
@@ -17273,7 +17655,7 @@ private final class Engine: @unchecked Sendable {
         let netFetch: @convention(block) (JSValue) -> String = { [weak self] request in
             guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:HTTP request is invalid" }
             return self.guarded {
-                try self.requireHTTPAdmission()
+                try self.requireHTTPAdmission(json)
                 guard let jobs = self.httpJobs else { throw HostFailure("HTTP bridge is unavailable") }
                 return try jobs.submit(json)
             } ?? "!MindwtrNativeError:HTTP bridge is unavailable"
@@ -17285,7 +17667,7 @@ private final class Engine: @unchecked Sendable {
         let secretCall: @convention(block) (JSValue) -> String = { [weak self] request in
             guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Secure storage request is invalid" }
             return self.guarded {
-                try self.requireSecretAdmission()
+                try self.requireSecretAdmission(json)
                 guard let jobs = self.secretJobs else { throw HostFailure("Secure storage bridge is unavailable") }
                 return try jobs.submit(json)
             } ?? "!MindwtrNativeError:Secure storage bridge is unavailable"
@@ -17293,7 +17675,7 @@ private final class Engine: @unchecked Sendable {
         let cryptoCall: @convention(block) (JSValue) -> String = { [weak self] request in
             guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Crypto request is invalid" }
             return self.guarded {
-                try self.requireCryptoAdmission()
+                try self.requireCryptoAdmission(json)
                 guard let jobs = self.cryptoJobs else { throw HostFailure("Crypto bridge is unavailable") }
                 return try jobs.submit(json)
             } ?? "!MindwtrNativeError:Crypto bridge is unavailable"
@@ -17312,8 +17694,9 @@ private final class Engine: @unchecked Sendable {
             let get: @convention(block) (JSValue) -> String = { [weak self] key in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.deviceStorageResult {
-                    let key = try Self.deviceStorageText(key), store = try self.requireDeviceStorageAdmission()
-                    let value = try store.get(key)
+                    let key = try Self.deviceStorageText(key)
+                    let value = try self.taskDownloadTurn == nil ? self.requireDeviceStorageAdmission().get(key)
+                        : self.taskDownloadLegacyRead([key])[0].1
                     return try Self.deviceStorageJSON([value.map { $0 as Any } ?? NSNull()], strings: value.map { [$0] } ?? [])
                 } ?? "!MindwtrNativeError:Device settings storage is unavailable"
             }
@@ -17336,8 +17719,9 @@ private final class Engine: @unchecked Sendable {
             let multiGet: @convention(block) (JSValue) -> String = { [weak self] keys in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.deviceStorageResult {
-                    let keys = try Self.deviceStorageKeys(keys), store = try self.requireDeviceStorageAdmission()
-                    let pairs = try store.multiGet(keys)
+                    let keys = try Self.deviceStorageKeys(keys)
+                    let pairs = try self.taskDownloadTurn == nil ? self.requireDeviceStorageAdmission().multiGet(keys)
+                        : self.taskDownloadLegacyRead(keys)
                     let strings = pairs.flatMap { pair in [pair.0] + (pair.1.map { [$0] } ?? []) }
                     return try Self.deviceStorageJSON(pairs.map { [$0.0, $0.1.map { $0 as Any } ?? NSNull()] }, strings: strings)
                 } ?? "!MindwtrNativeError:Device settings storage is unavailable"
@@ -17366,7 +17750,8 @@ private final class Engine: @unchecked Sendable {
         if let jobs = attachmentJobs {
             let fileCall: @convention(block) (JSValue) -> String = { [weak self] request in
                 guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Attachment file request is invalid" }
-                return self.guarded { try self.requireRawAttachmentRead(json); return try jobs.submit(json) } ?? "!MindwtrNativeError:Attachment file operation is unavailable"
+                return self.guarded { try self.requireRawAttachmentRead(json); return try jobs.submit(json,
+                    maximumReadBytes: self.taskDownloadTurn == nil ? nil : 8_388_608) } ?? "!MindwtrNativeError:Attachment file operation is unavailable"
             }
             let installerCall: @convention(block) (JSValue) -> String = { [weak self] request in
                 guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Attachment installer request is invalid" }
@@ -17422,6 +17807,7 @@ private final class Engine: @unchecked Sendable {
         ioBodySource = nil
         attachmentJobs?.shutdown(); attachmentJobs = nil
         providerCopy = nil
+        taskDownloadTurn = nil
         started = false
         recoveryActivationPending = false
         startupBoardResult = nil

@@ -147,7 +147,8 @@ final class NativeAttachmentFiles {
         cacheIdentity = try Self.identity(cacheFD)
     }
 
-    func call(_ json: String, checkCancellation: () throws -> Void = {}) throws -> Reply {
+    func call(_ json: String, maximumReadBytes: Int? = nil, checkCancellation: () throws -> Void = {}) throws -> Reply {
+        if let maximumReadBytes { guard (0...Self.maximumBytes).contains(maximumReadBytes) else { throw NativeAttachmentFilesError.invalidRequest } }
         guard json.utf8.count <= 24 * 1024 * 1024,
               let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)),
               let request = object as? [String: Any], let op = request["op"] as? String else {
@@ -170,24 +171,31 @@ final class NativeAttachmentFiles {
         try checkCancellation()
         if op == "barrier" { return Reply(value: nil, bytes: nil) }
         if op == "sha256" {
+            if let maximumReadBytes {
+                guard let encoded = request["base64"] as? String, encoded.utf8.count <= ((maximumReadBytes + 2) / 3) * 4 else { throw NativeAttachmentFilesError.tooLarge }
+            }
             let bytes = try Self.decodeBytes(request["base64"])
+            guard maximumReadBytes == nil || bytes.count <= maximumReadBytes! else { throw NativeAttachmentFilesError.tooLarge }
             try checkCancellation()
             return Reply(value: Self.digest(bytes), bytes: nil)
         }
         let path = try reference(request["uri"])
         switch op {
-        case "getInfo": return Reply(value: try info(path), bytes: nil)
+        case "getInfo":
+            let value = try info(path)
+            if let maximumReadBytes, let size = value["size"] as? NSNumber, size.int64Value > Int64(maximumReadBytes) { throw NativeAttachmentFilesError.tooLarge }
+            return Reply(value: value, bytes: nil)
         case "makeDirectory":
             let directory = try openDirectory(path, create: true)
             defer { Darwin.close(directory) }
             let named = try openDirectory(path); defer { Darwin.close(named) }
             guard try Self.identity(directory) == Self.identity(named) else { throw NativeAttachmentFilesError.unavailable }
         case "readDirectory": return Reply(value: try list(path, checkCancellation: checkCancellation), bytes: nil)
-        case "readBytes": return Reply(value: nil, bytes: try read(path, position: 0, length: nil, checkCancellation: checkCancellation))
+        case "readBytes": return Reply(value: nil, bytes: try read(path, position: 0, length: nil, maximumReadBytes: maximumReadBytes, checkCancellation: checkCancellation))
         case "readBytesRange":
             let position = try Self.integer(request["position"]), length = try Self.integer(request["length"])
             guard length <= Self.maximumBytes else { throw NativeAttachmentFilesError.tooLarge }
-            return Reply(value: nil, bytes: try read(path, position: position, length: length, checkCancellation: checkCancellation))
+            return Reply(value: nil, bytes: try read(path, position: position, length: length, maximumReadBytes: maximumReadBytes, checkCancellation: checkCancellation))
         case "writeBytes":
             let bytes = try Self.decodeBytes(request["base64"])
             try publish(path, checkCancellation: checkCancellation) { output in
@@ -206,7 +214,7 @@ final class NativeAttachmentFiles {
             let parent = try openParent(path); defer { Darwin.close(parent.fd) }
             try verify(parent, path: path)
             guard Darwin.fsync(parent.fd) == 0 else { throw NativeAttachmentFilesError.unavailable }
-        case "sha256File": return Reply(value: try hash(path, checkCancellation: checkCancellation), bytes: nil)
+        case "sha256File": return Reply(value: try hash(path, maximumReadBytes: maximumReadBytes, checkCancellation: checkCancellation), bytes: nil)
         default: throw NativeAttachmentFilesError.invalidRequest
         }
         return Reply(value: nil, bytes: nil)
@@ -224,7 +232,7 @@ final class NativeAttachmentFiles {
 
     /// Captures a shared-selected baseline candidate's current local generation.
     /// This never creates directories, reads unmanaged targets, or retires bytes.
-    func snapshotBaselineAttachment(attachmentID: String, targetURI: String,
+    func snapshotBaselineAttachment(attachmentID: String, targetURI: String, maximumReadBytes: Int? = nil,
                                     checkCancellation: () throws -> Void = {}) throws -> BaselineAttachmentObservation {
         guard Self.validBaselineAttachmentID(attachmentID), !targetURI.isEmpty,
               targetURI.utf8.count <= 16 * 1024, !targetURI.utf8.contains(0),
@@ -290,6 +298,7 @@ final class NativeAttachmentFiles {
         }
         let fd = try openFile(parent); defer { Darwin.close(fd) }
         let before = try Self.regular(fd)
+        if let maximumReadBytes { guard maximumReadBytes >= 0, before.st_size <= Int64(maximumReadBytes) else { throw NativeAttachmentFilesError.tooLarge } }
         guard Self.unchanged(named, before), before.st_nlink == 1,
               before.st_size <= 9_007_199_254_740_991 else { throw NativeAttachmentFilesError.unavailable }
         func validatePresent() throws {
@@ -302,7 +311,7 @@ final class NativeAttachmentFiles {
         // retained descriptors with the named tree on both sides of each call.
         func check() throws { try validatePresent(); try checkCancellation(); try validatePresent() }
         try check()
-        let content = try hashContents(fd, checkCancellation: check)
+        let content = try hashContents(fd, maximumReadBytes: maximumReadBytes, checkCancellation: check)
         try check()
         guard content.size == before.st_size else { throw NativeAttachmentFilesError.unavailable }
         return observed(.present(.init(targetURI: targetURI, sha256: content.sha256, size: content.size,
@@ -1167,43 +1176,48 @@ final class NativeAttachmentFiles {
         guard try Self.identity(fd) == Self.identity(current) else { throw NativeAttachmentFilesError.unavailable }
         return names
     }
-    private func read(_ path: Reference, position: Int, length: Int?, checkCancellation: () throws -> Void) throws -> Data {
+    private func read(_ path: Reference, position: Int, length: Int?, maximumReadBytes: Int? = nil, checkCancellation: () throws -> Void) throws -> Data {
         let parent = try openParent(path); defer { Darwin.close(parent.fd) }
         let fd = try openFile(parent); defer { Darwin.close(fd) }
         let before = try Self.regular(fd)
-        if length == nil && before.st_size > Self.maximumBytes { throw NativeAttachmentFilesError.tooLarge }
+        let cap = maximumReadBytes ?? Self.maximumBytes
+        if (length == nil || maximumReadBytes != nil) && before.st_size > Int64(cap) { throw NativeAttachmentFilesError.tooLarge }
         guard Darwin.lseek(fd, off_t(position), SEEK_SET) >= 0 else { throw NativeAttachmentFilesError.unavailable }
         #if DEBUG
         try afterSourceOpened?()
         #endif
         var bytes = Data()
-        let capacity = min(max(0, before.st_size - Int64(position)), Int64(length ?? Self.maximumBytes))
+        let capacity = min(max(0, before.st_size - Int64(position)), Int64(min(length ?? cap, cap)))
         bytes.reserveCapacity(Int(capacity))
         try consume(fd, limit: length, checkCancellation: checkCancellation) { chunk in
-            guard bytes.count <= Self.maximumBytes - chunk.count else { throw NativeAttachmentFilesError.tooLarge }
+            guard chunk.count <= cap, bytes.count <= cap - chunk.count else { throw NativeAttachmentFilesError.tooLarge }
             bytes.append(chunk)
         }
-        guard bytes.count <= Self.maximumBytes else { throw NativeAttachmentFilesError.tooLarge }
+        guard bytes.count <= cap else { throw NativeAttachmentFilesError.tooLarge }
         try stable(fd, before: before, parent: parent, path: path)
         return bytes
     }
-    private func hash(_ path: Reference, checkCancellation: () throws -> Void) throws -> String {
+    private func hash(_ path: Reference, maximumReadBytes: Int? = nil, checkCancellation: () throws -> Void) throws -> String {
         let parent = try openParent(path); defer { Darwin.close(parent.fd) }
         let fd = try openFile(parent); defer { Darwin.close(fd) }
         let before = try Self.regular(fd)
         #if DEBUG
         try afterSourceOpened?()
         #endif
-        let content = try hashContents(fd, checkCancellation: checkCancellation)
+        let content = try hashContents(fd, maximumReadBytes: maximumReadBytes, checkCancellation: checkCancellation)
         try stable(fd, before: before, parent: parent, path: path)
         return content.sha256
     }
-    private func hashContents(_ fd: Int32, checkCancellation: () throws -> Void,
+    private func hashContents(_ fd: Int32, maximumReadBytes: Int? = nil, checkCancellation: () throws -> Void,
                               chunk: (Data) throws -> Void = { _ in }) throws -> AttachmentStageContent {
+        if let maximumReadBytes {
+            guard maximumReadBytes >= 0, try Self.regular(fd).st_size <= Int64(maximumReadBytes) else { throw NativeAttachmentFilesError.tooLarge }
+        }
         var digest = SHA256(), size: Int64 = 0
         try consume(fd, checkCancellation: checkCancellation) { bytes in
             let next = size.addingReportingOverflow(Int64(bytes.count))
             guard !next.overflow else { throw NativeAttachmentFilesError.unavailable }
+            if let maximumReadBytes { guard next.partialValue <= Int64(maximumReadBytes) else { throw NativeAttachmentFilesError.tooLarge } }
             size = next.partialValue
             digest.update(data: bytes)
             try chunk(bytes)
