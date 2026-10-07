@@ -20330,13 +20330,28 @@ pub(crate) fn sync_fs_reserve_attachment_generation(
 ) -> Result<PublicationReservation, String> {
     let target_path = PathBuf::from(target_path);
     with_file_sync_lease(&state, &lease_token, window.label(), |lease| {
-        file_sync_attachment_publication::reserve(
-            &crate::storage::get_data_dir(&app),
+        let data_dir = crate::storage::get_data_dir(&app);
+        let reservation = file_sync_attachment_publication::reserve(
+            &data_dir,
             &mut lease.publication_root,
             &target_path,
             expected_size,
             &expected_sha256,
-        )
+        )?;
+        // The plugin's runtime scope uses literal leading dots on Unix even
+        // when its command scope permits dotfiles. Grant only this reserved file.
+        if let Err(error) = app.fs_scope().allow_file(&reservation.scratch_path) {
+            file_sync_attachment_publication::abandon(
+                &data_dir,
+                &mut lease.publication_root,
+                &reservation.operation_id,
+            )?;
+            return Err(format!("Failed to grant attachment staging access: {error}"));
+        }
+        log::info!(
+            "File Sync attachment staging access granted extra.releaseCheck=v1.3.5/file-sync-staging-scope"
+        );
+        Ok(reservation)
     })
 }
 
