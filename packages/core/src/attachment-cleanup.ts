@@ -114,6 +114,18 @@ function findPurgedParentAttachmentIds(appData: AppData): Set<string> {
  * pendingRemoteDeletes, which deliberately waits for the interval so retries
  * don't burn the attempt budget in minutes.
  */
+const attachmentHasFreshCleanupWork = (
+    attachment: Attachment,
+    parentPurged: boolean,
+    pendingCloudKeys: ReadonlySet<string>,
+): boolean => {
+    if (parentPurged) return true;
+    if (!attachment.deletedAt) return false;
+    if (attachment.kind === 'file' && attachment.localStatus !== 'missing') return true;
+    const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(attachment.cloudKey);
+    return Boolean(cloudKey && !pendingCloudKeys.has(cloudKey));
+};
+
 export function hasFreshAttachmentCleanupWork(appData: AppData): boolean {
     const pendingRemoteDeletes = normalizePendingRemoteDeletes(appData.settings.attachments?.pendingRemoteDeletes);
     // Drain an attempt-zero digest-qualified entry left by versions that used
@@ -127,16 +139,9 @@ export function hasFreshAttachmentCleanupWork(appData: AppData): boolean {
         return true;
     }
     const pendingCloudKeys = new Set(pendingRemoteDeletes.map((entry) => entry.cloudKey));
-    const hasWork = (attachments: readonly Attachment[] | undefined, parentPurged: boolean): boolean => {
-        if (!attachments?.length) return false;
-        if (parentPurged) return true;
-        return attachments.some((attachment) => {
-            if (!attachment.deletedAt) return false;
-            if (attachment.kind === 'file' && attachment.localStatus !== 'missing') return true;
-            const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(attachment.cloudKey);
-            return Boolean(cloudKey && !pendingCloudKeys.has(cloudKey));
-        });
-    };
+    const hasWork = (attachments: readonly Attachment[] | undefined, parentPurged: boolean): boolean => (
+        Boolean(attachments?.some((attachment) => attachmentHasFreshCleanupWork(attachment, parentPurged, pendingCloudKeys)))
+    );
     return appData.tasks.some((task) => hasWork(task.attachments, Boolean(task.purgedAt)))
         || appData.projects.some((project) => hasWork(project.attachments, Boolean(project.purgedAt)));
 }
@@ -194,7 +199,7 @@ export type AttachmentCleanupLifecycleOptions = {
     isRemoteMissingError?: (error: unknown) => boolean;
     onRemoteAttachmentMissing?: (target: AttachmentCleanupRemoteTarget) => void;
     onRemoteDeleteError?: (target: AttachmentCleanupRemoteTarget, error: unknown) => void;
-    onBatchLimitReached?: (info: { limit: number; total: number }) => void;
+    onBatchLimitReached?: (info: { limit: number; total: number; fresh: number }) => void;
 };
 
 export type AttachmentCleanupLifecycleResult = {
@@ -424,12 +429,20 @@ export async function runAttachmentCleanupLifecycle(
     let reachedBatchLimit = cleanupTargets.size > maxAttachmentTargets;
     const orphanedIds = new Set(orphanedAttachments.map((attachment) => attachment.id));
     const purgedParentAttachmentIds = findPurgedParentAttachmentIds(options.appData);
+    // Processed tombstones stay in the doc, so a batch taken in doc order would spend
+    // itself on them every cycle and never reach the rest: unprocessed work goes first.
+    const pendingCloudKeys = new Set(previousPendingByCloudKey.keys());
+    const hasFreshWork = (attachment: Attachment) => (
+        attachmentHasFreshCleanupWork(attachment, purgedParentAttachmentIds.has(attachment.id), pendingCloudKeys)
+    );
+    const orderedTargets = Array.from(cleanupTargets.values())
+        .sort((left, right) => Number(hasFreshWork(right)) - Number(hasFreshWork(left)));
     const processedOrphanedIds = new Set<string>();
     const processedFileTombstoneIds = new Set<string>();
     const clearedCloudKeys = new Set<string>();
     let processedCount = 0;
 
-    for (const attachment of cleanupTargets.values()) {
+    for (const attachment of orderedTargets) {
         if (processedCount >= maxAttachmentTargets) break;
         processedCount += 1;
         if (orphanedIds.has(attachment.id)) {
@@ -529,6 +542,7 @@ export async function runAttachmentCleanupLifecycle(
         options.onBatchLimitReached?.({
             limit: maxAttachmentTargets,
             total: Math.max(cleanupTargets.size, remoteCleanupTargets.size),
+            fresh: orderedTargets.filter(hasFreshWork).length,
         });
     }
 

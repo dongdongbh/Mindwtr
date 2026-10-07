@@ -94,6 +94,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'route', 'elapsedMs', 'moduleElapsedMs',
     // Global shortcut startup: bounded configured and applied shortcut names.
     'requestedShortcut', 'appliedShortcut',
+    // cleanup-batch-fresh-first: batch size and how many targets still had work (with total below).
+    'limit', 'fresh',
     // PR1348 native reminder replacement fields.
     'tagged', 'replaced', 'taggedRemoved',
     'releaseCheck', 'backend', 'statusPublished', 'lastSyncAt', 'lastSyncStatus',

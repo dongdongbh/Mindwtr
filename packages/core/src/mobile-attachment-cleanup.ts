@@ -191,10 +191,12 @@ export const runMobileAttachmentCleanup = async (
       ) throw error;
       options.logSyncWarning('Failed to delete remote attachment', error);
     },
-    onBatchLimitReached: ({ limit, total }) => {
+    onBatchLimitReached: ({ limit, total, fresh }) => {
       options.logSyncInfo('Attachment cleanup batch limit reached', {
+        releaseCheck: 'v1.3.5/cleanup-batch-fresh-first',
         limit: String(limit),
         total: String(total),
+        fresh: String(fresh),
       });
     },
   });
