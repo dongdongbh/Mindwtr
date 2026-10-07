@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   activateWatchConnectivity: vi.fn(async () => undefined),
-  addPendingWatchCaptureListener: vi.fn(() => ({ remove: vi.fn() })),
-  updateWatchApplicationContext: vi.fn(async () => undefined),
+  addPendingWatchCaptureListener: vi.fn((_listener: () => void) => ({ remove: vi.fn() })),
+  updateWatchApplicationContext: vi.fn(async (_context: unknown) => undefined),
   subscribeStore: vi.fn(() => () => undefined),
 }));
 
@@ -57,12 +57,23 @@ describe('useRootLayoutWatch', () => {
 
     expect(mocks.activateWatchConnectivity).not.toHaveBeenCalled();
     expect(mocks.addPendingWatchCaptureListener).not.toHaveBeenCalled();
+    expect(mocks.updateWatchApplicationContext).not.toHaveBeenCalled();
     expect(mocks.subscribeStore).not.toHaveBeenCalled();
 
     await act(async () => { tree.update(<Harness canonicalDataReady />); });
     expect(mocks.activateWatchConnectivity).toHaveBeenCalledOnce();
-    expect(mocks.addPendingWatchCaptureListener).toHaveBeenCalledWith(onPendingCapture);
+    expect(mocks.addPendingWatchCaptureListener).toHaveBeenCalledOnce();
+    const listener = mocks.addPendingWatchCaptureListener.mock.calls[0][0];
     await vi.waitFor(() => expect(mocks.updateWatchApplicationContext).toHaveBeenCalledOnce());
+    const firstContext = mocks.updateWatchApplicationContext.mock.calls[0][0];
+    expect(onPendingCapture).not.toHaveBeenCalled();
+    act(() => listener());
+    expect(onPendingCapture).toHaveBeenCalledOnce();
+    expect(onPendingCapture).toHaveBeenCalledWith();
+    expect(mocks.updateWatchApplicationContext).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(mocks.updateWatchApplicationContext).toHaveBeenCalledTimes(2));
+    expect(mocks.updateWatchApplicationContext).toHaveBeenNthCalledWith(2, firstContext);
+    expect(onPendingCapture.mock.invocationCallOrder[0]).toBeLessThan(mocks.updateWatchApplicationContext.mock.invocationCallOrder[1]);
     act(() => tree.unmount());
   });
 });
