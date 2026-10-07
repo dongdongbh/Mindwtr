@@ -460,6 +460,17 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             return try files.copyProviderSource(url, checkCancellation: cancellation.check)
         }
     }
+    func createPlaintextDownloadSource(bytes: Data, cancellation: NativeAttachmentCancellation) throws
+        -> (receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt, source: NativeAttachmentFiles.CacheSourceProof) {
+        guard bytes.count <= NativeAttachmentFiles.maximumPlaintextSourceBytes else { throw NativeAttachmentFilesError.tooLarge }
+        return try queue.sync {
+            lock.lock(); let ready = accepting; lock.unlock()
+            guard ready else { throw NativeAttachmentFileJobsError.unavailable }
+            try cancellation.check()
+            mutationLock.lock(); defer { mutationLock.unlock() }
+            return try files.createPlaintextDownloadSource(bytes: bytes, checkCancellation: cancellation.check)
+        }
+    }
     func copyPhotoProviderSource(_ url: URL, selection: NativeAttachmentPhotoSelection,
                                  cancellation: NativeAttachmentCancellation) throws -> NativeAttachmentFiles.ProviderCacheCopyReceipt {
         try queue.sync {
