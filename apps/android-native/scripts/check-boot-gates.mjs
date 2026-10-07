@@ -1189,7 +1189,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
-    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*\.\.\.\(attachmentsHost \? \{ attachments: attachmentsHost \} : \{\}\) \}\)/);
+    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*get attachments\(\) \{ return iosProjectAttachmentDownload \? iosManualSync\?\.attachmentsHost : attachmentsHost; \} \}\)/);
     assert.match(host, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];/);
     // An entry replays only while it fits its write as host-entry takes it (WriteJournal.SHAPES): a JSON object for `json`, a
     // boolean for a boolean, a Menu command for menuCommand's name, text for the rest; MENU names exactly host-entry's
@@ -3529,6 +3529,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
 const fakeCore = `
 export { SYNC_BACKEND_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-storage-keys.ts'))};
+import { NativeAttachmentCleanupUnconfirmedError as RealCleanupError } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};
+export { RealCleanupError as NativeAttachmentCleanupUnconfirmedError };
 import { mapSqliteTaskRow as hydrateTask285 } from ${JSON.stringify(resolve(app, '../../packages/core/src/sqlite-adapter.ts'))};
 globalThis.hydrateTaskAttachments285 = (attachments) => hydrateTask285({ id: 'task285', attachments: JSON.stringify(attachments) }).attachments;
 export { planAttachmentOpen, getAttachmentResolutionMessage } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-editor-model.ts'))};
@@ -3648,7 +3650,8 @@ export function setNativeReplayTokens(mode) { globalThis.replayTokens = mode; }
 export async function pruneNativeRequestReceipts() { return 3; }
 export function setStorageAdapter(adapter) { globalThis.adapter = adapter; }
 export function getStorageAdapter() { return globalThis.adapter; }
-export async function flushPendingSave() { globalThis.events.push('flush'); }
+export async function flushPendingSave() { globalThis.events.push('flush'); await globalThis.flushHold;
+  if (globalThis.flushError) throw new Error(globalThis.flushError); }
 export function getPersistenceStatus() { globalThis.onPersistenceStatus?.(); return globalThis.persistenceStatus ||
   { generation: 0, queued: false, inFlight: false, immediate: false, retrying: false, failed: false }; }
 export function isSupportedLanguage(value) { return ['en', 'zh', 'fa', 'de'].includes(value); }
@@ -3737,10 +3740,20 @@ export function createNativeHostContract(bindings = {}) {
     async addAttachmentFile(input) { globalThis.attachmentInputs.push(['draftAddFile', input]); return globalThis.attachmentReply; },
     async removeAttachment(input) { globalThis.attachmentInputs.push(['draftRemove', input]); return globalThis.attachmentReply; },
     getProjectAttachmentEditOptions(input) {
+      globalThis.projectOptionsReads = (globalThis.projectOptionsReads ?? 0) + 1;
       const project = globalThis.ownerProjects.find((item) => item.id === input.projectId);
       return project && !project.deletedAt && !project.purgedAt
         ? { ok: true, value: { revision: 'project-revision', project, canEdit: project.status !== 'archived' } }
         : { ok: false, error: { code: 'STALE_REVISION', message: 'Project unavailable' } };
+    },
+    async downloadAttachment(input) {
+      globalThis.attachmentInputs.push(['downloadAttachment', input]);
+      globalThis.downloadHosts.push(bindings.attachments);
+      await globalThis.downloadHold;
+      if (globalThis.downloadFatal) throw new RealCleanupError();
+      if (globalThis.downloadError) throw new Error(globalThis.downloadError);
+      globalThis.afterDownload?.();
+      return globalThis.attachmentReply;
     },
     async openAttachment(input) { globalThis.attachmentInputs.push(['openAttachment', input]); return globalThis.attachmentReply; },
     async settleTaskDraftAttachments(input) { globalThis.attachmentInputs.push(['settleTaskDraftAttachments', input]); return globalThis.attachmentReply; },
@@ -3961,7 +3974,7 @@ const built = await build({
         plugin.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: fakeCoreWithSync, loader: 'js', resolveDir: app }));
     } }],
 });
-const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, configure = () => {}) => {
+const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, configure = () => {}, source = built.outputFiles[0].text) => {
     const state = {
         fakeData: { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} },
         fakeDataSequence, activationCount: 0, saveCount: 0, queryCount: 0,
@@ -4040,7 +4053,7 @@ const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, c
         },
     };
     configure(state);
-    vm.runInNewContext(built.outputFiles[0].text, state);
+    vm.runInNewContext(source, state);
     return state;
 };
 const poll = async (state, id) => {
@@ -4180,6 +4193,169 @@ for (const [bridge, receipt, operation] of [
         assert.equal(typeof other.__mindwtrNative.kvMultiGet, 'undefined');
     }
 }
+// Task346 exercises the production entry with one narrow factory stand-in.
+// Actual core availability/installer/JSC acceptance is a separate native suite.
+{
+    const syncFixture = `
+export function createNativeSync() {
+  globalThis.syncFactoryCalls++;
+  return { attachmentsHost: globalThis.remoteAttachmentHost, settingsHost: {} };
+}
+`;
+    const downloadBuilt = await build({
+        entryPoints: [resolve(app, 'bundle/host-entry.ts')], bundle: true, write: false, format: 'iife',
+        plugins: [{ name: 'project-download-entry', setup(plugin) {
+            plugin.onResolve({ filter: /^\.\/host-sync$/ }, () => ({ path: 'sync', namespace: 'download-test' }));
+            plugin.onLoad({ filter: /.*/, namespace: 'download-test' }, () => ({ contents: syncFixture, loader: 'js' }));
+            plugin.onResolve({ filter: /^@mindwtr\/core$/ }, () => ({ path: 'core', namespace: 'test' }));
+            plugin.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: fakeCoreWithSync, loader: 'js', resolveDir: app }));
+        } }],
+    });
+    const input = { projectId: 'project346', attachmentId: 'attachment346', revision: 'project-revision' };
+    const attachment = { id: input.attachmentId, kind: 'file', title: 'Synthetic346', uri: 'file:///library/documents/attachments/attachment346.pdf' };
+    const create = (platform = 'ios') => makeState(0, [], platform, (state) => {
+        state.localAttachmentTest = true;
+        for (const name of ['fileCall', 'installerCall', 'fileAbort', 'fileDeleteNow', 'ioNext', 'ioBody']) state.__mindwtrNative[name] = () => '';
+        state.__mindwtrNative.fileDirectories = () => JSON.stringify({ document: 'file:///library/documents/', cache: 'file:///library/cache/' });
+        state.__mindwtrFileCall = async () => null; state.__mindwtrInstallerCall = async () => null;
+        state.syncFactoryCalls = 0; state.secretReads = 0; state.storedReads = 0; state.downloadHosts = [];
+        state.remoteAttachmentHost = { selected: 'remote-346' };
+        state.ownerProjects = []; // Install the selected row only after the empty VM boot verifies.
+        state.storedBackend = 'webdav';
+        // On non-iOS, avoid eager normal Sync so the explicit entry itself is tested.
+        if (platform === 'ios') state.__mindwtrNative.kvMultiGet = () => { throw new Error('Unexpected multi-read'); };
+        state.__mindwtrNative.kvGet = () => { state.storedReads++; return JSON.stringify([state.storedBackend ?? null]); };
+        state.__mindwtrSyncSecrets = { getSecret: () => { state.secretReads++; throw new Error('Unexpected secret read'); } };
+        state.attachmentReply = { ok: true, value: { status: 'available', message: null, update: null } };
+        state.settings = { diagnostics: { loggingEnabled: false } };
+    }, downloadBuilt.outputFiles[0].text);
+    const boot = async (state) => {
+        const answer = await poll(state, state.MindwtrHost.boot());
+        if (answer.ok) state.ownerProjects = [{ id: input.projectId, status: 'active', attachments: [{ ...attachment }] }];
+        return answer;
+    };
+    const command = (state, value = input) => poll(state,
+        state.MindwtrHost.iosForegroundSync('projectAttachmentDownload', JSON.stringify(value), () => ''));
+    const markerLines = (state) => (state.logText ?? '').split('\n').filter((line) => line.includes('v1.3.5/ios-project-file-download'));
+    const malformed = create();
+    assert.match((await command(malformed)).error, /^NOT_READY:/);
+    const bootMalformed = await boot(malformed);
+    assert.equal(bootMalformed.ok, true, JSON.stringify(bootMalformed));
+    for (const value of [null, [], {}, { ...input, projectId: '' }, { ...input, attachmentId: 1 }, { ...input, revision: null },
+        { ...input, projectId: 'x'.repeat(501) }, { ...input, attachmentId: 'x'.repeat(501) }, { ...input, revision: 'x'.repeat(201) },
+        { ...input, uri: 'file:///foreign' }, { ...input, remoteKey: 'synthetic' }, { ...input, password: 'synthetic' },
+        { ...input, extra: 'x'.repeat(128 * 1024) }]) assert.match((await command(malformed, value)).error, /^INVALID_INPUT:/);
+    assert.equal(malformed.storedReads, 0); assert.equal(malformed.syncFactoryCalls, 0); assert.equal(malformed.secretReads, 0);
+    for (const flag of ['failed', 'queued', 'inFlight', 'immediate', 'retrying']) {
+        malformed.persistenceStatus = { [flag]: true }; assert.match((await command(malformed)).error, /^NOT_READY:/);
+    }
+    malformed.persistenceStatus = null;
+    for (const field of ['sandbox', 'workspaceTransition']) {
+        malformed[field] = true; assert.match((await command(malformed)).error, /^NOT_READY:/); malformed[field] = false;
+    }
+    assert.equal(malformed.storedReads, 0);
+    for (const stored of [undefined, '', 'off', ' off ', 'dropbox', 'cloudkit']) {
+        malformed.storedBackend = stored;
+        const result = await command(malformed);
+        assert.equal(result.ok, true); assert.equal(result.value.ok, false); assert.equal(result.value.error.code, 'ACTION_FAILED');
+        assert.equal(malformed.storedBackend, stored);
+    }
+    assert.equal(malformed.syncFactoryCalls, 0); assert.equal(malformed.secretReads, 0); assert.equal(malformed.projectOptionsReads ?? 0, 0);
+    assert.equal(markerLines(malformed).length, 0);
+    const noIos = create('android'); assert.equal((await boot(noIos)).ok, true);
+    assert.match((await command(noIos)).error, /^NOT_READY:/); assert.equal(noIos.syncFactoryCalls, 0);
+
+    const stale = create(); assert.equal((await boot(stale)).ok, true);
+    const staleCases = [
+        () => ({ ...input, revision: 'older-revision' }),
+        () => { stale.ownerProjects = []; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, deletedAt: 'deleted', attachments: [attachment] }]; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, purgedAt: 'purged', attachments: [attachment] }]; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, attachments: [{ ...attachment, kind: 'link' }] }]; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, attachments: [{ ...attachment, deletedAt: 'deleted' }] }]; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, attachments: [{ ...attachment, id: 'replacement' }] }]; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, attachments: [attachment, attachment] }]; return input; },
+    ];
+    for (const replace of staleCases) {
+        const result = await command(stale, replace());
+        assert.equal(result.ok, true); assert.equal(result.value.ok, false); assert.equal(result.value.error.code, 'STALE_REVISION');
+    }
+    assert.equal(stale.syncFactoryCalls, 0); assert.equal(stale.secretReads, 0); assert.equal(stale.attachmentInputs.length, 0);
+    assert.equal(markerLines(stale).length, 0);
+
+    const selected = create(); assert.equal((await boot(selected)).ok, true);
+    const localHost = selected.contractBindings.attachments;
+    assert.notEqual(localHost, selected.remoteAttachmentHost);
+    const rowsBefore = JSON.stringify(selected.ownerProjects);
+    assert.deepEqual(await command(selected), { ok: true, value: selected.attachmentReply });
+    assert.equal(selected.syncFactoryCalls, 1); assert.equal(selected.downloadHosts[0], selected.remoteAttachmentHost);
+    assert.equal(selected.contractBindings.attachments, localHost, 'Successful download restores the local-only host');
+    assert.equal(JSON.stringify(selected.ownerProjects), rowsBefore);
+    assert.equal(JSON.stringify(selected.attachmentInputs[0]), JSON.stringify(['downloadAttachment', { owner: { kind: 'project', projectId: input.projectId }, attachmentId: input.attachmentId }]));
+    assert.equal(markerLines(selected).length, 1, 'Forced availability marker is persisted with diagnostics disabled');
+    const marker = JSON.parse(markerLines(selected)[0]);
+    assert.deepEqual(marker.context, { releaseCheck: 'v1.3.5/ios-project-file-download', operation: 'projectAttachmentDownload', outcome: 'available' });
+    assert.equal(marker.message, 'Native iOS Project file availability settled');
+    for (const privateValue of [input.projectId, input.attachmentId, input.revision, attachment.title, attachment.uri]) assert(!markerLines(selected)[0].includes(privateValue));
+    selected.ownerProjects[0].status = 'archived';
+    assert.deepEqual(await command(selected), { ok: true, value: selected.attachmentReply });
+    assert.equal(selected.syncFactoryCalls, 1, 'The same retained factory handles archived availability');
+    assert.equal(selected.contractBindings.attachments, localHost);
+    selected.logFailure = 'synthetic log refusal';
+    assert.deepEqual(await command(selected), { ok: true, value: selected.attachmentReply });
+    assert.equal(markerLines(selected).length, 2, 'A failed log append cannot invalidate durable availability');
+    selected.logFailure = null;
+    for (const answer of [{ ok: true, value: { status: 'unavailable', message: 'synthetic refusal', update: null } },
+        { ok: false, error: { code: 'ACTION_FAILED', message: 'synthetic host refusal' } }]) {
+        selected.attachmentReply = answer; const count = markerLines(selected).length;
+        assert.deepEqual(await command(selected), { ok: true, value: answer });
+        assert.equal(markerLines(selected).length, count);
+        assert.equal(selected.contractBindings.attachments, localHost);
+    }
+    selected.downloadError = 'synthetic download failure';
+    assert.match((await command(selected)).error, /synthetic download failure/);
+    assert.equal(selected.contractBindings.attachments, localHost, 'Thrown download restores the local-only host');
+    selected.downloadError = null;
+    const general = await poll(selected, selected.MindwtrHost.attachmentRequest('downloadAttachment', JSON.stringify({ owner: { kind: 'project', projectId: input.projectId }, attachmentId: input.attachmentId })));
+    assert.equal(general.ok, false, 'General local attachment download remains closed');
+
+    const draining = create(); assert.equal((await boot(draining)).ok, true);
+    const drainingLocalHost = draining.contractBindings.attachments;
+    let releaseDownload, releaseFlush;
+    draining.downloadHold = new Promise((resolveHold) => { releaseDownload = resolveHold; });
+    draining.flushHold = new Promise((resolveHold) => { releaseFlush = resolveHold; });
+    const ticket = draining.MindwtrHost.iosForegroundSync('projectAttachmentDownload', JSON.stringify(input), () => '');
+    await new Promise((tick) => setImmediate(tick));
+    assert.equal(draining.MindwtrHost.poll(ticket), null);
+    assert.equal(draining.contractBindings.attachments, draining.remoteAttachmentHost);
+    assert.match((await command(draining)).error, /^NOT_READY:/, 'The current invocation excludes another command');
+    releaseDownload(); await new Promise((tick) => setImmediate(tick));
+    assert.equal(draining.contractBindings.attachments, drainingLocalHost);
+    assert.notEqual(draining.contractBindings.attachments, draining.remoteAttachmentHost, 'Scope is restored before durable flush');
+    assert.equal(draining.MindwtrHost.poll(ticket), null, 'No result before the durable barrier settles');
+    assert.equal(markerLines(draining).length, 0);
+    releaseFlush(); assert.deepEqual(await poll(draining, ticket), { ok: true, value: draining.attachmentReply });
+    for (const flag of ['failed', 'queued', 'inFlight', 'immediate', 'retrying']) {
+        const failure = create(); assert.equal((await boot(failure)).ok, true);
+        const originalHost = failure.contractBindings.attachments;
+        failure.afterDownload = () => { failure.persistenceStatus = { [flag]: true }; };
+        assert.match((await command(failure)).error, /^NOT_READY:/);
+        assert.equal(failure.contractBindings.attachments, originalHost); assert.equal(markerLines(failure).length, 0);
+    }
+    const flushFailure = create(); assert.equal((await boot(flushFailure)).ok, true);
+    const originalHost = flushFailure.contractBindings.attachments;
+    flushFailure.flushError = 'synthetic durable failure';
+    assert.match((await command(flushFailure)).error, /synthetic durable failure/);
+    assert.equal(flushFailure.contractBindings.attachments, originalHost); assert.equal(markerLines(flushFailure).length, 0);
+    const fatal = create(); assert.equal((await boot(fatal)).ok, true);
+    fatal.downloadFatal = true;
+    assert.match((await command(fatal)).error, /cleanup could not be confirmed/i);
+    const counts = [fatal.storedReads, fatal.attachmentInputs.length, fatal.events.length];
+    assert.match((await command(fatal)).error, /cleanup could not be confirmed/i);
+    assert.deepEqual([fatal.storedReads, fatal.attachmentInputs.length, fatal.events.length], counts);
+    assert.equal(markerLines(fatal).length, 0);
+    console.log('Task346: strict selected Project Download admission, archived eligibility, scoped host restoration and durable availability acknowledgment (NodeVM)');
+}
 // Production host-entry selects independent local attachment policy only for
 // complete iOS file capabilities. No kvMultiGet, sync settings, AI or backend
 // constructor is supplied; readiness and diagnostic acknowledgments are real.
@@ -4248,8 +4424,8 @@ for (const [bridge, receipt, operation] of [
         assert.equal(stored.logText, beforeLog, 'No configured-run settlement marker is emitted for skipped/refused admission');
         assert.equal(stored.contractBindings.syncSettings, undefined, 'Off and unsupported runs never construct the Sync factory');
     }
-    assert.match(hostEntry, /name === 'syncResume' \? 'Native iOS resume Sync command settled'/);
-    assert.match(hostEntry, /name === 'syncResume' \? 'v1\.3\.5\/ios-resume-sync'/);
+    assert.ok(hostEntry.includes("name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }"));
+    assert.match(hostEntry, /context: \{ releaseCheck: diagnostic\.releaseCheck, operation: name, outcome:/);
     const local = makeState(0, [], 'ios', configureLocal);
     assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['attachments'], 'local capability enables neither Sync nor AI');
     assert.equal(local.localShaInstallCount, 1, 'successful local construction installs native SHA once');

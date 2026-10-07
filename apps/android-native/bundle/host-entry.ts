@@ -363,6 +363,7 @@ const nativeSync: NativeSync | null = globalThis.__mindwtrHostPlatform !== 'ios'
     : null;
 let iosManualSync: NativeSync | null = null;
 let iosCleanupCallback: ((requestJSON: string) => unknown) | null = null;
+let iosProjectAttachmentDownload = false;
 let iosForegroundFailure: NativeAttachmentCleanupUnconfirmedError | null = null;
 /** The device's network state as Kotlin last reported it (HostNetwork.kt); unknown until then, which never reads as offline. */
 let networkState: { isConnected: boolean | null; isInternetReachable: boolean | null } = { isConnected: null, isInternetReachable: null };
@@ -390,7 +391,7 @@ const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwt
 const localAttachments = nativeSync ? null : createNativeLocalAttachmentsForHost();
 const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contractHost;
 const contract = createNativeHostContract({ get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
-    ...(attachmentsHost ? { attachments: attachmentsHost } : {}) });
+    get attachments() { return iosProjectAttachmentDownload ? iosManualSync?.attachmentsHost : attachmentsHost; } });
 
 /**
  * Reminder alarms (host-reminders.ts), on a host with the alarm bridges (Android). The iOS host and the gates' stand-in bridge have
@@ -3754,7 +3755,7 @@ globalThis.MindwtrHost = {
                 || iosCleanupCallback || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
                 || typeof native().kvMultiGet !== 'function' || !globalThis.__mindwtrSyncSecrets) throw unavailable();
             const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
-                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume'];
+                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'projectAttachmentDownload'];
             if (!commands.includes(name) || typeof json !== 'string' || new TextEncoder().encode(json).byteLength > 128 * 1024) {
                 throw new Error('INVALID_INPUT: Invalid foreground sync request');
             }
@@ -3763,6 +3764,11 @@ globalThis.MindwtrHost = {
             catch { throw new Error('INVALID_INPUT: Invalid foreground sync request'); }
             if (!input || typeof input !== 'object' || Array.isArray(input)
                 || ['syncStored', 'syncResume'].includes(name) && Object.keys(input).length !== 0) throw new Error('INVALID_INPUT: Invalid foreground sync request');
+            if (name === 'projectAttachmentDownload' && (Object.keys(input).length !== 3
+                || ['projectId', 'attachmentId', 'revision'].some((field) => {
+                    const value = input[field];
+                    return typeof value !== 'string' || !value || value.length > (field === 'revision' ? 200 : 500);
+                }))) throw new Error('INVALID_INPUT: Invalid Project attachment download request');
             const refused = { ok: false as const, error: { code: 'ACTION_FAILED' as const,
                 message: 'This sync provider is not available in native iOS yet; the stored configuration is unchanged' } };
             if (name === 'selectSyncBackend' && input.option !== 'off' && input.option !== 'webdav'
@@ -3776,7 +3782,20 @@ globalThis.MindwtrHost = {
                 const stored = (await keyValue.get(SYNC_BACKEND_KEY))?.trim();
                 if (stored && stored !== 'off' && stored !== 'webdav') return refused;
                 if (['syncStored', 'syncResume'].includes(name) && stored !== 'webdav') return { ok: true as const, value: { success: true, skipped: true } };
-                iosManualSync ??= createNativeSync({ ...nativeSyncBindings, emit: () => {}, trace: () => {}, scheduleBackgroundSync: () => {},
+                if (name === 'projectAttachmentDownload' && stored !== 'webdav') return refused;
+                let downloadResult: Awaited<ReturnType<typeof contract.downloadAttachment>> | null = null;
+                if (name === 'projectAttachmentDownload') {
+                    const options = contract.getProjectAttachmentEditOptions({ projectId: input.projectId as string });
+                    if (!options.ok) downloadResult = options;
+                    else {
+                        const matches = (options.value.project.attachments ?? []).filter((item) => item.id === input.attachmentId);
+                        if (options.value.revision !== input.revision || matches.length !== 1
+                            || matches[0].kind !== 'file' || matches[0].deletedAt) downloadResult = {
+                            ok: false, error: { code: 'STALE_REVISION', message: 'Project attachment changed; read the list again' },
+                        };
+                    }
+                }
+                if (!downloadResult) iosManualSync ??= createNativeSync({ ...nativeSyncBindings, emit: () => {}, trace: () => {}, scheduleBackgroundSync: () => {},
                     retireLocalAttachment: async (attachmentID, targetURI, keep) => {
                         if (keep()) return false;
                         const requestID = generateUUID();
@@ -3792,18 +3811,33 @@ globalThis.MindwtrHost = {
                         } catch { throw new NativeAttachmentCleanupUnconfirmedError(); }
                     },
                 });
+                if (name === 'projectAttachmentDownload') {
+                    if (!downloadResult) {
+                        // The original contract remains local-only outside this owned call.
+                        iosProjectAttachmentDownload = true;
+                        try {
+                            downloadResult = await contract.downloadAttachment({
+                                owner: { kind: 'project', projectId: input.projectId as string }, attachmentId: input.attachmentId as string,
+                            });
+                        } finally { iosProjectAttachmentDownload = false; }
+                    }
+                    await flushPendingSave();
+                    requireSaved();
+                    const after = getPersistenceStatus();
+                    if (after.failed || after.queued || after.inFlight || after.immediate || after.retrying) throw unavailable();
+                }
                 let storedResult: { success: boolean; skipped: boolean } | null = null;
                 if (name === 'syncStored' || name === 'syncResume') {
-                    const answer = await iosManualSync.performStoredAutomaticSync(name === 'syncStored' ? 'startup' : 'resume');
+                    const answer = await iosManualSync!.performStoredAutomaticSync(name === 'syncStored' ? 'startup' : 'resume');
                     await flushPendingSave();
                     requireSaved();
                     const after = getPersistenceStatus();
                     if (after.failed || after.queued || after.inFlight || after.immediate || after.retrying) throw unavailable();
                     storedResult = { success: answer.success === true, skipped: Boolean(answer.skipped) };
                 }
-                const result = storedResult ? { ok: true as const, value: storedResult }
+                const result = downloadResult ?? (storedResult ? { ok: true as const, value: storedResult }
                     : name === 'syncSettings' ? contract.getSyncSettings(input)
-                    : await MENU_COMMANDS[name as SyncScreenCommand](input as never);
+                    : await MENU_COMMANDS[name as SyncScreenCommand](input as never));
                 // Offer only the providers admitted by this entry; all labels and field policy remain core's.
                 if (result.ok && result.value && typeof result.value === 'object' && 'backend' in result.value) {
                     // The command union includes non-view replies; only the two view commands reach this branch.
@@ -3812,13 +3846,15 @@ globalThis.MindwtrHost = {
                         model.backend.options = model.backend.options.filter(({ option }) => option === 'off' || option === 'webdav');
                     }
                 }
-                try {
-                    const diagnostic = name === 'syncStored' ? { message: 'Native iOS stored Sync command settled', releaseCheck: 'v1.3.5/ios-stored-sync' }
+                if (name !== 'projectAttachmentDownload' || result.ok && result.value && typeof result.value === 'object'
+                    && 'status' in result.value && result.value.status === 'available') try {
+                    const diagnostic = name === 'projectAttachmentDownload' ? { message: 'Native iOS Project file availability settled', releaseCheck: 'v1.3.5/ios-project-file-download' }
+                        : name === 'syncStored' ? { message: 'Native iOS stored Sync command settled', releaseCheck: 'v1.3.5/ios-stored-sync' }
                         : name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }
                         : { message: 'Native iOS foreground Sync command settled', releaseCheck: 'v1.3.5/ios-foreground-sync-owned' };
                     await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                         message: diagnostic.message,
-                        context: { releaseCheck: diagnostic.releaseCheck, operation: name, outcome: 'settled' },
+                        context: { releaseCheck: diagnostic.releaseCheck, operation: name, outcome: name === 'projectAttachmentDownload' ? 'available' : 'settled' },
                     }, { force: true });
                 } catch { /* A diagnostic cannot change the settled command result. */ }
                 return result;

@@ -55,6 +55,8 @@ private final class ForegroundDAVStore: @unchecked Sendable {
     private var version = 0
     private var unexpected = 0
     private var serverTime: Date?
+    private var getStatuses: [String: Int] = [:]
+    private var declaredLengths: [String: Int] = [:]
     init(expectedAuthorization: String) { self.expectedAuthorization = expectedAuthorization }
     var recorded: [Request] { lock.lock(); defer { lock.unlock() }; return requests }
     var unexpectedCount: Int { lock.lock(); defer { lock.unlock() }; return unexpected }
@@ -65,6 +67,8 @@ private final class ForegroundDAVStore: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         version += 1; objects[path] = Object(bytes: bytes, etag: "\"fixture-v\(version)\"")
     }
+    func refuseGet(_ path: String, status: Int) { lock.lock(); getStatuses[path] = status; lock.unlock() }
+    func declareGetLength(_ path: String, bytes: Int) { lock.lock(); declaredLengths[path] = bytes; lock.unlock() }
     func respond(_ request: URLRequest, body: Data) -> Reply {
         lock.lock(); defer { lock.unlock() }
         let url = request.url!, path = url.path, method = request.httpMethod ?? "GET"
@@ -88,8 +92,14 @@ private final class ForegroundDAVStore: @unchecked Sendable {
         }
         switch method {
         case "GET", "HEAD":
+            if method == "GET", let status = getStatuses[path] { return reply(status) }
             guard let object = objects[path] else { return reply(404) }
-            return reply(200, object.bytes, etag: object.etag, type: path.hasSuffix(".json") ? "application/json" : "application/octet-stream")
+            let response = reply(200, object.bytes, etag: object.etag, type: path.hasSuffix(".json") ? "application/json" : "application/octet-stream")
+            if method == "GET", let size = declaredLengths[path] {
+                var headers = response.headers; headers["Content-Length"] = String(size)
+                return Reply(status: response.status, headers: headers, body: response.body)
+            }
+            return response
         case "PUT":
             let previous = objects[path]
             if none == "*" && previous != nil { return reply(412) }
@@ -225,8 +235,8 @@ final class NativeForegroundWebDAVTests: XCTestCase {
     private func json(_ value: Any) throws -> String { String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), as: UTF8.self) }
     private func object(_ text: String) throws -> [String: Any] { try XCTUnwrap(NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any]) }
     private func inode(_ url: URL) throws -> ino_t { var info = stat(); guard lstat(url.path, &info) == 0 else { throw HostFailure("Fixture inode is unavailable") }; return info.st_ino }
-    private func core(boundary: ForegroundBoundaryState? = nil) -> CoreHost {
-        let faults = HostIOFaults(), configuration = URLSessionConfiguration.ephemeral
+    private func core(boundary: ForegroundBoundaryState? = nil, faults supplied: HostIOFaults? = nil) -> CoreHost {
+        let faults = supplied ?? HostIOFaults(), configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ForegroundDAVProtocol.self]; faults.httpConfiguration = configuration
         faults.secretService = service
         if let boundary { faults.cleanupBoundary = { name in try boundary.visit(name) { try self.captureBoundary() } } }
@@ -664,6 +674,329 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertEqual(boundary.count, 1)
         try assertCleaned(original: original); try assertConfiguration(); try assertRemoteTask(original: original)
         await host.close()
+    }
+
+    private struct ProjectDownloadFixture {
+        let projectID: String
+        let attachmentID: String
+        let bytes: Data
+        let target: URL
+        let remotePath: String
+        let attachment: [String: Any]
+    }
+
+    private func seedProjectDownload(status: String = "active", mode: String = "file") throws -> ProjectDownloadFixture {
+        let id = UUID().uuidString.lowercased(), attachmentID = UUID().uuidString.lowercased()
+        let bytes = Data("Synthetic saved Project download \(id) 🧠".utf8)
+        let filename = attachmentID + ".txt", at = "2026-10-06T00:00:00.000Z"
+        let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        var attachment: [String: Any] = ["id": attachmentID, "kind": "file", "title": "Remote Project fixture.txt",
+            "uri": "", "cloudKey": "attachments/" + filename, "fileHash": digest,
+            "size": bytes.count, "mimeType": "text/plain", "localStatus": "missing", "contentRev": 1,
+            "createdAt": at, "updatedAt": at]
+        if mode == "deleted" { attachment["deletedAt"] = at }
+        if mode == "link" {
+            attachment = ["id": attachmentID, "kind": "link", "title": "Selected link", "uri": "https://native-download.invalid/link", "createdAt": at, "updatedAt": at]
+        }
+        let sql = try SQLiteBridge(url: database); defer { sql.close() }
+        _ = try sql.execute("INSERT INTO projects(id,title,status,color,supportNotes,orderNum,tagIds,isSequential,isFocused,attachments,createdAt,updatedAt,rev,revBy) VALUES (?,'Selected download Project',?,'#94a3b8','Keep exact Project Notes 🧠',1,'[]',0,0,?,?,?,1,'fixture')",
+            parametersJSON: json([id, status, try json([attachment]), at, at]))
+        return ProjectDownloadFixture(projectID: id, attachmentID: attachmentID, bytes: bytes,
+            target: target.deletingLastPathComponent().appendingPathComponent(filename), remotePath: "/sync/attachments/" + filename, attachment: attachment)
+    }
+
+    private func seedUnrelatedDownloadProject() throws -> String {
+        let id = UUID().uuidString.lowercased(), at = "2026-10-06T00:00:00.000Z"
+        let link: [String: Any] = ["id": UUID().uuidString.lowercased(), "kind": "link", "title": "Preserve unrelated link", "uri": "https://unrelated-native.invalid/retained", "createdAt": at, "updatedAt": at]
+        let sql = try SQLiteBridge(url: database); defer { sql.close() }
+        _ = try sql.execute("INSERT INTO projects(id,title,status,color,supportNotes,orderNum,tagIds,isSequential,isFocused,attachments,createdAt,updatedAt,rev,revBy) VALUES (?,'Unrelated preserved Project','waiting','#123456','Unrelated Notes 🧠',2,'[]',0,0,?,?,?,4,'fixture')",
+            parametersJSON: json([id, try json([link]), at, at]))
+        return id
+    }
+
+    private func projectRows() throws -> [[String: Any]] {
+        let sql = try SQLiteBridge(url: database); defer { sql.close() }
+        return try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute("SELECT * FROM projects").utf8)) as? [[String: Any]])
+    }
+    private func projectRow(_ id: String) throws -> [String: Any] {
+        try XCTUnwrap(projectRows().first { $0["id"] as? String == id })
+    }
+    private func projectDownloadAttachment(_ fixture: ProjectDownloadFixture) throws -> [String: Any] {
+        let encoded = try XCTUnwrap(try projectRow(fixture.projectID)["attachments"] as? String)
+        let values = try XCTUnwrap(NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [[String: Any]])
+        return try XCTUnwrap(values.first { $0["id"] as? String == fixture.attachmentID })
+    }
+    private func settleDownloadFixtureWriter(_ host: CoreHost) async throws {
+        let beforeTask = try task(), beforeProjects = try projectRows(), requestStart = remote.recorded.count
+        let configuration = try configurationIdentity()
+        let filter = try object(await host.call("areaFilter"))
+        let option = try XCTUnwrap((filter["options"] as? [[String: Any]])?.first { $0["id"] as? String == "__none__" })
+        XCTAssertEqual(option["state"] as? String, "none")
+        // This existing explicit preference command runs the actual whole-store
+        // writer before the measured operation. Swift's sorted/slash-escaped
+        // seed JSON is not the shared writer's persisted representation.
+        _ = try await host.call("setAreaFilter", argumentsJSON: json([json(XCTUnwrap(option["next"]))]))
+        let currentTask = try task()
+        for (old, current) in [(beforeTask, currentTask)] + (try beforeProjects.map { ($0, try projectRow(XCTUnwrap($0["id"] as? String))) }) {
+            XCTAssertEqual(try json(current.filter { $0.key != "attachments" }), try json(old.filter { $0.key != "attachments" }))
+            let before = try XCTUnwrap(old["attachments"] as? String), after = try XCTUnwrap(current["attachments"] as? String)
+            let oldMetadata = try XCTUnwrap(NativeJSON.jsonObject(with: Data(before.utf8)) as? [[String: Any]])
+            let currentMetadata = try XCTUnwrap(NativeJSON.jsonObject(with: Data(after.utf8)) as? [[String: Any]])
+            XCTAssertEqual(try json(currentMetadata), try json(oldMetadata), "Setup preserves every seeded attachment field and empty remote-only URI")
+        }
+        XCTAssertEqual(remote.recorded.count, requestStart, "The baseline writer performs no Sync or attachment GET")
+        XCTAssertEqual(try configurationIdentity(), configuration)
+        XCTAssertEqual(try Data(contentsOf: target), originalBytes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        try assertProjectDownloadMarker(0)
+    }
+    private func projectDownloadInput(_ host: CoreHost, _ fixture: ProjectDownloadFixture) async throws -> [String: Any] {
+        let options = try object(await host.call("projectAttachmentEditOptions", argumentsJSON: json([json(["projectId": fixture.projectID])])))
+        let project = try XCTUnwrap(options["project"] as? [String: Any])
+        XCTAssertEqual(project["id"] as? String, fixture.projectID)
+        let status = try XCTUnwrap(try projectRow(fixture.projectID)["status"] as? String)
+        XCTAssertEqual(options["canEdit"] as? Bool, status != "archived", "Archived availability is eligible without granting edit authority")
+        return ["projectId": fixture.projectID, "attachmentId": fixture.attachmentID,
+            "revision": try XCTUnwrap(options["revision"] as? String)]
+    }
+    private func assertProjectSearchMembership(_ projects: [[String: Any]]) throws {
+        let sql = try SQLiteBridge(url: database); defer { sql.close() }
+        for (field, phrase) in [("title", "Selected download Project"), ("title", "Unrelated preserved Project"),
+                                ("supportNotes", "Keep exact Project Notes"), ("supportNotes", "Unrelated Notes")] {
+            let result = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute(
+                "SELECT projects.id FROM projects_fts JOIN projects ON projects.rowid=projects_fts.rowid WHERE projects_fts MATCH ? ORDER BY projects.id",
+                parametersJSON: json([field + " : \"" + phrase + "\""])).utf8)) as? [[String: Any]])
+            let expected = projects.filter { ($0[field] as? String)?.contains(phrase) == true }.compactMap { $0["id"] as? String }.sorted()
+            XCTAssertEqual(result.compactMap { $0["id"] as? String }, expected, "Project search membership remains exact despite rewritten FTS pages")
+        }
+    }
+    private func assertTaskSearchMembership() throws {
+        let sql = try SQLiteBridge(url: database); defer { sql.close() }
+        for phrase in ["title : \"Foreground fixture task\"", "description : \"Preserve unrelated task notes\""] {
+            let result = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute(
+                "SELECT tasks.id FROM tasks_fts JOIN tasks ON tasks.rowid=tasks_fts.rowid WHERE tasks_fts MATCH ? ORDER BY tasks.id",
+                parametersJSON: json([phrase])).utf8)) as? [[String: Any]])
+            XCTAssertEqual(result.compactMap { $0["id"] as? String }, [taskID], "Task search returns exactly the unchanged fixture before and after lost save acknowledgements")
+        }
+    }
+    private func assertDownloadPreservation(rows before: [String: String], projects oldProjects: [[String: Any]], selected: String, allowTaskIndexRebuild: Bool = false) throws {
+        // Existing projects_au rewrites its FTS shadow pages for any Project
+        // update. Keep all other raw tables and all unrelated Projects exact.
+        // Only the lost-COMMIT test permits these two Task index layouts: failed
+        // acknowledgements discard writer fingerprints and retries re-upsert
+        // byte-identical Task rows. Every Task row and remaining index table stays exact.
+        let domain = { (name: String) in name != "projects" && !name.hasPrefix("projects_fts")
+            && (!allowTaskIndexRebuild || !["tasks_fts_data", "tasks_fts_idx"].contains(name)) }
+        XCTAssertEqual(try rows().filter { domain($0.key) }, before.filter { domain($0.key) })
+        if allowTaskIndexRebuild { try assertTaskSearchMembership() }
+        XCTAssertEqual(try projectRows().filter { $0["id"] as? String != selected }.map { try json($0) }.sorted(),
+            try oldProjects.filter { $0["id"] as? String != selected }.map { try json($0) }.sorted())
+        let old = try XCTUnwrap(oldProjects.first { $0["id"] as? String == selected }), current = try projectRow(selected)
+        let allowed = Set(["attachments", "rev", "revBy", "updatedAt"])
+        XCTAssertEqual(try json(current.filter { !allowed.contains($0.key) }), try json(old.filter { !allowed.contains($0.key) }))
+        try assertProjectSearchMembership(oldProjects)
+        XCTAssertEqual(try Data(contentsOf: target), originalBytes, "The unrelated tombstone's physical bytes are never cleaned by Download")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path), "An availability request does not manufacture a command/cleanup journal")
+    }
+    private func assertDownloaded(_ fixture: ProjectDownloadFixture) throws {
+        XCTAssertEqual(try Data(contentsOf: fixture.target), fixture.bytes)
+        let digest = SHA256.hash(data: try Data(contentsOf: fixture.target)).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(digest, fixture.attachment["fileHash"] as? String)
+        var expected = fixture.attachment; expected["uri"] = fixture.target.absoluteString; expected["localStatus"] = "available"
+        XCTAssertEqual(try json(projectDownloadAttachment(fixture)), try json(expected), "Only device-local availability fields change")
+    }
+    private func assertProjectDownloadMarker(_ count: Int) throws {
+        let records = try markers("v1.3.5/ios-project-file-download")
+        XCTAssertEqual(records.count, count)
+        for record in records {
+            XCTAssertEqual(record["scope"] as? String, "native-ios")
+            XCTAssertEqual(record["message"] as? String, "Native iOS Project file availability settled")
+            XCTAssertEqual(record["context"] as? [String: String], ["releaseCheck": "v1.3.5/ios-project-file-download",
+                "operation": "projectAttachmentDownload", "outcome": "available"])
+        }
+    }
+
+    func testProjectDownloadPersistsLiveAndArchivedAvailabilityAndColdLocalOpen() async throws {
+        _ = try await configureStoredCleanupCandidate()
+        _ = try seedUnrelatedDownloadProject()
+        let fixtures = try [seedProjectDownload(), seedProjectDownload(status: "archived")]
+        for fixture in fixtures { remote.seed(fixture.remotePath, bytes: fixture.bytes) }
+        let host = core(), startupRequests = remote.recorded.count
+        _ = try await host.start(); XCTAssertEqual(remote.recorded.count, startupRequests)
+        try await settleDownloadFixtureWriter(host)
+        let configuration = try configurationIdentity(), remoteDocument = remote.bytes("/sync/data.json")
+        var markerCount = 0
+        for fixture in fixtures {
+            let input = try await projectDownloadInput(host, fixture)
+            let before = try rows(), oldProjects = try projectRows(), requestStart = remote.recorded.count
+            let answer = try await command(host, "projectAttachmentDownload", input)
+            XCTAssertEqual(Set(answer.keys), Set(["status", "message", "update"]))
+            XCTAssertEqual(answer["status"] as? String, "available"); XCTAssertTrue(answer["message"] is NSNull); XCTAssertTrue(answer["update"] is NSNull)
+            let requested = remote.recorded.dropFirst(requestStart)
+            XCTAssertEqual(requested.map { $0.path }, [fixture.remotePath], "The selected operation fetches only this attachment, not a full Sync")
+            XCTAssertEqual(requested.map { $0.method }, ["GET"]); XCTAssertEqual(requested.map { $0.status }, [200])
+            try assertDownloaded(fixture); try assertDownloadPreservation(rows: before, projects: oldProjects, selected: fixture.projectID)
+            XCTAssertEqual(try configurationIdentity(), configuration); XCTAssertEqual(remote.bytes("/sync/data.json"), remoteDocument)
+            markerCount += 1; try assertProjectDownloadMarker(markerCount)
+            let repeatInput = try await projectDownloadInput(host, fixture), settled = try rows(), settledProjects = try projectRows()
+            let installedInode = try inode(fixture.target), repeatStart = remote.recorded.count
+            let repeated = try await command(host, "projectAttachmentDownload", repeatInput)
+            XCTAssertEqual(repeated["status"] as? String, "available"); XCTAssertTrue(repeated["update"] is NSNull)
+            XCTAssertEqual(remote.recorded.count, repeatStart); XCTAssertEqual(try rows(), settled)
+            XCTAssertEqual(try json(projectRows()), try json(settledProjects)); XCTAssertEqual(try inode(fixture.target), installedInode)
+            markerCount += 1; try assertProjectDownloadMarker(markerCount)
+        }
+        let settled = try rows(), coldStart = remote.recorded.count
+        await host.close()
+        let cold = core(); _ = try await cold.start(); XCTAssertEqual(remote.recorded.count, coldStart)
+        for fixture in fixtures {
+            let result = try object(await cold.prepareProjectFileOpen(requestJSON: json(["projectId": fixture.projectID, "attachmentId": fixture.attachmentID])))
+            XCTAssertEqual(result["status"] as? String, "available"); XCTAssertTrue(result["update"] is NSNull)
+            let plan = try XCTUnwrap(result["open"] as? [String: Any])
+            XCTAssertEqual(plan["kind"] as? String, "file"); XCTAssertEqual(plan["uri"] as? String, fixture.target.absoluteString)
+            try assertDownloaded(fixture)
+        }
+        XCTAssertEqual(try rows(), settled); XCTAssertEqual(remote.recorded.count, coldStart)
+        try assertProjectDownloadMarker(4); try assertConfiguration()
+        let records = try markers("v1.3.5/ios-project-file-download")
+        let encoded = try json(records)
+        for value in [password, service!, namespace!, hostname!] + fixtures.flatMap({ [$0.projectID, $0.attachmentID, $0.target.absoluteString, $0.remotePath] }) {
+            XCTAssertFalse(encoded.contains(value), "The fixed settled marker carries no private fixture content")
+        }
+        await cold.close()
+    }
+
+    func testProjectDownloadRefusesStaleRevisionAndNonLiveFileBeforeHTTP() async throws {
+        _ = try await configureStoredCleanupCandidate()
+        let file = try seedProjectDownload(), link = try seedProjectDownload(mode: "link"), deleted = try seedProjectDownload(mode: "deleted")
+        let host = core(); _ = try await host.start()
+        try await settleDownloadFixtureWriter(host)
+        var stale = try await projectDownloadInput(host, file); stale["revision"] = "stale-" + (try XCTUnwrap(stale["revision"] as? String))
+        var missing = try await projectDownloadInput(host, file); missing["attachmentId"] = UUID().uuidString.lowercased()
+        let linkInput = try await projectDownloadInput(host, link), deletedInput = try await projectDownloadInput(host, deleted)
+        let inputs = [stale, linkInput, deletedInput, missing]
+        let before = try rows(), saved = try Data(contentsOf: manifest), requests = remote.recorded.count
+        for input in inputs {
+            let refused = try object(await host.foregroundSync(command: "projectAttachmentDownload", requestJSON: json(input)))
+            XCTAssertEqual(refused["ok"] as? Bool, false)
+            XCTAssertEqual((refused["error"] as? [String: Any])?["code"] as? String, "STALE_REVISION")
+            XCTAssertEqual(remote.recorded.count, requests); XCTAssertEqual(try rows(), before); XCTAssertEqual(try Data(contentsOf: manifest), saved)
+        }
+        try assertProjectDownloadMarker(0); XCTAssertEqual(try Data(contentsOf: target), originalBytes)
+        await host.close()
+    }
+
+    func testProjectDownloadAuthHashAndCapFailuresStayRetryableWhile404IsTerminal() async throws {
+        _ = try await configureStoredCleanupCandidate()
+        var fixtures: [(String, ProjectDownloadFixture)] = []
+        for mode in ["auth", "hash", "cap", "404"] {
+            let fixture = try seedProjectDownload(); fixtures.append((mode, fixture))
+            if mode != "404" { remote.seed(fixture.remotePath, bytes: mode == "hash" ? Data("Wrong synthetic generation".utf8) : fixture.bytes) }
+            if mode == "auth" { remote.refuseGet(fixture.remotePath, status: 401) }
+            if mode == "cap" { remote.declareGetLength(fixture.remotePath, bytes: NativeHTTPJobs.maximumBytes + 1) }
+        }
+        let faults = HostIOFaults(); var jobs: NativeHTTPJobs?
+        faults.configureHTTPJobs = { jobs = $0 }
+        let host = core(faults: faults); _ = try await host.start()
+        try await settleDownloadFixtureWriter(host)
+        for (mode, fixture) in fixtures {
+            let input = try await projectDownloadInput(host, fixture), before = try rows(), oldProjects = try projectRows(), requestStart = remote.recorded.count
+            let answer = try await command(host, "projectAttachmentDownload", input)
+            XCTAssertEqual(answer["status"] as? String, mode == "404" ? "unrecoverable" : "unavailable", mode)
+            XCTAssertTrue(answer["update"] is NSNull)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.target.path), mode)
+            try assertDownloadPreservation(rows: before, projects: oldProjects, selected: fixture.projectID)
+            XCTAssertTrue(remote.recorded.dropFirst(requestStart).allSatisfy { $0.method == "GET" && $0.path == fixture.remotePath })
+            XCTAssertGreaterThan(remote.recorded.count, requestStart)
+            let current = try projectDownloadAttachment(fixture)
+            if mode == "404" {
+                XCTAssertNotNil(current["deletedAt"] as? String); XCTAssertNil(current["cloudKey"]); XCTAssertNil(current["fileHash"])
+                XCTAssertEqual(current["title"] as? String, fixture.attachment["title"] as? String)
+                XCTAssertEqual(current["contentRev"] as? Int, fixture.attachment["contentRev"] as? Int)
+                let repeatInput = try await projectDownloadInput(host, fixture), repeatStart = remote.recorded.count
+                let refused = try object(await host.foregroundSync(command: "projectAttachmentDownload", requestJSON: json(repeatInput)))
+                XCTAssertEqual(refused["ok"] as? Bool, false); XCTAssertEqual(remote.recorded.count, repeatStart)
+            } else {
+                XCTAssertNil(current["deletedAt"]); XCTAssertEqual(current["cloudKey"] as? String, fixture.attachment["cloudKey"] as? String)
+                XCTAssertEqual(current["fileHash"] as? String, fixture.attachment["fileHash"] as? String)
+                XCTAssertEqual(current["localStatus"] as? String, "missing")
+            }
+            XCTAssertEqual(jobs?.counters.jobs, 0, "No refused response remains retained after this scope")
+            XCTAssertEqual(jobs?.counters.running, 0, "No failed download escapes the foreground invocation")
+            try assertProjectDownloadMarker(0)
+        }
+        try assertConfiguration(); await host.close()
+        let cold = core(), beforeCold = remote.recorded.count
+        _ = try await cold.start(); XCTAssertEqual(remote.recorded.count, beforeCold)
+        for (mode, fixture) in fixtures {
+            let current = try projectDownloadAttachment(fixture)
+            XCTAssertEqual(current["deletedAt"] != nil, mode == "404", "The durable distinction survives recreation")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.target.path))
+        }
+        XCTAssertEqual(try Data(contentsOf: target), originalBytes); await cold.close()
+    }
+
+    func testProjectDownloadReusesOnlyMatchingManagedTargetAndNeverOverwritesConflict() async throws {
+        _ = try await configureStoredCleanupCandidate()
+        let matching = try seedProjectDownload(), conflict = try seedProjectDownload()
+        let foreignBytes = Data("Preserve this conflicting managed generation".utf8)
+        try matching.bytes.write(to: matching.target); try foreignBytes.write(to: conflict.target)
+        let matchedInode = try inode(matching.target), conflictInode = try inode(conflict.target)
+        let host = core(); _ = try await host.start()
+        try await settleDownloadFixtureWriter(host)
+        let requestStart = remote.recorded.count
+        let reused = try await command(host, "projectAttachmentDownload", try await projectDownloadInput(host, matching))
+        XCTAssertEqual(reused["status"] as? String, "available"); try assertDownloaded(matching)
+        let before = try rows(), oldProjects = try projectRows()
+        let refused = try await command(host, "projectAttachmentDownload", try await projectDownloadInput(host, conflict))
+        XCTAssertEqual(refused["status"] as? String, "generation-conflict"); XCTAssertTrue(refused["update"] is NSNull)
+        XCTAssertEqual(remote.recorded.count, requestStart, "Existing managed targets are proved locally, never overwritten by a GET")
+        XCTAssertEqual(try Data(contentsOf: conflict.target), foreignBytes); XCTAssertEqual(try inode(conflict.target), conflictInode)
+        XCTAssertEqual(try inode(matching.target), matchedInode)
+        XCTAssertNil(try projectDownloadAttachment(conflict)["deletedAt"])
+        try assertDownloadPreservation(rows: before, projects: oldProjects, selected: conflict.projectID)
+        try assertProjectDownloadMarker(1); await host.close()
+    }
+
+    func testProjectDownloadLostCommitAcknowledgementReconcilesColdWithoutRefetch() async throws {
+        _ = try await configureStoredCleanupCandidate()
+        _ = try seedUnrelatedDownloadProject()
+        let fixture = try seedProjectDownload(); remote.seed(fixture.remotePath, bytes: fixture.bytes)
+        let faults = HostIOFaults(); var acknowledgements = 0; var jobs: NativeHTTPJobs?
+        faults.configureHTTPJobs = { jobs = $0 }
+        let host = core(faults: faults); _ = try await host.start()
+        try await settleDownloadFixtureWriter(host)
+        let input = try await projectDownloadInput(host, fixture), before = try rows(), oldProjects = try projectRows(), requestStart = remote.recorded.count
+        try assertTaskSearchMembership()
+        // The hook is after the real COMMIT, and fires only when its durable row
+        // already contains the final installed availability, not a transient
+        // downloading patch or a pre-commit refusal.
+        faults.afterSQL = { statement in
+            guard statement == "COMMIT", FileManager.default.fileExists(atPath: fixture.target.path),
+                  try self.projectDownloadAttachment(fixture)["localStatus"] as? String == "available" else { return }
+            acknowledgements += 1
+            throw HostFailure("Synthetic Project availability COMMIT acknowledgement loss")
+        }
+        do {
+            _ = try await host.foregroundSync(command: "projectAttachmentDownload", requestJSON: json(input))
+            XCTFail("A lost persistence acknowledgement cannot publish a confirmed download result")
+        } catch { XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed") }
+        XCTAssertEqual(jobs?.counters.jobs, 0, "An unknown persistence result leaves no retained HTTP response")
+        XCTAssertEqual(jobs?.counters.running, 0, "No download work escapes the unknown-result scope")
+        XCTAssertGreaterThan(acknowledgements, 0, "The actual post-COMMIT hook must witness the final durable availability")
+        try assertDownloaded(fixture); try assertDownloadPreservation(rows: before, projects: oldProjects, selected: fixture.projectID, allowTaskIndexRebuild: true)
+        XCTAssertEqual(remote.recorded.dropFirst(requestStart).map { $0.path }, [fixture.remotePath])
+        try assertProjectDownloadMarker(0)
+        await host.close()
+        let committed = try rows(), currentBytes = try Data(contentsOf: fixture.target), currentInode = try inode(fixture.target), coldStart = remote.recorded.count
+        let cold = core(); _ = try await cold.start(); XCTAssertEqual(remote.recorded.count, coldStart)
+        let reconciled = try await command(cold, "projectAttachmentDownload", try await projectDownloadInput(cold, fixture))
+        XCTAssertEqual(reconciled["status"] as? String, "available"); XCTAssertTrue(reconciled["update"] is NSNull)
+        XCTAssertEqual(remote.recorded.count, coldStart); XCTAssertEqual(try rows(), committed)
+        XCTAssertEqual(try Data(contentsOf: fixture.target), currentBytes); XCTAssertEqual(try inode(fixture.target), currentInode)
+        let opened = try object(await cold.prepareProjectFileOpen(requestJSON: json(["projectId": fixture.projectID, "attachmentId": fixture.attachmentID])))
+        XCTAssertEqual(opened["status"] as? String, "available")
+        try assertProjectDownloadMarker(1); try assertConfiguration(); await cold.close()
     }
 
     func testUnconfirmedCleanupContainsAllPostIntentWorkAndColdRecoveryUsesOriginalProof() async throws {
