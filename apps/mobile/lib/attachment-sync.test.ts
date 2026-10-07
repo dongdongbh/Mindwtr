@@ -3017,6 +3017,42 @@ describe('attachment sync', () => {
     });
   });
 
+  it.each(['candidate', 'winner'] as const)('forwards the real shared Cloud %s host response refusal without publishing through the RN binding', async (target) => {
+    const source = new Uint8Array([1, 2, 3]);
+    const core = await import('@mindwtr/core');
+    const failure = Object.assign(new Error('private response text'), { code: 'response-too-large', limitBytes: 8 });
+    vi.mocked(core.cloudGetFile).mockRejectedValueOnce(failure);
+    fileSystemMock.getInfoAsync.mockResolvedValue(target === 'candidate'
+      ? { exists: false }
+      : { exists: true, size: source.byteLength, modificationTime: 2 });
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(source));
+    const input = singleAttachmentData({
+      id: 'cloud-host-response', uri: target === 'candidate' ? '' : 'file://document/attachments/cloud-host-response.txt',
+      cloudKey: 'attachments/cloud-host-response.txt', fileHash: sha256Hex(new Uint8Array([9, 8, 7])),
+      contentSize: 1, contentMtimeMs: 0, localStatus: target === 'candidate' ? 'missing' : 'available',
+    });
+    const before = structuredClone(input);
+    const { logWarn } = await import('./app-log');
+
+    await expect(attachmentSync.syncCloudAttachments(input,
+      { url: 'https://cloud.example/v1/data', token: 'private-token' }, 'https://cloud.example/v1',
+      { phase: 'post-merge', activationProbe: target === 'candidate' },
+    )).rejects.toBe(failure);
+
+    expect(input).toEqual(before);
+    expect(core.cloudGetFile).toHaveBeenCalledTimes(1);
+    expect(core.cloudPutFile).not.toHaveBeenCalled();
+    expect(core.cloudDeleteFile).not.toHaveBeenCalled();
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    expect(fileSystemMock.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.moveAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.deleteAsync).not.toHaveBeenCalled();
+    expect(logWarn).toHaveBeenCalledWith('Cloud host response limit refused', expect.objectContaining({
+      extra: { releaseCheck: 'v1.3.5/cloud-host-response-limit', operation: 'response', outcome: 'refused' },
+    }));
+  });
+
   it('defers missing pending Cloud bytes without reading or replacing the remote generation', async () => {
     const appData = singleAttachmentData({
       id: 'recover-cloud',

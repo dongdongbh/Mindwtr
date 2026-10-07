@@ -61,7 +61,7 @@ host.attachmentCleanupGate = {
     },
 };
 host.attachmentUploadGate = {
-    async run(data: AppData, cap: number, phase: 'prepare' | 'post-merge', url: string, fixture?: SyntheticEncryptionFixture, provider: 'webdav' | 'selfhosted' = 'webdav') {
+    async run(data: AppData, cap: number, phase: 'prepare' | 'post-merge', url: string, fixture?: SyntheticEncryptionFixture, provider: 'webdav' | 'selfhosted' = 'webdav', activationProbe = true) {
         if (!['webdav', 'selfhosted'].includes(provider) || provider === 'selfhosted' && fixture) {
             throw new Error('Attachment upload fixture provider is unavailable');
         }
@@ -89,7 +89,8 @@ host.attachmentUploadGate = {
                     const releaseCheck = options?.extra?.releaseCheck;
                     if (releaseCheck !== 'v1.3.5/webdav-host-upload-limit'
                         && releaseCheck !== 'v1.3.5/webdav-host-download-limit'
-                        && releaseCheck !== 'v1.3.5/cloud-host-upload-limit') return;
+                        && releaseCheck !== 'v1.3.5/cloud-host-upload-limit'
+                        && releaseCheck !== 'v1.3.5/cloud-host-response-limit') return;
                     const context = {
                         releaseCheck: options.extra.releaseCheck,
                         operation: options.extra.operation, outcome: options.extra.outcome,
@@ -112,7 +113,7 @@ host.attachmentUploadGate = {
                 url, username: 'synthetic-fixture', password: 'synthetic-not-a-credential',
             }, signal, { phase, activationProbe: true, material }) : await attachments.syncPort.syncCloud(data, {
                 url, token: 'synthetic-fixture-token-395',
-            }, { signal, phase, activationProbe: true });
+            }, { signal, phase, activationProbe });
             return { admitted: true, result, inputUnchanged: JSON.stringify(data) === before, warnings };
         } catch (error) {
             const name = error instanceof Error ? error.name : 'Error';

@@ -493,6 +493,28 @@ describe('mobile attachment availability', () => {
     await expect(availability.ensureAttachmentAvailableDetailed(remoteAttachment())).resolves.toEqual({ status: 'unavailable' });
   });
 
+  it('keeps a real-shaped Cloud host cap unavailable without installing or changing its remote identity', async () => {
+    const ports = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_URL_KEY]: 'https://cloud.example/v1/data' } });
+    const failure = Object.assign(new Error('Response exceeds the 8 byte download limit'), {
+      code: 'response-too-large', limitBytes: 8,
+    });
+    ports.cloudGetFile.mockRejectedValueOnce(failure);
+    const requested = remoteAttachment({ fileHash: 'a'.repeat(64) });
+    const before = { ...requested };
+    const configBefore = [...ports.values.entries()];
+
+    await expect(ports.availability.ensureAttachmentAvailableDetailed(requested)).resolves.toEqual({ status: 'unavailable' });
+
+    expect(ports.cloudGetFile).toHaveBeenCalledTimes(1);
+    expect(requested).toEqual(before);
+    expect([...ports.values.entries()]).toEqual(configBefore);
+    expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    // Ordinary availability may create the managed directory before requesting
+    // bytes. A refused response must never create or install a file generation.
+    expect(ports.memory.calls.filter((call) => /^(writeBytes|copy|move|delete) /.test(call))).toEqual([]);
+    expect(ports.memory.files.size).toBe(0);
+  });
+
   it('uses a managed file already on disk only when it matches the remote hash', async () => {
     const { availability, memory, webdavGetFile } = setup({ storage: webdav });
     memory.put(`${MANAGED}att-1.txt`, REMOTE);

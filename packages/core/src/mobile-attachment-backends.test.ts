@@ -922,6 +922,147 @@ describe('self-hosted cloud attachment pass', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each([
+    ['candidate', undefined], ['candidate', 404], ['candidate', 429],
+    ['winner', undefined], ['winner', 404], ['winner', 429],
+  ] as const)('preserves a coded host response refusal from the Cloud %s GET ahead of status %s', async (target, status) => {
+    const failure = Object.assign(new TypeError('network failed at private URL with token and filename'), {
+      code: 'response-too-large', limitBytes: 8, status,
+    });
+    let callsAtRefusal = 0;
+    const cloudGetFile = vi.fn(async (): Promise<ArrayBuffer> => {
+      callsAtRefusal = memory.calls.length;
+      throw failure;
+    });
+    const cloudPutFile = vi.fn(async () => undefined);
+    const { backends, memory, common, installer, lines } = setup({
+      core: { cloudAttachmentExists: async () => true, cloudGetFile, cloudPutFile },
+    });
+    if (target === 'winner') memory.put(LOCAL_URI, LOCAL);
+    const input = withAttachment(fileAttachment({
+      cloudKey: 'attachments/att-1.txt', fileHash: (await computeSha256Hex(REMOTE))!,
+      contentMtimeMs: 1, contentSize: 1, ...(target === 'candidate' ? { uri: '', localStatus: 'missing' } : {}),
+    }));
+    const before = structuredClone(input);
+    const install = vi.spyOn(common, 'installAttachmentDownloadBytes');
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, {
+      phase: 'post-merge', activationProbe: target === 'candidate',
+    })).rejects.toBe(failure);
+
+    expect(cloudGetFile).toHaveBeenCalledTimes(1);
+    expect(cloudPutFile).not.toHaveBeenCalled();
+    expect(input).toEqual(before);
+    expect([...memory.files.keys()]).toEqual(target === 'winner' ? [LOCAL_URI] : []);
+    if (target === 'winner') expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect(memory.calls.slice(callsAtRefusal)).toEqual([]);
+    expect(install).not.toHaveBeenCalled();
+    expect(installer.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    expect(lines.filter((line) => line.level === 'warn')).toEqual([{
+      level: 'warn', message: 'Cloud host response limit refused',
+      extra: { releaseCheck: 'v1.3.5/cloud-host-response-limit', operation: 'response', outcome: 'refused' },
+    }]);
+  });
+
+  it('preserves a Cloud response refusal when the diagnostic sink throws', async () => {
+    const failure = Object.assign(new Error('private transport text'), { code: 'response-too-large', limitBytes: 8 });
+    const { backends, files } = setup({ core: {
+      cloudAttachmentExists: async () => true,
+      cloudGetFile: async () => { throw failure; },
+    } });
+    const diagnostic = vi.spyOn(files, 'logAttachmentWarn').mockImplementation(() => { throw new Error('sink unavailable'); });
+
+    await expect(backends.syncCloudAttachments(withAttachment(fileAttachment({
+      uri: '', localStatus: 'missing', cloudKey: 'attachments/att-1.txt',
+    })), cloudConfig, BASE_URL, { activationProbe: true, phase: 'post-merge' })).rejects.toBe(failure);
+
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith('Cloud host response limit refused', undefined, {
+      releaseCheck: 'v1.3.5/cloud-host-response-limit', operation: 'response', outcome: 'refused',
+    });
+  });
+
+  it('keeps an uncoded RN reader limit on the ordinary candidate warning path', async () => {
+    const { backends, lines } = setup({ core: {
+      cloudAttachmentExists: async () => true,
+      cloudGetFile: async () => { throw new ResponseTooLargeError(8); },
+    } });
+    const input = withAttachment(fileAttachment({ uri: '', localStatus: 'missing', cloudKey: 'attachments/att-1.txt' }));
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, {
+      activationProbe: true, phase: 'post-merge',
+    })).resolves.toBe(false);
+
+    expect(lines).toContainEqual(expect.objectContaining({ message: 'Failed to prove candidate attachment att-1' }));
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/cloud-host-response-limit')).toBe(false);
+  });
+
+  it.each([false, true])('does not acknowledge a capped Cloud PUT reply or classify it as a source 413 (pending=%s)', async (pending) => {
+    const failure = Object.assign(new Error('HTTP 413 private response text'), {
+      code: 'response-too-large', limitBytes: 8, status: 413,
+    });
+    const cloudPutFile = vi.fn<MobileAttachmentBackendsCoreFunctions['cloudPutFile']>(async () => { throw failure; });
+    const { backends, memory, files, lines } = setup({ core: { cloudPutFile, cloudAttachmentExists: async () => true } });
+    memory.put(LOCAL_URI, LOCAL);
+    const input = withAttachment(fileAttachment(pending ? {
+      cloudKey: 'attachments/att-1.txt', pendingContentUpload: true, fileHash: (await computeSha256Hex(LOCAL))!,
+    } : {}));
+    const before = structuredClone(input);
+    const refuseSource = vi.spyOn(files, 'handleAttachmentUploadRefusal');
+    const acknowledge = vi.spyOn(files, 'clearAttachmentUploadRefusal');
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase: 'post-merge' })).rejects.toBe(failure);
+
+    expect(cloudPutFile).toHaveBeenCalledTimes(1);
+    expect(input).toEqual(before);
+    expect(refuseSource).not.toHaveBeenCalled();
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect([...memory.files.keys()]).toEqual([LOCAL_URI]);
+    expect(memory.calls.filter((call) => call.startsWith('delete '))).toEqual([expect.stringContaining('mindwtr-upload-')]);
+    expect(lines.filter((line) => line.level === 'warn')).toEqual([{
+      level: 'warn', message: 'Cloud host response limit refused',
+      extra: { releaseCheck: 'v1.3.5/cloud-host-response-limit', operation: 'response', outcome: 'refused' },
+    }]);
+
+    cloudPutFile.mockResolvedValueOnce(undefined);
+    const retried = await backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase: 'post-merge' });
+    expect(cloudPutFile).toHaveBeenCalledTimes(2);
+    expect(attachmentOf(retried)).toMatchObject({ cloudKey: 'attachments/att-1.txt', fileHash: await computeSha256Hex(LOCAL) });
+    expect(attachmentOf(retried)?.pendingContentUpload).toBeUndefined();
+    expect(input).toEqual(before);
+    expect(refuseSource).not.toHaveBeenCalled();
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains an earlier successful Cloud PUT without folding either upload when the next reply is capped', async () => {
+    const failure = Object.assign(new Error('private response text'), { code: 'response-too-large', limitBytes: 8 });
+    const accepted: string[] = [];
+    const cloudPutFile = vi.fn(async (url: string) => {
+      accepted.push(url);
+      if (accepted.length === 2) throw failure;
+    });
+    const { backends, memory, files } = setup({ core: { cloudPutFile } });
+    const secondUri = `${MANAGED}att-2.txt`;
+    memory.put(LOCAL_URI, LOCAL);
+    memory.put(secondUri, REMOTE);
+    const input = withAttachment(fileAttachment());
+    input.tasks[0].attachments!.push(fileAttachment({ id: 'att-2', title: 'att-2.txt', uri: secondUri }));
+    const before = structuredClone(input);
+    const acknowledge = vi.spyOn(files, 'clearAttachmentUploadRefusal');
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase: 'post-merge' })).rejects.toBe(failure);
+
+    expect(accepted).toEqual([`${BASE_URL}/attachments/att-1.txt`, `${BASE_URL}/attachments/att-2.txt`]);
+    expect(input).toEqual(before);
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect(memory.read(secondUri)).toEqual(REMOTE);
+    expect([...memory.files.keys()].sort()).toEqual([LOCAL_URI, secondUri].sort());
+    expect(memory.calls.filter((call) => call.startsWith('delete '))).toEqual([
+      expect.stringContaining('mindwtr-upload-'), expect.stringContaining('mindwtr-upload-'),
+    ]);
+  });
+
   it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
     'rejects an invalid optional cloud upload capability (%s) at construction', (limit) => {
       expect(() => setup({ maxCloudBufferedUploadBytes: limit })).toThrow('Cloud buffered upload capability is invalid');

@@ -35,6 +35,7 @@ import { AttachmentUploadTooLargeError } from './attachment-transfer';
 import { createMobileAttachmentFiles } from './mobile-attachment-files';
 import { createMobileAttachmentCommon } from './mobile-attachment-common';
 import { createMobileAttachmentBackends } from './mobile-attachment-backends';
+import { cloudAttachmentExists } from './cloud';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 import { SyncEncryptionPartlyEncryptedError } from './sync-encryption';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
@@ -2847,6 +2848,98 @@ describe('runSharedSyncCycle', () => {
         expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/cloud-host-upload-limit')).toEqual([{
             level: 'warn', message: 'Cloud host upload admission refused',
             extra: { releaseCheck: 'v1.3.5/cloud-host-upload-limit', operation: 'upload', outcome: 'refused' },
+        }]);
+    });
+
+    it.each([
+        ['prepare presence', false], ['post-merge winner', false], ['activation candidate', false], ['activation candidate', true],
+    ] as const)('fails the real Cloud %s host response under warning policy (throwing diagnostic=%s)', async (site, throwingDiagnostic) => {
+        const failure = Object.assign(new TypeError('Response exceeds the 8 byte download limit'), {
+            code: 'response-too-large', limitBytes: 8,
+        });
+        const memory = createMemoryFileSystem();
+        const { log, lines } = createRecordingLog();
+        const files = createMobileAttachmentFiles({
+            fs: memory.fs, storage: createMemoryStorage().storage,
+            getSecureConfigValue: async () => null, log, core: { isSandboxMode: () => false },
+        });
+        const installer = {} as never;
+        const common = createMobileAttachmentCommon({
+            fs: memory.fs, files, installer, crypto: {} as never,
+            encryption: { logSyncEncryptionEvent: async () => undefined },
+            installerMayBeMissing: () => false, timersPaused: () => true, uploads: { createUploadTask: () => null },
+        });
+        const fetcher = vi.fn(async (): Promise<Response> => { throw failure; });
+        const cloudGetFile = vi.fn(async (): Promise<ArrayBuffer> => { throw failure; });
+        const cloudPutFile = vi.fn(async () => undefined);
+        const backends = createMobileAttachmentBackends({
+            fs: memory.fs, files, common, installer, log,
+            core: {
+                cloudGetFile, cloudPutFile,
+                cloudAttachmentExists: site === 'prepare presence'
+                    ? (url, options) => cloudAttachmentExists(url, { ...options, fetcher })
+                    : async () => true,
+            },
+        });
+        const uri = `${MANAGED}response.txt`;
+        const source = new Uint8Array([1, 2, 3, 4]);
+        const activationProbe = site === 'activation candidate';
+        if (!activationProbe) memory.put(uri, source);
+        const local = createData([{
+            ...createTask('t-local', 'Local task'),
+            attachments: [{
+                id: 'response', kind: 'file', title: 'private filename.txt', uri: activationProbe ? '' : uri,
+                cloudKey: 'attachments/response.txt', fileHash: 'a'.repeat(64), contentSize: 1, contentMtimeMs: 0,
+                localStatus: activationProbe ? 'missing' : 'available', createdAt: STAMP, updatedAt: STAMP,
+            }],
+        }]);
+        const before = cloneAppData(local);
+        const phase = site === 'prepare presence' ? 'prepare' : 'post-merge';
+        const syncAttachments = vi.fn(async (data: AppData, helpers: SyncRunAttachmentHelpers) => backends.syncCloudAttachments(
+            data, { url: 'https://cloud.example/v1/data', token: 'synthetic' }, 'https://cloud.example/v1',
+            { phase: helpers.phase, activationProbe: helpers.activationProbe },
+        ));
+        const bundle = createHarness({
+            backend: 'cloud', local, remote: cloneAppData(local), activationProbe,
+            io: { syncAttachments },
+            hooks: { shouldRunAttachmentPhase: vi.fn(async (_data, selected) => selected === phase) },
+            policy: { postMergeAttachmentErrorPolicy: 'warn' },
+        });
+        const writesAtRefusal: number[] = [];
+        const remoteAtRefusal: (AppData | null)[] = [];
+        const warn = log.warn;
+        vi.spyOn(log, 'warn').mockImplementation((message, context) => {
+            if (context?.extra?.releaseCheck === 'v1.3.5/cloud-host-response-limit') {
+                writesAtRefusal.push(bundle.harness.callOrder.filter((call) => call === 'writeRemote').length);
+                remoteAtRefusal.push(bundle.harness.remote ? cloneAppData(bundle.harness.remote) : null);
+                if (throwingDiagnostic) throw new Error('sink unavailable');
+            }
+            warn(message, context);
+        });
+
+        const result = await bundle.run();
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(failure.message);
+        expect(result.hadAttachmentWarning).not.toBe(true);
+        expect(result.fileAttachmentUploadBlocked).toBeUndefined();
+        expect(bundle.harness.warnings.some((warning) => /Attachment (pre-sync|sync) warning/.test(warning.message))).toBe(false);
+        expect(writesAtRefusal).toEqual([site === 'post-merge winner' ? 1 : 0]);
+        expect(bundle.io.writeRemote).toHaveBeenCalledTimes(writesAtRefusal[0]);
+        expect(remoteAtRefusal).toHaveLength(1);
+        expect(bundle.harness.remote).toEqual(remoteAtRefusal[0]);
+        expect(bundle.hooks.finalizeSuccess).not.toHaveBeenCalled();
+        expect(local).toEqual(before);
+        expect(bundle.harness.persisted.tasks[0].attachments).toEqual(before.tasks[0].attachments);
+        expect(cloudPutFile).not.toHaveBeenCalled();
+        expect(fetcher).toHaveBeenCalledTimes(site === 'prepare presence' ? 1 : 0);
+        expect(cloudGetFile).toHaveBeenCalledTimes(site === 'prepare presence' ? 0 : 1);
+        expect([...memory.files.keys()]).toEqual(activationProbe ? [] : [uri]);
+        if (!activationProbe) expect(memory.read(uri)).toEqual(source);
+        expect(memory.calls.filter((call) => /^(writeBytes|copy|move|delete) /.test(call))).toEqual([]);
+        expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/cloud-host-response-limit')).toEqual(throwingDiagnostic ? [] : [{
+            level: 'warn', message: 'Cloud host response limit refused',
+            extra: { releaseCheck: 'v1.3.5/cloud-host-response-limit', operation: 'response', outcome: 'refused' },
         }]);
     });
 

@@ -6,6 +6,7 @@ import {
     fetchWithTimeout,
     fetchWithTimeoutAndConsume,
     isAbortError,
+    isHostResponseTooLargeError,
     MAX_ERROR_BODY_BYTES,
     MAX_DOWNLOAD_BYTES,
     MAX_SYNC_DOCUMENT_BYTES,
@@ -485,6 +486,7 @@ export async function cloudAttachmentExists(
     try {
         return (await cloudHeadJson(url, options)).exists;
     } catch (error) {
+        if (isHostResponseTooLargeError(error)) throw error;
         if (isAbortError(error)) throw error;
         if (!(error instanceof CloudHttpError) || error.status !== 405) return null;
         if (!options.partialBodyReads) {
@@ -496,6 +498,7 @@ export async function cloudAttachmentExists(
         await cloudGetFile(url, { ...options, maxBytes: 1, onProgress: undefined });
         return true;
     } catch (error) {
+        if (isHostResponseTooLargeError(error)) throw error;
         if (isAbortError(error)) throw error;
         if (error instanceof ResponseTooLargeError) return true;
         return error instanceof CloudHttpError && error.status === 404 ? false : null;

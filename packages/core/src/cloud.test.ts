@@ -534,6 +534,31 @@ describe('cloudAttachmentExists (#1119 follow-up)', () => {
         expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit).method)).toEqual(['HEAD']);
     });
 
+    it.each(['HEAD', 'fallback GET'] as const)('rethrows the original coded host refusal from %s without a presence answer', async (site) => {
+        const failure = Object.assign(new TypeError('network failed'), { code: 'response-too-large', limitBytes: 8 });
+        const fetcher = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+            if (site === 'fallback GET' && init?.method === 'HEAD') return statusResponse(405);
+            throw failure;
+        });
+
+        await expect(cloudAttachmentExists(url, { fetcher, partialBodyReads: true })).rejects.toBe(failure);
+
+        expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(site === 'HEAD' ? ['HEAD'] : ['HEAD', 'GET']);
+    });
+
+    it.each([
+        Object.assign(new Error('network down'), { code: 'response-too-large', limitBytes: 0 }),
+        Object.assign(new Error('network down'), { code: 'response-too-large', limitBytes: 1.5 }),
+        Object.assign(new Error('network down'), { code: 'other', limitBytes: 8 }),
+        { message: 'network down', code: 'response-too-large', limitBytes: 8 },
+    ])('keeps malformed host refusal metadata on the ordinary unknown path (%#)', async (failure) => {
+        const fetcher = vi.fn(async (): Promise<Response> => { throw failure; });
+
+        await expect(cloudAttachmentExists(url, { fetcher })).resolves.toBeNull();
+
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
     it('reports a HEAD 404 as a definitive absence', async () => {
         const fetcher = vi.fn(async () => statusResponse(404));
 

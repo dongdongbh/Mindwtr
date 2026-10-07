@@ -971,6 +971,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           recordPatch(attachment);
           reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
         } catch (error) {
+          if (isHostResponseTooLargeError(error)) throw error;
           if (isAbortLikeError(error, options.signal)) throw error;
           reportProgress(
             attachment.id,
@@ -1019,6 +1020,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           recordPatch(attachment);
           reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
         } catch (error) {
+          if (isHostResponseTooLargeError(error)) throw error;
           if (isAbortLikeError(error, options.signal)) throw error;
           reportProgress(
             attachment.id,
@@ -1115,6 +1117,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             totalBytes,
           });
         } catch (error) {
+          if (isHostResponseTooLargeError(error)) throw error;
           if (maxCloudBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) throw error;
           if (shouldPropagateError || isAbortLikeError(error, options.signal)) {
             // The deterministic target may have existed before this attempt. Leaving
@@ -1205,6 +1208,16 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     try {
       return await runCloudAttachmentPass(...args);
     } catch (error) {
+      if (isHostResponseTooLargeError(error)) {
+        try {
+          files.logAttachmentWarn('Cloud host response limit refused', undefined, {
+            releaseCheck: 'v1.3.5/cloud-host-response-limit', operation: 'response', outcome: 'refused',
+          });
+        } catch {
+          // Diagnostics must not replace the original transport refusal.
+        }
+        throw error;
+      }
       if (maxCloudBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) {
         try {
           files.logAttachmentWarn('Cloud host upload admission refused', undefined, {
