@@ -3813,11 +3813,12 @@ globalThis.MindwtrHost = {
                     }
                 }
                 try {
+                    const diagnostic = name === 'syncStored' ? { message: 'Native iOS stored Sync command settled', releaseCheck: 'v1.3.5/ios-stored-sync' }
+                        : name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }
+                        : { message: 'Native iOS foreground Sync command settled', releaseCheck: 'v1.3.5/ios-foreground-sync-owned' };
                     await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
-                        message: name === 'syncStored' ? 'Native iOS stored Sync command settled'
-                            : name === 'syncResume' ? 'Native iOS resume Sync command settled' : 'Native iOS foreground Sync command settled',
-                        context: { releaseCheck: name === 'syncStored' ? 'v1.3.5/ios-stored-sync'
-                            : name === 'syncResume' ? 'v1.3.5/ios-resume-sync' : 'v1.3.5/ios-foreground-sync-owned', operation: name, outcome: 'settled' },
+                        message: diagnostic.message,
+                        context: { releaseCheck: diagnostic.releaseCheck, operation: name, outcome: 'settled' },
                     }, { force: true });
                 } catch { /* A diagnostic cannot change the settled command result. */ }
                 return result;
