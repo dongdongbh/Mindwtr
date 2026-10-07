@@ -32,9 +32,9 @@ import {
     buildFeedbackModalText,
     createAboutUpdateChecks,
     FEEDBACK_LOCATIONS,
-    FEEDBACK_MESSAGE_MAX_LENGTH,
     getAboutInstallChannel,
     getFeedbackDraftState,
+    getFeedbackMessageMaxLength,
     isFeedbackLocation,
     planFeedbackSubmit,
     type AboutAlertButton,
@@ -111,7 +111,6 @@ export type NativeAboutSettings = AboutSettingsModel & {
         categories: readonly string[];
         /** A bug's places, in RN's order. */
         locations: readonly string[];
-        messageMaxLength: number;
     };
 };
 
@@ -199,7 +198,6 @@ export function createAboutMethods(deps: Deps) {
                         isConfigured: Boolean(host.app.feedbackEndpointUrl.trim()),
                         categories: FEEDBACK_CATEGORIES,
                         locations: FEEDBACK_LOCATIONS,
-                        messageMaxLength: FEEDBACK_MESSAGE_MAX_LENGTH,
                     },
                 },
             };
@@ -268,19 +266,25 @@ export function createAboutMethods(deps: Deps) {
             return { ok: true, value: { badge, notices } };
         },
 
-        /** The modal's state for the draft as typed: whether Send is on, and the error line under the fields. */
-        checkAboutFeedback(input: { message: string; email: string; sending: boolean; error: string | null }): NativeHostResult<{ canSubmit: boolean; visibleError: string | null }> {
+        /**
+         * The modal's state for the draft as typed: whether Send is on, the error line under the fields, and the message field's
+         * limit (less a bug's place, which leads the message).
+         */
+        checkAboutFeedback(input: { message: string; email: string; sending: boolean; error: string | null; category: string; location: string }):
+            NativeHostResult<{ canSubmit: boolean; visibleError: string | null; messageMaxLength: number }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const host = deps.host();
             if (!host) return unavailable();
             if (!isObjectRecord(input) || !isText(input.message, 10_000) || !isText(input.email, 1_000) || typeof input.sending !== 'boolean'
-                || !(input.error === null || isText(input.error, 1_000))) {
-                return fail('INVALID_INPUT', 'The message, the email, whether it is sending and the screen\'s error are required');
+                || !(input.error === null || isText(input.error, 1_000)) || !isFeedbackCategory(input.category)
+                || !(input.location === '' || isFeedbackLocation(input.location))) {
+                return fail('INVALID_INPUT', 'The draft (category, place, message, email), whether it is sending and the screen\'s error are required');
             }
             const { canSubmit, visibleError } = getFeedbackDraftState({ tr, isConfigured: Boolean(host.app.feedbackEndpointUrl.trim()),
                 message: input.message, email: input.email, status: input.sending ? 'sending' : 'idle', error: input.error });
-            return { ok: true, value: { canSubmit, visibleError } };
+            const messageMaxLength = getFeedbackMessageMaxLength({ category: input.category, location: input.location as never }, tr);
+            return { ok: true, value: { canSubmit, visibleError, messageMaxLength } };
         },
 
         /**

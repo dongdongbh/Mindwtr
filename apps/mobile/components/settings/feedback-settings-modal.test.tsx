@@ -236,6 +236,19 @@ describe('FeedbackSettingsModal', () => {
     expect(text).not.toContain(tr('settings.feedbackPrivacy'));
   });
 
+  it('shortens the message field by the place that will lead it, so a full message still sends', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FeedbackSettingsModal visible isConfigured tr={tr} onClose={vi.fn()} onSubmit={vi.fn()} />);
+    });
+    const messageInput = () => tree.root.findAllByType(TextInput).find((node) => node.props.multiline)!;
+    expect(messageInput().props.maxLength).toBe(4000);
+    act(() => {
+      findTouchableByText(tree, 'Sync').props.onPress();
+    });
+    expect(messageInput().props.maxLength).toBe(4000 - 'Where: Sync\n\n'.length);
+  });
+
   it('routes unconfigured builds to GitHub issues', () => {
     const onOpenGitHub = vi.fn();
     let tree!: ReturnType<typeof create>;

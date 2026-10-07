@@ -207,7 +207,8 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         const bound = device({ foss: scenario.foss, feedbackEndpointUrl: scenario.feedbackEndpointUrl, feedbackStatus: scenario.feedbackStatus });
         const contract = await openContract(bound);
         const installerSource = installer(scenario);
-        const check = value(contract.checkAboutFeedback({ message: draft.message, email: draft.email, sending: false, error: null }));
+        const check = value(contract.checkAboutFeedback({ message: draft.message, email: draft.email, sending: false, error: null, category: draft.category, location: draft.location }));
+        expect(check.messageMaxLength).toBe(draft.location ? 4000 - `Where: ${draft.location === 'sync' ? 'Sync' : 'Inbox'}\n\n`.length : 4000);
         const submitTap = rn.events.find((event) => event[0] === 'tap' && event[1] === 'settings.feedbackSubmit')!;
         expect(check.canSubmit).toBe(submitTap[2] === 'enabled');
         const lastScreen = rn.screens.at(-1)!;

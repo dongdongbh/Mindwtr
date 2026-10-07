@@ -513,9 +513,22 @@ export function getFeedbackDraftState(input: {
     return { canSubmit, emailValid, visibleError };
 }
 
+/** A bug's place as it leads the message ("Where: Sync" and a blank line); '' without one. */
+const feedbackPlacePrefix = (draft: Pick<FeedbackDraft, 'category' | 'location'>, tr: (key: string) => string): string => (
+    draft.category === 'bug' && draft.location
+        ? `${tr('settings.feedbackWhereMessagePrefix')}: ${buildFeedbackModalText(tr).locations[draft.location]}\n\n`
+        : ''
+);
+
+/** The message field's limit: the endpoint's 4,000 characters less the place that leads it. */
+export const getFeedbackMessageMaxLength = (draft: Pick<FeedbackDraft, 'category' | 'location'>, tr: (key: string) => string): number => (
+    FEEDBACK_MESSAGE_MAX_LENGTH - feedbackPlacePrefix(draft, tr).length
+);
+
 /**
  * Send: the refusal RN shows for a blank message or an invalid email (`error`), else what it submits. A bug's place, when one
- * is chosen, leads the message ("Where: Sync" and a blank line); diagnostics go only with a bug.
+ * is chosen, leads the message ("Where: Sync" and a blank line), within the endpoint's 4,000 characters (a place picked after
+ * a full message shortens its end); diagnostics go only with a bug.
  */
 export function planFeedbackSubmit(draft: FeedbackDraft, tr: (key: string) => string):
     | { error: string }
@@ -524,8 +537,9 @@ export function planFeedbackSubmit(draft: FeedbackDraft, tr: (key: string) => st
     const trimmedEmail = draft.email.trim();
     if (!trimmedMessage) return { error: tr('settings.feedbackRequired') };
     if (!isFeedbackEmailShapeValid(trimmedEmail)) return { error: tr('settings.feedbackInvalidEmail') };
-    const submittedMessage = draft.category === 'bug' && draft.location
-        ? `${tr('settings.feedbackWhereMessagePrefix')}: ${buildFeedbackModalText(tr).locations[draft.location]}\n\n${trimmedMessage}`
+    const prefix = feedbackPlacePrefix(draft, tr);
+    const submittedMessage = prefix
+        ? `${prefix}${trimmedMessage.slice(0, getFeedbackMessageMaxLength(draft, tr))}`
         : trimmedMessage;
     return {
         input: {

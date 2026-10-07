@@ -20,6 +20,7 @@ import {
     FEEDBACK_CATEGORIES,
     FEEDBACK_LOCATIONS as feedbackLocations,
     getFeedbackDraftState,
+    getFeedbackMessageMaxLength,
     planFeedbackSubmit,
     type FeedbackCategory,
     type FeedbackLocation,
@@ -262,7 +263,7 @@ export function FeedbackSettingsModal({
                                     placeholder={messagePlaceholders[category]}
                                     placeholderTextColor={tc.secondaryText}
                                     multiline
-                                    maxLength={4000}
+                                    maxLength={getFeedbackMessageMaxLength({ category, location: bugLocation }, tr)}
                                     style={[
                                         styles.feedbackTextArea,
                                         {
