@@ -42,6 +42,7 @@ import { createNextRecurringTask } from './recurrence';
 import { toStableSyncJson } from './sync-helpers';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { createNativeHostContract } from './native-host-contract';
+import { prepareChecklistProjectConversion } from './checklist-project-conversion';
 import { readAreaDurableData } from './native-host-contract-area-durable';
 import { projectAvailabilityWritePlan } from './store-projects/project-actions';
 import { rawReadProjectSnapshot, rawReadRow } from './sqlite-raw-snapshot';
@@ -959,6 +960,20 @@ describe('canonical local reads contract', () => {
             if (!converted.success) throw new Error(`Conversion fixture failed: ${converted.reason}`);
             return converted.receipt;
         };
+        const checklistConversion = async () => {
+            const added = await useTaskStore.getState().addTask('Contract checklist source', {
+                status: 'inbox', checklist: [
+                    { id: 'contract-open', title: 'Open item', isCompleted: false },
+                    { id: 'contract-done', title: 'Checked item', isCompleted: true },
+                ],
+            });
+            const source = added.id ? useTaskStore.getState()._tasksById.get(added.id) : null;
+            if (!added.success || !source) throw new Error('Checklist conversion fixture missing');
+            const prepared = prepareChecklistProjectConversion(useTaskStore.getState(), source, 'Contract checklist project');
+            if (!prepared.success) throw new Error(`Checklist conversion fixture blocked: ${prepared.error}`);
+            await flushPendingSave();
+            return prepared.command;
+        };
 
         expect(
             [taskId, deletedTaskId, checklistTaskId, sectionId].every((value) => typeof value === 'string'),
@@ -985,6 +1000,16 @@ describe('canonical local reads contract', () => {
             }))),
             cancelProject: () => call('cancelProject', projectId),
             cancelTask: () => call('cancelTask', taskId),
+            convertChecklistToProject: async (control) => {
+                const command = await checklistConversion();
+                control.resetBaseline();
+                expect(await call('convertChecklistToProject', command)).toMatchObject({ success: true });
+                control.expectPersisted((written) => {
+                    expect(written.tasks.find((entry) => entry.id === command.source.id)).toEqual(command.retired);
+                    expect(written.projects.find((entry) => entry.id === command.project.id)).toEqual(command.project);
+                    for (const task of command.tasks) expect(written.tasks.find((entry) => entry.id === task.id)).toEqual(task);
+                });
+            },
             convertProjectToSection: () => convertedProjectReceipt(),
             commitPreparedAreaCreate: async (control) => {
                 const host = await nativeHost(control);
@@ -2188,6 +2213,19 @@ describe('canonical local reads contract', () => {
             duplicateTask: () => call('duplicateTask', taskId),
             moveTask: () => call('moveTask', taskId, 'waiting'),
             promoteTaskToProject: () => call('promoteTaskToProject', taskId),
+            undoChecklistToProject: async (control) => {
+                const command = await checklistConversion();
+                expect(await call('convertChecklistToProject', command)).toMatchObject({ success: true });
+                control.resetBaseline();
+                expect(await call('undoChecklistToProject', command)).toMatchObject({ success: true });
+                control.expectPersisted((written) => {
+                    const source = written.tasks.find((entry) => entry.id === command.source.id);
+                    expect(source?.deletedAt).toBeUndefined();
+                    expect(source?.checklist).toEqual(command.source.checklist);
+                    expect(written.projects.find((entry) => entry.id === command.project.id)?.deletedAt).toBeTruthy();
+                    for (const task of command.tasks) expect(written.tasks.find((entry) => entry.id === task.id)?.deletedAt).toBeTruthy();
+                });
+            },
             undoProjectToSection: async () => call('undoProjectToSection', await convertedProjectReceipt()),
             purgeDeletedProjects: async () => {
                 await call('deleteProject', projectId);

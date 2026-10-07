@@ -37,7 +37,7 @@ describe('optional checklist project conversion', () => {
         expect(saved?.projects[0]).toMatchObject({ supportNotes: 'Instructions', dueDate: '2026-12-01', startDate: '2026-11-01', attachments: source().attachments });
         expect(saved?.tasks.find(task => task.id === 'source')?.deletedAt).toBeTruthy();
         expect(useTaskStore.getState().tasks.map(task => [task.title, task.status, task.order, task.completedAt]))
-            .toEqual([['First', 'done', 0, undefined], ['Second', 'next', 1, undefined]]);
+            .toEqual([['First', 'done', 0, command.project.createdAt], ['Second', 'next', 1, undefined]]);
         expect(useTaskStore.getState().tasks.every(task => !task.dueDate && !task.recurrence && !task.attachments)).toBe(true);
         expect(await useTaskStore.getState().convertChecklistToProject(command)).toMatchObject({ success: true });
         expect(useTaskStore.getState()._allTasks).toHaveLength(3);
@@ -45,6 +45,11 @@ describe('optional checklist project conversion', () => {
         expect(useTaskStore.getState().tasks).toHaveLength(1);
         expect(useTaskStore.getState().tasks[0]).toMatchObject({ title: 'Launch', checklist: source().checklist, attachments: source().attachments });
         expect(useTaskStore.getState().projects).toHaveLength(0);
+        for (const child of command.tasks) {
+            const retired = saved?.tasks.find(task => task.id === child.id);
+            expect(retired?.deletedAt).toBeTruthy();
+            for (const field of ['projectId', 'sectionId', 'order', 'orderNum'] as const) expect(retired?.[field]).toBeUndefined();
+        }
         expect(await useTaskStore.getState().undoChecklistToProject(command)).toMatchObject({ success: true });
     });
     it('rejects a changed source or destination and never overwrites edits during undo', async () => {

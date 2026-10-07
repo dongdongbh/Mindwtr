@@ -58,8 +58,8 @@ export function prepareChecklistProjectConversion(state: State, source: Task, ti
             state: { ...state, _allProjects: [...state._allProjects, project] }, tasks: [],
             focusedCount: 0, focusTaskLimit: 0, projectOrderReserver: reserve });
         if (!built.ok) return { success: false, error: built.error };
-        // A checked item has no historical completion timestamp to copy.
-        tasks.push({ ...built.task, completedAt: undefined });
+        // Keep the shared creation-time completion fallback for checked items.
+        tasks.push(built.task);
     }
     const retired = { ...source, deletedAt: now, updatedAt: now, rev: nextRevision(source.rev), revBy: device.deviceId };
     return { success: true, command: JSON.parse(JSON.stringify({ source, retired, project, tasks,
@@ -72,6 +72,11 @@ type Context = {
     debouncedSave: Parameters<typeof persist>[1];
     flushPendingSave: () => Promise<void>;
 };
+
+const retiredChecklistTask = (task: Task, now: string, deviceId: Task['revBy']): Task => ({
+    ...task, projectId: undefined, sectionId: undefined, order: undefined, orderNum: undefined,
+    deletedAt: now, updatedAt: now, rev: nextRevision(task.rev), revBy: deviceId,
+});
 
 /** One snapshot write, with a frozen identity for save retries and conservative Undo. */
 export function createChecklistProjectConversionActions({ set, get, debouncedSave, flushPendingSave }: Context):
@@ -91,7 +96,7 @@ export function createChecklistProjectConversionActions({ set, get, debouncedSav
         const tombstone = <T extends Task | Project>(row: T) => ({ ...row, deletedAt: now, updatedAt: now,
             rev: nextRevision(row.rev), revBy: source.revBy });
         return same(source, restored) && same(project, tombstone(command.project))
-            && command.tasks.every(task => same(state._allTasks.find(row => row.id === task.id), tombstone(task)));
+            && command.tasks.every(task => same(state._allTasks.find(row => row.id === task.id), retiredChecklistTask(task, now, source.revBy)));
     };
     const run = async (command: ChecklistProjectConversion, undo: boolean) => {
         let accepted = false;
@@ -117,7 +122,7 @@ export function createChecklistProjectConversionActions({ set, get, debouncedSav
             const tombstone = <T extends Task | Project>(row: T): T => ({ ...row, deletedAt: now, updatedAt: now,
                 rev: nextRevision(row.rev), revBy: deviceId });
             const source = undo ? { ...command.source, updatedAt: now, rev: nextRevision(command.retired.rev), revBy: deviceId } : command.retired;
-            const generated = new Map(command.tasks.map(task => [task.id, tombstone(task)]));
+            const generated = new Map(command.tasks.map(task => [task.id, retiredChecklistTask(task, now, deviceId)]));
             const tasks = state._allTasks.map(task => task.id === source.id ? source : undo ? generated.get(task.id) ?? task : task);
             const projects = undo ? state._allProjects.map(project => project.id === command.project.id ? tombstone(project) : project)
                 : [...state._allProjects, command.project];
@@ -135,7 +140,7 @@ export function createChecklistProjectConversionActions({ set, get, debouncedSav
         } catch { return { success: false, error: 'task.expandChecklistSaveFailed' }; }
         if (!footprint(get(), command, undo)) return { success: false, error: 'task.expandChecklistConflict' };
         logInfo('Checklist project conversion saved', { scope: 'store', category: 'storage',
-            context: { releaseCheck: 'v1.3.5/checklist-project', operation: undo ? 'undo' : 'convert', count: command.tasks.length } });
+            context: { releaseCheck: 'v1.3.5/checklist-project-canonical', operation: undo ? 'undo' : 'convert', count: command.tasks.length } });
         return { success: true, id: undo ? command.source.id : command.project.id };
     };
     return { convertChecklistToProject: command => run(command, false), undoChecklistToProject: command => run(command, true) };
