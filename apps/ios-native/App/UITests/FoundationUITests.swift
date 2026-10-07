@@ -308,6 +308,70 @@ final class FoundationUITests: XCTestCase {
         // Leave Unlock unsubmitted so root can verify discovery wrote no plaintext.
     }
 
+    func testNativeEncryptionProviderStagesSavedWebDAVAndColdOffersEnable() throws {
+        let library = try task371Library("INCOMPATIBLE", prefix: "MINDWTR_PROVIDER_UI_")
+        guard let raw = ProcessInfo.processInfo.environment["MINDWTR_PROVIDER_UI_CONFIG"] else {
+            throw XCTSkip("Private isolated provider configuration is required for staging")
+        }
+        let prefix = "/dav/Mindwtr-test/native-ios-refusal-384-"
+        guard let config = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String],
+              let url = config["url"], let account = config["account"], let password = config["password"],
+              !account.isEmpty, !password.isEmpty,
+              let target = URLComponents(string: url), target.scheme == "https", target.host == "dav.jianguoyun.com",
+              target.user == nil, target.password == nil, target.query == nil, target.fragment == nil,
+              target.port == nil || target.port == 443, target.path.hasPrefix(prefix),
+              let collection = UUID(uuidString: String(target.path.dropFirst(prefix.count))),
+              collection.uuidString.lowercased() == String(target.path.dropFirst(prefix.count)) else {
+            XCTFail("Provider staging requires valid private credentials and the exact isolated test collection")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task322OpenSync(app); task322WebDav(app)
+        task322Type(app, "sync-url", url)
+        task322Type(app, "sync-username", account)
+        task322Type(app, "sync-password", password, secure: true)
+        boardEnabled(app.buttons["sync-save"], timeout: 30)
+        revealPagedElement(app, app.buttons["sync-save"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-save")
+        boardEnabled(app.buttons["sync-back"], timeout: 60)
+        boardEnabled(app.buttons["sync-encryption-open-enable"], timeout: 60)
+        app.terminate(); app.launch(); task371OpenSync(app, openFlow: false)
+        boardEnabled(app.buttons["sync-encryption-open-enable"], timeout: 60)
+    }
+
+    func testNativeEncryptionProviderWithoutSafeVersionsRefusesEnableAndColdRemainsOff() throws {
+        let library = try task371Library("INCOMPATIBLE", prefix: "MINDWTR_PROVIDER_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "enable")
+        for name in encryptionFields("enable") {
+            task322Type(app, "sync-encryption-" + name, "synthetic-native-provider-384", secure: true)
+        }
+        revealPagedElement(app, app.buttons["sync-encryption-enable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-enable")
+        let refusal = app.staticTexts.matching(NSPredicate(format: "label == %@", "This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.")).firstMatch
+        XCTAssertTrue(refusal.waitForExistence(timeout: 60))
+        boardEnabled(app.buttons["sync-back"], timeout: 60)
+        for name in encryptionFields("enable") {
+            let field = app.secureTextFields["sync-encryption-" + name]
+            boardEnabled(field, timeout: 30)
+            let value = field.value as? String ?? ""
+            XCTAssertTrue(value.isEmpty || value == field.placeholderValue)
+        }
+        XCTAssertFalse(app.buttons["sync-encryption-enable"].isEnabled)
+        for id in ["open-abandon", "recheck"] { XCTAssertFalse(app.buttons["sync-encryption-" + id].exists) }
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        boardEnabled(app.buttons["sync-encryption-open-enable"], timeout: 30)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "enable")
+        for id in ["open-abandon", "recheck"] { XCTAssertFalse(app.buttons["sync-encryption-" + id].exists) }
+    }
+
     private func task371Restart(_ app: XCUIApplication) {
         task322RestartGate(app)
         XCTAssertFalse(app.secureTextFields["sync-encryption-current"].exists)

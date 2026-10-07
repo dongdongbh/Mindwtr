@@ -44,7 +44,7 @@ private final class EncryptionDAVProtocol: URLProtocol {
 }
 
 private final class EncryptionDAVStore: @unchecked Sendable {
-    struct Request: Equatable { let method: String; let path: String; let condition: String?; let status: Int; let serverDate: String }
+    struct Request: Equatable { let method: String; let path: String; let condition: String?; let status: Int; let serverDate: String; let responseEtag: String? }
     struct Reply { let status: Int; let headers: [String: String]; let body: Data }
     private struct Object { let bytes: Data; let etag: String }
     private let lock = NSLock()
@@ -58,7 +58,8 @@ private final class EncryptionDAVStore: @unchecked Sendable {
     private var getStatuses: [String: Int] = [:]
     private var declaredLengths: [String: Int] = [:]
     private var omitEtags = false
-    func refuseStrongEtags() { lock.lock(); omitEtags = true; lock.unlock() }
+    private var unquotedEtags = false
+    func refuseStrongEtags(unquoted: Bool = false) { lock.lock(); omitEtags = !unquoted; unquotedEtags = unquoted; lock.unlock() }
     private var refuseFenceDelete = false
     func refuseFenceRelease() { lock.lock(); refuseFenceDelete = true; lock.unlock() }
     init(expectedAuthorization: String) { self.expectedAuthorization = expectedAuthorization }
@@ -85,9 +86,9 @@ private final class EncryptionDAVStore: @unchecked Sendable {
         date.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
         func reply(_ status: Int, _ bytes: Data = Data(), etag: String? = nil, type: String = "application/octet-stream") -> Reply {
             let serverDate = date.string(from: serverTime ?? Date())
-            requests.append(Request(method: method, path: path, condition: condition, status: status, serverDate: serverDate))
             var headers = ["Date": serverDate, "Content-Length": String(bytes.count), "Content-Type": type]
-            if let etag, !omitEtags { headers["ETag"] = etag }
+            if let etag, !omitEtags { headers["ETag"] = unquotedEtags ? "fixture-unquoted-validator" : etag }
+            requests.append(Request(method: method, path: path, condition: condition, status: status, serverDate: serverDate, responseEtag: headers["ETag"]))
             return Reply(status: status, headers: headers, body: method == "HEAD" ? Data() : bytes)
         }
         // Never retain or report a received credential. Every accepted DAV
@@ -840,6 +841,43 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertEqual(remote.snapshot, original); XCTAssertNil(try cachedKey()); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
         XCTAssertEqual(try rows(), before); XCTAssertEqual(try markers("v1.3.5/ios-encryption-enable-capacity"), 1)
         XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 0); assertDrained(); await host.close()
+    }
+    func testEnableUnquotedETagRefusesBeforeProbeFenceCryptoOrDurableMutation() async throws {
+        let host = try await plaintextHost(), before = try rows(), original = remote.snapshot, configuration = try Data(contentsOf: manifest)
+        try await enterEnable(host, passphrase)
+        let count = remote.recorded.count, operations = try XCTUnwrap(crypto).counters.operations
+        remote.refuseStrongEtags(unquoted: true)
+        _ = try await action(host, ["type": "submit", "flow": "enable"], requestID: UUID().uuidString.lowercased())
+        let requests = Array(remote.recorded.dropFirst(count))
+        XCTAssertEqual(requests.map { $0.method }, ["GET"], "An unsafe existing-document validator refuses before the capability probe or mutation fence")
+        XCTAssertEqual(requests.map { $0.path }, ["/sync/data.json"])
+        XCTAssertEqual(requests.map { $0.status }, [200])
+        XCTAssertEqual(requests.map { $0.responseEtag }, ["fixture-unquoted-validator"], "The actual native GET receives an ETag header, not an omitted validator")
+        XCTAssertFalse(requests.contains { $0.method == "PUT" || $0.method == "DELETE" })
+        XCTAssertNil(remote.bytes("/sync/.mindwtr-sync-fence-v1.json")); XCTAssertEqual(remote.snapshot, original)
+        XCTAssertEqual(crypto?.counters.operations, operations); XCTAssertNil(try cachedKey())
+        XCTAssertEqual(try Data(contentsOf: manifest), configuration); XCTAssertEqual(try rows(), before)
+        XCTAssertEqual(try Data(contentsOf: localFile), localBytes)
+        if let text = try stored()["@mindwtr_sync_encryption_state_v1"] as? String {
+            let state = try object(text)
+            XCTAssertEqual(state["state"] as? String, "off"); XCTAssertNil(state["incompleteTransition"]); XCTAssertNil(state["partlyEncryptedScope"])
+        }
+        let card = try await encryptionRows(host), fields = card.filter { $0["kind"] as? String == "field" }
+        XCTAssertTrue(card.contains { $0["tone"] as? String == "danger" && $0["text"] as? String == "This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox." })
+        XCTAssertEqual(Set(fields.compactMap { $0["field"] as? String }), Set(["next", "confirm"]))
+        XCTAssertTrue(fields.allSatisfy { $0["secure"] as? Bool == true && $0["value"] == nil })
+        let submit = try XCTUnwrap(card.first { ($0["action"] as? [String: Any])?["type"] as? String == "submit" })
+        XCTAssertEqual(submit["enabled"] as? Bool, false); XCTAssertEqual(submit["busy"] as? Bool, false)
+        XCTAssertFalse(card.contains { let action = $0["action"] as? [String: Any]; return action?["flow"] as? String == "abandon" || action?["type"] as? String == "recheck" })
+        XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 0); XCTAssertEqual(try markers(), 0); assertDrained(); await host.close()
+        let cold = core(), network = remote.recorded.count; _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
+        let offered = try await encryptionRows(cold)
+        XCTAssertTrue(offered.contains { let action = $0["action"] as? [String: Any]; return action?["type"] as? String == "open" && action?["flow"] as? String == "enable" && $0["enabled"] as? Bool == true })
+        XCTAssertFalse(offered.contains { let action = $0["action"] as? [String: Any]; return ["unlock", "change", "disable", "abandon"].contains(action?["flow"] as? String ?? "") || action?["type"] as? String == "recheck" || $0["kind"] as? String == "field" })
+        XCTAssertEqual(remote.recorded.count, network); XCTAssertEqual(remote.snapshot, original)
+        XCTAssertNil(try cachedKey()); XCTAssertEqual(try Data(contentsOf: manifest), configuration); XCTAssertEqual(try rows(), before)
+        XCTAssertEqual(try Data(contentsOf: localFile), localBytes); XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 0)
+        assertDrained(); await cold.close()
     }
     func testEnableRemoteCheckFailureRetainsOriginalArtifactsAndRetiresOwnedFields() async throws {
         let host = try await plaintextHost(), before = try rows(), original = remote.snapshot, configuration = try Data(contentsOf: manifest)
