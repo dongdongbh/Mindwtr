@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { createSyncEncryptionCard, getSyncEncryptionCardMessages, type SyncEncryptionCardHost } from './sync-encryption-card';
-import { SyncEncryptionBackendIncompatibleError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError } from './sync-encryption';
+import { SyncEncryptionBackendIncompatibleError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, type SyncEncryptionTransitionKind } from './sync-encryption';
 import { SyncCryptoUnsupportedError } from './sync-crypto';
 import { SyncEncryptionCleanupDeferredError, isSyncEncryptionCleanupDeferredError } from './sync-encryption-service';
 
 function setup(overrides: Partial<SyncEncryptionCardHost> = {}) {
     const calls: unknown[][] = [];
     let state: 'off' | 'enabled' | 'remote-encrypted-no-key' = 'off';
-    let incomplete: 'enable' | undefined;
+    let incomplete: SyncEncryptionTransitionKind | undefined;
     let partly = false;
     let found: 'plaintext' | 'encrypted' | 'mixed' = 'mixed';
     const host: SyncEncryptionCardHost = {
@@ -174,6 +174,39 @@ describe('sync encryption card', () => {
         await card.submitAbandon();
         expect(calls).toEqual([['abandon']]);
         expect(card.getState()).toMatchObject({ state: 'off', flow: 'none', incompleteTransition: false, error: null, busy: false });
+    });
+
+    it('retains the durable unfinished kind across refresh, transition failure, and completion', async () => {
+        const current = setup();
+        current.setIncomplete('disable');
+        await current.card.refresh().done;
+        expect(current.card.getState()).toMatchObject({ incompleteTransition: true, incompleteTransitionKind: 'disable' });
+        current.setIncomplete('enable');
+        await current.card.refresh().done;
+        expect(current.card.getState()).toMatchObject({ incompleteTransition: true, incompleteTransitionKind: 'enable' });
+
+        const interrupted = setup({ enable: async () => {
+            interrupted.setIncomplete('enable');
+            throw new Error('interrupted');
+        } });
+        await interrupted.card.refresh().done;
+        interrupted.card.openFlow('enable');
+        interrupted.card.setField('next', 'phrase');
+        interrupted.card.setField('confirm', 'phrase');
+        await interrupted.card.submitEnable();
+        expect(interrupted.card.getState()).toMatchObject({ state: 'off', incompleteTransition: true, incompleteTransitionKind: 'enable' });
+
+        const completed = setup({ enable: async () => {
+            completed.setIncomplete(undefined);
+            completed.setState('enabled');
+        } });
+        completed.setIncomplete('enable');
+        await completed.card.refresh().done;
+        completed.card.openFlow('enable');
+        completed.card.setField('next', 'phrase');
+        completed.card.setField('confirm', 'phrase');
+        await completed.card.submitEnable();
+        expect(completed.card.getState()).toMatchObject({ state: 'enabled', incompleteTransition: false, incompleteTransitionKind: null });
     });
 
     it('holds a partly encrypted location until "Check this location again" finds it whole', async () => {

@@ -19,6 +19,7 @@ import {
     isSyncEncryptionRemoteVersionUnavailableError,
     type SyncEncryptionState,
     type SyncEncryptionStatus,
+    type SyncEncryptionTransitionKind,
     type SyncEncryptionTransitionProgress,
 } from './sync-encryption';
 
@@ -67,6 +68,8 @@ export type SyncEncryptionCardState = {
     stateUnavailable: boolean;
     /** A change (enable, change, disable) is unfinished on this device: "Abandon setup" is offered. */
     incompleteTransition: boolean;
+    /** The durable unfinished kind, retained for hosts that admit a selected recovery flow. */
+    incompleteTransitionKind: SyncEncryptionTransitionKind | null;
     /** This device holds the location as partly encrypted (an encryption change cut off there): it syncs nothing there
      *  until "Check this location again" finds it whole. */
     partlyEncrypted: boolean;
@@ -89,6 +92,7 @@ const INITIAL_STATE: SyncEncryptionCardState = {
     state: null,
     stateUnavailable: false,
     incompleteTransition: false,
+    incompleteTransitionKind: null,
     partlyEncrypted: false,
     flow: 'none',
     busy: false,
@@ -160,6 +164,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         state: SyncEncryptionState | null;
         unavailable: boolean;
         incomplete: boolean;
+        incompleteKind: SyncEncryptionTransitionKind | null;
         partly: boolean;
     }> => {
         try {
@@ -168,11 +173,12 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
                 state: status.state,
                 unavailable: false,
                 incomplete: Boolean(status.incompleteTransition),
+                incompleteKind: status.incompleteTransition ?? null,
                 partly: Boolean(status.partlyEncrypted),
             };
         } catch (failure) {
             host.logSettingsError(failure);
-            return { state: null, unavailable: true, incomplete: false, partly: false };
+            return { state: null, unavailable: true, incomplete: false, incompleteKind: null, partly: false };
         }
     };
 
@@ -188,7 +194,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         let cancelled = false;
         const read = readState().then((next) => {
             if (!cancelled) {
-                set({ state: next.state, stateUnavailable: next.unavailable, incompleteTransition: next.incomplete, partlyEncrypted: next.partly });
+                set({ state: next.state, stateUnavailable: next.unavailable, incompleteTransition: next.incomplete, incompleteTransitionKind: next.incompleteKind, partlyEncrypted: next.partly });
                 if (next.incomplete) set({ error: 'transition-incomplete' });
             }
         });
@@ -269,7 +275,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         }
         // Transitions are resumable, so a half-finished run still moved the state.
         const nextState = await readState();
-        set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, partlyEncrypted: nextState.partly });
+        set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, incompleteTransitionKind: nextState.incompleteKind, partlyEncrypted: nextState.partly });
         if (nextState.incomplete) set({ error: 'transition-incomplete' });
         set({ pendingFirstSync: await host.isBackendPending().catch(() => false) });
         set({ progress: null, busy: false });
@@ -341,7 +347,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
             }
         }
         const nextState = await readState();
-        set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, partlyEncrypted: nextState.partly, busy: false });
+        set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, incompleteTransitionKind: nextState.incompleteKind, partlyEncrypted: nextState.partly, busy: false });
         if (accepted) {
             closeFlow();
             if (cleanupDeferred) set({ warning: cleanupDeferred });
@@ -361,14 +367,14 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
             .catch((error) => host.logSettingsError(error))
             .then(async () => {
                 const nextState = await readState();
-                set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, partlyEncrypted: nextState.partly });
+                set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, incompleteTransitionKind: nextState.incompleteKind, partlyEncrypted: nextState.partly });
             });
     };
 
     const retryState = async () => {
         set({ busy: true });
         const nextState = await readState();
-        set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, partlyEncrypted: nextState.partly, busy: false });
+        set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, incompleteTransitionKind: nextState.incompleteKind, partlyEncrypted: nextState.partly, busy: false });
     };
 
     return {
