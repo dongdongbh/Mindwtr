@@ -10,6 +10,7 @@ import {
 import { isGeneratedCaptureTokenShape, lookupCaptureToken, type TokenScope } from './server-capture-tokens';
 import { errorResponse, logInfo } from './server-config';
 import type { RateLimiter } from './server-rate-limit';
+import { createRequestAbortError } from './server-storage';
 
 const TOKEN_NAMESPACE_FILE_PATTERN = /^([a-f0-9]{64})\.json$/;
 const TOKEN_NAMESPACE_DIR_PATTERN = /^[a-f0-9]{64}$/;
@@ -56,6 +57,13 @@ export type ServerConfig = {
      * there as its owner's namespace and is refused with 403 on every other route.
      */
     acceptsCaptureTokens?: boolean;
+    /**
+     * Starts the capped body read right after auth and rate checks, before any
+     * admission wait, and hands the result to the handler as `ctx.body`. An unread
+     * body is buffered by the runtime without a cap, so a route whose writes can
+     * wait on admission reads actively. Return undefined to skip a method.
+     */
+    readBodyBeforeAdmission?: (req: Request, signal: AbortSignal) => Promise<unknown> | undefined;
 };
 
 const defaultGuardMethods = (method: string): boolean => method !== 'GET' && method !== 'HEAD';
@@ -96,7 +104,7 @@ export async function withNamespace(
     req: Request,
     url: URL,
     cfg: ServerConfig,
-    handler: (ctx: { key: string; filePath: string; scope: TokenScope }) => Promise<Response | null>,
+    handler: (ctx: { key: string; filePath: string; scope: TokenScope; body?: Promise<unknown> }) => Promise<Response | null>,
     signal?: AbortSignal,
 ): Promise<Response | null> {
     const token = getToken(req);
@@ -133,13 +141,41 @@ export async function withNamespace(
     const rateKey = `${key}:${req.method}:${toRateLimitRoute(pathname)}`;
     const rateLimitResponse = cfg.rateLimiter.check(rateKey, cfg.maxPerWindow);
     if (rateLimitResponse) return rateLimitResponse;
+    const bodyAbort = new AbortController();
+    const body = cfg.readBodyBeforeAdmission?.(
+        req,
+        signal ? AbortSignal.any([signal, bodyAbort.signal]) : bodyAbort.signal,
+    );
+    let bodyHandedOff = false;
+    try {
+        const refusal = await admitNamespaceWrite(cfg, key, scope, req.method, signal);
+        if (refusal) return refusal;
+        const filePath = join(cfg.dataDir, `${key}.json`);
+        bodyHandedOff = true;
+        return await handler({ key, filePath, scope, body });
+    } finally {
+        if (!bodyHandedOff && body) {
+            // A RequestAbortError reason: the body reader reuses it as its error.
+            bodyAbort.abort(createRequestAbortError('Request refused before its body was read'));
+            void body.catch(() => undefined);
+        }
+    }
+}
+
+async function admitNamespaceWrite(
+    cfg: ServerConfig,
+    key: string,
+    scope: TokenScope,
+    method: string,
+    signal?: AbortSignal,
+): Promise<Response | null> {
     const guardMethods = cfg.guardMethods ?? defaultGuardMethods;
-    if (scope === 'full' && guardMethods(req.method)) {
+    if (scope === 'full' && guardMethods(method)) {
         if (!cfg.allowedAuthTokens && !namespaceExists(cfg.dataDir, key)) {
             const admissionResponse = await cfg.runWithNamespaceAdmission(async (): Promise<Response | null> => {
                 // Recheck after taking the process-safe global lock. Write routes
                 // reserve a valid empty document here, keeping the lock window short:
-                // untrusted request bodies are read and validated after admission.
+                // untrusted request bodies are validated after admission.
                 const namespaceResponse = ensureNamespaceWriteAllowed(cfg, key);
                 if (namespaceResponse) return namespaceResponse;
                 const filePath = join(cfg.dataDir, `${key}.json`);
@@ -154,6 +190,5 @@ export async function withNamespace(
             if (namespaceResponse) return namespaceResponse;
         }
     }
-    const filePath = join(cfg.dataDir, `${key}.json`);
-    return handler({ key, filePath, scope });
+    return null;
 }

@@ -272,6 +272,7 @@ type BunRuntime = {
     serve: (options: {
         hostname: string;
         port: number;
+        maxRequestBodySize: number;
         fetch: (req: Request) => Response | Promise<Response>;
     }) => BunServer;
 };
@@ -1242,6 +1243,9 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
     const dataServerConfig: ServerConfig = {
         ...baseServerConfig,
         guardMethods: (method) => method === 'PUT' || method === 'GET',
+        readBodyBeforeAdmission: (req, signal) => (
+            req.method === 'PUT' ? readJsonBody(req, maxDataBodyBytes, signal) : undefined
+        ),
     };
     const calendarFeedServerConfig: ServerConfig = {
         ...baseServerConfig,
@@ -1360,6 +1364,10 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
     const server = bunRuntime.serve({
         hostname: host,
         port,
+        // Bun refuses a larger Content-Length with an empty 413 before the handler
+        // runs (default 128 MiB). Sit just above the largest app limit so the app's
+        // own capped reads answer with JSON naming the limit.
+        maxRequestBodySize: Math.max(maxBodyBytes, maxDataBodyBytes, maxAttachmentBytes) + 1_048_576,
         async fetch(req: Request) {
             const requestId = generateRequestId();
             const requestStartedAt = performance.now();
@@ -1631,10 +1639,10 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     }
 
                     if (req.method === 'PUT') {
-                        // Namespace admission has already reserved a valid empty
-                        // document, so body streaming and validation never hold the
+                        // The capped read started before namespace admission
+                        // (readBodyBeforeAdmission), so validation never holds the
                         // global admission lock.
-                        const body = await readJsonBody(req, maxDataBodyBytes, requestAbortController.signal);
+                        const body = await ctx.body;
                         if (isBodyReadError(body)) {
                             const err = body.__mindwtrError;
                             const status = Number(err?.status) || 413;

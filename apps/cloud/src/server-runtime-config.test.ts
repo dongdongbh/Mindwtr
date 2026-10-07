@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { spawnSync } from 'child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -45,6 +46,35 @@ describe('resolveCloudRuntimeConfig', () => {
         expect(CLOUD_NUMERIC_ENVIRONMENT_KEYS).toEqual(numericEnvironmentKeys);
         for (const key of numericEnvironmentKeys) {
             expect(example).toContain(`${key}=`);
+        }
+    });
+
+    test('passes the sync document limit through both compose files only when set', () => {
+        const composeFiles = ['compose.yaml', 'compose.https.yaml'].map((name) => (
+            new URL(`../../../docker/${name}`, import.meta.url).pathname
+        ));
+        for (const file of composeFiles) {
+            // Name only: a fixed fallback would hide a raised MINDWTR_CLOUD_MAX_BODY_BYTES.
+            expect(readFileSync(file, 'utf8')).toMatch(/^ {6}- MINDWTR_CLOUD_MAX_DATA_BODY_BYTES$/m);
+        }
+        if (spawnSync('docker', ['compose', 'version']).status !== 0) return;
+        const render = (file: string, value?: string): string | null => {
+            const env: Record<string, string | undefined> = {
+                ...process.env,
+                MINDWTR_CLOUD_CORS_ORIGIN: 'https://example.test',
+                MINDWTR_CLOUD_DOMAIN: 'example.test',
+                MINDWTR_CLOUD_MAX_DATA_BODY_BYTES: value,
+            };
+            if (value === undefined) delete env.MINDWTR_CLOUD_MAX_DATA_BODY_BYTES;
+            const result = spawnSync('docker', ['compose', '-f', file, 'config', '--format', 'json'], { env, encoding: 'utf8' });
+            expect(result.status).toBe(0);
+            const config = JSON.parse(result.stdout) as { services: Record<string, { environment: Record<string, string | null> }> };
+            return config.services['mindwtr-cloud'].environment.MINDWTR_CLOUD_MAX_DATA_BODY_BYTES;
+        };
+        for (const file of composeFiles) {
+            expect(render(file, '10000000')).toBe('10000000');
+            // null = name without a value: Docker leaves the variable unset in the container.
+            expect(render(file)).toBeNull();
         }
     });
 
