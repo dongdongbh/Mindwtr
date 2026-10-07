@@ -14,6 +14,7 @@ export const WEBDAV_ALLOW_WEAK_FINGERPRINT_KEY = '@mindwtr_webdav_allow_weak_fin
 export const CLOUD_URL_KEY = '@mindwtr_cloud_url';
 export const CLOUD_TOKEN_KEY = '@mindwtr_cloud_token';
 export const CLOUD_PROVIDER_KEY = '@mindwtr_cloud_provider';
+export const CLOUD_PROVIDER_DROPBOX = 'dropbox' as const;
 export const CLOUD_ALLOW_INSECURE_HTTP_KEY = '@mindwtr_cloud_allow_insecure_http';
 export const DROPBOX_LAST_REV_KEY = '@mindwtr_dropbox_last_rev';
 /** Device-local sync-encryption state (state + discovered salt/params). NEVER synced,

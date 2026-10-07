@@ -9944,6 +9944,10 @@ mod tests {
                 "OS global-hotkey (un)registration, inherently main/event-loop-bound",
             ),
             (
+                "set_tray_labels",
+                "builds three GUI menu items and replaces the tray menu, no file or network I/O",
+            ),
+            (
                 "set_tray_visible",
                 "tray-icon visibility is a live GUI-toolkit object mutation, no I/O",
             ),
