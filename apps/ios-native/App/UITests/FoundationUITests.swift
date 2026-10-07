@@ -364,6 +364,185 @@ final class FoundationUITests: XCTestCase {
         task337NoRestartGate(app, timeout: 5)
     }
 
+    private func task350Arguments(_ library: String, hook: String? = nil) -> [String] {
+        var arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if let hook { arguments.append(hook) }
+        return arguments
+    }
+
+    private func task350OpenProject(_ app: XCUIApplication, archived: Bool = false) {
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        boardTap(app, "tab-menu"); boardTap(app, "menu-projects")
+        let scroll = app.scrollViews["projects-scroll"]
+        if archived {
+            let section = app.buttons["projects-section-archived"]
+            revealPagedElement(app, section, in: scroll)
+            boardEnabled(section)
+            if section.value as? String == "Expand" { section.tap() }
+        }
+        let row = app.buttons["project-open-task121-" + (archived ? "archived" : "active")]
+        revealPagedElement(app, row, in: scroll)
+        boardEnabled(row); row.tap(); boardTap(app, "project-details-toggle")
+    }
+
+    private func task350TapProject(_ app: XCUIApplication, _ id: String) {
+        let element = app.buttons[id]
+        revealPagedElement(app, element, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        boardEnabled(element)
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44 - 0.01)
+        element.tap()
+    }
+
+    private func task350EditNotes(_ app: XCUIApplication, _ text: String) {
+        if !app.textViews["project-notes-input"].exists {
+            task350TapProject(app, "project-notes-toggle")
+            if app.buttons["project-notes-mode-edit"].isEnabled {
+                task350TapProject(app, "project-notes-mode-edit")
+            }
+        }
+        let input = app.textViews["project-notes-input"]
+        boardEnabled(input, timeout: 30)
+        revealPagedElement(app, input, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        replaceProjectNotesText(input, with: text)
+        XCTAssertEqual(input.value as? String, text)
+    }
+
+    private func task350NoFilePresentation(_ app: XCUIApplication) {
+        XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
+        XCTAssertFalse(app.otherElements["task-audio-player"].exists)
+        XCTAssertFalse(app.buttons["Close"].firstMatch.exists, "Download must not present the system file viewer")
+    }
+
+    private func task350KnownOffRefusal(_ app: XCUIApplication) {
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 15))
+        let message = "This sync provider is not available in native iOS yet; the stored configuration is unchanged"
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label == %@", message)).firstMatch.exists)
+        let dismiss = alert.buttons["project-attachment-open-dismiss"].firstMatch
+        boardEnabled(dismiss); dismiss.tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
+        boardEnabled(app.buttons["project-attachment-download-task121-file"], timeout: 30)
+        task350NoFilePresentation(app)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+    }
+
+    private func task350ColdNotes(_ app: XCUIApplication, library: String, text: String) {
+        app.terminate(); app.launchArguments = task350Arguments(library); app.launch()
+        task350OpenProject(app)
+        task350TapProject(app, "project-notes-toggle")
+        if app.buttons["project-notes-mode-preview"].exists && app.buttons["project-notes-mode-preview"].isEnabled {
+            task350TapProject(app, "project-notes-mode-preview")
+        }
+        let notes = app.staticTexts[text]
+        revealPagedElement(app, notes, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        XCTAssertTrue(notes.exists, "The exact flushed Notes must survive cold reopening")
+        boardEnabled(app.buttons["project-attachment-download-task121-file"], timeout: 30)
+        task350NoFilePresentation(app)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+    }
+
+    func testProjectDownloadKnownOffRefusalFlushesNotesAndArchivedRemainsEligible() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = "474dc5da-dc25-476a-a08b-2a151facc3b1"
+        let first = "Task350 Notes before known Off refusal", final = first + " and still editable"
+        // Root stages the existing Task121 missing-cloud-file fixture in this
+        // fresh isolated library with stored Off, no credential or local bytes.
+        app.launchArguments = task350Arguments(library)
+        app.launch(); defer { app.terminate() }
+        task350OpenProject(app); task350EditNotes(app, first)
+        task350TapProject(app, "project-attachment-download-task121-file")
+        task350KnownOffRefusal(app)
+        XCTAssertEqual(app.textViews["project-notes-input"].value as? String, first)
+        // Notes changed the Project revision before dispatch. The known reply
+        // must leave the current Notes options usable, without an auto Open.
+        task350EditNotes(app, final)
+        task350TapProject(app, "project-attachment-download-task121-file")
+        task350KnownOffRefusal(app)
+        task350ColdNotes(app, library: library, text: final)
+
+        boardTap(app, "project-back"); task350OpenProject(app, archived: true)
+        let download = app.buttons["project-attachment-download-task121-file"]
+        revealPagedElement(app, download, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        boardEnabled(download)
+        XCTAssertGreaterThanOrEqual(download.frame.height, 44 - 0.01)
+        for id in ["project-attachment-add-file", "project-attachment-add-link"] {
+            XCTAssertTrue(app.buttons[id].exists); XCTAssertFalse(app.buttons[id].isEnabled)
+        }
+        download.tap(); task350KnownOffRefusal(app)
+        boardEnabled(app.buttons["project-back"])
+    }
+
+    func testProjectDownloadUnknownThrowAndMalformedReplyRequireColdRestartWithNotesRetained() {
+        continueAfterFailure = false
+        for (library, hook, notes) in [
+            ("4c1d59d0-a06e-40cf-967a-7a815aa1d919", "--native-project-download-command-throw-once", "Task350 Notes before unknown throw"),
+            ("8b777ea5-9f9a-49e0-8c19-4bb46e03fe63", "--native-project-download-malformed-reply-once", "Task350 Notes before malformed reply")
+        ] {
+            let app = XCUIApplication()
+            app.launchArguments = task350Arguments(library, hook: hook)
+            app.launch(); defer { app.terminate() }
+            task350OpenProject(app); task350EditNotes(app, notes)
+            task350TapProject(app, "project-attachment-download-task121-file")
+            // Throw is before dispatch; malformed substitutes non-null Project
+            // update only after the actual native Off refusal has returned.
+            task322RestartGate(app)
+            for id in ["project-back", "project-attachment-download-task121-file", "project-attachment-open-task121-file",
+                       "project-attachment-add-file", "project-notes-mode-edit"] {
+                XCTAssertFalse(app.buttons[id].exists)
+            }
+            XCTAssertFalse(app.textViews["project-notes-input"].exists)
+            task350NoFilePresentation(app)
+            task350ColdNotes(app, library: library, text: notes)
+            task350TapProject(app, "project-notes-mode-edit")
+            boardEnabled(app.textViews["project-notes-input"])
+            XCTAssertEqual(app.textViews["project-notes-input"].value as? String, notes)
+            boardTap(app, "project-back"); task322OpenSync(app)
+            XCTAssertTrue(app.buttons["sync-option-off"].isSelected)
+        }
+    }
+
+    func testProjectDownloadDelayedOffReplyRetainsBusyThroughBackgroundAndDropsStaleError() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = "bec4af4a-9f68-43cc-b09a-de629e00b0d8"
+        let first = "Task350 Notes before delayed Off reply", final = first + " and after drainage"
+        app.launchArguments = task350Arguments(library, hook: "--native-project-download-delay-reply-once")
+        app.launch(); defer { app.terminate() }
+        task350OpenProject(app); task350EditNotes(app, first)
+        let download = app.buttons["project-attachment-download-task121-file"]
+        revealPagedElement(app, download, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        boardEnabled(download); XCTAssertGreaterThanOrEqual(download.frame.height, 44 - 0.01)
+        let began = ProcessInfo.processInfo.systemUptime
+        download.tap()
+        let loading = app.descendants(matching: .any).matching(identifier: "project-attachment-downloading-task121-file").firstMatch
+        XCTAssertTrue(loading.waitForExistence(timeout: 10))
+        XCTAssertFalse(download.isEnabled)
+        XCTAssertFalse(app.buttons["project-attachment-open-task121-file"].isEnabled)
+        XCTAssertFalse(app.textViews["project-notes-input"].isEnabled)
+
+        // The hook delays App delivery after a real native Off reply; it is
+        // not a held network transfer. Require actual background/activation
+        // inside its eight-second window rather than accept vacuous coverage.
+        task344BackgroundAndActivate(app)
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - began, 8,
+            "Automation must background and reactivate before the delayed reply can settle")
+        XCTAssertTrue(loading.exists, "Cancellation must retain the owner until its delayed reply drains")
+        XCTAssertFalse(download.isEnabled)
+        XCTAssertFalse(app.textViews["project-notes-input"].isEnabled)
+        XCTAssertTrue(loading.waitForNonExistence(timeout: 20))
+        boardEnabled(download, timeout: 30)
+        boardEnabled(app.textViews["project-notes-input"], timeout: 30)
+        XCTAssertEqual(app.textViews["project-notes-input"].value as? String, first)
+        XCTAssertFalse(app.alerts.firstMatch.exists, "A canceled known reply must not publish the old refusal")
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "project-attachment-open-error").firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        task350NoFilePresentation(app)
+        task350EditNotes(app, final)
+        task350TapProject(app, "project-attachment-download-task121-file")
+        task350KnownOffRefusal(app) // Explicit new dispatch works after drainage.
+        task350ColdNotes(app, library: library, text: final)
+    }
+
     private func task147Mode(_ app: XCUIApplication, _ value: String) {
         task144Open(app)
         let option = app.buttons["gtd-taskOpenMode-" + value]

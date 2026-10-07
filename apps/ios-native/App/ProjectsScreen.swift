@@ -2056,7 +2056,27 @@ struct ProjectDetailScreen: View {
                             .disabled(!model.projectAttachmentRemoveEnabled)
                             .accessibilityIdentifier("project-attachment-remove-" + entry.text("id"))
                         }
-                        if entry.flag("downloading") || entry.flag("missing") {
+                        if entry.text("kind") == "file", entry.flag("canDownload") {
+                            Button {
+                                resignProjectNotesInput()
+                                model.downloadProjectAttachment(entry.text("id"))
+                            } label: {
+                                Label(model.label("attachments.download"), systemImage: "arrow.down.circle")
+                                    .rnFont(13, .semibold)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).foregroundStyle(palette.tint)
+                            .disabled(!model.projectAttachmentDownloadEnabled || entry.flag("downloading"))
+                            .accessibilityIdentifier("project-attachment-download-" + entry.text("id"))
+                        }
+                        if model.projectAttachmentDownloadingID == entry.text("id") {
+                            HStack {
+                                ProgressView()
+                                Text(model.label("common.loading")).rnFont(12).foregroundStyle(palette.secondary)
+                            }
+                            .accessibilityIdentifier("project-attachment-downloading-" + entry.text("id"))
+                        } else if entry.flag("downloading") || entry.flag("missing") {
                             Text(model.label(entry.flag("downloading") ? "common.loading"
                                 : "attachments.missing"))
                                 .rnFont(12).foregroundStyle(palette.secondary)

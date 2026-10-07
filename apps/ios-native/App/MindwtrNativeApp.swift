@@ -267,6 +267,7 @@ private struct AppLockRoot: View {
         .onAppear { lock.sceneChanged(phase) }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             model.cancelForegroundSync()
+            model.cancelProjectAttachmentDownload()
             model.clearSettingsSyncForPrivacy()
             model.stopTaskAudioForBackground()
             model.cancelTaskFileImport()
@@ -279,6 +280,7 @@ private struct AppLockRoot: View {
             model.observeForegroundSyncScene(next, token: startupToken)
             if next != .active {
                 model.cancelForegroundSync()
+                model.cancelProjectAttachmentDownload()
                 model.clearSettingsSyncForPrivacy()
                 model.stopTaskAudioForBackground()
                 model.cancelTaskFileImport()
@@ -292,6 +294,7 @@ private struct AppLockRoot: View {
         .onChange(of: lock.concealed) { concealed in
             if concealed {
                 model.cancelForegroundSync()
+                model.cancelProjectAttachmentDownload()
                 model.clearSettingsSyncForPrivacy()
                 model.cancelTaskFileImport()
                 model.cancelProjectFileImport()

@@ -735,6 +735,7 @@ final class CoreModel: ObservableObject {
     @Published private(set) var projectAttachmentLoading = false
     @Published private(set) var projectAttachmentError: String?
     @Published private(set) var projectAttachmentOpening = false
+    @Published private(set) var projectAttachmentDownloadingID: String?
     @Published private(set) var projectAttachmentOpenError: String?
     @Published private(set) var projectFileOpenPresentation: AttachmentFileOpenPresentation?
     @Published private(set) var projectAttachmentLinkPresented = false
@@ -1402,6 +1403,24 @@ final class CoreModel: ObservableObject {
     private var projectAttachmentProjectID = ""
     private var projectAttachmentRevision = ""
     private var projectAttachmentOpenClaim = UUID()
+    private struct ProjectAttachmentDownloadOwner {
+        let id: UUID
+        let host: CoreHost
+        let projectID: String
+        let attachmentID: String
+        let session: Int
+        let generation: Int
+        let notesDraft: String
+        var dispatched = false
+    }
+    private var projectAttachmentDownloadOwner: ProjectAttachmentDownloadOwner?
+    private var projectAttachmentDownloadTask: Task<Void, Never>?
+    private var projectAttachmentDownloadGeneration = 0
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    private var projectAttachmentDownloadTestThrowOnce = false
+    private var projectAttachmentDownloadTestDelayOnce = false
+    private var projectAttachmentDownloadTestMalformedOnce = false
+    #endif
     private var projectAttachmentEditClaim = UUID()
     private var projectAttachmentEditOptions: CoreObject = [:]
     private var projectAttachmentEditOptionsCurrent = false
@@ -1769,7 +1788,12 @@ final class CoreModel: ObservableObject {
         projectAttachmentAddOpenEnabled && !projectAttachmentLinkPresented
     }
     var projectViewOpenEnabled: Bool {
-        projectViewCurrent && !projectAttachmentOpening
+        projectViewCurrent && !projectAttachmentOpening && projectAttachmentDownloadOwner == nil
+    }
+    var projectAttachmentDownloadEnabled: Bool {
+        projectViewOpenEnabled && projectAttachmentDownloadContextClean
+            && foregroundSyncSceneActive && UIApplication.shared.applicationState == .active
+            && projectAttachmentsVisible && !projectAttachmentLoading && projectFileOpenPresentation == nil
     }
     private var projectViewCurrent: Bool {
         projectActionsCurrent && pendingProjectView == nil && projectFilterPendingEdit == nil
@@ -4050,6 +4074,9 @@ final class CoreModel: ObservableObject {
                     settingsSyncTestThrowOnce = arguments.contains("--native-sync-command-throw-once")
                     startupSyncTestThrowOnce = arguments.contains("--native-startup-sync-command-throw-once")
                     resumeSyncTestThrowOnce = arguments.contains("--native-resume-sync-command-throw-once")
+                    projectAttachmentDownloadTestThrowOnce = arguments.contains("--native-project-download-command-throw-once")
+                    projectAttachmentDownloadTestDelayOnce = arguments.contains("--native-project-download-delay-reply-once")
+                    projectAttachmentDownloadTestMalformedOnce = arguments.contains("--native-project-download-malformed-reply-once")
                     host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
                         deviceStorage: (directory, "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased()),
                         isolatedTestID: identifier)
@@ -4434,6 +4461,7 @@ final class CoreModel: ObservableObject {
             && taskOwnedMenuSelection == nil && taskOwnedMenuAction == nil
             && !projectFileAddPending && projectFileImportClaim == nil && projectFileImportTask == nil
             && projectFileImporterID == nil && !projectFileImporterPresented
+            && projectAttachmentDownloadOwner == nil
             && !projectNotesEditMode && !projectNotesDirty && !projectNotesWritePending && projectNotesFlushTask == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsManagePresented
             && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
@@ -17938,7 +17966,9 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    @discardableResult private func readProjectDetail() async -> Bool {
+    @discardableResult private func readProjectDetail(ownedGuard: (() -> Bool)? = nil) async -> Bool {
+        guard ownedGuard?() != false,
+              ownedGuard != nil || projectAttachmentDownloadOwner?.dispatched != true else { return false }
         projectCurrent = false
         projectFilterPickerCurrent = false
         projectError = nil
@@ -17951,12 +17981,16 @@ final class CoreModel: ObservableObject {
         var collapsed = pendingProjectView?.collapsed ?? projectCompletedCollapsed
         for attempt in 0..<2 {
             do {
+                guard ownedGuard?() != false else { return false }
                 // Reference labels may be aliases; resolve the destination header through core.
-                if projectHeader["title"] == nil { try await readProjectRenameOptions() }
+                if projectHeader["title"] == nil {
+                    guard ownedGuard == nil else { return false }
+                    try await readProjectRenameOptions()
+                }
                 var next = try await projectDetailWindow(projectID: id, offset: 0, limit: pageSize,
                     showCompleted: showCompleted, collapsed: collapsed, filters: filters,
                     sheetOpen: sheetOpen, edit: edit)
-                guard session == projectFilterSession, selectedSurface == .project,
+                guard ownedGuard?() != false, session == projectFilterSession, selectedSurface == .project,
                       id == projectHeader.text("id"), sheetOpen == projectFiltersPresented else { return false }
                 // RN resets the completed pile when its grouping mode changes (including type/status edits).
                 if !collapsed, !projectDetail.isEmpty,
@@ -17967,6 +18001,7 @@ final class CoreModel: ObservableObject {
                     next = try await projectDetailWindow(projectID: id, offset: 0, limit: pageSize,
                         showCompleted: showCompleted, collapsed: collapsed, filters: filters,
                         sheetOpen: sheetOpen, edit: edit)
+                    guard ownedGuard?() != false else { return false }
                 }
                 let metadata = next.object("metadata")
                 let controls = next.object("controls")
@@ -18005,12 +18040,13 @@ final class CoreModel: ObservableObject {
                     let window = try await projectDetailWindow(projectID: id, offset: items.count, limit: limit,
                         revision: next.text("revision"), showCompleted: showCompleted, collapsed: collapsed,
                         filters: resolved, sheetOpen: sheetOpen)
+                    guard ownedGuard?() != false else { return false }
                     try validateProjectWindow(window, against: next, count: limit)
                     items += window.objects("items")
                 }
                 next["items"] = items
                 let sortOptions = try await readProjectTaskSortOptions(projectID: id, revision: next.text("mutationRevision"))
-                guard session == projectFilterSession, selectedSurface == .project,
+                guard ownedGuard?() != false, session == projectFilterSession, selectedSurface == .project,
                       id == projectHeader.text("id"), sheetOpen == projectFiltersPresented else { return false }
                 if projectNotes.text("revision") != next.text("mutationRevision") { projectNotesCurrent = false }
                 if projectNotesEditOptions.text("revision") != next.text("mutationRevision") {
@@ -18063,11 +18099,11 @@ final class CoreModel: ObservableObject {
                 }
                 return true
             } catch {
-                guard session == projectFilterSession, selectedSurface == .project,
+                guard ownedGuard?() != false, session == projectFilterSession, selectedSurface == .project,
                       id == projectHeader.text("id"), sheetOpen == projectFiltersPresented else { return false }
                 if attempt == 1 {
-                    projectError = error.localizedDescription
-                    if sheetOpen { projectFilterError = error.localizedDescription }
+                    projectError = ownedGuard == nil ? error.localizedDescription : label("settings.feedback.actionFailed")
+                    if sheetOpen { projectFilterError = projectError }
                 }
             }
         }
@@ -18112,12 +18148,16 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    private func readProjectNotesEditOptions() async throws {
+    private func readProjectNotesEditOptions(ownedGuard: (() -> Bool)? = nil) async throws {
+        guard ownedGuard?() != false,
+              ownedGuard != nil || projectAttachmentDownloadOwner?.dispatched != true else { throw CancellationError() }
         let id = projectHeader.text("id")
         guard selectedSurface == .project, projectCurrent, projectDetail.text("projectId") == id,
               !id.isEmpty else { throw CocoaError(.coderReadCorrupt) }
         for attempt in 0..<2 {
+            guard ownedGuard?() != false else { throw CancellationError() }
             let options = try await query("projectNotesEditOptions", [try json(["projectId": id])])
+            guard ownedGuard?() != false else { throw CancellationError() }
             let project = options.object("project")
             guard options.count == 3, !options.text("revision").isEmpty,
                   let canEdit = options["canEdit"] as? NSNumber,
@@ -18130,13 +18170,19 @@ final class CoreModel: ObservableObject {
                   !project.text("updatedAt").isEmpty else { throw CocoaError(.coderReadCorrupt) }
             if options.text("revision") != projectDetail.text("mutationRevision") {
                 if attempt == 0 {
-                    await readProjectDetail()
-                    guard projectCurrent, projectHeader.text("id") == id else { throw CocoaError(.coderReadCorrupt) }
+                    await readProjectDetail(ownedGuard: ownedGuard)
+                    guard ownedGuard?() != false, projectCurrent, projectHeader.text("id") == id else { throw CocoaError(.coderReadCorrupt) }
                     continue
                 }
                 throw CocoaError(.coderReadCorrupt)
             }
             let raw = project["supportNotes"] as? String
+            if ownedGuard != nil, !(raw ?? "").utf8.elementsEqual(projectNotesDraft.utf8) {
+                projectNotesEditConflict = true
+                projectNotesEditOptionsCurrent = false
+                projectNotesEditError = "Project Notes changed. Discard the draft to reload."
+                return
+            }
             if projectNotesEditLoaded && projectNotesDirty && raw != projectNotesEditBaseRaw {
                 projectNotesEditConflict = true
                 projectNotesEditOptionsCurrent = false
@@ -18233,8 +18279,10 @@ final class CoreModel: ObservableObject {
         await readProjectNotes()
     }
 
-    func readProjectAttachments(force: Bool = false) async {
-        guard ready, selectedSurface == .project, projectCurrent,
+    func readProjectAttachments(force: Bool = false, ownedGuard: (() -> Bool)? = nil) async {
+        guard ownedGuard?() != false,
+              ownedGuard != nil || projectAttachmentDownloadOwner?.dispatched != true,
+              ready, selectedSurface == .project, projectCurrent,
               projectDetail.text("projectId") == projectHeader.text("id"),
               !projectHeader.text("id").isEmpty, !projectDetail.text("mutationRevision").isEmpty else { return }
         let id = projectHeader.text("id"), revision = projectDetail.text("mutationRevision")
@@ -18249,10 +18297,10 @@ final class CoreModel: ObservableObject {
         projectAttachmentsCurrent = false
         projectAttachmentError = nil
         projectAttachmentLoading = true
-        defer { if projectAttachmentReadGeneration == generation { projectAttachmentLoading = false } }
+        defer { if ownedGuard?() != false, projectAttachmentReadGeneration == generation { projectAttachmentLoading = false } }
         do {
             let result = try await query("projectAttachmentList", [try json(["projectId": id])])
-            guard projectAttachmentReadGeneration == generation, selectedSurface == .project,
+            guard ownedGuard?() != false, projectAttachmentReadGeneration == generation, selectedSurface == .project,
                   projectCurrent, projectFilterSession == session, projectHeader.text("id") == id,
                   projectDetail.text("projectId") == id,
                   projectDetail.text("mutationRevision") == revision else { return }
@@ -18268,7 +18316,7 @@ final class CoreModel: ObservableObject {
             projectAttachmentRows = rows
             projectAttachmentsCurrent = true
         } catch {
-            if projectAttachmentReadGeneration == generation, selectedSurface == .project,
+            if ownedGuard?() != false, projectAttachmentReadGeneration == generation, selectedSurface == .project,
                projectFilterSession == session, projectHeader.text("id") == id,
                projectDetail.text("mutationRevision") == revision {
                 projectAttachmentError = "Project attachments could not be loaded. Try again."
@@ -18419,9 +18467,205 @@ final class CoreModel: ObservableObject {
     }
 
     private func invalidateProjectAttachmentOpen() {
+        cancelProjectAttachmentDownload()
         projectAttachmentOpenClaim = UUID()
         projectFileOpenPresentation = nil
         projectAttachmentOpening = false
+    }
+
+    private var projectAttachmentDownloadContextClean: Bool {
+        ready && !retryNeeded && !settingsSyncRestartRequired && !appLockRecoveryPending
+            && !appLock.concealed && !appLockActive && foregroundSyncOwner == nil
+            && !capturePresented && !capturePending && draft.isEmpty && noteDraft.isEmpty
+            && !processInboxPresented && processInboxRequest == nil && !processInboxTransitioning
+            && !mindSweepPresented && mindSweepRequest == nil && mindSweepDraft.isEmpty
+            && !morePresented && !areaPickerPresented && !areaManagerPresented && bulkConfirm.isEmpty
+            && !taskPresented && taskOpeningIntent == nil && taskEditor.isEmpty && !taskSavePending
+            && !taskRecoveryAvailable && !taskRecoveryGateVisible && !taskRecoveryStartupCorrupt
+            && !taskRecoveryHydrating && !taskRecoverySaving && taskRecoveryCheckpointTask == nil
+            && taskRecoveryCheckpointError == nil && taskAttachmentCheckpointFailed == nil
+            && taskAttachmentCheckpointDesired == nil && taskStartupSaveReceipt == nil
+            && !taskAttachmentWorking && taskAttachmentSaveRequest == nil && taskAttachmentDiscardRequest == nil
+            && taskFileImportClaim == nil && taskFileImportTask == nil && taskFileImporterID == nil
+            && !taskFileImporterPresented && !taskLinkSheetActive && !taskReferenceOpening && !taskAttachmentOpening
+            && taskFileOpenPresentation == nil && taskAudioPlayer == nil && taskSharePayload == nil
+            && taskOwnedMenuSelection == nil && taskOwnedMenuAction == nil
+            && !projectFileAddPending && !projectFileAddOpening && projectFileImportClaim == nil
+            && projectFileImportTask == nil && projectFileImporterID == nil && !projectFileImporterPresented
+            && projectAttachmentWriteRequest == nil && projectNotesWriteRequest == nil
+            && projectCreateRequest == nil && projectFocusRequest == nil && projectRenameRequest == nil
+            && projectFlowRequest == nil && projectTaskSortRequest == nil && projectTaskOrderRequest == nil
+            && projectStatusRequest == nil && projectDateRequest == nil && projectAreaRequest == nil
+            && projectTagsRequest == nil && projectSectionRequest == nil && projectSectionRenameRequest == nil
+            && projectSectionDeleteRequest == nil && projectSectionOrderRequest == nil
+            && projectDuplicateRequest == nil && projectLifecycleRequest == nil
+            && projectDeleteRequest == nil && projectDeleteUndoRequest == nil
+            && !savedSearchWritePresented && !settingsSyncPresented && !settingsSyncChecking
+            && !settingsManagePresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+    }
+
+    func downloadProjectAttachment(_ attachmentID: String) {
+        guard projectAttachmentDownloadEnabled || projectNotesFlushTask != nil,
+              ready, selectedSurface == .project, !retryNeeded, !settingsSyncRestartRequired,
+              !appLock.concealed, projectAttachmentDownloadOwner == nil, let currentHost = host,
+              projectAttachmentRows.filter({ $0.text("id") == attachmentID }).count == 1,
+              let row = projectAttachmentRows.first(where: { $0.text("id") == attachmentID }),
+              row.text("kind") == "file", row.flag("canDownload"), !row.flag("downloading"),
+              !attachmentID.isEmpty, attachmentID.utf16.count <= 500,
+              let selectedRaw = try? json(row) else { return }
+        let id = projectHeader.text("id")
+        guard !id.isEmpty, id.utf16.count <= 500 else { return }
+        let owner = ProjectAttachmentDownloadOwner(id: UUID(), host: currentHost, projectID: id,
+            attachmentID: attachmentID, session: projectFilterSession,
+            generation: projectAttachmentDownloadGeneration, notesDraft: projectNotesDraft)
+        observeDiagnosticsConcealment()
+        projectAttachmentDownloadOwner = owner
+        projectAttachmentOpenError = nil
+        projectAttachmentDownloadTask = Task { await performProjectAttachmentDownload(owner, selectedRaw: selectedRaw) }
+    }
+
+    // Cancellation revokes delivery, never the busy owner of an awaited bridge call.
+    func cancelProjectAttachmentDownload() {
+        guard projectAttachmentDownloadOwner != nil else { return }
+        projectAttachmentDownloadGeneration += 1
+        projectAttachmentDownloadTask?.cancel()
+        projectAttachmentReadGeneration += 1
+        projectAttachmentLoading = false
+    }
+
+    private func projectAttachmentDownloadCurrent(_ owner: ProjectAttachmentDownloadOwner, requireClaim: Bool = true) -> Bool {
+        host === owner.host && projectAttachmentDownloadOwner?.id == owner.id
+            && projectAttachmentDownloadGeneration == owner.generation
+            && (!requireClaim || projectAttachmentOpenClaim == owner.id)
+            && !Task.isCancelled && foregroundSyncSceneActive && UIApplication.shared.applicationState == .active
+            && projectAttachmentDownloadContextClean && selectedSurface == .project
+            && projectFilterSession == owner.session && projectHeader.text("id") == owner.projectID
+            && projectDetail.text("projectId") == owner.projectID
+            && projectNotesDraft.utf8.elementsEqual(owner.notesDraft.utf8)
+    }
+
+    private enum ProjectAttachmentDownloadReply {
+        case resolution(status: String, message: String?)
+        case refused(code: String, message: String)
+    }
+
+    private func validateProjectAttachmentDownloadReply(_ result: CoreObject) throws -> ProjectAttachmentDownloadReply {
+        guard let ok = result["ok"] as? NSNumber, CFGetTypeID(ok) == CFBooleanGetTypeID() else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        if ok.boolValue {
+            guard Set(result.keys) == Set(["ok", "value"]), let value = result["value"] as? CoreObject,
+                  Set(value.keys) == Set(["status", "message", "update"]), let status = value["status"] as? String,
+                  ["available", "generation-conflict", "unrecoverable", "unavailable", "stale"].contains(status),
+                  value["update"] is NSNull else { throw CocoaError(.coderReadCorrupt) }
+            if status == "available" || status == "stale" {
+                guard value["message"] is NSNull else { throw CocoaError(.coderReadCorrupt) }
+                return .resolution(status: status, message: nil)
+            }
+            guard let message = value["message"] as? String else { throw CocoaError(.coderReadCorrupt) }
+            return .resolution(status: status, message: message)
+        }
+        guard Set(result.keys) == Set(["ok", "error"]), let error = result["error"] as? CoreObject,
+              Set(error.keys) == Set(["code", "message"]), let code = error["code"] as? String,
+              ["NOT_READY", "INVALID_INPUT", "STALE_REVISION", "TASK_NOT_FOUND", "ACTION_FAILED", "SAVE_FAILED"].contains(code),
+              let message = error["message"] as? String else { throw CocoaError(.coderReadCorrupt) }
+        return .refused(code: code, message: message)
+    }
+
+    private func performProjectAttachmentDownload(_ owner: ProjectAttachmentDownloadOwner, selectedRaw: String) async {
+        var ownsBusy = false
+        defer {
+            if projectAttachmentDownloadOwner?.id == owner.id {
+                let current = projectAttachmentDownloadCurrent(owner)
+                projectAttachmentDownloadOwner = nil
+                projectAttachmentDownloadTask = nil
+                projectAttachmentDownloadingID = nil
+                if projectAttachmentOpenClaim == owner.id { projectAttachmentOpening = false }
+                if ownsBusy, host === owner.host {
+                    if current { finishOperation() }
+                    else { busy = false; refreshRequested = false }
+                }
+            }
+        }
+        // Join an already admitted blur before freezing its ordinary Notes admission.
+        if let flush = projectNotesFlushTask {
+            guard await flush.value else { return }
+        }
+        guard projectAttachmentDownloadCurrent(owner, requireClaim: false), projectViewCurrent, !busy,
+              let selected = projectAttachmentRows.first(where: { $0.text("id") == owner.attachmentID }),
+              (try? json(selected)) == selectedRaw else { return }
+        projectAttachmentOpenClaim = owner.id
+        projectAttachmentOpening = true
+        projectAttachmentDownloadingID = owner.attachmentID
+        guard projectAttachmentDownloadCurrent(owner),
+              await flushProjectNotesEdit(attachmentOpenClaim: owner.id),
+              projectAttachmentDownloadCurrent(owner), projectViewCurrent, !busy else { return }
+        let current = { [self] in projectAttachmentDownloadCurrent(owner) }
+        if !projectAttachmentsVisible || projectAttachmentLoading {
+            await readProjectAttachments(force: true, ownedGuard: current)
+        }
+        guard current(), projectViewCurrent, !busy,
+              !projectNotesDirty, !projectNotesWritePending, projectAttachmentsVisible, !projectAttachmentLoading,
+              let row = projectAttachmentRows.first(where: { $0.text("id") == owner.attachmentID }),
+              row.text("kind") == "file", row.flag("canDownload"), !row.flag("downloading"),
+              (try? json(row)) == selectedRaw else { return }
+        let revision = projectDetail.text("mutationRevision")
+        guard !revision.isEmpty, revision.utf16.count <= 200 else { return }
+        let request: String
+        do {
+            request = try json(["projectId": owner.projectID, "attachmentId": owner.attachmentID, "revision": revision])
+            guard request.utf8.count <= 128 * 1024 else { return }
+        } catch { return }
+        busy = true
+        ownsBusy = true
+        projectAttachmentDownloadOwner?.dispatched = true
+        let reply: ProjectAttachmentDownloadReply
+        do {
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if projectAttachmentDownloadTestThrowOnce {
+                projectAttachmentDownloadTestThrowOnce = false
+                throw CocoaError(.fileWriteUnknown)
+            }
+            #endif
+            var encoded = try await owner.host.foregroundSync(command: "projectAttachmentDownload", requestJSON: request)
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if projectAttachmentDownloadTestDelayOnce {
+                projectAttachmentDownloadTestDelayOnce = false
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 8) { continuation.resume() }
+                }
+            }
+            if projectAttachmentDownloadTestMalformedOnce {
+                projectAttachmentDownloadTestMalformedOnce = false
+                encoded = "{\"ok\":true,\"value\":{\"status\":\"available\",\"message\":null,\"update\":{}}}"
+            }
+            #endif
+            guard encoded.utf8.count <= 128 * 1024 else { throw CocoaError(.coderReadCorrupt) }
+            reply = try validateProjectAttachmentDownloadReply(decode(encoded))
+        } catch {
+            requireSettingsSyncRestart(owner.host)
+            return
+        }
+        guard projectAttachmentDownloadCurrent(owner) else { return }
+        let message: String?
+        switch reply {
+        case let .resolution(_, text): message = text
+        case let .refused(_, text): message = text
+        }
+        guard await readProjectDetail(ownedGuard: current), current() else { return }
+        if projectNotesEditMode {
+            do { try await readProjectNotesEditOptions(ownedGuard: current) }
+            catch {
+                guard current() else { return }
+                projectNotesEditReadError = label("settings.feedback.actionFailed")
+            }
+        }
+        guard current() else { return }
+        await readProjectAttachments(force: true, ownedGuard: current)
+        guard current() else { return }
+        if let message {
+            projectAttachmentOpenError = message.isEmpty ? label("settings.feedback.actionFailed") : message
+        }
     }
 
     func dismissProjectAttachmentOpenError() { projectAttachmentOpenError = nil }
