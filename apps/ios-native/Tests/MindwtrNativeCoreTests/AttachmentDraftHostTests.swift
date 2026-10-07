@@ -36,7 +36,7 @@ final class AttachmentDraftHostTests: XCTestCase {
         let db = try SQLiteBridge(url: database); defer { db.close() }
         return try db.execute(statement, parametersJSON: json(args))
     }
-    private func savedTask() throws -> String { try sql("SELECT * FROM tasks WHERE id=?", [taskID]) }
+    private func savedTask() throws -> String { try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks WHERE id=?", [taskID]).utf8))) }
     private func seed(extra: String = "opaque / 文") async throws -> (CoreHost, EditorDraftSnapshot) {
         let boot = core(); _ = try await boot.start(); await boot.close()
         _ = try sql("INSERT INTO tasks(id,title,status,contexts,tags,attachments,createdAt,updatedAt,rev,revBy) VALUES (?,?,'inbox','[]','[]','[]',?,?,1,'fixture')", [taskID, "Saved title", at, at])
