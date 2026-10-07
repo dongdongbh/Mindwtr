@@ -182,6 +182,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
     private var root: URL!, bundle: URL!, hostname: String!, service: String!, namespace: String!
     private var remote: ForegroundDAVStore!
     private var unexpectedBefore = 0
+    private var traceBusyLease = false
     private let taskID = UUID().uuidString.lowercased(), attachmentID = UUID().uuidString.lowercased()
     private let originalBytes = Data("Private synthetic foreground cleanup bytes".utf8)
     private let unknownValue = "Unknown current namespace value 🧠"
@@ -224,7 +225,9 @@ final class NativeForegroundWebDAVTests: XCTestCase {
                         kSecAttrService as String: alias == "legacy" ? service : service + ":" + alias,
                         kSecAttrAccount as String: bytes, kSecAttrGeneric as String: bytes,
                         kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
+                    if traceBusyLease { NSLog("Native WebDAV CI phase=fixture-delete-before") }
                     let status = SecItemDelete(query as CFDictionary)
+                    if traceBusyLease { NSLog("Native WebDAV CI phase=fixture-delete-after") }
                     XCTAssertTrue(status == errSecSuccess || status == errSecItemNotFound, "Only exact fixture accounts are retired")
                 }
             }
@@ -239,6 +242,10 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         let faults = supplied ?? HostIOFaults(), configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ForegroundDAVProtocol.self]; faults.httpConfiguration = configuration
         faults.secretService = service
+        if traceBusyLease {
+            faults.secretBeforeOperation = { operation, _ in NSLog("Native WebDAV CI phase=secure-before operation=%@", operation) }
+            faults.secretAfterOperation = { operation, _ in NSLog("Native WebDAV CI phase=secure-after operation=%@", operation) }
+        }
         if let boundary { faults.cleanupBoundary = { name in try boundary.visit(name) { try self.captureBoundary() } } }
         let value = CoreHost(databaseURL: database, bundleURL: bundle, faults: faults,
             deviceStorage: (containerURL: container, bundleIdentifier: namespace))
@@ -265,7 +272,10 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         remote.seed("/sync/data.json", bytes: Data(try json(["tasks": [], "projects": [], "sections": [], "areas": [], "settings": [:]]).utf8))
     }
     private func command(_ host: CoreHost, _ name: String, _ input: [String: Any] = [:]) async throws -> [String: Any] {
-        let reply = try object(await host.foregroundSync(command: name, requestJSON: json(input)))
+        if traceBusyLease { NSLog("Native WebDAV CI phase=command-before command=%@", name) }
+        let encoded = try await host.foregroundSync(command: name, requestJSON: json(input))
+        if traceBusyLease { NSLog("Native WebDAV CI phase=command-after command=%@", name) }
+        let reply = try object(encoded)
         XCTAssertEqual(reply["ok"] as? Bool, true, "The real shared command must succeed: \(name)")
         if reply["value"] is NSNull { return [:] }
         return try XCTUnwrap(reply["value"] as? [String: Any])
@@ -338,7 +348,9 @@ final class NativeForegroundWebDAVTests: XCTestCase {
             kSecAttrAccount as String: bytes, kSecAttrGeneric as String: bytes, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
             kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
         var result: CFTypeRef?
+        if traceBusyLease { NSLog("Native WebDAV CI phase=fixture-read-before") }
         XCTAssertEqual(SecItemCopyMatching(query as CFDictionary, &result), errSecSuccess)
+        if traceBusyLease { NSLog("Native WebDAV CI phase=fixture-read-after") }
         XCTAssertEqual(result as? Data, Data(password.utf8), "The accepted Save uses actual isolated Security storage")
     }
     private func assertCleaned(original: [String: Any]) throws {
@@ -587,7 +599,12 @@ final class NativeForegroundWebDAVTests: XCTestCase {
     }
 
     func testBusyLeaseReturnsWithoutDetachedFollowUpAndLaterExplicitSyncOwnsCleanup() async throws {
+        // Fixed stage labels distinguish a platform wait from the intentional
+        // lease delay when CI terminates before XCTest can report a result.
+        traceBusyLease = true
+        NSLog("Native WebDAV CI phase=seed-before")
         try await seed()
+        NSLog("Native WebDAV CI phase=seed-after")
         let original = try attachment()
         // Configure through the real verified Test/Save path without giving its
         // ordinary cycle this test's cleanup candidate. The cold host below loads
