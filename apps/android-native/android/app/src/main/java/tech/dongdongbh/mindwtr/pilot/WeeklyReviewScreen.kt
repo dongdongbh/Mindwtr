@@ -139,7 +139,12 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
                     Icon(Lucide.Share2, null, tint = c.text, modifier = Modifier.size(18.dp))
                     Text(finish.getString("shareLabel"), style = rnText(15, 600), color = c.text, textAlign = TextAlign.Center, maxLines = 2)
                 }
-                PrimaryButton(finish.getString("label"), Modifier.weight(1f), model.failedAction == null) { finishReview() }
+                // RN's handleFinish: the review closes, then the store review prompt's gate (AboutSettings.kt).
+                val activity = androidx.activity.compose.LocalActivity.current
+                PrimaryButton(finish.getString("label"), Modifier.weight(1f), model.failedAction == null) {
+                    finishReview()
+                    requestStoreReviewAfterWeeklyReview(model, activity)
+                }
             } else {
                 val back = view.getJSONObject("back")
                 val previous = back.menuText("checkpoint")

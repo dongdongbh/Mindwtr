@@ -239,6 +239,14 @@ class MindwtrTheme(val colors: ThemeColors, val isDark: Boolean, val isMaterial:
     val swatchBorder = rgba(15, 23, 42, 0.15f)
     val swatchSelected = rgb("#0F172A")
     val settingsScrim = rgba(0, 0, 0, 0.4f)
+    /** RN's About link text and its spinner (settings.styles.ts linkText), RN's fixed blue. */
+    val settingsLink = rgb("#3B82F6")
+    /** RN's feedback modal backdrop (feedbackModalBackdrop), rgba(0,0,0,0.42). */
+    val feedbackScrim = rgba(0, 0, 0, 0.42f)
+    /** Data's analytics switch (sync-settings-sections.tsx): trackColor { false: #767577, true: #71717A }, thumbColor #F4F4F5. */
+    val analyticsSwitch = RnSwitchProps(rgb("#767577"), rgb("#71717A"), rgb("#F4F4F5"), rgb("#F4F4F5"))
+    /** The feedback modal's diagnostics switch: trackColor { false: border, true: `${tint}66` }, thumbColor tint on, secondaryText off. */
+    val feedbackSwitch = RnSwitchProps(colors.border, colors.tint.copy(alpha = 0x66 / 255f), colors.secondaryText, colors.tint)
     val settingsCheck = rgb("#3B82F6")
     /** RN's capture screen Save (capture-modal.tsx styles.save): the same blue in every theme. */
     val captureSave = rgb("#3B82F6")

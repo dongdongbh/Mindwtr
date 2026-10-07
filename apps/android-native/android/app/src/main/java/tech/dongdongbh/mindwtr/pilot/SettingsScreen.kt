@@ -98,6 +98,7 @@ fun SettingsList(model: InboxViewModel) = with(model.menu.settings) {
             "data" -> DataSettings(model, shown.view)
             "sync" -> SyncSettings(model, shown.view)
             "ai" -> AISettings(model, shown.view)
+            "about" -> AboutSettings(model, shown.view)
             else -> GtdSettings(model, shown.view)
         }
         Spacer(Modifier.height(16.dp))
@@ -339,6 +340,12 @@ private fun DataSettings(model: InboxViewModel, view: JSONObject) = with(model.m
     val diagnostics = view.getJSONObject("diagnostics")
     SectionTitle(diagnostics.getString("title"), top = 24, color = c.text)
     Card {
+        // RN's analytics switch, in a build with the heartbeat: on while opted out; turning it on asks core's question first.
+        diagnostics.optJSONObject("analytics")?.let { analytics ->
+            ToggleRow(model, analytics, false, props = theme.analyticsSwitch) { edit ->
+                if (edit.getBoolean("value")) settings.editLocal { put("analyticsConfirm", true) } else settings.data(edit)
+            }
+        }
         // RN always draws this row's top border (it follows the Encryption block). Share and Clear touch no app data, so they work
         // in every state, as RN's do (a retry owed included).
         ToggleRow(model, diagnostics.getJSONObject("debugLogging"), true) { settings.data(it) }
@@ -964,6 +971,20 @@ private fun SettingsDialogs(model: InboxViewModel, page: SettingsPage) = with(mo
         "manageEditor" -> ManageEditor(model, page.view, open)
     }
     if (settings.screen == "ai") AISettingsDialogs(model, page.view)
+    if (settings.screen == "about") AboutOverlays(model, page.view)
+    // Data's analytics question (RN's Alert): Keep enabled closes it; Disable sends the switch's edit.
+    if (settings.screen == "data" && settings.local.optBoolean("analyticsConfirm")) page.view.getJSONObject("diagnostics").optJSONObject("analytics")?.let { analytics ->
+        val confirm = analytics.getJSONObject("confirm")
+        val close = { settings.editLocal { remove("analyticsConfirm") } }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = close,
+            title = { Text(confirm.getString("title")) },
+            text = { Text(confirm.getString("message")) },
+            confirmButton = { androidx.compose.material3.TextButton({ close(); settings.data(analytics.getJSONObject("edit")) }, Modifier.testTag("analytics-disable")) {
+                Text(confirm.getString("disableLabel").uppercase()) } },
+            dismissButton = { androidx.compose.material3.TextButton(close, Modifier.testTag("analytics-keep")) { Text(confirm.getString("keepLabel").uppercase()) } },
+        )
+    }
     if (settings.screen == "gtd-task-editor") settings.local.optString("sheetField").ifEmpty { null }?.let { id ->
         val field = page.view.getJSONObject("taskEditor").menuObjects("groups").flatMap { it.menuObjects("fields") }.firstOrNull { it.getString("id") == id }
         if (field != null) FieldSheet(model, field)

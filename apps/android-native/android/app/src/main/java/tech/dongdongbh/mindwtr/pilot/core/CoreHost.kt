@@ -54,6 +54,8 @@ class CoreHost(
     private val widgets: HostWidgets? = null,
     /** The background sync job kept scheduled or cancelled, as core decides (CoreWork.scheduleSync); null: this host has none. */
     private val scheduleBackgroundSync: ((Boolean) -> Unit)? = null,
+    /** The build as Settings › About reports it (AboutSettings.kt aboutAppInfo, JSON); null: this host has no About. */
+    private val appInfo: String? = null,
 ) {
     /**
      * Reminder alarms on the platform (pilot/Reminders.kt): core's plan applied in core's order, the notification permission as RN
@@ -345,6 +347,10 @@ class CoreHost(
         bridge.setProperty("kvMultiRemove", guarded { args -> keyValue.multiRemove(stringList(args[0] as String)); null })
         // Debug builds only (check-ai-device.mjs): RN's AI consent record goes before boot, so the check sees RN's question again.
         if (debugFault("ai_consent_reset") == "1") keyValue.remove("mindwtr-ai-provider-consent-v1")
+        // Debug builds only (check-about-device.mjs): the day's heartbeat and the update check's day go before boot, so the check
+        // sees this boot's heartbeat and About's silent check (RN's keys: core's HEARTBEAT_LAST_SENT_DAY_KEY, UPDATE_BADGE_*).
+        if (debugFault("about_reset") == "1") keyValue.multiRemove(listOf("mindwtr-analytics-last-heartbeat-day", "mindwtr-update-last-check",
+            "mindwtr-update-available", "mindwtr-update-latest"))
         // An event for the screens: handed on as text; a listener that throws never reaches JS.
         bridge.setProperty("hostEvent", guarded { args -> runCatching { onEvent?.invoke(args[0] as String) }; null })
         // The pending-captures queue (core's ingestPendingCaptures): app-private files only.
@@ -382,6 +388,8 @@ class CoreHost(
         engine.globalObject.setProperty("__mindwtrNative", bridge)
         // The build's flavor (D8): core reads it as RN's isFossBuild.
         engine.globalObject.setProperty("__mindwtrFossBuild", BuildConfig.FOSS)
+        // The build's version, channel and endpoints for About, feedback and the heartbeat (host-about.ts).
+        appInfo?.let { engine.globalObject.setProperty("__mindwtrAppInfo", it) }
     }
 
     /**
@@ -639,6 +647,16 @@ class CoreHost(
      * timeout (5 min), so it never holds the engine ([callLong]). It is a read: nothing to journal.
      */
     fun aiRequest(name: String, json: String, handle: LongCall = LongCall()): JSONObject = callLong("aiRequest", name, json, handle = handle)
+
+    /**
+     * A Settings › About request (host-entry.ts ABOUT_REQUESTS) with [json] unchanged: an update check, a feedback send, the
+     * heartbeat, the prompts' active day or the store review's gate. Each may wait on the network, so it never holds the engine
+     * ([callLong]); none is a journaled write.
+     */
+    fun aboutRequest(name: String, json: String): JSONObject = callLong("aboutRequest", name, json)
+
+    /** One of RN's AsyncStorage values (RnKeyValue), read on the engine thread; null when it has none. */
+    fun rnValue(key: String): String? = onEngine { keyValue.get(key) }
 
     /**
      * An attachment's Download, Open (the bytes first) or the editor's draft settlement (host-entry.ts ATTACHMENT_REQUESTS) with

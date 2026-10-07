@@ -9,7 +9,9 @@
 //       left queued once at its first boot, captures once, keeps every
 //       pre-upgrade row and every other non-database file, and leaves a
 //       .prewrite checkpoint that holds the pre-upgrade rows. In RKStorage only
-//       RN's alarm map may change (the reminder alarms), after a byte checkpoint;
+//       RN's alarm map (the reminder alarms) and RN's prompt state may change, after a byte checkpoint;
+//       RN's About, heartbeat and prompt keys carry over (pass O1): RN's update dot shows on the native
+//       Settings menu, the prompt state keeps RN's days and adds today, the anonymous id stays;
 //   4   recovery (continues 1): the RN 154 build opens the database and keeps
 //       the native edit and the native import. While the recovery source is v1.3.2 a failure is
 //       reported as BLOCKED (RN startup snapshot bug) and does not fail the run;
@@ -112,6 +114,11 @@ const MARKER = 'mindwtr-data:json-ahead-of-sqlite';
 const RECONCILED = 'mindwtr-data:sqlite-json-reconcile-v1';
 const JSON_BACKUP = 'mindwtr-data';
 const ASYNC_STORAGE = 'databases/RKStorage';
+// RN's About, heartbeat and prompt keys (core's UPDATE_BADGE_*, ANALYTICS_DISTINCT_ID_KEY, LOCAL_USER_PROMPT_STATE_KEY): pass O1.
+const UPDATE_AVAILABLE = 'mindwtr-update-available';
+const UPDATE_LAST_CHECK = 'mindwtr-update-last-check';
+const DISTINCT_ID = 'mindwtr-analytics-distinct-id';
+const PROMPT_STATE = 'mindwtr:local-user-prompts:v1';
 // The native app's byte copy of RKStorage, taken once before its first RKStorage write.
 const RN_CHECKPOINT = 'files/SQLite/RKStorage.prewrite';
 // RN's reminder alarm map (core's REMINDER_ALARM_MAP_STORAGE_KEY): the native app's reminder alarms clear RN's and keep theirs there.
@@ -501,6 +508,13 @@ const scenarioUpgrade = async () => {
     const queued = { id: randomUUID(), title: t.queued, createdAt: new Date().toISOString(), source: 'android-quick-capture' };
     queue([queued]);
     const queuedPath = `files/pending-captures/${queued.id}.json`;
+    // Pass O1: RN's About, analytics and review state under RN's keys (INJECTED, as RN's About, heartbeat and first paint write
+    // them): an update RN found, the heartbeat's anonymous id, and the prompt state with RN's first-seen day and active days.
+    const phoneToday = sh('date +%Y-%m-%d');
+    const rnPrompts = { firstSeenAt: new Date(Date.now() - 40 * 86_400_000).toISOString(), firstSeenDayKey: '2026-01-02', activeDayKeys: ['2026-01-02', '2026-01-03'] };
+    const rnAbout = { [UPDATE_AVAILABLE]: 'true', [UPDATE_LAST_CHECK]: String(Date.now()), [DISTINCT_ID]: 'rn-upgrade-distinct-id', [PROMPT_STATE]: JSON.stringify(rnPrompts) };
+    rewriteAsyncStorage('1-about', `INSERT OR REPLACE INTO catalystLocalStorage (key, value) VALUES ${Object.entries(rnAbout)
+        .map(([key, value]) => `('${key}', '${value.replace(/'/g, "''")}')`).join(', ')};`);
     const before = snapshot();
     const widgetsBefore = widgetPrefsNow();
     const pre = readState(pullDatabase('1-pre'));
@@ -520,6 +534,14 @@ const scenarioUpgrade = async () => {
     await tap(button(await screen(), 'Save'));
     nodes = await waitFor('the native capture', (current) => header(current) === expected.length + 1 && draftText(current) === '');
     check(hasText(nodes, t.native), '(1) native capture is listed');
+    // RN's update dot carries over: the native Settings menu's About row has it.
+    await tap(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'));
+    nodes = await waitFor('the More sheet', (current) => Boolean(tagged(current, 'more-sheet')), 10_000);
+    await tap(withDescription(nodes, en['nav.settings']) ?? fail('no Settings tile'));
+    nodes = await waitFor('native Settings', (current) => Boolean(tagged(current, 'settings-main')), 20_000);
+    const aboutRow = (current) => current.find((node) => (node['content-desc'] ?? '').startsWith(`${en['settings.about']}. `));
+    for (let step = 0; step < 6 && !aboutRow(nodes); step += 1) nodes = await device.swipe(nodes, 'down');
+    check(aboutRow(nodes)?.['content-desc'].includes(en['settings.updateAvailable']), `(1) RN's update dot carries over to the native Settings menu: ${aboutRow(nodes)?.['content-desc']}`);
     const published = await widgetsPublished('1');
     await stopApp();
 
@@ -544,7 +566,14 @@ const scenarioUpgrade = async () => {
         const postAsync = asyncStorage('1-post-rkstorage');
         return [...new Set([...preAsync.keys(), ...postAsync.keys()])].filter((name) => preAsync.get(name) !== postAsync.get(name));
     })();
-    check(asyncChanged.every((name) => name === ALARM_MAP), `(1) RKStorage: only RN's alarm map ${ALARM_MAP} changed${shortList(asyncChanged)}`);
+    check(asyncChanged.every((name) => name === ALARM_MAP || name === PROMPT_STATE), `(1) RKStorage: only RN's alarm map ${ALARM_MAP} and RN's prompt state changed${shortList(asyncChanged)}`);
+    // Pass O1: the native first paint counted today as RN's does, on RN's state: RN's first-seen time and days kept, today added.
+    const postAbout = asyncStorage('1-post-about');
+    const prompts = JSON.parse(postAbout.get(PROMPT_STATE) ?? '{}');
+    check(prompts.firstSeenAt === rnPrompts.firstSeenAt && prompts.firstSeenDayKey === rnPrompts.firstSeenDayKey
+        && isDeepStrictEqual(prompts.activeDayKeys, [...rnPrompts.activeDayKeys, phoneToday]), `(1) RN's prompt state carries over with today added: ${JSON.stringify(prompts)}`);
+    check([UPDATE_AVAILABLE, UPDATE_LAST_CHECK, DISTINCT_ID].every((key) => postAbout.get(key) === rnAbout[key]),
+        '(1) RN\'s update dot, its last check and the heartbeat\'s anonymous id are kept as RN left them (a debug build sends no heartbeat)');
     check(!rnStateWritten || checkpointMatches(before, after), `(1) ${RN_CHECKPOINT} holds the pre-upgrade RKStorage files byte for byte, taken before that write`);
     const changed = differences(before, after, {
         changedOk: (path) => isDatabase(path) || path === queuedPath || isAsyncStorage(path) || isWidgetPayload(path),
