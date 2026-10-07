@@ -1335,7 +1335,7 @@ export const en: Record<string, string> = {
         'settings.syncEncryptionErrorRotationFirst': 'An interrupted passphrase change left this sync location half-updated. Run Change passphrase again to finish it, then turn encryption off.',
         'settings.syncEncryptionErrorBackendRequired': 'This needs a working sync connection — it updates the files at the sync location, and none is set up yet. Run one sync first, or turn encryption off and back on with the new passphrase.',
         'settings.syncEncryptionErrorBackendIncompatible': 'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
-        'settings.syncEncryptionErrorTransitionIncomplete': 'This encryption change may be incomplete because Mindwtr could not verify a remote file version. Sync remains paused. Retry the same encryption change before changing or disconnecting this sync location.',
+        'settings.syncEncryptionErrorTransitionIncomplete': 'Mindwtr could not confirm that the encryption change is complete. Sync remains paused. Retry the same encryption change before changing or disconnecting this sync location.',
         'settings.syncEncryptionAbandon': 'Abandon setup',
         'settings.syncEncryptionAbandonWarning': 'Abandon the unfinished encryption change on this device only. Encryption turns off here and the sync location is not contacted, so it may stay partly encrypted, and this device keeps sync paused there. Finish or undo the change from a device that can reach it.',
         'settings.syncEncryptionPassphraseTooLong': 'A passphrase can have at most 1,000 characters.',

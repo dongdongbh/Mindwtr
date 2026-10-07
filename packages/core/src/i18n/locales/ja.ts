@@ -1341,7 +1341,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncEncryptionErrorRotationFirst': 'パスフレーズの変更が中断され、この同期先は途中までしか更新されていません。まず「パスフレーズを変更」をもう一度実行して完了させてから、暗号化を解除してください。',
         'settings.syncEncryptionErrorBackendRequired': 'この操作には動作中の同期接続が必要です。同期先のファイルを更新する処理ですが、同期先がまだ設定されていません。先に一度同期を実行するか、暗号化をいったん解除して新しいパスフレーズで再度有効にしてください。',
         'settings.syncEncryptionErrorBackendIncompatible': 'このWebDAVサーバーは安全なバージョン確認（強いETagと条件付き書き込み）を提供または強制しないため、安全に同期したり暗号化を変更したりできません。対応するWebDAVプロバイダー、ファイル同期、またはDropboxを使用してください。',
-        'settings.syncEncryptionErrorTransitionIncomplete': 'リモートファイルのバージョンを確認できなかったため、この暗号化変更は完了していない可能性があります。同期は一時停止したままです。この同期先を変更または切断する前に、同じ暗号化変更をもう一度実行してください。',
+        'settings.syncEncryptionErrorTransitionIncomplete': 'Mindwtr は暗号化の変更が完了したことを確認できませんでした。同期は一時停止したままです。この同期先を変更または切断する前に、同じ暗号化変更をもう一度実行してください。',
         'settings.syncEncryptionAbandon': '設定を破棄',
         'settings.syncEncryptionAbandonWarning': '未完了の暗号化の変更をこのデバイスでのみ破棄します。このデバイスでは暗号化がオフになり、同期先には接続しないため、同期先は一部が暗号化されたままになることがあり、このデバイスはその同期先での同期を一時停止したままにします。同期先に接続できるデバイスから、変更を完了するか元に戻してください。',
         'settings.syncEncryptionPassphraseTooLong': 'パスフレーズは最大1,000文字です。',

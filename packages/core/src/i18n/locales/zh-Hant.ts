@@ -1284,7 +1284,7 @@ export const zhHant: Record<string, string> = {
         'settings.syncEncryptionErrorRotationFirst': '上次變更密碼短語時被中斷，此同步位置只更新了一半。請先再次執行「變更密碼短語」將其完成，再關閉加密。',
         'settings.syncEncryptionErrorBackendRequired': '此操作需要可用的同步連線——它會更新同步位置上的檔案，而目前尚未設定同步。請先完成一次同步，或先關閉加密再用新密碼短語重新開啟。',
         'settings.syncEncryptionErrorBackendIncompatible': '此 WebDAV 伺服器未提供或強制執行安全的版本檢查（強 ETag 與條件式寫入），因此 Mindwtr 無法安全地同步或變更加密。請使用相容的 WebDAV 供應商、檔案同步或 Dropbox。',
-        'settings.syncEncryptionErrorTransitionIncomplete': '由於 Mindwtr 無法驗證遠端檔案版本，這次加密變更可能尚未完成。同步仍維持暫停。請先重試相同的加密變更，再更換或中斷此同步位置。',
+        'settings.syncEncryptionErrorTransitionIncomplete': 'Mindwtr 無法確認加密變更已完成。同步仍維持暫停。請先重試相同的加密變更，再更換或中斷此同步位置。',
         'settings.syncEncryptionAbandon': '放棄設定',
         'settings.syncEncryptionAbandonWarning': '僅在此裝置上放棄未完成的加密變更。此裝置會關閉加密，且不會連線同步位置，因此該位置可能仍處於部分加密狀態，此裝置會在那裡保持同步暫停。請在能存取該位置的裝置上完成或復原這次變更。',
         'settings.syncEncryptionPassphraseTooLong': '密碼短語最多 1,000 個字元。',

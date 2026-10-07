@@ -395,6 +395,61 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertEqual(http?.counters.jobs, 0); XCTAssertEqual(http?.counters.running, 0)
         XCTAssertEqual(secrets?.counters.jobs, 0); XCTAssertEqual(secrets?.counters.running, 0)
     }
+    func testOffRefusesSeededIncompleteEnableAndColdHostRetainsSavedWebDAVTarget() async throws {
+        let saved = try await lockedHost()
+        await saved.close()
+        // This manually staged, fixture-only sidecar proves selection admission.
+        // It is not evidence of actual interrupted Enable conversion/recovery.
+        var configuration = try stored()
+        configuration["@mindwtr_sync_encryption_state_v1"] = try json(["state":"off","incompleteTransition":"enable"])
+        try Data(json(configuration).utf8).write(to: manifest, options: .atomic)
+        let originalManifest = try Data(contentsOf: manifest), before = try rows(), initial = remote.snapshot
+        let network = remote.recorded.count, keyBefore = try cachedKey()
+        #if os(macOS)
+        let originalSecrets = try Data(contentsOf: fixtureSecrets)
+        #endif
+        var host = core()
+        _ = try await host.start(); _ = try await command(host, "openSyncSettings")
+        let requestID = UUID().uuidString.lowercased()
+        for attempt in 0..<3 {
+            if attempt == 2 {
+                await host.close(); host = core()
+                _ = try await host.start(); _ = try await command(host, "openSyncSettings")
+            }
+            XCTAssertEqual(try storedState()["state"] as? String, "off")
+            XCTAssertEqual(try storedState()["incompleteTransition"] as? String, "enable")
+            let reply = try await raw(host, "selectSyncBackend", ["requestId":attempt == 2 ? UUID().uuidString.lowercased() : requestID,"option":"off"])
+            XCTAssertEqual(reply["ok"] as? Bool, false, "Warm retry and fresh cold request cannot disconnect an unfinished target")
+            let error = try XCTUnwrap(reply["error"] as? [String:Any])
+            XCTAssertTrue(try XCTUnwrap(error["message"] as? String).contains("SYNC_ENCRYPTION_TRANSITION_INCOMPLETE"))
+            let model = try await command(host, "syncSettings")
+            let options = try XCTUnwrap((model["backend"] as? [String:Any])?["options"] as? [[String:Any]])
+            XCTAssertEqual(options.first { $0["selected"] as? Bool == true }?["option"] as? String, "webdav")
+            XCTAssertTrue(model["off"] is NSNull, "Settings must keep the saved WebDAV target available for shared recovery")
+            let card = try XCTUnwrap(model["encryption"] as? [String:Any]), cardRows = try XCTUnwrap(card["rows"] as? [[String:Any]])
+            XCTAssertTrue(cardRows.contains { $0["tone"] as? String == "danger" && ($0["text"] as? String)?.contains("Sync remains paused") == true },
+                "Actual persisted incomplete state must stay visibly paused")
+            XCTAssertEqual(try Data(contentsOf: manifest), originalManifest)
+            #if os(macOS)
+            XCTAssertEqual(try Data(contentsOf: fixtureSecrets), originalSecrets, "No synthetic secure item changes")
+            #endif
+            XCTAssertEqual(try cachedKey(), keyBefore); XCTAssertEqual(try rows(), before)
+            XCTAssertEqual(remote.snapshot, initial); XCTAssertEqual(remote.recorded.count, network, "Startup, open and Off refusal perform no HTTP")
+            XCTAssertEqual(try Data(contentsOf: localFile), localBytes); XCTAssertEqual(crypto?.counters.operations, 0)
+            assertDrained()
+        }
+        await host.close()
+        let log = try String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)
+        let guarded = try log.split(separator: "\n").filter { $0.contains("v1.3.5/sync-encryption-off-guard") }.map { try object(String($0)) }
+        XCTAssertEqual(guarded.count, 3)
+        for record in guarded {
+            XCTAssertEqual(record["context"] as? [String:String],
+                ["releaseCheck":"v1.3.5/sync-encryption-off-guard","operation":"select-off","outcome":"refused"])
+        }
+        XCTAssertFalse(log.contains(password)); XCTAssertFalse(log.contains(passphrase)); XCTAssertFalse(log.contains(keyHex))
+        XCTAssertEqual(try markers(), 0, "Selecting Off cannot acknowledge an Unlock")
+    }
+
     func testWrongThenCorrectPassphrasePersistsExactKeyAndColdExplicitSyncDecrypts() async throws {
         let host = try await lockedHost(), before = try rows(), initial = remote.snapshot, configuration = try stored()
         try await enter(host, "wrong synthetic passphrase")

@@ -1284,7 +1284,7 @@ export const zhHans: Record<string, string> = {
         'settings.syncEncryptionErrorRotationFirst': '上次更改密码短语被中断，此同步位置只更新了一半。请先再次执行“更改密码短语”将其完成，然后再关闭加密。',
         'settings.syncEncryptionErrorBackendRequired': '此操作需要可用的同步连接——它会更新同步位置上的文件，而目前尚未设置同步。请先完成一次同步，或者关闭加密后用新密码短语重新开启。',
         'settings.syncEncryptionErrorBackendIncompatible': '此 WebDAV 服务器未提供或强制执行安全的版本检查（强 ETag 和条件写入），因此 Mindwtr 无法安全地同步或更改加密。请使用兼容的 WebDAV 提供商、文件同步或 Dropbox。',
-        'settings.syncEncryptionErrorTransitionIncomplete': '由于 Mindwtr 无法验证远程文件版本，此次加密更改可能尚未完成。同步仍处于暂停状态。请先重试同一加密更改，再更换或断开此同步位置。',
+        'settings.syncEncryptionErrorTransitionIncomplete': 'Mindwtr 无法确认加密更改已完成。同步仍处于暂停状态。请先重试同一加密更改，再更换或断开此同步位置。',
         'settings.syncEncryptionAbandon': '放弃设置',
         'settings.syncEncryptionAbandonWarning': '仅在此设备上放弃未完成的加密更改。此设备会关闭加密，且不会连接同步位置，因此该位置可能仍处于部分加密状态，此设备会在那里保持同步暂停。请在能访问该位置的设备上完成或撤销这次更改。',
         'settings.syncEncryptionPassphraseTooLong': '密码短语最多 1,000 个字符。',

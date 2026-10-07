@@ -1122,6 +1122,26 @@ describe('native Settings › Sync Off durable acknowledgement', () => {
         return methods;
     };
 
+    it('refuses Off with an unfinished Enable journal and keeps the saved WebDAV target', async () => {
+        const { dev, contract } = await start({ ...WEBDAV_STORED, os: 'ios', encryption: { state: 'off', incomplete: 'enable' } }, {
+            lastSyncStatus: 'error', lastSyncError: 'prior sync error',
+        });
+        const info = vi.spyOn(dev.host.log, 'info');
+        const result = await contract.selectSyncBackend({ requestId: generateUUID(), option: 'off' });
+        expect(result).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        if (result.ok) throw new Error('Expected unfinished encryption refusal');
+        expect(result.error.message).toContain('SYNC_ENCRYPTION_TRANSITION_INCOMPLETE');
+        expect(dev.state.storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+        expect(value(contract.getSyncSettings()).panel?.kind).toBe('webdav');
+        expect(useTaskStore.getState().settings).toMatchObject({ lastSyncStatus: 'error', lastSyncError: 'prior sync error' });
+        expect(dev.state.log.filter((entry) => entry[0] === 'setItem' && entry[1] === SYNC_BACKEND_KEY)).toEqual([]);
+        expect(info).toHaveBeenCalledWith('Sync Off refused during incomplete encryption transition', {
+            scope: 'sync-settings', force: true, extra: {
+                releaseCheck: 'v1.3.5/sync-encryption-off-guard', operation: 'select-off', outcome: 'refused',
+            },
+        });
+    });
+
     it('joins the Off UUID and waits for the queued status write before acknowledging it', async () => {
         const { dev, contract } = await start({ ...WEBDAV_STORED, os: 'ios' }, { lastSyncStatus: 'error', lastSyncError: 'synthetic prior failure' });
         let release!: () => void;
@@ -1172,38 +1192,18 @@ describe('native Settings › Sync Off durable acknowledgement', () => {
         }
     });
 
-    it('drains the queued status reset before returning a known KV failure', async () => {
+    it('returns a known KV failure without resetting status or the saved backend', async () => {
         const { dev, contract } = await start({ ...WEBDAV_STORED, os: 'ios' }, { lastSyncStatus: 'error' });
         dev.state.failKeys.add(SYNC_BACKEND_KEY);
-        let release!: () => void;
-        let entered!: () => void;
-        const held = new Promise<void>((resolve) => { release = resolve; });
-        const saving = new Promise<void>((resolve) => { entered = resolve; });
-        let persistedSettings: AppSettings | undefined;
-        const adapter = getStorageAdapter();
-        const saveData = adapter.saveData;
-        adapter.saveData = async (data) => {
-            entered();
-            await held;
-            await saveData(data);
-            persistedSettings = data.settings;
-        };
         const input = { requestId: generateUUID(), option: 'off' as const };
-        const command = contract.selectSyncBackend(input);
-        try {
-            expect(await Promise.race([command.then(() => 'failure'), saving.then(() => 'flush')])).toBe('flush');
-            expect(dev.state.storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
-            release();
-            expect(await command).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED', message: 'The device store refused the write' } });
-            expect(persistedSettings?.lastSyncStatus).toBe('idle');
-            expect(getPersistenceStatus()).toMatchObject({ queued: 0, inFlight: false, failed: false });
-            expect(value(contract.getSyncSettings()).panel?.kind).toBe('webdav');
-            expect(device.calls.filter((call) => call[0] === 'logInfo')).toEqual([]);
-        } finally {
-            release();
-            await command;
-            await flushPendingSave();
-        }
+        expect(await contract.selectSyncBackend(input)).toMatchObject({
+            ok: false, error: { code: 'SAVE_FAILED', message: 'The device store refused the write' },
+        });
+        expect(dev.state.storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+        expect(useTaskStore.getState().settings.lastSyncStatus).toBe('error');
+        expect(getPersistenceStatus()).toMatchObject({ queued: 0, inFlight: false, failed: false });
+        expect(value(contract.getSyncSettings()).panel?.kind).toBe('webdav');
+        expect(device.calls.filter((call) => call[0] === 'logInfo')).toEqual([]);
     });
     it('does not cache a failed flush, and drains it on exact already-Off retry', async () => {
         const { dev } = await start({ ...WEBDAV_STORED, os: 'ios' }, { lastSyncStatus: 'error' });

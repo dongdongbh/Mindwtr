@@ -30,6 +30,8 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ## v1.3.5 (add before tagging, trim in the release after)
 
+- **`v1.3.5/sync-encryption-off-guard`** — `packages/core/src/sync-settings-transport.ts`, when the serialized Sync Off action refuses an unfinished encryption transition before changing its saved backend. Fixed fields: `operation=select-off`, `outcome=refused`. The tester's Diagnostics must show this marker while the original backend remains selected, so Retry or Abandon still addresses that location. It does not prove conversion completion or remote rollback. No locations, credentials, passphrases or artifact contents are logged.
+
 - **`v1.3.5/obsidian-inline-tag`** — `apps/desktop/src/lib/obsidian-scanner.ts`, after parsing an inline note with a required tag configured, in both full and live scans. Message: `Obsidian inline tag filter applied`; `count` is the number of matching checkboxes in that file. A full scan and a live note edit must each emit the marker; only matching checkbox lines should appear. TaskNotes bypasses this filter. No tags, task text, paths or identifiers are logged.
 
 - **`v1.3.5/ios-encryption-enable-capacity`** — `apps/android-native/bundle/host-sync.ts`, after shared Enable rejects an artifact that cannot fit the native encrypted-output capacity, before conversion mutates artifacts or local encryption material. Message: `Native iOS encryption enable capacity refused`; fixed fields `operation=enable`, `outcome=refused`. Remote fence acquisition/release may occur. This prerequisite does not expose native Enable or prove its interruption recovery. No artifact names, sizes, paths, contents, credentials or raw errors are logged.
