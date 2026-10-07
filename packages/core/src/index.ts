@@ -35,6 +35,7 @@ export * from './speech-to-task';
 export * from './data-transfer-transaction';
 export * from './feedback';
 export * from './feedback-diagnostics';
+export * from './about-settings-model';
 export * from './sandbox';
 export * from './sandbox-data';
 export * from './store';

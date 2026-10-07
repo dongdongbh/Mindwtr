@@ -2,13 +2,13 @@ import {
   buildDiagnosticsErrorEntry,
   buildDiagnosticsLogEntry,
   buildFeedbackDiagnostics,
+  buildFeedbackDiagnosticsSnapshot,
   createDiagnosticsLog,
   createFeedbackDiagnosticsBuffer,
   FEEDBACK_DIAGNOSTICS_SOURCE_CHARS,
   getBreadcrumbs,
   isDiagnosticsLoggingEnabled,
   sanitizeForLog,
-  sanitizeLogContext,
   useTaskStore,
   type DiagnosticsLog,
   type DiagnosticsLogEntry,
@@ -533,19 +533,7 @@ export async function collectFeedbackDiagnostics(maxChars = RECENT_LOG_MAX_CHARS
   // Feedback attachment is an explicit, one-time opt-in. Build the snapshot in
   // memory so checking the box does not persist a log when detailed logging is
   // disabled, while still explaining the recent app flow.
-  const snapshot = JSON.stringify({
-    ts: new Date().toISOString(),
-    level: 'info',
-    scope: 'feedback',
-    message: 'Feedback diagnostics snapshot',
-    context: sanitizeLogContext({
-      debugLoggingEnabled: isLoggingEnabled(),
-        releaseCheck: 'v1.3.0/feedback-diagnostics',
-      captureMode: 'recent-session-and-saved-log',
-      breadcrumbCount: breadcrumbs.length,
-      breadcrumbs: breadcrumbs.length > 0 ? breadcrumbs.join(';') : 'none',
-    }),
-  });
+  const snapshot = buildFeedbackDiagnosticsSnapshot({ debugLoggingEnabled: isLoggingEnabled(), breadcrumbs });
   const recentLogs = await readRecentLogText(FEEDBACK_DIAGNOSTICS_SOURCE_CHARS);
   return buildFeedbackDiagnostics(
     [recentLogs, feedbackDiagnosticsBuffer.read(), readRetainedFatalCrashText()],

@@ -1,3 +1,5 @@
+import { sanitizeLogContext } from './log-sanitize';
+
 /** Local, volatile diagnostics. Callers supply entries through their existing
  * sanitizers; this buffer never writes to disk or sends anything. */
 type DiagnosticEntry = {
@@ -96,4 +98,25 @@ export function buildFeedbackDiagnostics(
     }
     selected.sort((a, b) => Date.parse(a.entry.ts) - Date.parse(b.entry.ts));
     return [...selected.map((item) => item.line), snapshot].join('\n');
+}
+
+/**
+ * The snapshot line that ends the attached diagnostics: whether debug logging is on and the recent app flow (the breadcrumbs).
+ * Built in memory, so attaching never writes a log while logging is off. RN's collectFeedbackDiagnostics and the native host's.
+ */
+export function buildFeedbackDiagnosticsSnapshot(input: { debugLoggingEnabled: boolean; breadcrumbs: readonly string[]; now?: Date }): string {
+    const { breadcrumbs } = input;
+    return JSON.stringify({
+        ts: (input.now ?? new Date()).toISOString(),
+        level: 'info',
+        scope: 'feedback',
+        message: 'Feedback diagnostics snapshot',
+        context: sanitizeLogContext({
+            debugLoggingEnabled: input.debugLoggingEnabled,
+            releaseCheck: 'v1.3.0/feedback-diagnostics',
+            captureMode: 'recent-session-and-saved-log',
+            breadcrumbCount: breadcrumbs.length,
+            breadcrumbs: breadcrumbs.length > 0 ? breadcrumbs.join(';') : 'none',
+        }),
+    });
 }

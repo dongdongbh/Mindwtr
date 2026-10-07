@@ -1,18 +1,14 @@
 import Constants from 'expo-constants';
 import * as StoreReview from 'expo-store-review';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
-  recordStoreReviewPromptAttempt,
-  shouldAttemptStoreReviewPrompt,
+  attemptStoreReviewAfterPositiveMoment,
   type UserPromptPlatform,
 } from '@mindwtr/core';
 
 import { logWarn } from '@/lib/app-log';
-import {
-  readLocalUserPromptState,
-  updateLocalUserPromptState,
-} from '@/lib/user-prompt-state';
 
 type MobileReviewPromptExtraConfig = {
   isFossBuild?: boolean | string;
@@ -48,23 +44,16 @@ async function hasNativeReviewAction(): Promise<boolean> {
 }
 
 export async function maybeRequestStoreReviewAfterPositiveMoment(nowMs = Date.now()): Promise<boolean> {
-  if (!isStoreReviewPromptBuildEligible()) return false;
-
-  const [promptState, storeReviewAvailable] = await Promise.all([
-    readLocalUserPromptState(),
-    hasNativeReviewAction(),
-  ]);
-
-  if (!shouldAttemptStoreReviewPrompt({
-    nowMs,
+  // Core's gate and attempt record (user-prompts.ts), shared with the native hosts.
+  if (!await attemptStoreReviewAfterPositiveMoment({
+    buildEligible: isStoreReviewPromptBuildEligible(),
     platform: getPromptPlatform(),
-    promptState,
-    storeReviewAvailable,
+    storage: AsyncStorage,
+    hasNativeReviewAction,
+    nowMs,
   })) {
     return false;
   }
-
-  await updateLocalUserPromptState((current) => recordStoreReviewPromptAttempt(current, nowMs));
 
   try {
     await StoreReview.requestReview();

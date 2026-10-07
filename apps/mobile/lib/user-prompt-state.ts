@@ -1,40 +1,31 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
-  recordPromptActivity,
+  LOCAL_USER_PROMPT_STATE_KEY,
+  readLocalUserPromptState as readCoreLocalUserPromptState,
+  recordLocalPromptActivity as recordCoreLocalPromptActivity,
+  updateLocalUserPromptState as updateCoreLocalUserPromptState,
+  writeLocalUserPromptState as writeCoreLocalUserPromptState,
   type UserPromptState,
 } from '@mindwtr/core';
 
-export const LOCAL_USER_PROMPT_STATE_KEY = 'mindwtr:local-user-prompts:v1';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
+// Core's (user-prompts.ts) on RN's AsyncStorage, shared with the native hosts.
+export { LOCAL_USER_PROMPT_STATE_KEY };
 
 export async function readLocalUserPromptState(): Promise<UserPromptState> {
-  const raw = await AsyncStorage.getItem(LOCAL_USER_PROMPT_STATE_KEY);
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return isRecord(parsed) ? parsed as UserPromptState : {};
-  } catch {
-    return {};
-  }
+  return readCoreLocalUserPromptState(AsyncStorage);
 }
 
 export async function writeLocalUserPromptState(promptState: UserPromptState): Promise<void> {
-  await AsyncStorage.setItem(LOCAL_USER_PROMPT_STATE_KEY, JSON.stringify(promptState));
+  await writeCoreLocalUserPromptState(AsyncStorage, promptState);
 }
 
 export async function updateLocalUserPromptState(
   updater: (promptState: UserPromptState) => UserPromptState,
 ): Promise<UserPromptState> {
-  const current = await readLocalUserPromptState();
-  const next = updater(current);
-  await writeLocalUserPromptState(next);
-  return next;
+  return updateCoreLocalUserPromptState(AsyncStorage, updater);
 }
 
 export async function recordLocalPromptActivity(nowMs = Date.now()): Promise<UserPromptState> {
-  return updateLocalUserPromptState((promptState) => recordPromptActivity(promptState, nowMs));
+  return recordCoreLocalPromptActivity(AsyncStorage, nowMs);
 }

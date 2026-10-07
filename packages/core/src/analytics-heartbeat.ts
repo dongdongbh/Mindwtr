@@ -184,3 +184,138 @@ export async function resetHeartbeatOptOutMarker(
         await storage.setItem(storageKey, '');
     }
 }
+
+// ---- The mobile apps' heartbeat (React Native's and the native hosts'): their ids, channel, device fields and gates ----
+
+/** The install's anonymous id: a UUID made on the first heartbeat, kept under RN's AsyncStorage key. */
+export const ANALYTICS_DISTINCT_ID_KEY = 'mindwtr-analytics-distinct-id';
+
+export type MobileAnalyticsHeartbeatConfig = {
+    analyticsHeartbeatUrl: string;
+    analyticsHeartbeatChannel?: string;
+    appVersion: string;
+    isExpoGo: boolean;
+    isFossBuild: boolean;
+};
+
+/** The device a mobile heartbeat describes, and its storage and fetch. */
+export type MobileHeartbeatDevice = {
+    /** RN's Platform.OS. */
+    platform: string;
+    /** RN's Platform.Version. */
+    platformVersion?: string | number | null;
+    /** Android's release name (RN's Platform.constants.Release). */
+    osRelease?: string | null;
+    isPad?: boolean;
+    locale: string;
+    /** A development build (RN's __DEV__) never sends. */
+    isDev: boolean;
+    storage: StorageLike;
+    fetcher: HeartbeatFetch;
+    generateId: () => string;
+};
+
+export function isMobileAnalyticsHeartbeatConfigured({
+    analyticsHeartbeatUrl,
+    isExpoGo,
+}: Pick<MobileAnalyticsHeartbeatConfig, 'analyticsHeartbeatUrl' | 'isExpoGo' | 'isFossBuild'>): boolean {
+    return !isExpoGo && Boolean(analyticsHeartbeatUrl.trim());
+}
+
+export function resolveMobileAnalyticsVersion(
+    baseVersion: string,
+    releaseVersion?: string | null
+): string {
+    const base = String(baseVersion || '').trim() || '0.0.0';
+    const release = String(releaseVersion || '').trim().replace(/^v/i, '');
+    if (!release || release === base) return base;
+    if (release.startsWith(`${base}-`)) return release;
+    return base;
+}
+
+export function getMobileAnalyticsChannel(
+    platform: string,
+    isFossBuild: boolean,
+    configuredChannel?: string | null
+): string {
+    const channel = String(configuredChannel ?? '').trim();
+    if (channel) return channel;
+    if (platform === 'ios') return 'app-store';
+    if (platform !== 'android') return platform || 'mobile';
+    // Release builds bake ANALYTICS_HEARTBEAT_CHANNEL (play-store, android-internal-test,
+    // android-direct), so this fallback only fires for builds without one. The old
+    // install-referrer probe is gone: testing-track installs carry no referrer and the
+    // API can reject, which misfiled Play testers as android-sideload/android-unknown.
+    return isFossBuild ? 'fdroid' : 'play-store';
+}
+
+export async function getOrCreateAnalyticsDistinctId(storage: StorageLike, generateId: () => string): Promise<string> {
+    const existing = (await storage.getItem(ANALYTICS_DISTINCT_ID_KEY) || '').trim();
+    if (existing) return existing;
+    const generated = generateId();
+    await storage.setItem(ANALYTICS_DISTINCT_ID_KEY, generated);
+    return generated;
+}
+
+export function getMobileDeviceClass(platform: string, isPad?: boolean): string {
+    if (platform === 'ios') return isPad === true ? 'tablet' : 'phone';
+    if (platform === 'android') return 'phone';
+    return 'desktop';
+}
+
+export function getMobileOsMajor(platform: string, platformVersion?: string | number | null, osRelease?: string | null): string {
+    if (platform === 'ios') {
+        const raw = String(platformVersion ?? '');
+        const major = raw.match(/\d+/)?.[0];
+        return major ? `ios-${major}` : 'ios';
+    }
+    if (platform === 'android') {
+        const raw = String(osRelease ?? platformVersion ?? '');
+        const major = raw.match(/\d+/)?.[0];
+        return major ? `android-${major}` : 'android';
+    }
+    return platform || 'mobile';
+}
+
+const canSendMobileAnalyticsHeartbeat = (config: MobileAnalyticsHeartbeatConfig, device: MobileHeartbeatDevice): boolean =>
+    isMobileAnalyticsHeartbeatConfigured(config) && !device.isDev;
+
+async function buildMobileHeartbeatOptions(config: MobileAnalyticsHeartbeatConfig, device: MobileHeartbeatDevice, profileId: string | null = null) {
+    const [distinctId, channel] = await Promise.all([
+        getOrCreateAnalyticsDistinctId(device.storage, device.generateId),
+        getMobileAnalyticsChannel(device.platform, config.isFossBuild, config.analyticsHeartbeatChannel),
+    ]);
+    return {
+        enabled: true,
+        endpointUrl: config.analyticsHeartbeatUrl,
+        distinctId,
+        profileId,
+        platform: device.platform,
+        channel,
+        appVersion: config.appVersion,
+        deviceClass: getMobileDeviceClass(device.platform, device.isPad),
+        osMajor: getMobileOsMajor(device.platform, device.platformVersion, device.osRelease),
+        locale: device.locale,
+        storage: device.storage,
+        fetcher: device.fetcher,
+    };
+}
+
+/** The one opt-out event, when the user turns the heartbeat off. */
+export async function sendMobileAnalyticsOptOut(config: MobileAnalyticsHeartbeatConfig, device: MobileHeartbeatDevice): Promise<boolean> {
+    if (!canSendMobileAnalyticsHeartbeat(config, device)) return false;
+    return sendHeartbeatOptOut(await buildMobileHeartbeatOptions(config, device));
+}
+
+/** The day's heartbeat at startup, unless the user turned it off (settings.analytics.heartbeatEnabled). */
+export async function sendMobileDailyHeartbeat(
+    config: MobileAnalyticsHeartbeatConfig,
+    settings: { analytics?: { heartbeatEnabled?: boolean }; analyticsProfileId?: string | null },
+    device: MobileHeartbeatDevice,
+): Promise<boolean> {
+    if (!canSendMobileAnalyticsHeartbeat(config, device)) return false;
+    if (settings.analytics?.heartbeatEnabled === false) {
+        return false;
+    }
+    return sendDailyHeartbeat(await buildMobileHeartbeatOptions(config, device, settings.analyticsProfileId ?? null));
+}

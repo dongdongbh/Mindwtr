@@ -276,7 +276,9 @@ async function run(scenario: Scenario) {
       record('tap', step.tap, target.props.disabled === true ? 'disabled' : 'enabled');
       if (target.props.disabled !== true) await act(async () => { target.props.onPress(); });
     } else if ('pressAlert' in step) {
-      const button = harness.openAlert?.buttons.find((entry) => entry.text === label(step.pressAlert));
+      // The alert's own buttons, opened by the step before (TypeScript narrowed the field to null at the reset above).
+      const opened = harness.openAlert as { buttons: { text?: string; onPress?: () => void }[] } | null;
+      const button = opened?.buttons.find((entry) => entry.text === label(step.pressAlert));
       if (!button) throw new Error(`${scenario.name}: no alert button ${step.pressAlert}`);
       harness.openAlert = null;
       await act(async () => { button.onPress?.(); });

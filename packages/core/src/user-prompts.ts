@@ -430,3 +430,79 @@ export function recordUpdateReminderDismissed(
         },
     };
 }
+
+// ---- The prompt state the mobile apps keep on the device (RN's AsyncStorage) ----
+
+/** The device's prompt state: first seen, active days, the store review's and the other prompts' last times. */
+export const LOCAL_USER_PROMPT_STATE_KEY = 'mindwtr:local-user-prompts:v1';
+
+type PromptStorage = {
+    getItem: (key: string) => Promise<string | null>;
+    setItem: (key: string, value: string) => Promise<void>;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+export async function readLocalUserPromptState(storage: PromptStorage): Promise<UserPromptState> {
+    const raw = await storage.getItem(LOCAL_USER_PROMPT_STATE_KEY);
+    if (!raw) return {};
+    try {
+        const parsed = JSON.parse(raw);
+        return isRecord(parsed) ? parsed as UserPromptState : {};
+    } catch {
+        return {};
+    }
+}
+
+export async function writeLocalUserPromptState(storage: PromptStorage, promptState: UserPromptState): Promise<void> {
+    await storage.setItem(LOCAL_USER_PROMPT_STATE_KEY, JSON.stringify(promptState));
+}
+
+export async function updateLocalUserPromptState(
+    storage: PromptStorage,
+    updater: (promptState: UserPromptState) => UserPromptState,
+): Promise<UserPromptState> {
+    const current = await readLocalUserPromptState(storage);
+    const next = updater(current);
+    await writeLocalUserPromptState(storage, next);
+    return next;
+}
+
+/** Today counts as an active day (at first paint). */
+export async function recordLocalPromptActivity(storage: PromptStorage, nowMs = Date.now()): Promise<UserPromptState> {
+    return updateLocalUserPromptState(storage, (promptState) => recordPromptActivity(promptState, nowMs));
+}
+
+/**
+ * After a positive moment (a finished Weekly Review): whether to ask the store for its review sheet now. A build that may ask
+ * (`buildEligible`: a store build) asks when the store has a review action and the prompt state passes the gate; the attempt
+ * is stored before the host asks, so a sheet the store never shows still starts the cooldown.
+ */
+export async function attemptStoreReviewAfterPositiveMoment(input: {
+    buildEligible: boolean;
+    platform: UserPromptPlatform;
+    storage: PromptStorage;
+    hasNativeReviewAction: () => Promise<boolean>;
+    nowMs: number;
+}): Promise<boolean> {
+    if (!input.buildEligible) return false;
+
+    const [promptState, storeReviewAvailable] = await Promise.all([
+        readLocalUserPromptState(input.storage),
+        input.hasNativeReviewAction(),
+    ]);
+
+    if (!shouldAttemptStoreReviewPrompt({
+        nowMs: input.nowMs,
+        platform: input.platform,
+        promptState,
+        storeReviewAvailable,
+    })) {
+        return false;
+    }
+
+    await updateLocalUserPromptState(input.storage, (current) => recordStoreReviewPromptAttempt(current, input.nowMs));
+    return true;
+}

@@ -76,8 +76,17 @@ vi.mock('expo-application', () => ({
 vi.mock('@mindwtr/core', async () => {
   // hasActiveMobileNotificationFeature is a pure predicate (packages/core/src/schedule-utils.ts):
   // passthrough the real implementation rather than re-stub it here.
-  const { hasActiveMobileNotificationFeature } = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
+  const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
+  const { hasActiveMobileNotificationFeature } = actual;
   return {
+    // The heartbeat's pure device fields (core's analytics-heartbeat.ts); its sends are stubbed.
+    getMobileAnalyticsChannel: actual.getMobileAnalyticsChannel,
+    getMobileDeviceClass: actual.getMobileDeviceClass,
+    getMobileOsMajor: actual.getMobileOsMajor,
+    isMobileAnalyticsHeartbeatConfigured: actual.isMobileAnalyticsHeartbeatConfigured,
+    resolveMobileAnalyticsVersion: actual.resolveMobileAnalyticsVersion,
+    sendMobileDailyHeartbeat: vi.fn(async () => false),
+    sendMobileAnalyticsOptOut: vi.fn(async () => false),
     flushPendingSave,
     generateUUID: () => 'generated-id',
     hasActiveMobileNotificationFeature,
