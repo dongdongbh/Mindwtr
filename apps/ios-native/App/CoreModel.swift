@@ -308,7 +308,7 @@ final class CoreModel: ObservableObject {
     @Published private(set) var settingsSyncUsername = ""
     @Published private(set) var settingsSyncPassword = ""
     @Published private(set) var settingsSyncAllowInsecure = false
-    @Published private(set) var settingsSyncPassphrase = ""
+    @Published private var settingsSyncPassphrases: [String: String] = [:]
     @Published private(set) var settingsSyncError: String?
     @Published private(set) var settingsSyncStatus: String?
     @Published private(set) var settingsSyncChecking = false
@@ -5178,7 +5178,7 @@ final class CoreModel: ObservableObject {
         // Revoke delivery and local text synchronously; the captured owner keeps
         // busy until its accepted bridge call and any required host close settle.
         settingsSyncEncryptionTask?.cancel()
-        settingsSyncPassphrase = ""
+        settingsSyncPassphrases = [:]
         settingsSyncReadTask?.cancel()
         settingsSyncReadTask = nil
         settingsSyncGeneration += 1
@@ -5205,29 +5205,28 @@ final class CoreModel: ObservableObject {
 
     private func settingsSyncEncryptionActionAllowed(_ action: CoreObject) -> Bool {
         switch action.text("type") {
-        case "open", "submit": return Set(action.keys) == Set(["type", "flow"]) && action.text("flow") == "unlock"
-        case "cancel", "decline", "retry": return Set(action.keys) == Set(["type"])
+        case "open", "submit": return Set(action.keys) == Set(["type", "flow"]) && ["unlock", "enable", "abandon"].contains(action.text("flow"))
+        case "cancel", "decline", "retry", "recheck": return Set(action.keys) == Set(["type"])
         default: return false
         }
     }
 
-    // Rendering admits only the selected shared Unlock wire, never another flow
-    // or a returned plaintext field/reveal control.
+    // Admit only selected saved-WebDAV flows, never returned plaintext or reveal controls.
     private func validSettingsSyncEncryption(_ value: Any?) -> Bool {
         if value is NSNull { return true }
         guard let card = value as? CoreObject, Set(card.keys) == Set(["title", "guide", "rows"]),
               card["title"] is String, let rows = card["rows"] as? [CoreObject], rows.count <= 128,
               card["guide"] is NSNull || card["guide"] is CoreObject else { return false }
-        var fields = 0
+        var fields = Set<String>()
         for row in rows {
             switch row.text("kind") {
             case "text":
                 guard Set(row.keys) == Set(["kind", "text", "tone"]), row["text"] is String,
                       ["label", "description", "warning", "danger"].contains(row.text("tone")) else { return false }
             case "field":
-                fields += 1
-                guard fields == 1, Set(row.keys) == Set(["kind", "field", "label", "secure", "maxLength", "tooLong"]),
-                      row.text("field") == "current", row["label"] is String, row["tooLong"] is String,
+                guard fields.insert(row.text("field")).inserted,
+                      Set(row.keys) == Set(["kind", "field", "label", "secure", "maxLength", "tooLong"]),
+                      ["current", "next", "confirm"].contains(row.text("field")), row["label"] is String, row["tooLong"] is String,
                       settingsSyncWireBool(row["secure"]) == true, let limit = row["maxLength"] as? NSNumber,
                       CFGetTypeID(limit) != CFBooleanGetTypeID(), limit.doubleValue == Double(limit.intValue),
                       limit.intValue > 0, limit.intValue <= 1000 else { return false }
@@ -5238,22 +5237,31 @@ final class CoreModel: ObservableObject {
             default: return false
             }
         }
+        guard fields.isEmpty || fields == Set(["current"]) || fields == Set(["next", "confirm"]) else { return false }
+        if !fields.isEmpty {
+            let flow = fields.contains("current") ? "unlock" : "enable"
+            guard rows.contains(where: { $0.text("kind") == "action" && $0.object("action").text("type") == "submit"
+                && $0.object("action").text("flow") == flow }) else { return false }
+        }
         return true
     }
 
-    private var settingsSyncEncryptionField: CoreObject? {
-        settingsSync.object("encryption").objects("rows").first { $0.text("kind") == "field" }
+    private func settingsSyncEncryptionField(_ field: String) -> CoreObject? {
+        settingsSync.object("encryption").objects("rows").first { $0.text("kind") == "field" && $0.text("field") == field }
     }
-    var settingsSyncPassphraseTooLong: String? {
-        guard let field = settingsSyncEncryptionField, settingsSyncPassphrase.utf16.count > field.number("maxLength") else { return nil }
-        return field.text("tooLong")
+    func settingsSyncPassphrase(_ field: String) -> String { settingsSyncPassphrases[field] ?? "" }
+    func settingsSyncPassphraseTooLong(_ field: String) -> String? {
+        guard let row = settingsSyncEncryptionField(field), settingsSyncPassphrase(field).utf16.count > row.number("maxLength") else { return nil }
+        return row.text("tooLong")
     }
-    func setSettingsSyncPassphrase(_ value: String) {
-        guard settingsSyncCanEdit, !settingsSyncDraftDirty, !settingsSyncChecking, settingsSyncEncryptionField != nil else { return }
-        settingsSyncPassphrase = value
+    func setSettingsSyncPassphrase(_ value: String, field: String) {
+        guard settingsSyncCanEdit, !settingsSyncDraftDirty, !settingsSyncChecking, settingsSyncEncryptionField(field) != nil else { return }
+        settingsSyncPassphrases[field] = value
     }
     func settingsSyncEncryptionActionID(_ action: CoreObject) -> String {
-        action.text("type") == "submit" ? "unlock" : action.text("type")
+        if action.text("type") == "submit" { return action.text("flow") }
+        if action.text("type") == "open", action.text("flow") != "unlock" { return "open-" + action.text("flow") }
+        return action.text("type")
     }
     private func settingsSyncEncryptionOffered(_ action: CoreObject, enabled: Bool) -> Bool {
         settingsSync.object("encryption").objects("rows").contains {
@@ -5268,8 +5276,10 @@ final class CoreModel: ObservableObject {
               settingsSyncEncryptionActionAllowed(action), !settingsSyncOpeningRevision.isEmpty,
               settingsSync.text("configRevision") == settingsSyncOpeningRevision else { return false }
         if action.text("type") == "submit" {
-            return settingsSyncEncryptionOffered(action, enabled: false) && settingsSyncEncryptionField != nil
-                && !settingsSyncPassphrase.isEmpty && settingsSyncPassphraseTooLong == nil
+            let fields = action.text("flow") == "enable" ? ["next", "confirm"] : action.text("flow") == "unlock" ? ["current"] : []
+            return settingsSyncEncryptionOffered(action, enabled: fields.isEmpty) && fields.allSatisfy {
+                settingsSyncEncryptionField($0) != nil && !settingsSyncPassphrase($0).isEmpty && settingsSyncPassphraseTooLong($0) == nil
+            }
         }
         return settingsSyncEncryptionOffered(action, enabled: true)
     }
@@ -5310,22 +5320,24 @@ final class CoreModel: ObservableObject {
         settingsSyncError = nil
         settingsSyncStatus = nil
         busy = true
-        let passphrase = settingsSyncPassphrase
-        let task = Task { await runSettingsSyncEncryption(owner, action: action, passphrase: passphrase) }
+        let passphrases = settingsSyncPassphrases
+        let task = Task { await runSettingsSyncEncryption(owner, action: action, passphrases: passphrases) }
         settingsSyncEncryptionTask = task
         await task.value
     }
 
-    private func runSettingsSyncEncryption(_ owner: SettingsSyncEncryptionOwner, action: CoreObject, passphrase: String) async {
+    private func runSettingsSyncEncryption(_ owner: SettingsSyncEncryptionOwner, action: CoreObject, passphrases: [String: String]) async {
         var staged = false
         do {
             guard settingsSyncEncryptionCurrent(owner), settingsSyncOpeningRevision == owner.revision, !settingsSyncDraftDirty else { throw CancellationError() }
-            if action.text("type") == "submit" {
+            let fields = action.text("type") != "submit" ? [] : action.text("flow") == "enable" ? ["next", "confirm"]
+                : action.text("flow") == "unlock" ? ["current"] : []
+            for field in fields {
                 // Typed may mutate before an acknowledgement is lost. From this
                 // point only confirmed Submit retirement or closing this host is safe.
                 staged = true
                 let typed = try settingsSyncEncryptionReply(try await owner.host.foregroundSync(command: "runSyncEncryptionAction",
-                    requestJSON: try json(["revision": owner.revision, "action": ["type": "typed", "field": "current", "value": passphrase]])), action: true)
+                    requestJSON: try json(["revision": owner.revision, "action": ["type": "typed", "field": field, "value": passphrases[field] ?? ""]])), action: true)
                 guard settingsSyncEncryptionCurrent(owner), typed.flag("ok") else { throw CocoaError(.coderReadCorrupt) }
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
                 if settingsSyncEncryptionTypedThrowOnce {
@@ -5342,6 +5354,8 @@ final class CoreModel: ObservableObject {
                 }
                 #endif
                 guard settingsSyncEncryptionCurrent(owner), typed.flag("ok") else { throw CocoaError(.coderReadCorrupt) }
+            }
+            if !fields.isEmpty {
                 let fresh = try settingsSyncEncryptionReply(try await owner.host.foregroundSync(command: "syncSettings",
                     requestJSON: try json(["draft": ["url": settingsSyncURL]])), action: false)
                 guard settingsSyncEncryptionCurrent(owner), fresh.flag("ok"), let view = fresh["value"] as? CoreObject,
@@ -5351,11 +5365,11 @@ final class CoreModel: ObservableObject {
             }
             guard settingsSyncEncryptionCurrent(owner), settingsSyncOpeningRevision == owner.revision, !settingsSyncDraftDirty else { throw CancellationError() }
             var input: CoreObject = ["revision": owner.revision, "action": action]
-            if ["submit", "decline"].contains(action.text("type")) { input["requestId"] = owner.id.uuidString.lowercased() }
+            if ["submit", "decline", "recheck"].contains(action.text("type")) { input["requestId"] = owner.id.uuidString.lowercased() }
             let reply = try settingsSyncEncryptionReply(try await owner.host.foregroundSync(command: "runSyncEncryptionAction", requestJSON: try json(input)), action: true)
             if action.text("type") == "submit", reply.flag("ok") { staged = false }
             guard settingsSyncEncryptionCurrent(owner) else { throw CancellationError() }
-            settingsSyncPassphrase = ""
+            settingsSyncPassphrases = [:]
             guard let value = settingsSyncValue(reply) else {
                 if staged { throw CocoaError(.coderReadCorrupt) }
                 return finishSettingsSyncEncryption(owner)
@@ -5381,7 +5395,7 @@ final class CoreModel: ObservableObject {
         guard settingsSyncEncryptionOwner?.id == owner.id else { return }
         settingsSyncEncryptionOwner = nil
         settingsSyncEncryptionTask = nil
-        settingsSyncPassphrase = ""
+        settingsSyncPassphrases = [:]
         if host === owner.host { finishOperation() }
     }
 

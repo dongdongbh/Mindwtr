@@ -101,7 +101,45 @@ it('records bounded iOS unlock only after the shared service confirms completion
         sync.settingsHost.encryption.unlockOnly = false;
         expect(await provide('synthetic secret')).toBe('ok');
         expect(entries).toHaveLength(0);
+        delete sync.settingsHost.encryption.unlockOnly;
+        sync.settingsHost.encryption.mode = 'saved-webdav-enable-unlock';
+        expect(await provide('synthetic secret')).toBe('ok');
+        expect(entries).toHaveLength(platform === 'ios' ? 1 : 0);
     }
+});
+
+it('records selected iOS encryption settlement without changing a completed outcome when logging fails', async () => {
+    const create = core.createSyncEncryptionService;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    spyOn(core, 'createSyncEncryptionService').mockImplementation((options) => ({
+        ...create(options),
+        enableSyncEncryption: async () => { await held; },
+        abandonSyncEncryptionTransition: async () => 'enable' as const,
+        recheckPartlyEncryptedLocation: async () => 'mixed' as const,
+    }));
+    iosFiles();
+    globals.__mindwtrHostPlatform = 'ios';
+    const { sync, bindings } = host({}, false, undefined, async () => false);
+    sync.settingsHost.encryption.mode = 'saved-webdav-enable-unlock';
+    const entries: Parameters<typeof bindings.appendLog>[0][] = [];
+    bindings.appendLog = async (entry) => { entries.push(entry); return null; };
+    const transitions = sync.settingsHost.encryption.transitions!;
+    const pending = transitions.enable('synthetic secret', {});
+    await Promise.resolve();
+    expect(entries).toHaveLength(0);
+    release();
+    await pending;
+    expect(await transitions.abandon()).toBe('enable');
+    expect(await transitions.recheck()).toBe('mixed');
+    expect(entries.map((entry) => entry.context)).toEqual(['enable', 'abandon', 'recheck'].map((operation) => ({
+        releaseCheck: 'v1.3.5/ios-encryption-selected', operation, outcome: 'confirmed',
+    })));
+    expect(JSON.stringify(entries)).not.toContain('synthetic secret');
+    bindings.appendLog = () => { throw new Error('synthetic diagnostic failure'); };
+    await transitions.enable('synthetic secret', {});
+    expect(await transitions.abandon()).toBe('enable');
+    expect(await transitions.recheck()).toBe('mixed');
 });
 
 const fetches: string[] = [];

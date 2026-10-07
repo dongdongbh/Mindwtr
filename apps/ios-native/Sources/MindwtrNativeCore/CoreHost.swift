@@ -16207,7 +16207,7 @@ private final class Engine: @unchecked Sendable {
         guard let input = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any],
               let revision = input["revision"] as? String, !revision.isEmpty, revision.utf16.count <= 100,
               let action = input["action"] as? [String: Any], let type = action["type"] as? String else { throw foregroundSyncFailure }
-        let takesRequest = type == "submit" || type == "decline"
+        let takesRequest = type == "submit" || type == "decline" || type == "recheck"
         guard Set(input.keys) == (takesRequest ? Set(["revision", "action", "requestId"]) : Set(["revision", "action"])) else { throw foregroundSyncFailure }
         if takesRequest {
             guard let id = input["requestId"] as? String, id.utf8.count == 36,
@@ -16215,11 +16215,13 @@ private final class Engine: @unchecked Sendable {
         }
         switch type {
         case "open", "submit":
-            guard Set(action.keys) == Set(["type", "flow"]), action["flow"] as? String == "unlock" else { throw foregroundSyncFailure }
+            guard Set(action.keys) == Set(["type", "flow"]), let flow = action["flow"] as? String,
+                  ["unlock", "enable", "abandon"].contains(flow) else { throw foregroundSyncFailure }
         case "typed":
-            guard Set(action.keys) == Set(["type", "field", "value"]), action["field"] as? String == "current",
+            guard Set(action.keys) == Set(["type", "field", "value"]), let field = action["field"] as? String,
+                  ["current", "next", "confirm"].contains(field),
                   let value = action["value"] as? String, value.utf16.count <= 1000 else { throw foregroundSyncFailure }
-        case "cancel", "decline", "retry":
+        case "cancel", "decline", "retry", "recheck":
             guard Set(action.keys) == Set(["type"]) else { throw foregroundSyncFailure }
         default: throw foregroundSyncFailure
         }

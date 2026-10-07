@@ -3868,19 +3868,19 @@ globalThis.MindwtrHost = {
                 }))) throw new Error('INVALID_INPUT: Invalid Project attachment download request');
             if (name === 'runSyncEncryptionAction') {
                 const action = input.action;
-                const invalid = () => new Error('INVALID_INPUT: Invalid encrypted unlock request');
+                const invalid = () => new Error('INVALID_INPUT: Invalid selected encryption request');
                 if (!action || typeof action !== 'object' || Array.isArray(action)
                     || typeof input.revision !== 'string' || !input.revision || input.revision.length > 100) throw invalid();
                 const target = action as Record<string, unknown>;
-                const needsRequest = target.type === 'submit' || target.type === 'decline';
+                const needsRequest = target.type === 'submit' || target.type === 'decline' || target.type === 'recheck';
                 if (Object.keys(input).length !== (needsRequest ? 3 : 2)
                     || needsRequest && (typeof input.requestId !== 'string' || !/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i.test(input.requestId))
                     || !needsRequest && input.requestId !== undefined) throw invalid();
                 const valid = target.type === 'open' || target.type === 'submit'
-                    ? Object.keys(target).length === 2 && target.flow === 'unlock'
-                    : target.type === 'typed' ? Object.keys(target).length === 3 && target.field === 'current'
+                    ? Object.keys(target).length === 2 && ['unlock', 'enable', 'abandon'].includes(target.flow as string)
+                    : target.type === 'typed' ? Object.keys(target).length === 3 && ['current', 'next', 'confirm'].includes(target.field as string)
                         && typeof target.value === 'string' && target.value.length <= 1000
-                        : ['cancel', 'decline', 'retry'].includes(target.type as string) && Object.keys(target).length === 1;
+                        : ['cancel', 'decline', 'retry', 'recheck'].includes(target.type as string) && Object.keys(target).length === 1;
                 if (!valid) throw invalid();
             }
             const refused = { ok: false as const, error: { code: 'ACTION_FAILED' as const,
@@ -3925,7 +3925,7 @@ globalThis.MindwtrHost = {
                         } catch { throw new NativeAttachmentCleanupUnconfirmedError(); }
                     },
                 });
-                if (iosManualSync) iosManualSync.settingsHost.encryption.unlockOnly = true;
+                if (iosManualSync) iosManualSync.settingsHost.encryption.mode = 'saved-webdav-enable-unlock';
                 if (name === 'projectAttachmentDownload') {
                     if (!downloadResult) {
                         // The original contract remains local-only outside this owned call.

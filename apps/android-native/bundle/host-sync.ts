@@ -531,6 +531,13 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     // ---- Settings › Sync's device (native-host-contract-settings-sync.ts) ----
 
+    const logSelectedEncryptionCompleted = async (operation: 'enable' | 'abandon' | 'recheck'): Promise<void> => {
+        if (platform !== 'ios' || settingsHost.encryption.mode !== 'saved-webdav-enable-unlock') return;
+        try {
+            await logLine('info', 'Native iOS selected encryption service completed', { scope: 'native-ios', force: true,
+                extra: { releaseCheck: 'v1.3.5/ios-encryption-selected', operation, outcome: 'confirmed' } });
+        } catch { /* A failed diagnostic cannot turn a completed transition into a failure. */ }
+    };
     const settingsHost: NativeSyncSettingsHost = {
         platform: { os: platform, cloudKitAvailable: false, isFossBuild: bindings.isFossBuild, dropboxAppKey: '' },
         storage: {
@@ -555,6 +562,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                 enable: async (passphrase, options) => {
                     try {
                         await transitions.enableSyncEncryption(passphrase, options);
+                        await logSelectedEncryptionCompleted('enable');
                     } catch (error) {
                         if (platform === 'ios' && error instanceof SyncEncryptionArtifactCapacityError) {
                             try {
@@ -569,15 +577,24 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                 disable: (options) => transitions.disableSyncEncryption(options),
                 provide: async (passphrase) => {
                     const outcome = await transitions.provideSyncEncryptionPassphrase(passphrase);
-                    if (platform === 'ios' && settingsHost.encryption.unlockOnly && outcome === 'ok') {
+                    if (platform === 'ios' && (settingsHost.encryption.unlockOnly
+                        || settingsHost.encryption.mode === 'saved-webdav-enable-unlock') && outcome === 'ok') {
                         await logLine('info', 'Native iOS encrypted unlock service completed', { scope: 'native-ios', force: true,
                             extra: { releaseCheck: 'v1.3.5/ios-encryption-unlock', operation: 'unlock', outcome: 'confirmed' } });
                     }
                     return outcome;
                 },
                 decline: () => transitions.declineSyncEncryptionPassphrase(),
-                abandon: () => transitions.abandonSyncEncryptionTransition(),
-                recheck: () => transitions.recheckPartlyEncryptedLocation(),
+                abandon: async () => {
+                    const outcome = await transitions.abandonSyncEncryptionTransition();
+                    await logSelectedEncryptionCompleted('abandon');
+                    return outcome;
+                },
+                recheck: async () => {
+                    const outcome = await transitions.recheckPartlyEncryptedLocation();
+                    await logSelectedEncryptionCompleted('recheck');
+                    return outcome;
+                },
                 randomBytes: (length) => crypto.randomBytes(length),
             },
             isBackendPending: () => transitions.isSyncEncryptionBackendPending(),

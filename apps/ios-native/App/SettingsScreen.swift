@@ -23,7 +23,7 @@ struct SettingsScreen: View {
     @State private var areaDeleteConfirmAnswered = false
     @State private var syncReloadConfirmPresented = false
     @State private var syncBackendPending: String?
-    private enum SyncField: Hashable { case url, username, password, encryption }
+    private enum SyncField: Hashable { case url, username, password, encryption(String) }
     @FocusState private var syncField: SyncField?
 
     var body: some View {
@@ -322,15 +322,15 @@ struct SettingsScreen: View {
         case "field":
             VStack(alignment: .leading, spacing: 8) {
                 Text(row.text("label")).rnFont(14, .semibold)
-                SecureField(row.text("label"), text: Binding(get: { model.settingsSyncPassphrase },
-                    set: { model.setSettingsSyncPassphrase($0) }))
+                SecureField(row.text("label"), text: Binding(get: { model.settingsSyncPassphrase(row.text("field")) },
+                    set: { model.setSettingsSyncPassphrase($0, field: row.text("field")) }))
                     .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
-                    .focused($syncField, equals: .encryption).submitLabel(.done).onSubmit { syncField = nil }
+                    .focused($syncField, equals: .encryption(row.text("field"))).submitLabel(.done).onSubmit { syncField = nil }
                     .rnFont(16).padding(12).frame(minHeight: 44)
                     .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
                     .disabled(!model.settingsSyncCanEdit || model.settingsSyncChecking || model.settingsSyncDraftDirty)
-                    .accessibilityLabel(row.text("label")).accessibilityIdentifier("sync-encryption-current")
-                if let tooLong = model.settingsSyncPassphraseTooLong {
+                    .accessibilityLabel(row.text("label")).accessibilityIdentifier("sync-encryption-" + row.text("field"))
+                if let tooLong = model.settingsSyncPassphraseTooLong(row.text("field")) {
                     Text(tooLong).rnFont(14).foregroundStyle(palette.danger)
                         .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-encryption-too-long")
                 }

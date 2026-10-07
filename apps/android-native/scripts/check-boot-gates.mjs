@@ -3752,7 +3752,8 @@ export function createNativeHostContract(bindings = {}) {
     async runSyncEncryptionAction(input) {
       globalThis.encryptionInputs ??= [];
       globalThis.encryptionInputs.push(input);
-      if (bindings.syncSettings?.encryption?.unlockOnly !== true) throw new Error('Missing unlock-only capability');
+      if (bindings.syncSettings?.encryption?.mode !== 'saved-webdav-enable-unlock'
+          || bindings.syncSettings.encryption.unlockOnly !== undefined) throw new Error('Missing selected saved-WebDAV encryption capability');
       return { ok: true, value: { toasts: [], passphrase: null } };
     },
     async downloadAttachment(input) {
@@ -3975,7 +3976,7 @@ assert(syncOnly.includes('createMobileSyncService') && syncOnly.includes('create
 // device with encryption off would upload plain attachments beside ciphertext. The card's "Check this location again" needs recheck.
 // The cycle names its own folder (an activation's candidate is not the stored one), passed through as it is.
 assert(/probeLocationCiphertext: \(target\) => transitions\.probeSyncLocationCiphertext\(target\),/.test(hostSyncTs), 'the native sync service asks whether the location holds ciphertext');
-assert(/recheck: \(\) => transitions\.recheckPartlyEncryptedLocation\(\),/.test(hostSyncTs), 'the native encryption card rechecks a partly encrypted location');
+assert(/recheck: async \(\) => \{\s*const outcome = await transitions\.recheckPartlyEncryptedLocation\(\);/.test(hostSyncTs), 'the native encryption card rechecks a partly encrypted location');
 const fakeCoreWithSync = `${fakeCore}\n${syncOnly.map((name) => `export const ${name} = () => { throw new Error('${name}: sync is not bound in the gates'); };`).join('\n')}\n`;
 const built = await build({
     entryPoints: [resolve(app, 'bundle/host-entry.ts')], bundle: true, write: false, format: 'iife',
@@ -4305,20 +4306,25 @@ export function createNativeSync() {
     const command = (state, value = input) => poll(state,
         state.MindwtrHost.iosForegroundSync('projectAttachmentDownload', JSON.stringify(value), () => ''));
     const markerLines = (state) => (state.logText ?? '').split('\n').filter((line) => line.includes('v1.3.5/ios-project-file-download'));
-    // Task370 exercises admission before any configured service or secret read.
+    // Task379 exercises selected encryption admission before any configured service or secret read.
     const encrypted = create();
     const unlock = { revision: 'saved-location', action: { type: 'open', flow: 'unlock' } };
     const unlockCommand = (value) => poll(encrypted,
         encrypted.MindwtrHost.iosForegroundSync('runSyncEncryptionAction', JSON.stringify(value), () => ''));
     assert.equal((await boot(encrypted)).ok, true);
-    for (const value of [null, [], {}, { ...unlock, revision: '' }, { ...unlock, revision: 'r'.repeat(101) },
+    const invalidEncryptionInputs = [null, [], {}, { ...unlock, revision: '' }, { ...unlock, revision: 'r'.repeat(101) },
         { ...unlock, requestId: '11111111-1111-1111-1111-111111111111' }, { ...unlock, extra: true },
-        ...['enable', 'change', 'disable', 'abandon'].map((flow) => ({ ...unlock, action: { type: 'open', flow } })),
+        ...['change', 'disable'].map((flow) => ({ ...unlock, action: { type: 'open', flow } })),
         ...['generate', 'reveal', 'recheck'].map((type) => ({ ...unlock, action: { type } })),
-        { ...unlock, action: { type: 'typed', field: 'next', value: 'synthetic' } },
-        { ...unlock, action: { type: 'typed', field: 'current', value: 'x'.repeat(1001) } },
-        { ...unlock, action: { type: 'submit', flow: 'unlock' } },
-        { ...unlock, action: { type: 'decline' }, requestId: 'invalid' }]) {
+        { ...unlock, action: { type: 'typed', field: 'unknown', value: 'synthetic' } },
+        ...['current', 'next', 'confirm'].map((field) => ({ ...unlock, action: { type: 'typed', field, value: 'x'.repeat(1001) } })),
+        { ...unlock, action: { type: 'typed', field: 'confirm', value: '🧠'.repeat(501) } },
+        ...['unlock', 'enable', 'abandon'].map((flow) => ({ ...unlock, action: { type: 'submit', flow } })),
+        { ...unlock, action: { type: 'decline' }, requestId: 'invalid' },
+        { ...unlock, action: { type: 'recheck' }, requestId: 'invalid' },
+        { ...unlock, action: { type: 'open', flow: 'enable', extra: true } },
+        { ...unlock, action: { type: 'typed', field: 'next', value: 'synthetic', extra: true } }];
+    for (const value of invalidEncryptionInputs) {
         assert.match((await unlockCommand(value)).error, /^INVALID_INPUT:/);
     }
     assert.equal(encrypted.storedReads, 0);
@@ -4330,16 +4336,20 @@ export function createNativeSync() {
     }
     assert.equal(encrypted.syncFactoryCalls, 0);
     encrypted.storedBackend = 'webdav';
-    for (const action of [{ type: 'open', flow: 'unlock' }, { type: 'typed', field: 'current', value: 'synthetic' },
-        { type: 'submit', flow: 'unlock' }, { type: 'decline' }, { type: 'cancel' }, { type: 'retry' }]) {
+    const selectedEncryptionActions = [...['unlock', 'enable', 'abandon'].map((flow) => ({ type: 'open', flow })),
+        ...['current', 'next', 'confirm'].map((field) => ({ type: 'typed', field, value: 'synthetic' })),
+        ...['unlock', 'enable', 'abandon'].map((flow) => ({ type: 'submit', flow })),
+        { type: 'decline' }, { type: 'cancel' }, { type: 'retry' }, { type: 'recheck' }];
+    for (const action of selectedEncryptionActions) {
         const value = { revision: unlock.revision, action,
-            ...(['submit', 'decline'].includes(action.type) ? { requestId: '11111111-1111-1111-1111-111111111111' } : {}) };
+            ...(['submit', 'decline', 'recheck'].includes(action.type) ? { requestId: '11111111-1111-1111-1111-111111111111' } : {}) };
         assert.equal((await unlockCommand(value)).value.ok, true);
         assert.deepEqual(JSON.parse(JSON.stringify(encrypted.encryptionInputs.at(-1))), value);
     }
-    assert.equal(encrypted.syncFactoryCalls, 1, 'Unlock uses the retained foreground service');
+    assert.equal(encrypted.syncFactoryCalls, 1, 'Selected encryption uses the retained foreground service');
     assert.equal(encrypted.secretReads, 0, 'Entry fixture reads no credentials');
     assert(!(encrypted.logText ?? '').includes('synthetic'), 'Passphrase never enters entry diagnostics');
+    console.log(`Task379: ${invalidEncryptionInputs.length} invalid encryption envelopes refused before storage; ${selectedEncryptionActions.length} selected actions admitted with exact mode and UUID ownership (NodeVM)`);
     const malformed = create();
     assert.match((await command(malformed)).error, /^NOT_READY:/);
     const bootMalformed = await boot(malformed);
