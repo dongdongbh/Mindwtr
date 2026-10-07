@@ -3662,6 +3662,23 @@ fn wrong_sync_server_hint(status: reqwest::StatusCode) -> &'static str {
     }
 }
 
+/// A 413 on the sync document write: name both sizes and the server setting to raise.
+/// Same wording as core `cloud.ts`. The cloud server sends `limitBytes`; a proxy's 413
+/// does not, so the hint also names the proxy.
+fn cloud_data_too_large_message(body_bytes: usize, response_body: &str) -> String {
+    let limit_bytes = serde_json::from_str::<Value>(response_body)
+        .ok()
+        .and_then(|value| value.get("limitBytes").and_then(Value::as_u64));
+    match limit_bytes {
+        Some(limit) => format!(
+            "Cloud PUT failed (413): the sync data ({body_bytes} bytes) is larger than the server's limit ({limit} bytes). Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server."
+        ),
+        None => format!(
+            "Cloud PUT failed (413): the sync data ({body_bytes} bytes) is larger than the server's limit. Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server (and any proxy body limit)."
+        ),
+    }
+}
+
 fn parse_cloud_json_body(body: &str) -> Result<Value, String> {
     let normalized = body.trim_start_matches('\u{feff}').trim();
     serde_json::from_str::<Value>(normalized).map_err(|error| {
@@ -3729,6 +3746,7 @@ fn cloud_put_json_blocking(
     let token = token.unwrap_or_default();
     let payload = serde_json::to_string_pretty(data)
         .map_err(|e| format!("Failed to encode Cloud payload: {e}"))?;
+    let payload_len = payload.len();
     let client = cloud_blocking_http_client(config.proxy_url.as_deref(), allow_insecure_http)?;
     let response = cloud_request_builder(&client, reqwest::Method::PUT, &url, &token)
         .header("Content-Type", "application/json")
@@ -3736,6 +3754,10 @@ fn cloud_put_json_blocking(
         .send()
         .map_err(|e| format_reqwest_send_error("Cloud request failed", &e))?;
 
+    if response.status() == reqwest::StatusCode::PAYLOAD_TOO_LARGE {
+        let body = response.text().unwrap_or_default();
+        return Err(cloud_data_too_large_message(payload_len, &body));
+    }
     if !response.status().is_success() {
         return Err(format!(
             "Cloud PUT failed ({}): {}{}",
@@ -4005,6 +4027,21 @@ mod tests {
         assert_eq!(
             wrong_sync_server_hint(reqwest::StatusCode::UNAUTHORIZED),
             ""
+        );
+    }
+
+    #[test]
+    fn cloud_data_too_large_names_both_sizes_and_the_setting() {
+        assert_eq!(
+            cloud_data_too_large_message(
+                1234,
+                r#"{"error":"Payload too large: the limit is 2000000 bytes","limitBytes":2000000}"#
+            ),
+            "Cloud PUT failed (413): the sync data (1234 bytes) is larger than the server's limit (2000000 bytes). Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server."
+        );
+        assert_eq!(
+            cloud_data_too_large_message(1234, "<html>nginx</html>"),
+            "Cloud PUT failed (413): the sync data (1234 bytes) is larger than the server's limit. Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server (and any proxy body limit)."
         );
     }
 
