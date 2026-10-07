@@ -58,7 +58,10 @@ export type { SyncEncryptionProgressCallback, SyncEncryptionTransitionOptions } 
 let service: SyncEncryptionService | null = null;
 const encryptionService = (): SyncEncryptionService => {
     service ??= createSyncEncryptionService<MobileFileSyncLease>({
-        storage: { getItem: (key) => AsyncStorage.getItem(key) },
+        storage: {
+            getItem: (key) => AsyncStorage.getItem(key),
+            removeItem: (key) => AsyncStorage.removeItem(key),
+        },
         state: {
             loadSyncEncryptionLocalState: () => loadSyncEncryptionLocalState(),
             reloadSyncEncryptionLocalStateForRecovery: () => reloadSyncEncryptionLocalStateForRecovery(),

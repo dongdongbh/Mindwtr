@@ -20,7 +20,7 @@ import { isSandboxMode } from './sandbox';
 import { sanitizeAttachmentUriForSyncMerge } from './sync-normalization';
 import { createWebdavDownloadBackoff } from './sync-runtime-utils';
 import { readSyncLocationScope } from './sync-encryption-local-state';
-import { CLOUD_ALLOW_INSECURE_HTTP_KEY, CLOUD_TOKEN_KEY, CLOUD_URL_KEY, type SyncKeyValueStoragePort } from './sync-storage-keys';
+import { ATTACHMENT_PRESENCE_RECONCILE_KEY, CLOUD_ALLOW_INSECURE_HTTP_KEY, CLOUD_TOKEN_KEY, CLOUD_URL_KEY, type SyncKeyValueStoragePort } from './sync-storage-keys';
 import { isLikelyFilePath, loadWebDavSyncConfig, runDropboxAuthorized as runCoreDropboxAuthorized, type MobileWebDavStoredConfig } from './mobile-sync-utils';
 import type { MobileCloudSyncConfig, MobileSyncDropboxAuthPort, MobileSyncLogPort } from './mobile-sync-service';
 
@@ -53,7 +53,6 @@ export const getManagedAttachmentFileName = (attachment: Pick<Attachment, 'id' |
 const ATTACHMENT_UPLOAD_REFUSAL_MAX_ATTEMPTS = 3;
 type AttachmentUploadRefusal = { contentIdentity: string; attempts: number };
 
-const ATTACHMENT_PRESENCE_RECONCILE_KEY = '@mindwtr_attachment_presence_reconcile_v1';
 const ATTACHMENT_TEMP_FILE_PREFIX = '.mindwtr-attachment-write-';
 
 /** What the host's file system reports for a path. `exists` stays undefined when the platform

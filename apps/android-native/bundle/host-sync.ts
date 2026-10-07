@@ -210,7 +210,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     // run on core's serialized sync queue, so a transition and a cycle never interleave. Dropbox and File Sync come later.
     const transitions = createSyncEncryptionService<never>({
         maxEncryptedArtifactBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
-        storage: { getItem: (key) => keyValue.get(key) },
+        storage,
         state: encryptionState,
         crypto,
         fetch: (input, init) => fetch(input, init),

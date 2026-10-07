@@ -30,6 +30,8 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ## v1.3.5 (add before tagging, trim in the release after)
 
+- **`v1.3.5/encryption-recheck-posture`** — `packages/core/src/sync-encryption-service.ts`, after a full Recheck invalidates both completed-cycle proofs and durably clears the partly encrypted location quarantine. The existing transition event carries fixed `kind=recheck`, `phase=end`, `outcome=ok`. After another device finishes encryption, expect this marker, then document discovery and Unlock on the next sync; an old plaintext sync history must not quarantine the location again before discovery. Mixed locations and failed proof removal must not emit the marker. No locations, contents, credentials or passphrases are logged.
+
 - **`v1.3.5/sync-encryption-off-guard`** — `packages/core/src/sync-settings-transport.ts`, when the serialized Sync Off action refuses an unfinished encryption transition before changing its saved backend. Fixed fields: `operation=select-off`, `outcome=refused`. The tester's Diagnostics must show this marker while the original backend remains selected, so Retry or Abandon still addresses that location. It does not prove conversion completion or remote rollback. No locations, credentials, passphrases or artifact contents are logged.
 
 - **`v1.3.5/macos-dock-reopen`** — `apps/desktop/src-tauri/src/lib.rs`. `macOS Dock reopen handled` proves the native reopen event reached the existing main-window reveal path. Close the main window, click the Dock icon, and check that the window returns; repeat while minimized. The marker proves event handling, not successful window display. No task content or identifiers are logged. (#1352)

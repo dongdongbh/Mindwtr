@@ -47,6 +47,7 @@ import {
   CLOUD_TOKEN_KEY,
   CLOUD_URL_KEY,
   DROPBOX_LAST_REV_KEY,
+  FAST_SYNC_STATE_KEY,
   SYNC_BACKEND_KEY,
   SYNC_PATH_BOOKMARK_KEY,
   SYNC_PATH_KEY,
@@ -84,7 +85,6 @@ const WEBDAV_RETRY_OPTIONS = { maxAttempts: 5, baseDelayMs: 2000, maxDelayMs: 30
 const WEBDAV_READ_RETRY_OPTIONS = { ...WEBDAV_RETRY_OPTIONS, shouldRetry: isRetryableWebdavReadError };
 const DROPBOX_RETRY_OPTIONS = { maxAttempts: 3, baseDelayMs: 1000, maxDelayMs: 8000 };
 const SYNC_CONFIG_CACHE_TTL_MS = 30_000;
-const FAST_SYNC_STATE_KEY = '@mindwtr_fast_sync_state_v1';
 const LOCAL_SYNC_STATUS_KEY = '@mindwtr_local_sync_status_v1';
 
 type LocalSyncStatus = Pick<AppData['settings'], 'lastSyncAt' | 'lastSyncStatus' | 'lastSyncError' | 'lastSyncStats' | 'lastSyncHistory'>;

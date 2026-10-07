@@ -17,6 +17,8 @@ export const CLOUD_PROVIDER_KEY = '@mindwtr_cloud_provider';
 export const CLOUD_PROVIDER_DROPBOX = 'dropbox' as const;
 export const CLOUD_ALLOW_INSECURE_HTTP_KEY = '@mindwtr_cloud_allow_insecure_http';
 export const DROPBOX_LAST_REV_KEY = '@mindwtr_dropbox_last_rev';
+export const FAST_SYNC_STATE_KEY = '@mindwtr_fast_sync_state_v1';
+export const ATTACHMENT_PRESENCE_RECONCILE_KEY = '@mindwtr_attachment_presence_reconcile_v1';
 /** Device-local sync-encryption state (state + discovered salt/params). NEVER synced,
  *  never a content-signature field — see sync-encryption-local-state.ts. Non-secret on purpose:
  *  the salt and KDF params are in every artifact header anyway. */
