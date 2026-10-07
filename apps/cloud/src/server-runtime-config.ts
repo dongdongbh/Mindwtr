@@ -11,6 +11,7 @@ export type CloudRuntimeConfig = Readonly<{
     rateMax: number;
     attachmentRateMax: number;
     maxBodyBytes: number;
+    maxDataBodyBytes: number;
     maxAttachmentBytes: number;
     anyTokenMaxNamespaces: number;
     rateCleanupMs: number;
@@ -32,6 +33,7 @@ export type CloudRuntimeConfigOverrides = Partial<Record<
     | 'rateMax'
     | 'attachmentRateMax'
     | 'maxBodyBytes'
+    | 'maxDataBodyBytes'
     | 'maxAttachmentBytes'
     | 'anyTokenMaxNamespaces'
     | 'rateCleanupMs'
@@ -52,6 +54,7 @@ const NUMERIC_ENVIRONMENT_RULES = [
     { key: 'MINDWTR_CLOUD_RATE_MAX', minimum: 1 },
     { key: 'MINDWTR_CLOUD_ATTACHMENT_RATE_MAX', minimum: 1 },
     { key: 'MINDWTR_CLOUD_MAX_BODY_BYTES', minimum: 1 },
+    { key: 'MINDWTR_CLOUD_MAX_DATA_BODY_BYTES', minimum: 1 },
     { key: 'MINDWTR_CLOUD_MAX_ATTACHMENT_BYTES', minimum: 1 },
     { key: 'MINDWTR_CLOUD_ANY_TOKEN_MAX_NAMESPACES', minimum: 0 },
     { key: 'MINDWTR_CLOUD_RATE_CLEANUP_MS', minimum: 1 },
@@ -143,6 +146,14 @@ export const resolveCloudRuntimeConfig = (
         120,
         1,
     );
+    const maxBodyBytes = resolveInteger(
+        env,
+        overrides,
+        'maxBodyBytes',
+        'MINDWTR_CLOUD_MAX_BODY_BYTES',
+        2_000_000,
+        1,
+    );
 
     return Object.freeze({
         port: resolveInteger(env, overrides, 'port', 'PORT', 8787, 0, 65_535),
@@ -163,12 +174,15 @@ export const resolveCloudRuntimeConfig = (
             rateMax,
             1,
         ),
-        maxBodyBytes: resolveInteger(
+        maxBodyBytes,
+        // The sync document is the whole library, so it gets its own limit. An
+        // operator who raised the small limit above the default never gets less.
+        maxDataBodyBytes: resolveInteger(
             env,
             overrides,
-            'maxBodyBytes',
-            'MINDWTR_CLOUD_MAX_BODY_BYTES',
-            2_000_000,
+            'maxDataBodyBytes',
+            'MINDWTR_CLOUD_MAX_DATA_BODY_BYTES',
+            Math.max(50_000_000, maxBodyBytes),
             1,
         ),
         maxAttachmentBytes: resolveInteger(

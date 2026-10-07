@@ -109,6 +109,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // desktop-reminder-fired / desktop-notification-path (apps/desktop/src/lib/notification-service.tsx)
     'kind', 'entity', 'fireAt', 'path', 'error',
     'deferred', 'ids',
+    // cloud-data-body-limit reuses status below: the sync data size and the server's limit, in bytes.
+    'limitBytes', 'bodyBytes',
     // streamed-upload-head-fallback (core WebDAV attachment pass): the attachment id only.
     'id',
     // webdav-activation-batches (core activation coordinator)

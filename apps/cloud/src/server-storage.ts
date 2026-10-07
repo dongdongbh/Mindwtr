@@ -1055,7 +1055,7 @@ export async function readRequestBytes(
 ): Promise<Uint8Array | BodyReadError> {
     const contentLength = Number(req.headers.get('content-length') || '0');
     if (contentLength && contentLength > maxBodyBytes) {
-        return createBodyReadError('Payload too large', 413);
+        return createBodyReadError(`Payload too large: the limit is ${maxBodyBytes} bytes`, 413);
     }
     const stream = req.body;
     if (!stream) {
@@ -1083,7 +1083,7 @@ export async function readRequestBytes(
                 totalLength += value.length;
                 if (totalLength > maxBodyBytes) {
                     await reader.cancel().catch(() => undefined);
-                    return createBodyReadError('Payload too large', 413);
+                    return createBodyReadError(`Payload too large: the limit is ${maxBodyBytes} bytes`, 413);
                 }
                 chunks.push(value);
             }
