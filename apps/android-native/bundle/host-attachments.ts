@@ -190,7 +190,11 @@ const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels:
 };
 
 export const createNativeAttachments = (bindings: NativeAttachmentBindings, channels: NativeFileChannels) => {
-    const { fs, files, common, installer, contractHost } = bindNativeAttachmentFiles(bindings, channels);
+    const { fs, files, common, installer, contractHost, availability } = bindNativeAttachmentFiles(bindings, channels, {
+        // Selected existing-file preparation may verify bytes, but never
+        // acquire scratch or report a prepared remote download through this port.
+        preparePlaintextDownload: unavailable('Existing attachment preparation download'),
+    });
 
     const backends = createMobileAttachmentBackends({
         fs,
@@ -214,7 +218,7 @@ export const createNativeAttachments = (bindings: NativeAttachmentBindings, chan
         runCleanup: (options) => runMobileAttachmentCleanup(options, { fs, retireLocalAttachment: bindings.retireLocalAttachment }),
     };
 
-    return { contractHost, syncPort };
+    return { contractHost, syncPort, prepareAttachmentAvailableDetailed: availability.prepareAttachmentAvailableDetailed };
 };
 
 export type NativeAttachments = ReturnType<typeof createNativeAttachments>;

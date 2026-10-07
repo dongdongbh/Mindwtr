@@ -17,6 +17,13 @@ export type PreparedAreaAuthority = { snapshot: AppData; state: Pick<TaskStore,
     '_allTasks' | '_allProjects' | '_allSections' | '_allAreas' | '_allPeople' | 'settings' | 'lastDataChangeAt'>;
     saveBoundary?: PreparedNativeSaveBoundary; rawSavedSnapshot?: AppData };
 
+/** Invocation-local Project availability effect; never a journal or replay capability. */
+export type SelectedProjectAvailabilityWrite = {
+    projectId: string; attachmentId: string; targetURI: string;
+    before: Project; after: Project; rawBefore: unknown[]; rawAfter: unknown[];
+    deviceIdBefore: string | null; deviceIdToInitialize: string | null; updateAt: string;
+};
+
 export type StoreActionResult = {
     success: boolean;
     error?: string;
@@ -734,6 +741,7 @@ export interface TaskStore {
     commitPreparedProjectAttachmentWrite: (input: PreparedProjectAttachmentWrite & { request: { projectId: string; requestId: string; intent: ProjectAttachmentIntent }; result: { id: string; attachmentIds: string[] } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectFileRemoveWrite: (input: PreparedProjectFileRemoveWrite & { request: { projectId: string; requestId: string; intent: ProjectFileRemoveIntent }; result: { id: string; attachmentIds: string[] } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectFileAddWrite: (input: PreparedProjectFileAddWrite & { request: { projectId: string; requestId: string; version?: 2; sourceSha256?: string }; result: { id: string; attachmentIds: string[] } }, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    commitSelectedProjectAvailability: (input: SelectedProjectAvailabilityWrite, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectStatus: (input: PreparedProjectStatus & { request: { projectId: string; status: 'active' | 'waiting' | 'someday' } }) => Promise<PreparedTaskEditResult>;
     commitPreparedTrashProjectRestore: (input: PreparedTrashProjectRestore) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectDelete: (input: PreparedProjectDelete) => Promise<PreparedTaskEditResult>;

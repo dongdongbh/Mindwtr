@@ -366,6 +366,7 @@ const nativeSync: NativeSync | null = globalThis.__mindwtrHostPlatform !== 'ios'
 let iosManualSync: NativeSync | null = null;
 let iosCleanupCallback: ((requestJSON: string) => unknown) | null = null;
 let iosProjectAttachmentDownload = false;
+let iosRelocatedProjectAvailability = false;
 let iosTaskAttachmentPreparation = false;
 let iosForegroundFailure: NativeAttachmentCleanupUnconfirmedError | null = null;
 /** The device's network state as Kotlin last reported it (HostNetwork.kt); unknown until then, which never reads as offline. */
@@ -394,7 +395,15 @@ const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwt
 const localAttachments = nativeSync ? null : createNativeLocalAttachmentsForHost();
 const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contractHost;
 const contract = createNativeHostContract({ get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
-    get attachments() { return iosProjectAttachmentDownload ? iosManualSync?.attachmentsHost : attachmentsHost; } });
+    get attachments() {
+        const selected = iosProjectAttachmentDownload ? iosManualSync?.attachmentsHost : attachmentsHost;
+        if (!iosRelocatedProjectAvailability || !selected) return selected;
+        return { ...selected, ensureAttachmentAvailableDetailed: async (attachment: import('../../../packages/core/src/types').Attachment) => {
+            const result = await iosManualSync?.prepareAttachmentAvailableDetailed?.(attachment);
+            if (result?.status === 'available') return { status: 'available' as const, attachment: result.attachment };
+            return { status: result?.status === 'generation-conflict' ? 'generation-conflict' as const : 'unavailable' as const };
+        } };
+    } });
 
 /**
  * Reminder alarms (host-reminders.ts), on a host with the alarm bridges (Android). The iOS host and the gates' stand-in bridge have
@@ -2482,6 +2491,17 @@ globalThis.MindwtrHost = {
     projectTagsWriteCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedProjectTagsWrite(JSON.parse(json))));
     },
+    /** Settled durable raw authority; target derivation remains shared policy. */
+    projectAttachmentAvailabilityPreflight(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments || nativeSync || !bootAdapter
+                || iosCleanupCallback || iosTaskAttachmentPreparation || isSandboxMode() || isWorkspaceTransitionActive()) {
+                throw new Error('NOT_READY: Project availability is unavailable');
+            }
+            requireSaved();
+            return unwrap(await contract.getProjectAttachmentAvailabilityPreflight(JSON.parse(json)));
+        });
+    },
     projectAttachmentEditOptions(json: string): string {
         return submit(async () => {
             requireSaved();
@@ -3710,16 +3730,17 @@ globalThis.MindwtrHost = {
             const projectFileOpen = operation === 'project-file-open' && outcome === 'prepared';
             const relocatedOpen = ['relocated-task-file-open', 'relocated-project-file-open'].includes(operation) && outcome === 'prepared';
             const relocatedAvailability = operation === 'relocated-task-availability' && outcome === 'confirmed';
+            const relocatedProjectAvailability = operation === 'relocated-project-availability' && outcome === 'confirmed';
             const projectFileRemove = operation === 'project-file-remove' && outcome === 'saved';
             const projectFileAdd = operation === 'project-file-add' && ['saved', 'abandoned'].includes(outcome);
             const projectFileHash = operation === 'project-file-hash' && outcome === 'saved';
             const taskFileHash = operation === 'task-file-hash' && outcome === 'saved';
             const ownedCleanup = operation === 'cleanup-owned-retirement' && ['removed', 'absent', 'retained'].includes(outcome);
             const editorAcknowledged = ['editor-add', 'editor-remove', 'editor-save', 'editor-discard', 'editor-recover'].includes(operation) && outcome === 'confirmed';
-            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !relocatedAvailability && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash && !ownedCleanup && !availabilityConsumer
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !relocatedAvailability && !relocatedProjectAvailability && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash && !ownedCleanup && !availabilityConsumer
                 || !(['add', 'checkpoint', 'save'].includes(operation) && ['confirmed', 'replayed'].includes(outcome)
                     || operation === 'discard' && outcome === 'retained'
-                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || relocatedAvailability || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash || ownedCleanup || availabilityConsumer)) return {};
+                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || relocatedAvailability || relocatedProjectAvailability || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash || ownedCleanup || availabilityConsumer)) return {};
             try {
                 if (completeSave && outcome === 'domainSaved') await diagnosticsLog.append({
                     ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
@@ -3737,6 +3758,7 @@ globalThis.MindwtrHost = {
                         : projectFileOpen ? { releaseCheck: 'v1.3.5/ios-project-local-file-open' }
                         : relocatedOpen ? { releaseCheck: 'v1.3.5/ios-relocated-file-open', surface: operation === 'relocated-task-file-open' ? 'task' : 'project' }
                         : relocatedAvailability ? { releaseCheck: 'v1.3.5/ios-relocated-task-availability' }
+                        : relocatedProjectAvailability ? { releaseCheck: 'v1.3.5/ios-relocated-project-availability' }
                         : projectFileRemove ? { releaseCheck: 'v1.3.5/ios-project-file-remove' }
                         : projectFileAdd ? { releaseCheck: 'v1.3.5/ios-project-file-add' }
                         : projectFileHash ? { releaseCheck: 'v1.3.5/ios-project-file-hash' }
@@ -3818,7 +3840,7 @@ globalThis.MindwtrHost = {
         return null;
     },
     /** Only CoreHost.foregroundSync supplies this invocation-scoped physical cleanup callback. */
-    iosForegroundSync(name: string, json: string, cleanup: unknown): string {
+    iosForegroundSync(name: string, json: string, cleanup: unknown, currentTargetURI?: unknown): string {
         return submit(async () => {
             if (iosForegroundFailure) throw iosForegroundFailure;
             const unavailable = () => new Error('NOT_READY: Foreground sync is unavailable');
@@ -3827,6 +3849,10 @@ globalThis.MindwtrHost = {
                 || typeof native().kvMultiGet !== 'function' || !globalThis.__mindwtrSyncSecrets) throw unavailable();
             const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
                 'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'projectAttachmentDownload'];
+            if (currentTargetURI !== undefined && (name !== 'projectAttachmentDownload' || typeof currentTargetURI !== 'string'
+                || !currentTargetURI.startsWith('file:///') || currentTargetURI.length > 16_384 || !currentTargetURI.includes('/'))) {
+                throw new Error('INVALID_INPUT: Invalid selected Project availability target');
+            }
             if (!commands.includes(name) || typeof json !== 'string' || new TextEncoder().encode(json).byteLength > 128 * 1024) {
                 throw new Error('INVALID_INPUT: Invalid foreground sync request');
             }
@@ -3887,10 +3913,15 @@ globalThis.MindwtrHost = {
                         // The original contract remains local-only outside this owned call.
                         iosProjectAttachmentDownload = true;
                         try {
-                            downloadResult = await contract.downloadAttachment({
+                            if (typeof currentTargetURI === 'string') {
+                                iosRelocatedProjectAvailability = true;
+                                downloadResult = await contract.downloadRelocatedProjectAttachment({ projectId: input.projectId as string,
+                                    attachmentId: input.attachmentId as string, revision: input.revision as string,
+                                    managedDirectoryURI: currentTargetURI.slice(0, currentTargetURI.lastIndexOf('/') + 1) }, currentTargetURI);
+                            } else downloadResult = await contract.downloadAttachment({
                                 owner: { kind: 'project', projectId: input.projectId as string }, attachmentId: input.attachmentId as string,
                             });
-                        } finally { iosProjectAttachmentDownload = false; }
+                        } finally { iosProjectAttachmentDownload = false; iosRelocatedProjectAvailability = false; }
                     }
                     await flushPendingSave();
                     requireSaved();
@@ -3917,8 +3948,8 @@ globalThis.MindwtrHost = {
                         model.backend.options = model.backend.options.filter(({ option }) => option === 'off' || option === 'webdav');
                     }
                 }
-                if (name !== 'projectAttachmentDownload' || result.ok && result.value && typeof result.value === 'object'
-                    && 'status' in result.value && result.value.status === 'available') try {
+                if (currentTargetURI === undefined && (name !== 'projectAttachmentDownload' || result.ok && result.value && typeof result.value === 'object'
+                    && 'status' in result.value && result.value.status === 'available')) try {
                     const diagnostic = name === 'projectAttachmentDownload' ? { message: 'Native iOS Project file availability settled', releaseCheck: 'v1.3.5/ios-project-file-download' }
                         : name === 'syncStored' ? { message: 'Native iOS stored Sync command settled', releaseCheck: 'v1.3.5/ios-stored-sync' }
                         : name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }

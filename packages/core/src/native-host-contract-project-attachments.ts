@@ -131,23 +131,28 @@ type AttachmentWriteDependencies = {
     revision: () => string;
     t: () => (key: string) => string;
 };
+export function readProjectAttachmentEditOptions(deps: Pick<AttachmentWriteDependencies, 'readiness' | 'revision'>,
+    input: { projectId: string }): NativeHostResult<{ revision: string;
+    project: { id: string } & NativeProjectAttachmentWriteToken; canEdit: boolean }> {
+    const ready = deps.readiness();
+    if (!ready.ok) return ready;
+    if (!input || !id(input.projectId)) return fail('INVALID_INPUT', 'A Project ID is required');
+    const project = useTaskStore.getState()._projectsById.get(input.projectId);
+    if (!project || project.deletedAt || project.purgedAt)
+        return fail('STALE_REVISION', 'Project is unavailable; refresh before editing links');
+    const expected = token(project);
+    const value = { revision: deps.revision(), project: { id: project.id, ...expected },
+        canEdit: project.status !== 'archived' };
+    return validToken(expected) && isNativeJsonWithinBytes(value) ? { ok: true, value }
+        : fail('INVALID_INPUT', 'Project links exceed the bounded native response');
+}
 function createAttachmentWriteMethods<V extends AttachmentWriteVersion>(deps: AttachmentWriteDependencies, version: V) {
     const noun = version === 1 ? 'link' : 'file';
     const plural = version === 1 ? 'links' : 'files';
     return {
         getProjectAttachmentEditOptions(input: { projectId: string }): NativeHostResult<{ revision: string;
             project: { id: string } & NativeProjectAttachmentWriteToken; canEdit: boolean }> {
-            const ready = deps.readiness();
-            if (!ready.ok) return ready;
-            if (!input || !id(input.projectId)) return fail('INVALID_INPUT', 'A Project ID is required');
-            const project = useTaskStore.getState()._projectsById.get(input.projectId);
-            if (!project || project.deletedAt || project.purgedAt)
-                return fail('STALE_REVISION', 'Project is unavailable; refresh before editing links');
-            const expected = token(project);
-            const value = { revision: deps.revision(), project: { id: project.id, ...expected },
-                canEdit: project.status !== 'archived' };
-            return validToken(expected) && isNativeJsonWithinBytes(value) ? { ok: true, value }
-                : fail('INVALID_INPUT', 'Project links exceed the bounded native response');
+            return readProjectAttachmentEditOptions(deps, input);
         },
 
         probeProjectAttachmentWriteOutcome(input: AttachmentWriteRequest<V>): NativeHostResult<NativeProjectAttachmentWriteResult> {

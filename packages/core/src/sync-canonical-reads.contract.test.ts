@@ -43,6 +43,8 @@ import { toStableSyncJson } from './sync-helpers';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { createNativeHostContract } from './native-host-contract';
 import { readAreaDurableData } from './native-host-contract-area-durable';
+import { projectAvailabilityWritePlan } from './store-projects/project-actions';
+import { rawReadProjectSnapshot, rawReadRow } from './sqlite-raw-snapshot';
 import { loadNativeRequestReceipts, NativeReceiptSqliteAdapter, resetNativeRequestReceipts, taskRevisionOf } from './native-request-receipts';
 import { openScratchSqlite } from './screen-parity.replay';
 import { createTaskDraft } from './task-draft';
@@ -1656,6 +1658,32 @@ describe('canonical local reads contract', () => {
                 control.resetBaseline();
                 expect(nativeValue(await host.commitPreparedProjectFileAddWrite({ request, prepared: planned.prepared })))
                     .toEqual({ id, attachmentIds: [request.requestId] });
+            },
+            commitSelectedProjectAvailability: async (control) => {
+                const id = settled.projects[1].id;
+                const attachment = fileAttachment('86a0cbe9-4d30-498e-8d82-7721769a8299', {
+                    uri: 'file:///old/attachments/86a0cbe9-4d30-498e-8d82-7721769a8299.pdf', localStatus: 'missing',
+                });
+                expect(await call('updateProject', id, { attachments: [attachment] })).toMatchObject({ success: true });
+                await nativeHost(control);
+                const durable = nativeValue(await readAreaDurableData(false, true));
+                const before = durable.authority.snapshot;
+                const row = before.projects.find((entry) => entry.id === id)!;
+                const source = rawReadProjectSnapshot(row)!;
+                const deviceId = before.settings.deviceId ?? null;
+                const planned = projectAvailabilityWritePlan(source, [...rawReadRow(row, projectToSqliteRow(row)).row],
+                    attachment.id, 'file:///current/attachments/86a0cbe9-4d30-498e-8d82-7721769a8299.pdf',
+                    deviceId, null, NOW_ISO);
+                if (!planned) throw new Error('Selected Project availability must prepare a real write');
+                control.expectPersisted((written) => {
+                    expect(written.projects).toEqual(before.projects.map((entry) => entry.id === id ? planned.after : entry));
+                    expect(written.tasks).toEqual(before.tasks);
+                    expect(written.sections).toEqual(before.sections);
+                    expect(written.settings).toEqual(before.settings);
+                });
+                control.resetBaseline();
+                expect(await useTaskStore.getState().commitSelectedProjectAvailability(planned, durable.authority))
+                    .toEqual({ success: true, id, outcome: 'applied' });
             },
             commitPreparedProjectFileRemoveWrite: async (control) => {
                 const projectId = settled.projects[1].id;

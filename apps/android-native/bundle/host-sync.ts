@@ -593,6 +593,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         performStoredAutomaticSync,
         /** The editor's and the project screen's attachment IO (core's NativeAttachmentsHost); null without app files. */
         attachmentsHost: attachments?.contractHost ?? null,
+        prepareAttachmentAvailableDetailed: attachments?.prepareAttachmentAvailableDetailed ?? null,
         /** The badge and cycle count now. */
         state,
         /**

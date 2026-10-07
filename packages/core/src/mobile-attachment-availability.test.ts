@@ -147,7 +147,6 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     ['cloud', { storage: { ...webdav, [SYNC_BACKEND_KEY]: 'cloud' } }, {}],
     ['sandbox', { storage: webdav, sandbox: true }, {}],
     ['non-file', { storage: webdav }, { kind: 'link' as const }],
-    ['no remote identity', { storage: webdav }, { cloudKey: undefined }],
     ['terminal attachment', { storage: webdav }, { deletedAt: now }],
   ])('refuses %s before any local/provider/source action', async (_name, options, overrides) => {
     const preparePlaintextDownload = vi.fn(async () => sourceReply());
@@ -184,6 +183,31 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     expect(repair).not.toHaveBeenCalled();
     expect(webdavGetFile).not.toHaveBeenCalled();
     expect(preparePlaintextDownload).not.toHaveBeenCalled();
+  });
+
+  it.each(['matching', 'hashless', 'mismatch', 'missing'] as const)('prepares a cloudKeyless local selection only with matching present bytes (%s)', async (mode) => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, memory, files, webdavGetFile, installAttachmentFileGeneration } = setup({ storage: webdav, preparePlaintextDownload });
+    const uri = `${MANAGED}att-1.txt`;
+    if (mode !== 'missing') memory.put(uri, REMOTE);
+    const requested = Object.freeze(remoteAttachment({
+      uri, cloudKey: undefined, pendingContentUpload: false,
+      fileHash: mode === 'hashless' ? undefined : mode === 'mismatch' ? 'a'.repeat(64) : await computeSha256Hex(REMOTE),
+    }));
+    const repair = vi.spyOn(files, 'ensureAttachmentStoredLocally');
+    const config = vi.spyOn(files, 'loadWebDavConfig');
+
+    await expect(availability.prepareAttachmentAvailableDetailed!(requested)).resolves.toEqual(
+      mode === 'matching' ? { status: 'available', attachment: { ...requested, localStatus: 'available' } }
+        : { status: mode === 'missing' ? 'unavailable' : 'generation-conflict' },
+    );
+    expect(mutations(memory.calls)).toEqual([]);
+    expect(memory.read(uri)).toEqual(mode === 'missing' ? undefined : REMOTE);
+    expect(repair).not.toHaveBeenCalled();
+    expect(config).not.toHaveBeenCalled();
+    expect(webdavGetFile).not.toHaveBeenCalled();
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
   });
 
   it('keeps terminal404 policy without a source and leaves the original metadata/bytes intact', async () => {

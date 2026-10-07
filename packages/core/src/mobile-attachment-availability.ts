@@ -389,7 +389,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     assertAttachmentSyncNotAborted(signal);
     if (attachment.kind !== 'file') return preparing ? null : attachment;
     const localAttachment = { ...attachment };
-    if (preparing && (!localAttachment.cloudKey || localAttachment.deletedAt)) return null;
+    if (preparing && localAttachment.deletedAt) return null;
     const preparedBackend = preparing ? await host.storage.getItem(SYNC_BACKEND_KEY) : undefined;
     assertAttachmentSyncNotAborted(signal);
     if (preparing && preparedBackend !== 'webdav') return null;
@@ -412,6 +412,9 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       }
     }
 
+    // A selected existing generation needs its stored hash, not a remote key.
+    // A missing selection still cannot acquire bytes without remote identity.
+    if (preparing && !localAttachment.cloudKey) return null;
     const backend = preparing ? preparedBackend : await host.storage.getItem(SYNC_BACKEND_KEY);
     if (backend === 'file') {
       const syncPath = await host.storage.getItem(SYNC_PATH_KEY);
