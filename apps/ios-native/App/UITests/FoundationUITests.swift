@@ -1,11 +1,11 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
-    // These cases require a fresh locked saved-WebDAV library staged externally
+    // These cases require a saved-WebDAV library in the flow's state, staged externally
     // through the real settings writer. No backend address or credential lives here.
     private func task371Library(_ suffix: String, prefix: String = "MINDWTR_UNLOCK_UI_") throws -> String {
         guard let raw = ProcessInfo.processInfo.environment[prefix + suffix + "_LIBRARY"] else {
-            throw XCTSkip("A fresh externally staged locked WebDAV library is required")
+            throw XCTSkip("An externally staged WebDAV library in the requested state is required")
         }
         guard let id = UUID(uuidString: raw), id.uuidString.lowercased() == raw else {
             XCTFail("The isolated library must be a canonical lowercase UUID")
@@ -28,13 +28,14 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "settings-sync")
         boardEnabled(app.buttons["sync-option-webdav"], timeout: 30)
         XCTAssertTrue(app.buttons["sync-option-webdav"].isSelected)
-        let openID = flow == "unlock" ? "sync-encryption-open" : "sync-encryption-open-enable"
+        let openID = flow == "unlock" ? "sync-encryption-open" : "sync-encryption-open-" + flow
         let open = app.buttons[openID]
-        revealPagedElement(app, open, in: app.scrollViews["sync-screen"])
         boardEnabled(open, timeout: 30)
+        revealPagedElement(app, open, in: app.scrollViews["sync-screen"])
         XCTAssertGreaterThanOrEqual(open.frame.height, 44 - 0.01)
         boardTap(app, openID)
-        for name in flow == "unlock" ? ["current"] : ["next", "confirm"] {
+        let fields = encryptionFields(flow)
+        for name in fields {
             let field = app.secureTextFields["sync-encryption-" + name]
             boardEnabled(field, timeout: 30)
             let value = field.value as? String ?? ""
@@ -43,12 +44,37 @@ final class FoundationUITests: XCTestCase {
         }
         XCTAssertFalse(app.buttons["sync-encryption-reveal"].exists)
         XCTAssertFalse(app.buttons["sync-encryption-generate"].exists)
-        XCTAssertFalse(app.buttons["sync-encryption-" + flow].isEnabled)
+        if !fields.isEmpty { XCTAssertFalse(app.buttons["sync-encryption-" + flow].isEnabled) }
+    }
+
+    private func encryptionFields(_ flow: String) -> [String] {
+        switch flow {
+        case "unlock": return ["current"]
+        case "enable": return ["next", "confirm"]
+        case "change": return ["current", "next", "confirm"]
+        default: return []
+        }
     }
 
     private func task371Type(_ app: XCUIApplication, _ text: String) {
         task322Type(app, "sync-encryption-current", text, secure: true)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch.exists)
+    }
+
+    func testNativeEncryptionUnlockCompletesAndColdReopensEnabled() throws {
+        let library = try task371Library("SUCCESS")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app)
+        task371Type(app, "correct horse battery staple")
+        revealPagedElement(app, app.buttons["sync-encryption-unlock"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-unlock")
+        XCTAssertTrue(app.staticTexts["Sync encryption is on"].waitForExistence(timeout: 60))
+        XCTAssertFalse(app.secureTextFields["sync-encryption-current"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "change")
+        XCTAssertTrue(app.staticTexts["Sync encryption is on"].exists)
     }
 
     func testNativeEncryptionEnableMismatchAndCancelRetireBothFields() throws {
@@ -122,6 +148,71 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["sync-encryption-open-enable"].exists)
     }
 
+    func testNativeEncryptionChangeMismatchAndCancelRetireAllFields() throws {
+        let library = try task371Library("INPUT", prefix: "MINDWTR_CHANGE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "change")
+        task322Type(app, "sync-encryption-current", "synthetic-old-382", secure: true)
+        task322Type(app, "sync-encryption-next", "synthetic-next-382", secure: true)
+        XCTAssertFalse(app.buttons["sync-encryption-change"].isEnabled)
+        task322Type(app, "sync-encryption-confirm", "synthetic-different-382", secure: true)
+        revealPagedElement(app, app.buttons["sync-encryption-change"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-change")
+        XCTAssertTrue(app.staticTexts["The two passphrases do not match."].waitForExistence(timeout: 30))
+        for name in encryptionFields("change") {
+            let field = app.secureTextFields["sync-encryption-" + name]
+            let value = field.value as? String ?? ""
+            XCTAssertTrue(value.isEmpty || value == field.placeholderValue)
+        }
+        XCTAssertFalse(app.buttons["sync-encryption-change"].isEnabled)
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        for name in encryptionFields("change") { XCTAssertTrue(app.secureTextFields["sync-encryption-" + name].waitForNonExistence(timeout: 15)) }
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "change")
+    }
+
+    func testNativeEncryptionChangeCompletesAndColdReopensEnabled() throws {
+        let library = try task371Library("SUCCESS", prefix: "MINDWTR_CHANGE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "change")
+        for name in encryptionFields("change") {
+            task322Type(app, "sync-encryption-" + name, name == "current" ? "correct horse battery staple" : "synthetic-native-change-382", secure: true)
+        }
+        revealPagedElement(app, app.buttons["sync-encryption-change"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-change")
+        for name in encryptionFields("change") { XCTAssertTrue(app.secureTextFields["sync-encryption-" + name].waitForNonExistence(timeout: 60)) }
+        boardEnabled(app.buttons["sync-encryption-open-change"], timeout: 30)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "change")
+        XCTAssertTrue(app.staticTexts["Sync encryption is on"].exists)
+    }
+
+    func testNativeEncryptionDisableCancelThenCompletesAndColdReopensOff() throws {
+        let library = try task371Library("SUCCESS", prefix: "MINDWTR_DISABLE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "disable")
+        for name in encryptionFields("change") { XCTAssertFalse(app.secureTextFields["sync-encryption-" + name].exists) }
+        boardEnabled(app.buttons["sync-encryption-disable"])
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        XCTAssertFalse(app.buttons["sync-encryption-disable"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "disable")
+        revealPagedElement(app, app.buttons["sync-encryption-disable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-disable")
+        XCTAssertTrue(app.buttons["sync-encryption-open-enable"].waitForExistence(timeout: 60))
+        XCTAssertFalse(app.buttons["sync-encryption-open-change"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "enable")
+        XCTAssertFalse(app.buttons["sync-encryption-open-disable"].exists)
+    }
+
     private func task371Restart(_ app: XCUIApplication) {
         task322RestartGate(app)
         XCTAssertFalse(app.secureTextFields["sync-encryption-current"].exists)
@@ -185,6 +276,10 @@ final class FoundationUITests: XCTestCase {
         try encryptionBackgroundDuringTypedReply(flow: "enable", library: task371Library("BACKGROUND", prefix: "MINDWTR_ENABLE_UI_"))
     }
 
+    func testNativeEncryptionChangeBackgroundBetweenTypedFieldsRetainsOwnerUntilClose() throws {
+        try encryptionBackgroundDuringTypedReply(flow: "change", library: task371Library("BACKGROUND", prefix: "MINDWTR_CHANGE_UI_"))
+    }
+
     private func encryptionBackgroundDuringTypedReply(flow: String, library: String) throws {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -192,7 +287,7 @@ final class FoundationUITests: XCTestCase {
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch(); defer { app.terminate() }
         task371OpenSync(app, flow: flow)
-        let fields = flow == "enable" ? ["next", "confirm"] : ["current"]
+        let fields = encryptionFields(flow)
         for name in fields { task322Type(app, "sync-encryption-" + name, "synthetic-background-371", secure: true) }
         revealPagedElement(app, app.buttons["sync-encryption-" + flow], in: app.scrollViews["sync-screen"])
         boardTap(app, "sync-encryption-" + flow)

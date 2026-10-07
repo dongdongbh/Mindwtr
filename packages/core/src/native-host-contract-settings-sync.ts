@@ -159,7 +159,7 @@ export type NativeSyncSettingsHost = {
     encryption: {
         /** Selected host capability: only unlock an existing saved WebDAV location. */
         unlockOnly?: boolean;
-        /** Production iOS binds Enable/Unlock; the broader saved-WebDAV mode remains internal. */
+        /** Selected saved-WebDAV capability; the broader mode also admits Change and Disable. */
         mode?: 'saved-webdav-enable-unlock' | 'saved-webdav';
         getStatus(): Promise<SyncEncryptionStatus>;
         getIncompleteTransition(): Promise<SyncEncryptionTransitionKind | null>;

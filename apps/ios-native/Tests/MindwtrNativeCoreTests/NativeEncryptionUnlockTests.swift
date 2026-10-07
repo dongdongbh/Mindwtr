@@ -185,6 +185,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
     private let taskID = "local370", remoteTaskID = "remote370"
     private let at = "2026-10-07T12:00:00.000Z", password = "synthetic-dav-370"
     private let passphrase = "correct horse battery staple"
+    private let nextPassphrase = "synthetic next generation 382"
     // Independent RN/Noble Argon2id reference: salt 01..10, m64/t1/p1.
     private let keyHex = "fcd175b0b1aa6e9995ec57b1a0678fa481c471f2f894ebe20426c324f6ff7aeb"
     private let localBytes = Data("Untouched local file370".utf8)
@@ -367,7 +368,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         _ = try await action(host, ["type": "open", "flow": "unlock"])
         _ = try await action(host, ["type": "typed", "field": "current", "value": value])
     }
-    private func plaintextHost(_ faults: HostIOFaults = HostIOFaults()) async throws -> CoreHost {
+    private func plaintextHost(_ faults: HostIOFaults = HostIOFaults(), pendingLocal: Bool = true) async throws -> CoreHost {
         // Setup happens before Enable; no fixture repairs its interrupted journal or artifacts.
         remote = EncryptionDAVStore(expectedAuthorization: "Basic " + Data(("synthetic:" + password).utf8).base64EncodedString())
         EncryptionDAVProtocol.install(hostname, store: remote)
@@ -385,8 +386,10 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         _ = try await command(host, "testSyncConnection", ["webdav": fields])
         _ = try await command(host, "saveSyncBackend", ["requestId": UUID().uuidString.lowercased(), "revision": try await revision(host), "webdav": fields])
         await host.close()
-        let db = try SQLiteBridge(url: database)
-        _ = try db.execute("UPDATE tasks SET attachments=? WHERE id=?", parametersJSON: json([try json([attachment]), taskID])); db.close()
+        if pendingLocal {
+            let db = try SQLiteBridge(url: database)
+            _ = try db.execute("UPDATE tasks SET attachments=? WHERE id=?", parametersJSON: json([try json([attachment]), taskID])); db.close()
+        }
         let fresh = core(faults); _ = try await fresh.start(); _ = try await command(fresh, "openSyncSettings")
         let card = try await encryptionRows(fresh)
         XCTAssertTrue(card.contains { ($0["action"] as? [String: Any])?["flow"] as? String == "enable" })
@@ -395,6 +398,177 @@ final class NativeEncryptionUnlockTests: XCTestCase {
     private func enterEnable(_ host: CoreHost, _ value: String, open: Bool = true) async throws {
         if open { _ = try await action(host, ["type": "open", "flow": "enable"]) }
         for field in ["next", "confirm"] { _ = try await action(host, ["type": "typed", "field": field, "value": value]) }
+    }
+    private func enabledHost(_ faults: HostIOFaults = HostIOFaults(), pendingLocal: Bool = true) async throws -> (host: CoreHost, original: [String: Data]) {
+        let host = try await plaintextHost(faults, pendingLocal: pendingLocal), original = remote.snapshot
+        try await enterEnable(host, passphrase)
+        _ = try await action(host, ["type": "submit", "flow": "enable"], requestID: UUID().uuidString.lowercased())
+        try assertEnableCompleted(original); assertDrained()
+        return (host, original)
+    }
+    private func enterChange(_ host: CoreHost, current: String, next: String, open: Bool = true) async throws {
+        if open { _ = try await action(host, ["type": "open", "flow": "change"]) }
+        _ = try await action(host, ["type": "typed", "field": "current", "value": current])
+        for field in ["next", "confirm"] { _ = try await action(host, ["type": "typed", "field": field, "value": next]) }
+    }
+    private func encryptedPath(_ plaintextPath: String) -> String {
+        plaintextPath == "/sync/data.json" ? "/sync/data.json.enc"
+            : plaintextPath == "/sync/data.json.bak" ? "/sync/data.json.enc.bak" : plaintextPath
+    }
+    private func artifacts(_ snapshot: [String: Data]) -> [String: Data] {
+        snapshot.filter { $0.key != "/sync/.mindwtr-sync-fence-v1.json" }
+    }
+    private func assertNoArtifactMutation(since index: Int) {
+        let mutations = remote.recorded.dropFirst(index).filter { $0.method == "PUT" || $0.method == "DELETE" }
+        var probePaths = Set<String>()
+        for request in mutations {
+            let fence = request.path == "/sync/.mindwtr-sync-fence-v1.json"
+            let probe = request.path.range(of: "^/sync/data\\.json\\.mindwtr-etag-probe-[a-z0-9]+-[a-z0-9]*$", options: .regularExpression) != nil
+            XCTAssertTrue(fence || probe, "Refused transitions cannot mutate a document or attachment")
+            if fence {
+                if request.method == "PUT" && request.status == 201 { XCTAssertEqual(request.condition, "none:*") }
+                else {
+                    XCTAssertEqual(request.status, 204); XCTAssertTrue(request.condition?.hasPrefix("match:") == true)
+                }
+            }
+            if probe { probePaths.insert(request.path) }
+        }
+        XCTAssertLessThanOrEqual(probePaths.count, 1, "Only the exact owned capability probe can mutate outside the fence")
+        for path in probePaths {
+            let probeRequests = remote.recorded.dropFirst(index).filter { $0.path == path }
+            XCTAssertEqual(probeRequests.map { $0.method }, ["PUT", "GET", "PUT", "PUT", "GET", "PUT", "DELETE", "GET", "DELETE"])
+            XCTAssertEqual(probeRequests.map { $0.status }, [201, 200, 412, 204, 200, 412, 412, 200, 204])
+            let puts = mutations.filter { $0.path == path && $0.method == "PUT" }
+            XCTAssertEqual(puts.map { $0.status }, [201, 412, 204, 412])
+            XCTAssertEqual(puts.prefix(2).map { $0.condition }, ["none:*", "none:*"])
+            XCTAssertTrue(puts.suffix(2).allSatisfy { $0.condition?.hasPrefix("match:") == true })
+            let deletes = mutations.filter { $0.path == path && $0.method == "DELETE" }
+            XCTAssertEqual(deletes.map { $0.status }, [412, 204], "Stale deletion must refuse before verified conditional cleanup")
+            XCTAssertTrue(deletes.allSatisfy { $0.condition?.hasPrefix("match:") == true })
+            if puts.count == 4, deletes.count == 2 {
+                XCTAssertEqual(puts[2].condition, puts[3].condition, "Replacement and stale write name the initial generation")
+                XCTAssertEqual(deletes[0].condition, puts[2].condition, "Stale delete names the same retired initial generation")
+                XCTAssertNotEqual(deletes[0].condition, deletes[1].condition, "Cleanup names the verified replacement generation")
+            }
+            XCTAssertNil(remote.bytes(path))
+        }
+    }
+    private func expireRetainedFence() throws {
+        let fence = try object(String(decoding: XCTUnwrap(remote.bytes("/sync/.mindwtr-sync-fence-v1.json")), as: UTF8.self))
+        let expires = try XCTUnwrap(fence["expiresAt"] as? NSNumber).doubleValue
+        remote.advanceServerTime(to: Date(timeIntervalSince1970: (expires + 1_000) / 1_000))
+    }
+    private func assertChangeCompleted(_ original: [String: Data], oldKey: Data) throws {
+        try assertEnableCompleted(original)
+        let changedKey = try XCTUnwrap(cachedKey())
+        XCTAssertNotEqual(changedKey, oldKey)
+        for path in original.keys {
+            let bytes = try XCTUnwrap(remote.bytes(encryptedPath(path)))
+            XCTAssertThrowsError(try independentlyDecrypted(bytes, key: oldKey), "Every artifact retired the old generation")
+        }
+    }
+    private func assertDisableCompleted(_ original: [String: Data], since index: Int) throws {
+        XCTAssertNil(try cachedKey()); XCTAssertNil(try stored()["@mindwtr_sync_encryption_state_v1"])
+        XCTAssertEqual(artifacts(remote.snapshot), original)
+        let requests = Array(remote.recorded.dropFirst(index))
+        for path in ["/sync/data.json", "/sync/data.json.bak"] {
+            XCTAssertNil(remote.bytes(encryptedPath(path)))
+            if let deletion = requests.firstIndex(where: { $0.method == "DELETE" && $0.path == encryptedPath(path) && $0.status == 204 }) {
+                let written = try XCTUnwrap(requests.firstIndex { $0.method == "PUT" && $0.path == path && $0.status == 201 })
+                let verified = try XCTUnwrap(requests.indices.first { $0 > written && requests[$0].method == "GET" && requests[$0].path == path && requests[$0].status == 200 })
+                XCTAssertLessThan(verified, deletion, "Verified plaintext precedes ciphertext removal")
+                XCTAssertEqual(requests[written].condition, "none:*")
+                XCTAssertTrue(requests[deletion].condition?.hasPrefix("match:") == true)
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: localFile), localBytes)
+    }
+    private func assertIncompleteTransitionBlocked(_ host: CoreHost, flow: String, expectedKind: String) async throws {
+        let before = artifacts(remote.snapshot), domain = try rows(), state = try json(storedState()), currentKey = try cachedKey()
+        let count = remote.recorded.count, operations = crypto?.counters.operations
+        let wrongFlow = flow == "change" ? "disable" : "change"
+        let refused = try await raw(host, "runSyncEncryptionAction", ["revision": try await revision(host), "action": ["type": "open", "flow": wrongFlow]])
+        XCTAssertEqual(refused["ok"] as? Bool, false, "An unfinished journal only admits its own transition")
+        let off = try await raw(host, "selectSyncBackend", ["requestId": UUID().uuidString.lowercased(), "option": "off"])
+        XCTAssertEqual(off["ok"] as? Bool, false)
+        XCTAssertTrue(((off["error"] as? [String: Any])?["message"] as? String)?.contains("SYNC_ENCRYPTION_TRANSITION_INCOMPLETE") == true)
+        XCTAssertEqual(crypto?.counters.operations, operations); XCTAssertEqual(remote.recorded.count, count)
+        XCTAssertEqual(try storedState()["incompleteTransition"] as? String, expectedKind)
+        XCTAssertEqual(try json(storedState()), state); XCTAssertEqual(try cachedKey(), currentKey)
+        try await assertPlaintextSyncBlocked(host)
+        XCTAssertEqual(artifacts(remote.snapshot), before); XCTAssertEqual(try rows(), domain)
+    }
+    private func interruptedTransition(_ flow: String) async throws -> (requestID: String, original: [String: Data], oldKey: Data) {
+        let gate = EncryptionKDFGate("Actual " + flow + " after verified backup before base conversion"), faults = HostIOFaults()
+        defer { gate.unblock() }
+        faults.configureHTTPJobs = { jobs in
+            jobs.beforeCompletion = {
+                let requests = self.remote.recorded
+                if flow == "disable" {
+                    if requests.last?.method == "DELETE", requests.last?.path == "/sync/data.json.enc.bak", requests.last?.status == 204 { gate.hold() }
+                } else if requests.last?.method == "GET", requests.last?.path == "/sync/.mindwtr-sync-fence-v1.json", requests.last?.status == 200,
+                          let write = requests.lastIndex(where: { $0.method == "PUT" && $0.path == "/sync/data.json.enc.bak" && $0.status == 204 }),
+                          let verify = requests.lastIndex(where: { $0.method == "GET" && $0.path == "/sync/data.json.enc.bak" && $0.status == 200 }), verify > write {
+                    // This next guarded read occurs after shared backup decrypt verification,
+                    // before the base document's conditional rewrite.
+                    gate.hold()
+                }
+            }
+        }
+        let enabled = try await enabledHost(faults), host = enabled.host, before = try rows(), initial = artifacts(remote.snapshot), configuration = try stored()
+        let oldKey = try XCTUnwrap(cachedKey()), kind = flow == "change" ? "change-passphrase" : "disable"
+        if flow == "change" { try await enterChange(host, current: passphrase, next: nextPassphrase) }
+        else { _ = try await action(host, ["type": "open", "flow": "disable"]) }
+        let requestID = UUID().uuidString.lowercased()
+        let requestJSON = try json(["revision": try await revision(host), "action": ["type": "submit", "flow": flow], "requestId": requestID])
+        let transitionStart = remote.recorded.count
+        gate.arm()
+        let request = Task { () -> Result<String, Error> in
+            defer { gate.complete() }
+            do { return .success(try await host.foregroundSync(command: "runSyncEncryptionAction", requestJSON: requestJSON)) }
+            catch { return .failure(error) }
+        }
+        await fulfillment(of: [gate.reached], timeout: 30)
+        XCTAssertFalse(gate.completed); XCTAssertEqual(http?.counters.running, 1)
+        XCTAssertEqual(try storedState()["incompleteTransition"] as? String, kind)
+        XCTAssertEqual(try cachedKey(), oldKey); XCTAssertEqual(remote.bytes("/sync/data.json.enc"), initial["/sync/data.json.enc"])
+        let requests = Array(remote.recorded.dropFirst(transitionStart)), backup = flow == "change" ? "/sync/data.json.enc.bak" : "/sync/data.json.bak"
+        let backupWrite = try XCTUnwrap(requests.firstIndex { $0.method == "PUT" && $0.path == backup && $0.status == (flow == "change" ? 204 : 201) })
+        let backupRead = try XCTUnwrap(requests.indices.first { $0 > backupWrite && requests[$0].method == "GET" && requests[$0].path == backup && requests[$0].status == 200 })
+        XCTAssertLessThan(backupRead, requests.count - 1, "The held callback follows actual read-back verification")
+        if flow == "change" { XCTAssertTrue(requests[backupWrite].condition?.hasPrefix("match:") == true) }
+        else { XCTAssertEqual(requests[backupWrite].condition, "none:*"); XCTAssertTrue(requests.last?.condition?.hasPrefix("match:") == true) }
+        if flow == "change" {
+            for path in ["/sync/attachments/alpha.bin", "/sync/attachments/beta.bin", "/sync/data.json.enc.bak"] {
+                let changed = try XCTUnwrap(remote.bytes(path))
+                XCTAssertNotEqual(changed, initial[path]); XCTAssertEqual(changed.prefix(6), Data("MWENC1".utf8))
+                XCTAssertThrowsError(try independentlyDecrypted(changed, key: oldKey))
+            }
+            XCTAssertEqual(try independentlyDecrypted(XCTUnwrap(remote.bytes("/sync/data.json.enc")), key: oldKey), enabled.original["/sync/data.json"])
+        } else {
+            for path in ["/sync/attachments/alpha.bin", "/sync/attachments/beta.bin", "/sync/data.json.bak"] {
+                XCTAssertEqual(remote.bytes(path), enabled.original[path])
+            }
+            XCTAssertNil(remote.bytes("/sync/data.json.enc.bak")); XCTAssertNil(remote.bytes("/sync/data.json"))
+        }
+        request.cancel(); try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertFalse(gate.completed, "Cancellation keeps the accepted HTTP callback owned until drain")
+        let replacement = core()
+        do { _ = try await replacement.start(); XCTFail("Interrupted transition retains the library lease until drain") } catch {}
+        gate.unblock()
+        switch await request.value {
+        case .success: XCTFail("Interrupted transition cannot report confirmation")
+        case .failure(let error): XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed")
+        }
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(try cachedKey(), oldKey)
+        XCTAssertEqual(try storedState()["incompleteTransition"] as? String, kind)
+        for name in configuration.keys where name != "@mindwtr_sync_encryption_state_v1" {
+            XCTAssertEqual(try json(XCTUnwrap(stored()[name])), try json(XCTUnwrap(configuration[name])))
+        }
+        XCTAssertNotNil(remote.bytes("/sync/.mindwtr-sync-fence-v1.json"))
+        XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 1, "Only completed setup Enable is confirmed")
+        XCTAssertEqual(try Data(contentsOf: localFile), localBytes); assertDrained(); await host.close()
+        return (requestID, enabled.original, oldKey)
     }
     private func independentlyDecrypted(_ bytes: Data, key: Data) throws -> Data {
         XCTAssertGreaterThanOrEqual(bytes.count, 70); XCTAssertEqual(bytes.prefix(8), Data("MWENC1".utf8) + Data([1, 1]))
@@ -534,7 +708,8 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertEqual(remote.recorded.count, network); XCTAssertEqual(remote.snapshot, completed)
         XCTAssertEqual(try cachedKey(), persistedKey); XCTAssertEqual(try rows(), before)
         let offered = try await encryptionRows(cold).compactMap { $0["action"] as? [String: Any] }
-        XCTAssertFalse(offered.contains { ["enable", "change", "disable"].contains($0["flow"] as? String ?? "") })
+        XCTAssertFalse(offered.contains { $0["flow"] as? String == "enable" })
+        for flow in ["change", "disable"] { XCTAssertTrue(offered.contains { $0["flow"] as? String == flow }) }
         assertDrained(); await cold.close()
     }
     func testInterruptedVerifiedEnableColdRetryRejectsWrongPassphraseAndReusesOriginalSalt() async throws {
@@ -691,6 +866,180 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         let cold = core(), count = remote.recorded.count; _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
         XCTAssertEqual(remote.recorded.count, count); try assertEnableCompleted(original); XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 0); await cold.close()
     }
+    func testSelectedChangeWrongThenCorrectAndDisablePreserveEveryArtifactAndColdDomain() async throws {
+        let enabled = try await enabledHost(), host = enabled.host, before = try rows(), initial = remote.snapshot
+        let oldKey = try XCTUnwrap(cachedKey()), oldState = try json(storedState()), count = remote.recorded.count
+        try await enterChange(host, current: "wrong current synthetic382", next: nextPassphrase)
+        let fields = try await encryptionRows(host).filter { $0["kind"] as? String == "field" }
+        XCTAssertEqual(Set(fields.compactMap { $0["field"] as? String }), Set(["current", "next", "confirm"]))
+        XCTAssertTrue(fields.allSatisfy { $0["secure"] as? Bool == true && $0["value"] == nil })
+        _ = try await action(host, ["type": "submit", "flow": "change"], requestID: UUID().uuidString.lowercased())
+        XCTAssertEqual(remote.snapshot, initial); assertNoArtifactMutation(since: count)
+        XCTAssertEqual(try cachedKey(), oldKey); XCTAssertEqual(try json(storedState()), oldState); XCTAssertEqual(try rows(), before)
+        let wrongRows = try await encryptionRows(host)
+        XCTAssertTrue(wrongRows.contains { $0["tone"] as? String == "danger" })
+        XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 1)
+        try await enterChange(host, current: passphrase, next: nextPassphrase, open: false)
+        _ = try await action(host, ["type": "submit", "flow": "change"], requestID: UUID().uuidString.lowercased())
+        try assertChangeCompleted(enabled.original, oldKey: oldKey)
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 2)
+        let changed = remote.snapshot, newKey = try XCTUnwrap(cachedKey()); assertDrained(); await host.close()
+        let cold = core(), startup = remote.recorded.count; _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, startup); XCTAssertEqual(remote.snapshot, changed)
+        XCTAssertEqual(try cachedKey(), newKey); XCTAssertEqual(try rows(), before); try assertChangeCompleted(enabled.original, oldKey: oldKey)
+        _ = try await action(cold, ["type": "open", "flow": "disable"])
+        let disableRows = try await encryptionRows(cold)
+        XCTAssertFalse(disableRows.contains { $0["kind"] as? String == "field" }, "Disable needs no passphrase fields")
+        let disableStart = remote.recorded.count
+        _ = try await action(cold, ["type": "submit", "flow": "disable"], requestID: UUID().uuidString.lowercased())
+        try assertDisableCompleted(enabled.original, since: disableStart)
+        XCTAssertNil(remote.bytes("/sync/.mindwtr-sync-fence-v1.json")); XCTAssertEqual(try rows(), before)
+        XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 3); assertDrained(); await cold.close()
+        let off = core(), network = remote.recorded.count; _ = try await off.start(); _ = try await command(off, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, network); XCTAssertNil(try cachedKey()); XCTAssertNil(try stored()["@mindwtr_sync_encryption_state_v1"])
+        XCTAssertEqual(remote.snapshot, enabled.original); XCTAssertEqual(try rows(), before)
+        let offered = try await encryptionRows(off)
+        XCTAssertTrue(offered.contains { ($0["action"] as? [String: Any])?["flow"] as? String == "enable" })
+        XCTAssertEqual(try Data(contentsOf: localFile), localBytes); assertDrained(); await off.close()
+    }
+    func testInterruptedVerifiedChangeColdWrongNextRefusesThenSameInputsConvergeAllGenerations() async throws {
+        let interrupted = try await interruptedTransition("change"), before = try rows(), initial = remote.snapshot
+        let cold = core(), count = remote.recorded.count; _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, count); XCTAssertEqual(try cachedKey(), interrupted.oldKey)
+        let replay = try await raw(cold, "runSyncEncryptionAction", ["revision": try await revision(cold), "action": ["type": "submit", "flow": "change"], "requestId": interrupted.requestID])
+        XCTAssertEqual(replay["ok"] as? Bool, false); XCTAssertEqual(remote.recorded.count, count)
+        try await assertIncompleteTransitionBlocked(cold, flow: "change", expectedKind: "change-passphrase")
+        try expireRetainedFence()
+        let wrongStart = remote.recorded.count, oldState = try json(storedState())
+        try await enterChange(cold, current: passphrase, next: "wrong next synthetic382")
+        _ = try await action(cold, ["type": "submit", "flow": "change"], requestID: UUID().uuidString.lowercased())
+        XCTAssertTrue(remote.recorded.dropFirst(wrongStart).contains { $0.method == "GET" && $0.path == "/sync/data.json.enc.bak" && $0.status == 200 })
+        XCTAssertEqual(artifacts(remote.snapshot), artifacts(initial)); assertNoArtifactMutation(since: wrongStart)
+        XCTAssertEqual(try cachedKey(), interrupted.oldKey); XCTAssertEqual(try json(storedState()), oldState)
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 1)
+        let wrongRows = try await encryptionRows(cold)
+        XCTAssertTrue(wrongRows.contains { $0["tone"] as? String == "danger" })
+        try await enterChange(cold, current: passphrase, next: nextPassphrase, open: false)
+        let retryStart = remote.recorded.count
+        _ = try await action(cold, ["type": "submit", "flow": "change"], requestID: UUID().uuidString.lowercased())
+        try assertChangeCompleted(interrupted.original, oldKey: interrupted.oldKey)
+        for path in interrupted.original.keys {
+            XCTAssertTrue(remote.recorded.dropFirst(retryStart).contains { $0.method == "PUT" && $0.path == encryptedPath(path) && $0.status == 204 && $0.condition?.hasPrefix("match:") == true },
+                "Correct retry converges every predecessor/intermediate artifact under one current salt")
+        }
+        XCTAssertNil(remote.bytes("/sync/.mindwtr-sync-fence-v1.json")); XCTAssertEqual(try rows(), before)
+        XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 2)
+        let completed = remote.snapshot, persisted = try cachedKey(); assertDrained(); await cold.close()
+        let fresh = core(), network = remote.recorded.count; _ = try await fresh.start(); _ = try await command(fresh, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, network); XCTAssertEqual(remote.snapshot, completed)
+        XCTAssertEqual(try cachedKey(), persisted); XCTAssertEqual(try rows(), before); try assertChangeCompleted(interrupted.original, oldKey: interrupted.oldKey)
+        assertDrained(); await fresh.close()
+    }
+    func testInterruptedVerifiedDisableColdCachedKeyRetryFinishesOnlyRemainingBaseDocument() async throws {
+        let interrupted = try await interruptedTransition("disable"), before = try rows(), initial = remote.snapshot
+        let cold = core(), count = remote.recorded.count; _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, count); XCTAssertEqual(try cachedKey(), interrupted.oldKey)
+        try await assertIncompleteTransitionBlocked(cold, flow: "disable", expectedKind: "disable")
+        XCTAssertEqual(remote.snapshot, initial); try expireRetainedFence()
+        _ = try await action(cold, ["type": "open", "flow": "disable"])
+        let retryStart = remote.recorded.count
+        _ = try await action(cold, ["type": "submit", "flow": "disable"], requestID: UUID().uuidString.lowercased())
+        try assertDisableCompleted(interrupted.original, since: retryStart)
+        let artifactPuts = remote.recorded.dropFirst(retryStart).filter { $0.method == "PUT" && ($0.path.hasPrefix("/sync/attachments/") || $0.path == "/sync/data.json" || $0.path == "/sync/data.json.bak") }
+        XCTAssertEqual(artifactPuts.map { $0.path }, ["/sync/data.json"], "Already verified plaintext is retained exactly without rewrites")
+        XCTAssertNil(remote.bytes("/sync/.mindwtr-sync-fence-v1.json")); XCTAssertEqual(try rows(), before)
+        XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 2); assertDrained(); await cold.close()
+        let fresh = core(), network = remote.recorded.count; _ = try await fresh.start(); _ = try await command(fresh, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, network); XCTAssertEqual(remote.snapshot, interrupted.original)
+        XCTAssertNil(try cachedKey()); XCTAssertNil(try stored()["@mindwtr_sync_encryption_state_v1"]); XCTAssertEqual(try rows(), before)
+        XCTAssertEqual(try Data(contentsOf: localFile), localBytes); assertDrained(); await fresh.close()
+    }
+    private func abandonInterruptedTransition(_ flow: String) async throws -> (host: CoreHost, partial: [String: Data], domain: [String: String], scope: String) {
+        _ = try await interruptedTransition(flow)
+        let partial = remote.snapshot, domain = try rows(), configuration = try stored(), host = core()
+        let startup = remote.recorded.count; _ = try await host.start(); _ = try await command(host, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, startup)
+        _ = try await action(host, ["type": "open", "flow": "abandon"])
+        let abandonRows = try await encryptionRows(host)
+        XCTAssertFalse(abandonRows.contains { $0["kind"] as? String == "field" })
+        let network = remote.recorded.count
+        _ = try await action(host, ["type": "submit", "flow": "abandon"], requestID: UUID().uuidString.lowercased())
+        let state = try storedState(), scope = try XCTUnwrap(state["partlyEncryptedScope"] as? String)
+        let scopeComponents = try XCTUnwrap(NativeJSON.jsonObject(with: Data(scope.utf8)) as? [String])
+        XCTAssertEqual(state["state"] as? String, "off"); XCTAssertEqual(scopeComponents, ["webdav", endpoint, "synthetic"])
+        XCTAssertNil(state["incompleteTransition"]); XCTAssertNil(try cachedKey())
+        XCTAssertEqual(try stored()["@mindwtr_sync_backend"] as? String, "webdav")
+        XCTAssertEqual(remote.recorded.count, network, "Abandon clears only this device's transition and secure item")
+        XCTAssertEqual(remote.snapshot, partial); XCTAssertEqual(try rows(), domain)
+        for name in configuration.keys where name != "@mindwtr_sync_encryption_state_v1" {
+            XCTAssertEqual(try json(XCTUnwrap(stored()[name])), try json(XCTUnwrap(configuration[name])))
+        }
+        try await assertPlaintextSyncBlocked(host); assertDrained(); await host.close()
+        let cold = core(), count = remote.recorded.count; _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, count); XCTAssertEqual(try storedState()["partlyEncryptedScope"] as? String, scope)
+        XCTAssertNil(try cachedKey()); XCTAssertEqual(remote.snapshot, partial); XCTAssertEqual(try rows(), domain)
+        try await assertPlaintextSyncBlocked(cold)
+        return (cold, partial, domain, scope)
+    }
+    func testActualChangeAbandonIsLocalOnlyAndWholeCiphertextRecheckColdDiscoversNoKey() async throws {
+        let abandoned = try await abandonInterruptedTransition("change"), host = abandoned.host, count = remote.recorded.count
+        XCTAssertTrue(artifacts(abandoned.partial).values.allSatisfy { $0.prefix(6) == Data("MWENC1".utf8) })
+        _ = try await action(host, ["type": "recheck"], requestID: UUID().uuidString.lowercased())
+        // Recheck classifies encryption posture, not uniform passphrase generation.
+        // This real partial rotation is all ciphertext and may clear quarantine.
+        XCTAssertNil(try stored()["@mindwtr_sync_encryption_state_v1"]); XCTAssertNil(try cachedKey())
+        XCTAssertEqual(remote.snapshot, abandoned.partial); assertNoArtifactMutation(since: count)
+        XCTAssertEqual(try markers("v1.3.5/encryption-recheck-posture"), 1); XCTAssertEqual(try rows(), abandoned.domain)
+        assertDrained(); await host.close()
+        let cold = core(), startup = remote.recorded.count; _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, startup); try expireRetainedFence()
+        let discovery = remote.recorded.count; _ = try await command(cold, "syncStored")
+        XCTAssertTrue(remote.recorded.dropFirst(discovery).contains { $0.method == "GET" && $0.path == "/sync/data.json.enc" && $0.status == 200 })
+        XCTAssertEqual(try storedState()["state"] as? String, "remote-encrypted-no-key")
+        XCTAssertNil(try cachedKey()); assertNoArtifactMutation(since: discovery)
+        XCTAssertEqual(artifacts(remote.snapshot), artifacts(abandoned.partial)); XCTAssertNil(remote.bytes("/sync/.mindwtr-sync-fence-v1.json"))
+        XCTAssertEqual(try rows(), abandoned.domain); XCTAssertNil(remote.bytes("/sync/attachments/upload379.txt"))
+        XCTAssertEqual(try Data(contentsOf: localFile), localBytes); assertDrained(); await cold.close()
+    }
+    func testActualDisableAbandonIsLocalOnlyAndMixedRecheckKeepsColdScopeQuarantined() async throws {
+        let abandoned = try await abandonInterruptedTransition("disable"), host = abandoned.host, count = remote.recorded.count
+        let bytes = Array(artifacts(abandoned.partial).values)
+        XCTAssertTrue(bytes.contains { $0.prefix(6) == Data("MWENC1".utf8) }); XCTAssertTrue(bytes.contains { $0.prefix(6) != Data("MWENC1".utf8) })
+        _ = try await action(host, ["type": "recheck"], requestID: UUID().uuidString.lowercased())
+        XCTAssertEqual(try storedState()["partlyEncryptedScope"] as? String, abandoned.scope)
+        XCTAssertNil(try cachedKey()); XCTAssertEqual(remote.snapshot, abandoned.partial); assertNoArtifactMutation(since: count)
+        XCTAssertEqual(try rows(), abandoned.domain); try await assertPlaintextSyncBlocked(host)
+        assertDrained(); await host.close()
+        let cold = core(), startup = remote.recorded.count; _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, startup); XCTAssertEqual(try storedState()["partlyEncryptedScope"] as? String, abandoned.scope)
+        XCTAssertNil(try cachedKey()); try await assertPlaintextSyncBlocked(cold)
+        XCTAssertEqual(remote.snapshot, abandoned.partial); XCTAssertEqual(try rows(), abandoned.domain)
+        XCTAssertEqual(try Data(contentsOf: localFile), localBytes); assertDrained(); await cold.close()
+    }
+    func testPeerPlaintextDiscoveryAllowsSelectedDisableToClearOnlyLocalEncryptionPair() async throws {
+        let enabled = try await enabledHost(pendingLocal: false), host = enabled.host, oldKey = try XCTUnwrap(cachedKey())
+        for (path, plaintext) in enabled.original {
+            // External peer precondition; native Disable evidence starts after discovery.
+            remote.seed(path, bytes: plaintext)
+            if encryptedPath(path) != path { remote.removeAsPeer(encryptedPath(path)) }
+        }
+        let peer = remote.snapshot, count = remote.recorded.count
+        _ = try await raw(host, "syncNow", ["requestId": UUID().uuidString.lowercased(), "revision": try await revision(host), "webdav": fields])
+        XCTAssertTrue(remote.recorded.dropFirst(count).contains { $0.method == "GET" && $0.path == "/sync/data.json" && $0.status == 200 })
+        XCTAssertEqual(try storedState()["state"] as? String, "remote-plaintext"); XCTAssertEqual(try cachedKey(), oldKey)
+        XCTAssertEqual(remote.snapshot, peer); assertNoArtifactMutation(since: count)
+        let before = try rows()
+        _ = try await action(host, ["type": "open", "flow": "disable"])
+        let disableStart = remote.recorded.count
+        _ = try await action(host, ["type": "submit", "flow": "disable"], requestID: UUID().uuidString.lowercased())
+        try assertDisableCompleted(enabled.original, since: disableStart); assertNoArtifactMutation(since: disableStart)
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 2)
+        assertDrained(); await host.close()
+        let cold = core(), network = remote.recorded.count; _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
+        XCTAssertEqual(remote.recorded.count, network); XCTAssertNil(try cachedKey()); XCTAssertNil(try stored()["@mindwtr_sync_encryption_state_v1"])
+        XCTAssertEqual(remote.snapshot, peer); XCTAssertEqual(try rows(), before); XCTAssertEqual(try Data(contentsOf: localFile), localBytes)
+        assertDrained(); await cold.close()
+    }
     func testOffRefusesSeededIncompleteEnableAndColdHostRetainsSavedWebDAVTarget() async throws {
         let saved = try await lockedHost()
         await saved.close()
@@ -786,10 +1135,10 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         let host = try await lockedHost(), before = try rows(), config = try Data(contentsOf: manifest), initial = remote.snapshot
         let operations = try XCTUnwrap(crypto).counters.operations
         let current = try await revision(host)
-        for value: [String: Any] in [["type": "open", "flow": "change"], ["type": "open", "flow": "disable"], ["type": "generate"], ["type": "reveal"], ["type": "recheck"], ["type": "typed", "field": "unknown", "value": "synthetic"], ["type": "typed", "field": "current", "value": String(repeating: "a", count: 1001)], ["type": "typed", "field": "confirm", "value": String(repeating: "🧠", count: 501)]] {
+        for value: [String: Any] in [["type": "generate"], ["type": "reveal"], ["type": "recheck"], ["type": "typed", "field": "unknown", "value": "synthetic"], ["type": "typed", "field": "current", "value": String(repeating: "a", count: 1001)], ["type": "typed", "field": "confirm", "value": String(repeating: "🧠", count: 501)]] {
             do { _ = try await raw(host, "runSyncEncryptionAction", ["revision": current, "action": value]); XCTFail("Unsupported native action admitted") } catch { XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed") }
         }
-        for value: [String: Any] in [["type": "open", "flow": "enable"], ["type": "open", "flow": "abandon"], ["type": "typed", "field": "next", "value": "synthetic"]] {
+        for value: [String: Any] in [["type": "open", "flow": "change"], ["type": "open", "flow": "disable"], ["type": "open", "flow": "enable"], ["type": "open", "flow": "abandon"], ["type": "typed", "field": "next", "value": "synthetic"]] {
             let refused = try await raw(host, "runSyncEncryptionAction", ["revision": current, "action": value])
             XCTAssertEqual(refused["ok"] as? Bool, false, "Selected grammar cannot bypass the shared locked-state policy")
         }

@@ -3752,7 +3752,7 @@ export function createNativeHostContract(bindings = {}) {
     async runSyncEncryptionAction(input) {
       globalThis.encryptionInputs ??= [];
       globalThis.encryptionInputs.push(input);
-      if (bindings.syncSettings?.encryption?.mode !== 'saved-webdav-enable-unlock'
+      if (bindings.syncSettings?.encryption?.mode !== 'saved-webdav'
           || bindings.syncSettings.encryption.unlockOnly !== undefined) throw new Error('Missing selected saved-WebDAV encryption capability');
       return { ok: true, value: { toasts: [], passphrase: null } };
     },
@@ -4306,7 +4306,7 @@ export function createNativeSync() {
     const command = (state, value = input) => poll(state,
         state.MindwtrHost.iosForegroundSync('projectAttachmentDownload', JSON.stringify(value), () => ''));
     const markerLines = (state) => (state.logText ?? '').split('\n').filter((line) => line.includes('v1.3.5/ios-project-file-download'));
-    // Task379 exercises selected encryption admission before any configured service or secret read.
+    // Selected encryption admission runs before any configured service or secret read.
     const encrypted = create();
     const unlock = { revision: 'saved-location', action: { type: 'open', flow: 'unlock' } };
     const unlockCommand = (value) => poll(encrypted,
@@ -4314,12 +4314,12 @@ export function createNativeSync() {
     assert.equal((await boot(encrypted)).ok, true);
     const invalidEncryptionInputs = [null, [], {}, { ...unlock, revision: '' }, { ...unlock, revision: 'r'.repeat(101) },
         { ...unlock, requestId: '11111111-1111-1111-1111-111111111111' }, { ...unlock, extra: true },
-        ...['change', 'disable'].map((flow) => ({ ...unlock, action: { type: 'open', flow } })),
+        { ...unlock, action: { type: 'open', flow: 'unknown' } },
         ...['generate', 'reveal', 'recheck'].map((type) => ({ ...unlock, action: { type } })),
         { ...unlock, action: { type: 'typed', field: 'unknown', value: 'synthetic' } },
         ...['current', 'next', 'confirm'].map((field) => ({ ...unlock, action: { type: 'typed', field, value: 'x'.repeat(1001) } })),
         { ...unlock, action: { type: 'typed', field: 'confirm', value: '🧠'.repeat(501) } },
-        ...['unlock', 'enable', 'abandon'].map((flow) => ({ ...unlock, action: { type: 'submit', flow } })),
+        ...['unlock', 'enable', 'change', 'disable', 'abandon'].map((flow) => ({ ...unlock, action: { type: 'submit', flow } })),
         { ...unlock, action: { type: 'decline' }, requestId: 'invalid' },
         { ...unlock, action: { type: 'recheck' }, requestId: 'invalid' },
         { ...unlock, action: { type: 'open', flow: 'enable', extra: true } },
@@ -4336,9 +4336,9 @@ export function createNativeSync() {
     }
     assert.equal(encrypted.syncFactoryCalls, 0);
     encrypted.storedBackend = 'webdav';
-    const selectedEncryptionActions = [...['unlock', 'enable', 'abandon'].map((flow) => ({ type: 'open', flow })),
+    const selectedEncryptionActions = [...['unlock', 'enable', 'change', 'disable', 'abandon'].map((flow) => ({ type: 'open', flow })),
         ...['current', 'next', 'confirm'].map((field) => ({ type: 'typed', field, value: 'synthetic' })),
-        ...['unlock', 'enable', 'abandon'].map((flow) => ({ type: 'submit', flow })),
+        ...['unlock', 'enable', 'change', 'disable', 'abandon'].map((flow) => ({ type: 'submit', flow })),
         { type: 'decline' }, { type: 'cancel' }, { type: 'retry' }, { type: 'recheck' }];
     for (const action of selectedEncryptionActions) {
         const value = { revision: unlock.revision, action,
@@ -4349,7 +4349,7 @@ export function createNativeSync() {
     assert.equal(encrypted.syncFactoryCalls, 1, 'Selected encryption uses the retained foreground service');
     assert.equal(encrypted.secretReads, 0, 'Entry fixture reads no credentials');
     assert(!(encrypted.logText ?? '').includes('synthetic'), 'Passphrase never enters entry diagnostics');
-    console.log(`Task379: ${invalidEncryptionInputs.length} invalid encryption envelopes refused before storage; ${selectedEncryptionActions.length} selected actions admitted with exact mode and UUID ownership (NodeVM)`);
+    console.log(`Selected encryption: ${invalidEncryptionInputs.length} invalid envelopes refused before storage; ${selectedEncryptionActions.length} actions admitted with exact mode and UUID ownership (NodeVM)`);
     const malformed = create();
     assert.match((await command(malformed)).error, /^NOT_READY:/);
     const bootMalformed = await boot(malformed);

@@ -3877,7 +3877,7 @@ globalThis.MindwtrHost = {
                     || needsRequest && (typeof input.requestId !== 'string' || !/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i.test(input.requestId))
                     || !needsRequest && input.requestId !== undefined) throw invalid();
                 const valid = target.type === 'open' || target.type === 'submit'
-                    ? Object.keys(target).length === 2 && ['unlock', 'enable', 'abandon'].includes(target.flow as string)
+                    ? Object.keys(target).length === 2 && ['unlock', 'enable', 'change', 'disable', 'abandon'].includes(target.flow as string)
                     : target.type === 'typed' ? Object.keys(target).length === 3 && ['current', 'next', 'confirm'].includes(target.field as string)
                         && typeof target.value === 'string' && target.value.length <= 1000
                         : ['cancel', 'decline', 'retry', 'recheck'].includes(target.type as string) && Object.keys(target).length === 1;
@@ -3925,7 +3925,7 @@ globalThis.MindwtrHost = {
                         } catch { throw new NativeAttachmentCleanupUnconfirmedError(); }
                     },
                 });
-                if (iosManualSync) iosManualSync.settingsHost.encryption.mode = 'saved-webdav-enable-unlock';
+                if (iosManualSync) iosManualSync.settingsHost.encryption.mode = 'saved-webdav';
                 if (name === 'projectAttachmentDownload') {
                     if (!downloadResult) {
                         // The original contract remains local-only outside this owned call.

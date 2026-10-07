@@ -531,8 +531,9 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     // ---- Settings › Sync's device (native-host-contract-settings-sync.ts) ----
 
-    const logSelectedEncryptionCompleted = async (operation: 'enable' | 'abandon' | 'recheck'): Promise<void> => {
-        if (platform !== 'ios' || settingsHost.encryption.mode !== 'saved-webdav-enable-unlock') return;
+    const logSelectedEncryptionCompleted = async (operation: 'enable' | 'change' | 'disable' | 'abandon' | 'recheck'): Promise<void> => {
+        if (platform !== 'ios' || (settingsHost.encryption.mode !== 'saved-webdav-enable-unlock'
+            && settingsHost.encryption.mode !== 'saved-webdav')) return;
         try {
             await logLine('info', 'Native iOS selected encryption service completed', { scope: 'native-ios', force: true,
                 extra: { releaseCheck: 'v1.3.5/ios-encryption-selected', operation, outcome: 'confirmed' } });
@@ -573,12 +574,19 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                         throw error;
                     }
                 },
-                change: (current, next, options) => transitions.changeSyncEncryptionPassphrase(current, next, options),
-                disable: (options) => transitions.disableSyncEncryption(options),
+                change: async (current, next, options) => {
+                    await transitions.changeSyncEncryptionPassphrase(current, next, options);
+                    await logSelectedEncryptionCompleted('change');
+                },
+                disable: async (options) => {
+                    await transitions.disableSyncEncryption(options);
+                    await logSelectedEncryptionCompleted('disable');
+                },
                 provide: async (passphrase) => {
                     const outcome = await transitions.provideSyncEncryptionPassphrase(passphrase);
                     if (platform === 'ios' && (settingsHost.encryption.unlockOnly
-                        || settingsHost.encryption.mode === 'saved-webdav-enable-unlock') && outcome === 'ok') {
+                        || settingsHost.encryption.mode === 'saved-webdav-enable-unlock'
+                        || settingsHost.encryption.mode === 'saved-webdav') && outcome === 'ok') {
                         await logLine('info', 'Native iOS encrypted unlock service completed', { scope: 'native-ios', force: true,
                             extra: { releaseCheck: 'v1.3.5/ios-encryption-unlock', operation: 'unlock', outcome: 'confirmed' } });
                     }

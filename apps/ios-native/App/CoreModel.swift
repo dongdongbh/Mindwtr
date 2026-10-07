@@ -5205,7 +5205,7 @@ final class CoreModel: ObservableObject {
 
     private func settingsSyncEncryptionActionAllowed(_ action: CoreObject) -> Bool {
         switch action.text("type") {
-        case "open", "submit": return Set(action.keys) == Set(["type", "flow"]) && ["unlock", "enable", "abandon"].contains(action.text("flow"))
+        case "open", "submit": return Set(action.keys) == Set(["type", "flow"]) && ["unlock", "enable", "change", "disable", "abandon"].contains(action.text("flow"))
         case "cancel", "decline", "retry", "recheck": return Set(action.keys) == Set(["type"])
         default: return false
         }
@@ -5237,9 +5237,10 @@ final class CoreModel: ObservableObject {
             default: return false
             }
         }
-        guard fields.isEmpty || fields == Set(["current"]) || fields == Set(["next", "confirm"]) else { return false }
+        guard fields.isEmpty || fields == Set(["current"]) || fields == Set(["next", "confirm"])
+            || fields == Set(["current", "next", "confirm"]) else { return false }
         if !fields.isEmpty {
-            let flow = fields.contains("current") ? "unlock" : "enable"
+            let flow = fields.count == 3 ? "change" : fields.contains("current") ? "unlock" : "enable"
             guard rows.contains(where: { $0.text("kind") == "action" && $0.object("action").text("type") == "submit"
                 && $0.object("action").text("flow") == flow }) else { return false }
         }
@@ -5248,6 +5249,14 @@ final class CoreModel: ObservableObject {
 
     private func settingsSyncEncryptionField(_ field: String) -> CoreObject? {
         settingsSync.object("encryption").objects("rows").first { $0.text("kind") == "field" && $0.text("field") == field }
+    }
+    private func settingsSyncEncryptionFields(_ flow: String) -> [String] {
+        switch flow {
+        case "unlock": return ["current"]
+        case "enable": return ["next", "confirm"]
+        case "change": return ["current", "next", "confirm"]
+        default: return []
+        }
     }
     func settingsSyncPassphrase(_ field: String) -> String { settingsSyncPassphrases[field] ?? "" }
     func settingsSyncPassphraseTooLong(_ field: String) -> String? {
@@ -5276,7 +5285,7 @@ final class CoreModel: ObservableObject {
               settingsSyncEncryptionActionAllowed(action), !settingsSyncOpeningRevision.isEmpty,
               settingsSync.text("configRevision") == settingsSyncOpeningRevision else { return false }
         if action.text("type") == "submit" {
-            let fields = action.text("flow") == "enable" ? ["next", "confirm"] : action.text("flow") == "unlock" ? ["current"] : []
+            let fields = settingsSyncEncryptionFields(action.text("flow"))
             return settingsSyncEncryptionOffered(action, enabled: fields.isEmpty) && fields.allSatisfy {
                 settingsSyncEncryptionField($0) != nil && !settingsSyncPassphrase($0).isEmpty && settingsSyncPassphraseTooLong($0) == nil
             }
@@ -5330,8 +5339,7 @@ final class CoreModel: ObservableObject {
         var staged = false
         do {
             guard settingsSyncEncryptionCurrent(owner), settingsSyncOpeningRevision == owner.revision, !settingsSyncDraftDirty else { throw CancellationError() }
-            let fields = action.text("type") != "submit" ? [] : action.text("flow") == "enable" ? ["next", "confirm"]
-                : action.text("flow") == "unlock" ? ["current"] : []
+            let fields = action.text("type") == "submit" ? settingsSyncEncryptionFields(action.text("flow")) : []
             for field in fields {
                 // Typed may mutate before an acknowledgement is lost. From this
                 // point only confirmed Submit retirement or closing this host is safe.

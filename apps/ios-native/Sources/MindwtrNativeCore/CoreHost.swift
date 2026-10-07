@@ -16216,7 +16216,7 @@ private final class Engine: @unchecked Sendable {
         switch type {
         case "open", "submit":
             guard Set(action.keys) == Set(["type", "flow"]), let flow = action["flow"] as? String,
-                  ["unlock", "enable", "abandon"].contains(flow) else { throw foregroundSyncFailure }
+                  ["unlock", "enable", "change", "disable", "abandon"].contains(flow) else { throw foregroundSyncFailure }
         case "typed":
             guard Set(action.keys) == Set(["type", "field", "value"]), let field = action["field"] as? String,
                   ["current", "next", "confirm"].contains(field),
