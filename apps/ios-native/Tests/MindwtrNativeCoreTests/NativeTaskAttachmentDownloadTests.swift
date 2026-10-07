@@ -55,8 +55,9 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
     private var remote: TaskDownloadHTTPState!
     private var scheduleBase: [String: Any]!
     private var before: EditorDraftSnapshot!
+    private var relocationFixtureBase: URL?
     private let taskID = "task363-download"
-    private let attachmentID = "36300000-1111-4111-8111-111111111111"
+    private var attachmentID = "36300000-1111-4111-8111-111111111111"
     private let requestID = "36300000-2222-4222-8222-222222222222"
     private let bytes = Data([0, 255, 128, 7, 13, 10]) + Data("Task363 / 文".utf8)
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -87,6 +88,9 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertEqual(remote?.unexpected, 0, "Every request is a bound authenticated GET")
         if let hostname { TaskDownloadHTTPProtocol.set(hostname, nil) }
         if let root { try FileManager.default.removeItem(at: root) }
+        if let relocationFixtureBase, FileManager.default.fileExists(atPath: relocationFixtureBase.path) {
+            try FileManager.default.removeItem(at: relocationFixtureBase)
+        }
     }
     private func json(_ value: Any) throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed, .withoutEscapingSlashes]), as: UTF8.self)
@@ -610,4 +614,408 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertThrowsError(try files.call(read, maximumReadBytes: 8)); files.afterSourceOpened = nil
         XCTAssertEqual(try Data(contentsOf: target).count, 9)
     }
+
+    // Synthetic roots model an actual container move on macOS. Hosted iOS
+    // already has a real Application/<UUID>/Library anchor; real reinstall
+    // acceptance uses the App fixture rather than nesting a second anchor.
+    private func relocationRoot367(_ name: String) throws -> URL {
+        #if os(iOS)
+        throw XCTSkip("Synthetic relocation roots are macOS fixtures; actual iOS reinstall is separate acceptance")
+        #else
+        if relocationFixtureBase == nil { relocationFixtureBase = try XCTUnwrap(root) }
+        let base = try XCTUnwrap(relocationFixtureBase).appendingPathComponent(name, isDirectory: true)
+        let container = base.appendingPathComponent("Application/" + UUID().uuidString.lowercased(), isDirectory: true)
+        root = container.appendingPathComponent("Library/" + UUID().uuidString.lowercased(), isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return container
+        #endif
+    }
+    private func relocate367(_ original: URL, copy: Bool = false) throws {
+        let next = original.deletingLastPathComponent().appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
+        let suffix = String(root.path.dropFirst(original.path.count))
+        if copy { try FileManager.default.copyItem(at: original, to: next) }
+        else { try FileManager.default.moveItem(at: original, to: next) }
+        root = URL(fileURLWithPath: next.path + suffix, isDirectory: true)
+    }
+    private func relocatedMarkers367() throws -> Int {
+        let log = root.appendingPathComponent("logs/mindwtr.log")
+        guard FileManager.default.fileExists(atPath: log.path) else { return 0 }
+        return try String(contentsOf: log, encoding: .utf8).components(separatedBy: "v1.3.5/ios-relocated-task-availability").count - 1
+    }
+    private func pendingWrapper367() throws -> [String: Any] {
+        let command = try object(String(decoding: Data(contentsOf: journal), as: UTF8.self))
+        let args = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(command["argumentsJSON"] as? String).utf8)) as? [String])
+        return try object(XCTUnwrap(args.first))
+    }
+    private func terminalBody367() throws -> [String: Any] {
+        let command = try object(String(decoding: Data(contentsOf: journal), as: UTF8.self))
+        let raw = try XCTUnwrap(((command["terminal"] as? [String: Any])?["success"] as? [String: Any])?["_0"] as? String)
+        return try object(raw)
+    }
+    private func replaceSelected367(_ edit: (inout [String: Any]) -> Void) throws {
+        var payload = try object(before.payloadJSON)
+        var selected = try XCTUnwrap((payload["attachments"] as? [[String: Any]])?.first)
+        edit(&selected)
+        payload["attachments"] = [selected]; payload["attachmentsBase"] = [selected]
+        _ = try sql("UPDATE tasks SET attachments=? WHERE id=?", [json([selected]), taskID])
+        before = EditorDraftSnapshot(sessionID: before.sessionID, taskID: taskID, generation: before.generation + 1, payloadJSON: try json(payload))
+        try editor.checkpoint(before)
+    }
+    private func assertRelocatedRefused367(_ live: CoreHost, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let saved = try rows(), settings = try Data(contentsOf: manifest), settingsIdentity = try inode(manifest)
+        let checkpoint = try Data(contentsOf: editor.url), checkpointIdentity = try inode(editor.url)
+        do {
+            let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request()))
+            XCTAssertTrue(["unavailable", "generation-conflict"].contains(reply["status"] as? String ?? ""), file: file, line: line)
+        } catch { XCTAssertFalse(error.localizedDescription.contains("file:///"), file: file, line: line) }
+        XCTAssertNil(try store.readVersioned(), file: file, line: line)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path), file: file, line: line)
+        XCTAssertEqual(try rows(), saved, file: file, line: line)
+        XCTAssertEqual(try Data(contentsOf: manifest), settings, file: file, line: line)
+        XCTAssertEqual(try inode(manifest), settingsIdentity, file: file, line: line)
+        XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint, file: file, line: line)
+        XCTAssertEqual(try inode(editor.url), checkpointIdentity, file: file, line: line)
+        XCTAssertEqual(remote.requests, 0, file: file, line: line)
+        XCTAssertEqual(try relocatedMarkers367(), 0, file: file, line: line)
+    }
+    func testRelocatedTaskBorrowedDownloadKeepColdSaveLeavesOldBaselineUnmanaged() async throws {
+        let container = try relocationRoot367("keep-save")
+        try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+        let old = target, oldURI = old.absoluteString
+        try relocate367(container, copy: true)
+        // The readable old file deliberately disagrees; success must use only
+        // the selected current target and never consult or retire old bytes.
+        let oldBytes = Data("Unrelated readable old-container bytes".utf8)
+        try oldBytes.write(to: old)
+        let oldIdentity = try inode(old), currentIdentity = try inode(target), saved = try rows()
+        let settings = try Data(contentsOf: manifest), settingsIdentity = try inode(manifest)
+        let other = try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks WHERE id='other'").utf8)))
+        let live = host(); _ = try await live.start()
+        let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request()))
+        XCTAssertEqual(reply["status"] as? String, "draftAvailable"); XCTAssertEqual(reply["generation"] as? Int, 2)
+        let op = try XCTUnwrap(store.readAvailability()?.operations.last)
+        guard case .borrowed(let proof) = op.resource else { return XCTFail("Relocated current bytes must remain borrowed") }
+        XCTAssertEqual(op.phase, .checkpointed); XCTAssertEqual(op.targetURI, target.absoluteString)
+        XCTAssertEqual(proof.identity, currentIdentity); XCTAssertEqual(proof.sha256, hash(bytes)); XCTAssertEqual(proof.size, Int64(bytes.count))
+        let projected = try object(XCTUnwrap(editor.read()?.snapshot.payloadJSON))
+        XCTAssertEqual((projected["edited"] as? [String: String])?["title"], "Dirty title")
+        XCTAssertEqual((projected["edited"] as? [String: String])?["description"], "Kept dirty note / 文")
+        XCTAssertEqual((projected["attachments"] as? [[String: Any]])?.first?["uri"] as? String, target.absoluteString)
+        XCTAssertEqual((projected["attachmentsBase"] as? [[String: Any]])?.first?["uri"] as? String, oldURI)
+        XCTAssertEqual(try rows(), saved); XCTAssertEqual(try Data(contentsOf: manifest), settings); XCTAssertEqual(try inode(manifest), settingsIdentity)
+        XCTAssertEqual(remote.requests, 0); XCTAssertEqual(try files(cache), [])
+        await live.close(); XCTAssertEqual(try relocatedMarkers367(), 1)
+        let cold = host(); _ = try await cold.start()
+        let checkpoint = try XCTUnwrap(editor.read()?.snapshot)
+        _ = try await cold.checkAttachmentDraftResumeV3(expectedSession: checkpoint.sessionID, expectedGeneration: checkpoint.generation)
+        var journalReached = false, settledReached = false
+        let hooks = AttachmentDraftHostHooks(); hooks.boundary = { if $0 == .afterSaveJournal { journalReached = true; throw HostFailure("Synthetic relocated Save journal boundary") } }
+        await cold.configureAttachmentDraftHost(hooks)
+        await refusal { _ = try await cold.saveAttachmentDraftComplete(saveRequestJSON: self.savedRequest(), expectedSession: checkpoint.sessionID, expectedGeneration: checkpoint.generation) }
+        XCTAssertTrue(journalReached)
+        let wrapper = try pendingWrapper367(); XCTAssertEqual(wrapper["version"] as? Int, 5)
+        let candidates = try XCTUnwrap(wrapper["candidates"] as? [[String: Any]])
+        let baseline = try XCTUnwrap(candidates.first { ($0["authority"] as? [String: Any])?["kind"] as? String == "baseline" })
+        let observation = try XCTUnwrap((baseline["authority"] as? [String: Any])?["observation"] as? [String: String])
+        XCTAssertEqual(observation, ["kind": "unmanaged", "targetURI": oldURI])
+        hooks.boundary = { if $0 == .afterSaveSettled { settledReached = true; throw HostFailure("Synthetic relocated Save settled boundary") } }
+        await refusal { _ = try await cold.retryPending() }; XCTAssertTrue(settledReached)
+        let terminal = try terminalBody367()
+        XCTAssertEqual((terminal["targets"] as? [[String: Any]])?.first?["outcome"] as? String, "unmanaged")
+        await cold.configureAttachmentDraftHost(AttachmentDraftHostHooks()); _ = try await cold.retryPending()
+        XCTAssertNil(try store.readVersioned()); XCTAssertNil(try editor.read()); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        let row = try XCTUnwrap((NativeJSON.jsonObject(with: Data(sql("SELECT title,description,attachments,rev FROM tasks WHERE id=?", [taskID]).utf8)) as? [[String: Any]])?.first)
+        XCTAssertEqual(row["title"] as? String, "Dirty title"); XCTAssertEqual(row["description"] as? String, "Kept dirty note / 文"); XCTAssertEqual(row["rev"] as? Int, 2)
+        let attachment = try XCTUnwrap((NativeJSON.jsonObject(with: Data(XCTUnwrap(row["attachments"] as? String).utf8)) as? [[String: Any]])?.first)
+        XCTAssertEqual(attachment["uri"] as? String, target.absoluteString); XCTAssertEqual(attachment["localStatus"] as? String, "available")
+        XCTAssertEqual(attachment["fileHash"] as? String, hash(bytes).uppercased())
+        XCTAssertEqual(try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks WHERE id='other'").utf8))), other)
+        XCTAssertEqual(try Data(contentsOf: manifest), settings); XCTAssertEqual(try inode(manifest), settingsIdentity)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), currentIdentity)
+        XCTAssertEqual(try Data(contentsOf: old), oldBytes); XCTAssertEqual(try inode(old), oldIdentity)
+        XCTAssertEqual(remote.requests, 0); await cold.close(); XCTAssertEqual(try relocatedMarkers367(), 1)
+    }
+    func testRelocatedTaskBorrowedDiscardRetainsCurrentBytesAfterContainerMove() async throws {
+        let container = try relocationRoot367("discard")
+        try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+        let old = target; try relocate367(container)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
+        let saved = try rows(), settings = try Data(contentsOf: manifest), identity = try inode(target)
+        let live = host(); _ = try await live.start()
+        let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request()))
+        XCTAssertEqual(reply["status"] as? String, "draftAvailable")
+        guard case .borrowed = try XCTUnwrap(store.readAvailability()?.operations.last).resource else { return XCTFail("Borrowed-only repair") }
+        let checkpoint = try XCTUnwrap(editor.read()?.snapshot), id = UUID().uuidString.lowercased()
+        _ = try await live.discardAttachmentDraftV3(requestJSON: json(["version": 1, "requestId": id, "sessionID": checkpoint.sessionID, "generation": checkpoint.generation]))
+        XCTAssertEqual(try store.readAvailability()?.session.state, .cleanupPending)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), identity)
+        await live.close(); let cold = host(); _ = try await cold.start()
+        let result = try object(await cold.finishAttachmentDraftDiscardV3(expectedSession: checkpoint.sessionID, requestId: id))
+        XCTAssertEqual(result["version"] as? Int, 7)
+        XCTAssertEqual((result["operations"] as? [[String: Any]])?.first?["target"] as? String, "notOwned")
+        XCTAssertEqual((result["operations"] as? [[String: Any]])?.first?["stage"] as? String, "unclaimed")
+        XCTAssertNil(try store.readVersioned()); XCTAssertNil(try editor.read()); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertEqual(try rows(), saved); XCTAssertEqual(try Data(contentsOf: manifest), settings)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), identity)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path)); XCTAssertEqual(remote.requests, 0)
+        await cold.close(); XCTAssertEqual(try relocatedMarkers367(), 1)
+    }
+    func testRelocatedTaskMissingHashSizeAndFilenameRefuseWithoutNetworkOrOwner() async throws {
+        for name in ["missing", "hashless", "hash", "size", "filename"] {
+            let container = try relocationRoot367(name)
+            try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+            try relocate367(container)
+            switch name {
+            case "missing": try FileManager.default.removeItem(at: target)
+            case "hashless": try replaceSelected367 { $0.removeValue(forKey: "fileHash") }
+            case "hash": try replaceSelected367 { $0["fileHash"] = String(repeating: "0", count: 64) }
+            case "size": try replaceSelected367 { $0["size"] = self.bytes.count + 1 }
+            default: try replaceSelected367 { $0["cloudKey"] = "attachments/36300000-3333-4333-8333-333333333333.txt" }
+            }
+            let identity = name == "missing" ? nil : try inode(target)
+            let live = host(); _ = try await live.start(); try await assertRelocatedRefused367(live)
+            if let identity { XCTAssertEqual(try inode(target), identity); XCTAssertEqual(try Data(contentsOf: target), bytes) }
+            await live.close()
+        }
+    }
+
+    func testRelocatedTaskCanonicalMappingRefusalsStopBeforeFileWork() async throws {
+        for name in ["foreign", "noncanonical", "library", "extra-anchor", "query", "non-uuid", "uppercase-uuid"] {
+            attachmentID = name == "non-uuid" ? "not-a-uuid" : name == "uppercase-uuid" ? "A1111111-B222-4333-8444-555555555555" : "36300000-1111-4111-8111-111111111111"
+            let container = try relocationRoot367(name)
+            try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+            let oldURI = target.absoluteString, libraryName = root.lastPathComponent
+            try relocate367(container)
+            try replaceSelected367 { selected in
+                switch name {
+                case "foreign": selected["uri"] = oldURI.replacingOccurrences(of: "/Application/", with: "/Foreign/")
+                case "noncanonical": selected["uri"] = oldURI.replacingOccurrences(of: attachmentID + ".txt", with: "%33" + String(attachmentID.dropFirst()) + ".txt")
+                case "library": selected["uri"] = oldURI.replacingOccurrences(of: "/Library/" + libraryName + "/", with: "/Library/36300000-4444-4444-8444-444444444444/")
+                case "extra-anchor": selected["uri"] = oldURI.replacingOccurrences(of: "/attachment-files/", with: "/Application/36300000-4444-4444-8444-444444444444/Library/attachment-files/")
+                case "query": selected["uri"] = oldURI + "?unexpected=1"
+                default: break // Valid metadata ID syntax, but not the selected relocation UUID grammar.
+                }
+            }
+            let identity = try inode(target), hooks = NativeAttachmentHostHooks(); var work = 0
+            hooks.configureJobs = { $0.beforeWork = { _, _ in work += 1 } }
+            let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start()
+            let initialWork = work
+            try await assertRelocatedRefused367(live)
+            XCTAssertEqual(work, initialWork, "Malformed mapping must refuse before observing any file")
+            XCTAssertEqual(try inode(target), identity); XCTAssertEqual(try Data(contentsOf: target), bytes)
+            await live.close()
+        }
+    }
+    func testRelocatedTaskAmbiguousCurrentAnchorCannotMintAvailabilityOwner() async throws {
+        let outer = try relocationRoot367("ambiguous"), outerRoot = try XCTUnwrap(root)
+        let inner = outerRoot.appendingPathComponent("Application/" + UUID().uuidString.lowercased(), isDirectory: true)
+        root = inner.appendingPathComponent("Library/" + UUID().uuidString.lowercased(), isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+        try relocate367(inner)
+        let identity = try inode(target), live = host(); _ = try await live.start()
+        try await assertRelocatedRefused367(live)
+        XCTAssertEqual(try inode(target), identity); XCTAssertEqual(try Data(contentsOf: target), bytes)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outer.path)); await live.close()
+    }
+    func testRelocatedTaskUnsafeEntriesAndEightMiBCapCannotBecomeBorrowed() async throws {
+        for name in ["symlink", "hardlink", "directory", "cap"] {
+            let container = try relocationRoot367(name)
+            try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+            try relocate367(container)
+            let outside = root.appendingPathComponent("unrelated.txt"); try bytes.write(to: outside)
+            try FileManager.default.removeItem(at: target)
+            switch name {
+            case "symlink": try FileManager.default.createSymbolicLink(at: target, withDestinationURL: outside)
+            case "hardlink": try FileManager.default.linkItem(at: outside, to: target)
+            case "directory": try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+            default:
+                XCTAssertTrue(FileManager.default.createFile(atPath: target.path, contents: Data()))
+                let handle = try FileHandle(forWritingTo: target); try handle.truncate(atOffset: 8_388_609); try handle.close()
+                // Sparse file, streaming hash: every other proof condition agrees
+                // so the selected descriptor cap itself is required to refuse.
+                let reader = try FileHandle(forReadingFrom: target); var digest = SHA256()
+                while let chunk = try reader.read(upToCount: 65_536), !chunk.isEmpty { digest.update(data: chunk) }
+                try reader.close()
+                let hash = digest.finalize().map { String(format: "%02x", $0) }.joined()
+                try replaceSelected367 { $0["size"] = 8_388_609; $0["fileHash"] = hash }
+            }
+            let identity = try inode(target), outsideIdentity = try inode(outside)
+            let live = host(); _ = try await live.start(); try await assertRelocatedRefused367(live)
+            XCTAssertEqual(try inode(target), identity); XCTAssertEqual(try inode(outside), outsideIdentity)
+            XCTAssertEqual(try Data(contentsOf: outside), bytes)
+            if name == "cap" { XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.intValue, 8_388_609) }
+            await live.close()
+        }
+    }
+
+    func testRelocatedTaskEntryAndParentReplacementAfterProofRefuseCheckpoint() async throws {
+        for name in ["entry-race", "parent-race"] {
+            let container = try relocationRoot367(name)
+            try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+            try relocate367(container)
+            let saved = try rows(), checkpoint = try Data(contentsOf: editor.url), checkpointIdentity = try inode(editor.url)
+            let originalIdentity = try inode(target), hooks = NativeAttachmentHostHooks()
+            var replacementIdentity: String?, displaced: URL?, mutationFailed = false
+            hooks.configureJobs = { jobs in jobs.afterWork = { _, _ in
+                guard replacementIdentity == nil && !mutationFailed else { return }
+                do {
+                    if name == "entry-race" {
+                        try self.bytes.write(to: self.target, options: .atomic)
+                    } else {
+                        let old = self.root.appendingPathComponent("displaced-managed", isDirectory: true)
+                        try FileManager.default.moveItem(at: self.managed, to: old); displaced = old
+                        try FileManager.default.copyItem(at: old, to: self.managed)
+                    }
+                    replacementIdentity = try self.inode(self.target)
+                } catch { mutationFailed = true }
+            } }
+            let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start()
+            await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
+            XCTAssertFalse(mutationFailed); XCTAssertNotNil(replacementIdentity); XCTAssertNotEqual(replacementIdentity, originalIdentity)
+            // Admission may already have created an empty V5 owner; the changed
+            // current generation must never become an availability operation.
+            XCTAssertEqual(try store.readAvailability()?.operations.count, 0)
+            XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), checkpointIdentity)
+            XCTAssertEqual(try rows(), saved); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), replacementIdentity)
+            if let displaced { XCTAssertEqual(try Data(contentsOf: displaced.appendingPathComponent(attachmentID + ".txt")), bytes) }
+            XCTAssertEqual(remote.requests, 0); await live.close(); XCTAssertEqual(try relocatedMarkers367(), 0)
+        }
+    }
+    func testRelocatedTaskRawRowAndSameByteEditorReplacementRefuseBeforeOwner() async throws {
+        for name in ["row-race", "editor-race"] {
+            let container = try relocationRoot367(name)
+            try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+            try relocate367(container)
+            let checkpoint = try Data(contentsOf: editor.url), initialEditorIdentity = try inode(editor.url), targetIdentity = try inode(target)
+            let settings = try Data(contentsOf: manifest), hooks = NativeAttachmentHostHooks()
+            var mutatedRows: String?, editorIdentity: String?, mutationFailed = false, hit = false
+            hooks.configureJobs = { jobs in jobs.afterWork = { _, _ in
+                guard !hit else { return }; hit = true
+                do {
+                    if name == "row-race" { _ = try self.sql("UPDATE tasks SET description='Intervening durable note',rev=2 WHERE id=?", [self.taskID]); mutatedRows = try self.rows() }
+                    else { editorIdentity = try self.exactEditorReplacement(); mutatedRows = try self.rows() }
+                } catch { mutationFailed = true }
+            } }
+            let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start()
+            await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
+            XCTAssertTrue(hit); XCTAssertFalse(mutationFailed); XCTAssertNil(try store.readVersioned())
+            XCTAssertEqual(try rows(), mutatedRows); XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint)
+            XCTAssertEqual(try inode(editor.url), editorIdentity ?? initialEditorIdentity)
+            XCTAssertEqual(try Data(contentsOf: manifest), settings); XCTAssertEqual(try inode(target), targetIdentity); XCTAssertEqual(try Data(contentsOf: target), bytes)
+            XCTAssertEqual(remote.requests, 0); await live.close(); XCTAssertEqual(try relocatedMarkers367(), 0)
+        }
+    }
+    func testRelocatedTaskSidecarReplacementAndFailedMarkerNeverEmitConfirmedDiagnostic() async throws {
+        for name in ["sidecar-race", "marker-failure"] {
+            let container = try relocationRoot367(name)
+            try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+            try relocate367(container)
+            let saved = try rows(), settings = try Data(contentsOf: manifest), targetIdentity = try inode(target)
+            let hooks = AttachmentDraftHostHooks(); var hit = false, retainedBytes: Data?, retainedIdentity: String?
+            hooks.boundary = { point in
+                if name == "sidecar-race" && point == .afterIntent {
+                    hit = true; retainedBytes = try Data(contentsOf: self.store.url)
+                    let original = try self.inode(self.store.url)
+                    try XCTUnwrap(retainedBytes).write(to: self.store.url, options: .atomic)
+                    retainedIdentity = try self.inode(self.store.url)
+                    XCTAssertNotEqual(original, retainedIdentity)
+                } else if name == "marker-failure" && point == .beforeMarker {
+                    hit = true; throw HostFailure("Synthetic unavailable checkpoint marker")
+                }
+            }
+            let live = host(); _ = try await live.start(); await live.configureAttachmentDraftHost(hooks)
+            await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
+            XCTAssertTrue(hit)
+            let op = try XCTUnwrap(store.readAvailability()?.operations.last)
+            XCTAssertEqual(op.phase, name == "sidecar-race" ? .intent : .resultDurable)
+            guard case .borrowed = op.resource else { return XCTFail("Failure may retain only the borrowed current proof") }
+            if let retainedBytes, let retainedIdentity { XCTAssertEqual(try Data(contentsOf: store.url), retainedBytes); XCTAssertEqual(try inode(store.url), retainedIdentity) }
+            XCTAssertEqual(try rows(), saved); XCTAssertEqual(try Data(contentsOf: manifest), settings)
+            XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), targetIdentity)
+            XCTAssertEqual(remote.requests, 0); await live.close(); XCTAssertEqual(try relocatedMarkers367(), 0)
+            if name == "marker-failure" {
+                let cold = host(); _ = try await cold.start()
+                let checkpoint = try XCTUnwrap(editor.read()?.snapshot)
+                // A before-marker failure retains resultDurable while the
+                // editor is already at after; explicit recovery settles that
+                // owed transition before ordinary Resume validation.
+                _ = try await cold.recoverAttachmentDraftV3(expectedSession: checkpoint.sessionID)
+                XCTAssertEqual(try store.readAvailability()?.operations.last?.phase, .checkpointed)
+                XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), targetIdentity)
+                await cold.close(); XCTAssertEqual(try relocatedMarkers367(), 0, "Cold replay uses ordinary Resume, not a new relocation admission marker")
+            }
+        }
+    }
+    func testRelocatedTaskCancellationAndCloseDrainAcceptedProofWithoutCheckpoint() async throws {
+        for name in ["cancel", "cancel-close"] {
+            let container = try relocationRoot367(name)
+            try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+            try relocate367(container)
+            let saved = try rows(), checkpoint = try Data(contentsOf: editor.url), identity = try inode(target)
+            let accepted = expectation(description: "Relocated typed proof admitted on native file queue")
+            let release = DispatchSemaphore(value: 0), hooks = NativeAttachmentHostHooks()
+            var held = false, jobs: NativeAttachmentFileJobs?
+            hooks.configureJobs = { value in jobs = value; value.beforeWork = { _, _ in
+                guard !held else { return }; held = true; accepted.fulfill()
+                guard release.wait(timeout: .now() + 10) == .success else { throw HostFailure("Synthetic proof barrier timed out") }
+            } }
+            let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start()
+            let raw = try request(), operation = Task { try await live.downloadTaskAttachmentV5(requestJSON: raw) }
+            await fulfillment(of: [accepted], timeout: 5); XCTAssertTrue(held); XCTAssertEqual(jobs?.counters.jobs, 1)
+            operation.cancel()
+            let closing: Task<Void, Never>? = name == "cancel-close" ? Task { await live.close() } : nil
+            // The accepted proof still owns the library even after cancellation.
+            let replacement = host(); await refusal { _ = try await replacement.start() }
+            release.signal(); await refusal { _ = try await operation.value }
+            if let closing { await closing.value } else { await live.close() }
+            XCTAssertEqual(jobs?.counters.jobs, 0); XCTAssertEqual(jobs?.counters.bytes, 0)
+            XCTAssertNil(try store.readVersioned()); XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint)
+            XCTAssertEqual(try rows(), saved); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), identity)
+            XCTAssertEqual(remote.requests, 0); XCTAssertEqual(try relocatedMarkers367(), 0)
+            _ = try await replacement.start()
+            let reply = try object(await replacement.downloadTaskAttachmentV5(requestJSON: request()))
+            XCTAssertEqual(reply["status"] as? String, "draftAvailable"); XCTAssertEqual(remote.requests, 0)
+            await replacement.close(); XCTAssertEqual(try relocatedMarkers367(), 1)
+        }
+    }
+    func testRelocatedTaskPreMoveV5AndMixedV4EvidenceCannotBeRebound() async throws {
+        for name in ["pre-move-v5", "pre-move-v4"] {
+            let container = try relocationRoot367(name)
+            try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+            let oldHost = host(); _ = try await oldHost.start()
+            if name == "pre-move-v5" {
+                let reply = try object(await oldHost.downloadTaskAttachmentV5(requestJSON: request()))
+                XCTAssertEqual(reply["status"] as? String, "draftAvailable")
+                before = try XCTUnwrap(editor.read()?.snapshot)
+            } else { _ = try await oldHost.beginAttachmentDraftV4(expectedSession: before.sessionID, expectedGeneration: before.generation) }
+            await oldHost.close(); try relocate367(container)
+            let saved = try rows(), sidecar = try Data(contentsOf: store.url), sidecarIdentity = try inode(store.url)
+            let checkpoint = try Data(contentsOf: editor.url), checkpointIdentity = try inode(editor.url), identity = try inode(target)
+            let live = host(); _ = try await live.start()
+            await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request(UUID().uuidString.lowercased())) }
+            XCTAssertEqual(try Data(contentsOf: store.url), sidecar); XCTAssertEqual(try inode(store.url), sidecarIdentity)
+            XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), checkpointIdentity)
+            XCTAssertEqual(try rows(), saved); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), identity)
+            XCTAssertEqual(remote.requests, 0); await live.close(); XCTAssertEqual(try relocatedMarkers367(), 0)
+        }
+    }
+    func testRelocatedTaskPendingOrdinaryCommandRefusesBeforeProofAndPreservesJournal() async throws {
+        let container = try relocationRoot367("pending")
+        try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+        try relocate367(container)
+        let faults = HostIOFaults(), live = host(faults: faults); _ = try await live.start()
+        let capture = try object(await live.call("captureOpen"))
+        faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Synthetic pending Capture COMMIT") } }
+        await refusal { _ = try await live.call("captureSubmit", argumentsJSON: self.json([self.json(["text": "Pending synthetic capture", "options": try XCTUnwrap(capture["options"]), "captureId": UUID().uuidString.lowercased(), "openAfterSave": false])])) }
+        let pendingBytes = try Data(contentsOf: journal), pendingIdentity = try inode(journal), saved = try rows()
+        let checkpoint = try Data(contentsOf: editor.url), checkpointIdentity = try inode(editor.url), identity = try inode(target)
+        await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
+        XCTAssertEqual(try Data(contentsOf: journal), pendingBytes); XCTAssertEqual(try inode(journal), pendingIdentity)
+        XCTAssertNil(try store.readVersioned()); XCTAssertEqual(try rows(), saved)
+        XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), checkpointIdentity)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), identity)
+        XCTAssertEqual(remote.requests, 0); await live.close(); XCTAssertEqual(try relocatedMarkers367(), 0)
+    }
+
 }

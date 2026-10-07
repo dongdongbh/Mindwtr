@@ -2574,33 +2574,52 @@ private final class Engine: @unchecked Sendable {
                       let initialURL = preflight["initialURL"] as? String, !initialURL.isEmpty,
                       let target = preflight["targetURI"] as? String, taskDownloadManagedPath(target, root: managed),
                       let original = selected["uri"] as? String else { throw Self.taskDownloadFailure }
-                guard original.isEmpty || taskDownloadManagedPath(original, root: managed) else { return try taskDownloadKnown("unavailable", request) }
+                var relocatedProof: NativeAttachmentFiles.BaselineAttachmentProof?
+                if !original.isEmpty && !taskDownloadManagedPath(original, root: managed) {
+                    // Only an existing hash-proven current target can repair a
+                    // relocated selection. The old path never gains read or
+                    // retirement authority, and a refusal never falls into GET.
+                    guard let mapped = try? relocatedFileOpenURI(selected), Self.ownedEqual(mapped, target),
+                          let proof = try coordinator.snapshotFileOpen(attachmentID: request.attachmentID,
+                            targetURI: target, cancellation: cancellation) else { return try taskDownloadKnown("unavailable", request) }
+                    do { try relocatedFileOpenProof(proof, selected: selected) }
+                    catch { return try taskDownloadKnown("generation-conflict", request) }
+                    relocatedProof = proof
+                    try requireTaskDownloadTurn(before: true); try cancellation.check()
+                }
                 turn.initialURL = initialURL; turn.originalURI = original; turn.targetURI = target
                 try coordinator.preflightDownloadV5(request, selectedJSON: attachmentJSON, targetURI: target, cancellation: cancellation)
                 try coordinator.beginV5(request, cancellation: cancellation)
                 turn.record = try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned()
                 try requireTaskDownloadTurn(before: true)
-                let rawConfig = try Self.ownedJSON(["backend": config[0].1.map { $0 as Any } ?? NSNull(), "url": config[1].1.map { $0 as Any } ?? NSNull(),
-                    "username": config[2].1.map { $0 as Any } ?? NSNull(), "allowInsecureHttp": config[3].1.map { $0 as Any } ?? NSNull(),
-                    "encryptionStateJSON": config[4].1.map { $0 as Any } ?? NSNull()])
-                let input = try Self.ownedJSON(["version": 1, "taskID": editor.snapshot.taskID, "beforePayloadJSON": editor.snapshot.payloadJSON,
-                    "requestJSON": request.json, "rawConfigJSON": rawConfig])
-                let block: @convention(block) (JSValue, JSValue) -> String = { [weak self, weak turn] metadata, bytes in
-                    guard let turn else { return "!MindwtrNativeError:Attachment preparation is unavailable" }
-                    guard let self, metadata.context === turn.runtime, bytes.context === turn.runtime,
-                          metadata.isString, bytes.isString, let metadata = metadata.toString(), let bytes = bytes.toString() else {
-                        turn.callbackRefused = true
-                        return "!MindwtrNativeError:Attachment preparation is unavailable"
-                    }
-                    do { return try self.taskDownloadSourceCallback(metadata, bytes, turn: turn, cancellation: cancellation) }
-                    catch { turn.callbackRefused = true; return "!MindwtrNativeError:Attachment preparation is unavailable" }
-                }
-                guard let callback = JSValue(object: block, in: runtime), runtime.exception == nil else { throw Self.taskDownloadFailure }
-                turn.preparing = true
                 let replyRaw: String
-                do { replyRaw = try invoke("iosTaskDraftPrepareAvailability", arguments: [input, callback], localCancellation: cancellation) }
-                catch { turn.preparing = false; jobs.drain(); throw error }
-                turn.preparing = false; jobs.drain()
+                if relocatedProof != nil {
+                    var resolved = selected
+                    resolved["uri"] = target; resolved["localStatus"] = "available"
+                    replyRaw = try Self.ownedJSON(["version": 1, "requestId": request.id, "status": "available",
+                        "attachmentJSON": Self.ownedJSON(resolved)])
+                } else {
+                    let rawConfig = try Self.ownedJSON(["backend": config[0].1.map { $0 as Any } ?? NSNull(), "url": config[1].1.map { $0 as Any } ?? NSNull(),
+                        "username": config[2].1.map { $0 as Any } ?? NSNull(), "allowInsecureHttp": config[3].1.map { $0 as Any } ?? NSNull(),
+                        "encryptionStateJSON": config[4].1.map { $0 as Any } ?? NSNull()])
+                    let input = try Self.ownedJSON(["version": 1, "taskID": editor.snapshot.taskID, "beforePayloadJSON": editor.snapshot.payloadJSON,
+                        "requestJSON": request.json, "rawConfigJSON": rawConfig])
+                    let block: @convention(block) (JSValue, JSValue) -> String = { [weak self, weak turn] metadata, bytes in
+                        guard let turn else { return "!MindwtrNativeError:Attachment preparation is unavailable" }
+                        guard let self, metadata.context === turn.runtime, bytes.context === turn.runtime,
+                              metadata.isString, bytes.isString, let metadata = metadata.toString(), let bytes = bytes.toString() else {
+                            turn.callbackRefused = true
+                            return "!MindwtrNativeError:Attachment preparation is unavailable"
+                        }
+                        do { return try self.taskDownloadSourceCallback(metadata, bytes, turn: turn, cancellation: cancellation) }
+                        catch { turn.callbackRefused = true; return "!MindwtrNativeError:Attachment preparation is unavailable" }
+                    }
+                    guard let callback = JSValue(object: block, in: runtime), runtime.exception == nil else { throw Self.taskDownloadFailure }
+                    turn.preparing = true
+                    do { replyRaw = try invoke("iosTaskDraftPrepareAvailability", arguments: [input, callback], localCancellation: cancellation) }
+                    catch { turn.preparing = false; jobs.drain(); throw error }
+                    turn.preparing = false; jobs.drain()
+                }
                 try requireTaskDownloadTurn(before: true); try cancellation.check()
                 guard !turn.callbackRefused, replyRaw.utf8.count <= 2 * 1024 * 1024,
                       let reply = try NativeJSON.jsonObject(with: Data(replyRaw.utf8)) as? [String: Any],
@@ -2633,6 +2652,7 @@ private final class Engine: @unchecked Sendable {
                         guard let resolved = try NativeJSON.jsonObject(with: Data(attachment.utf8)) as? [String: Any], let uri = resolved["uri"] as? String,
                               Self.ownedEqual(uri, original) || Self.ownedEqual(uri, target), !uri.isEmpty,
                               let proof = try coordinator.snapshotFileOpen(attachmentID: request.attachmentID, targetURI: uri, cancellation: cancellation) else { throw Self.taskDownloadFailure }
+                        if let relocatedProof { guard proof == relocatedProof else { throw Self.taskDownloadFailure } }
                         resource = .borrowed(proof: .init(sha256: proof.sha256, size: proof.size, identity: proof.identity, directoryIdentity: proof.directoryIdentity))
                     } else { resource = .none }
                 }
@@ -2645,6 +2665,26 @@ private final class Engine: @unchecked Sendable {
                 let result = try coordinator.acceptPreparedAvailabilityV5(request: request, preparedJSON: frozen, resource: resource, cancellation: cancellation)
                 // Optional scratch cleanup cannot revoke the durable checkpoint ACK.
                 try? finishTaskDownloadSource(turn, completed: true)
+                if let relocatedProof {
+                    let store = NativeAttachmentDraftStore(databaseURL: databaseURL)
+                    guard let acknowledged = try store.readVersioned(), case .availability(let record) = acknowledged.record,
+                          let acknowledgedEditor = try editorDrafts.readOwnedCheckpoint(), acknowledgedEditor.attempt == nil,
+                          Self.ownedEqual(record.session.checkpoint, acknowledgedEditor.snapshot),
+                          let op = record.operations.last, op.phase == .checkpointed,
+                          Self.ownedEqual(op.requestJSON, request.json), case .borrowed = op.resource else { throw Self.taskDownloadFailure }
+                    func requireAcknowledged() throws {
+                        try requireTaskDownloadTurn(); try cancellation.check()
+                        guard let actual = try store.readVersioned(), acknowledged.matches(actual),
+                              let actualEditor = try editorDrafts.readOwnedCheckpoint(), acknowledgedEditor.matches(actualEditor) else { throw Self.taskDownloadFailure }
+                        let proof = try coordinator.snapshotFileOpen(attachmentID: request.attachmentID, targetURI: target, cancellation: cancellation)
+                        try requireTaskDownloadTurn(); try cancellation.check()
+                        guard proof == relocatedProof, let after = try store.readVersioned(), acknowledged.matches(after),
+                              let afterEditor = try editorDrafts.readOwnedCheckpoint(), acknowledgedEditor.matches(afterEditor) else { throw Self.taskDownloadFailure }
+                    }
+                    try requireAcknowledged()
+                    _ = try? invoke("attachmentDraftAcknowledged", arguments: ["relocated-task-availability", "confirmed"])
+                    try requireAcknowledged()
+                }
                 return result
             } catch {
                 turn.preparing = false
