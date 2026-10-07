@@ -30,6 +30,8 @@ const input = (selected = attachment()) => ({ version: 1, taskID: 'task362',
 });
 const rawConfig = (changes: Record<string, unknown> = {}) => JSON.stringify({ backend: 'webdav',
     url: 'https://synthetic.invalid/dav/data.json', username: 'fixture', allowInsecureHttp: null, encryptionStateJSON: null, ...changes });
+const cloudConfig = (changes: Record<string, unknown> = {}) => JSON.stringify({ backend: 'cloud',
+    url: 'https://synthetic.invalid/v1/data', provider: null, allowInsecureHttp: 'false', encryptionStateJSON: null, ...changes });
 const nativeFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = nativeFetch; setSha256HexProvider(null); });
 
@@ -67,7 +69,9 @@ const fixture = () => {
     };
     const run = (selected = attachment(), changes: Record<string, unknown> = {}, signal = new AbortController().signal) =>
         prepareNativeTaskAttachmentAvailability(JSON.stringify({ ...input(selected), rawConfigJSON: rawConfig(changes) }), bindings, channels, signal);
-    return { memory, fileCalls, secretCalls, legacyCalls, sources, requests, stableHashes, channels, bindings, run,
+    const runConfig = (captured: string, selected = attachment()) => prepareNativeTaskAttachmentAvailability(
+        JSON.stringify({ ...input(selected), rawConfigJSON: captured }), bindings, channels, new AbortController().signal);
+    return { memory, fileCalls, secretCalls, legacyCalls, sources, requests, stableHashes, channels, bindings, run, runConfig,
         wire: (bytes: Uint8Array) => { wire = bytes; }, status: (value: number) => { status = value; },
         secret: (value: string | null) => { secretValue = value; }, failure: (value: Error) => { secretFailure = value; },
         key: (value: string | null) => { keyValue = value; }, reply: (value: string) => { sourceReply = value; },
@@ -75,9 +79,55 @@ const fixture = () => {
 };
 
 describe('selected Task Download private JS producer', () => {
-    it('binds the shared endpoint and exact download filename without URI extension fallback', () => {
+    it('binds the shared selfhosted endpoint and preserves the original attachment identity', async () => {
+        const f = fixture(), selected = attachment({ fileHash: digest(BYTES) });
+        const preflight = await prepareNativeTaskAttachmentAvailabilityPreflight(JSON.stringify({ ...input(selected),
+            cloudURL: 'https://synthetic.invalid/v1/data/', cloudProvider: null, encryptionStateJSON: null, managedDirectoryURI: MANAGED }));
+        expect(preflight.initialURL).toBe('https://synthetic.invalid/v1/attachments/baseline362.txt');
+        expect(preflight.attachmentJSON).toBe(JSON.stringify(selected));
+        expect((await f.runConfig(cloudConfig(), selected)).status).toBe('prepared');
+        expect(f.requests).toEqual([{ url: preflight.initialURL, authorization: 'Bearer synthetic-credential' }]);
+        expect(f.secretCalls).toEqual(['mindwtr_cloud_token']); expect(f.legacyCalls).toEqual([]);
+        expect(f.sources[0].base64).toBe(bytesToBase64(BYTES)); expect(f.sources[0].metadata.attachmentId).toBe(selected.id);
+        expect(f.fileCalls).toEqual(['getInfo']); expect(f.memory.files.size).toBe(0);
+    });
+
+    it('reads a missing secure cloud token from legacy without migrating or sharing WebDAV authority', async () => {
+        const f = fixture(); f.secret(null);
+        expect((await f.runConfig(cloudConfig({ provider: ' selfhosted ' }))).status).toBe('prepared');
+        expect(f.secretCalls).toEqual(['mindwtr_cloud_token']); expect(f.legacyCalls).toEqual(['@mindwtr_cloud_token']);
+        expect(f.requests[0].authorization).toBe('Bearer legacy-credential'); expect(f.memory.files.size).toBe(0);
+    });
+
+    it.each(['dropbox', 'cloudkit', 'file', 'unknown'])('rejects captured unsupported cloud provider %s before IO', async (provider) => {
+        const f = fixture(); await expect(f.runConfig(cloudConfig({ provider }))).rejects.toThrow('INVALID_INPUT');
+        expect(f.fileCalls).toEqual([]); expect(f.secretCalls).toEqual([]); expect(f.requests).toEqual([]); expect(f.sources).toEqual([]);
+        await expect(prepareNativeTaskAttachmentAvailabilityPreflight(JSON.stringify({ ...input(),
+            cloudURL: 'https://synthetic.invalid/v1/data', cloudProvider: provider, encryptionStateJSON: null, managedDirectoryURI: MANAGED }))).rejects.toThrow('INVALID_INPUT');
+    });
+
+    it.each(['enable', 'disable', 'change-passphrase'])('refuses incomplete cloud transition %s before any IO', async (kind) => {
+        const f = fixture(), state = JSON.stringify({ state: 'off', incompleteTransition: kind });
+        await expect(prepareNativeTaskAttachmentAvailabilityPreflight(JSON.stringify({ ...input(),
+            cloudURL: 'https://synthetic.invalid/v1/data', cloudProvider: 'selfhosted', encryptionStateJSON: state,
+            managedDirectoryURI: MANAGED }))).rejects.toThrow('SYNC_ENCRYPTION_TRANSITION_INCOMPLETE');
+        await expect(f.runConfig(cloudConfig({ encryptionStateJSON: state }))).rejects.toThrow('SYNC_ENCRYPTION_TRANSITION_INCOMPLETE');
+        expect(f.fileCalls).toEqual([]); expect(f.secretCalls).toEqual([]); expect(f.requests).toEqual([]); expect(f.sources).toEqual([]);
+    });
+
+    it.each(['enabled', 'remote-encrypted-no-key', 'remote-plaintext', 'off'])('retains complete encryption posture %s for plaintext cloud availability', async (posture) => {
+        const f = fixture(); f.key(bytesToBase64(new Uint8Array(32).fill(7)));
+        const state = JSON.stringify({ state: posture, discoveredSalt: '01'.repeat(16), discoveredParams: SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+            ...(posture === 'off' ? { partlyEncryptedScope: JSON.stringify(['webdav', 'https://other.invalid', 'synthetic']) } : {}) });
+        const captured = cloudConfig({ encryptionStateJSON: state });
+        expect((await f.runConfig(captured)).status).toBe('prepared'); expect(f.bindings.rawConfigJSON).toBe(rawConfig());
+        expect(f.sources[0].base64).toBe(bytesToBase64(BYTES)); expect(f.sources[0].metadata.sha256).toBe(digest(BYTES));
+        expect(f.requests).toHaveLength(1); expect(f.legacyCalls).toEqual([]); expect(f.memory.files.size).toBe(0);
+    });
+
+    it('binds the shared endpoint and exact download filename without URI extension fallback', async () => {
         const selected = attachment({ cloudKey: 'attachments/', title: 'No extension', uri: MANAGED + 'old.pdf' });
-        const result = prepareNativeTaskAttachmentAvailabilityPreflight(JSON.stringify({ ...input(selected),
+        const result = await prepareNativeTaskAttachmentAvailabilityPreflight(JSON.stringify({ ...input(selected),
             webdavURL: 'https://synthetic.invalid/dav/DATA.JSON/', managedDirectoryURI: MANAGED }));
         expect(result).toEqual({ version: 1, requestId: REQUEST, attachmentJSON: JSON.stringify(selected),
             initialURL: 'https://synthetic.invalid/dav/attachments/', targetURI: MANAGED + selected.id });
@@ -85,7 +135,7 @@ describe('selected Task Download private JS producer', () => {
         expect(getAttachmentDownloadFileName(attachment({ cloudKey: 'attachments/', title: 'Fixture.pdf' }))).toBe('baseline362.pdf');
     });
 
-    it.each(['extra', 'request', 'identity', 'payload', 'version', 'directory'])('rejects closed preflight grammar: %s', (mutation) => {
+    it.each(['extra', 'request', 'identity', 'payload', 'version', 'directory'])('rejects closed preflight grammar: %s', async (mutation) => {
         const value: Record<string, unknown> = { ...input(), webdavURL: 'https://synthetic.invalid/dav', managedDirectoryURI: MANAGED };
         if (mutation === 'extra') value.extra = true;
         if (mutation === 'request') value.requestJSON = JSON.stringify({ ...JSON.parse(value.requestJSON as string), extra: true });
@@ -93,7 +143,7 @@ describe('selected Task Download private JS producer', () => {
         if (mutation === 'payload') value.beforePayloadJSON = '{}';
         if (mutation === 'version') value.version = '1';
         if (mutation === 'directory') value.managedDirectoryURI = 'https://synthetic.invalid/';
-        expect(() => prepareNativeTaskAttachmentAvailabilityPreflight(JSON.stringify(value))).toThrow('INVALID_INPUT');
+        await expect(prepareNativeTaskAttachmentAvailabilityPreflight(JSON.stringify(value))).rejects.toThrow('INVALID_INPUT');
     });
 
     it('returns prepared bytes and keeps Task metadata, stores and stable SHA provider untouched', async () => {
@@ -122,8 +172,13 @@ describe('selected Task Download private JS producer', () => {
         expect(await computeSha256Hex(BYTES)).toBe(digest(BYTES));
     });
 
-    it.each(['off', 'cloud', null])('refuses unsupported stored backend %s before file/secret/network work', async (backend) => {
+    it.each(['off', null])('refuses unsupported stored backend %s before file/secret/network work', async (backend) => {
         const f = fixture(); expect(await f.run(attachment(), { backend })).toEqual({ version: 1, requestId: REQUEST, status: 'unavailable' });
+        expect(f.fileCalls).toEqual([]); expect(f.secretCalls).toEqual([]); expect(f.requests).toEqual([]); expect(f.sources).toEqual([]);
+    });
+
+    it('rejects a cloud backend supplied with the WebDAV configuration grammar before IO', async () => {
+        const f = fixture(); await expect(f.run(attachment(), { backend: 'cloud' })).rejects.toThrow('INVALID_INPUT');
         expect(f.fileCalls).toEqual([]); expect(f.secretCalls).toEqual([]); expect(f.requests).toEqual([]); expect(f.sources).toEqual([]);
     });
 

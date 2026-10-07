@@ -879,6 +879,7 @@ private final class Engine: @unchecked Sendable {
         let editor: EditorDraftStore.OwnedCheckpoint
         let taskRowsJSON: String
         let config: [(String, String?)]
+        let cloudToken: String?
         var record: NativeAttachmentDraftStore.VersionedSnapshot?
         var legacy: [(String, String?)] = []
         var initialURL = ""
@@ -893,9 +894,9 @@ private final class Engine: @unchecked Sendable {
         init(generation: UInt64, runtime: JSContext, jobs: NativeAttachmentFileJobs, storage: NativeDeviceKV,
              request: NativeAttachmentDraftCoordinator.AvailabilityDownloadRequest, cancellation: NativeAttachmentCancellation,
              editor: EditorDraftStore.OwnedCheckpoint,
-             taskRowsJSON: String, config: [(String, String?)], record: NativeAttachmentDraftStore.VersionedSnapshot?) {
+             taskRowsJSON: String, config: [(String, String?)], cloudToken: String? = nil, record: NativeAttachmentDraftStore.VersionedSnapshot?) {
             self.generation = generation; self.runtime = runtime; self.jobs = jobs; self.storage = storage
-            self.request = request; self.cancellation = cancellation; self.editor = editor; self.taskRowsJSON = taskRowsJSON; self.config = config; self.record = record
+            self.request = request; self.cancellation = cancellation; self.editor = editor; self.taskRowsJSON = taskRowsJSON; self.config = config; self.cloudToken = cloudToken; self.record = record
         }
     }
     private var taskDownloadTurn: TaskDownloadTurn?
@@ -2474,8 +2475,19 @@ private final class Engine: @unchecked Sendable {
         try attachmentDraftOperation { try attachmentDraftCoordinatorV3(cancellation: cancellation).addV3(requestJSON, cancellation: cancellation) }
     }
     private static let taskDownloadConfigKeys = ["@mindwtr_sync_backend", "@mindwtr_webdav_url", "@mindwtr_webdav_username",
-        "@mindwtr_webdav_allow_insecure_http", "@mindwtr_sync_encryption_state_v1"]
+        "@mindwtr_webdav_allow_insecure_http", "@mindwtr_sync_encryption_state_v1", "@mindwtr_cloud_url",
+        "@mindwtr_cloud_provider", "@mindwtr_cloud_allow_insecure_http"]
     private static let taskDownloadLegacyKeys = Set(["@mindwtr_webdav_password", "@mindwtr_sync_encryption_key_v1"])
+    private static let taskDownloadCloudLegacyKeys = Set(["@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1"])
+    private static func taskDownloadSelfHosted(_ config: [(String, String?)]) -> Bool {
+        guard config.count == taskDownloadConfigKeys.count, config[0].1 == "cloud" else { return false }
+        let provider = config[6].1?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return provider.isEmpty || provider == "selfhosted"
+    }
+    private func taskDownloadCloudToken(_ cancellation: NativeAttachmentCancellation) throws -> String? {
+        guard let secretJobs else { throw Self.taskDownloadFailure }
+        return try secretJobs.readCloudTokenForAttachmentOwner(cancellation: cancellation)
+    }
     private static var taskDownloadFailure: HostFailure { HostFailure("Attachment download could not be confirmed; retained evidence requires exact recovery") }
     private func taskDownloadRows(_ taskID: String) throws -> String {
         let raw = try requireDatabase().execute("SELECT * FROM tasks WHERE id=?", parametersJSON: Self.ownedJSON([taskID]))
@@ -2498,6 +2510,9 @@ private final class Engine: @unchecked Sendable {
               current.count == turn.config.count else { throw Self.taskDownloadFailure }
         for (name, expected) in turn.legacy {
             guard Self.taskDownloadOptionalEqual(try turn.storage.get(name), expected) else { throw Self.taskDownloadFailure }
+        }
+        if Self.taskDownloadSelfHosted(turn.config) {
+            guard Self.taskDownloadOptionalEqual(try taskDownloadCloudToken(turn.cancellation), turn.cloudToken) else { throw Self.taskDownloadFailure }
         }
         if before {
             let actual = try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned()
@@ -2593,11 +2608,16 @@ private final class Engine: @unchecked Sendable {
                   let editor = try editorDrafts.readOwnedCheckpoint(), editor.attempt == nil,
                   Self.ownedEqual(editor.snapshot.sessionID, request.session), editor.snapshot.generation == request.generation else { throw Self.taskDownloadFailure }
             let config = try storage.multiGet(Self.taskDownloadConfigKeys)
-            guard config.count == 5 else { throw Self.taskDownloadFailure }
-            guard config[0].1 == "webdav", let url = config[1].1, !url.isEmpty else { return try taskDownloadKnown("unavailable", request) }
+            guard config.count == Self.taskDownloadConfigKeys.count else { throw Self.taskDownloadFailure }
+            let cloud = Self.taskDownloadSelfHosted(config)
+            guard config[0].1 == "webdav" || cloud, let url = config[cloud ? 5 : 1].1, !url.isEmpty else { return try taskDownloadKnown("unavailable", request) }
+            let legacyToken = cloud ? try storage.get("@mindwtr_cloud_token") : nil
+            let cloudToken = cloud ? try taskDownloadCloudToken(cancellation) : nil
             let turn = TaskDownloadTurn(generation: attachmentGeneration, runtime: runtime, jobs: jobs, storage: storage,
                 request: request, cancellation: cancellation, editor: editor, taskRowsJSON: try taskDownloadRows(editor.snapshot.taskID), config: config,
+                cloudToken: cloudToken,
                 record: try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned())
+            if cloud { turn.legacy.append(("@mindwtr_cloud_token", legacyToken)) }
             taskDownloadTurn = turn
             defer { turn.preparing = false; taskDownloadTurn = nil; scheduleAttachmentIdle(immediate: true) }
             do {
@@ -2606,9 +2626,14 @@ private final class Engine: @unchecked Sendable {
                 })
                 try requireTaskDownloadTurn(before: true); try cancellation.check()
                 let managed = try taskDownloadManagedURI(jobs)
-                let preflightJSON = try Self.ownedJSON(["version": 1, "taskID": editor.snapshot.taskID,
+                var preflightInput: [String: Any] = ["version": 1, "taskID": editor.snapshot.taskID,
                     "beforePayloadJSON": editor.snapshot.payloadJSON, "requestJSON": request.json,
-                    "webdavURL": url, "managedDirectoryURI": managed])
+                    (cloud ? "cloudURL" : "webdavURL"): url, "managedDirectoryURI": managed]
+                if cloud {
+                    preflightInput["cloudProvider"] = config[6].1.map { $0 as Any } ?? NSNull()
+                    preflightInput["encryptionStateJSON"] = config[4].1.map { $0 as Any } ?? NSNull()
+                }
+                let preflightJSON = try Self.ownedJSON(preflightInput)
                 let preflightRaw = try invoke("attachmentDraftAvailabilityPreflight", arguments: [preflightJSON], localCancellation: cancellation)
                 try requireTaskDownloadTurn(before: true)
                 guard let preflight = try NativeJSON.jsonObject(with: Data(preflightRaw.utf8)) as? [String: Any],
@@ -2645,8 +2670,8 @@ private final class Engine: @unchecked Sendable {
                     replyRaw = try Self.ownedJSON(["version": 1, "requestId": request.id, "status": "available",
                         "attachmentJSON": Self.ownedJSON(resolved)])
                 } else {
-                    let rawConfig = try Self.ownedJSON(["backend": config[0].1.map { $0 as Any } ?? NSNull(), "url": config[1].1.map { $0 as Any } ?? NSNull(),
-                        "username": config[2].1.map { $0 as Any } ?? NSNull(), "allowInsecureHttp": config[3].1.map { $0 as Any } ?? NSNull(),
+                    let rawConfig = try Self.ownedJSON(["backend": config[0].1.map { $0 as Any } ?? NSNull(), "url": config[cloud ? 5 : 1].1.map { $0 as Any } ?? NSNull(),
+                        (cloud ? "provider" : "username"): config[cloud ? 6 : 2].1.map { $0 as Any } ?? NSNull(), "allowInsecureHttp": config[cloud ? 7 : 3].1.map { $0 as Any } ?? NSNull(),
                         "encryptionStateJSON": config[4].1.map { $0 as Any } ?? NSNull()])
                     let input = try Self.ownedJSON(["version": 1, "taskID": editor.snapshot.taskID, "beforePayloadJSON": editor.snapshot.payloadJSON,
                         "requestJSON": request.json, "rawConfigJSON": rawConfig])
@@ -2711,6 +2736,13 @@ private final class Engine: @unchecked Sendable {
                 let result = try coordinator.acceptPreparedAvailabilityV5(request: request, preparedJSON: frozen, resource: resource, cancellation: cancellation)
                 // Optional scratch cleanup cannot revoke the durable checkpoint ACK.
                 try? finishTaskDownloadSource(turn, completed: true)
+                if cloud && status != "unrecoverable" {
+                    // A diagnostic cannot revoke a durable checkpoint or grant
+                    // availability when captured authority is no longer current.
+                    do { try requireTaskDownloadTurn()
+                        _ = try? invoke("attachmentDraftAcknowledged", arguments: ["selfhosted-task-availability", "confirmed"])
+                    } catch { }
+                }
                 if let relocatedProof {
                     let store = NativeAttachmentDraftStore(databaseURL: databaseURL)
                     guard let acknowledged = try store.readVersioned(), case .availability(let record) = acknowledged.record,
@@ -16165,6 +16197,13 @@ private final class Engine: @unchecked Sendable {
                let relocated = try relocatedProjectAvailability(requestJSON: requestJSON, callback: callback, cancellation: cancellation) {
                 try denyCleanupOwner(); return relocated
             }
+            if command == "projectAttachmentDownload" {
+                let storage = try requireDeviceStorageAdmission(), saved = try storage.multiGet(Self.taskDownloadConfigKeys)
+                // Relocated repair has its own native owner above. Ordinary cloud
+                // Project download remains closed until preparation and metadata
+                // persistence share a native owner; it must not stage bytes or queue writes.
+                if Self.taskDownloadSelfHosted(saved) { throw Self.foregroundSyncFailure }
+            }
             if command == "runSyncEncryptionAction" {
                 try Self.validateEncryptionUnlockRequest(requestJSON)
                 let storage = try requireDeviceStorageAdmission()
@@ -16270,6 +16309,9 @@ private final class Engine: @unchecked Sendable {
         guard let mapped = try relocatedFileOpenURI(selected) else { return nil }
         let generation = attachmentGeneration, deviceBefore = try projectAvailabilityDevice()
         let storage = try requireDeviceStorageAdmission(), config = try storage.multiGet(Self.taskDownloadConfigKeys)
+        let cloud = Self.taskDownloadSelfHosted(config)
+        let legacyToken = cloud ? try storage.get("@mindwtr_cloud_token") : nil
+        let cloudToken = cloud ? try taskDownloadCloudToken(cancellation) : nil
         var after: [String: Any]?, writesAllowed = false
         func commonOwner() throws {
             try cancellation.check(); try self.denyCleanupOwner()
@@ -16287,6 +16329,10 @@ private final class Engine: @unchecked Sendable {
             guard actual.count == config.count, zip(actual, config).allSatisfy({
                 Self.ownedEqual($0.0.0, $0.1.0) && Self.taskDownloadOptionalEqual($0.0.1, $0.1.1)
             }) else { throw Self.foregroundSyncFailure }
+            if cloud {
+                guard Self.taskDownloadOptionalEqual(try storage.get("@mindwtr_cloud_token"), legacyToken),
+                      Self.taskDownloadOptionalEqual(try self.taskDownloadCloudToken(cancellation), cloudToken) else { throw Self.foregroundSyncFailure }
+            }
         }
         func rowOwner() throws {
             try commonOwner()
@@ -16314,7 +16360,8 @@ private final class Engine: @unchecked Sendable {
         try rowOwner()
         let input = try Self.ownedJSON(["projectId": projectID, "attachmentId": attachmentID,
             "revision": revision, "managedDirectoryURI": projectManagedURI()])
-        let raw = try invoke("projectAttachmentAvailabilityPreflight", arguments: [input], localCancellation: cancellation)
+        let raw = try invoke("projectAttachmentAvailabilityPreflight",
+            arguments: cloud ? [input, config[4].1.map { $0 as Any } ?? NSNull()] : [input], localCancellation: cancellation)
         try rowOwner()
         guard let preflight = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               Set(preflight.keys) == Set(["revision", "project", "targetURI"]), preflight["revision"] as? String == revision,
@@ -16339,7 +16386,10 @@ private final class Engine: @unchecked Sendable {
         var confirmed = false
         defer {
             turn.live = false; projectAvailabilityTurn = nil
-            if confirmed { _ = try? invoke("attachmentDraftAcknowledged", arguments: ["relocated-project-availability", "confirmed"]) }
+            if confirmed {
+                _ = try? invoke("attachmentDraftAcknowledged", arguments: ["relocated-project-availability", "confirmed"])
+                if cloud { _ = try? invoke("attachmentDraftAcknowledged", arguments: ["selfhosted-project-availability", "confirmed"]) }
+            }
             scheduleAttachmentIdle(immediate: true)
         }
         writesAllowed = true
@@ -17590,7 +17640,7 @@ private final class Engine: @unchecked Sendable {
     }
     private func taskDownloadLegacyRead(_ names: [String]) throws -> [(String, String?)] {
         guard let turn = taskDownloadTurn, turn.preparing, !names.isEmpty,
-              names.count <= 2, names.allSatisfy({ Self.taskDownloadLegacyKeys.contains($0) }) else { throw Self.deviceStorageUnavailable }
+              names.count <= 2, names.allSatisfy({ (Self.taskDownloadSelfHosted(turn.config) ? Self.taskDownloadCloudLegacyKeys : Self.taskDownloadLegacyKeys).contains($0) }) else { throw Self.deviceStorageUnavailable }
         try requireTaskDownloadTurn(before: true)
         let values = try turn.storage.multiGet(names)
         for (name, value) in values {
@@ -17704,7 +17754,7 @@ private final class Engine: @unchecked Sendable {
             guard turn.preparing else { throw Self.taskDownloadFailure }
             guard let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any],
                   Set(raw.keys) == Set(["op", "key"]), raw["op"] as? String == "get", let account = raw["key"] as? String,
-                  ["mindwtr_webdav_password", "mindwtr_sync_encryption_key_v1"].contains(account) else { throw Self.taskDownloadFailure }
+                  [Self.taskDownloadSelfHosted(turn.config) ? "mindwtr_cloud_token" : "mindwtr_webdav_password", "mindwtr_sync_encryption_key_v1"].contains(account) else { throw Self.taskDownloadFailure }
             return
         }
         guard started, !closed, !recoveryActivationPending, pending == nil,

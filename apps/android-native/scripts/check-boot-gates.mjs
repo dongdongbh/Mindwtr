@@ -1189,8 +1189,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
-    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected;/);
-    assert.match(hostEntry, /const result = await iosManualSync\?\.prepareAttachmentAvailableDetailed\?\.\(attachment\);/);
+    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected;/);
+    assert.match(hostEntry, /const result = await \(iosSelfHostedProjectAttachments \?\? iosManualSync\)\?\.prepareAttachmentAvailableDetailed\?\.\(attachment\);/);
     assert.match(host, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];/);
     // An entry replays only while it fits its write as host-entry takes it (WriteJournal.SHAPES): a JSON object for `json`, a
     // boolean for a boolean, a Menu command for menuCommand's name, text for the rest; MENU names exactly host-entry's
@@ -3771,6 +3771,15 @@ export function createNativeHostContract(bindings = {}) {
       globalThis.afterDownload?.();
       return globalThis.attachmentReply;
     },
+    async downloadRelocatedProjectAttachment(input, currentTargetURI) {
+      globalThis.attachmentInputs.push(['downloadRelocatedProjectAttachment', input, currentTargetURI]);
+      globalThis.downloadHosts.push(bindings.attachments);
+      await globalThis.downloadHold;
+      if (globalThis.downloadFatal) throw new RealCleanupError();
+      if (globalThis.downloadError) throw new Error(globalThis.downloadError);
+      globalThis.afterDownload?.();
+      return globalThis.attachmentReply;
+    },
     async openAttachment(input) { globalThis.attachmentInputs.push(['openAttachment', input]); return globalThis.attachmentReply; },
     async settleTaskDraftAttachments(input) { globalThis.attachmentInputs.push(['settleTaskDraftAttachments', input]); return globalThis.attachmentReply; },
     editTaskChecklist(input) {
@@ -4271,7 +4280,7 @@ for (const [bridge, receipt, operation] of [
 // Actual contract state admission and availability/installer/crypto/JSC acceptance have separate suites.
 {
     const syncFixture = `
-export function createHostSyncCrypto() { throw new Error('Task Download crypto is not bound in Project entry fixture'); }
+export function createHostSyncCrypto() { return {}; }
 export function isNativeIosSelfHostedProvider(value) { return !value?.trim() || value.trim() === 'selfhosted'; }
 export function createNativeSync() {
   globalThis.syncFactoryCalls++;
@@ -4394,8 +4403,8 @@ export function createNativeSync() {
     console.log(`Selected encryption: ${invalidEncryptionInputs.length} invalid envelopes refused before storage; ${unsupportedEncryptionBackends.length} providers refused before factory; ${selectedEncryptionActions.length} WebDAV and ${localEncryptionActions.length * locallyRoutedBackends.length} local envelopes routed with exact mode and UUID ownership; ${locallyRoutedBackends.length} core refusals preserved (NodeVM)`);
     const foreground = create();
     assert.equal((await boot(foreground)).ok, true);
-    const foregroundCommand = (name, value) => poll(foreground,
-        foreground.MindwtrHost.iosForegroundSync(name, JSON.stringify(value), () => ''));
+    const foregroundCommand = (name, value, currentTargetURI) => poll(foreground,
+        foreground.MindwtrHost.iosForegroundSync(name, JSON.stringify(value), () => '', currentTargetURI));
     const selfHostedFields = { url: 'https://synthetic398.invalid/v1/data', token: null, allowInsecureHttp: false };
     const webdavFields = { url: 'https://synthetic398.invalid/data.json', username: 'synthetic', password: null, allowInsecureHttp: false };
     const request = { requestId: '11111111-1111-1111-1111-111111111111', revision: 'config-398' };
@@ -4448,13 +4457,41 @@ export function createNativeSync() {
     }
     foreground.incompleteTransition = false;
     assert.equal((await foregroundCommand('selectSyncBackend', { requestId: request.requestId, option: 'selfhosted' })).value.ok, true);
+    // Ordinary cloud Project requests refuse independently at entry, even when
+    // configuration is valid. They never reach options, factory or availability.
+    const ordinaryCloudProject = create(); assert.equal((await boot(ordinaryCloudProject)).ok, true);
+    ordinaryCloudProject.storedBackend = 'cloud';
+    const ordinaryLogs = ordinaryCloudProject.logText;
+    for (const provider of [undefined, '', 'selfhosted', ' selfhosted ']) {
+        ordinaryCloudProject.storedProvider = provider;
+        assert.deepEqual((await command(ordinaryCloudProject)).value, { ok: false, error: { code: 'ACTION_FAILED',
+            message: 'This sync provider is not available in native iOS yet; the stored configuration is unchanged' } });
+    }
+    assert.equal(ordinaryCloudProject.syncFactoryCalls, 0); assert.equal(ordinaryCloudProject.secretReads, 0);
+    assert.equal(ordinaryCloudProject.projectOptionsReads ?? 0, 0); assert.equal(ordinaryCloudProject.attachmentInputs.length, 0);
+    assert.equal(ordinaryCloudProject.logText, ordinaryLogs, 'Gated ordinary cloud Project emits no completion marker');
     const downloadsBefore = foreground.attachmentInputs.length;
-    assert.equal((await foregroundCommand('projectAttachmentDownload', input)).value.error.code, 'ACTION_FAILED');
-    assert.equal(foreground.attachmentInputs.length, downloadsBefore, 'Self-hosted Project availability waits for native attachment authority');
+    const localForegroundHost = foreground.contractBindings.attachments;
+    const mappedTarget = attachment.uri;
+    assert.equal((await foregroundCommand('projectAttachmentDownload', input, mappedTarget)).value.ok, true);
+    assert.equal(foreground.attachmentInputs.length, downloadsBefore + 1, 'Saved selfhosted relocated Project routes through selected availability');
+    assert.deepEqual(JSON.parse(JSON.stringify(foreground.attachmentInputs.at(-1))), ['downloadRelocatedProjectAttachment', {
+        ...input, managedDirectoryURI: mappedTarget.slice(0, mappedTarget.lastIndexOf('/') + 1),
+    }, mappedTarget]);
+    assert.notEqual(foreground.downloadHosts.at(-1), foreground.remoteAttachmentHost, 'Relocated selfhosted availability uses its read-only scoped host');
+    assert.equal(foreground.contractBindings.attachments, localForegroundHost, 'Relocated Project scope restores the local host');
+    foreground.incompleteTransition = true;
+    const blockedDownloads = foreground.attachmentInputs.length;
+    const blockedLogs = foreground.logText;
+    assert.deepEqual((await foregroundCommand('projectAttachmentDownload', input, mappedTarget)).value,
+        { ok: false, error: { code: 'ACTION_FAILED', message: 'Sync encryption transition is incomplete' } });
+    assert.equal(foreground.attachmentInputs.length, blockedDownloads, 'Incomplete transition refuses before relocated Project availability');
+    assert.equal(foreground.logText, blockedLogs, 'Refused relocated admission emits no completion marker');
+    foreground.incompleteTransition = false;
     foreground.foregroundReply = { ok: false, error: { code: 'STALE_REVISION', message: 'Synthetic shared stale refusal' } };
     assert.deepEqual((await foregroundCommand('saveSyncBackend', { ...request, selfHosted: selfHostedFields })).value,
         foreground.foregroundReply, 'Shared revision/admission refusal survives routing');
-    console.log(`Self-hosted entry: ${malformedForms.length * 3} invalid/mixed forms before storage; 4 unsupported providers before factory; 4 legacy/provider forms routed; 6 incomplete-transition commands before dispatch; Project availability remains closed (NodeVM)`);
+    console.log(`Self-hosted entry: ${malformedForms.length * 3} invalid/mixed forms before storage; 4 unsupported providers before factory; 4 legacy/provider forms routed; 7 incomplete-transition commands before dispatch; 4 ordinary cloud Project forms before factory; scoped read-only relocated Project routing and restoration (NodeVM)`);
     const malformed = create();
     assert.match((await command(malformed)).error, /^NOT_READY:/);
     const bootMalformed = await boot(malformed);
@@ -6184,6 +6221,28 @@ export function createNativeSync() {
         const android = makeState(0);
         assert.equal((await poll(android, android.MindwtrHost.attachmentDraftAcknowledged('add-mixed', 'confirmed'))).ok, true);
         assert.equal(android.logText, null);
+    });
+    await check('selfhosted availability acknowledgments are fixed, private, iOS-only and best effort', async () => {
+        const local = makeState(0, [], 'ios');
+        for (const operation of ['selfhosted-task-availability', 'selfhosted-project-availability']) {
+            assert.equal((await poll(local, local.MindwtrHost.attachmentDraftAcknowledged(operation, 'confirmed'))).ok, true);
+            const marker = JSON.parse(local.logText.trim().split('\n').at(-1));
+            assert.deepEqual(marker.context, { releaseCheck: 'v1.3.5/ios-selfhosted-file-availability', operation, outcome: 'confirmed' });
+            const before = local.logText;
+            for (const outcome of ['retained', 'replayed', 'removed', 'settled', 'private://credential/task']) {
+                assert.equal((await poll(local, local.MindwtrHost.attachmentDraftAcknowledged(operation, outcome))).ok, true);
+            }
+            assert.equal(local.logText, before);
+            local.logFailure = 'private diagnostics failure';
+            assert.equal((await poll(local, local.MindwtrHost.attachmentDraftAcknowledged(operation, 'confirmed'))).ok, true);
+            assert.equal(local.logText, before); local.logFailure = null;
+            const android = makeState(0);
+            assert.equal((await poll(android, android.MindwtrHost.attachmentDraftAcknowledged(operation, 'confirmed'))).ok, true);
+            assert.equal(android.logText, null);
+        }
+        const before = local.logText;
+        assert.equal((await poll(local, local.MindwtrHost.attachmentDraftAcknowledged('selfhosted-task-availability/private', 'confirmed'))).ok, true);
+        assert.equal(local.logText, before);
     });
     await check('provider Add acknowledgment is iOS-only, fixed, and independent of optional diagnostics', async () => {
         const local = makeState(0, [], 'ios');

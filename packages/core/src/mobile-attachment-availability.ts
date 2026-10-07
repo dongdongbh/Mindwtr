@@ -391,7 +391,12 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     if (preparing && localAttachment.deletedAt) return null;
     const preparedBackend = preparing ? await host.storage.getItem(SYNC_BACKEND_KEY) : undefined;
     assertAttachmentSyncNotAborted(signal);
-    if (preparing && preparedBackend !== 'webdav') return null;
+    if (preparing && preparedBackend !== 'webdav') {
+      if (preparedBackend !== 'cloud') return null;
+      const provider = (await host.storage.getItem(CLOUD_PROVIDER_KEY))?.trim() || '';
+      assertAttachmentSyncNotAborted(signal);
+      if (provider && provider !== 'selfhosted') return null;
+    }
     const uri = localAttachment.uri || '';
     if (uri && isHttpAttachmentUri(uri)) {
       if (preparing) return null;
@@ -430,16 +435,19 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     }
 
     if (backend === 'cloud' && localAttachment.cloudKey) {
-      const attachmentsDir = await files.getAttachmentsDir();
+      const attachmentsDir = preparing ? files.getManagedAttachmentsDir() : await files.getAttachmentsDir();
+      assertAttachmentSyncNotAborted(signal);
       if (!attachmentsDir) return null;
       const filename = getAttachmentDownloadFileName(localAttachment);
       const targetUri = `${attachmentsDir}${filename}`;
       const targetPresence = await files.getLocalAttachmentPresence(targetUri);
+      assertAttachmentSyncNotAborted(signal);
       if (targetPresence === 'unreadable') return null;
       if (targetPresence === 'present') {
-        return resolveMatchingManagedTarget(localAttachment, targetUri);
+        return resolveMatchingManagedTarget(localAttachment, targetUri, signal);
       }
       const cloudProvider = ((await host.storage.getItem(CLOUD_PROVIDER_KEY)) || '').trim();
+      assertAttachmentSyncNotAborted(signal);
       if (cloudProvider === CLOUD_PROVIDER_DROPBOX) {
         const dropboxClientId = await host.getDropboxClientId();
         if (!dropboxClientId) return null;
@@ -470,31 +478,43 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
         }
       }
       const config = await files.loadCloudConfig();
+      assertAttachmentSyncNotAborted(signal);
       if (!config?.url) return null;
       const baseSyncUrl = getCloudBaseUrl(config.url);
       try {
-        const data = await core.withRetry(() =>
-          core.cloudGetFile(`${baseSyncUrl}/${localAttachment.cloudKey}`, {
+        const data = await core.withRetry(() => {
+          assertAttachmentSyncNotAborted(signal);
+          return core.cloudGetFile(`${baseSyncUrl}/${localAttachment.cloudKey}`, {
             ...getMobileCloudRequestOptions(config.allowInsecureHttp),
             token: config.token,
+            ...(preparing ? { signal } : {}),
             onProgress: (loaded, total) => reportProgress(localAttachment.id, 'download', loaded, total, 'active'),
-          })
-        );
+          });
+        });
+        assertAttachmentSyncNotAborted(signal);
+        const material = await host.encryption.getSyncEncryptionMaterial();
+        assertAttachmentSyncNotAborted(signal);
         const bytes = await common.openAttachmentBytesFromDownload(
           data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
-          await host.encryption.getSyncEncryptionMaterial(),
+          material,
         );
+        assertAttachmentSyncNotAborted(signal);
         const installedAttachment = await installMissingAttachmentBytes(
           localAttachment,
           attachmentsDir,
           targetUri,
           bytes,
+          purpose,
+          signal,
         );
+        assertAttachmentSyncNotAborted(signal);
         if (installedAttachment === GENERATION_CONFLICT) return GENERATION_CONFLICT;
         if (!installedAttachment) return null;
+        if ('availabilityStatus' in installedAttachment && installedAttachment.availabilityStatus === 'prepared') return installedAttachment;
         reportProgress(localAttachment.id, 'download', bytes.length, bytes.length, 'completed');
         return installedAttachment;
       } catch (error) {
+        assertAttachmentSyncNotAborted(signal);
         return downloadFailed(localAttachment, error, getErrorStatus(error) === 404, {
           message: `Cloud attachment ${localAttachment.id} is no longer available`,
           releaseCheck: 'v1.3.4/cloud-download-not-found',

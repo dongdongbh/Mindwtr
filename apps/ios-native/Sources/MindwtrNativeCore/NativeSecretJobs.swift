@@ -191,6 +191,21 @@ final class NativeSecretJobs: @unchecked Sendable {
     }
     /// Do not abort accepted work: finally compensation still runs in this runtime.
     func drain() { worker.sync {} }
+    /// The selected attachment owner compares the same read-only account at its
+    /// serialized mutation boundaries. This does not lock external Keychain writers.
+    func readCloudTokenForAttachmentOwner(cancellation: NativeAttachmentCancellation) throws -> String? {
+        try cancellation.check()
+        return try worker.sync {
+            condition.lock(); let open = accepting; condition.unlock()
+            guard open else { throw HostFailure("Secure storage bridge is closed") }
+            try cancellation.check()
+            let value = try read("mindwtr_cloud_token")
+            try cancellation.check()
+            condition.lock(); let stillOpen = accepting; condition.unlock()
+            guard stillOpen else { throw HostFailure("Secure storage bridge is closed") }
+            return value
+        }
+    }
     func shutdown() {
         condition.lock(); accepting = false; wake = nil; let current = Array(jobs.values); condition.unlock()
         current.forEach { $0.token.cancel() }

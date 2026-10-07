@@ -19,12 +19,14 @@ import { readNativeAttachments } from '../../../packages/core/src/native-host-co
 import { bytesToBase64 } from '../../../packages/core/src/base64-bytes';
 import { createSyncSecretVault, getSecureConfigValueReadOnly } from '../../../packages/core/src/sync-secret-storage';
 import { createSyncEncryptionStateStore } from '../../../packages/core/src/sync-encryption-local-state';
+import { normalizeCloudProvider } from '../../../packages/core/src/sync-client-helpers';
+import { SyncEncryptionTransitionIncompleteError } from '../../../packages/core/src/sync-encryption';
 import type { MobileAttachmentCleanupHost } from '../../../packages/core/src/mobile-attachment-cleanup';
 import {
     CLOUD_ALLOW_INSECURE_HTTP_KEY, CLOUD_PROVIDER_KEY, CLOUD_URL_KEY,
     SYNC_BACKEND_KEY, SYNC_PATH_BOOKMARK_KEY, SYNC_PATH_KEY,
     WEBDAV_ALLOW_INSECURE_HTTP_KEY, WEBDAV_ALLOW_WEAK_FINGERPRINT_KEY, WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY,
-    WEBDAV_PASSWORD_KEY, SYNC_ENCRYPTION_STATE_KEY, SYNC_ENCRYPTION_KEY_KEY,
+    WEBDAV_PASSWORD_KEY, CLOUD_TOKEN_KEY, SYNC_ENCRYPTION_STATE_KEY, SYNC_ENCRYPTION_KEY_KEY,
 } from '../../../packages/core/src/sync-storage-keys';
 import {
     createMobileAttachmentBackends,
@@ -263,15 +265,48 @@ const taskDownloadCapture = (value: Record<string, unknown>) => {
 };
 
 /** Pure route binding, before native installs any submission lease. */
-export const prepareNativeTaskAttachmentAvailabilityPreflight = (json: string) => {
-    const input = taskDownloadObject(json, ['version', 'taskID', 'beforePayloadJSON', 'requestJSON', 'webdavURL', 'managedDirectoryURI']);
+export const prepareNativeTaskAttachmentAvailabilityPreflight = async (json: string) => {
+    const value = taskDownloadObject(json);
+    const cloud = Object.hasOwn(value, 'cloudURL');
+    const input = taskDownloadObject(json, ['version', 'taskID', 'beforePayloadJSON', 'requestJSON', 'managedDirectoryURI',
+        ...(cloud ? ['cloudURL', 'cloudProvider', 'encryptionStateJSON'] : ['webdavURL'])]);
     const captured = taskDownloadCapture(input);
-    const webdavURL = taskDownloadText(input.webdavURL, 16 * 1024);
+    const url = taskDownloadText(cloud ? input.cloudURL : input.webdavURL, 16 * 1024);
+    if (cloud) {
+        if (!taskDownloadSelfHostedProvider(input.cloudProvider)) return taskDownloadInvalid();
+        await assertNativeSelfHostedAttachmentEncryptionAdmission(input.encryptionStateJSON);
+    }
     const directory = taskDownloadText(input.managedDirectoryURI, 16 * 1024);
     if (!directory.startsWith('file:///') || !directory.endsWith('/')) return taskDownloadInvalid();
     return { version: 1, requestId: captured.requestId, attachmentJSON: JSON.stringify(captured.attachment),
-        initialURL: `${getBaseSyncUrl(webdavURL)}/${captured.attachment.cloudKey}`,
+        initialURL: `${cloud ? getCloudBaseUrl(url) : getBaseSyncUrl(url)}/${captured.attachment.cloudKey}`,
         targetURI: `${directory}${getAttachmentDownloadFileName(captured.attachment)}` };
+};
+
+const taskDownloadSelfHostedProvider = (value: unknown): boolean => {
+    if (value !== null && typeof value !== 'string') return false;
+    const provider = (value as string | null)?.trim() || null;
+    return (provider === null || provider === 'selfhosted') && normalizeCloudProvider(provider) === 'selfhosted';
+};
+
+const assertSelfHostedAttachmentEncryptionAdmission = async (encryption: ReturnType<typeof createSyncEncryptionStateStore>) => {
+    const status = await encryption.getSyncEncryptionStatus();
+    const incomplete = await encryption.getIncompleteSyncEncryptionTransition();
+    if ((status.incompleteTransition ?? null) !== incomplete) throw new Error('Self-hosted encryption admission is unavailable');
+    if (incomplete) throw new SyncEncryptionTransitionIncompleteError(incomplete);
+};
+
+/** Captured sidecar admission before native proves any relocated local bytes. */
+export const assertNativeSelfHostedAttachmentEncryptionAdmission = async (raw: unknown) => {
+    if (raw !== null && typeof raw !== 'string') return taskDownloadInvalid();
+    const refuse = async (): Promise<never> => { throw new Error('Self-hosted attachment authority is unavailable'); };
+    const encryption = createSyncEncryptionStateStore({
+        storage: { getItem: async (name) => name === SYNC_ENCRYPTION_STATE_KEY ? raw as string | null : refuse(),
+            setItem: refuse, removeItem: refuse },
+        secureConfig: { getSecureConfigValue: refuse, setSecureConfigValue: refuse, deleteSecureConfigValue: refuse },
+        readActiveScope: refuse, log: { info: () => {}, warn: () => {} },
+    });
+    await assertSelfHostedAttachmentEncryptionAdmission(encryption);
 };
 
 export type NativeTaskAttachmentPreparationBindings = {
@@ -285,11 +320,15 @@ export type NativeTaskAttachmentPreparationBindings = {
 
 /** One selected invocation: no migration, global SHA replacement, sync or publication. */
 export const createNativeTaskAttachmentPreparation = (bindings: NativeTaskAttachmentPreparationBindings, channels: NativeFileChannels) => {
-    const raw = taskDownloadObject(bindings.rawConfigJSON, ['backend', 'url', 'username', 'allowInsecureHttp', 'encryptionStateJSON']);
+    const value = taskDownloadObject(bindings.rawConfigJSON);
+    const cloud = value.backend === 'cloud';
+    const raw = taskDownloadObject(bindings.rawConfigJSON, ['backend', 'url', cloud ? 'provider' : 'username', 'allowInsecureHttp', 'encryptionStateJSON']);
     if (Object.values(raw).some((value) => value !== null && typeof value !== 'string')) return taskDownloadInvalid();
+    if (cloud && !taskDownloadSelfHostedProvider(raw.provider)) return taskDownloadInvalid();
     const snapshot = new Map<string, string | null>([
-        [SYNC_BACKEND_KEY, raw.backend as string | null], [WEBDAV_URL_KEY, raw.url as string | null],
-        [WEBDAV_USERNAME_KEY, raw.username as string | null], [WEBDAV_ALLOW_INSECURE_HTTP_KEY, raw.allowInsecureHttp as string | null],
+        [SYNC_BACKEND_KEY, raw.backend as string | null], [cloud ? CLOUD_URL_KEY : WEBDAV_URL_KEY, raw.url as string | null],
+        [cloud ? CLOUD_PROVIDER_KEY : WEBDAV_USERNAME_KEY, (cloud ? raw.provider : raw.username) as string | null],
+        [cloud ? CLOUD_ALLOW_INSECURE_HTTP_KEY : WEBDAV_ALLOW_INSECURE_HTTP_KEY, raw.allowInsecureHttp as string | null],
         [SYNC_ENCRYPTION_STATE_KEY, raw.encryptionStateJSON as string | null],
     ]);
     const refuse = async (): Promise<never> => { throw new Error('Task attachment preparation capability is unavailable'); };
@@ -298,7 +337,7 @@ export const createNativeTaskAttachmentPreparation = (bindings: NativeTaskAttach
     const storage: SyncKeyValueStoragePort = {
         getItem: (name) => {
             if (snapshot.has(name)) return Promise.resolve(snapshot.get(name)!);
-            if (![WEBDAV_PASSWORD_KEY, SYNC_ENCRYPTION_KEY_KEY].includes(name)) return refuse();
+            if (![cloud ? CLOUD_TOKEN_KEY : WEBDAV_PASSWORD_KEY, SYNC_ENCRYPTION_KEY_KEY].includes(name)) return refuse();
             if (!legacy.has(name)) legacy.set(name, Promise.resolve().then(() => bindings.getLegacyValue(name)));
             return legacy.get(name)!;
         }, setItem: refuse, removeItem: refuse,
@@ -306,7 +345,7 @@ export const createNativeTaskAttachmentPreparation = (bindings: NativeTaskAttach
     const secretPort = {
         isAvailable: async () => true,
         getItem: (account: string) => {
-            if (!['mindwtr_webdav_password', 'mindwtr_sync_encryption_key_v1'].includes(account)) return refuse();
+            if (![cloud ? 'mindwtr_cloud_token' : 'mindwtr_webdav_password', 'mindwtr_sync_encryption_key_v1'].includes(account)) return refuse();
             if (!secrets.has(account)) secrets.set(account, Promise.resolve().then(() => bindings.getSecret(account)));
             return secrets.get(account)!;
         }, setItem: refuse, deleteItem: refuse,
@@ -331,7 +370,52 @@ export const createNativeTaskAttachmentPreparation = (bindings: NativeTaskAttach
         if (typeof result !== 'string' || result.startsWith('!MindwtrNativeError:')) return refuse();
         try { return JSON.parse(result); } catch { return refuse(); }
     } });
-    return { prepareAttachmentAvailableDetailed: availability.prepareAttachmentAvailableDetailed! };
+    return { prepareAttachmentAvailableDetailed: async (attachment: Parameters<NonNullable<typeof availability.prepareAttachmentAvailableDetailed>>[0], signal?: AbortSignal) => {
+        if (signal?.aborted) throw signal.reason;
+        if (cloud) await assertSelfHostedAttachmentEncryptionAdmission(encryption);
+        return availability.prepareAttachmentAvailableDetailed!(attachment, signal);
+    } };
+};
+
+/** Saved selfhosted relocated Project availability: read-only credentials and native local proof. */
+export const createNativeReadOnlySelfHostedAttachments = (
+    bindings: Pick<NativeTaskAttachmentPreparationBindings, 'getLegacyValue' | 'getSecret' | 'crypto' | 'fetch'> & {
+        getConfigValue(name: string): Promise<string | null>;
+    }, channels: NativeFileChannels,
+) => {
+    const refuse = async (): Promise<never> => { throw new Error('Self-hosted attachment authority is unavailable'); };
+    const configNames = [SYNC_BACKEND_KEY, CLOUD_URL_KEY, CLOUD_PROVIDER_KEY, CLOUD_ALLOW_INSECURE_HTTP_KEY, SYNC_ENCRYPTION_STATE_KEY];
+    const storage: SyncKeyValueStoragePort = {
+        getItem: (name) => configNames.includes(name) ? bindings.getConfigValue(name)
+            : [CLOUD_TOKEN_KEY, SYNC_ENCRYPTION_KEY_KEY].includes(name) ? bindings.getLegacyValue(name) : refuse(),
+        setItem: refuse, removeItem: refuse,
+    };
+    const secrets = { isAvailable: async () => true,
+        getItem: (account: string) => ['mindwtr_cloud_token', 'mindwtr_sync_encryption_key_v1'].includes(account)
+            ? bindings.getSecret(account) : refuse(), setItem: refuse, deleteItem: refuse };
+    const vault = createSyncSecretVault(secrets);
+    const secureConfig = { getSecureConfigValue: (name: string) => getSecureConfigValueReadOnly({ storage, secrets, vault }, name),
+        setSecureConfigValue: refuse, deleteSecureConfigValue: refuse };
+    const encryption = createSyncEncryptionStateStore({ storage, secureConfig, readActiveScope: refuse,
+        log: { info: () => {}, warn: () => {} } });
+    const { contractHost, availability } = bindNativeAttachmentFiles({ storage,
+        getSecureConfigValue: secureConfig.getSecureConfigValue, crypto: bindings.crypto, fetch: bindings.fetch,
+        log: { info: () => {}, warn: () => {}, sanitize: () => 'Self-hosted attachment is unavailable' },
+        encryption: { getSyncEncryptionMaterial: encryption.getSyncEncryptionMaterial, logSyncEncryptionEvent: async () => {} },
+    }, channels, { installSha256Provider: false, preparePlaintextDownload: refuse });
+    const admit = async () => {
+        if (await storage.getItem(SYNC_BACKEND_KEY) !== 'cloud'
+            || !taskDownloadSelfHostedProvider(await storage.getItem(CLOUD_PROVIDER_KEY))) return refuse();
+        await assertSelfHostedAttachmentEncryptionAdmission(encryption);
+    };
+    return {
+        contractHost: { ...contractHost, ensureAttachmentAvailableDetailed: async (attachment: Parameters<typeof contractHost.ensureAttachmentAvailableDetailed>[0]) => {
+            await admit(); return contractHost.ensureAttachmentAvailableDetailed(attachment);
+        } },
+        prepareAttachmentAvailableDetailed: async (attachment: Parameters<NonNullable<typeof availability.prepareAttachmentAvailableDetailed>>[0]) => {
+            await admit(); return availability.prepareAttachmentAvailableDetailed!(attachment);
+        },
+    };
 };
 
 /** Close the selected input/result grammar around the existing shared policy. */

@@ -8,8 +8,13 @@ import XCTest
 private final class ProjectRelocationState: @unchecked Sendable {
     private let lock = NSLock()
     private var network = 0, secrets = 0, crypto = 0, work = 0, installers = 0
+    private var secretOperations: [String] = []
     func networkAttempt() { lock.lock(); network += 1; lock.unlock() }
-    func secretAttempt() { lock.lock(); secrets += 1; lock.unlock() }
+    func secretAttempt(operation: String? = nil, alias: String? = nil) {
+        lock.lock(); defer { lock.unlock() }; secrets += 1
+        if let operation, let alias { secretOperations.append(operation + ":" + alias) }
+    }
+    var cloudReads: [String] { lock.lock(); defer { lock.unlock() }; return secretOperations }
     func cryptoAttempt() { lock.lock(); crypto += 1; lock.unlock() }
     func fileWork(_ installer: Bool) -> Int { lock.lock(); defer { lock.unlock() }; work += 1; if installer { installers += 1 }; return work }
     var counts: [Int] { lock.lock(); defer { lock.unlock() }; return [network, secrets, crypto, work, installers] }
@@ -17,11 +22,14 @@ private final class ProjectRelocationState: @unchecked Sendable {
 private final class ProjectRelocationNoHTTP: URLProtocol {
     private static let lock = NSLock()
     private static var states: [String: ProjectRelocationState] = [:]
+    private static var unexpected = 0
     static func set(_ name: String, _ state: ProjectRelocationState?) { lock.lock(); states[name] = state; lock.unlock() }
+    static var unexpectedAttempts: Int { lock.lock(); defer { lock.unlock() }; return unexpected }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        Self.lock.lock(); let state = Self.states[request.url?.host ?? ""]; Self.lock.unlock()
+        Self.lock.lock(); let state = Self.states[request.url?.host ?? ""]
+        if state == nil { Self.unexpected += 1 }; Self.lock.unlock()
         state?.networkAttempt()
         client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
     }
@@ -33,6 +41,10 @@ private final class ProjectRelocationNoHTTP: URLProtocol {
 final class NativeProjectRelocationAvailabilityTests: XCTestCase {
     private var fixture: URL!, root: URL!, bundle: URL!
     private var hostname: String!, namespace: String!, state: ProjectRelocationState!
+    private var cloudSecretReads = false
+    private var cloudService = ""
+    private var unexpectedBaseline: Int?
+    private enum CloudProviderMode { case missing, blank, selfHosted }
     private let projectID = "project368", attachmentID = "852d70cf-303a-47d0-98cb-d16de850a94d"
     private let at = "2026-10-07T12:00:00.000Z", bytes = Data("Verified relocated Project bytes / 文\n".utf8)
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -57,11 +69,20 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         hostname = "project368-" + UUID().uuidString.lowercased() + ".invalid"
         namespace = "tech.dongdongbh.mindwtr.project368." + UUID().uuidString.lowercased()
+        cloudSecretReads = false; cloudService = "mindwtr.native-keychain.fixture.project403." + UUID().uuidString.lowercased()
         state = ProjectRelocationState(); ProjectRelocationNoHTTP.set(hostname, state)
+        unexpectedBaseline = ProjectRelocationNoHTTP.unexpectedAttempts
         #endif
     }
     override func tearDownWithError() throws {
-        if let state { XCTAssertEqual(state.counts[0], 0); XCTAssertEqual(state.counts[1], 0); XCTAssertEqual(state.counts[2], 0); XCTAssertEqual(state.counts[4], 0) }
+        if let unexpectedBaseline { XCTAssertEqual(ProjectRelocationNoHTTP.unexpectedAttempts, unexpectedBaseline, "No intercepted HTTP attempt may escape the registered fixture destination") }
+        if let state {
+            XCTAssertEqual(state.counts[0], 0); XCTAssertEqual(state.counts[2], 0); XCTAssertEqual(state.counts[4], 0)
+            if cloudSecretReads {
+                XCTAssertEqual(state.cloudReads.count, state.counts[1])
+                XCTAssertTrue(state.cloudReads.allSatisfy { ["get:no-auth", "get:auth", "get:legacy"].contains($0) })
+            } else { XCTAssertEqual(state.counts[1], 0) }
+        }
         if let hostname { ProjectRelocationNoHTTP.set(hostname, nil) }
         if let fixture { try FileManager.default.removeItem(at: fixture) }
     }
@@ -88,15 +109,19 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         return "\(UInt64(entry.st_dev)):\(UInt64(entry.st_ino))"
     }
     private func hash(_ value: Data) -> String { SHA256.hash(data: value).map { String(format: "%02x", $0) }.joined() }
-    private func markers() throws -> Int {
+    private func markers(_ receipt: String = "v1.3.5/ios-relocated-project-availability") throws -> Int {
         let log = root.appendingPathComponent("logs/mindwtr.log")
         guard FileManager.default.fileExists(atPath: log.path) else { return 0 }
-        return try String(contentsOf: log, encoding: .utf8).components(separatedBy: "v1.3.5/ios-relocated-project-availability").count - 1
+        return try String(contentsOf: log, encoding: .utf8).components(separatedBy: receipt).count - 1
     }
     private func host(_ faults: HostIOFaults = HostIOFaults(), mutation: ((Int) -> Void)? = nil,
                       before: ((Int) throws -> Void)? = nil) async -> CoreHost {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [ProjectRelocationNoHTTP.self]; faults.httpConfiguration = config
-        faults.secretBeforeOperation = { [state] _, _ in state?.secretAttempt() }
+        let cloud = cloudSecretReads
+        if cloud { faults.secretService = cloudService }
+        faults.secretBeforeOperation = { [state] operation, alias in
+            state?.secretAttempt(operation: cloud ? operation : nil, alias: cloud ? alias : nil)
+        }
         faults.secretStatus = { _, _ in errSecItemNotFound }
         faults.cryptoBeforeOperation = { [state] _ in state?.cryptoAttempt() }
         let live = CoreHost(databaseURL: database, bundleURL: bundle, faults: faults,
@@ -130,6 +155,24 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         _ = try sql("UPDATE projects SET attachments=?,tagIds=NULL,viewSectionIds='[]' WHERE id=?", [json([item]), projectID])
         try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
     }
+    private func retainedCloudState() throws -> String {
+        try json(["state": "enabled", "discoveredSalt": "0102030405060708090a0b0c0d0e0f10",
+            "discoveredParams": ["mKib": 64, "t": 1, "p": 1],
+            "discoveredScope": try json(["webdav", "https://other403.invalid/data.json", "synthetic"])])
+    }
+    private func configureCloud(_ provider: CloudProviderMode) throws {
+        var config = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
+        config["@mindwtr_sync_backend"] = "cloud"; config["@mindwtr_cloud_url"] = "https://" + hostname + "/v1/data"
+        config["@mindwtr_cloud_allow_insecure_http"] = "false"
+        config["@mindwtr_cloud_token"] = "synthetic-relocation-token-403"
+        config["@mindwtr_sync_encryption_state_v1"] = try retainedCloudState()
+        switch provider {
+        case .missing: config.removeValue(forKey: "@mindwtr_cloud_provider")
+        case .blank: config["@mindwtr_cloud_provider"] = " \t\n"
+        case .selfHosted: config["@mindwtr_cloud_provider"] = "selfhosted"
+        }
+        try Data(json(config).utf8).write(to: manifest, options: .atomic); cloudSecretReads = true
+    }
     private func relocate(copy: Bool = false) throws -> URL {
         let original = root.deletingLastPathComponent().deletingLastPathComponent()
         let next = original.deletingLastPathComponent().appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
@@ -153,8 +196,12 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
     func testLiveSelectedSavePreservesRawFalseNullAndActualColdCoreHostOpen() async throws { try await saveAndCold(status: "active") }
     func testArchivedSelectedSavePreservesRawFalseNullAndActualColdCoreHostOpen() async throws { try await saveAndCold(status: "archived") }
     func testCloudKeylessHashedLocalSelectionPreservesRawMetadataAndColdOpenWithoutRemoteFallback() async throws { try await saveAndCold(status: "active", cloudKey: false) }
-    private func saveAndCold(status: String, cloudKey: Bool = true) async throws {
+    func testMissingCloudProviderRelocatesAndColdOpensWithoutMigrationOrRemoteFallback() async throws { try await saveAndCold(status: "active", cloudProvider: .missing) }
+    func testBlankCloudProviderRelocatesAndColdOpensWithoutMigrationOrRemoteFallback() async throws { try await saveAndCold(status: "active", cloudProvider: .blank) }
+    func testSelfHostedCloudProviderRelocatesAndColdOpensWithoutMigrationOrRemoteFallback() async throws { try await saveAndCold(status: "active", cloudProvider: .selfHosted) }
+    private func saveAndCold(status: String, cloudKey: Bool = true, cloudProvider: CloudProviderMode? = nil) async throws {
         try await seed(status: status)
+        if let cloudProvider { try configureCloud(cloudProvider) }
         if !cloudKey { try replaceSelected { $0.removeValue(forKey: "cloudKey") } }
         let old = try relocate(copy: true)
         let oldBytes = Data("Coexisting old bytes must remain unmanaged".utf8); try oldBytes.write(to: old)
@@ -172,6 +219,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: old), oldBytes); XCTAssertEqual(try inode(old), oldIdentity)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertNil(try NativeAttachmentDraftStore(databaseURL: database).readVersioned())
         await live.close(); XCTAssertEqual(try markers(), 1)
+        if cloudProvider != nil { XCTAssertEqual(try markers("v1.3.5/ios-selfhosted-file-availability"), 1) }
         let cold = await host(); _ = try await cold.start()
         XCTAssertEqual(try json(row()), try json(after), "A fresh CoreHost must not normalize the acknowledged raw AFTER")
         XCTAssertEqual(try selected()["pendingContentUpload"] as? Bool, false)
@@ -179,6 +227,77 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         XCTAssertEqual(open["status"] as? String, "available"); XCTAssertEqual((open["open"] as? [String: Any])?["uri"] as? String, target.absoluteString)
         XCTAssertEqual(try json(row()), try json(after)); XCTAssertEqual(try Data(contentsOf: old), oldBytes)
         XCTAssertEqual(try Data(contentsOf: manifest), preferences); await cold.close(); XCTAssertEqual(try markers(), 1)
+        if cloudProvider != nil {
+            XCTAssertEqual(try markers("v1.3.5/ios-selfhosted-file-availability"), 1)
+            let config = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
+            XCTAssertEqual(config["@mindwtr_sync_encryption_state_v1"] as? String, try retainedCloudState())
+            XCTAssertEqual(config["@mindwtr_cloud_token"] as? String, "synthetic-relocation-token-403")
+            XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), currentIdentity); XCTAssertEqual(try inode(old), oldIdentity)
+            XCTAssertGreaterThan(state.counts[1], 0, "A saved cloud owner must compare its real native read-only token snapshot")
+        }
+    }
+    func testCloudURLProviderAndLegacyTokenChangesAcrossRelocatedProofRefuseWithoutWrite() async throws {
+        try await seed(); try configureCloud(.selfHosted); let old = try relocate(copy: true)
+        let oldBytes = Data("Coexisting old cloud bytes must remain unmanaged".utf8); try oldBytes.write(to: old)
+        let oldIdentity = try inode(old), currentIdentity = try inode(target), config = try Data(contentsOf: manifest)
+        for field in ["@mindwtr_cloud_url", "@mindwtr_cloud_provider", "@mindwtr_cloud_token"] {
+            var armed = false, changed = false, failed = false, holdAt = Int.max, changedConfig: Data?
+            let live = await host(mutation: { count in
+                guard armed && !changed && count == holdAt else { return }; changed = true
+                do {
+                    var value = try self.object(String(decoding: config, as: UTF8.self))
+                    switch field {
+                    case "@mindwtr_cloud_url": value[field] = "https://" + self.hostname + "/changed/v1/data"
+                    case "@mindwtr_cloud_provider": value[field] = "dropbox"
+                    default: value[field] = "synthetic-intervening-token-403"
+                    }
+                    let updated = Data(try self.json(value).utf8); try updated.write(to: self.manifest, options: .atomic); changedConfig = updated
+                } catch { failed = true }
+            })
+            _ = try await live.start(); let request = try await input(live), before = try rows(), selectedRow = try json(row())
+            holdAt = state.counts[3] + 1; armed = true
+            await refused(live, request: request)
+            XCTAssertTrue(changed, field); XCTAssertFalse(failed, field); XCTAssertGreaterThanOrEqual(state.counts[3], holdAt)
+            XCTAssertEqual(try rows(), before); XCTAssertEqual(try json(row()), selectedRow)
+            let preservedConfig = try XCTUnwrap(changedConfig); XCTAssertEqual(try Data(contentsOf: manifest), preservedConfig)
+            XCTAssertEqual(try object(String(decoding: preservedConfig, as: UTF8.self))["@mindwtr_sync_encryption_state_v1"] as? String, try retainedCloudState())
+            XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), currentIdentity)
+            XCTAssertEqual(try Data(contentsOf: old), oldBytes); XCTAssertEqual(try inode(old), oldIdentity)
+            XCTAssertEqual(try markers(), 0); XCTAssertEqual(try markers("v1.3.5/ios-selfhosted-file-availability"), 0)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertNil(try NativeAttachmentDraftStore(databaseURL: database).readVersioned())
+            await live.close()
+            let cold = await host(); _ = try await cold.start()
+            XCTAssertEqual(try rows(), before); XCTAssertEqual(try json(row()), selectedRow); XCTAssertEqual(try Data(contentsOf: manifest), preservedConfig)
+            XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), currentIdentity)
+            XCTAssertEqual(try Data(contentsOf: old), oldBytes); XCTAssertEqual(try inode(old), oldIdentity)
+            await cold.close(); XCTAssertEqual(try markers(), 0); XCTAssertEqual(try markers("v1.3.5/ios-selfhosted-file-availability"), 0)
+            // Reset only the mutated synthetic configuration between independent proof windows.
+            try config.write(to: manifest)
+        }
+        XCTAssertGreaterThan(state.counts[1], 0, "The changed owner must have captured the native token snapshot")
+    }
+    func testIncompleteCloudTransitionRefusesRelocatedProofBeforeFileWorkAcrossColdOpen() async throws {
+        try await seed(); try configureCloud(.selfHosted)
+        var config = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
+        config["@mindwtr_sync_encryption_state_v1"] = try json(["state": "off", "incompleteTransition": "enable"])
+        try Data(json(config).utf8).write(to: manifest, options: .atomic)
+        let old = try relocate(copy: true), oldBytes = Data("Preserve old incomplete-transition bytes".utf8); try oldBytes.write(to: old)
+        let oldIdentity = try inode(old), currentIdentity = try inode(target), preferences = try Data(contentsOf: manifest)
+        let baseline = try rows(), selectedRow = try json(row())
+        for _ in 0..<2 {
+            var armed = false, proofAttempts = 0
+            let live = await host(before: { _ in if armed { proofAttempts += 1 } })
+            _ = try await live.start(); let request = try await input(live), work = state.counts[3]; armed = true
+            await refused(live, request: request); armed = false
+            XCTAssertEqual(proofAttempts, 0, "Incomplete cloud state must reject before the first native file worker")
+            XCTAssertEqual(state.counts[3], work); XCTAssertEqual(try rows(), baseline); XCTAssertEqual(try json(row()), selectedRow)
+            XCTAssertEqual(try Data(contentsOf: manifest), preferences)
+            XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), currentIdentity)
+            XCTAssertEqual(try Data(contentsOf: old), oldBytes); XCTAssertEqual(try inode(old), oldIdentity)
+            XCTAssertEqual(try markers(), 0); XCTAssertEqual(try markers("v1.3.5/ios-selfhosted-file-availability"), 0)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertNil(try NativeAttachmentDraftStore(databaseURL: database).readVersioned())
+            await live.close()
+        }
     }
     func testMissingHashSizeFilenameAndEightMiBCapRefuseWithoutFallbackOrWrite() async throws {
         try await seed(); _ = try relocate()

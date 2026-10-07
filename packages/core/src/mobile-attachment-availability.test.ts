@@ -8,6 +8,7 @@ import { defaultSyncCryptoPrimitives, SYNC_CRYPTO_DEFAULT_KDF_PARAMS, type SyncK
 import { globalProgressTracker } from './attachment-progress';
 import { CLOUD_PROVIDER_KEY, CLOUD_URL_KEY, SYNC_BACKEND_KEY, SYNC_PATH_KEY, WEBDAV_PASSWORD_KEY, WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY } from './sync-storage-keys';
 import { DropboxFileNotFoundError } from './dropbox';
+import { withRetry } from './retry-utils';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 
 const now = '2026-09-28T00:00:00.000Z';
@@ -32,6 +33,7 @@ const setup = (options: {
   cloudKit?: MobileAttachmentCloudKitPort;
   preparePlaintextDownload?: MobileAttachmentCommonHost['preparePlaintextDownload'];
   material?: SyncKeyMaterial;
+  withRetry?: MobileAttachmentAvailabilityCoreFunctions['withRetry'];
 } = {}) => {
   const memory = createMemoryFileSystem();
   const { storage, values } = createMemoryStorage(options.storage);
@@ -73,7 +75,7 @@ const setup = (options: {
     cloudKit: options.cloudKit,
     core: {
       isSandboxMode: () => options.sandbox === true,
-      withRetry: (operation) => operation(),
+      withRetry: options.withRetry ?? ((operation) => operation()),
       webdavGetFile,
       cloudGetFile,
       downloadDropboxFile,
@@ -144,7 +146,8 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     ['absent backend', { storage: { [WEBDAV_URL_KEY]: webdav[WEBDAV_URL_KEY] } }, {}],
     ['File Sync', { storage: { ...webdav, [SYNC_BACKEND_KEY]: 'file' } }, {}],
     ['CloudKit', { storage: { ...webdav, [SYNC_BACKEND_KEY]: 'cloudkit' } }, {}],
-    ['cloud', { storage: { ...webdav, [SYNC_BACKEND_KEY]: 'cloud' } }, {}],
+    ['Dropbox cloud', { storage: { ...webdav, [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'dropbox' } }, {}],
+    ['unknown cloud', { storage: { ...webdav, [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'unknown' } }, {}],
     ['sandbox', { storage: webdav, sandbox: true }, {}],
     ['non-file', { storage: webdav }, { kind: 'link' as const }],
     ['terminal attachment', { storage: webdav }, { deletedAt: now }],
@@ -164,6 +167,42 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     expect(downloadDropboxFile).not.toHaveBeenCalled();
     expect(preparePlaintextDownload).not.toHaveBeenCalled();
     expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it.each(['', 'selfhosted', ' selfhosted '])('prepares selfhosted cloud bytes without directories, install or completed progress (%s)', async (provider) => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const ports = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: provider,
+      [CLOUD_URL_KEY]: 'https://cloud.example/v1/data' }, preparePlaintextDownload });
+    const requested = Object.freeze(remoteAttachment({ contentRev: 3, fileHash: await computeSha256Hex(REMOTE) }));
+    const original = { ...requested }, config = [...ports.values.entries()];
+    const outcome = await ports.availability.prepareAttachmentAvailableDetailed!(requested);
+    expect(outcome).toMatchObject({ status: 'prepared', sourceToken: SOURCE_TOKEN, size: REMOTE.length,
+      attachment: { ...requested, uri: `${MANAGED}att-1.txt`, localStatus: 'available' } });
+    expect(ports.cloudGetFile).toHaveBeenCalledOnce();
+    expect(ports.cloudGetFile).toHaveBeenCalledWith('https://cloud.example/v1/attachments/att-1.txt', expect.objectContaining({ token: '' }));
+    expect(preparePlaintextDownload).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: requested.id,
+      targetURI: `${MANAGED}att-1.txt`, expectation: { kind: 'absent' } }), REMOTE, undefined);
+    expect(mutations(ports.memory.calls)).toEqual([]); expect(ports.memory.files.size).toBe(0);
+    expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled(); expect(ports.webdavGetFile).not.toHaveBeenCalled();
+    expect(requested).toEqual(original); expect([...ports.values.entries()]).toEqual(config);
+  });
+
+  it.each(['resolved', 'retry'])('cancels selfhosted preparation during HTTP without a retry or callback (%s)', async (mode) => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply()), controller = new AbortController();
+    const reason = new Error('Synthetic cloud preparation cancellation');
+    let attempts = 0;
+    const ports = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_URL_KEY]: 'https://cloud.example/v1/data' }, preparePlaintextDownload,
+      withRetry: (operation) => withRetry(() => { attempts += 1; return operation(); },
+        { maxAttempts: 2, baseDelayMs: 0, shouldRetry: () => true }) });
+    ports.cloudGetFile.mockImplementationOnce(async (_url, options) => {
+      expect(options.signal).toBe(controller.signal); controller.abort(reason);
+      if (mode === 'retry') throw new Error('Synthetic transient failure');
+      return toArrayBuffer(REMOTE);
+    });
+    await expect(ports.availability.prepareAttachmentAvailableDetailed!(remoteAttachment(), controller.signal)).rejects.toBe(reason);
+    expect(attempts).toBe(mode === 'retry' ? 2 : 1);
+    expect(ports.cloudGetFile).toHaveBeenCalledOnce(); expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    expect(mutations(ports.memory.calls)).toEqual([]); expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled();
   });
 
   it.each(['', `${MANAGED}att-1.txt`])('borrows only matching present bytes (%s) without copying or creating a directory', async (uri) => {

@@ -92,7 +92,7 @@ import {
 } from '@mindwtr/core';
 import { createNativeAI } from './host-ai';
 import { createNativeLocalAttachmentsForHost, nativeFileChannels, prepareNativeTaskAttachmentAvailabilityPreflight,
-    prepareNativeTaskAttachmentAvailability } from './host-attachments';
+    prepareNativeTaskAttachmentAvailability, createNativeReadOnlySelfHostedAttachments, assertNativeSelfHostedAttachmentEncryptionAdmission } from './host-attachments';
 import { createNativeReminders } from './host-reminders';
 import { createNativeSync, createHostSyncCrypto, isNativeIosSelfHostedProvider, type NativeSync, type NativeSyncBindings } from './host-sync';
 import { createWidgetPublisher, type WidgetInputs } from './host-widgets';
@@ -368,6 +368,7 @@ let iosManualSync: NativeSync | null = null;
 let iosCleanupCallback: ((requestJSON: string) => unknown) | null = null;
 let iosProjectAttachmentDownload = false;
 let iosRelocatedProjectAvailability = false;
+let iosSelfHostedProjectAttachments: ReturnType<typeof createNativeReadOnlySelfHostedAttachments> | null = null;
 let iosTaskAttachmentPreparation = false;
 let iosForegroundFailure: NativeAttachmentCleanupUnconfirmedError | null = null;
 /** The device's network state as Kotlin last reported it (HostNetwork.kt); unknown until then, which never reads as offline. */
@@ -397,10 +398,10 @@ const localAttachments = nativeSync ? null : createNativeLocalAttachmentsForHost
 const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contractHost;
 const contract = createNativeHostContract({ get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
     get attachments() {
-        const selected = iosProjectAttachmentDownload ? iosManualSync?.attachmentsHost : attachmentsHost;
+        const selected = iosProjectAttachmentDownload ? iosSelfHostedProjectAttachments?.contractHost ?? iosManualSync?.attachmentsHost : attachmentsHost;
         if (!iosRelocatedProjectAvailability || !selected) return selected;
         return { ...selected, ensureAttachmentAvailableDetailed: async (attachment: import('../../../packages/core/src/types').Attachment) => {
-            const result = await iosManualSync?.prepareAttachmentAvailableDetailed?.(attachment);
+            const result = await (iosSelfHostedProjectAttachments ?? iosManualSync)?.prepareAttachmentAvailableDetailed?.(attachment);
             if (result?.status === 'available') return { status: 'available' as const, attachment: result.attachment };
             return { status: result?.status === 'generation-conflict' ? 'generation-conflict' as const : 'unavailable' as const };
         } };
@@ -2493,13 +2494,14 @@ globalThis.MindwtrHost = {
         return submit(async () => unwrap(await contract.commitPreparedProjectTagsWrite(JSON.parse(json))));
     },
     /** Settled durable raw authority; target derivation remains shared policy. */
-    projectAttachmentAvailabilityPreflight(json: string): string {
+    projectAttachmentAvailabilityPreflight(json: string, encryptionStateJSON?: unknown): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments || nativeSync || !bootAdapter
                 || iosCleanupCallback || iosTaskAttachmentPreparation || isSandboxMode() || isWorkspaceTransitionActive()) {
                 throw new Error('NOT_READY: Project availability is unavailable');
             }
             requireSaved();
+            if (encryptionStateJSON !== undefined) await assertNativeSelfHostedAttachmentEncryptionAdmission(encryptionStateJSON);
             return unwrap(await contract.getProjectAttachmentAvailabilityPreflight(JSON.parse(json)));
         });
     },
@@ -3725,6 +3727,7 @@ globalThis.MindwtrHost = {
                 || operation === 'availability-save' && ['domainSaved', 'settled'].includes(outcome)
                 || operation === 'availability-discard' && outcome === 'settled'
                 || operation === 'availability-checkpoint' && outcome === 'confirmed';
+            const selfHostedAvailability = ['selfhosted-task-availability', 'selfhosted-project-availability'].includes(operation) && outcome === 'confirmed';
             const preexistingReplay = operation === 'preexisting-journal-replay' && outcome === 'confirmed';
             const containerRecovery = operation === 'container-relocation' && outcome === 'confirmed';
             const fileOpen = operation === 'file-open' && outcome === 'prepared';
@@ -3738,10 +3741,10 @@ globalThis.MindwtrHost = {
             const taskFileHash = operation === 'task-file-hash' && outcome === 'saved';
             const ownedCleanup = operation === 'cleanup-owned-retirement' && ['removed', 'absent', 'retained'].includes(outcome);
             const editorAcknowledged = ['editor-add', 'editor-remove', 'editor-save', 'editor-discard', 'editor-recover'].includes(operation) && outcome === 'confirmed';
-            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !relocatedAvailability && !relocatedProjectAvailability && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash && !ownedCleanup && !availabilityConsumer
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !relocatedAvailability && !relocatedProjectAvailability && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash && !ownedCleanup && !availabilityConsumer && !selfHostedAvailability
                 || !(['add', 'checkpoint', 'save'].includes(operation) && ['confirmed', 'replayed'].includes(outcome)
                     || operation === 'discard' && outcome === 'retained'
-                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || relocatedAvailability || relocatedProjectAvailability || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash || ownedCleanup || availabilityConsumer)) return {};
+                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || relocatedAvailability || relocatedProjectAvailability || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash || ownedCleanup || availabilityConsumer || selfHostedAvailability)) return {};
             try {
                 if (completeSave && outcome === 'domainSaved') await diagnosticsLog.append({
                     ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
@@ -3753,6 +3756,7 @@ globalThis.MindwtrHost = {
                 await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                     message: 'Native iOS attachment draft acknowledged',
                     context: { ...(editorAcknowledged ? { releaseCheck: 'v1.3.5/ios-editor-owned-attachments' }
+                        : selfHostedAvailability ? { releaseCheck: 'v1.3.5/ios-selfhosted-file-availability' }
                         : availabilityConsumer ? { releaseCheck: 'v1.3.5/ios-task-availability-consumers' }
                         : ownedCleanup ? { releaseCheck: 'v1.3.5/ios-cleanup-owned-retirement' }
                         : fileOpen ? { releaseCheck: 'v1.3.5/ios-local-file-open' }
@@ -3913,7 +3917,9 @@ globalThis.MindwtrHost = {
                 const selfHosted = stored === 'cloud' && isNativeIosSelfHostedProvider(await keyValue.get(CLOUD_PROVIDER_KEY));
                 if (stored && stored !== 'off' && stored !== 'webdav' && !selfHosted) return refused;
                 if (['syncStored', 'syncResume'].includes(name) && stored !== 'webdav' && !selfHosted) return { ok: true as const, value: { success: true, skipped: true } };
-                if (name === 'projectAttachmentDownload' && stored !== 'webdav') return refused;
+                if (name === 'projectAttachmentDownload' && stored !== 'webdav' && !selfHosted) return refused;
+                // Only native-owned relocated repair is admitted for cloud Projects.
+                if (name === 'projectAttachmentDownload' && selfHosted && typeof currentTargetURI !== 'string') return refused;
                 if (name === 'runSyncEncryptionAction' && selfHosted) return refused;
                 let downloadResult: Awaited<ReturnType<typeof contract.downloadAttachment>> | null = null;
                 if (name === 'projectAttachmentDownload') {
@@ -3946,7 +3952,7 @@ globalThis.MindwtrHost = {
                 if (iosManualSync) iosManualSync.settingsHost.encryption.mode = 'saved-webdav-or-local';
                 if (name === 'selectSyncBackend' && input.option === 'selfhosted'
                     || ['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name) && input.selfHosted !== undefined
-                    || ['syncStored', 'syncResume'].includes(name) && selfHosted) {
+                    || ['syncStored', 'syncResume', 'projectAttachmentDownload'].includes(name) && selfHosted) {
                     try { await iosManualSync!.assertSelfHostedSyncAdmission(); }
                     catch (error) {
                         if (error instanceof NativeAttachmentCleanupUnconfirmedError) throw error;
@@ -3957,6 +3963,15 @@ globalThis.MindwtrHost = {
                 if (name === 'projectAttachmentDownload') {
                     if (!downloadResult) {
                         // The original contract remains local-only outside this owned call.
+                        if (selfHosted) {
+                            const channels = nativeFileChannels();
+                            if (!channels) throw unavailable();
+                            iosSelfHostedProjectAttachments = createNativeReadOnlySelfHostedAttachments({
+                                getConfigValue: (name) => keyValue.get(name), getLegacyValue: (name) => keyValue.get(name),
+                                getSecret: (account) => (globalThis.__mindwtrSyncSecrets as HostSecrets).getSecret(account),
+                                crypto: createHostSyncCrypto((globalThis as { __mindwtrCryptoCall?: Parameters<typeof createHostSyncCrypto>[0] }).__mindwtrCryptoCall),
+                            }, channels);
+                        }
                         iosProjectAttachmentDownload = true;
                         try {
                             if (typeof currentTargetURI === 'string') {
@@ -3967,7 +3982,7 @@ globalThis.MindwtrHost = {
                             } else downloadResult = await contract.downloadAttachment({
                                 owner: { kind: 'project', projectId: input.projectId as string }, attachmentId: input.attachmentId as string,
                             });
-                        } finally { iosProjectAttachmentDownload = false; iosRelocatedProjectAvailability = false; }
+                        } finally { iosProjectAttachmentDownload = false; iosRelocatedProjectAvailability = false; iosSelfHostedProjectAttachments = null; }
                     }
                     await flushPendingSave();
                     requireSaved();
