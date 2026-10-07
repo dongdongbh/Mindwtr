@@ -49,6 +49,7 @@ final class RetainedAttachmentOrdinaryHostTests: XCTestCase {
         switch try XCTUnwrap(store.readVersioned()).record {
         case .legacy(let value): return value.session.checkpoint
         case .mixed(let value): return value.session.checkpoint
+        case .availability(let value): return value.session.checkpoint
         }
     }
     private func operation() throws -> Store.Operation {
@@ -57,6 +58,7 @@ final class RetainedAttachmentOrdinaryHostTests: XCTestCase {
         case .mixed(let value):
             guard case .add(let op) = try XCTUnwrap(value.operations.first) else { throw HostFailure("Fixture Add missing") }
             return op
+        case .availability: throw HostFailure("Historical fixture Add required")
         }
     }
     private func source() -> URL { cache.appendingPathComponent("borrowed.txt") }

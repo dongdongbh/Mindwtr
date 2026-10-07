@@ -1043,19 +1043,19 @@ const attachmentCleanupJson = (json: string, maxBytes: number): unknown => {
 };
 const attachmentDiscardInvalid = (): Error => new Error('INVALID_INPUT: Invalid attachment Discard handoff');
 const attachmentDiscardNotReady = (): Error => new Error('NOT_READY: Attachment Discard requires settled native storage');
-const attachmentDiscardInput = (json: string): { version: 1; requestId: string; targetURI: string } => {
+const attachmentDiscardInput = (json: string, availability: boolean): { requestId: string; targetURI: string } => {
     try {
         if (typeof json !== 'string' || json.length > 64 * 1024
             || new TextEncoder().encode(json).byteLength > 64 * 1024) throw attachmentDiscardInvalid();
         const value = JSON.parse(json) as Record<string, unknown> | null;
         if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 3
-            || value.version !== 1 || typeof value.requestId !== 'string'
+            || value.version !== (availability ? 2 : 1) || typeof value.requestId !== 'string'
             || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value.requestId)
             || typeof value.targetURI !== 'string' || !value.targetURI
             || value.targetURI.length > 16 * 1024 || new TextEncoder().encode(value.targetURI).byteLength > 16 * 1024) {
             throw attachmentDiscardInvalid();
         }
-        return { version: 1, requestId: value.requestId, targetURI: value.targetURI };
+        return { requestId: value.requestId, targetURI: value.targetURI };
     } catch { throw attachmentDiscardInvalid(); }
 };
 const settledAttachmentDiscardState = () => {
@@ -1081,9 +1081,9 @@ const nativeAttachmentFileInUse = (uri: string, owners: readonly (Task | Project
     return counterpart !== null && isAttachmentFileInUse(counterpart, owners);
 };
 /** Native-held callbacks complete their action before JSC's return-time microtask drain. */
-const retireAttachmentDiscard = (json: string, keepCallback: () => string, retireCallback: () => string): string => {
+const retireAttachmentDiscard = (json: string, keepCallback: () => string, retireCallback: () => string, availability = false): string => {
     if (typeof keepCallback !== 'function' || typeof retireCallback !== 'function') throw attachmentDiscardInvalid();
-    const input = attachmentDiscardInput(json), before = settledAttachmentDiscardState();
+    const input = attachmentDiscardInput(json, availability), before = settledAttachmentDiscardState();
     const tasks = before.state._allTasks, projects = before.state._allProjects, generation = before.status.generation;
     let inUse: boolean;
     try { inUse = nativeAttachmentFileInUse(input.targetURI, [...tasks, ...projects]); }
@@ -1101,7 +1101,8 @@ const retireAttachmentDiscard = (json: string, keepCallback: () => string, retir
         }
         const value = JSON.parse(result) as Record<string, unknown> | null;
         if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 1
-            || !(inUse ? value.outcome === 'referenced' : value.outcome === 'removed' || value.outcome === 'absent')) {
+            || !(inUse ? value.outcome === 'referenced' : value.outcome === 'removed' || value.outcome === 'absent'
+                || availability && (value.outcome === 'notOwned' || value.outcome === 'referenced'))) {
             throw attachmentDiscardInvalid();
         }
         return result;
@@ -1129,6 +1130,7 @@ type AttachmentSavePlan = Readonly<{
     taskID: string;
     afterRevision: ReturnType<typeof taskRevisionOf>;
     completeRemoveOnly: boolean;
+    availability: boolean;
     settlementPlan: ReadonlyArray<Readonly<(ReturnType<typeof contract.validatePreparedOwnedEditorFileEditTaskDraftSave>
         & { ok: true })['value']['settlementPlan'][number]>>;
 }>;
@@ -1174,7 +1176,7 @@ const retireAttachmentFileEditSave = (json: string, referencedCallback: () => st
                 : legacy.prepared.decision.kind === 'changed' ? legacy.prepared.decision.prepared.effect.task.after : legacy.prepared.decision.effect.task.after;
             if (!afterTask) throw attachmentSaveInvalid();
             plan = Object.freeze({ envelopeJSON: input.envelopeJSON, taskID: envelope.request.saveRequest.id,
-                afterRevision: taskRevisionOf(afterTask),
+                afterRevision: taskRevisionOf(afterTask), availability: complete?.request.version === 4,
                 completeRemoveOnly: complete !== null && complete.request.ownedDraft.priorOperations.length > 0
                     && complete.request.ownedDraft.priorOperations.every((entry) => entry.kind === 'remove'),
                 settlementPlan: Object.freeze(checked.value.settlementPlan.map((value) => Object.freeze({ ...value,
@@ -1212,6 +1214,7 @@ const retireAttachmentFileEditSave = (json: string, referencedCallback: () => st
         const outcomes = referenced ? ['referenced'] : moved ? ['taskChanged']
             : selected.reason === 'uncommitted-draft' ? ['removed', 'absent']
                 : ['removed', 'absent', 'generationChanged', 'unsafeEntry', 'noOwnedGeneration', 'unmanaged'];
+        if (plan.availability && !referenced && !moved) outcomes.push('notOwned', 'referenced');
         if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 1
             || typeof value.outcome !== 'string' || !outcomes.includes(value.outcome)) throw attachmentSaveInvalid();
         return result;
@@ -3583,6 +3586,9 @@ globalThis.MindwtrHost = {
     attachmentDraftDiscardRetire(json: string, keepCallback: () => string, retireCallback: () => string): string {
         return retireAttachmentDiscard(json, keepCallback, retireCallback);
     },
+    attachmentDraftDiscardRetireV5(json: string, keepCallback: () => string, retireCallback: () => string): string {
+        return retireAttachmentDiscard(json, keepCallback, retireCallback, true);
+    },
     attachmentDraftResult(json: string): string {
         return submit(async () => completeNativeAttachmentDraftAdd(attachmentDraftJson(json), attachmentDraftDependencies));
     },
@@ -3651,6 +3657,10 @@ globalThis.MindwtrHost = {
             const completeSave = operation === 'complete-save' && ['domainSaved', 'settled'].includes(outcome);
             const completeUndo = operation === 'complete-cancel-undo' && outcome === 'confirmed';
             const ownedResume = operation === 'owned-resume' && outcome === 'validated';
+            const availabilityConsumer = operation === 'availability-resume' && outcome === 'validated'
+                || operation === 'availability-save' && ['domainSaved', 'settled'].includes(outcome)
+                || operation === 'availability-discard' && outcome === 'settled'
+                || operation === 'availability-checkpoint' && outcome === 'confirmed';
             const preexistingReplay = operation === 'preexisting-journal-replay' && outcome === 'confirmed';
             const containerRecovery = operation === 'container-relocation' && outcome === 'confirmed';
             const fileOpen = operation === 'file-open' && outcome === 'prepared';
@@ -3662,10 +3672,10 @@ globalThis.MindwtrHost = {
             const taskFileHash = operation === 'task-file-hash' && outcome === 'saved';
             const ownedCleanup = operation === 'cleanup-owned-retirement' && ['removed', 'absent', 'retained'].includes(outcome);
             const editorAcknowledged = ['editor-add', 'editor-remove', 'editor-save', 'editor-discard', 'editor-recover'].includes(operation) && outcome === 'confirmed';
-            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash && !ownedCleanup
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash && !ownedCleanup && !availabilityConsumer
                 || !(['add', 'checkpoint', 'save'].includes(operation) && ['confirmed', 'replayed'].includes(outcome)
                     || operation === 'discard' && outcome === 'retained'
-                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash || ownedCleanup)) return {};
+                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash || ownedCleanup || availabilityConsumer)) return {};
             try {
                 if (completeSave && outcome === 'domainSaved') await diagnosticsLog.append({
                     ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
@@ -3677,6 +3687,7 @@ globalThis.MindwtrHost = {
                 await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                     message: 'Native iOS attachment draft acknowledged',
                     context: { ...(editorAcknowledged ? { releaseCheck: 'v1.3.5/ios-editor-owned-attachments' }
+                        : availabilityConsumer ? { releaseCheck: 'v1.3.5/ios-task-availability-consumers' }
                         : ownedCleanup ? { releaseCheck: 'v1.3.5/ios-cleanup-owned-retirement' }
                         : fileOpen ? { releaseCheck: 'v1.3.5/ios-local-file-open' }
                         : projectFileOpen ? { releaseCheck: 'v1.3.5/ios-project-local-file-open' }

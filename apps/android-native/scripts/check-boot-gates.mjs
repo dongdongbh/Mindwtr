@@ -5082,11 +5082,11 @@ export function createNativeSync() {
     const databases = []; let cases = 0;
     const check = async (work) => { await work(); cases++; };
     const call = (state, method, input) => poll(state, state.MindwtrHost[method](JSON.stringify(input)));
-    const fixture = async ({ empty = false, noop = false, recurring = false, cancel = false, large = false, withAdd = false, availability = false,
+    const fixture = async ({ empty = false, noop = false, recurring = false, cancel = false, large = false, withAdd = false, availability = false, availabilityTombstone = false, availabilitySameURI = false,
         managedDirectoryURI = ROOT } = {}) => {
         const baseline = Array.from({ length: 2 }, (_, n) => ({ id: `file${n}`, kind: 'file', title: 'File', uri: managedDirectoryURI + `${n}.pdf`,
             size: 3, localStatus: 'available', createdAt: AT, updatedAt: AT }));
-        if (availability) Object.assign(baseline[0], { uri: '', cloudKey: 'attachments/file0.pdf', fileHash: 'a'.repeat(64), localStatus: 'missing' });
+        if (availability) Object.assign(baseline[0], { uri: availabilitySameURI ? managedDirectoryURI + '0.pdf' : '', cloudKey: 'attachments/file0.pdf', fileHash: 'a'.repeat(64), localStatus: 'missing' });
         baseline.push({ ...baseline[0], id: 'old-tombstone', uri: managedDirectoryURI + 'old.pdf', deletedAt: AT });
         const source = { id: 'task268', title: 'Task', status: 'next', taskMode: 'list', tags: [], contexts: [], checklist: [],
             description: large ? 'x'.repeat(270_000) : 'Notes', attachments: baseline, createdAt: AT, updatedAt: AT, rev: 8, revBy: 'before',
@@ -5136,6 +5136,8 @@ export function createNativeSync() {
         }
         const draft = JSON.parse(ownedDraft.beforePayloadJSON).attachments;
         if (noop && !empty) source.attachments = draft;
+        if (availabilityTombstone) source.attachments = baseline.map((row, index) => index === 0
+            ? { ...row, deletedAt: '2026-10-06T00:00:00.000Z' } : row);
         const request = { version: availability ? 4 : 2, kind: 'owned-editor-file-edit-save',
             checkpoint: { version: 1, sessionID: SESSION, taskID: source.id, generation: ownedDraft.priorOperations.length + 1, payloadJSON: ownedDraft.beforePayloadJSON },
             ownedDraft, saveRequest: { id: source.id, requestId: REQUEST, base: touchedBase, patch: edited,
@@ -5199,6 +5201,33 @@ export function createNativeSync() {
             assert.equal((await call(f.state, 'taskCancellationUndoCommit', { request, prepared: prepared.value.prepared })).ok, true);
             const row = f.db.prepare('SELECT status, attachments FROM tasks WHERE id = ?').get('task268');
             assert.equal(row.status, 'next'); assert.equal(JSON.parse(row.attachments)[0].uri, ROOT + '0.pdf');
+        });
+        await check(async () => {
+            const f = await fixture({ availability: true, availabilityTombstone: true });
+            assert.equal((await call(f.state, 'attachmentFileEditSaveCommit', f.envelope)).ok, true); syncLive(f);
+            const index = f.plan.findIndex((row) => row.reason === 'uncommitted-draft' && row.attachment.uri === ROOT + '0.pdf');
+            assert(index >= 0, 'new available URI survives as an uncommitted candidate when a concurrent tombstone wins');
+            const input = JSON.stringify({ version: 1, envelopeJSON: JSON.stringify(f.envelope), candidateIndex: index });
+            let borrowed = 0;
+            const keep = () => '{"outcome":"referenced"}', changed = () => { throw Error('wrong branch'); };
+            const retire = () => { borrowed++; return '{"outcome":"notOwned"}'; };
+            assert.equal(f.state.MindwtrHost.attachmentFileEditSaveRetire(input, keep, changed, retire), '{"outcome":"notOwned"}');
+            assert.equal(borrowed, 1);
+            assert.equal(f.state.MindwtrHost.attachmentFileEditSaveRetire(input, changed, changed, keep), '{"outcome":"referenced"}', 'selected native durable-reference backstop can retain bytes');
+            f.state.ownerProjects = [{ attachments: [{ kind: 'file', uri: ROOT + '0.pdf' }] }];
+            assert.equal(f.state.MindwtrHost.attachmentFileEditSaveRetire(input, keep, changed, retire), '{"outcome":"referenced"}');
+            assert.equal(borrowed, 1, 'fresh references keep the file even on a cached selected plan');
+            f.state.ownerProjects = [];
+            const same = await fixture({ availability: true, availabilityTombstone: true, availabilitySameURI: true });
+            assert.equal((await call(same.state, 'attachmentFileEditSaveCommit', same.envelope)).ok, true); syncLive(same);
+            const baseline = same.plan.findIndex((row) => row.reason === 'deleted-after-save' && row.attachment.uri === ROOT + '0.pdf');
+            assert(baseline >= 0, 'same-URI borrowed availability can become a baseline cleanup candidate');
+            assert.equal(same.state.MindwtrHost.attachmentFileEditSaveRetire(JSON.stringify({ version: 1,
+                envelopeJSON: JSON.stringify(same.envelope), candidateIndex: baseline }), keep, changed, retire), '{"outcome":"notOwned"}');
+            const historical = await fixture();
+            assert.equal((await call(historical.state, 'attachmentFileEditSaveCommit', historical.envelope)).ok, true); syncLive(historical);
+            assert.throws(() => historical.state.MindwtrHost.attachmentFileEditSaveRetire(JSON.stringify({ version: 1,
+                envelopeJSON: JSON.stringify(historical.envelope), candidateIndex: 0 }), keep, changed, retire), /INVALID_INPUT/);
         });
         const recurring = await fixture({ recurring: true });
         await check(async () => {
@@ -5558,6 +5587,30 @@ export function createNativeSync() {
     await check('candidate platform gate', async () => {
         const state = makeState(0);
         assert.match((await poll(state, state.MindwtrHost.attachmentDraftDiscardCandidates('{}'))).error, /^NOT_READY:/);
+    });
+    await check('availability-only Discard accepts truthful borrowed retention with sealed historical grammar', async () => {
+        const local = await bootLocal(), raw = JSON.stringify({ version: 2, requestId: ID, targetURI: TARGET });
+        let entered = 0;
+        const keep = () => { entered++; return '{"outcome":"referenced"}'; };
+        const borrowed = () => { entered++; return '{"outcome":"notOwned"}'; };
+        assert.equal(local.MindwtrHost.attachmentDraftDiscardRetireV5(raw, keep, borrowed), '{"outcome":"notOwned"}');
+        assert.equal(entered, 1);
+        for (const invalidRaw of [input, JSON.stringify({ version: true, requestId: ID, targetURI: TARGET }),
+            JSON.stringify({ version: 2, requestId: ID, targetURI: TARGET, extra: true })]) {
+            assert.throws(() => local.MindwtrHost.attachmentDraftDiscardRetireV5(invalidRaw, keep, borrowed), /INVALID_INPUT/);
+        }
+        assert.throws(() => call(local, raw, keep, borrowed), /INVALID_INPUT/); assert.equal(entered, 1);
+        assert.throws(() => call(local, input, keep, borrowed), /INVALID_INPUT/); assert.equal(entered, 2);
+        assert.equal(local.MindwtrHost.attachmentDraftDiscardRetireV5(raw, borrowed, () => '{"outcome":"referenced"}'), '{"outcome":"referenced"}');
+        assert.throws(() => call(local, input, borrowed, () => '{"outcome":"referenced"}'), /INVALID_INPUT/);
+        local.ownerProjects = [{ attachments: [{ kind: 'file', uri: TARGET }] }];
+        assert.equal(local.MindwtrHost.attachmentDraftDiscardRetireV5(raw, keep, borrowed), '{"outcome":"referenced"}');
+        assert.equal(entered, 3);
+        assert.throws(() => local.MindwtrHost.attachmentDraftDiscardRetireV5(raw, borrowed, borrowed), /INVALID_INPUT/);
+        const calls = entered;
+        for (const other of [makeLocal(), makeState(0, [], 'android', configureLocal)])
+            assert.throws(() => other.MindwtrHost.attachmentDraftDiscardRetireV5(raw, keep, borrowed), /NOT_READY/);
+        assert.equal(entered, calls);
     });
     await check('before validated boot', () => refused(makeLocal()));
     await check('normal bootRecovery ready state', async () => {
@@ -6077,6 +6130,31 @@ export function createNativeSync() {
             const before = local.logText;
             for (const name of ['relocated-file-open', `${operation}-extra`, 'relocated-file-open/task']) assert.equal((await ack(local, name)).ok, true);
             for (const outcome of ['confirmed', 'replayed', '', null]) assert.equal((await ack(local, operation, outcome)).ok, true);
+            assert.equal(local.logText, before);
+            assert.deepEqual((await poll(local, local.MindwtrHost.logShare())).value, { path: 'files/logs/mindwtr.log' });
+            const exported = local.logText;
+            local.logFailure = 'private diagnostics failure'; assert.equal((await ack(local)).ok, true); assert.equal(local.logText, exported);
+            for (const platform of ['android', undefined]) {
+                const other = makeState(0, [], platform); assert.equal((await ack(other)).ok, true); assert.equal(other.logText, null);
+            }
+        }
+    });
+    await check('availability consumer markers persist only fixed iOS acknowledgment pairs', async () => {
+        const pairs = [['availability-resume', 'validated'], ['availability-checkpoint', 'confirmed'],
+            ['availability-save', 'domainSaved'], ['availability-save', 'settled'], ['availability-discard', 'settled']];
+        for (const [operation, outcome] of pairs) {
+            const local = makeState(0, [], 'ios');
+            local.settings = { diagnostics: { loggingEnabled: false } };
+            const ack = (state, op = operation, result = outcome) => poll(state, state.MindwtrHost.attachmentDraftAcknowledged(op, result));
+            assert.equal((await ack(local)).ok, true);
+            assert.deepEqual(JSON.parse(local.logText.trim()).context,
+                { releaseCheck: 'v1.3.5/ios-task-availability-consumers', operation, outcome });
+            const before = local.logText;
+            for (const result of ['validated', 'confirmed', 'domainSaved', 'settled', 'prepared', 'downloaded', '', null]) {
+                if (!pairs.some(([op, accepted]) => op === operation && accepted === result))
+                    assert.equal((await ack(local, operation, result)).ok, true);
+            }
+            assert.equal((await ack(local, operation + '-extra')).ok, true);
             assert.equal(local.logText, before);
             assert.deepEqual((await poll(local, local.MindwtrHost.logShare())).value, { path: 'files/logs/mindwtr.log' });
             const exported = local.logText;

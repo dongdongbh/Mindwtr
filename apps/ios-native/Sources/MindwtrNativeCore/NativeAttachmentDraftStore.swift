@@ -1192,7 +1192,7 @@ struct NativeAttachmentDraftStore {
     }
     static func availabilityFingerprint(_ record: AvailabilityRecord) throws -> String { try validate(record); return try canonicalFingerprint(record) }
 
-    enum VersionedRecord: Sendable { case legacy(Record), mixed(MixedRecord) }
+    enum VersionedRecord: Sendable { case legacy(Record), mixed(MixedRecord), availability(AvailabilityRecord) }
     struct VersionedSnapshot: Sendable {
         let record: VersionedRecord
         let bytes: Data
@@ -1263,6 +1263,10 @@ struct NativeAttachmentDraftStore {
                 try Self.require(read.links == 1)
                 let value = try JSONDecoder().decode(MixedRecord.self, from: read.data)
                 try Self.validate(value); record = .mixed(value)
+            case 5:
+                try Self.require(read.links == 1)
+                let value = try JSONDecoder().decode(AvailabilityRecord.self, from: read.data)
+                try Self.validate(value); record = .availability(value)
             default: throw NativeAttachmentDraftStoreError.corrupt
             }
         } catch { throw NativeAttachmentDraftStoreError.corrupt }
@@ -1470,5 +1474,28 @@ struct NativeAttachmentDraftStore {
         }
         do { try DurableFile.remove(url) }
         catch { throw NativeAttachmentDraftStoreError.io }
+    }
+
+    static func ownedAvailabilityDiscardFingerprint(_ record: AvailabilityRecord) throws -> String {
+        try validate(record)
+        guard record.session.state == .cleanupPending, record.checkpointAdvance == nil,
+              let discard = record.discard, discard.phase == .detached, let reply = discard.replyJSON else { throw NativeAttachmentDraftStoreError.corrupt }
+        _ = try ownedDiscardFingerprint(Record(version: 2, session: record.session, operations: [],
+            discard: .init(requestId: discard.requestId, requestJSON: discard.requestJSON, expected: discard.expected, phase: .detached, replyJSON: reply)))
+        return try canonicalFingerprint(record)
+    }
+    func releaseSavedAvailabilityMatching(fingerprint: String) throws {
+        try Self.require(Self.digest(fingerprint))
+        if let record = try readAvailability() {
+            try Self.require(record.session.state == .active && record.discard == nil && record.checkpointAdvance == nil
+                && record.operations.allSatisfy { $0.phase == .checkpointed && $0.reason == nil }
+                && Self.equal(try Self.availabilityFingerprint(record), fingerprint))
+        }
+        do { try DurableFile.remove(url) } catch { throw NativeAttachmentDraftStoreError.io }
+    }
+    func releaseDiscardedAvailabilityMatching(fingerprint: String) throws {
+        try Self.require(Self.digest(fingerprint))
+        if let record = try readAvailability() { try Self.require(Self.equal(try Self.ownedAvailabilityDiscardFingerprint(record), fingerprint)) }
+        do { try DurableFile.remove(url) } catch { throw NativeAttachmentDraftStoreError.io }
     }
 }

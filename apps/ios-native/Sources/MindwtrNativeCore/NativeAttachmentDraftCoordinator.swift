@@ -186,6 +186,7 @@ final class NativeAttachmentDraftCoordinator {
         switch snapshot.record {
         case .legacy(let record): return try Self.summary(record)
         case .mixed(let record): return try Self.summary(record)
+        case .availability(let record): return try Self.summary(record)
         }
     }
     private static func summary(_ record: Store.Record) throws -> String {
@@ -993,6 +994,569 @@ final class NativeAttachmentDraftCoordinator {
         }
     }
 
+    // Selected availability consumers. Structural records alone grant neither
+    // shared patch authority nor ownership of a matching existing generation.
+    struct AvailabilitySavePreparation {
+        let binding: Store.AvailabilitySnapshot
+        let snapshot: EditorDraftSnapshot
+        let fingerprint: String
+        let envelopeJSON: String
+        let resultJSON: String
+        let candidates: [MixedSaveCandidate]
+        let stages: [String]
+    }
+    struct AvailabilityDiscardDecision {
+        let decided: Store.AvailabilityRecord
+        let detached: Store.AvailabilityRecord
+        let replyJSON: String
+    }
+    private func requireAvailability(_ binding: Store.AvailabilitySnapshot,
+                                     _ cancellation: NativeAttachmentCancellation) throws {
+        try requireOwner(); try cancellation.check()
+        guard let actual = try store.readAvailabilitySnapshot(), binding.matches(actual) else { throw Self.failure }
+        try requireOwner(); try cancellation.check()
+    }
+    private func availabilityRead(_ cancellation: NativeAttachmentCancellation) throws -> Store.AvailabilitySnapshot {
+        try requireOwner(); try cancellation.check()
+        guard let binding = try store.readAvailabilitySnapshot() else { throw Self.failure }
+        try requireAvailability(binding, cancellation)
+        return binding
+    }
+    private func availabilityInvoke(_ method: String, _ input: [String: Any], binding: Store.AvailabilitySnapshot,
+                                    cancellation: NativeAttachmentCancellation) throws -> [String: Any] {
+        try requireAvailability(binding, cancellation)
+        let encoded = try Self.json(input)
+        guard encoded.utf8.count <= Store.maximumBytes else { throw Self.failure }
+        let result = try Self.object(invoke(method, [encoded]))
+        try requireAvailability(binding, cancellation)
+        return result
+    }
+    private func availabilityPrepared(_ op: Store.AvailabilityOperation) throws -> [String: Any] {
+        let request = try Self.object(op.requestJSON, limit: 64 * 1024)
+        guard Set(request.keys) == Set(["version", "requestId", "sessionID", "generation", "attachmentId", "identity"]),
+              Self.integer(request["version"]) == 1, Self.uuid(request["requestId"]) == op.requestId,
+              Self.uuid(request["sessionID"]) == op.before.sessionID, Self.integer(request["generation"]) == Int64(op.before.generation),
+              (request["attachmentId"] as? String).map({ Self.equal($0, op.attachmentId) }) == true,
+              (request["identity"] as? String).map({ Self.equal($0, op.identity) }) == true,
+              Self.equal(try Self.json(request), op.requestJSON) else { throw Self.failure }
+        let frozen = try Self.object(op.preparedJSON, limit: 2 * 1024 * 1024)
+        guard Set(frozen.keys) == Set(["version", "kind", "taskID", "requestId", "attachmentId", "identity", "beforePayloadJSON", "afterPayloadJSON", "status", "resolvedAttachmentJSON"]),
+              Self.integer(frozen["version"]) == 1, frozen["kind"] as? String == "prepared-file-availability",
+              (frozen["taskID"] as? String).map({ Self.equal($0, op.before.taskID) }) == true,
+              (frozen["requestId"] as? String).map({ Self.equal($0, op.requestId) }) == true,
+              (frozen["attachmentId"] as? String).map({ Self.equal($0, op.attachmentId) }) == true,
+              (frozen["identity"] as? String).map({ Self.equal($0, op.identity) }) == true,
+              (frozen["beforePayloadJSON"] as? String).map({ Self.equal($0, op.before.payloadJSON) }) == true,
+              (frozen["afterPayloadJSON"] as? String).map({ Self.equal($0, op.after.payloadJSON) }) == true else { throw Self.failure }
+        if case .owned(_, let reserved?, _, _) = op.resource {
+            let expected = managedURI + ".mindwtr-install-" + op.requestId.replacingOccurrences(of: "-", with: "") + ".candidate/stage"
+            guard Self.equal(reserved.uri, expected) else { throw Self.failure }
+        }
+        if let target = op.targetURI {
+            guard let url = URL(string: target), Self.equal(url.deletingLastPathComponent().absoluteString, managedURI) else { throw Self.failure }
+        }
+        if let reply = op.replyJSON { guard Self.equal(reply, try availabilityReply(op)) else { throw Self.failure } }
+        return ["kind": "availability", "operation": frozen]
+    }
+    private func availabilityReply(_ op: Store.AvailabilityOperation) throws -> String {
+        let frozen = try Self.object(op.preparedJSON, limit: 2 * 1024 * 1024)
+        guard let status = frozen["status"] as? String, ["available", "unrecoverable"].contains(status) else { throw Self.failure }
+        return try Self.json(["version": 1, "status": status == "available" ? "draftAvailable" : "draftUnrecoverable",
+            "requestId": op.requestId, "sessionID": op.after.sessionID, "generation": op.after.generation, "attachmentId": op.attachmentId])
+    }
+    static func availabilitySaveLineageJSON(_ record: Store.AvailabilityRecord, managedDirectoryURI: String) throws -> String {
+        _ = try Store.availabilityFingerprint(record)
+        guard record.session.state == .active, record.discard == nil, record.checkpointAdvance == nil,
+              record.operations.allSatisfy({ $0.phase == .checkpointed && $0.reason == nil }) else { throw failure }
+        return try availabilityLineageJSON(record, payload: record.session.checkpoint.payloadJSON, managedDirectoryURI: managedDirectoryURI)
+    }
+    private static func availabilityLineageJSON(_ record: Store.AvailabilityRecord, payload: String, managedDirectoryURI: String) throws -> String {
+        try json(["version": 5, "taskID": record.session.taskID,
+            "initialPayloadJSON": record.operations.first?.before.payloadJSON ?? record.session.checkpoint.payloadJSON,
+            "beforePayloadJSON": payload, "priorOperations": try record.operations.map {
+                ["kind": "availability", "operation": try object($0.preparedJSON, limit: 2 * 1024 * 1024)] as [String: Any]
+            }, "managedDirectoryURI": managedDirectoryURI])
+    }
+    private func availabilityProjection(_ record: Store.AvailabilityRecord, payload: String, binding: Store.AvailabilitySnapshot,
+                                        cancellation: NativeAttachmentCancellation) throws {
+        for op in record.operations { _ = try availabilityPrepared(op) }
+        let input = try Self.object(Self.availabilityLineageJSON(record, payload: payload, managedDirectoryURI: managedURI))
+        let result = try availabilityInvoke("attachmentDraftValidateLineageV5", input, binding: binding, cancellation: cancellation)
+        guard Set(result.keys) == Set(["version", "taskID", "payloadJSON"]), Self.integer(result["version"]) == 5,
+              (result["taskID"] as? String).map({ Self.equal($0, record.session.taskID) }) == true,
+              (result["payloadJSON"] as? String).map({ Self.equal($0, payload) }) == true else { throw Self.failure }
+    }
+    private func availabilityEditor(_ record: Store.AvailabilityRecord) throws -> EditorDraftStore.OwnedCheckpoint {
+        guard record.session.state == .active, record.discard == nil, let binding = try editor.readOwnedCheckpoint(), binding.attempt == nil else { throw Self.failure }
+        var allowed = [record.session.checkpoint]
+        if let last = record.operations.last, last.phase == .resultDurable { allowed.append(last.after) }
+        if let advance = record.checkpointAdvance { allowed.append(advance.after) }
+        guard allowed.contains(where: { Self.equal($0, binding.snapshot) }) else { throw Self.failure }
+        return binding
+    }
+    private func requireAvailabilityEditor(_ binding: Store.AvailabilitySnapshot, _ editorBinding: EditorDraftStore.OwnedCheckpoint,
+                                           _ cancellation: NativeAttachmentCancellation) throws {
+        try requireAvailability(binding, cancellation)
+        guard let current = try editor.readOwnedCheckpoint(), editorBinding.matches(current), current.attempt == nil else { throw Self.failure }
+        try requireOwner(); try cancellation.check()
+    }
+    private func availabilityBoundary(_ point: AttachmentDraftBoundary, binding: Store.AvailabilitySnapshot,
+                                      editorBinding: EditorDraftStore.OwnedCheckpoint, cancellation: NativeAttachmentCancellation) throws {
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        #if DEBUG
+        try hooks?.boundary?(point)
+        #endif
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+    }
+    private func availabilityFile(_ request: NativeAttachmentDraftFileRequest, binding: Store.AvailabilitySnapshot,
+                                  editorBinding: EditorDraftStore.OwnedCheckpoint, cancellation: NativeAttachmentCancellation) throws -> [String: Any] {
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        let result = try file(request, cancellation: cancellation)
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        return result
+    }
+    private func writeAvailability(_ record: Store.AvailabilityRecord, binding: Store.AvailabilitySnapshot,
+                                   editorBinding: EditorDraftStore.OwnedCheckpoint, cancellation: NativeAttachmentCancellation) throws -> Store.AvailabilitySnapshot {
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        let next = try store.writeAvailabilityAcknowledged(record)
+        try requireAvailabilityEditor(next, editorBinding, cancellation)
+        return next
+    }
+    private func availabilityRecord(_ record: Store.AvailabilityRecord, checkpoint: EditorDraftSnapshot,
+                                    operations: [Store.AvailabilityOperation]? = nil, advance: Store.CheckpointAdvance? = nil) -> Store.AvailabilityRecord {
+        .init(session: .init(sessionID: record.session.sessionID, taskID: record.session.taskID, state: record.session.state, checkpoint: checkpoint),
+              operations: operations ?? record.operations, discard: record.discard, checkpointAdvance: advance)
+    }
+    private func advancingAvailability(_ op: Store.AvailabilityOperation, phase: Store.Phase, resource: Store.AvailabilityResource? = nil,
+                                      reply: String? = nil, reason: Store.Reason? = nil) -> Store.AvailabilityOperation {
+        .init(requestId: op.requestId, requestJSON: op.requestJSON, attachmentId: op.attachmentId, identity: op.identity,
+              phase: phase, reason: reason, before: op.before, after: op.after, preparedJSON: op.preparedJSON,
+              targetURI: op.targetURI, resource: resource ?? op.resource, replyJSON: reply ?? op.replyJSON)
+    }
+    private func replacingAvailability(_ record: Store.AvailabilityRecord, _ op: Store.AvailabilityOperation) -> Store.AvailabilityRecord {
+        availabilityRecord(record, checkpoint: op.phase == .checkpointed ? op.after : record.session.checkpoint,
+                           operations: Array(record.operations.dropLast()) + [op])
+    }
+    static func availabilityOwnedOperation(_ op: Store.AvailabilityOperation) throws -> Store.Operation {
+        guard case .owned(let source, let stage, let filled, let published) = op.resource, let target = op.targetURI else { throw failure }
+        // Physical helper adapter only. It is never admitted as an Add proof.
+        return .init(requestId: op.requestId, requestJSON: op.requestJSON, phase: op.phase, reason: op.reason,
+            before: op.before, after: op.after, preparedJSON: op.preparedJSON, targetURI: target,
+            source: source, stage: stage, filled: filled, published: published, replyJSON: op.replyJSON)
+    }
+    private func verifyAvailabilityResource(_ op: Store.AvailabilityOperation, cancellation: NativeAttachmentCancellation) throws {
+        try requireOwner(); try cancellation.check()
+        switch op.resource {
+        case .none: break
+        case .borrowed(let expected):
+            guard let target = op.targetURI else { throw Self.failure }
+            let observed = try MixedSaveObservation.read(file(.snapshotBaseline(attachmentID: op.attachmentId, targetURI: target), cancellation: cancellation))
+            guard let actual = observed.proof, actual.sha256 == expected.sha256, actual.size == expected.size,
+                  Self.equal(actual.identity, expected.identity), Self.equal(actual.directoryIdentity, expected.directoryIdentity) else { throw Self.failure }
+        case .owned:
+            let owned = try Self.availabilityOwnedOperation(op)
+            guard let reserved = owned.stage, let expected = owned.published else { throw Self.failure }
+            let raw = try file(.verifyPublication(targetURI: owned.targetURI, stage: stage(reserved),
+                sha256: owned.source.sha256, size: owned.source.size), cancellation: cancellation)
+            guard try JSONDecoder().decode(Store.Published.self, from: Data(Self.json(raw).utf8)) == expected else { throw Self.failure }
+        }
+        try requireOwner(); try cancellation.check()
+    }
+    private func preflightAvailabilityRecovery(_ record: Store.AvailabilityRecord) throws {
+        try store.preflightAvailability(record)
+        guard let op = record.operations.last, op.phase != .checkpointed else { return }
+        try editor.preflightCheckpoint(op.after)
+        let token = "18446744073709551615:18446744073709551615"
+        let phases: [Store.Phase]
+        let ownedProofs: (Store.Source, Store.Stage, Store.Filled, Store.Published)?
+        switch op.resource {
+        case .owned(let source, let reserved, let filled, let published):
+            let stage = reserved ?? Store.Stage(uri: managedURI + ".mindwtr-install-" + op.requestId.replacingOccurrences(of: "-", with: "") + ".candidate/stage",
+                identity: token, directoryIdentity: token, privateDirectoryIdentity: token)
+            ownedProofs = (source, stage, filled ?? .init(sha256: source.sha256, size: source.size, identity: stage.identity),
+                published ?? .init(sha256: source.sha256, size: source.size, identity: stage.identity, directoryIdentity: stage.directoryIdentity))
+            phases = [.intent, .stagePrepared, .stageFilled, .published, .resultDurable, .checkpointed]
+        default: ownedProofs = nil; phases = [.intent, .resultDurable, .checkpointed]
+        }
+        for phase in phases where phase.rank >= op.phase.rank {
+            let resource: Store.AvailabilityResource
+            if let (source, stage, filled, published) = ownedProofs {
+                resource = .owned(source: source, stage: phase.rank >= Store.Phase.stagePrepared.rank ? stage : nil,
+                    filled: phase.rank >= Store.Phase.stageFilled.rank ? filled : nil,
+                    published: phase.rank >= Store.Phase.published.rank ? published : nil)
+            } else { resource = op.resource }
+            let reply = phase.rank >= Store.Phase.resultDurable.rank ? try availabilityReply(op) : nil
+            for reason in phase == .checkpointed ? [nil] : [nil, Store.Reason.interruptedReservation] {
+                let next = advancingAvailability(op, phase: phase, resource: resource, reply: reply, reason: reason)
+                let shape = replacingAvailability(record, next)
+                _ = try Store.availabilityFingerprint(shape)
+                guard try JSONEncoder().encode(shape).count <= Store.maximumBytes else { throw Self.failure }
+            }
+        }
+    }
+    func recoverV5(session: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        jobs.drain()
+        var binding = try availabilityRead(cancellation), record = binding.record
+        guard Self.uuid(session) != nil, Self.equal(session, record.session.sessionID) else { throw Self.failure }
+        var editorBinding = try availabilityEditor(record)
+        let projected = record.operations.last.flatMap { $0.phase == .checkpointed ? nil : $0.after.payloadJSON } ?? record.session.checkpoint.payloadJSON
+        try availabilityProjection(record, payload: projected, binding: binding, cancellation: cancellation)
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        if record.checkpointAdvance != nil {
+            record = try finishAdvanceV5(record, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+            return try Self.summary(record)
+        }
+        try preflightAvailabilityRecovery(record)
+        binding = try writeAvailability(record, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+        guard var op = record.operations.last else { return try Self.summary(record) }
+        if op.phase == .checkpointed { return try Self.summary(record) }
+        func persist(_ next: Store.AvailabilityOperation) throws {
+            let changed = replacingAvailability(record, next)
+            try editor.preflightCheckpoint(next.after); try store.preflightAvailability(changed)
+            binding = try writeAvailability(changed, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+            record = changed; op = next
+        }
+        if case .owned(let source, _, _, _) = op.resource {
+            if op.phase == .intent {
+                guard op.reason != .interruptedReservation, let target = op.targetURI else { throw Self.failure }
+                _ = try availabilityFile(.ensureManagedDirectory, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                do {
+                    let raw = try availabilityFile(.prepareStage(targetURI: target, operationID: op.requestId.replacingOccurrences(of: "-", with: "")),
+                        binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                    try availabilityBoundary(.afterReservation, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                    guard Set(raw.keys) == Set(["stageURI", "stagedIdentity", "directoryIdentity", "privateDirectoryIdentity"]),
+                          let uri = raw["stageURI"] as? String, let inode = raw["stagedIdentity"] as? String,
+                          let directory = raw["directoryIdentity"] as? String, let parent = raw["privateDirectoryIdentity"] as? String else { throw Self.failure }
+                    try availabilityBoundary(.beforeStageProof, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                    try persist(advancingAvailability(op, phase: .stagePrepared,
+                        resource: .owned(source: source, stage: .init(uri: uri, identity: inode, directoryIdentity: directory, privateDirectoryIdentity: parent), filled: nil, published: nil)))
+                } catch {
+                    if op.phase == .intent, (try? requireAvailabilityEditor(binding, editorBinding, cancellation)) != nil {
+                        try? persist(advancingAvailability(op, phase: .intent, reason: .interruptedReservation))
+                    }
+                    throw Self.failure
+                }
+                try availabilityBoundary(.afterStageProof, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+            }
+            if op.phase == .stagePrepared {
+                guard case .owned(_, let reserved?, _, _) = op.resource else { throw Self.failure }
+                let raw = try availabilityFile(.fillStage(source: self.source(source), stage: stage(reserved)),
+                    binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                let filled = try JSONDecoder().decode(Store.Filled.self, from: Data(Self.json(raw).utf8))
+                try availabilityBoundary(.beforeFilled, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                try persist(advancingAvailability(op, phase: .stageFilled,
+                    resource: .owned(source: source, stage: reserved, filled: filled, published: nil)))
+                try availabilityBoundary(.afterFilled, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+            }
+            if op.phase == .stageFilled {
+                guard case .owned(_, let reserved?, let filled?, _) = op.resource, let target = op.targetURI else { throw Self.failure }
+                var proof = try? availabilityFile(.verifyPublication(targetURI: target, stage: stage(reserved), sha256: filled.sha256, size: filled.size),
+                    binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                if proof == nil {
+                    let raw = try availabilityFile(.snapshotSource(sourceURI: source.sourceURI), binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                    guard try JSONDecoder().decode(Store.Source.self, from: Data(Self.json(raw).utf8)) == source else { throw Self.failure }
+                    try availabilityBoundary(.beforePublication, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                    _ = try? availabilityFile(.publishStage(stage: stage(reserved), targetURI: target, sha256: filled.sha256),
+                        binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                    try availabilityBoundary(.afterPublication, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                    proof = try availabilityFile(.verifyPublication(targetURI: target, stage: stage(reserved), sha256: filled.sha256, size: filled.size),
+                        binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                }
+                guard let proof else { throw Self.failure }
+                let publication = try JSONDecoder().decode(Store.Published.self, from: Data(Self.json(proof).utf8))
+                try persist(advancingAvailability(op, phase: .published,
+                    resource: .owned(source: source, stage: reserved, filled: filled, published: publication)))
+                try availabilityBoundary(.afterPublicationProof, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+            }
+        }
+        if op.phase == .intent || op.phase == .published || op.phase == .resultDurable {
+            try requireAvailabilityEditor(binding, editorBinding, cancellation)
+            try verifyAvailabilityResource(op, cancellation: cancellation)
+            try requireAvailabilityEditor(binding, editorBinding, cancellation)
+            if op.phase != .resultDurable {
+                try availabilityBoundary(.beforeResult, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+                try persist(advancingAvailability(op, phase: .resultDurable, reply: try availabilityReply(op)))
+            }
+            try availabilityBoundary(.afterResult, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+            try availabilityBoundary(.beforeCheckpoint, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+            editorBinding = try editor.checkpointOwnedMatching(before: op.before, after: op.after, binding: editorBinding)
+            try requireAvailabilityEditor(binding, editorBinding, cancellation)
+            try availabilityBoundary(.afterCheckpoint, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+            try availabilityBoundary(.beforeMarker, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+            try persist(advancingAvailability(op, phase: .checkpointed))
+            try availabilityBoundary(.afterMarker, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+        }
+        guard op.phase == .checkpointed else { throw Self.failure }
+        return try Self.summary(record)
+    }
+    private static func summary(_ record: Store.AvailabilityRecord) throws -> String {
+        let status = record.checkpointAdvance != nil ? "checkpointPending" : record.session.state == .cleanupPending ? "cleanupPending"
+            : record.operations.last?.reason != nil ? "uncertain" : "active"
+        return try json(["version": 5, "status": status, "sessionID": record.session.sessionID,
+            "checkpoint": try object(String(decoding: JSONEncoder().encode(record.session.checkpoint), as: UTF8.self)),
+            "operations": record.operations.map { ["kind": "availability", "requestId": $0.requestId, "phase": $0.phase.rawValue,
+                "reason": $0.reason.map { $0.rawValue as Any } ?? NSNull()] },
+            "discard": record.discard.map { ["requestId": $0.requestId, "phase": $0.phase.rawValue] as Any } ?? NSNull()])
+    }
+    func checkResumeV5(_ snapshot: EditorDraftSnapshot, cancellation: NativeAttachmentCancellation) throws -> String {
+        jobs.drain(); let binding = try availabilityRead(cancellation), record = binding.record
+        let lineage = try Self.availabilitySaveLineageJSON(record, managedDirectoryURI: managedURI)
+        guard Self.equal(record.session.checkpoint, snapshot) else { throw Self.failure }
+        let editorBinding = try availabilityEditor(record)
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        try availabilityProjection(record, payload: snapshot.payloadJSON, binding: binding, cancellation: cancellation)
+        let checkpoint = try Self.object(String(decoding: JSONEncoder().encode(snapshot), as: UTF8.self))
+        let ready = try availabilityInvoke("attachmentDraftResumeCheckV3", ["version": 3, "kind": "owned-editor-resume", "checkpoint": checkpoint,
+            "ownedDraft": try Self.object(lineage)], binding: binding, cancellation: cancellation)
+        guard Set(ready.keys) == Set(["kind", "freshDraft", "freshScheduleBase", "freshRecurrenceBase", "freshChecklistBase", "freshAttachmentsBase"]),
+              ready["kind"] as? String == "ready", ready["freshDraft"] is [String: Any], ready["freshScheduleBase"] is [String: Any],
+              ready["freshRecurrenceBase"] is [String: Any], ready["freshChecklistBase"] is [[String: Any]], ready["freshAttachmentsBase"] is [[String: Any]] else { throw Self.failure }
+        let result = try Self.json(["version": 1, "checkpoint": checkpoint, "ready": ready])
+        guard result.utf8.count <= Store.maximumBytes else { throw Self.failure }
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        acknowledge("availability-resume", "validated")
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        return result
+    }
+    func advanceV5(_ snapshot: EditorDraftSnapshot, cancellation: NativeAttachmentCancellation) throws {
+        jobs.drain(); let binding = try availabilityRead(cancellation), record = binding.record
+        guard record.session.state == .active, record.discard == nil, record.operations.allSatisfy({ $0.phase == .checkpointed && $0.reason == nil }),
+              Self.equal(snapshot.sessionID, record.session.sessionID), Self.equal(snapshot.taskID, record.session.taskID) else { throw Self.failure }
+        let editorBinding = try availabilityEditor(record)
+        try availabilityProjection(record, payload: snapshot.payloadJSON, binding: binding, cancellation: cancellation)
+        if let pending = record.checkpointAdvance {
+            guard Self.equal(snapshot, pending.after) else { throw Self.failure }
+            _ = try finishAdvanceV5(record, binding: binding, editorBinding: editorBinding, cancellation: cancellation); return
+        }
+        guard snapshot.generation > record.session.checkpoint.generation else {
+            guard Self.equal(snapshot, record.session.checkpoint) else { throw Self.failure }; return
+        }
+        let pending = availabilityRecord(record, checkpoint: record.session.checkpoint,
+            advance: .init(before: record.session.checkpoint, after: snapshot))
+        try editor.preflightCheckpoint(snapshot); try store.preflightAvailability(pending)
+        let settled = availabilityRecord(pending, checkpoint: snapshot)
+        guard try JSONEncoder().encode(settled).count <= Store.maximumBytes else { throw Self.failure }
+        try availabilityBoundary(.beforeAdvanceIntent, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+        let next = try writeAvailability(pending, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+        try availabilityBoundary(.afterAdvanceIntent, binding: next, editorBinding: editorBinding, cancellation: cancellation)
+        _ = try finishAdvanceV5(pending, binding: next, editorBinding: editorBinding, cancellation: cancellation)
+    }
+    private func finishAdvanceV5(_ record: Store.AvailabilityRecord, binding: Store.AvailabilitySnapshot,
+                                 editorBinding: EditorDraftStore.OwnedCheckpoint, cancellation: NativeAttachmentCancellation) throws -> Store.AvailabilityRecord {
+        guard let advance = record.checkpointAdvance else { throw Self.failure }
+        try availabilityProjection(record, payload: advance.after.payloadJSON, binding: binding, cancellation: cancellation)
+        try availabilityBoundary(.beforeAdvanceEditor, binding: binding, editorBinding: editorBinding, cancellation: cancellation)
+        let receipt = try editor.checkpointOwnedMatching(before: advance.before, after: advance.after, binding: editorBinding)
+        try availabilityBoundary(.afterAdvanceEditor, binding: binding, editorBinding: receipt, cancellation: cancellation)
+        let settled = availabilityRecord(record, checkpoint: advance.after)
+        try availabilityBoundary(.beforeAdvanceMarker, binding: binding, editorBinding: receipt, cancellation: cancellation)
+        let next = try writeAvailability(settled, binding: binding, editorBinding: receipt, cancellation: cancellation)
+        try availabilityBoundary(.afterAdvanceMarker, binding: next, editorBinding: receipt, cancellation: cancellation)
+        acknowledge("availability-checkpoint", "confirmed")
+        try requireAvailabilityEditor(next, receipt, cancellation)
+        return settled
+    }
+
+    static func availabilitySaveCandidates(plan: [[String: Any]], envelopeJSON: String, authorities: [MixedSaveAuthority],
+                                            record: Store.AvailabilityRecord?) throws -> [MixedSaveCandidate] {
+        let envelope = try object(envelopeJSON)
+        guard let request = envelope["request"] as? [String: Any], integer(request["version"]) == 4,
+              let save = request["saveRequest"] as? [String: Any], let half = save["attachments"] as? [String: Any],
+              let baseline = half["base"] as? [[String: Any]], let owned = request["ownedDraft"] as? [String: Any],
+              integer(owned["version"]) == 5, let history = owned["priorOperations"] as? [[String: Any]],
+              authorities.count == plan.count else { throw failure }
+        let operations = try history.map { entry -> [String: Any] in
+            guard Set(entry.keys) == Set(["kind", "operation"]), entry["kind"] as? String == "availability",
+                  let frozen = entry["operation"] as? [String: Any] else { throw failure }
+            return frozen
+        }
+        return try plan.enumerated().map { index, value in
+            guard Set(value.keys) == Set(["attachment", "reason"]), let attachment = value["attachment"] as? [String: Any],
+                  attachment["kind"] as? String == "file", let id = attachment["id"] as? String, let uri = attachment["uri"] as? String,
+                  !uri.isEmpty, let reason = value["reason"] as? String,
+                  ["uncommitted-draft", "replaced-baseline", "deleted-after-save"].contains(reason) else { throw failure }
+            let originals = baseline.filter { ($0["id"] as? String).map { equal($0, id) } == true
+                && ($0["uri"] as? String).map { equal($0, uri) } == true && $0["kind"] as? String == "file" }
+            let matching = try operations.filter { frozen in
+                guard frozen["status"] as? String == "available", let raw = frozen["resolvedAttachmentJSON"] as? String else { return false }
+                let resolved = try object(raw, limit: 1_000_000)
+                return (frozen["attachmentId"] as? String).map { equal($0, id) } == true
+                    && (resolved["uri"] as? String).map { equal($0, uri) } == true
+            }
+            switch authorities[index] {
+            case .ownedAdd: throw failure
+            case .ownedAvailability(let requestID), .borrowedAvailability(let requestID):
+                guard matching.count == 1, originals.count <= 1,
+                      (originals.isEmpty ? reason == "uncommitted-draft" : ["replaced-baseline", "deleted-after-save"].contains(reason)),
+                      (matching[0]["requestId"] as? String).map({ equal($0, requestID) }) == true else { throw failure }
+                if let record {
+                    let retained = record.operations.filter { equal($0.requestId, requestID) && equal($0.attachmentId, id)
+                        && $0.targetURI.map { equal($0, uri) } == true }
+                    guard retained.count == 1 else { throw failure }
+                    switch (authorities[index], retained[0].resource) {
+                    case (.ownedAvailability, .owned(_, let stage?, _, let published?)):
+                        guard equal(stage.identity, published.identity), equal(stage.directoryIdentity, published.directoryIdentity) else { throw failure }
+                    case (.borrowedAvailability, .borrowed): break
+                    default: throw failure
+                    }
+                }
+            case .baseline(let observation):
+                guard originals.count == 1, matching.isEmpty, reason != "uncommitted-draft", equal(observation.targetURI, uri) else { throw failure }
+            }
+            return .init(index: index, attachmentID: id, targetURI: uri, reason: reason, authority: authorities[index])
+        }
+    }
+    func prepareAvailabilitySave(_ raw: String, session: String, generation: Int,
+                                 cancellation: NativeAttachmentCancellation) throws -> AvailabilitySavePreparation {
+        jobs.drain(); let binding = try availabilityRead(cancellation), record = binding.record
+        let lineage = try Self.availabilitySaveLineageJSON(record, managedDirectoryURI: managedURI)
+        let editorBinding = try availabilityEditor(record)
+        guard Self.equal(session, editorBinding.snapshot.sessionID), generation == editorBinding.snapshot.generation else { throw Self.failure }
+        try availabilityProjection(record, payload: editorBinding.snapshot.payloadJSON, binding: binding, cancellation: cancellation)
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        let request: [String: Any] = ["version": 4, "kind": "owned-editor-file-edit-save",
+            "checkpoint": try Self.object(String(decoding: JSONEncoder().encode(editorBinding.snapshot), as: UTF8.self)),
+            "ownedDraft": try Self.object(lineage), "saveRequest": try Self.object(raw, limit: 2_000_000)]
+        let response = try availabilityInvoke("attachmentFileEditSavePrepare", request, binding: binding, cancellation: cancellation)
+        guard Set(response.keys) == Set(["kind", "prepared"]), response["kind"] as? String == "prepared",
+              let prepared = response["prepared"] as? [String: Any], let repeated = prepared["request"] as? [String: Any],
+              Self.equal(try Self.json(repeated), try Self.json(request)) else { throw Self.failure }
+        let envelopeJSON = try Self.json(["request": request, "prepared": prepared])
+        guard envelopeJSON.utf8.count <= Store.maximumBytes else { throw Self.failure }
+        let validation = try availabilityInvoke("attachmentFileEditSaveValidate", try Self.object(envelopeJSON), binding: binding, cancellation: cancellation)
+        guard Set(validation.keys) == Set(["version", "kind", "result", "settlementPlan"]), Self.integer(validation["version"]) == 4,
+              validation["kind"] as? String == "owned-editor-file-edit-save", let result = validation["result"] as? [String: Any],
+              let plan = validation["settlementPlan"] as? [[String: Any]], !record.operations.isEmpty || plan.isEmpty else { throw Self.failure }
+        let baseline = ((request["saveRequest"] as? [String: Any])?["attachments"] as? [String: Any])?["base"] as? [[String: Any]] ?? []
+        var authorities: [MixedSaveAuthority] = []
+        for value in plan {
+            guard let attachment = value["attachment"] as? [String: Any], let id = attachment["id"] as? String,
+                  let uri = attachment["uri"] as? String else { throw Self.failure }
+            let originals = baseline.filter { ($0["id"] as? String).map { Self.equal($0, id) } == true
+                && ($0["uri"] as? String).map { Self.equal($0, uri) } == true }
+            let matching = record.operations.filter { Self.equal($0.attachmentId, id) && $0.targetURI.map { Self.equal($0, uri) } == true }
+            guard matching.count <= 1, originals.count <= 1 else { throw Self.failure }
+            if let retained = matching.first {
+                switch retained.resource {
+                case .owned: authorities.append(.ownedAvailability(retained.requestId))
+                case .borrowed: authorities.append(.borrowedAvailability(retained.requestId))
+                case .none: throw Self.failure
+                }
+            } else {
+                guard originals.count == 1 else { throw Self.failure }
+                try requireAvailabilityEditor(binding, editorBinding, cancellation)
+                let observed = try MixedSaveObservation.read(file(.snapshotBaseline(attachmentID: id, targetURI: uri), cancellation: cancellation))
+                try requireAvailabilityEditor(binding, editorBinding, cancellation)
+                authorities.append(.baseline(observed))
+            }
+        }
+        let candidates = try Self.availabilitySaveCandidates(plan: plan, envelopeJSON: envelopeJSON, authorities: authorities, record: record)
+        try verifyAvailabilitySavePublished(record, envelopeJSON: envelopeJSON, cancellation: cancellation)
+        try requireAvailabilityEditor(binding, editorBinding, cancellation)
+        return .init(binding: binding, snapshot: editorBinding.snapshot, fingerprint: try Store.availabilityFingerprint(record),
+            envelopeJSON: envelopeJSON, resultJSON: try Self.json(result), candidates: candidates,
+            stages: record.operations.compactMap { if case .owned = $0.resource { return $0.requestId }; return nil })
+    }
+    func verifyAvailabilitySavePublished(_ record: Store.AvailabilityRecord, envelopeJSON: String,
+                                        cancellation: NativeAttachmentCancellation) throws {
+        jobs.drain(); try requireOwner(); try cancellation.check()
+        _ = try Self.availabilitySaveLineageJSON(record, managedDirectoryURI: managedURI)
+        for op in record.operations { _ = try availabilityPrepared(op) }
+        let envelope = try Self.object(envelopeJSON)
+        guard let request = envelope["request"] as? [String: Any], let save = request["saveRequest"] as? [String: Any],
+              let id = save["id"] as? String, let prepared = envelope["prepared"] as? [String: Any], Self.integer(prepared["version"]) == 4,
+              let decision = prepared["decision"] as? [String: Any], let proof = decision["prepared"] as? [String: Any] else { throw Self.failure }
+        let tasks: [[String: Any]]
+        switch decision["kind"] as? String {
+        case "changed":
+            guard let rows = (proof["effect"] as? [String: Any])?["tasks"] as? [[String: Any]] else { throw Self.failure }
+            tasks = try rows.map { guard let after = $0["after"] as? [String: Any] else { throw Self.failure }; return after }
+            guard tasks.filter({ ($0["id"] as? String).map { Self.equal($0, id) } == true }).count == 1 else { throw Self.failure }
+        case "noop":
+            guard let source = (proof["witness"] as? [String: Any])?["source"] as? [String: Any],
+                  (source["id"] as? String).map({ Self.equal($0, id) }) == true else { throw Self.failure }
+            tasks = [source]
+        default: throw Self.failure
+        }
+        let attachments = try tasks.flatMap { task -> [[String: Any]] in
+            guard task["attachments"] == nil || task["attachments"] is [[String: Any]] else { throw Self.failure }
+            return task["attachments"] as? [[String: Any]] ?? []
+        }
+        for op in record.operations where op.targetURI.map({ target in attachments.contains {
+            $0["kind"] as? String == "file" && ($0["uri"] as? String).map { Self.equal($0, target) } == true
+                && ($0["deletedAt"] == nil || $0["deletedAt"] is NSNull)
+        } }) == true { try verifyAvailabilityResource(op, cancellation: cancellation) }
+    }
+    func prepareAvailabilityDiscardDecision(_ raw: String, record: Store.AvailabilityRecord) throws -> AvailabilityDiscardDecision {
+        let request = try Self.request(raw, add: false)
+        _ = try Store.availabilityFingerprint(record)
+        guard record.checkpointAdvance == nil, Self.equal(record.session.sessionID, request.session),
+              !record.operations.contains(where: { Self.equal($0.requestId, request.id) }) else { throw Self.failure }
+        if let existing = record.discard {
+            guard Self.equal(existing.requestJSON, request.json), Self.equal(existing.expected, record.session.checkpoint) else { throw Self.failure }
+        } else { guard record.session.state == .active, record.session.checkpoint.generation == request.generation else { throw Self.failure } }
+        let reply = try Self.json(["version": 1, "status": "cleanupPending", "requestId": request.id, "sessionID": request.session])
+        let session = Store.Session(sessionID: record.session.sessionID, taskID: record.session.taskID,
+            state: .cleanupPending, checkpoint: record.session.checkpoint)
+        let decided = Store.AvailabilityRecord(session: session, operations: record.operations,
+            discard: .init(requestId: request.id, requestJSON: request.json, expected: record.session.checkpoint, phase: .decided))
+        let detached = Store.AvailabilityRecord(session: session, operations: record.operations,
+            discard: .init(requestId: request.id, requestJSON: request.json, expected: record.session.checkpoint, phase: .detached, replyJSON: reply))
+        if let retained = record.discard?.replyJSON { guard Self.equal(retained, reply) else { throw Self.failure } }
+        return .init(decided: decided, detached: detached, replyJSON: reply)
+    }
+    func prepareAvailabilityDiscardCandidates(_ record: Store.AvailabilityRecord, binding: Store.AvailabilitySnapshot,
+                                             cancellation: NativeAttachmentCancellation) throws -> [Store.AvailabilityOperation] {
+        jobs.drain(); try requireAvailability(binding, cancellation)
+        _ = try Store.availabilityFingerprint(record)
+        guard record.checkpointAdvance == nil else { throw Self.failure }
+        for op in record.operations { _ = try availabilityPrepared(op) }
+        if let discard = record.discard { _ = try prepareAvailabilityDiscardDecision(discard.requestJSON, record: record) }
+        let operations = record.operations.map { ["kind": "availability", "phase": $0.phase == .checkpointed ? "checkpointed" : "intent", "preparedJSON": $0.preparedJSON] }
+        let response = try availabilityInvoke("attachmentDraftDiscardCandidatesV5", ["version": 4, "historyVersion": 5,
+            "taskID": record.session.taskID, "managedDirectoryURI": managedURI,
+            "initialPayloadJSON": record.operations.first?.before.payloadJSON ?? record.session.checkpoint.payloadJSON,
+            "checkpointPayloadJSON": record.session.checkpoint.payloadJSON, "operations": operations], binding: binding, cancellation: cancellation)
+        guard Set(response.keys) == Set(["version", "kind", "historyVersion", "taskID", "candidates"]),
+              Self.integer(response["version"]) == 4, Self.integer(response["historyVersion"]) == 5,
+              response["kind"] as? String == "owned-availability-discard-candidates",
+              (response["taskID"] as? String).map({ Self.equal($0, record.session.taskID) }) == true,
+              let candidates = response["candidates"] as? [[String: Any]], candidates.count <= record.operations.count else { throw Self.failure }
+        var used = Set<String>()
+        return try candidates.map { candidate in
+            guard Set(candidate.keys) == Set(["requestId", "attachmentId", "targetURI", "reason"]),
+                  let request = candidate["requestId"] as? String, let id = candidate["attachmentId"] as? String,
+                  let target = candidate["targetURI"] as? String, candidate["reason"] as? String == "uncommitted-draft", used.insert(request).inserted else { throw Self.failure }
+            let matches = record.operations.filter { Self.equal($0.requestId, request) && Self.equal($0.attachmentId, id)
+                && $0.targetURI.map { Self.equal($0, target) } == true }
+            guard matches.count == 1 else { throw Self.failure }
+            if case .none = matches[0].resource { throw Self.failure }
+            return matches[0]
+        }
+    }
+    func retireAvailabilityTarget(_ op: Store.AvailabilityOperation, cancellation: NativeAttachmentCancellation) throws -> String {
+        try requireOwner(); try cancellation.check()
+        switch op.resource {
+        case .none: throw Self.failure
+        case .borrowed: return "notOwned"
+        case .owned: return try retireOwnedDiscardTarget(Self.availabilityOwnedOperation(op), cancellation: cancellation)
+        }
+    }
+    func retireAvailabilityStage(_ op: Store.AvailabilityOperation, cancellation: NativeAttachmentCancellation) throws -> String {
+        try requireOwner(); try cancellation.check()
+        guard case .owned(_, let reserved?, _, _) = op.resource, let target = op.targetURI else { throw Self.failure }
+        let raw = try file(.retirePrivateStage(stage: stage(reserved), targetURI: target,
+            operationID: op.requestId.replacingOccurrences(of: "-", with: "")), cancellation: cancellation)
+        guard Set(raw.keys) == Set(["status"]), let status = raw["status"] as? String, ["removed", "missing"].contains(status) else { throw Self.failure }
+        try requireOwner(); try cancellation.check(); return status
+    }
+    func promotedAvailabilityDiscard(_ record: Store.AvailabilityRecord, proof: Store.Published) throws -> Store.AvailabilityRecord {
+        guard let op = record.operations.last, op.phase == .stageFilled,
+              case .owned(let source, let reserved?, let filled?, nil) = op.resource else { throw Self.failure }
+        return replacingAvailability(record, advancingAvailability(op, phase: .published,
+            resource: .owned(source: source, stage: reserved, filled: filled, published: proof), reason: op.reason))
+    }
+
     struct OwnedSavePreparation {
         let record: NativeAttachmentDraftStore.Record
         let fingerprint: String
@@ -1046,10 +1610,13 @@ final class NativeAttachmentDraftCoordinator {
     }
     enum MixedSaveAuthority {
         case ownedAdd(String)
+        case ownedAvailability(String), borrowedAvailability(String)
         case baseline(MixedSaveObservation)
         func object() throws -> [String: Any] {
             switch self {
             case .ownedAdd(let id): return ["kind": "ownedAdd", "requestId": id]
+            case .ownedAvailability(let id): return ["kind": "ownedAvailability", "requestId": id]
+            case .borrowedAvailability(let id): return ["kind": "borrowedAvailability", "requestId": id]
             case .baseline(let observation): return ["kind": "baseline", "observation": try NativeAttachmentDraftCoordinator.object(observation.json)]
             }
         }
@@ -1058,6 +1625,9 @@ final class NativeAttachmentDraftCoordinator {
             case "ownedAdd":
                 guard Set(value.keys) == Set(["kind", "requestId"]), let id = uuid(value["requestId"]), id.utf8.count == 36 else { throw failure }
                 return .ownedAdd(id)
+            case "ownedAvailability", "borrowedAvailability":
+                guard Set(value.keys) == Set(["kind", "requestId"]), let id = uuid(value["requestId"]), id.utf8.count == 36 else { throw failure }
+                return value["kind"] as? String == "ownedAvailability" ? .ownedAvailability(id) : .borrowedAvailability(id)
             case "baseline":
                 guard Set(value.keys) == Set(["kind", "observation"]), let raw = value["observation"] as? [String: Any] else { throw failure }
                 return .baseline(try MixedSaveObservation.read(raw))
@@ -1074,7 +1644,8 @@ final class NativeAttachmentDraftCoordinator {
         var outcomes: Set<String> {
             let keeps: Set<String> = reason == "uncommitted-draft" ? ["referenced"] : ["referenced", "taskChanged"]
             switch authority {
-            case .ownedAdd: return keeps.union(["removed", "absent"])
+            case .ownedAdd, .ownedAvailability: return keeps.union(["removed", "absent"])
+            case .borrowedAvailability: return keeps.union(["notOwned"])
             case .baseline(let observation):
                 return keeps.union(observation.kind == "present" ? ["removed", "absent", "generationChanged", "unsafeEntry"] : [observation.kind])
             }
@@ -1090,11 +1661,11 @@ final class NativeAttachmentDraftCoordinator {
         let stages: [String]
     }
     enum MixedSaveSelection {
-        case legacy, complete, completeHash
+        case legacy, complete, completeHash, completeAvailability
         var isComplete: Bool { self != .legacy }
-        var envelopeVersion: Int { self == .completeHash ? 3 : (isComplete ? 2 : 1) }
-        var wrapperVersion: Int { self == .completeHash ? 4 : (isComplete ? 3 : 2) }
-        var historyVersion: Int { self == .completeHash ? 4 : 3 }
+        var envelopeVersion: Int { self == .completeAvailability ? 4 : self == .completeHash ? 3 : (isComplete ? 2 : 1) }
+        var wrapperVersion: Int { self == .completeAvailability ? 5 : self == .completeHash ? 4 : (isComplete ? 3 : 2) }
+        var historyVersion: Int { self == .completeAvailability ? 5 : self == .completeHash ? 4 : 3 }
         var allowsEmptyHistory: Bool { isComplete }
     }
     static func mixedSaveLineageJSON(_ record: Store.MixedRecord, managedDirectoryURI: String,
@@ -1144,6 +1715,7 @@ final class NativeAttachmentDraftCoordinator {
                     let retained = mixedSaveAdds(record).filter { equal($0.requestId, requestID) && equal($0.targetURI, uri) }
                     guard retained.count == 1, retained[0].stage != nil, retained[0].published != nil else { throw failure }
                 }
+            case .ownedAvailability, .borrowedAvailability: throw failure
             case .baseline(let observed):
                 guard originals.count == 1, adds.isEmpty, reason != "uncommitted-draft", equal(observed.targetURI, uri) else { throw failure }
             }
@@ -1287,17 +1859,39 @@ final class NativeAttachmentDraftCoordinator {
         case .ownedAdd(let id):
             guard currentURI == nil, let op = Self.mixedSaveAdds(record).first(where: { Self.equal($0.requestId, id) }) else { throw Self.failure }
             outcome = try retireOwnedDiscardTarget(op, cancellation: cancellation)
+        case .ownedAvailability, .borrowedAvailability: throw Self.failure
         case .baseline(let observation):
-            if let proof = observation.proof {
-                // The synchronous native owner has rechecked this mapping. No
-                // content or file/directory generation proof can be replaced.
-                let resolved = currentURI.map { NativeAttachmentFiles.BaselineAttachmentProof(targetURI: $0,
-                    sha256: proof.sha256, size: proof.size, identity: proof.identity, directoryIdentity: proof.directoryIdentity) } ?? proof
-                let value = try file(.retireBaseline(attachmentID: candidate.attachmentID, proof: resolved), cancellation: cancellation)
-                guard Set(value.keys) == Set(["status"]), let status = value["status"] as? String,
-                      ["removed", "absent", "generationChanged", "unsafeEntry"].contains(status) else { throw Self.failure }
-                outcome = status
-            } else { guard currentURI == nil else { throw Self.failure }; outcome = observation.kind }
+            outcome = try retireSaveBaseline(candidate, observation: observation, currentURI: currentURI, cancellation: cancellation)
+        }
+        jobs.drain(); try requireOwner(); try cancellation.check()
+        guard candidate.outcomes.contains(outcome) else { throw Self.failure }
+        return outcome
+    }
+    private func retireSaveBaseline(_ candidate: MixedSaveCandidate, observation: MixedSaveObservation,
+                                    currentURI: String? = nil, cancellation: NativeAttachmentCancellation) throws -> String {
+        if let proof = observation.proof {
+            let resolved = currentURI.map { NativeAttachmentFiles.BaselineAttachmentProof(targetURI: $0,
+                sha256: proof.sha256, size: proof.size, identity: proof.identity, directoryIdentity: proof.directoryIdentity) } ?? proof
+            let value = try file(.retireBaseline(attachmentID: candidate.attachmentID, proof: resolved), cancellation: cancellation)
+            guard Set(value.keys) == Set(["status"]), let status = value["status"] as? String,
+                  ["removed", "absent", "generationChanged", "unsafeEntry"].contains(status) else { throw Self.failure }
+            return status
+        }
+        guard currentURI == nil else { throw Self.failure }
+        return observation.kind
+    }
+    func retireAvailabilitySaveTarget(_ candidate: MixedSaveCandidate, record: Store.AvailabilityRecord,
+                                      cancellation: NativeAttachmentCancellation) throws -> String {
+        try requireOwner(); try cancellation.check()
+        let outcome: String
+        switch candidate.authority {
+        case .ownedAvailability(let id), .borrowedAvailability(let id):
+            let matches = record.operations.filter { Self.equal($0.requestId, id) && Self.equal($0.attachmentId, candidate.attachmentID)
+                && $0.targetURI.map { Self.equal($0, candidate.targetURI) } == true }
+            guard matches.count == 1 else { throw Self.failure }
+            outcome = try retireAvailabilityTarget(matches[0], cancellation: cancellation)
+        case .baseline(let observation): outcome = try retireSaveBaseline(candidate, observation: observation, cancellation: cancellation)
+        case .ownedAdd: throw Self.failure
         }
         jobs.drain(); try requireOwner(); try cancellation.check()
         guard candidate.outcomes.contains(outcome) else { throw Self.failure }

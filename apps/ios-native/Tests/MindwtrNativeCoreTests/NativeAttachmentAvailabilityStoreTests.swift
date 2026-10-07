@@ -138,10 +138,14 @@ final class NativeAttachmentAvailabilityStoreTests: XCTestCase {
             }
         }
     }
-    func testOrdinaryReadersNeverAdmitHistory5() throws {
+    func testSelectedVersionedReaderAdmitsHistory5WithoutWideningHistoricalReaders() throws {
         try write(record([operation(snapshot(1))]))
         let bytes = try Data(contentsOf: store.url), identity = try inode(store.url)
-        refused { _ = try self.cold().readVersioned() }; refused { _ = try self.cold().read() }; refused { _ = try self.cold().readMixed() }
+        let selected = try XCTUnwrap(cold().readVersioned())
+        guard case .availability(let actual) = selected.record else { return XCTFail("Expected selected history5") }
+        XCTAssertEqual(actual, try cold().readAvailability()); XCTAssertEqual(selected.bytes, bytes)
+        XCTAssertEqual("\(selected.device):\(selected.inode)", identity)
+        refused { _ = try self.cold().read() }; refused { _ = try self.cold().readMixed() }
         XCTAssertEqual(try Data(contentsOf: store.url), bytes); XCTAssertEqual(try inode(store.url), identity)
     }
     func testExactCodableKeysNullsClosedResourceAndBooleanVersions() throws {
