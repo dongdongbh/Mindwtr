@@ -1,5 +1,8 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const en: Record<string, string> = {
+    'tray.quickAdd': "Quick Add",
+    'tray.show': "Show Mindwtr",
+    'tray.quit': "Quit",
     "settings.mcpTitle": "Local MCP server (advanced)",
     "settings.mcpDesc": "Connect an AI client on this computer to Mindwtr.",
     "settings.mcpUnavailable": "Available only in the desktop app, outside the sandbox.",

@@ -1,5 +1,8 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const faOverrides: Record<string, string> = {
+    'tray.quickAdd': "افزودن سریع",
+    'tray.show': "نمایش Mindwtr",
+    'tray.quit': "خروج",
     "settings.mcpTitle": "سرور محلی MCP (پیشرفته)",
     "settings.mcpDesc": "یک برنامه هوش مصنوعی روی این رایانه را به Mindwtr وصل کنید.",
     "settings.mcpUnavailable": "فقط در برنامه دسکتاپ و خارج از محیط آزمایشی در دسترس است.",

@@ -155,10 +155,10 @@ use sync_encryption::{
     mark_sync_encryption_transition_incomplete, set_sync_encryption_key_material,
 };
 use ui::{
-    acknowledge_close_request, apply_global_quick_add_shortcut, consume_quick_add_pending,
+    acknowledge_close_request, apply_global_quick_add_shortcut, build_tray_menu, consume_quick_add_pending,
     create_quick_add_window, get_system_theme_preference, hide_quick_add_window,
     hide_quick_add_window_for_app, notify_ui_ready, quit_app, reveal_main_window_after_timeout,
-    set_global_quick_add_shortcut, set_tray_tooltip, set_tray_visible,
+    set_global_quick_add_shortcut, set_tray_labels, set_tray_tooltip, set_tray_visible,
     show_macos_widget_quick_add_window, show_main, show_quick_add_window, MainWindowReveal,
 };
 
@@ -1923,13 +1923,7 @@ pub fn run() {
             }
             macos_widget::install_macos_widget_capture_listener(&handle);
             let tray_init_result: tauri::Result<()> = (|| {
-                let quick_add_item =
-                    MenuItem::with_id(handle, "quick_add", "Quick Add", true, None::<&str>)?;
-                let show_item =
-                    MenuItem::with_id(handle, "show", "Show Mindwtr", true, None::<&str>)?;
-                let quit_item = MenuItem::with_id(handle, "quit", "Quit", true, None::<&str>)?;
-                let tray_menu =
-                    Menu::with_items(handle, &[&quick_add_item, &show_item, &quit_item])?;
+                let tray_menu = build_tray_menu(handle, "Quick Add", "Show Mindwtr", "Quit")?;
 
                 let tray_icon = resolve_tray_icon(handle);
 
@@ -2188,6 +2182,7 @@ pub fn run() {
             install_attachment_download,
             set_tray_visible,
             set_tray_tooltip,
+            set_tray_labels,
             set_macos_activation_policy,
             get_linux_distro,
             start_audio_recording,

@@ -1203,7 +1203,10 @@ function App() {
         };
     }, [isObsidianEnabled, obsidianVaultPath, sandboxMode, startObsidianWatcher, stopObsidianWatcher]);
 
-    useDesktopShellSync({ enabled: !sandboxMode, showTray, trayTooltip, closeBehavior });
+    useDesktopShellSync({
+        enabled: !sandboxMode, showTray, trayTooltip, closeBehavior,
+        trayLabels: { quickAdd: t('tray.quickAdd'), show: t('tray.show'), quit: t('tray.quit') },
+    });
 
     useEffect(() => {
         if (sandboxMode || import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return;

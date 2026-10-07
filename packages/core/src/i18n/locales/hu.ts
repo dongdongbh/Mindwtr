@@ -2,6 +2,9 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Hungarian.
 export const huOverrides: Record<string, string> = {
+    'tray.quickAdd': "Gyors hozzáadás",
+    'tray.show': "Mindwtr megjelenítése",
+    'tray.quit': "Kilépés",
     "settings.mcpTitle": "Helyi MCP-kiszolgáló (haladó)",
     "settings.mcpDesc": "Csatlakoztasd a számítógépen futó MI-klienst a Mindwtr-hez.",
     "settings.mcpUnavailable": "Csak az asztali alkalmazásban érhető el, a tesztkörnyezeten kívül.",

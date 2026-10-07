@@ -1,5 +1,8 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const zhHant: Record<string, string> = {
+    'tray.quickAdd': "快速新增",
+    'tray.show': "顯示Mindwtr",
+    'tray.quit': "結束",
     "settings.mcpTitle": "本機 MCP 伺服器（進階）",
     "settings.mcpDesc": "將此電腦上的 AI 用戶端連接到 Mindwtr。",
     "settings.mcpUnavailable": "僅在桌面應用程式中可用，沙盒模式下不可用。",

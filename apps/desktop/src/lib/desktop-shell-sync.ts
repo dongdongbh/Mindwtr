@@ -9,6 +9,7 @@ export type DesktopShellSyncOptions = {
     /** `undefined` until settings hydrate — the tray is left alone until then. */
     showTray: boolean | undefined;
     trayTooltip: string;
+    trayLabels: { quickAdd: string; show: string; quit: string };
     closeBehavior: DesktopCloseBehavior;
 };
 
@@ -42,7 +43,7 @@ function runShellCommand(
  * One effect per command on purpose — each re-runs on its own inputs, and the
  * tray icon must exist before its tooltip is set.
  */
-export function useDesktopShellSync({ enabled = true, showTray, trayTooltip, closeBehavior }: DesktopShellSyncOptions): void {
+export function useDesktopShellSync({ enabled = true, showTray, trayTooltip, trayLabels, closeBehavior }: DesktopShellSyncOptions): void {
     useEffect(() => {
         if (!enabled) return;
         if (!isTauriRuntime()) return;
@@ -60,6 +61,13 @@ export function useDesktopShellSync({ enabled = true, showTray, trayTooltip, clo
         if (showTray === false) return;
         return runShellCommand('set_tray_tooltip', { tooltip: trayTooltip }, 'tray', 'setTooltip');
     }, [enabled, showTray, trayTooltip]);
+
+    useEffect(() => {
+        if (!enabled || !isTauriRuntime() || showTray === false) return;
+        return runShellCommand('set_tray_labels', {
+            quickAdd: trayLabels.quickAdd, show: trayLabels.show, quit: trayLabels.quit,
+        }, 'tray', 'setLabels');
+    }, [enabled, showTray, trayLabels.quickAdd, trayLabels.show, trayLabels.quit]);
 
     // Settings alone can only ever put the app *back* in the Dock, Cmd+Tab and
     // the menu bar. Enabling close-to-tray used to make it an accessory app for

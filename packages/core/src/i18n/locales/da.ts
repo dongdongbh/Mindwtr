@@ -1,5 +1,8 @@
 // Danish translation. Keep at full key parity with en.ts.
 export const daOverrides: Record<string, string> = {
+    'tray.quickAdd': "Hurtig tilføjelse",
+    'tray.show': "Vis Mindwtr",
+    'tray.quit': "Afslut",
     "settings.mcpTitle": "Lokal MCP-server (avanceret)",
     "settings.mcpDesc": "Forbind en AI-klient på denne computer til Mindwtr.",
     "settings.mcpUnavailable": "Kun tilgængelig i skrivebordsappen uden for sandkassen.",

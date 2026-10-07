@@ -1,5 +1,8 @@
 // Ukrainian app strings. Keep placeholders and slash-command syntax in sync with en.ts.
 export const ukOverrides: Record<string, string> = {
+    'tray.quickAdd': "Швидке додавання",
+    'tray.show': "Показати Mindwtr",
+    'tray.quit': "Вийти",
     "settings.mcpTitle": "Локальний сервер MCP (розширено)",
     "settings.mcpDesc": "Підключіть клієнт ШІ на цьому комп’ютері до Mindwtr.",
     "settings.mcpUnavailable": "Доступно лише в настільному застосунку, поза тестовим середовищем.",
