@@ -1661,8 +1661,14 @@ describe('cloud server namespace mode', () => {
                 const splitAt = Math.floor(payload.length / 2);
                 controller.enqueue(new TextEncoder().encode(payload.slice(0, splitAt)));
                 void bodyGate.then(() => {
-                    controller.enqueue(new TextEncoder().encode(payload.slice(splitAt)));
-                    controller.close();
+                    // A refused write's body is cancelled by the server (its read starts before admission),
+                    // which closes this stream first; the rest has nowhere to go then.
+                    try {
+                        controller.enqueue(new TextEncoder().encode(payload.slice(splitAt)));
+                        controller.close();
+                    } catch {
+                        // Already closed by the server's cancel.
+                    }
                 });
             },
         });
@@ -1722,8 +1728,14 @@ describe('cloud server namespace mode', () => {
                 const splitAt = Math.floor(payload.length / 2);
                 controller.enqueue(new TextEncoder().encode(payload.slice(0, splitAt)));
                 void bodyGate.then(() => {
-                    controller.enqueue(new TextEncoder().encode(payload.slice(splitAt)));
-                    controller.close();
+                    // A refused write's body is cancelled by the server (its read starts before admission),
+                    // which closes this stream first; the rest has nowhere to go then.
+                    try {
+                        controller.enqueue(new TextEncoder().encode(payload.slice(splitAt)));
+                        controller.close();
+                    } catch {
+                        // Already closed by the server's cancel.
+                    }
                 });
             },
         });
