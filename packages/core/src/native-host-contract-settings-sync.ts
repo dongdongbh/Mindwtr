@@ -159,8 +159,8 @@ export type NativeSyncSettingsHost = {
     encryption: {
         /** Selected host capability: only unlock an existing saved WebDAV location. */
         unlockOnly?: boolean;
-        /** Selected saved-WebDAV capability; the broader mode also admits Change and Disable. */
-        mode?: 'saved-webdav-enable-unlock' | 'saved-webdav';
+        /** Selected capabilities; saved-webdav-or-local adds only local Enable and Disable. */
+        mode?: 'saved-webdav-enable-unlock' | 'saved-webdav' | 'saved-webdav-or-local';
         getStatus(): Promise<SyncEncryptionStatus>;
         getIncompleteTransition(): Promise<SyncEncryptionTransitionKind | null>;
         /** True while no durable sync backend exists (transitions then run local-only). */
@@ -391,13 +391,17 @@ const CONFIGURATION_KEYS = [
     CLOUD_ALLOW_INSECURE_HTTP_KEY,
 ];
 
-/** The stored configuration's revision: every key the commit writes, and both secrets as fingerprints. */
-const readConfigRevision = async (host: NativeSyncSettingsHost): Promise<string> => {
-    const entries = await host.storage.multiGet(CONFIGURATION_KEYS);
+/** The last KV snapshot supplies both the target and every configuration cell, with secrets fingerprinted. */
+const readConfigSnapshot = async (host: NativeSyncSettingsHost) => {
     const password = await host.secrets.get(WEBDAV_PASSWORD_KEY);
     const token = await host.secrets.get(CLOUD_TOKEN_KEY);
-    return fingerprint([entries, secretPrint(password), secretPrint(token)]);
+    const entries = await host.storage.multiGet(CONFIGURATION_KEYS);
+    return {
+        revision: fingerprint([entries, secretPrint(password), secretPrint(token)]),
+        backend: entries.find(([name]) => name === SYNC_BACKEND_KEY)?.[1],
+    };
 };
+const readConfigRevision = async (host: NativeSyncSettingsHost): Promise<string> => (await readConfigSnapshot(host)).revision;
 
 /** A form's fields as a request identity: the password or token only as fingerprints. */
 const fieldsPrint = (fields: NativeSyncWebDavFields | NativeSyncSelfHostedFields | null) => (
@@ -571,7 +575,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             supportsCloudKit: params(current.host).supportsNativeICloudSync,
         });
         const busy = state.isSyncing || state.isTestingConnection || state.dropboxBusy;
-        if (!selection.isEncryptionCapableBackend) {
+        const localCard = state.syncBackend === 'off' && current.host.encryption.mode === 'saved-webdav-or-local';
+        if (!selection.isEncryptionCapableBackend && !localCard) {
             if (current.card) {
                 for (const cancel of current.cardCancels.splice(0)) cancel();
                 current.card = null;
@@ -848,6 +853,38 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         const proven = current.transport.getProven();
         return current.transport.getState().syncBackend === 'webdav' && proven.backend === 'webdav' && !proven.pending;
     };
+    const selectedEncryptionTarget = (current: Screen): 'webdav' | 'local' | null => {
+        if (hasProvenWebDavBackend(current)) return 'webdav';
+        const proven = current.transport.getProven();
+        return encryptionMode(current) === 'saved-webdav-or-local'
+            && current.transport.getState().syncBackend === 'off' && proven.backend === 'off' && !proven.pending
+            && current.card?.getState().pendingFirstSync ? 'local' : null;
+    };
+    const hasAllWebDavTransitions = (current: Screen) => (
+        encryptionMode(current) === 'saved-webdav' || encryptionMode(current) === 'saved-webdav-or-local'
+    );
+    const refuseSelectedEncryptionTarget = async (current: Screen, captured: 'webdav' | 'local' | null, revision: string) => {
+        await settle(current);
+        const snapshot = await readConfigSnapshot(current.host), stored = snapshot.backend;
+        const durable = stored == null || stored.trim() === 'off' ? 'local'
+            : stored.trim() === 'webdav' ? 'webdav' : null;
+        // A selection started during the read is not a settled target proof.
+        const refused = snapshot.revision !== revision
+            ? fail('STALE_REVISION', 'The stored sync configuration changed since this form was read; read the screen again')
+            : !captured || current.pending.size > 0 || durable !== captured || selectedEncryptionTarget(current) !== captured
+                ? fail('ACTION_FAILED', 'This action requires its saved backend without a staged selection') : null;
+        if (refused) {
+            try {
+                await current.host.log.info('Native encryption selected target refused', {
+                    scope: 'native-sync', force: true,
+                    extra: { releaseCheck: 'v1.3.5/native-encryption-target-guard', outcome: 'refused' },
+                });
+            } catch {
+                // The refusal is terminal; diagnostics cannot reopen admission.
+            }
+        }
+        return refused;
+    };
     const canUnlock = (current: Screen) => {
         const card = current.card?.getState();
         return card?.state === 'remote-encrypted-no-key' && !card.incompleteTransition;
@@ -869,7 +906,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
     };
     const canAbandon = (current: Screen) => {
         const kind = current.card?.getState().incompleteTransitionKind;
-        return kind === 'enable' || encryptionMode(current) === 'saved-webdav'
+        return kind === 'enable' || hasAllWebDavTransitions(current)
             && (kind === 'disable' || kind === 'change-passphrase');
     };
     const canRecheck = (current: Screen) => {
@@ -879,22 +916,34 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
     const selectedEncryptionActionAllowed = (current: Screen, target: { type?: unknown; flow?: unknown; field?: unknown }): boolean => {
         const mode = encryptionMode(current);
         if (mode === 'full') return true;
-        if (!hasProvenWebDavBackend(current)) return false;
+        const location = selectedEncryptionTarget(current);
+        if (!location) return false;
+        if (location === 'local') {
+            if (target.type === 'retry' || target.type === 'cancel') return true;
+            const card = current.card?.getState();
+            if (card?.incompleteTransition) return false;
+            if (target.type === 'open' || target.type === 'submit') {
+                return target.flow === 'enable' ? canEnable(current)
+                    : target.flow === 'disable' && card?.state === 'enabled' && canDisable(current);
+            }
+            return target.type === 'typed' && card?.flow === 'enable' && canEnable(current)
+                && (target.field === 'next' || target.field === 'confirm');
+        }
         if (mode === 'unlock-only') return isUnlockOnlyAction(target)
             && (canUnlock(current) || target.type === 'retry' || target.type === 'cancel');
         if (target.type === 'retry' || target.type === 'cancel') return true;
         if (target.type === 'open' || target.type === 'submit') {
             return target.flow === 'unlock' ? canUnlock(current)
                 : target.flow === 'enable' ? canEnable(current)
-                    : target.flow === 'change' ? mode === 'saved-webdav' && canChange(current)
-                        : target.flow === 'disable' ? mode === 'saved-webdav' && canDisable(current)
+                    : target.flow === 'change' ? hasAllWebDavTransitions(current) && canChange(current)
+                        : target.flow === 'disable' ? hasAllWebDavTransitions(current) && canDisable(current)
                             : target.flow === 'abandon' && canAbandon(current);
         }
         if (target.type === 'typed') {
             const flow = current.card?.getState().flow;
             return flow === 'unlock' ? target.field === 'current' && canUnlock(current)
                 : flow === 'enable' ? (target.field === 'next' || target.field === 'confirm') && canEnable(current)
-                    : flow === 'change' && mode === 'saved-webdav' && canChange(current)
+                    : flow === 'change' && hasAllWebDavTransitions(current) && canChange(current)
                         && (target.field === 'current' || target.field === 'next' || target.field === 'confirm');
         }
         return target.type === 'decline' ? canUnlock(current)
@@ -1204,7 +1253,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             const host = deps.host();
             if (!host) return fail('ACTION_FAILED', 'Sync is not available on this host yet');
             if (host.encryption.mode !== undefined
-                && ((host.encryption.mode !== 'saved-webdav-enable-unlock' && host.encryption.mode !== 'saved-webdav')
+                && ((host.encryption.mode !== 'saved-webdav-enable-unlock' && host.encryption.mode !== 'saved-webdav'
+                    && host.encryption.mode !== 'saved-webdav-or-local')
                     || host.encryption.unlockOnly !== undefined)) {
                 return fail('ACTION_FAILED', 'The selected sync encryption mode cannot be combined with unlockOnly');
             }
@@ -1253,7 +1303,9 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                         let writeFailed = false;
                         let writeError: unknown;
                         try {
-                            await current.transport.handleSelectSyncBackend('off');
+                            const off = current.transport.handleSelectSyncBackend('off');
+                            if (off) track(current, off.catch(() => undefined));
+                            await off;
                         } catch (error) {
                             if (error instanceof NativeAttachmentCleanupUnconfirmedError) throw error;
                             writeFailed = true;
@@ -1474,7 +1526,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             }
             const mode = encryptionMode(current);
             const selected = mode !== 'full';
-            const savedWebDav = mode === 'saved-webdav-enable-unlock' || mode === 'saved-webdav';
+            const savedWebDav = mode === 'saved-webdav-enable-unlock' || hasAllWebDavTransitions(current);
+            const capturedTarget = selectedEncryptionTarget(current);
             const needsRequest = type === 'submit' || type === 'decline'
                 || savedWebDav && type === 'recheck';
             if (!valid || (needsRequest ? !isRequestId(input.requestId) : input.requestId !== undefined)) {
@@ -1498,12 +1551,11 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 const receipt = screenActionReceipt(input.requestId!, fingerprint(identity));
                 if (receipt) {
                     if ('ok' in receipt && !receipt.ok) return receipt;
+                    await settle(current);
                     const stale = await refuseStaleConfiguration(current, input.revision!);
                     if (stale) return stale;
-                    const [[, stored]] = await current.host.storage.multiGet([SYNC_BACKEND_KEY]);
-                    if (stored?.trim() !== 'webdav' || !hasProvenWebDavBackend(current)) {
-                        return fail('ACTION_FAILED', 'This action requires a saved WebDAV backend without a staged selection');
-                    }
+                    const refused = await refuseSelectedEncryptionTarget(current, 'webdav', input.revision!);
+                    if (refused) return refused;
                     const result = await receipt;
                     return result.ok ? { ok: true, value: { ...result.value, passphrase: null } } : result;
                 }
@@ -1511,24 +1563,21 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             if (selected && !selectedEncryptionActionAllowed(current, target!)) {
                 return fail('ACTION_FAILED', mode === 'unlock-only'
                     ? 'This host only supports unlocking saved WebDAV encryption'
-                    : 'This encryption action is not available for the saved WebDAV location');
+                    : 'This encryption action is not available for the selected sync location');
             }
             const refuseSelectedConfiguration = async (): Promise<NativeHostResult<never> | null> => {
+                if (selected) await settle(current);
                 if (input.revision !== undefined) {
                     const stale = await refuseStaleConfiguration(current, input.revision);
                     if (stale) return stale;
                 }
                 if (selected) {
-                    const [[, stored]] = await current.host.storage.multiGet([SYNC_BACKEND_KEY]);
-                    if (stored?.trim() !== 'webdav' || !hasProvenWebDavBackend(current)) {
-                        return fail('ACTION_FAILED', mode === 'unlock-only'
-                            ? 'Unlock requires a saved WebDAV backend without a staged selection'
-                            : 'This action requires a saved WebDAV backend without a staged selection');
-                    }
+                    const refused = await refuseSelectedEncryptionTarget(current, capturedTarget, input.revision!);
+                    if (refused) return refused;
                     if (type !== 'retry' && type !== 'cancel' && !selectedEncryptionActionAllowed(current, target!)) {
                         return fail('ACTION_FAILED', mode === 'unlock-only'
                             ? 'This WebDAV location is not available for passphrase unlock'
-                            : 'This encryption action is not available for the saved WebDAV location');
+                            : 'This encryption action is not available for the selected sync location');
                     }
                 }
                 const actualFields = printCardFields();
