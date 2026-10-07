@@ -93,6 +93,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'route', 'elapsedMs', 'moduleElapsedMs',
     // Global shortcut startup: bounded configured and applied shortcut names.
     'requestedShortcut', 'appliedShortcut',
+    // PR1348 native reminder replacement fields.
+    'tagged', 'replaced', 'taggedRemoved',
     'releaseCheck', 'backend', 'statusPublished', 'lastSyncAt', 'lastSyncStatus',
     'artifact', 'cloudProvider', 'scheme', 'host', 'delivery', 'deduped',
     // UpNote handoff diagnostics contain only the surface, scheme and outcome.

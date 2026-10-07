@@ -15,6 +15,11 @@ export function isWindowsRuntime(): boolean {
     return typeof navigator !== 'undefined' && (navigator.userAgent ?? '').includes('Windows');
 }
 
+/** Whether the desktop shell is running on macOS (WKWebView's user agent says "Macintosh"). */
+export function isMacRuntime(): boolean {
+    return typeof navigator !== 'undefined' && (navigator.userAgent ?? '').includes('Macintosh');
+}
+
 /** Whether the desktop shell is running on Linux, including Flatpak and AppImage builds. */
 export function isLinuxRuntime(): boolean {
     return typeof navigator !== 'undefined' && (navigator.userAgent ?? '').includes('Linux');

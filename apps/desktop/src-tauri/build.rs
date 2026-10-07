@@ -25,7 +25,12 @@ fn main() {
             .file("src/macos_widget_bridge.m")
             .flag("-fobjc-arc")
             .compile("mindwtr_macos_widget_bridge");
+        cc::Build::new()
+            .file("src/macos_notification_bridge.m")
+            .flag("-fobjc-arc")
+            .compile("mindwtr_macos_notification_bridge");
         println!("cargo:rustc-link-lib=framework=Foundation");
+        println!("cargo:rustc-link-lib=framework=UserNotifications");
         println!("cargo:rustc-link-lib=framework=AppKit");
         println!("cargo:rustc-link-lib=framework=EventKit");
         println!("cargo:rustc-link-lib=framework=CloudKit");
@@ -36,6 +41,7 @@ fn main() {
         println!("cargo:rerun-if-changed=src/macos_quick_add_focus_bridge.m");
         println!("cargo:rerun-if-changed=src/macos_renderer_recovery_bridge.m");
         println!("cargo:rerun-if-changed=src/macos_widget_bridge.m");
+        println!("cargo:rerun-if-changed=src/macos_notification_bridge.m");
 
         // App Group ID for the macOS widget (#1054 decision 4): team-ID-prefixed,
         // not "group.*" -- macOS Sequoia shows a user-facing authorization prompt

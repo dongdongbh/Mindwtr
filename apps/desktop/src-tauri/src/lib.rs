@@ -274,9 +274,23 @@ fn flatpak_notification_id() -> String {
     format!("mindwtr-{millis}-{random}")
 }
 
+/// The portal replaces a notification it holds under the same id, so a tagged reminder (one tag per
+/// task) replaces the task's notification instead of adding another one.
+#[cfg(target_os = "linux")]
+fn flatpak_notification_id_for(tag: Option<&str>) -> String {
+    tag.map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(flatpak_notification_id)
+}
+
 #[cfg(target_os = "linux")]
 #[tauri::command]
-async fn send_flatpak_notification(title: String, body: Option<String>) -> Result<(), String> {
+async fn send_flatpak_notification(
+    title: String,
+    body: Option<String>,
+    tag: Option<String>,
+) -> Result<(), String> {
     if !is_flatpak() {
         return Err("unsupported_install".to_string());
     }
@@ -301,9 +315,11 @@ async fn send_flatpak_notification(title: String, body: Option<String>) -> Resul
             .await
             .map_err(|_| "portal_unavailable".to_string())?;
         proxy
-            .add_notification(&flatpak_notification_id(), notification)
+            .add_notification(&flatpak_notification_id_for(tag.as_deref()), notification)
             .await
-            .map_err(|_| "portal_rejected".to_string())
+            .map_err(|_| "portal_rejected".to_string())?;
+        log::info!("Flatpak notification acknowledged tagged={} extra.releaseCheck=v1.3.5/linux-notification-replacement", tag.as_deref().is_some_and(|tag| !tag.trim().is_empty()));
+        Ok(())
     })
     .await
     .map_err(|_| "delivery_timeout".to_string())?
@@ -311,7 +327,11 @@ async fn send_flatpak_notification(title: String, body: Option<String>) -> Resul
 
 #[cfg(not(target_os = "linux"))]
 #[tauri::command]
-async fn send_flatpak_notification(_title: String, _body: Option<String>) -> Result<(), String> {
+async fn send_flatpak_notification(
+    _title: String,
+    _body: Option<String>,
+    _tag: Option<String>,
+) -> Result<(), String> {
     Err("unsupported_platform".to_string())
 }
 
@@ -320,42 +340,60 @@ async fn send_linux_notification(
     state: tauri::State<'_, LinuxNotificationState>,
     title: String,
     body: Option<String>,
+    tag: Option<String>,
 ) -> Result<(), String> {
-    linux_notification::send_notification(state.inner(), title, body).await
+    linux_notification::send_notification(state.inner(), title, body, tag).await
 }
 
-/// Sends a Windows toast through the process's own package identity.
-///
-/// `tauri-plugin-notification` always calls `CreateToastNotifierWithId(<tauri identifier>)`.
-/// In an MSIX (Microsoft Store) install that identifier is not the package's AUMID, Windows
-/// rejects the notifier, and the plugin discards the error, so a tray-resident app shows no
-/// reminder toast at all (#1146). A packaged process must use `CreateToastNotifier()` with no
-/// id. Unpackaged installs (NSIS, portable) keep the plugin path: their shortcut registers the
-/// AUMID the plugin passes.
+/// Windows replaces a toast that shares a group and a tag. A tag holds at most 64 characters, so a
+/// longer one (an unusually long task id) is shortened to a stable hash of itself.
+#[cfg(any(target_os = "windows", test))]
+const WINDOWS_TOAST_GROUP: &str = "mindwtr";
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_toast_tag(tag: &str) -> String {
+    const MAX_TAG_CHARS: usize = 64;
+    if tag.encode_utf16().count() <= MAX_TAG_CHARS {
+        return tag.to_string();
+    }
+    // FNV-1a: stable across builds and runs, unlike std's DefaultHasher.
+    let hash = tag.bytes().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    });
+    format!("mindwtr-{hash:016x}")
+}
+
 #[cfg(target_os = "windows")]
-#[tauri::command]
-async fn send_windows_packaged_notification(title: String, body: Option<String>) -> Result<(), String> {
+fn show_windows_toast(
+    notifier: windows::core::Result<windows::UI::Notifications::ToastNotifier>,
+    title: &str,
+    body: Option<&str>,
+    tag: Option<&str>,
+) -> Result<(), String> {
     use windows::core::HSTRING;
     use windows::Data::Xml::Dom::XmlDocument;
-    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager, ToastTemplateType};
-
-    if install::current_package_family_name().is_none() {
-        return Err("Windows package identity is unavailable".to_string());
-    }
+    use windows::UI::Notifications::{
+        ToastNotification, ToastNotificationManager, ToastTemplateType,
+    };
 
     let trimmed_title = title.trim();
     if trimmed_title.is_empty() {
         return Err("Notification title is required".to_string());
     }
-    let trimmed_body = body.as_deref().map(str::trim).unwrap_or("");
+    let trimmed_body = body.map(str::trim).unwrap_or("");
 
     fn win_err(context: &str, error: windows::core::Error) -> String {
-        format!("{context}: {} (HRESULT 0x{:08X})", error.message(), error.code().0)
+        format!(
+            "{context}: {} (HRESULT 0x{:08X})",
+            error.message(),
+            error.code().0
+        )
     }
 
     // Two-line template: title in the first text node, body in the second.
-    let xml: XmlDocument = ToastNotificationManager::GetTemplateContent(ToastTemplateType::ToastText02)
-        .map_err(|error| win_err("Failed to load the toast template", error))?;
+    let xml: XmlDocument =
+        ToastNotificationManager::GetTemplateContent(ToastTemplateType::ToastText02)
+            .map_err(|error| win_err("Failed to load the toast template", error))?;
     let text_nodes = xml
         .GetElementsByTagName(&HSTRING::from("text"))
         .map_err(|error| win_err("Failed to read the toast template text nodes", error))?;
@@ -376,11 +414,51 @@ async fn send_windows_packaged_notification(title: String, body: Option<String>)
 
     let toast = ToastNotification::CreateToastNotification(&xml)
         .map_err(|error| win_err("Failed to create the toast", error))?;
-    ToastNotificationManager::CreateToastNotifier()
-        .map_err(|error| win_err("Failed to create the packaged toast notifier", error))?
+    if let Some(tag) = tag.map(str::trim).filter(|tag| !tag.is_empty()) {
+        // Same group and tag: this toast replaces the task's previous one and pops up again.
+        toast
+            .SetTag(&HSTRING::from(windows_toast_tag(tag)))
+            .map_err(|error| win_err("Failed to tag the toast", error))?;
+        toast
+            .SetGroup(&HSTRING::from(WINDOWS_TOAST_GROUP))
+            .map_err(|error| win_err("Failed to group the toast", error))?;
+    }
+    notifier
+        .map_err(|error| win_err("Failed to create the toast notifier", error))?
         .Show(&toast)
         .map_err(|error| win_err("Failed to show the toast", error))?;
+    if tag.is_some_and(|tag| !tag.trim().is_empty()) {
+        log::info!("Windows replacing reminder accepted extra.releaseCheck=v1.3.5/windows-reminder-replacement");
+    }
     Ok(())
+}
+
+/// Sends a Windows toast through the process's own package identity.
+///
+/// `tauri-plugin-notification` always calls `CreateToastNotifierWithId(<tauri identifier>)`.
+/// In an MSIX (Microsoft Store) install that identifier is not the package's AUMID, Windows
+/// rejects the notifier, and the plugin discards the error, so a tray-resident app shows no
+/// reminder toast at all (#1146). A packaged process must use `CreateToastNotifier()` with no
+/// id. Unpackaged installs (NSIS, portable) keep the plugin path: their shortcut registers the
+/// AUMID the plugin passes. A `tag` (one per task) makes the toast replace the task's last one.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn send_windows_packaged_notification(
+    title: String,
+    body: Option<String>,
+    tag: Option<String>,
+) -> Result<(), String> {
+    use windows::UI::Notifications::ToastNotificationManager;
+
+    if install::current_package_family_name().is_none() {
+        return Err("Windows package identity is unavailable".to_string());
+    }
+    show_windows_toast(
+        ToastNotificationManager::CreateToastNotifier(),
+        &title,
+        body.as_deref(),
+        tag.as_deref(),
+    )
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -388,8 +466,100 @@ async fn send_windows_packaged_notification(title: String, body: Option<String>)
 async fn send_windows_packaged_notification(
     _title: String,
     _body: Option<String>,
+    _tag: Option<String>,
 ) -> Result<(), String> {
     Err("Windows packaged notifications are only available on Windows".to_string())
+}
+
+/// A reminder that replaces its task's notification where `tauri-plugin-notification` can only add
+/// one: an unpackaged Windows install (the plugin's own notifier and AUMID, plus a toast tag) and
+/// macOS (a UserNotifications request identifier). Any error sends the caller back to the plugin, so a
+/// reminder still shows, as one more notification.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn send_replacing_notification(
+    app: tauri::AppHandle,
+    title: String,
+    body: Option<String>,
+    tag: String,
+) -> Result<(), String> {
+    use windows::core::HSTRING;
+    use windows::UI::Notifications::ToastNotificationManager;
+
+    // The plugin passes its AUMID only to an installed app; a dev build has no shortcut registering it.
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let exe_dir = exe
+        .parent()
+        .map(|dir| dir.display().to_string())
+        .unwrap_or_default();
+    let separator = std::path::MAIN_SEPARATOR;
+    if exe_dir.ends_with(&format!("{separator}target{separator}debug"))
+        || exe_dir.ends_with(&format!("{separator}target{separator}release"))
+    {
+        return Err("Replacing toasts need an installed app".to_string());
+    }
+    let app_id = HSTRING::from(app.config().identifier.as_str());
+    show_windows_toast(
+        ToastNotificationManager::CreateToastNotifierWithId(&app_id),
+        &title,
+        body.as_deref(),
+        Some(&tag),
+    )
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn send_replacing_notification(
+    title: String,
+    body: Option<String>,
+    tag: String,
+) -> Result<(), String> {
+    let trimmed_title = title.trim();
+    let trimmed_tag = tag.trim();
+    if trimmed_title.is_empty() || trimmed_tag.is_empty() {
+        return Err("A title and a tag are required".to_string());
+    }
+    let to_c =
+        |value: &str| CString::new(value).map_err(|_| "Notification text holds a NUL".to_string());
+    let title_c = to_c(trimmed_title)?;
+    let tag_c = to_c(trimmed_tag)?;
+    let body_c = body
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(to_c)
+        .transpose()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let error = unsafe {
+            mindwtr_macos_send_replacing_notification(
+                title_c.as_ptr(),
+                body_c
+                    .as_ref()
+                    .map_or(std::ptr::null(), |body| body.as_ptr()),
+                tag_c.as_ptr(),
+            )
+        };
+        if error.is_null() {
+            log::info!("macOS replacing reminder accepted extra.releaseCheck=v1.3.5/macos-replacing-reminder");
+            Ok(())
+        } else {
+            let message = unsafe { CStr::from_ptr(error).to_string_lossy().into_owned() };
+            unsafe { libc::free(error.cast()) };
+            Err(message)
+        }
+    })
+    .await
+    .map_err(|_| "Notification worker failed".to_string())?
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[tauri::command]
+async fn send_replacing_notification(
+    _title: String,
+    _body: Option<String>,
+    _tag: String,
+) -> Result<(), String> {
+    Err("unsupported_platform".to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -672,6 +842,11 @@ unsafe extern "C" {
     ) -> i32;
     fn mindwtr_macos_make_quick_add_panel(ns_window: *mut std::ffi::c_void) -> bool;
     fn mindwtr_macos_present_quick_add_panel(ns_window: *mut std::ffi::c_void) -> bool;
+    fn mindwtr_macos_send_replacing_notification(
+        title: *const c_char,
+        body: *const c_char,
+        identifier: *const c_char,
+    ) -> *mut c_char;
 
     fn mindwtr_cloudkit_account_status() -> *mut c_char;
     fn mindwtr_cloudkit_ensure_zone() -> *mut c_char;
@@ -2034,6 +2209,7 @@ pub fn run() {
             send_flatpak_notification,
             send_linux_notification,
             send_windows_packaged_notification,
+            send_replacing_notification,
             get_local_api_server_status,
             set_local_api_server_config,
             get_mcp_server_status,
@@ -2073,6 +2249,19 @@ mod tests {
             .expect("system clock should be after unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("mindwtr-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn windows_toast_tag_keeps_a_task_tag_and_shortens_an_overlong_one_stably() {
+        let task_tag = "mindwtr-reminder:task:0b9a3a3e-6a2f-4c51-9d1c-0f3c9a1d2e4b";
+        assert_eq!(windows_toast_tag(task_tag), task_tag);
+
+        let long_tag = format!("mindwtr-reminder:task:{}", "x".repeat(80));
+        let shortened = windows_toast_tag(&long_tag);
+        assert!(shortened.encode_utf16().count() <= 64);
+        assert_eq!(shortened, windows_toast_tag(&long_tag));
+        assert_ne!(shortened, windows_toast_tag(&format!("{long_tag}y")));
+        assert_eq!(WINDOWS_TOAST_GROUP, "mindwtr");
     }
 
     #[test]
