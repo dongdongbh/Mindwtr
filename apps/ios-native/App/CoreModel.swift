@@ -5211,7 +5211,7 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    // Admit only selected saved-WebDAV flows, never returned plaintext or reveal controls.
+    // Admit selected saved-WebDAV and local setup flows, never returned plaintext or reveal controls.
     private func validSettingsSyncEncryption(_ value: Any?) -> Bool {
         if value is NSNull { return true }
         guard let card = value as? CoreObject, Set(card.keys) == Set(["title", "guide", "rows"]),

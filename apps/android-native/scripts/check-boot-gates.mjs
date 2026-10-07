@@ -3752,9 +3752,9 @@ export function createNativeHostContract(bindings = {}) {
     async runSyncEncryptionAction(input) {
       globalThis.encryptionInputs ??= [];
       globalThis.encryptionInputs.push(input);
-      if (bindings.syncSettings?.encryption?.mode !== 'saved-webdav'
-          || bindings.syncSettings.encryption.unlockOnly !== undefined) throw new Error('Missing selected saved-WebDAV encryption capability');
-      return { ok: true, value: { toasts: [], passphrase: null } };
+      if (bindings.syncSettings?.encryption?.mode !== 'saved-webdav-or-local'
+          || bindings.syncSettings.encryption.unlockOnly !== undefined) throw new Error('Missing selected WebDAV or local encryption capability');
+      return globalThis.encryptionReply ?? { ok: true, value: { toasts: [], passphrase: null } };
     },
     async downloadAttachment(input) {
       globalThis.attachmentInputs.push(['downloadAttachment', input]);
@@ -4261,8 +4261,8 @@ for (const [bridge, receipt, operation] of [
         assert.equal(typeof other.__mindwtrNative.kvMultiGet, 'undefined');
     }
 }
-// Task346 exercises the production entry with one narrow factory stand-in.
-// Actual core availability/installer/JSC acceptance is a separate native suite.
+// Task346 and selected encryption exercise the production entry with narrow factory/core stand-ins.
+// Actual contract state admission and availability/installer/crypto/JSC acceptance have separate suites.
 {
     const syncFixture = `
 export function createHostSyncCrypto() { throw new Error('Task Download crypto is not bound in Project entry fixture'); }
@@ -4330,11 +4330,41 @@ export function createNativeSync() {
     assert.equal(encrypted.storedReads, 0);
     assert.equal(encrypted.syncFactoryCalls, 0);
     assert.equal(encrypted.secretReads, 0);
-    for (const backend of [undefined, '', 'off', 'dropbox']) {
+    const unsupportedEncryptionBackends = ['dropbox', 'file', 'cloud', 'cloudkit', 'unsupported'];
+    for (const backend of unsupportedEncryptionBackends) {
         encrypted.storedBackend = backend;
-        assert.equal((await unlockCommand(unlock)).value.ok, false);
+        assert.deepEqual((await unlockCommand(unlock)).value, { ok: false, error: { code: 'ACTION_FAILED',
+            message: 'This sync provider is not available in native iOS yet; the stored configuration is unchanged' } });
+        assert.equal(encrypted.storedBackend, backend);
     }
     assert.equal(encrypted.syncFactoryCalls, 0);
+    assert.equal(encrypted.secretReads, 0);
+    assert.equal(encrypted.encryptionInputs?.length ?? 0, 0, 'Unsupported providers never reach the selected contract');
+    // This entry routes Off/missing envelopes to core; it does not decide local state, revision or transition admission.
+    const localEncryptionActions = [{ type: 'open', flow: 'enable' },
+        ...['next', 'confirm'].map((field) => ({ type: 'typed', field, value: 'synthetic-local-388' })),
+        { type: 'submit', flow: 'enable' }, { type: 'open', flow: 'disable' }, { type: 'submit', flow: 'disable' }];
+    const locallyRoutedBackends = [undefined, '', 'off', ' off '];
+    for (const backend of locallyRoutedBackends) {
+        const localEncryption = create(); assert.equal((await boot(localEncryption)).ok, true);
+        localEncryption.storedBackend = backend;
+        const localCommand = (value) => poll(localEncryption,
+            localEncryption.MindwtrHost.iosForegroundSync('runSyncEncryptionAction', JSON.stringify(value), () => ''));
+        for (const action of localEncryptionActions) {
+            const value = { revision: unlock.revision, action,
+                ...(action.type === 'submit' ? { requestId: '11111111-1111-1111-1111-111111111111' } : {}) };
+            assert.deepEqual((await localCommand(value)).value, { ok: true, value: { toasts: [], passphrase: null } });
+            assert.deepEqual(JSON.parse(JSON.stringify(localEncryption.encryptionInputs.at(-1))), value);
+            assert.equal(localEncryption.storedBackend, backend, 'Routing never activates or rewrites a backend');
+        }
+        assert.equal(localEncryption.syncFactoryCalls, 1, 'Local routing retains one foreground service');
+        assert.equal(localEncryption.contractBindings.syncSettings.encryption.mode, 'saved-webdav-or-local');
+        localEncryption.encryptionReply = { ok: false, error: { code: 'ACTION_FAILED', message: 'Synthetic selected-state refusal' } };
+        assert.deepEqual(await localCommand({ ...unlock, action: { type: 'open', flow: 'disable' } }),
+            { ok: true, value: localEncryption.encryptionReply }, 'Core admission refusals survive local routing');
+        assert.equal(localEncryption.syncFactoryCalls, 1); assert.equal(localEncryption.secretReads, 0);
+        assert(!(localEncryption.logText ?? '').includes('synthetic-local-388'), 'Local field text never enters entry diagnostics');
+    }
     encrypted.storedBackend = 'webdav';
     const selectedEncryptionActions = [...['unlock', 'enable', 'change', 'disable', 'abandon'].map((flow) => ({ type: 'open', flow })),
         ...['current', 'next', 'confirm'].map((field) => ({ type: 'typed', field, value: 'synthetic' })),
@@ -4349,7 +4379,7 @@ export function createNativeSync() {
     assert.equal(encrypted.syncFactoryCalls, 1, 'Selected encryption uses the retained foreground service');
     assert.equal(encrypted.secretReads, 0, 'Entry fixture reads no credentials');
     assert(!(encrypted.logText ?? '').includes('synthetic'), 'Passphrase never enters entry diagnostics');
-    console.log(`Selected encryption: ${invalidEncryptionInputs.length} invalid envelopes refused before storage; ${selectedEncryptionActions.length} actions admitted with exact mode and UUID ownership (NodeVM)`);
+    console.log(`Selected encryption: ${invalidEncryptionInputs.length} invalid envelopes refused before storage; ${unsupportedEncryptionBackends.length} providers refused before factory; ${selectedEncryptionActions.length} WebDAV and ${localEncryptionActions.length * locallyRoutedBackends.length} local envelopes routed with exact mode and UUID ownership; ${locallyRoutedBackends.length} core refusals preserved (NodeVM)`);
     const malformed = create();
     assert.match((await command(malformed)).error, /^NOT_READY:/);
     const bootMalformed = await boot(malformed);

@@ -3896,7 +3896,7 @@ globalThis.MindwtrHost = {
                 const stored = (await keyValue.get(SYNC_BACKEND_KEY))?.trim();
                 if (stored && stored !== 'off' && stored !== 'webdav') return refused;
                 if (['syncStored', 'syncResume'].includes(name) && stored !== 'webdav') return { ok: true as const, value: { success: true, skipped: true } };
-                if (['projectAttachmentDownload', 'runSyncEncryptionAction'].includes(name) && stored !== 'webdav') return refused;
+                if (name === 'projectAttachmentDownload' && stored !== 'webdav') return refused;
                 let downloadResult: Awaited<ReturnType<typeof contract.downloadAttachment>> | null = null;
                 if (name === 'projectAttachmentDownload') {
                     const options = contract.getProjectAttachmentEditOptions({ projectId: input.projectId as string });
@@ -3925,7 +3925,7 @@ globalThis.MindwtrHost = {
                         } catch { throw new NativeAttachmentCleanupUnconfirmedError(); }
                     },
                 });
-                if (iosManualSync) iosManualSync.settingsHost.encryption.mode = 'saved-webdav';
+                if (iosManualSync) iosManualSync.settingsHost.encryption.mode = 'saved-webdav-or-local';
                 if (name === 'projectAttachmentDownload') {
                     if (!downloadResult) {
                         // The original contract remains local-only outside this owned call.

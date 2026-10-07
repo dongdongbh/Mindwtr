@@ -109,10 +109,14 @@ it('records bounded iOS unlock only after the shared service confirms completion
         sync.settingsHost.encryption.mode = 'saved-webdav';
         expect(await provide('synthetic secret')).toBe('ok');
         expect(entries).toHaveLength(platform === 'ios' ? 1 : 0);
+        entries.length = 0;
+        sync.settingsHost.encryption.mode = 'saved-webdav-or-local';
+        expect(await provide('synthetic secret')).toBe('ok');
+        expect(entries).toHaveLength(platform === 'ios' ? 1 : 0);
     }
 });
 
-it('records selected iOS encryption settlement without changing a completed outcome when logging fails', async () => {
+it.each(['saved-webdav', 'saved-webdav-or-local'] as const)('records selected iOS encryption settlement for %s without changing a completed outcome when logging fails', async (mode) => {
     const create = core.createSyncEncryptionService;
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
@@ -127,7 +131,7 @@ it('records selected iOS encryption settlement without changing a completed outc
     iosFiles();
     globals.__mindwtrHostPlatform = 'ios';
     const { sync, bindings } = host({}, false, undefined, async () => false);
-    sync.settingsHost.encryption.mode = 'saved-webdav';
+    sync.settingsHost.encryption.mode = mode;
     const entries: Parameters<typeof bindings.appendLog>[0][] = [];
     bindings.appendLog = async (entry) => { entries.push(entry); return null; };
     const transitions = sync.settingsHost.encryption.transitions!;
