@@ -111,3 +111,6 @@ zbus = { version = "=5.12.0", default-features = false, features = ["tokio"] }
 [features]
 default = []
 diagnostics = ["tauri/devtools"]
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
