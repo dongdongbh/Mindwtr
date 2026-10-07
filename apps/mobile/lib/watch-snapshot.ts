@@ -1,11 +1,21 @@
-import type { PomodoroPhase } from '@mindwtr/core';
+import type { ChecklistItem, PomodoroPhase } from '@mindwtr/core';
 
 import type { MobilePomodoroControllerState } from './pomodoro-controller';
 
 export const WATCH_FOCUS_TASK_LIMIT = 20;
 export const WATCH_TITLE_LIMIT = 160;
 
-export type WatchFocusItem = { id: string; title: string };
+export type WatchFocusItem = {
+  id: string;
+  title: string;
+  createdAt?: string;
+  description?: string;
+  checklist?: ChecklistItem[];
+  detailsUnavailable?: boolean;
+};
+// Leave space for property-list overhead; native validation checks the actual encoding too.
+export const WATCH_DETAILS_BUDGET = 40 * 1024;
+const encodedSize = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
 
 export type WatchApplicationContext = {
   protocolVersion: 1;
@@ -39,12 +49,26 @@ export function buildWatchApplicationContext({
 }): WatchApplicationContext {
   const seen = new Set<string>();
   const boundedFocus: WatchFocusItem[] = [];
+  let remainingDetails = WATCH_DETAILS_BUDGET;
   for (const item of focus) {
     const id = item.id.trim();
     const title = boundedText(item.title);
     if (!id || !title || seen.has(id)) continue;
     seen.add(id);
-    boundedFocus.push({ id, title });
+    const details = {
+      ...(item.createdAt ? { createdAt: item.createdAt } : {}),
+      ...(item.description ? { description: item.description } : {}),
+      ...(item.checklist?.length ? { checklist: item.checklist } : {}),
+    };
+    const size = encodedSize(details);
+    const fits = size <= Math.min(16 * 1024, remainingDetails)
+      && (item.checklist?.length ?? 0) <= 100
+      && (item.checklist ?? []).every((entry) => entry.id.length > 0 && entry.id.trim() === entry.id
+        && !/[\u0000-\u001f\u007f]/.test(entry.id)
+        && new TextEncoder().encode(entry.id).length <= 512
+        && new TextEncoder().encode(entry.title).length <= 8000);
+    boundedFocus.push({ id, title, ...(fits ? details : { detailsUnavailable: true }) });
+    if (fits) remainingDetails -= size;
     if (boundedFocus.length >= WATCH_FOCUS_TASK_LIMIT) break;
   }
 

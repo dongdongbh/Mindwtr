@@ -20,6 +20,7 @@
 import { prepareCaptureTask, type CaptureAssemblyInput } from './capture';
 import { normalizeShortcutTags } from './capture-deeplink';
 import { safeParseDate } from './date';
+import { getChecklistEditStatus } from './task-checklist-model';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { buildQuickAddParseOptions, parseQuickAdd } from './quick-add';
 import type { AppData, Area, Person, Project, Task } from './types';
@@ -85,7 +86,19 @@ export type PendingPomodoro = {
     source?: string;
 };
 
-export type PendingQueueItem = PendingCapture | PendingCompletion | PendingAudioCapture | PendingDefer | PendingPomodoro;
+export type PendingChecklist = {
+    kind: 'checklist';
+    id: string;
+    taskId: string;
+    taskCreatedAt: string;
+    itemId: string;
+    itemTitle: string;
+    isCompleted: boolean;
+    createdAt: string;
+    source: 'apple-watch';
+};
+
+export type PendingQueueItem = PendingChecklist | PendingCapture | PendingCompletion | PendingAudioCapture | PendingDefer | PendingPomodoro;
 
 const trimOrUndefined = (value: unknown): string | undefined => {
     if (typeof value !== 'string') return undefined;
@@ -145,6 +158,18 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
         || (record.kind !== 'text' && record.kind !== 'audio')
     )) return null;
     const outboxRetried = record.outboxRetried === true ? true : undefined;
+    if (record.kind === 'checklist') {
+        const validId = (value: unknown): value is string => typeof value === 'string'
+            && value.length > 0 && value.length <= 512 && value.trim() === value;
+        if (source !== 'apple-watch' || !UUID_PATTERN.test(id)
+            || !createdAt || !safeParseDate(createdAt)
+            || !validId(record.taskId) || !validId(record.itemId)
+            || typeof record.taskCreatedAt !== 'string' || !safeParseDate(record.taskCreatedAt)
+            || typeof record.itemTitle !== 'string' || record.itemTitle.length > 8000
+            || typeof record.isCompleted !== 'boolean') return null;
+        return { kind: 'checklist', id, taskId: record.taskId, taskCreatedAt: record.taskCreatedAt,
+            itemId: record.itemId, itemTitle: record.itemTitle, isCompleted: record.isCompleted, createdAt, source };
+    }
     if (record.kind === 'complete') {
         const taskId = trimOrUndefined(record.taskId);
         if (!taskId) return null;
@@ -298,7 +323,7 @@ export type PendingCaptureRecordPort = {
 /** The key React Native (AsyncStorage) and the native app (RKStorage) keep that record under. */
 export const PENDING_CAPTURE_LAST_APPLIED_STORAGE_KEY = 'mindwtr:pending-captures:last-applied:v1';
 const LAST_APPLIED_KEEP_MS = 14 * 24 * 60 * 60 * 1000;
-type LastApplied = { tapMs: number; id: string; at: number };
+type LastApplied = { tapMs: number; id: string; at: number; outcome?: string };
 
 type PendingCaptureLogContext = { scope: string; extra?: Record<string, unknown> };
 
@@ -310,6 +335,8 @@ export type PendingCaptureLog = {
 };
 
 export type PendingCaptureDrainDeps = PendingCaptureStoreDeps & {
+    /** Persist/send a terminal Watch receipt only after durable task and ordering writes. */
+    settleWatchChecklist?: (id: string, outcome: string) => Promise<void>;
     queue: PendingCaptureQueuePort;
     lastApplied: PendingCaptureRecordPort;
     log: PendingCaptureLog;
@@ -467,6 +494,28 @@ async function applyPendingDefer(
     return outcome;
 }
 
+/** Resolve against current data; never replace the Watch's old copy of the list. */
+export async function applyPendingChecklist(
+    command: PendingChecklist,
+    deps: Pick<PendingCaptureStoreDeps, 'tasks' | 'getTasks' | 'projects' | 'getProjects' | 'updateTask'>,
+): Promise<string | null> {
+    const task = (deps.getTasks?.() ?? deps.tasks).find((entry) => entry.id === command.taskId);
+    if (!task || task.deletedAt || task.purgedAt || task.createdAt !== command.taskCreatedAt) return 'missing';
+    const items = task.checklist ?? [];
+    const matches = items.filter((item) => item.id === command.itemId && item.title === command.itemTitle);
+    if (matches.length !== 1) return 'changed';
+    // A completion may already have advanced recurrence before a crash at the save/receipt boundary.
+    if (matches[0].isCompleted === command.isCompleted) return 'applied';
+    const project = (deps.getProjects?.() ?? deps.projects).find((entry) => entry.id === task.projectId);
+    if (task.status === 'archived' || task.status === 'reference'
+        || (task.status === 'done' && (task.taskMode !== 'list' || task.recurrence))
+        || (project && (project.deletedAt || project.status === 'archived'))) return 'terminal';
+    const checklist = items.map((item) => item === matches[0] ? { ...item, isCompleted: command.isCompleted } : item);
+    const status = getChecklistEditStatus({ taskMode: task.taskMode, status: task.status, checklist });
+    const result = await deps.updateTask(task.id, { checklist, ...(status !== task.status ? { status } : {}) });
+    return isFailedResult(result) ? null : 'applied';
+}
+
 /** Ingests every queue item it can, oldest file name first (Watch commands in tap order); resolves to the count ingested. */
 export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): Promise<number> {
     const {
@@ -523,7 +572,8 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
     }
 
     const isWatchCommand = (capture: PendingQueueItem | null) => (
-        capture?.kind === 'defer'
+        capture?.kind === 'checklist'
+        || capture?.kind === 'defer'
         || capture?.kind === 'pomodoro'
         || (capture?.kind === 'complete' && capture.source === 'apple-watch')
     );
@@ -564,8 +614,10 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         try {
             const parsed: unknown = raw ? JSON.parse(raw) : {};
             for (const [taskId, entry] of Object.entries(parsed && typeof parsed === 'object' ? parsed : {})) {
-                const { tapMs, id, at } = (entry ?? {}) as Partial<LastApplied>;
-                if (Number.isFinite(tapMs) && typeof id === 'string' && Number.isFinite(at)) record.set(taskId, { tapMs: tapMs!, id, at: at! });
+                const { tapMs, id, at, outcome } = (entry ?? {}) as Partial<LastApplied>;
+                if (Number.isFinite(tapMs) && typeof id === 'string' && Number.isFinite(at)) record.set(taskId, {
+                    tapMs: tapMs!, id, at: at!, ...(typeof outcome === 'string' ? { outcome } : {}),
+                });
             }
         } catch {
             // A record this app wrote but cannot parse starts over: commands apply as before it existed.
@@ -586,7 +638,10 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         if (Number.isNaN(tapMs) || (last && tapMs < last.tapMs)) return;
         const now = Date.now();
         record.set(command.taskId, { tapMs, id: command.id, at: now });
-        for (const [taskId, entry] of record) if (now - entry.at > LAST_APPLIED_KEEP_MS) record.delete(taskId);
+        for (const [taskId, entry] of record) {
+            // Watch checklist commands can remain offline indefinitely; their item ordering cannot expire.
+            if (!taskId.startsWith('["watch-checklist",') && now - entry.at > LAST_APPLIED_KEEP_MS) record.delete(taskId);
+        }
         await lastApplied.write(JSON.stringify(Object.fromEntries(record)));
     };
     const logSkip = (kind: 'complete' | 'defer', outcome: 'stale' | 'replayed') => {
@@ -604,6 +659,40 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
             // re-log on every foreground.
             void log.warn('Discarding malformed pending capture', { scope: 'shortcuts', extra: { name } });
             await queue.delete(name).catch(() => undefined);
+            continue;
+        }
+
+        if (capture.kind === 'checklist') {
+            // Older hosts retain this command until they can acknowledge its durable result.
+            if (!deps.settleWatchChecklist || !flushPendingSave) { onUnfinished?.('queued'); continue; }
+            const record = await (appliedRecord ??= readLastApplied());
+            if (!record) { onUnfinished?.('queued'); continue; }
+            const target = JSON.stringify(['watch-checklist', capture.taskId, capture.taskCreatedAt, capture.itemId, capture.itemTitle]);
+            const previous = record.get(target);
+            const tapMs = Date.parse(capture.createdAt);
+            const stale = previous && (tapMs < previous.tapMs || (tapMs === previous.tapMs && capture.id < previous.id));
+            let outcome = previous?.id === capture.id ? previous.outcome ?? 'applied' : stale ? 'stale' : undefined;
+            try {
+                if (!outcome) {
+                    outcome = await applyPendingChecklist(capture, deps) ?? undefined;
+                    if (!outcome) { onUnfinished?.('queued'); continue; }
+                }
+                await flushPendingSave();
+                if (!stale) {
+                    record.set(target, { tapMs, id: capture.id, at: Date.now(), outcome });
+                    await lastApplied.write(JSON.stringify(Object.fromEntries(record)));
+                }
+                await deps.settleWatchChecklist(capture.id, outcome);
+                await queue.delete(name);
+                ingested += 1;
+                void log.info('Watch checklist command settled', {
+                    scope: 'capture', extra: { releaseCheck: 'v1.3.5/watch-checklist', outcome },
+                });
+            } catch {
+                // No later command may leapfrog an unrecorded write.
+                onUnfinished?.('owed');
+                break;
+            }
             continue;
         }
 

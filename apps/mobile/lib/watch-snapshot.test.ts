@@ -23,6 +23,19 @@ const pomodoro = (overrides: Partial<MobilePomodoroControllerState> = {}): Mobil
 });
 
 describe('Watch application context', () => {
+  it('retains complete Unicode details within the budget and explicitly omits oversized lists', () => {
+    const checklist = Array.from({ length: 50 }, (_, i) => ({ id: `${i}`, title: `牛奶 🥛 ${i}`, isCompleted: i === 0 }));
+    const small = { id: 'shopping', title: 'Shopping', description: 'Line one\nLine two', checklist };
+    const result = buildWatchApplicationContext({ focus: [small], pomodoro: pomodoro() });
+    expect(result.focus[0]).toEqual(small);
+    const focus = Array.from({ length: 20 }, (_, i) => ({ ...small, id: `${i}`, description: '漢😀'.repeat(500) }));
+    const bounded = buildWatchApplicationContext({ focus, pomodoro: pomodoro() });
+    expect(new TextEncoder().encode(JSON.stringify(bounded)).length).toBeLessThan(60 * 1024);
+    expect(bounded.focus.some((item) => item.detailsUnavailable)).toBe(true);
+    for (const item of bounded.focus) expect(item.checklist === undefined || item.checklist.length === 50).toBe(true);
+    const huge = buildWatchApplicationContext({ focus: [{ ...small, description: '😀'.repeat(10000) }], pomodoro: pomodoro() });
+    expect(huge.focus[0]).toEqual({ id: 'shopping', title: 'Shopping', detailsUnavailable: true });
+  });
   it('bounds and deduplicates Focus tasks and strips nullable timer fields', () => {
     const focus = Array.from({ length: 30 }, (_, index) => ({
       id: `task-${index}`,

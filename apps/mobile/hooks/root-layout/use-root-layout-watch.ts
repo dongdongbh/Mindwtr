@@ -54,7 +54,11 @@ export function useRootLayoutWatch({
         maxItems: 20,
         focusFilter: getFocusWidgetFilter(),
       });
-      const focus = widget.sections.flatMap((section) => section.items.map(({ id, title }) => ({ id, title })));
+      const byId = new Map(store.tasks.map((task) => [task.id, task]));
+      const focus = widget.sections.flatMap((section) => section.items.map(({ id, title }) => {
+        const task = byId.get(id);
+        return { id, title, createdAt: task?.createdAt, description: task?.description, checklist: task?.checklist };
+      }));
       const pomodoro = mobilePomodoroController.getSnapshot();
       const linkTaskEnabled = store.settings.gtd?.pomodoro?.linkTask === true;
       const completionAlertEnabled = store.settings.gtd?.pomodoro?.completionAlert !== false;
@@ -120,7 +124,12 @@ export function useRootLayoutWatch({
       }, WATCH_PUBLICATION_COALESCE_MS);
     };
 
-    const nativeListener = addPendingWatchCaptureListener(onPendingCapture);
+    const nativeListener = addPendingWatchCaptureListener(() => {
+      onPendingCapture();
+      // Settlement also emits this edge, after the task save is durable.
+      lastContextKey = '';
+      requestPublish();
+    });
     const unsubscribeStore = useTaskStore.subscribe(requestPublish);
     let timerKey = watchPomodoroPublicationKey(mobilePomodoroController.getSnapshot());
     const unsubscribePomodoro = mobilePomodoroController.subscribe(() => {

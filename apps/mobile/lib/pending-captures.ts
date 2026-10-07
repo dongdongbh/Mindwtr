@@ -10,6 +10,7 @@ import {
 } from '@mindwtr/core';
 
 import { logError, logInfo, logWarn } from './app-log';
+import { settleWatchChecklist } from '../modules/watch-connectivity';
 import { deleteAsync, documentDirectory, getInfoAsync, readAsStringAsync, readDirectoryAsync } from './file-system';
 
 // Background Shortcuts captures (#845) and the Android quick-capture dialog
@@ -131,6 +132,7 @@ export async function ingestPendingCaptures({ transcribeAudio, ...deps }: Ingest
     const dir = `${documentDirectory}${PENDING_CAPTURES_DIRECTORY}`;
     return drainPendingCaptureQueue({
         ...deps,
+        settleWatchChecklist,
         queue: {
             list: async () => ((await getInfoAsync(dir)).exists ? readDirectoryAsync(dir) : null),
             read: (name) => readAsStringAsync(`${dir}/${name}`),
