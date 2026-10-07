@@ -655,7 +655,7 @@ pub(crate) fn nudge_wayland_csd_after_show(window: &tauri::WebviewWindow) {
 pub(crate) fn nudge_wayland_csd_after_show(_window: &tauri::WebviewWindow) {}
 
 /// The single funnel for putting the main window back on screen: the tray menu
-/// and tray click, a second instance (including the Flatpak listener), the
+/// and tray click, macOS Dock reopen, a second instance (including the Flatpak listener), the
 /// first reveal after launch, and the quick-add fallback all land here.
 ///
 /// The macOS activation policy is restored to Regular before the window
