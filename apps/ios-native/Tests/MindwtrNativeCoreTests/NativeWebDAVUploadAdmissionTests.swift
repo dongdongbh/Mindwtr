@@ -114,11 +114,12 @@ final class NativeWebDAVUploadAdmissionTests: XCTestCase {
           const probe=()=>{const id=String(++next);Promise.resolve().then(async()=>{
             const gate=globalThis.attachmentUploadGate,n=__mindwtrNative;
             if(!gate||typeof gate.run!=='function'||typeof n.fileCall!=='function')throw new Error('Attachment upload fixture gate is unavailable');
-            const input=plans.shift(),ops={},original=n.fileCall;
+            const input=plans.shift(),ops={},original=n.fileCall,crypto=n.cryptoCall;
             if(!input)throw new Error('Upload fixture probe failed');
             n.fileCall=request=>{const op=JSON.parse(request).op;ops[op]=(ops[op]||0)+1;return original(request)};
-            try {const result=await gate.run(input.data,input.cap,input.phase,input.url);return {...result,ops,kv:typeof n.kvMultiGet}}
-            finally {n.fileCall=original}
+            n.cryptoCall=request=>{const op=JSON.parse(request).op;ops[op]=(ops[op]||0)+1;return crypto(request)};
+            try {const result=await gate.run(input.data,input.cap,input.phase,input.url,input.fixture);return {...result,ops,kv:typeof n.kvMultiGet}}
+            finally {n.fileCall=original;n.cryptoCall=crypto}
           }).then(value=>replies.set(id,JSON.stringify({ok:true,value})),
             error=>replies.set(id,JSON.stringify({ok:false,error:error&&error.message==='Attachment upload fixture gate is unavailable'?'Attachment upload fixture gate is unavailable':'Upload fixture probe failed'})));return id};
           MindwtrHost.menuRead=(name,params)=>name==='dataSettings'?probe():oldMenu(name,params);
@@ -152,8 +153,10 @@ final class NativeWebDAVUploadAdmissionTests: XCTestCase {
                             parametersJSON: json([taskID, "Synthetic upload task", try json([attachment(pending)]), at, at]))
         try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true)
     }
-    private func plan(cap: Int, phase: String, pending: Bool) -> [String: Any] {
-        ["data": data(pending), "cap": cap, "phase": phase, "url": remote]
+    private func plan(cap: Int, phase: String, pending: Bool, encrypted: Bool = false) -> [String: Any] {
+        var value: [String: Any] = ["data": data(pending), "cap": cap, "phase": phase, "url": remote]
+        if encrypted { value["fixture"] = ["key": [Int](repeating: 0, count: 32), "salt": [Int](repeating: 0, count: 16), "params": ["mKib": 64, "t": 1, "p": 1]] }
+        return value
     }
     private func probe(_ host: CoreHost) async throws -> [String: Any] {
         return try object(await host.call("menuRead", argumentsJSON: json(["dataSettings", "{}"])))
@@ -191,7 +194,7 @@ final class NativeWebDAVUploadAdmissionTests: XCTestCase {
         XCTAssertNil(result["result"], file: file, line: line)
         let ops = try XCTUnwrap(result["ops"] as? [String: Int], file: file, line: line)
         XCTAssertGreaterThan(ops["getInfo"] ?? 0, 0, file: file, line: line)
-        for op in ["copy", "readBytes", "readBytesRange", "sha256File", "sha256", "writeBytes", "move"] {
+        for op in ["copy", "readBytes", "readBytesRange", "sha256File", "sha256", "writeBytes", "move", "aesGcmSeal", "aesGcmOpen"] {
             XCTAssertEqual(ops[op] ?? 0, 0, "Admission precedes source/snapshot bytes: " + op, file: file, line: line)
         }
         let warnings = try XCTUnwrap(result["warnings"] as? [[String: String]], file: file, line: line)
@@ -265,5 +268,80 @@ final class NativeWebDAVUploadAdmissionTests: XCTestCase {
         XCTAssertEqual(try rows(), before); XCTAssertEqual(try inode(source), originalInode); XCTAssertEqual(try Data(contentsOf: source), bytes)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), beforeCache)
         XCTAssertEqual(result["kv"] as? String, "undefined"); await value.close()
+    }
+
+    func testEncryptedWireCapAuthenticatesExactUploadAndRefusesEightMiBSourceBeforeBytesAcrossColdPhases() async throws {
+        try await seed(false)
+        let bytes = Data([0, 255, 128, 1, 10, 13, 42, 7, 9]); try bytes.write(to: source)
+        // MWENC1 has a maintained 54-byte authenticated header and a 16-byte tag.
+        let wireCap = bytes.count + 70
+        let originalInode = try inode(source), originalHash = try digest(source)
+        let exact = try host(plans: [plan(cap: wireCap - 1, phase: "post-merge", pending: false, encrypted: true),
+                                    plan(cap: wireCap, phase: "post-merge", pending: false, encrypted: true)])
+        try await start(exact); let before = try rows()
+        let beforeCache = try FileManager.default.contentsOfDirectory(atPath: cache.path)
+        try assertRefused(await probe(exact))
+        XCTAssertEqual(state.recorded.methods.count, 0); XCTAssertEqual(try rows(), before)
+        XCTAssertEqual(try inode(source), originalInode); XCTAssertEqual(try Data(contentsOf: source), bytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), beforeCache)
+        let result = try await probe(exact)
+        XCTAssertEqual(result["admitted"] as? Bool, true); XCTAssertEqual(result["inputUnchanged"] as? Bool, true)
+        let uploaded = try XCTUnwrap(result["result"] as? [String: Any])
+        let tasks = try XCTUnwrap(uploaded["tasks"] as? [[String: Any]])
+        let attachments = try XCTUnwrap(tasks.first?["attachments"] as? [[String: Any]])
+        let attachment = try XCTUnwrap(attachments.first)
+        XCTAssertEqual(attachment["fileHash"] as? String, originalHash)
+        XCTAssertFalse((attachment["cloudKey"] as? String ?? "").isEmpty); XCTAssertNil(attachment["deletedAt"])
+        let ops = try XCTUnwrap(result["ops"] as? [String: Int])
+        for op in ["copy", "sha256File", "readBytes", "aesGcmSeal"] { XCTAssertGreaterThan(ops[op] ?? 0, 0, op) }
+        let network = state.recorded
+        XCTAssertEqual(network.methods.filter { $0 == "MKCOL" }.count, 1)
+        XCTAssertEqual(network.methods.filter { $0 == "PUT" }.count, 1)
+        XCTAssertGreaterThan(network.methods.filter { $0 == "HEAD" }.count, 0)
+        XCTAssertEqual(network.conditions, ["*"])
+        let wire = try XCTUnwrap(network.uploads.first); XCTAssertEqual(wire.count, wireCap)
+        guard wire.count >= 70 else { throw HostFailure("Synthetic encrypted upload container is incomplete") }
+        XCTAssertEqual(wire.prefix(8), Data("MWENC1".utf8) + Data([1, 1])); XCTAssertNotEqual(wire, bytes)
+        let header = wire.prefix(54), nonce = try AES.GCM.Nonce(data: wire.subdata(in: 34..<46))
+        let sealed = try AES.GCM.SealedBox(nonce: nonce, ciphertext: wire.subdata(in: 54..<(wire.count - 16)), tag: wire.suffix(16))
+        XCTAssertEqual(try AES.GCM.open(sealed, using: SymmetricKey(data: Data(count: 32)), authenticating: header), bytes)
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(try inode(source), originalInode); XCTAssertEqual(try Data(contentsOf: source), bytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), beforeCache)
+        XCTAssertEqual(result["kv"] as? String, "undefined"); await exact.close()
+
+        // An 8 MiB plaintext source fits the old source cap but its sealed bytes
+        // exceed the unchanged native 8 MiB wire cap. Use a real sparse file.
+        let hostWireCap = 8 * 1024 * 1024
+        let fd = Darwin.open(source.path, O_WRONLY | O_TRUNC | O_CLOEXEC)
+        guard fd >= 0 else { throw HostFailure("Synthetic encrypted upload source creation failed") }
+        XCTAssertEqual(ftruncate(fd, off_t(hostWireCap)), 0); Darwin.close(fd)
+        XCTAssertEqual(try source.resourceValues(forKeys: [.fileSizeKey]).fileSize, hostWireCap)
+        let largeInode = try inode(source), largeHash = try digest(source), transportBefore = state.recorded.methods.count
+        let warm = try host(plans: [plan(cap: hostWireCap, phase: "prepare", pending: true, encrypted: true),
+                                   plan(cap: hostWireCap, phase: "post-merge", pending: true, encrypted: true)])
+        try await start(warm)
+        let largeBefore = try rows(), largeCache = try FileManager.default.contentsOfDirectory(atPath: cache.path)
+        for _ in 0..<2 {
+            try assertRefused(await probe(warm))
+            XCTAssertEqual(state.recorded.methods.count, transportBefore); XCTAssertEqual(try rows(), largeBefore)
+            XCTAssertEqual(try inode(source), largeInode); XCTAssertEqual(try digest(source), largeHash)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), largeCache)
+        }
+        await warm.close()
+        let cold = try host(plans: [plan(cap: hostWireCap, phase: "post-merge", pending: true, encrypted: true)])
+        try await start(cold); try assertRefused(await probe(cold))
+        XCTAssertEqual(state.recorded.methods.count, transportBefore); XCTAssertEqual(try rows(), largeBefore)
+        XCTAssertEqual(try inode(source), largeInode); XCTAssertEqual(try digest(source), largeHash)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), largeCache)
+        await cold.close()
+        let log = try String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)
+        let markers = log.split(separator: "\n").filter { $0.contains("v1.3.5/webdav-host-upload-limit") }
+        XCTAssertEqual(markers.count, 4)
+        for marker in markers {
+            XCTAssertEqual(try object(String(marker))["context"] as? [String: String],
+                           ["releaseCheck": "v1.3.5/webdav-host-upload-limit", "operation": "upload", "outcome": "refused"])
+        }
+        XCTAssertFalse(log.contains(source.absoluteString)); XCTAssertFalse(log.contains("Synthetic private upload.bin"))
+        XCTAssertFalse(log.contains("synthetic-not-a-credential")); XCTAssertFalse(log.contains(hostname))
     }
 }

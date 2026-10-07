@@ -399,6 +399,25 @@ describe('mobile attachment common: streamed uploads', () => {
 });
 
 describe('mobile attachment common: pre-passes', () => {
+  it('invokes optional upload stat admission before copying an empty foreign source', async () => {
+    const { common, memory } = setup();
+    const uri = 'file:///data/files/provider-copy.txt';
+    memory.put(uri, new Uint8Array(0));
+    const original = attachment({ uri });
+    const attachmentsById = new Map([[original.id, original]]);
+    const refusal = new AttachmentUploadTooLargeError(1, 0);
+    const assertUploadStat = vi.fn(() => { throw refusal; });
+
+    await expect(common.migrateAttachmentsLocallyBeforeSync(attachmentsById, undefined, 0, assertUploadStat))
+      .rejects.toBe(refusal);
+
+    expect(assertUploadStat).toHaveBeenCalledTimes(1);
+    expect(assertUploadStat).toHaveBeenCalledWith(expect.objectContaining({ size: 0 }));
+    expect(attachmentsById.get(original.id)).toBe(original);
+    expect([...memory.files.keys()]).toEqual([uri]);
+    expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+  });
+
   it('migrates at most three outside files per pass and drops unreadable ones from the round', async () => {
     const { common, memory } = setup();
     const attachmentsById = new Map<string, Attachment>();

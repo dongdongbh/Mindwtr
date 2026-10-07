@@ -867,6 +867,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     attachmentsById: Map<string, Attachment>,
     signal?: AbortSignal,
     maxBufferedUploadBytes?: number,
+    assertUploadStat?: AttachmentTransferLifecycleOptions['assertUploadStat'],
   ): Promise<Map<string, Attachment>> => {
     const migrateAttachmentLocally = files.createAttachmentLocalMigrationLimiter();
     const patches = new Map<string, Attachment>();
@@ -881,9 +882,12 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
           continue;
         }
         if (presence === 'confirmed-not-found') continue;
-        if (maxBufferedUploadBytes !== undefined) {
+        if (maxBufferedUploadBytes !== undefined || assertUploadStat) {
           const stat = await files.statAttachmentFile(attachment.uri || '');
-          assertBufferedAttachmentUploadSize(stat?.size ?? NaN, maxBufferedUploadBytes);
+          assertUploadStat?.(stat);
+          if (maxBufferedUploadBytes !== undefined) {
+            assertBufferedAttachmentUploadSize(stat?.size ?? NaN, maxBufferedUploadBytes);
+          }
         }
       }
       const result = await migrateAttachmentLocally(attachment);

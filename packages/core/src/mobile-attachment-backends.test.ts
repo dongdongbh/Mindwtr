@@ -11,6 +11,15 @@ import { createMobileAttachmentCommon, type MobileAttachmentUploadTask } from '.
 import { createMobileAttachmentBackends, type MobileAttachmentBackendsCoreFunctions } from './mobile-attachment-backends';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
+import {
+  decryptSyncArtifact,
+  defaultSyncCryptoPrimitives,
+  encryptedSyncArtifactByteLength,
+  inspectSyncArtifact,
+  SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+  type SyncCryptoPrimitives,
+  type SyncKeyMaterial,
+} from './sync-crypto';
 
 const now = '2026-09-28T00:00:00.000Z';
 const LOCAL = new Uint8Array([1, 2, 3, 4]);
@@ -19,6 +28,9 @@ const LOCAL_URI = `${MANAGED}att-1.txt`;
 const BASE_URL = 'https://dav.example.com/Mindwtr';
 const toArrayBuffer = (bytes: Uint8Array) => bytes.slice().buffer as ArrayBuffer;
 const httpError = (status: number) => Object.assign(new Error(`HTTP ${status}`), { status });
+const material: SyncKeyMaterial = {
+  key: new Uint8Array(32).fill(7), salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+};
 
 const fileAttachment = (overrides: Partial<Attachment> = {}): Attachment => ({
   id: 'att-1',
@@ -55,6 +67,7 @@ const setup = (options: {
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
   createUploadTask?: () => MobileAttachmentUploadTask | null;
   maxWebdavBufferedUploadBytes?: number;
+  crypto?: SyncCryptoPrimitives;
 } = {}) => {
   const memory = createMemoryFileSystem({ saf: options.saf });
   const { storage } = createMemoryStorage();
@@ -96,7 +109,7 @@ const setup = (options: {
   const common = createMobileAttachmentCommon({
     fs: memory.fs,
     files,
-    crypto: {} as never,
+    crypto: options.crypto ?? {} as never,
     encryption: { logSyncEncryptionEvent: async () => undefined },
     installer,
     installerMayBeMissing: () => false,
@@ -123,14 +136,14 @@ describe('WebDAV attachment pass', () => {
     vi.unstubAllGlobals();
   });
 
-  const stubWebdavServer = (putResponse: () => Response) => {
+  const stubWebdavServer = (putResponse: (body: Uint8Array) => Response) => {
     const requests: { method: string; url: string; headers: Record<string, string> }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const method = (init.method ?? 'GET').toUpperCase();
       requests.push({ method, url, headers: { ...(init.headers as Record<string, string>) } });
       if (method === 'HEAD') return new Response(null, { status: 404 });
       if (method === 'MKCOL') return new Response(null, { status: 201 });
-      if (method === 'PUT') return putResponse();
+      if (method === 'PUT') return putResponse(new Uint8Array(init.body as ArrayBuffer));
       return new Response(null, { status: 500 });
     }));
     return requests;
@@ -155,6 +168,178 @@ describe('WebDAV attachment pass', () => {
     expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
     expect(attachmentOf(result)?.contentSize).toBe(LOCAL.byteLength);
     expect(requests.filter((request) => request.method === 'PUT')).toHaveLength(1);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
+  });
+
+  it.each([0, LOCAL.byteLength])('accepts an encrypted upload at the exact host wire cap for %s plaintext bytes', async (size) => {
+    const source = LOCAL.slice(0, size);
+    const uploaded: Uint8Array[] = [];
+    const requests = stubWebdavServer((body) => {
+      uploaded.push(body);
+      return new Response(null, { status: 201 });
+    });
+    const cap = encryptedSyncArtifactByteLength(source.byteLength);
+    const { backends, memory, lines } = setup({ maxWebdavBufferedUploadBytes: cap, crypto: defaultSyncCryptoPrimitives });
+    memory.put(LOCAL_URI, source);
+    const input = withAttachment(fileAttachment({ size: 1 }));
+    const before = structuredClone(input);
+
+    const result = await backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { material });
+
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0].byteLength).toBe(cap);
+    expect(inspectSyncArtifact(uploaded[0]).kind).toBe('encrypted');
+    expect(await decryptSyncArtifact(uploaded[0], material.key)).toEqual(source);
+    expect(requests.find((request) => request.method === 'PUT')?.headers['If-None-Match']).toBe('*');
+    expect(attachmentOf(result)).toMatchObject({ cloudKey: 'attachments/att-1.txt', contentSize: source.byteLength });
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(source);
+    expect([...memory.files.keys()]).toEqual([LOCAL_URI]);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
+  });
+
+  it.each([
+    ['first upload', {}, undefined],
+    ['pending post-merge upload', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), pendingContentUpload: true }, 'post-merge'],
+    ['pending prepare identity', { cloudKey: 'attachments/att-1.txt', pendingContentUpload: true }, 'prepare'],
+    ['prepare content hash', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), contentSize: 1, contentMtimeMs: 0 }, 'prepare'],
+    ['foreign source migration', { uri: 'file:///data/files/provider-copy.txt' }, undefined],
+  ] as const)('refuses an encrypted host wire cap +1 before copying, hashing or sealing for %s', async (_name, overrides, phase) => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const seal = vi.fn(defaultSyncCryptoPrimitives.aesGcmSeal);
+    const { backends, memory, files, lines } = setup({
+      maxWebdavBufferedUploadBytes: encryptedSyncArtifactByteLength(LOCAL.byteLength),
+      crypto: { ...defaultSyncCryptoPrimitives, aesGcmSeal: seal },
+      core: { webdavFileExists: async () => true },
+    });
+    const input = withAttachment(fileAttachment({ ...overrides, size: 1 }));
+    const uri = input.tasks[0].attachments![0].uri!;
+    const source = new Uint8Array(LOCAL.byteLength + 1).fill(3);
+    memory.put(uri, source);
+    const before = structuredClone(input);
+    const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { material, phase }))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.read(uri)).toEqual(source);
+    expect([...memory.files.keys()]).toEqual([uri]);
+    expect(hash).not.toHaveBeenCalled();
+    expect(seal).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+    expect(requests.filter((request) => ['MKCOL', 'PUT', 'DELETE'].includes(request.method))).toEqual([]);
+    expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toEqual([{
+      level: 'warn', message: 'WebDAV host upload admission refused',
+      extra: { releaseCheck: 'v1.3.5/webdav-host-upload-limit', operation: 'upload', outcome: 'refused' },
+    }]);
+  });
+
+  it.each([
+    ['first upload', {}, undefined],
+    ['pending prepare identity', { cloudKey: 'attachments/att-1.txt', pendingContentUpload: true }, 'prepare'],
+    ['pending post-merge upload', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), pendingContentUpload: true }, 'post-merge'],
+    ['foreign source migration', { uri: 'file:///data/files/provider-copy.txt' }, undefined],
+  ] as const)('refuses an empty encrypted upload below the envelope cap before local IO for %s', async (_name, overrides, phase) => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const seal = vi.fn(defaultSyncCryptoPrimitives.aesGcmSeal);
+    const { backends, memory, lines } = setup({
+      maxWebdavBufferedUploadBytes: encryptedSyncArtifactByteLength(0) - 1,
+      crypto: { ...defaultSyncCryptoPrimitives, aesGcmSeal: seal },
+      core: { webdavFileExists: async () => true },
+    });
+    const input = withAttachment(fileAttachment(overrides));
+    const uri = input.tasks[0].attachments![0].uri!;
+    memory.put(uri, new Uint8Array(0));
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { material, phase }))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.read(uri)).toEqual(new Uint8Array(0));
+    expect([...memory.files.keys()]).toEqual([uri]);
+    expect(seal).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+    expect(requests.filter((request) => ['MKCOL', 'PUT', 'DELETE'].includes(request.method))).toEqual([]);
+    expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toHaveLength(1);
+  });
+
+  it.each(['copy', 'read'] as const)('refuses encrypted snapshot growth at %s before sealing or remote mutation', async (growth) => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const seal = vi.fn(defaultSyncCryptoPrimitives.aesGcmSeal);
+    const { backends, memory, files } = setup({
+      maxWebdavBufferedUploadBytes: encryptedSyncArtifactByteLength(LOCAL.byteLength),
+      crypto: { ...defaultSyncCryptoPrimitives, aesGcmSeal: seal },
+    });
+    memory.put(LOCAL_URI, LOCAL);
+    if (growth === 'copy') {
+      const copy = memory.fs.copy;
+      vi.spyOn(memory.fs, 'copy').mockImplementation(async (from, to) => {
+        await copy(from, to);
+        memory.put(to, new Uint8Array(LOCAL.byteLength + 1));
+      });
+    } else {
+      const read = memory.fs.readBytes;
+      vi.spyOn(memory.fs, 'readBytes').mockImplementation(async (uri) => (
+        uri.includes('mindwtr-upload-') ? new Uint8Array(LOCAL.byteLength + 1) : read(uri)
+      ));
+    }
+    const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+    const input = withAttachment(fileAttachment());
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { material }))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect([...memory.files.keys()]).toEqual([LOCAL_URI]);
+    expect(hash).not.toHaveBeenCalled();
+    expect(seal).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+    if (growth === 'copy') expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|sha256) /.test(call))).toEqual([]);
+  });
+
+  it.each(['idle', 'unchanged cloud copy'] as const)('does not refuse %s with an encrypted cap below envelope overhead', async (kind) => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory, files, lines } = setup({
+      maxWebdavBufferedUploadBytes: encryptedSyncArtifactByteLength(0) - 1,
+      crypto: defaultSyncCryptoPrimitives,
+      core: { webdavFileExists: async () => true },
+    });
+    memory.put(LOCAL_URI, LOCAL);
+    const stat = (await files.statAttachmentFile(LOCAL_URI))!;
+    const input = withAttachment(fileAttachment({
+      cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), contentSize: stat.size, contentMtimeMs: stat.mtimeMs,
+    }));
+    if (kind === 'idle') input.tasks[0].attachments = [];
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { material, phase: 'prepare' }))
+      .resolves.toBe(false);
+
+    expect(input).toEqual(before);
+    expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+    expect(requests).toEqual([]);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
+  });
+
+  it('retains uncapped encrypted upload behavior without a host capability', async () => {
+    const uploaded: Uint8Array[] = [];
+    stubWebdavServer((body) => {
+      uploaded.push(body);
+      return new Response(null, { status: 201 });
+    });
+    const { backends, memory, lines } = setup({ crypto: defaultSyncCryptoPrimitives });
+    memory.put(LOCAL_URI, LOCAL);
+
+    const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL, undefined, { material });
+
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0].byteLength).toBe(encryptedSyncArtifactByteLength(LOCAL.byteLength));
+    expect(await decryptSyncArtifact(uploaded[0], material.key)).toEqual(LOCAL);
+    expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
     expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
   });
 

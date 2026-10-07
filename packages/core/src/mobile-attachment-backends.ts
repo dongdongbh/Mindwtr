@@ -39,7 +39,7 @@ import {
 } from './dropbox';
 import { isAbortError, isHostResponseTooLargeError, refuseWriteRedirect } from './http-utils';
 import { withRetry } from './retry-utils';
-import type { SyncKeyMaterial } from './sync-crypto';
+import { encryptedSyncArtifactByteLength, type SyncKeyMaterial } from './sync-crypto';
 import { isSyncRemoteMutationFenceError } from './sync-remote-fence';
 import { getErrorStatus, isWebdavRateLimitedError } from './sync-runtime-utils';
 import {
@@ -149,8 +149,8 @@ export type MobileAttachmentBackendsHost = {
     | 'retainFileSyncAttachmentPublicationForInvalidTarget'
   >;
   log: Pick<MobileSyncLogPort, 'sanitize'>;
-  /** Optional plaintext-byte admission for a host's buffered WebDAV transport.
-   * The caller reserves encryption-envelope bytes inside its own wire limit. */
+  /** Optional wire-byte admission for a host's buffered WebDAV transport.
+   * Each pass reserves encryption-envelope bytes when material is present. */
   maxWebdavBufferedUploadBytes?: number;
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
 };
@@ -242,6 +242,18 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
   ): Promise<AppData | false> => {
     assertAttachmentSyncNotAborted(signal);
     const material = options.material ?? null;
+    const maxBufferedPlaintextBytes = maxWebdavBufferedUploadBytes === undefined
+      ? undefined
+      : Math.max(0, maxWebdavBufferedUploadBytes - (material ? encryptedSyncArtifactByteLength(0) : 0));
+    const assertUploadStat = maxBufferedPlaintextBytes === undefined ? undefined : (stat: LocalFileStat | null) => {
+      // Validate the source size before computing its encrypted length. Clamping the
+      // plaintext cap to zero keeps existing validators valid even when the wire cap
+      // cannot hold an empty envelope; the second check refuses that case on demand.
+      assertBufferedAttachmentUploadSize(stat?.size ?? NaN, maxBufferedPlaintextBytes);
+      if (material) {
+        assertBufferedAttachmentUploadSize(encryptedSyncArtifactByteLength(stat!.size), maxWebdavBufferedUploadBytes!);
+      }
+    };
     let lastRequestAt = 0;
     let blockedUntil = 0;
     const waitForSlot = async (): Promise<void> => {
@@ -317,7 +329,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     // folded into a fresh document at the end. `attachmentsById` is updated alongside so a
     // later pass reads the earlier pass's values.
     const allPatches = await common.migrateAttachmentsLocallyBeforeSync(
-      attachmentsById, signal, maxWebdavBufferedUploadBytes,
+      attachmentsById, signal, maxBufferedPlaintextBytes, assertUploadStat,
     );
 
     let abortedByRateLimit = false;
@@ -454,10 +466,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       getLocalFileStat: (path) => files.statAttachmentFile(path),
       computeLocalFileHash: (path) => files.computeAttachmentFileHash(path),
       contentChangePhase: options.phase,
-      maxBufferedUploadBytes: maxWebdavBufferedUploadBytes,
-      assertUploadStat: maxWebdavBufferedUploadBytes === undefined ? undefined : (stat) => {
-        assertBufferedAttachmentUploadSize(stat?.size ?? NaN, maxWebdavBufferedUploadBytes);
-      },
+      maxBufferedUploadBytes: maxBufferedPlaintextBytes,
+      assertUploadStat,
       isFatalError: (error) => (
         isAttachmentSyncAbortError(error, signal)
         || isHostResponseTooLargeError(error)
