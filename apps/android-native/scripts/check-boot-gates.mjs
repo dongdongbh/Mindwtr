@@ -3529,6 +3529,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
 const fakeCore = `
 export { SYNC_BACKEND_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-storage-keys.ts'))};
+export { getBaseSyncUrl } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-paths.ts'))};
 import { NativeAttachmentCleanupUnconfirmedError as RealCleanupError } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};
 export { RealCleanupError as NativeAttachmentCleanupUnconfirmedError };
 import { mapSqliteTaskRow as hydrateTask285 } from ${JSON.stringify(resolve(app, '../../packages/core/src/sqlite-adapter.ts'))};
@@ -3541,7 +3542,7 @@ export { validateNativeAttachmentDraftBeginV3, validateNativeAttachmentDraftLine
     validateNativeAttachmentDraftBeginV5, validateNativeAttachmentDraftLineageV5,
     prepareNativeAttachmentDraftAddV4, prepareNativeAttachmentDraftRemoveV4, completeNativeAttachmentDraftAddV4,
     prepareNativeAttachmentDraftAddV3, prepareNativeAttachmentDraftRemoveV3,
-    readNativeAttachmentDraftRemoveFrozen } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft.ts'))};
+    readNativeAttachmentDraftRemoveFrozen, prepareNativeAttachmentDraftAvailability } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft.ts'))};
 export { prepareNativeAttachmentDraftDiscardCandidates, prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4, prepareNativeAttachmentDraftDiscardCandidatesV5 } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft-discard.ts'))};
 export { prepareNativeAttachmentCleanupWitness, isNativeAttachmentCleanupWitnessEligible } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};
 import { createOwnedEditorFileEditTaskDraftSaveMethods as createRealMixedSaveMethods } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract-owned-file-edit-save.ts'))};
@@ -3944,8 +3945,9 @@ export function createMobileAttachmentInstaller() {
   if (!globalThis.localAttachmentTest) throw new Error('local attachments unbound');
   return { installAttachmentFileGeneration: async () => { throw new Error('no remote installer call'); } };
 }
-export function createMobileAttachmentCommon() {
+export function createMobileAttachmentCommon(host) {
   if (!globalThis.localAttachmentTest) throw new Error('local attachments unbound');
+  if (host.preparePlaintextDownload) return { prepareAttachmentDownloadBytes: async () => { throw new Error('Unexpected source creation in Off entry fixture'); } };
   return {};
 }
 export function setSha256HexProvider() {
@@ -4061,6 +4063,63 @@ const poll = async (state, id) => {
     await new Promise((resolveTick) => setImmediate(resolveTick));
     return JSON.parse(state.MindwtrHost.poll(id));
 };
+// Task362: real pure route/projection and the production private-entry Off/admission path.
+// Native363 separately proves actual HTTP/receipt/intent/recovery with the real core bundle.
+{
+    const AT = '2026-10-07T00:00:00.000Z', taskID = 'task362';
+    const selected = { id: 'baseline362', kind: 'file', title: 'Fixture.txt', uri: '', cloudKey: 'attachments/baseline362.txt',
+        localStatus: 'missing', createdAt: AT, updatedAt: AT };
+    const request = { version: 1, requestId: '00000000-0000-4000-8000-000000000362',
+        sessionID: '00000000-0000-4000-8000-000000000363', generation: 0, attachmentId: selected.id,
+        identity: '' };
+    const beforePayloadJSON = JSON.stringify({ version: 2, taskID, attachmentsOwned: true,
+        attachmentsBase: [selected], attachments: [selected], opaque: 'Retain 文' });
+    // Use the actual shared identity grammar, not an independently guessed tuple.
+    const identityBuild = await build({ stdin: { contents: `export { getAttachmentDownloadIdentity } from './mobile-attachment-availability';`,
+        resolveDir: resolve(app, '../../packages/core/src'), loader: 'ts' }, bundle: true, write: false, format: 'iife', globalName: 'identity362' });
+    const identityState = {}; vm.runInNewContext(identityBuild.outputFiles[0].text, identityState);
+    request.identity = identityState.identity362.getAttachmentDownloadIdentity(selected);
+    const base = { version: 1, taskID, beforePayloadJSON, requestJSON: JSON.stringify(request) };
+    const route = { ...base, webdavURL: 'https://synthetic.invalid/dav/data.json', managedDirectoryURI: 'file:///library/documents/attachments/' };
+    const configure = (state) => {
+        state.localAttachmentTest = true; state.localShaInstallCount = 0; state.selectedIoCalls = 0;
+        for (const name of ['fileCall', 'installerCall', 'fileAbort', 'fileDeleteNow', 'ioNext', 'ioBody']) {
+            state.__mindwtrNative[name] = () => { state.selectedIoCalls++; throw new Error('Unexpected selected IO'); };
+        }
+        state.__mindwtrNative.fileDirectories = () => JSON.stringify({ document: 'file:///library/documents/', cache: 'file:///library/cache/' });
+        state.__mindwtrFileCall = async () => { state.selectedIoCalls++; throw new Error('Unexpected selected file IO'); };
+        state.__mindwtrInstallerCall = async () => { throw new Error('No selected installer'); };
+        state.__mindwtrSyncSecrets = { getSecret: async () => { state.selectedIoCalls++; throw new Error('No Off secret read'); } };
+    };
+    const state = makeState(0, [], 'ios', configure);
+    const preflight = () => poll(state, state.MindwtrHost.attachmentDraftAvailabilityPreflight(JSON.stringify(route)));
+    assert.match((await preflight()).error, /^NOT_READY:/);
+    assert.equal((await poll(state, state.MindwtrHost.boot())).ok, true);
+    assert.deepEqual((await preflight()).value, { version: 1, requestId: request.requestId, attachmentJSON: JSON.stringify(selected),
+        initialURL: 'https://synthetic.invalid/dav/attachments/baseline362.txt', targetURI: 'file:///library/documents/attachments/baseline362.txt' });
+    const rawConfigJSON = JSON.stringify({ backend: 'off', url: null, username: null, allowInsecureHttp: null, encryptionStateJSON: null });
+    const run = (input = { ...base, rawConfigJSON }, callback = () => { throw new Error('No Off source callback'); }) =>
+        poll(state, state.MindwtrHost.iosTaskDraftPrepareAvailability(JSON.stringify(input), callback));
+    const logBefore = state.logText, shaBefore = state.localShaInstallCount;
+    assert.deepEqual(await run(), { ok: true, value: { version: 1, requestId: request.requestId, status: 'unavailable' } });
+    assert.match((await run({ ...base, rawConfigJSON, extra: true })).error, /^INVALID_INPUT:/);
+    assert.deepEqual((await run()).value, { version: 1, requestId: request.requestId, status: 'unavailable' }, 'A refused invocation releases its private slot');
+    assert.match((await run(undefined, null)).error, /^NOT_READY:/);
+    for (const field of ['sandbox', 'workspaceTransition']) {
+        state[field] = true; assert.match((await run()).error, /^NOT_READY:/); assert.match((await preflight()).error, /^NOT_READY:/); state[field] = false;
+    }
+    assert.equal(state.selectedIoCalls, 0); assert.equal(state.localShaInstallCount, shaBefore); assert.equal(state.logText, logBefore);
+    const resolved = { ...selected, uri: route.managedDirectoryURI + 'baseline362.txt', localStatus: 'available', fileHash: 'a'.repeat(64) };
+    const proof = await poll(state, state.MindwtrHost.attachmentDraftPrepareAvailability(JSON.stringify({ version: 1, taskID,
+        requestId: request.requestId, attachmentId: selected.id, identity: request.identity, beforePayloadJSON,
+        status: 'available', resolvedAttachmentJSON: JSON.stringify(resolved) })));
+    assert.equal(proof.ok, true); assert.equal(proof.value.kind, 'prepared-file-availability');
+    assert.deepEqual(JSON.parse(proof.value.afterPayloadJSON).attachments, [resolved]);
+    assert.equal(JSON.parse(proof.value.afterPayloadJSON).opaque, 'Retain 文');
+    const android = makeState(0, [], 'android');
+    assert.match((await poll(android, android.MindwtrHost.attachmentDraftAvailabilityPreflight(JSON.stringify(route)))).error, /^NOT_READY:/);
+    assert.match((await poll(android, android.MindwtrHost.iosTaskDraftPrepareAvailability(JSON.stringify({ ...base, rawConfigJSON }), () => ''))).error, /^NOT_READY:/);
+}
 // HTTP transport alone enables no KV/sync/AI binding. Its private fixed
 // receipt uses the existing forced Diagnostics writer, without request input.
 {
@@ -4198,6 +4257,7 @@ for (const [bridge, receipt, operation] of [
 // Actual core availability/installer/JSC acceptance is a separate native suite.
 {
     const syncFixture = `
+export function createHostSyncCrypto() { throw new Error('Task Download crypto is not bound in Project entry fixture'); }
 export function createNativeSync() {
   globalThis.syncFactoryCalls++;
   return { attachmentsHost: globalThis.remoteAttachmentHost, settingsHost: {} };

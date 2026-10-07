@@ -32,6 +32,7 @@ import {
     validateNativeAttachmentDraftLineageV3, validateNativeAttachmentDraftLineageV4, validateNativeAttachmentDraftLineageV5,
     prepareNativeAttachmentDraftAddV3, prepareNativeAttachmentDraftAddV4,
     prepareNativeAttachmentDraftRemoveV3, prepareNativeAttachmentDraftRemoveV4,
+    prepareNativeAttachmentDraftAvailability,
     readNativeAttachmentDraftRemoveFrozen,
     completeNativeAttachmentDraftAdd, completeNativeAttachmentDraftAddV4,
     prepareNativeAttachmentDraftDiscardCandidates,
@@ -89,9 +90,10 @@ import {
     webdavPutJson,
 } from '@mindwtr/core';
 import { createNativeAI } from './host-ai';
-import { createNativeLocalAttachmentsForHost } from './host-attachments';
+import { createNativeLocalAttachmentsForHost, nativeFileChannels, prepareNativeTaskAttachmentAvailabilityPreflight,
+    prepareNativeTaskAttachmentAvailability } from './host-attachments';
 import { createNativeReminders } from './host-reminders';
-import { createNativeSync, type NativeSync, type NativeSyncBindings } from './host-sync';
+import { createNativeSync, createHostSyncCrypto, type NativeSync, type NativeSyncBindings } from './host-sync';
 import { createWidgetPublisher, type WidgetInputs } from './host-widgets';
 
 type NativeBridge = {
@@ -364,6 +366,7 @@ const nativeSync: NativeSync | null = globalThis.__mindwtrHostPlatform !== 'ios'
 let iosManualSync: NativeSync | null = null;
 let iosCleanupCallback: ((requestJSON: string) => unknown) | null = null;
 let iosProjectAttachmentDownload = false;
+let iosTaskAttachmentPreparation = false;
 let iosForegroundFailure: NativeAttachmentCleanupUnconfirmedError | null = null;
 /** The device's network state as Kotlin last reported it (HostNetwork.kt); unknown until then, which never reads as offline. */
 let networkState: { isConnected: boolean | null; isInternetReachable: boolean | null } = { isConnected: null, isInternetReachable: null };
@@ -3491,6 +3494,46 @@ globalThis.MindwtrHost = {
     attachmentDraftBeginV5(json: string): string {
         return submit(async () => validateNativeAttachmentDraftBeginV5(attachmentDraftJson(json), attachmentDraftDependencies));
     },
+    attachmentDraftAvailabilityPreflight(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || isSandboxMode() || isWorkspaceTransitionActive()) {
+                throw new Error('NOT_READY: Task attachment preparation is unavailable');
+            }
+            requireSaved();
+            return prepareNativeTaskAttachmentAvailabilityPreflight(json);
+        });
+    },
+    attachmentDraftPrepareAvailability(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: Attachment draft capability is unavailable');
+            return prepareNativeAttachmentDraftAvailability(attachmentDraftJson(json));
+        });
+    },
+    iosTaskDraftPrepareAvailability(json: string, prepareSource: unknown): string {
+        return submit(async (signal) => {
+            const unavailable = () => new Error('NOT_READY: Task attachment preparation is unavailable');
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || !localAttachments || nativeSync
+                || iosTaskAttachmentPreparation || iosCleanupCallback || iosForegroundFailure
+                || typeof prepareSource !== 'function' || !globalThis.__mindwtrSyncSecrets
+                || isSandboxMode() || isWorkspaceTransitionActive()) throw unavailable();
+            requireSaved();
+            const channels = nativeFileChannels();
+            if (!channels) throw unavailable();
+            let callback: ((metadataJSON: string, plaintextBase64: string) => string) | null = prepareSource as typeof callback;
+            iosTaskAttachmentPreparation = true;
+            try {
+                return await prepareNativeTaskAttachmentAvailability(json, {
+                    getLegacyValue: (name) => keyValue.get(name),
+                    getSecret: (account) => (globalThis.__mindwtrSyncSecrets as HostSecrets).getSecret(account),
+                    crypto: createHostSyncCrypto((globalThis as { __mindwtrCryptoCall?: Parameters<typeof createHostSyncCrypto>[0] }).__mindwtrCryptoCall),
+                    prepareSource: (metadata, bytes) => {
+                        if (!callback || signal.aborted) throw unavailable();
+                        return callback(metadata, bytes);
+                    },
+                }, channels, signal);
+            } finally { callback = null; iosTaskAttachmentPreparation = false; }
+        });
+    },
     attachmentDraftValidateLineageV5(json: string): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: Attachment draft capability is unavailable');
@@ -3778,7 +3821,7 @@ globalThis.MindwtrHost = {
             if (iosForegroundFailure) throw iosForegroundFailure;
             const unavailable = () => new Error('NOT_READY: Foreground sync is unavailable');
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments || nativeSync || !bootAdapter
-                || iosCleanupCallback || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
+                || iosCleanupCallback || iosTaskAttachmentPreparation || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
                 || typeof native().kvMultiGet !== 'function' || !globalThis.__mindwtrSyncSecrets) throw unavailable();
             const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
                 'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'projectAttachmentDownload'];

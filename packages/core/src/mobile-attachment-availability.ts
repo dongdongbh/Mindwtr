@@ -32,6 +32,10 @@ export type AttachmentAvailabilityOutcome =
   | { status: 'unrecoverable'; attachment: Attachment }
   | { status: 'unavailable' };
 
+/** Remote download naming; unlike managed copies, only the title supplies a fallback extension. */
+export const getAttachmentDownloadFileName = (attachment: Attachment): string =>
+  attachment.cloudKey?.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
+
 /** Private candidate only. Its source is not installed or checkpointed availability. */
 export type PreparedAttachmentAvailabilityOutcome = AttachmentAvailabilityOutcome | {
   status: 'prepared';
@@ -272,7 +276,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     if (!attachment.cloudKey) return null;
     const attachmentsDir = await files.getAttachmentsDir();
     if (!attachmentsDir) return null;
-    const filename = attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
+    const filename = getAttachmentDownloadFileName(attachment);
     const targetUri = `${attachmentsDir}${filename}`;
     const targetPresence = await files.getLocalAttachmentPresence(targetUri);
     if (targetPresence === 'unreadable') return null;
@@ -426,7 +430,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     if (backend === 'cloud' && localAttachment.cloudKey) {
       const attachmentsDir = await files.getAttachmentsDir();
       if (!attachmentsDir) return null;
-      const filename = localAttachment.cloudKey.split('/').pop() || `${localAttachment.id}${extractExtension(localAttachment.title)}`;
+      const filename = getAttachmentDownloadFileName(localAttachment);
       const targetUri = `${attachmentsDir}${filename}`;
       const targetPresence = await files.getLocalAttachmentPresence(targetUri);
       if (targetPresence === 'unreadable') return null;
@@ -504,7 +508,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       const attachmentsDir = preparing ? files.getManagedAttachmentsDir() : await files.getAttachmentsDir();
       assertAttachmentSyncNotAborted(signal);
       if (!attachmentsDir) return null;
-      const filename = localAttachment.cloudKey.split('/').pop() || `${localAttachment.id}${extractExtension(localAttachment.title)}`;
+      const filename = getAttachmentDownloadFileName(localAttachment);
       const targetUri = `${attachmentsDir}${filename}`;
       const targetPresence = await files.getLocalAttachmentPresence(targetUri);
       assertAttachmentSyncNotAborted(signal);
