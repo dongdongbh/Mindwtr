@@ -14,7 +14,7 @@ final class FoundationUITests: XCTestCase {
         return raw
     }
 
-    private func task371OpenSync(_ app: XCUIApplication, flow: String = "unlock") {
+    private func task371OpenSync(_ app: XCUIApplication, flow: String = "unlock", openFlow: Bool = true) {
         if !app.buttons["settings-back"].exists {
             boardEnabled(app.buttons["tab-menu"], timeout: 30)
             boardTap(app, "tab-menu")
@@ -28,6 +28,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "settings-sync")
         boardEnabled(app.buttons["sync-option-webdav"], timeout: 30)
         XCTAssertTrue(app.buttons["sync-option-webdav"].isSelected)
+        if !openFlow { return }
         let openID = flow == "unlock" ? "sync-encryption-open" : "sync-encryption-open-" + flow
         let open = app.buttons[openID]
         boardEnabled(open, timeout: 30)
@@ -211,6 +212,100 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["sync-encryption-open-change"].exists)
         app.terminate(); app.launch(); task371OpenSync(app, flow: "enable")
         XCTAssertFalse(app.buttons["sync-encryption-open-disable"].exists)
+    }
+
+    func testNativeEncryptionInterruptedEnableRetainsRecoveryAfterColdRestart() throws {
+        let library = try task371Library("PARTIAL", prefix: "MINDWTR_RECOVERY_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "enable")
+        for name in encryptionFields("enable") {
+            task322Type(app, "sync-encryption-" + name, "synthetic-native-recovery-383", secure: true)
+        }
+        revealPagedElement(app, app.buttons["sync-encryption-enable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-enable")
+        // Root's one-shot HTTP failure must leave a real unfinished transition.
+        // A normally completed Enable has no Abandon opener and fails this check.
+        boardEnabled(app.buttons["sync-encryption-open-abandon"], timeout: 60)
+        for name in encryptionFields("enable") {
+            let field = app.secureTextFields["sync-encryption-" + name]
+            if field.exists {
+                let value = field.value as? String ?? ""
+                XCTAssertTrue(value.isEmpty || value == field.placeholderValue)
+            }
+        }
+        XCTAssertFalse(app.buttons["sync-encryption-enable"].isEnabled)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "abandon")
+        for name in encryptionFields("change") { XCTAssertFalse(app.secureTextFields["sync-encryption-" + name].exists) }
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        boardEnabled(app.buttons["sync-encryption-open-abandon"], timeout: 30)
+        // Preserve the unfinished journal and bytes for root's external snapshot.
+    }
+
+    func testNativeEncryptionAbandonCancelAndMixedRecheckKeepLocationPaused() throws {
+        let library = try task371Library("PARTIAL", prefix: "MINDWTR_RECOVERY_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "abandon")
+        for name in encryptionFields("change") { XCTAssertFalse(app.secureTextFields["sync-encryption-" + name].exists) }
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "Abandon the unfinished encryption change on this device only. Encryption turns off here and the sync location is not contacted, so it may stay partly encrypted, and this device keeps sync paused there. Finish or undo the change from a device that can reach it.")).firstMatch.exists)
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        let abandon = app.buttons["sync-encryption-open-abandon"]
+        boardEnabled(abandon, timeout: 30)
+        revealPagedElement(app, abandon, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-open-abandon")
+        revealPagedElement(app, app.buttons["sync-encryption-abandon"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-abandon")
+        let recheck = app.buttons["sync-encryption-recheck"]
+        boardEnabled(recheck, timeout: 60)
+        let partly = app.staticTexts.matching(NSPredicate(format: "label == %@", "This sync location is partly encrypted: an encryption change was cut off there. Sync stays paused here so plain files never land beside encrypted ones. Finish or undo the change from a device that can reach it, then check again.")).firstMatch
+        XCTAssertTrue(partly.exists)
+        for id in ["open-enable", "open", "open-change", "open-disable", "open-abandon"] {
+            XCTAssertFalse(app.buttons["sync-encryption-" + id].exists)
+        }
+        revealPagedElement(app, recheck, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-recheck")
+        boardEnabled(app.buttons["sync-back"], timeout: 60)
+        boardEnabled(recheck, timeout: 60)
+        XCTAssertTrue(partly.exists)
+        XCTAssertFalse(app.buttons["sync-encryption-open-enable"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, openFlow: false)
+        boardEnabled(app.buttons["sync-encryption-recheck"], timeout: 30)
+        XCTAssertTrue(partly.exists)
+        for id in ["open-enable", "open", "open-change", "open-disable", "open-abandon"] {
+            XCTAssertFalse(app.buttons["sync-encryption-" + id].exists)
+        }
+    }
+
+    func testNativeEncryptionWholeRecheckColdDiscoveryOffersUnlock() throws {
+        let library = try task371Library("PARTIAL", prefix: "MINDWTR_RECOVERY_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        // Root has conditionally finished the peer's canonical ciphertext before launch.
+        task371OpenSync(app, openFlow: false)
+        let recheck = app.buttons["sync-encryption-recheck"]
+        boardEnabled(recheck, timeout: 30)
+        let partly = app.staticTexts.matching(NSPredicate(format: "label == %@", "This sync location is partly encrypted: an encryption change was cut off there. Sync stays paused here so plain files never land beside encrypted ones. Finish or undo the change from a device that can reach it, then check again.")).firstMatch
+        XCTAssertTrue(partly.exists)
+        revealPagedElement(app, recheck, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-recheck")
+        boardEnabled(app.buttons["sync-encryption-open-enable"], timeout: 60)
+        XCTAssertTrue(partly.waitForNonExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["sync-encryption-recheck"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app)
+        XCTAssertFalse(app.buttons["sync-encryption-unlock"].isEnabled)
+        for id in ["open-enable", "open-change", "open-disable"] {
+            XCTAssertFalse(app.buttons["sync-encryption-" + id].exists)
+        }
+        // Leave Unlock unsubmitted so root can verify discovery wrote no plaintext.
     }
 
     private func task371Restart(_ app: XCUIApplication) {
