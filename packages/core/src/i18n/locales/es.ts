@@ -2,6 +2,9 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Spanish.
 export const esOverrides: Record<string, string> = {
+    'tray.quickAdd': "Añadir rápidamente",
+    'tray.show': "Mostrar Mindwtr",
+    'tray.quit': "Salir",
     "settings.mcpTitle": "Servidor MCP local (avanzado)",
     "settings.mcpDesc": "Conecta un cliente de IA de este equipo a Mindwtr.",
     "settings.mcpUnavailable": "Solo disponible en la aplicación de escritorio, fuera del entorno de prueba.",

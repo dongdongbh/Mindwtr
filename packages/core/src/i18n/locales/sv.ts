@@ -1,5 +1,8 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const svOverrides: Record<string, string> = {
+    'tray.quickAdd': "Snabbinmatning",
+    'tray.show': "Visa Mindwtr",
+    'tray.quit': "Avsluta",
     "settings.mcpTitle": "Lokal MCP-server (avancerat)",
     "settings.mcpDesc": "Anslut en AI-klient på den här datorn till Mindwtr.",
     "settings.mcpUnavailable": "Endast tillgängligt i skrivbordsappen, utanför sandlådan.",

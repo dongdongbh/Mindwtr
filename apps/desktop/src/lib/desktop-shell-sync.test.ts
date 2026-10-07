@@ -29,7 +29,7 @@ afterEach(() => {
     delete (window as any).__TAURI_INTERNALS__;
 });
 
-const options: DesktopShellSyncOptions = { showTray: true, trayTooltip: 'Mindwtr', closeBehavior: 'tray' };
+const options: DesktopShellSyncOptions = { showTray: true, trayTooltip: 'Mindwtr', trayLabels: { quickAdd: 'Quick Add', show: 'Show Mindwtr', quit: 'Quit' }, closeBehavior: 'tray' };
 const quitOptions: DesktopShellSyncOptions = { ...options, closeBehavior: 'quit' };
 
 describe('useDesktopShellSync', () => {
@@ -44,6 +44,7 @@ describe('useDesktopShellSync', () => {
         expect(invoked).toEqual([
             ['set_tray_visible', { visible: true }],
             ['set_tray_tooltip', { tooltip: 'Mindwtr' }],
+            ['set_tray_labels', options.trayLabels],
         ]);
     });
 
@@ -68,6 +69,7 @@ describe('useDesktopShellSync', () => {
             // No visibility command without a setting, but an unhydrated tray is
             // still shown, so its tooltip still applies.
             'set_tray_tooltip',
+            'set_tray_labels',
         ]);
     });
 
@@ -100,6 +102,23 @@ describe('useDesktopShellSync', () => {
         expect(invoked).toEqual([['set_tray_tooltip', { tooltip: 'Mindwtr — 2 focused' }]]);
     });
 
+    it('updates menu labels when the app language changes, including while the tray is hidden', () => {
+        enableTauri();
+        const { rerender } = renderHook((props: DesktopShellSyncOptions) => useDesktopShellSync(props), {
+            initialProps: options,
+        });
+        invoked.length = 0;
+        const trayLabels = { quickAdd: '快速添加', show: '查看Mindwtr', quit: '退出' };
+        rerender({ ...options, trayLabels });
+        expect(invoked).toEqual([['set_tray_labels', trayLabels]]);
+        rerender({ ...options, showTray: false, trayLabels });
+        invoked.length = 0;
+        rerender({ ...options, showTray: false });
+        expect(invoked).toEqual([]);
+        rerender(options);
+        expect(invoked).toContainEqual(['set_tray_labels', options.trayLabels]);
+    });
+
     it('issues each command once per unchanged render', () => {
         enableTauri();
         const { rerender } = renderHook((props: typeof options) => useDesktopShellSync(props), {
@@ -119,11 +138,12 @@ describe('useDesktopShellSync', () => {
         };
 
         renderHook(() => useDesktopShellSync(quitOptions));
-        await vi.waitFor(() => expect(logErrorMock).toHaveBeenCalledTimes(3));
+        await vi.waitFor(() => expect(logErrorMock).toHaveBeenCalledTimes(4));
 
         expect(logErrorMock.mock.calls.map((call) => (call as unknown as [unknown, object])[1])).toEqual([
             { scope: 'tray', step: 'setVisible' },
             { scope: 'tray', step: 'setTooltip' },
+            { scope: 'tray', step: 'setLabels' },
             { scope: 'window', step: 'setActivationPolicy' },
         ]);
     });
@@ -136,7 +156,7 @@ describe('useDesktopShellSync', () => {
         });
 
         const { unmount } = renderHook(() => useDesktopShellSync(quitOptions));
-        expect(rejects).toHaveLength(3);
+        expect(rejects).toHaveLength(4);
         unmount();
         for (const reject of rejects) reject(new Error('too late'));
         await new Promise((resolve) => setTimeout(resolve, 0));

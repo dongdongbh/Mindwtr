@@ -10,6 +10,9 @@
 //   パーサのコマンドトークン (/due:, @context, #tag, +Project…) は英語のまま。
 // - 数値プレースホルダは詰める ({{count}}件)、英単語は前後に半角スペースを入れる (Dropbox に接続)。
 export const jaOverrides: Record<string, string> = {
+    'tray.quickAdd': "クイック追加",
+    'tray.show': "Mindwtrを表示",
+    'tray.quit': "終了",
     "settings.mcpTitle": "ローカル MCP サーバー（詳細）",
     "settings.mcpDesc": "このコンピューターの AI クライアントを Mindwtr に接続します。",
     "settings.mcpUnavailable": "デスクトップアプリのサンドボックス外でのみ利用できます。",
