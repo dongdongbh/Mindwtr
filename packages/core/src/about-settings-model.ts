@@ -14,7 +14,7 @@ import {
     UPDATE_BADGE_LAST_CHECK_KEY,
     UPDATE_BADGE_LATEST_KEY,
 } from './app-store-update';
-import type { FeedbackCategory, FeedbackSubmissionInput } from './feedback';
+import { isValidFeedbackEmail, type FeedbackCategory, type FeedbackSubmissionInput } from './feedback';
 
 /** RN's settings `tr`: a key's text (English when the language lacks it), with template values filled. */
 export type AboutTranslate = (key: string, values?: Record<string, string>) => string;
@@ -489,7 +489,8 @@ export type FeedbackDraft = {
 
 export type FeedbackStatus = 'idle' | 'sending' | 'sent' | 'error';
 
-const isFeedbackEmailShapeValid = (trimmedEmail: string) => !trimmedEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
+// The endpoint's own rule (feedback.ts: the shape and at most 254 characters), so the modal never sends an email it refuses.
+const isFeedbackEmailShapeValid = (trimmedEmail: string) => isValidFeedbackEmail(trimmedEmail);
 
 /**
  * The modal's state as RN derives it from the draft: whether Send is on, and the error line (the screen's own error first,
