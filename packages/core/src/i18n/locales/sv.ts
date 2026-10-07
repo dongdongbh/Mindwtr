@@ -1,5 +1,16 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const svOverrides: Record<string, string> = {
+    "task.expandChecklist": "Gör checklistans punkter till projektuppgifter",
+    "task.keepChecklistDescription": "Behåll den ursprungliga uppgiften och checklistan i projektet.",
+    "task.expandChecklistDescription": "Skapa en uppgift per punkt med samma ordning och bockar. Anteckningar, bilagor och datum flyttas till projektet; taggar och sammanhang följer de nya uppgifterna. Originalet flyttas till papperskorgen. Fokus kopieras inte. Omvandlingen kan ångras.",
+    "task.expandChecklistInvalid": "Varje punkt i checklistan måste ha en titel.",
+    "task.expandChecklistInactive": "Tillgängligt för inkorgsuppgifter, nästa åtgärder och slutförda uppgifter i aktiva projekt.",
+    "task.expandChecklistSchedule": "Behåll listan eller ta först bort upprepning, relativa datum och påminnelser. Tider med påminnelser kan inte överföras till projektet.",
+    "task.expandChecklistMetadata": "Behåll listan eller rensa först ansvarig, plats, uppskattad tid och registrerad tid. Dessa uppgifter kan inte överföras till projektet.",
+    "task.expandChecklistNameExists": "Ett projekt med detta namn finns redan i området. Välj ett annat namn för det nya projektet.",
+    "task.expandChecklistConflict": "Uppgifterna eller projektet har ändrats. Omvandlingen avbröts och dina ändringar har bevarats.",
+    "task.expandChecklistSaveFailed": "Omvandlingen kunde inte sparas. Försök igen för att spara samma omvandling utan dubbletter.",
+
     'settings.obsidianRequiredInlineTag': "Obligatorisk tagg för uppgifter i text",
     'settings.obsidianRequiredInlineTagHint': "Lämna tomt för att visa alla uppgifter i texten. #task matchar även #task/work. Endast taggar på kryssrutans rad räknas, inte anteckningens taggar. Nya uppgifter i texten får taggen automatiskt.",
     'tray.quickAdd': "Snabbinmatning",

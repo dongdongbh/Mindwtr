@@ -1,5 +1,16 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const zhHant: Record<string, string> = {
+    "task.expandChecklist": "將清單項目轉換為專案任務",
+    "task.keepChecklistDescription": "將原任務及其清單保留在專案中。",
+    "task.expandChecklistDescription": "每個清單項目建立一個任務，保留順序和勾選狀態。備註、附件和日期移至新專案；標籤和情境保留在新任務中。原任務移至垃圾桶，不複製專注標記。可以復原此次轉換。",
+    "task.expandChecklistInvalid": "清單至少需要一項，且每項都必須有標題。",
+    "task.expandChecklistInactive": "僅收件匣、下一步和已完成任務可展開，所屬專案必須處於活動狀態。",
+    "task.expandChecklistSchedule": "保留清單，或先移除重複、相對日期和任務提醒。帶提醒的時間不能轉移到專案。",
+    "task.expandChecklistMetadata": "保留清單，或先清除負責人、地點、預估時間和已記錄時間。這些任務資訊無法轉移到專案。",
+    "task.expandChecklistNameExists": "該領域已有同名專案。請使用其他名稱，將清單展開為新專案。",
+    "task.expandChecklistConflict": "任務或專案已變更，無法繼續轉換。你的變更已保留。",
+    "task.expandChecklistSaveFailed": "無法儲存轉換。重試會儲存同一次轉換，不會建立重複項目。",
+
     'settings.obsidianRequiredInlineTag': "行內任務必要標籤",
     'settings.obsidianRequiredInlineTagHint': "留空以顯示所有行內任務。#task 也符合 #task/work。只比對核取方塊所在行的標籤，不使用筆記標籤。新建行內任務會自動加入此標籤。",
     'tray.quickAdd': "快速新增",

@@ -228,6 +228,27 @@ describe('TaskItem', () => {
         expect(updateTask.mock.invocationCallOrder[0]).toBeLessThan(promoteTaskToProject.mock.invocationCallOrder[0]);
     });
 
+    it.each([false, true])('requires an explicit checklist expansion choice (%s)', async (expand) => {
+        const task: Task = { ...mockTask, status: 'next', checklist: [{ id: 'step', title: 'Step', isCompleted: true }] };
+        const promote = vi.fn(async (_id: string, _options?: unknown) => ({ success: true, id: 'project' }));
+        const convert = vi.fn(async (_command: unknown) => ({ success: true, id: 'project' }));
+        act(() => useTaskStore.setState({ _allTasks: [task], _allProjects: [], _allAreas: [], _allSections: [],
+            promoteTaskToProject: promote, convertChecklistToProject: convert }));
+        const view = render(<LanguageProvider><TaskItem task={task} /></LanguageProvider>);
+        fireEvent.click(view.getAllByRole('button', { name: /edit/i })[0]);
+        fireEvent.click(view.getByRole('button', { name: /create project from task/i }));
+        const dialog = view.getByRole('dialog', { name: /create project from task/i });
+        const checkbox = within(dialog).getByRole('checkbox', { name: /turn checklist items/i });
+        expect(checkbox).not.toBeChecked();
+        expect(promote).not.toHaveBeenCalled();
+        expect(convert).not.toHaveBeenCalled();
+        if (expand) fireEvent.click(checkbox);
+        fireEvent.click(within(dialog).getByRole('button', { name: /create project from task/i }));
+        await waitFor(() => expect(expand ? convert : promote).toHaveBeenCalledTimes(1));
+        expect(expand ? promote : convert).not.toHaveBeenCalled();
+        if (expand) expect(convert.mock.calls[0][0]).toMatchObject({ tasks: [{ title: 'Step', status: 'done' }] });
+    });
+
     it('aborts project promotion when the dirty editor draft cannot be saved', async () => {
         const editableTask: Task = { ...mockTask, id: 'promote-save-failure-task', status: 'next' };
         const updateTask = vi.fn(async () => ({ success: false as const, error: 'Save failed' }));

@@ -1,5 +1,16 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const zhHans: Record<string, string> = {
+    "task.expandChecklist": "将清单项转换为项目任务",
+    "task.keepChecklistDescription": "将原任务及其清单保留在项目中。",
+    "task.expandChecklistDescription": "每个清单项创建一个任务，保留顺序和勾选状态。备注、附件和日期移至新项目；标签和情境保留在新任务中。原任务移至回收站，不复制专注标记。可以撤销此次转换。",
+    "task.expandChecklistInvalid": "清单至少需要一项，且每项都必须有标题。",
+    "task.expandChecklistInactive": "仅收集箱、下一步和已完成任务可展开，所属项目必须处于活动状态。",
+    "task.expandChecklistSchedule": "保留清单，或先移除重复、相对日期和任务提醒。带提醒的时间不能转移到项目。",
+    "task.expandChecklistMetadata": "保留清单，或先清除负责人、地点、预计耗时和已记录耗时。这些任务信息无法转移到项目。",
+    "task.expandChecklistNameExists": "该领域已有同名项目。请使用其他名称，将清单展开为新项目。",
+    "task.expandChecklistConflict": "任务或项目已更改，无法继续转换。你的更改已保留。",
+    "task.expandChecklistSaveFailed": "无法保存转换。重试会保存同一次转换，不会创建重复项。",
+
     'settings.obsidianRequiredInlineTag': "行内任务必需标签",
     'settings.obsidianRequiredInlineTagHint': "留空以显示所有行内任务。#task 也匹配 #task/work。只匹配复选框所在行的标签，不使用笔记标签。新建行内任务会自动添加此标签。",
     'tray.quickAdd': "快速添加",

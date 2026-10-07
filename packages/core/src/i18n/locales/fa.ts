@@ -1,5 +1,16 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const faOverrides: Record<string, string> = {
+    "task.expandChecklist": "تبدیل موارد چک‌لیست به کارهای پروژه",
+    "task.keepChecklistDescription": "کار اصلی و چک‌لیست آن در پروژه نگه داشته می‌شوند.",
+    "task.expandChecklistDescription": "برای هر مورد یک کار با حفظ ترتیب و وضعیت انجام ساخته می‌شود. یادداشت‌ها، پیوست‌ها و تاریخ‌ها به پروژه و برچسب‌ها و زمینه‌ها به کارهای جدید منتقل می‌شوند. اصل کار به زباله‌دان می‌رود. تمرکز کپی نمی‌شود. تبدیل قابل واگردانی است.",
+    "task.expandChecklistInvalid": "هر مورد چک‌لیست باید عنوان داشته باشد.",
+    "task.expandChecklistInactive": "برای کارهای ورودی، اقدام بعدی و انجام‌شده در پروژه‌های فعال در دسترس است.",
+    "task.expandChecklistSchedule": "چک‌لیست را نگه دارید یا ابتدا تکرار، تاریخ‌های نسبی و یادآورها را حذف کنید. تاریخ‌های دارای ساعت و یادآور به پروژه منتقل نمی‌شوند.",
+    "task.expandChecklistMetadata": "چک‌لیست را نگه دارید یا ابتدا مسئول، مکان، زمان تخمینی و زمان ثبت‌شده را پاک کنید. این اطلاعات به پروژه منتقل نمی‌شوند.",
+    "task.expandChecklistNameExists": "پروژه‌ای با این نام در حوزه وجود دارد. برای پروژه جدید نام دیگری انتخاب کنید.",
+    "task.expandChecklistConflict": "کارها یا پروژه تغییر کرده‌اند؛ تبدیل ادامه نیافت. تغییرات شما حفظ شدند.",
+    "task.expandChecklistSaveFailed": "تبدیل ذخیره نشد. تلاش دوباره همان تبدیل را بدون ایجاد موارد تکراری ذخیره می‌کند.",
+
     'settings.obsidianRequiredInlineTag': "برچسب ضروری کارهای درون‌خطی",
     'settings.obsidianRequiredInlineTagHint': "برای نمایش همهٔ کارهای درون‌خطی خالی بگذارید. #task با #task/work نیز مطابقت دارد. فقط برچسب‌های خط کادر انتخاب در نظر گرفته می‌شوند، نه برچسب‌های یادداشت. این برچسب به کارهای درون‌خطی جدید به‌طور خودکار افزوده می‌شود.",
     'tray.quickAdd': "افزودن سریع",

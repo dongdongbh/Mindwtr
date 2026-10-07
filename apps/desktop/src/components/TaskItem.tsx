@@ -1,5 +1,8 @@
+import { taskDraftToUpdatePatch } from '@mindwtr/core/task-draft';
+import { TaskProjectConversionDialog } from './TaskProjectConversionDialog';
 import { useState, memo, useEffect, useRef, useCallback, useMemo, type DragEvent, type ReactNode } from 'react';
 import {
+    prepareChecklistProjectConversion,
     DEFAULT_PROJECT_COLOR,
     Task,
     TaskStatus,
@@ -818,20 +821,56 @@ export const TaskItem = memo(function TaskItem({
         () => duplicateTaskAndReveal(task, { t }),
         [t, task],
     );
-    const handlePromoteTaskToProject = useCallback(async () => {
+    const [projectConversionOpen, setProjectConversionOpen] = useState(false);
+    const confirmProjectConversion = useCallback(async (title?: string, expand = false) => {
         if (effectiveReadOnly) return;
         try {
             const saveResult = await handleSubmit(undefined, { keepEditing: true });
             if (saveResult && !saveResult.success) return;
-            const result = await promoteTaskToProject(task.id);
+            if (expand) {
+                const state = useTaskStore.getState();
+                const source = state._tasksById.get(task.id);
+                if (!source) return;
+                const prepared = prepareChecklistProjectConversion(state, source, title ?? source.title);
+                if (!prepared.success) { showToast(t(prepared.error), 'error'); return; }
+                const command = prepared.command;
+                const undo = async () => {
+                    const result = await useTaskStore.getState().undoChecklistToProject(command);
+                    if (!result.success) showToast(t(result.error || 'task.expandChecklistConflict'), 'error', 6000,
+                        result.error === 'task.expandChecklistSaveFailed' ? { label: t('common.retry'), onClick: undo } : undefined);
+                    else {
+                        setSelectedProjectId(command.source.projectId ?? null);
+                        setHighlightTask(command.source.id);
+                        dispatchNavigateEvent(command.source.projectId ? 'projects' : command.source.status === 'done' ? 'done' : command.source.status === 'next' ? 'next' : 'inbox');
+                    }
+                };
+                const convert = async () => {
+                    const result = await useTaskStore.getState().convertChecklistToProject(command);
+                    if (!result.success) {
+                        showToast(t(result.error || 'task.expandChecklistSaveFailed'), 'error', 6000,
+                            result.error === 'task.expandChecklistSaveFailed' ? { label: t('common.retry'), onClick: convert } : undefined);
+                        return;
+                    }
+                    showToast(t('task.promoteToProjectCreated'), 'success', 6000, { label: t('common.undo'), onClick: undo });
+                    setProjectConversionOpen(false);
+                    setSelectedProjectId(command.project.id);
+                    setEditingTaskId(null);
+                    setTaskExpanded(task.id, false);
+                    dispatchNavigateEvent('projects');
+                };
+                await convert();
+                return;
+            }
+            const result = await (title ? promoteTaskToProject(task.id, { title }) : promoteTaskToProject(task.id));
             if (!result.success || !result.id) {
-                showToast(result.error || t('task.promoteToProjectFailed'), 'error');
+                showToast(result.error ? t(result.error) : t('task.promoteToProjectFailed'), 'error');
                 return;
             }
             showToast(
                 result.reused ? t('task.promoteToProjectMoved') : t('task.promoteToProjectCreated'),
                 'success',
             );
+            setProjectConversionOpen(false);
             setHighlightTask(task.id);
             setSelectedProjectId(result.id);
             setEditingTaskId(null);
@@ -854,6 +893,11 @@ export const TaskItem = memo(function TaskItem({
             showToast(t('task.promoteToProjectFailed'), 'error');
         }
     }, [effectiveReadOnly, handleSubmit, promoteTaskToProject, setEditingTaskId, setHighlightTask, setSelectedProjectId, setTaskExpanded, showToast, t, task.id]);
+    const handlePromoteTaskToProject = useCallback(() => {
+        if (effectiveReadOnly) return;
+        if (task.checklist?.length) { setProjectConversionOpen(true); }
+        else void confirmProjectConversion();
+    }, [confirmProjectConversion, task.checklist?.length, effectiveReadOnly]);
     const handleConvertTaskToSection = useCallback(async () => {
         if (effectiveReadOnly) return;
         try {
@@ -1802,6 +1846,9 @@ export const TaskItem = memo(function TaskItem({
                 t={t}
             />
             <TaskAttachmentOverlays attachments={attachments} t={t} />
+            {projectConversionOpen && <TaskProjectConversionDialog
+                task={{ ...task, ...taskDraftToUpdatePatch(draft, task) }}
+                onClose={() => setProjectConversionOpen(false)} onConfirm={confirmProjectConversion} />}
             {showWaitingAssignmentPrompt && (
                 <PromptModal
                     isOpen

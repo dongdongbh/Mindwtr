@@ -10,6 +10,16 @@
 //   パーサのコマンドトークン (/due:, @context, #tag, +Project…) は英語のまま。
 // - 数値プレースホルダは詰める ({{count}}件)、英単語は前後に半角スペースを入れる (Dropbox に接続)。
 export const jaOverrides: Record<string, string> = {
+    "task.expandChecklist": "チェックリストの項目をプロジェクトのタスクにする",
+    "task.keepChecklistDescription": "元のタスクとチェックリストをプロジェクト内に残します。",
+    "task.expandChecklistDescription": "順序とチェック状態を保ち、項目ごとにタスクを作成します。メモ、添付、日付はプロジェクトに、タグとコンテキストは新しいタスクに引き継ぎます。元のタスクはゴミ箱に移動し、フォーカスは引き継ぎません。変換は取り消せます。",
+    "task.expandChecklistInvalid": "チェックリストの各項目にタイトルが必要です。",
+    "task.expandChecklistInactive": "アクティブなプロジェクト内の受信箱、次のアクション、完了タスクで利用できます。",
+    "task.expandChecklistSchedule": "リストを維持するか、先に繰り返し、相対日付、リマインダーを解除してください。通知付きの時刻はプロジェクトに引き継げません。",
+    "task.expandChecklistMetadata": "リストを維持するか、先に担当者、場所、見積時間、記録時間を解除してください。これらはプロジェクトに引き継げません。",
+    "task.expandChecklistNameExists": "このエリアに同名のプロジェクトがあります。新しいプロジェクトには別の名前を指定してください。",
+    "task.expandChecklistConflict": "タスクまたはプロジェクトが変更されたため、変換できませんでした。変更内容は保持されています。",
+    "task.expandChecklistSaveFailed": "変換を保存できませんでした。再試行すると重複を作らず同じ変換を保存します。",
     'settings.obsidianRequiredInlineTag': "インラインタスクの必須タグ",
     'settings.obsidianRequiredInlineTagHint': "空欄の場合はすべてのインラインタスクを表示します。#task は #task/work にも一致します。チェックボックス行のタグのみが対象で、ノートのタグは含みません。新しいインラインタスクにはこのタグが自動で追加されます。",
     'tray.quickAdd': "クイック追加",
