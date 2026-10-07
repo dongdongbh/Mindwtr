@@ -4107,6 +4107,37 @@ mod tests {
     }
 
     #[test]
+    fn cloud_put_stops_reading_a_413_body_held_open_past_the_cap() {
+        use std::io::{Read, Write};
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind cloud test server");
+        let address = listener.local_addr().expect("server address");
+        let (done_sender, done_receiver) = mpsc::channel::<()>();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept cloud request");
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            // Promise far more than is sent, send past the cap, then hold the connection open.
+            let head = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 10485760\r\n\r\n";
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(&vec![b' '; 2 * CLOUD_ERROR_BODY_MAX_BYTES]);
+            let _ = done_receiver.recv_timeout(Duration::from_secs(10));
+        });
+
+        let client = cloud_blocking_http_client(None, true).expect("client");
+        let started = Instant::now();
+        let error = cloud_put_payload(&client, &format!("http://{address}/v1/data"), "", "{}".to_string())
+            .expect_err("413");
+        let elapsed = started.elapsed();
+        let _ = done_sender.send(());
+        server.join().expect("server thread");
+        assert!(elapsed < Duration::from_secs(5), "read waited for the held body: {elapsed:?}");
+        assert_eq!(error, cloud_data_too_large_message(2, ""));
+    }
+
+    #[test]
     fn cloud_json_body_explains_html_from_wrong_endpoint() {
         assert_eq!(
             parse_cloud_json_body("<!doctype html><html></html>").unwrap_err(),
