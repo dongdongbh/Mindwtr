@@ -3,6 +3,7 @@ import * as core from '@mindwtr/core';
 import {
     BACKGROUND_SYNC_FAILURE_STATE_KEY,
     NativeAttachmentCleanupUnconfirmedError,
+    SyncEncryptionArtifactCapacityError,
     SYNC_BACKEND_KEY,
     WEBDAV_URL_KEY,
     resetForTests,
@@ -104,6 +105,39 @@ it('records bounded iOS unlock only after the shared service confirms completion
 });
 
 const fetches: string[] = [];
+it('binds the iOS encrypted-output capacity and preserves refusal if diagnostics fail', async () => {
+    const create = core.createSyncEncryptionService;
+    const capacities: (number | undefined)[] = [];
+    const refused = new SyncEncryptionArtifactCapacityError();
+    let failure: unknown = refused;
+    spyOn(core, 'createSyncEncryptionService').mockImplementation((options) => {
+        capacities.push(options.maxEncryptedArtifactBytes);
+        return { ...create(options), enableSyncEncryption: async () => { throw failure; } };
+    });
+    for (const platform of ['ios', 'android']) {
+        if (platform === 'ios') iosFiles();
+        globals.__mindwtrHostPlatform = platform;
+        const { sync, bindings } = host({}, false, undefined, async () => false);
+        const entries: Parameters<typeof bindings.appendLog>[0][] = [];
+        bindings.appendLog = async (entry) => { entries.push(entry); return null; };
+        const enable = sync.settingsHost.encryption.transitions!.enable;
+        failure = refused;
+        await expect(enable('synthetic secret', {})).rejects.toBe(refused);
+        expect(entries).toHaveLength(platform === 'ios' ? 1 : 0);
+        if (platform === 'ios') expect(entries[0]!.context).toEqual({
+            releaseCheck: 'v1.3.5/ios-encryption-enable-capacity', operation: 'enable', outcome: 'refused',
+        });
+        expect(JSON.stringify(entries)).not.toContain('synthetic secret');
+        bindings.appendLog = () => { throw new Error('synthetic diagnostic failure'); };
+        await expect(enable('synthetic secret', {})).rejects.toBe(refused);
+        entries.length = 0;
+        bindings.appendLog = async (entry) => { entries.push(entry); return null; };
+        failure = new Error('ordinary transition failure');
+        await expect(enable('synthetic secret', {})).rejects.toBe(failure);
+        expect(entries).toHaveLength(0);
+    }
+    expect(capacities).toEqual([8 * 1024 * 1024, undefined]);
+});
 /** A server that refuses the password: a failure core does not retry, so a cycle fails at once. */
 const failingFetch = (async (input: RequestInfo | URL) => {
     fetches.push(String(input));

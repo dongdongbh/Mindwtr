@@ -29,6 +29,7 @@ import {
     SETTINGS_SYNC_BADGE_COLORS,
     SYNC_BACKEND_KEY,
     SyncCryptoAuthError,
+    SyncEncryptionArtifactCapacityError,
     buildDiagnosticsErrorEntry,
     buildDiagnosticsLogEntry,
     classifySyncFailure,
@@ -208,6 +209,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     // Core's encryption transitions (enable, change, disable, unlock), as RN's lib/sync-encryption-service.ts binds them. They
     // run on core's serialized sync queue, so a transition and a cycle never interleave. Dropbox and File Sync come later.
     const transitions = createSyncEncryptionService<never>({
+        maxEncryptedArtifactBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         storage: { getItem: (key) => keyValue.get(key) },
         state: encryptionState,
         crypto,
@@ -550,7 +552,19 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             getStatus: () => encryptionState.getSyncEncryptionStatus(),
             getIncompleteTransition: () => encryptionState.getIncompleteSyncEncryptionTransition(),
             transitions: {
-                enable: (passphrase, options) => transitions.enableSyncEncryption(passphrase, options),
+                enable: async (passphrase, options) => {
+                    try {
+                        await transitions.enableSyncEncryption(passphrase, options);
+                    } catch (error) {
+                        if (platform === 'ios' && error instanceof SyncEncryptionArtifactCapacityError) {
+                            try {
+                                await logLine('warn', 'Native iOS encryption enable capacity refused', { scope: 'native-ios', force: true,
+                                    extra: { releaseCheck: 'v1.3.5/ios-encryption-enable-capacity', operation: 'enable', outcome: 'refused' } });
+                            } catch { /* Diagnostics cannot replace the capacity refusal. */ }
+                        }
+                        throw error;
+                    }
+                },
                 change: (current, next, options) => transitions.changeSyncEncryptionPassphrase(current, next, options),
                 disable: (options) => transitions.disableSyncEncryption(options),
                 provide: async (passphrase) => {

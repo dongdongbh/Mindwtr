@@ -32,6 +32,15 @@ const NONCE_LEN = 12;
 const GCM_TAG_LEN = 16;
 const KEY_LEN = 32;
 
+/** Exact MWENC1 output size for an unpadded plaintext generation. */
+export function encryptedSyncArtifactByteLength(plaintextByteLength: number): number {
+    if (!Number.isSafeInteger(plaintextByteLength) || plaintextByteLength < 0
+        || plaintextByteLength > Number.MAX_SAFE_INTEGER - HEADER_LEN - GCM_TAG_LEN) {
+        throw new RangeError('Invalid sync encryption plaintext byte length');
+    }
+    return HEADER_LEN + plaintextByteLength + GCM_TAG_LEN;
+}
+
 // Sanity ceiling on header-declared Argon2id cost. A reader has no choice but to run Argon2 at
 // the header's cost before the GCM tag can even be checked (the key is needed to authenticate),
 // so an attacker-controlled or merely corrupt header could otherwise wedge or OOM the app before

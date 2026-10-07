@@ -256,6 +256,8 @@ export type SyncEncryptionFileSyncPort<Lease> = {
 };
 
 export type SyncEncryptionServiceDeps<Lease> = {
+    /** Host WebDAV transport cap; omitted for RN and other backends. */
+    maxEncryptedArtifactBytes?: number;
     storage: Pick<SyncKeyValueStoragePort, 'getItem'>;
     state: SyncEncryptionServiceStatePort;
     crypto: SyncCryptoPrimitives;
@@ -280,6 +282,10 @@ type BackendTarget<Lease> =
     | { kind: 'unsupported' };
 
 export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDeps<Lease>) => {
+    if (deps.maxEncryptedArtifactBytes !== undefined
+        && (!Number.isSafeInteger(deps.maxEncryptedArtifactBytes) || deps.maxEncryptedArtifactBytes <= 0)) {
+        throw new RangeError('maxEncryptedArtifactBytes must be a positive safe integer');
+    }
     const { storage, state, crypto } = deps;
 
     // -----------------------------------------------------------------------
@@ -804,6 +810,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         const listAttachmentKeys = () => listWebdavAttachmentKeys(baseSyncUrl, requestOptions);
         let referencedAttachmentKeys: string[] = [];
         return {
+            maxEncryptedArtifactBytes: deps.maxEncryptedArtifactBytes,
             acquireRemoteMutationFence: async () => {
                 // The fence is a versioned write like every transition write: a server without strong ETags is refused
                 // here, before the fence file is written (it could never be read back or removed there).

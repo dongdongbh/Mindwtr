@@ -62,7 +62,11 @@ const createMemoryFolder = (initial: Record<string, Uint8Array>) => {
 
 type Lease = { id: string };
 
-const createHarness = (backend: Record<string, string> = {}, folder?: SyncEncryptionRemotePort | null) => {
+const createHarness = (
+    backend: Record<string, string> = {},
+    folder?: SyncEncryptionRemotePort | null,
+    options: { maxEncryptedArtifactBytes?: number; webdavUrl?: string; dropboxClientId?: string } = {},
+) => {
     const plain = new Map<string, string>(Object.entries(backend));
     const secrets = new Map<string, string>();
     const logs: Array<{ level: string; message: string; extra: Record<string, string>; force?: boolean }> = [];
@@ -104,6 +108,7 @@ const createHarness = (backend: Record<string, string> = {}, folder?: SyncEncryp
         isLeaseIdentityLostError: (error: unknown) => error instanceof Error && error.name === 'LeaseIdentityLost',
     };
     const service = createSyncEncryptionService<Lease>({
+        maxEncryptedArtifactBytes: options.maxEncryptedArtifactBytes,
         storage,
         state,
         crypto: fastCrypto,
@@ -113,9 +118,9 @@ const createHarness = (backend: Record<string, string> = {}, folder?: SyncEncryp
         parseWebdavXml: () => {
             throw new Error('no XML in this test');
         },
-        loadWebDavConfig: async () => null,
+        loadWebDavConfig: async () => options.webdavUrl ? { url: options.webdavUrl } : null,
         webDavRequestOptions: () => ({}),
-        getDropboxClientId: async () => '',
+        getDropboxClientId: async () => options.dropboxClientId ?? '',
         runDropboxAuthorized: (_clientId, operation) => operation('token'),
         fileSync,
     });
@@ -124,6 +129,31 @@ const createHarness = (backend: Record<string, string> = {}, folder?: SyncEncryp
 };
 
 describe('sync encryption service', () => {
+    it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+        'rejects invalid host capacity %s at construction', (capacity) => {
+            expect(() => createHarness({}, undefined, { maxEncryptedArtifactBytes: capacity }))
+                .toThrow('maxEncryptedArtifactBytes');
+        },
+    );
+
+    it('binds the host capacity to WebDAV only, preserving uncapped File Sync and Dropbox', async () => {
+        const file = createMemoryFolder({ 'data.json': encode({ tasks: ['more than ten bytes'] }) });
+        const cap = 80;
+        const harness = createHarness(
+            { [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: '/sync' },
+            file.port,
+            { maxEncryptedArtifactBytes: cap, webdavUrl: 'https://example.com/data.json', dropboxClientId: 'app' },
+        );
+        const webdav = await harness.service.__testUtils.createWebdavRemotePort(null);
+        const dropbox = await harness.service.__testUtils.createDropboxRemotePort(null);
+        expect(webdav.maxEncryptedArtifactBytes).toBe(cap);
+        expect(dropbox.maxEncryptedArtifactBytes).toBeUndefined();
+
+        await harness.service.enableSyncEncryption('correct horse');
+        expect(file.files.has('data.json.enc')).toBe(true);
+        expect(file.files.get('data.json.enc')!.bytes.length).toBeGreaterThan(cap);
+    });
+
     it('manages the key locally before any backend exists, and logs the transition forced', async () => {
         const { plain, secrets, service, transitionLines } = createHarness();
 

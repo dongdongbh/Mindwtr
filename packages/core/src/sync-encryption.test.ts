@@ -242,6 +242,111 @@ describe('local-only transitions (no configured backend, #1001)', () => {
 });
 
 describe('runEnableSyncEncryptionOverRemote', () => {
+    it.each([
+        ['later attachment', {
+            'attachments/a.png': { bytes: utf8('a'), kind: 'attachment' as const },
+            'attachments/z.png': { bytes: utf8('eleven bytes'), kind: 'attachment' as const },
+            'data.json': { bytes: utf8('a'), kind: 'document' as const },
+        }],
+        ['base document after an attachment', {
+            'attachments/a.png': { bytes: utf8('a'), kind: 'attachment' as const },
+            'data.json': { bytes: utf8('eleven bytes'), kind: 'document' as const },
+        }],
+    ])('refuses an oversized %s before any journal, key, or artifact write', async (_description, seed) => {
+        const remote = Object.assign(createFakeRemote(seed), { maxEncryptedArtifactBytes: 80 });
+        const original = new Map(remote.store);
+        const write = vi.spyOn(remote, 'write');
+        const remove = vi.spyOn(remote, 'remove');
+        const keyCache = createFakeKeyCache();
+        const setKey = vi.spyOn(keyCache, 'setKey');
+        const localState = createFakeLocalState();
+        const writeState = vi.spyOn(localState, 'write');
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toThrow('SYNC_ENCRYPTION_ARTIFACT_CAPACITY');
+
+        expect(remote.store).toEqual(original);
+        expect(write).not.toHaveBeenCalled();
+        expect(remove).not.toHaveBeenCalled();
+        expect(setKey).not.toHaveBeenCalled();
+        expect(writeState).not.toHaveBeenCalled();
+    });
+
+    it('accepts the exact encrypted-output boundary', async () => {
+        const remote = Object.assign(createFakeRemote({
+            'attachments/a.png': { bytes: utf8('ten letters'), kind: 'attachment' },
+            'data.json': { bytes: utf8('ten letters'), kind: 'document' },
+        }), { maxEncryptedArtifactBytes: 81 });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await runEnableSyncEncryptionOverRemote(
+            'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        );
+
+        expect(remote.store.get('attachments/a.png')).toHaveLength(81);
+        expect(remote.store.get('data.json.enc')).toHaveLength(81);
+        expect(localState.value?.state).toBe('enabled');
+    });
+
+    it('uses authenticated plaintext size for an interrupted encrypted generation before rewrapping', async () => {
+        const base = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(1), FAST_KDF);
+        const abandoned = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(2), FAST_KDF);
+        const remote = Object.assign(createFakeRemote({
+            'data.json.enc': { bytes: await encryptSyncArtifact(utf8('a'), base), kind: 'document' },
+            'attachments/a.png': { bytes: await encryptSyncArtifact(utf8('eleven bytes'), abandoned), kind: 'attachment' },
+        }), { maxEncryptedArtifactBytes: 80 });
+        const original = new Map(remote.store);
+        const write = vi.spyOn(remote, 'write');
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        const writeState = vi.spyOn(localState, 'write');
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toThrow('SYNC_ENCRYPTION_ARTIFACT_CAPACITY');
+        expect(remote.store).toEqual(original);
+        expect(write).not.toHaveBeenCalled();
+        expect(writeState).not.toHaveBeenCalled();
+        expect(keyCache.current).toBeNull();
+    });
+
+    it('uses canonical encrypted size, ignoring verified provider padding on an unchanged generation', async () => {
+        const material = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(3), FAST_KDF);
+        const sealed = await encryptSyncArtifact(utf8('a'), material);
+        const padded = new Uint8Array(sealed.length + 9);
+        padded.set(sealed);
+        padded.fill(0x20, sealed.length);
+        const remote = Object.assign(createFakeRemote({
+            'data.json.enc': { bytes: padded, kind: 'document' },
+        }), { maxEncryptedArtifactBytes: sealed.length });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await runEnableSyncEncryptionOverRemote(
+            'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        );
+        expect(remote.store.get('data.json.enc')).toEqual(padded);
+        expect(localState.value?.state).toBe('enabled');
+    });
+
+    it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+        'rejects invalid host output capacity %s before reading or mutating remote', async (capacity) => {
+            const remote = Object.assign(createFakeRemote(), { maxEncryptedArtifactBytes: capacity });
+            const list = vi.spyOn(remote, 'list');
+            const keyCache = createFakeKeyCache();
+            const localState = createFakeLocalState();
+
+            await expect(runEnableSyncEncryptionOverRemote(
+                'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+            )).rejects.toThrow('maxEncryptedArtifactBytes');
+            expect(list).not.toHaveBeenCalled();
+            expect(keyCache.current).toBeNull();
+            expect(localState.value).toBeNull();
+        },
+    );
+
     it('fails before remote or local commit when existing bytes have no safe backend version', async () => {
         const original = utf8('{"tasks":[]}');
         const remote = createFakeRemote({
