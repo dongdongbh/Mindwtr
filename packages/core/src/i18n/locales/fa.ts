@@ -1,5 +1,7 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const faOverrides: Record<string, string> = {
+    'settings.obsidianRequiredInlineTag': "برچسب ضروری کارهای درون‌خطی",
+    'settings.obsidianRequiredInlineTagHint': "برای نمایش همهٔ کارهای درون‌خطی خالی بگذارید. #task با #task/work نیز مطابقت دارد. فقط برچسب‌های خط کادر انتخاب در نظر گرفته می‌شوند، نه برچسب‌های یادداشت. این برچسب به کارهای درون‌خطی جدید به‌طور خودکار افزوده می‌شود.",
     'tray.quickAdd': "افزودن سریع",
     'tray.show': "نمایش Mindwtr",
     'tray.quit': "خروج",

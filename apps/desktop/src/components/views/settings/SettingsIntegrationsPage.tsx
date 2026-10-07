@@ -48,6 +48,8 @@ type Labels = {
     obsidianScanFoldersHint: string;
     obsidianInboxFile: string;
     obsidianInboxFileHint: string;
+    obsidianRequiredInlineTag: string;
+    obsidianRequiredInlineTagHint: string;
     obsidianDataview: string;
     obsidianDataviewDesc: string;
     obsidianDataviewMetadata: string;
@@ -136,6 +138,8 @@ type SettingsIntegrationsPageProps = {
     onObsidianVaultPathChange: (value: string) => void;
     onObsidianEnabledChange: (value: boolean) => void;
     onObsidianScanFoldersTextChange: (value: string) => void;
+    obsidianRequiredInlineTag: string;
+    onObsidianRequiredInlineTagChange: (value: string) => void;
     onObsidianInboxFileChange: (value: string) => void;
     onObsidianTaskNotesIncludeArchivedChange: (value: boolean) => void;
     onObsidianDataviewMetadataEnabledChange: (value: boolean) => void;
@@ -191,6 +195,8 @@ export function SettingsIntegrationsPage({
     onObsidianEnabledChange,
     onObsidianScanFoldersTextChange,
     onObsidianInboxFileChange,
+    obsidianRequiredInlineTag,
+    onObsidianRequiredInlineTagChange,
     onObsidianTaskNotesIncludeArchivedChange,
     onObsidianDataviewMetadataEnabledChange,
     onObsidianNewTaskFormatChange,
@@ -234,6 +240,8 @@ export function SettingsIntegrationsPage({
                 obsidianVaultPath={obsidianVaultPath}
                 obsidianEnabled={obsidianEnabled}
                 obsidianScanFoldersText={obsidianScanFoldersText}
+                obsidianRequiredInlineTag={obsidianRequiredInlineTag}
+                onObsidianRequiredInlineTagChange={onObsidianRequiredInlineTagChange}
                 obsidianInboxFile={obsidianInboxFile}
                 obsidianTaskNotesIncludeArchived={obsidianTaskNotesIncludeArchived}
                 obsidianDataviewMetadataEnabled={obsidianDataviewMetadataEnabled}

@@ -67,6 +67,8 @@ type ObsidianStoreState = {
 
 const defaultConfig = normalizeObsidianConfig({});
 let watchUpdateQueue: Promise<ObsidianWatchUpdateResult | null> = Promise.resolve(null);
+let configRevision = 0;
+let pendingConfigChanges = 0;
 let activeScan: { key: string; promise: Promise<void> } | null = null;
 
 const toErrorMessage = (error: unknown, fallback: string): string => {
@@ -101,13 +103,16 @@ const normalizeEventPaths = (paths: string[], config: ObsidianConfig): string[] 
 const scanConfigChanged = (left: ObsidianConfig, right: ObsidianConfig): boolean => {
     return left.vaultPath !== right.vaultPath
         || left.scanFolders.join('\n') !== right.scanFolders.join('\n')
+        || left.requiredInlineTag !== right.requiredInlineTag
         || left.taskNotesIncludeArchived !== right.taskNotesIncludeArchived
         || left.dataviewMetadataEnabled !== right.dataviewMetadataEnabled;
 };
 
 const buildScanKey = (config: ObsidianConfig): string => JSON.stringify({
+    revision: configRevision,
     enabled: config.enabled,
     scanFolders: config.scanFolders,
+    requiredInlineTag: config.requiredInlineTag,
     taskNotesIncludeArchived: config.taskNotesIncludeArchived,
     dataviewMetadataEnabled: config.dataviewMetadataEnabled,
     vaultPath: config.vaultPath,
@@ -168,41 +173,50 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
     },
     updateConfig: async (nextConfig) => {
         const merged = normalizeObsidianConfig({ ...get().config, ...nextConfig });
-        const saved = normalizeObsidianConfig(await ObsidianService.setConfig(merged));
-        const hasVaultMarker = saved.vaultPath ? await ObsidianService.hasVaultMarker(saved.vaultPath) : null;
-        const previousConfig = get().config;
-        const shouldResetScanState = scanConfigChanged(previousConfig, saved);
-        set({
-            config: saved,
-            hasVaultMarker,
-            warnings: [],
-            error: null,
-            watcherError: null,
-            hasScannedThisSession: false,
-            ...(shouldResetScanState
-                ? {
+        // Invalidate reads immediately, then let an older timestamp write finish
+        // before persisting the new filter. It must never restore old settings.
+        configRevision += 1;
+        pendingConfigChanges += 1;
+        try {
+            await activeScan?.promise.catch(() => undefined);
+            const saved = normalizeObsidianConfig(await ObsidianService.setConfig(merged));
+            const hasVaultMarker = saved.vaultPath ? await ObsidianService.hasVaultMarker(saved.vaultPath) : null;
+            const previousConfig = get().config;
+            const shouldResetScanState = scanConfigChanged(previousConfig, saved);
+            set({
+                config: saved,
+                hasVaultMarker,
+                warnings: [],
+                error: null,
+                watcherError: null,
+                hasScannedThisSession: false,
+                ...(shouldResetScanState
+                    ? {
+                        tasks: [],
+                        scannedFileCount: 0,
+                        scannedRelativePaths: [],
+                        taskNotesDetectedPaths: [],
+                        importMode: 'inline',
+                    }
+                    : {}),
+            });
+            if (!saved.enabled || !saved.vaultPath) {
+                set({
                     tasks: [],
                     scannedFileCount: 0,
                     scannedRelativePaths: [],
                     taskNotesDetectedPaths: [],
+                    warnings: [],
                     importMode: 'inline',
-                }
-                : {}),
-        });
-        if (!saved.enabled || !saved.vaultPath) {
-            set({
-                tasks: [],
-                scannedFileCount: 0,
-                scannedRelativePaths: [],
-                taskNotesDetectedPaths: [],
-                warnings: [],
-                importMode: 'inline',
-                hasScannedThisSession: false,
-                isWatching: false,
-                watcherError: null,
-            });
+                    hasScannedThisSession: false,
+                    isWatching: false,
+                    watcherError: null,
+                });
+            }
+            return saved;
+        } finally {
+            pendingConfigChanges -= 1;
         }
-        return saved;
     },
     setVaultPath: async (vaultPath, options) => {
         const trimmed = String(vaultPath || '').trim() || null;
@@ -247,6 +261,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
         await get().rescan();
     },
     rescan: async () => {
+        if (pendingConfigChanges > 0) return;
         const requestedScanKey = buildScanKey(get().config);
         if (activeScan) {
             if (activeScan.key === requestedScanKey) {
@@ -380,9 +395,11 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
         });
     },
     handleFilesChanged: async (payload) => enqueueWatchUpdate(async () => {
+        if (pendingConfigChanges > 0) return null;
         const config = get().config;
         if (!config.enabled || !config.vaultPath) return null;
 
+        const scanKey = buildScanKey(config);
         const changed = normalizeEventPaths(payload.changed, config);
         const deleted = normalizeEventPaths(payload.deleted, config)
             .filter((path) => !changed.includes(path));
@@ -457,6 +474,8 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
                 warnings.push(toErrorMessage(error, `Failed to refresh ${changedPath}.`));
             }
         }
+
+        if (buildScanKey(get().config) !== scanKey) return null;
 
         if (!shouldRescan && currentImportMode === 'tasknotes' && touchedExistingTaskNotesFile) {
             if (nextTaskNotesDetectedPaths.size === 0) {

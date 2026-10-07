@@ -1,5 +1,7 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const svOverrides: Record<string, string> = {
+    'settings.obsidianRequiredInlineTag': "Obligatorisk tagg för uppgifter i text",
+    'settings.obsidianRequiredInlineTagHint': "Lämna tomt för att visa alla uppgifter i texten. #task matchar även #task/work. Endast taggar på kryssrutans rad räknas, inte anteckningens taggar. Nya uppgifter i texten får taggen automatiskt.",
     'tray.quickAdd': "Snabbinmatning",
     'tray.show': "Visa Mindwtr",
     'tray.quit': "Avsluta",

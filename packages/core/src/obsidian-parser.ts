@@ -66,6 +66,7 @@ export type ParseObsidianTasksOptions = {
     relativeFilePath: string;
     fileModifiedAt: string;
     dataviewMetadataEnabled?: boolean;
+    requiredInlineTag?: string;
 };
 
 export type ParseObsidianTasksResult = {
@@ -148,6 +149,26 @@ export const extractObsidianTags = (text: string): string[] => {
         if (value) tags.push(value);
     }
     return uniqueObsidianStrings(tags);
+};
+
+/** One inline tag, with the same character set as the existing tag extractor. */
+export const normalizeObsidianRequiredInlineTag = (value: string | null | undefined): string => {
+    const tag = normalizeObsidianTagValue(value ?? '');
+    if (!tag && !(value ?? '').trim()) return '';
+    if (!/^[\p{L}\p{N}_/.:-]+$/u.test(tag) || tag.startsWith('/') || tag.endsWith('/') || tag.includes('//')) {
+        throw new Error('Enter one inline tag, such as #task.');
+    }
+    return `#${tag}`;
+};
+
+export const matchesObsidianRequiredInlineTag = (text: string, requiredInlineTag: string): boolean => {
+    const required = normalizeObsidianRequiredInlineTag(requiredInlineTag).slice(1);
+    return !required || extractObsidianTags(text).some((tag) => tag === required || tag.startsWith(`${required}/`));
+};
+
+export const appendObsidianRequiredInlineTag = (text: string, requiredInlineTag: string): string => {
+    const tag = normalizeObsidianRequiredInlineTag(requiredInlineTag);
+    return matchesObsidianRequiredInlineTag(text, tag) ? text : `${text.trimEnd()} ${tag}`;
 };
 
 export const extractObsidianWikiLinks = (text: string): string[] => {
@@ -436,6 +457,7 @@ export const parseObsidianTasksFromMarkdown = (
         if (!match) continue;
         const text = (match[3] || '').trim();
         if (!text) continue;
+        if (!matchesObsidianRequiredInlineTag(text, options.requiredInlineTag ?? '')) continue;
 
         const lineNumber = split.bodyStartLineNumber + index;
         const dataviewData = options.dataviewMetadataEnabled

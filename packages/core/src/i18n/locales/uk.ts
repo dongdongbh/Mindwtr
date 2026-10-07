@@ -1,5 +1,7 @@
 // Ukrainian app strings. Keep placeholders and slash-command syntax in sync with en.ts.
 export const ukOverrides: Record<string, string> = {
+    'settings.obsidianRequiredInlineTag': "Обов’язкова мітка рядкових завдань",
+    'settings.obsidianRequiredInlineTagHint': "Залиште порожнім, щоб показувати всі рядкові завдання. #task також відповідає #task/work. Враховуються лише мітки в рядку прапорця, а не мітки нотатки. Нові рядкові завдання отримують цю мітку автоматично.",
     'tray.quickAdd': "Швидке додавання",
     'tray.show': "Показати Mindwtr",
     'tray.quit': "Вийти",

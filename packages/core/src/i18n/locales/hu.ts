@@ -2,6 +2,8 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Hungarian.
 export const huOverrides: Record<string, string> = {
+    'settings.obsidianRequiredInlineTag': "Kötelező címke a soron belüli feladatokhoz",
+    'settings.obsidianRequiredInlineTagHint': "Üresen minden soron belüli feladat megjelenik. A #task a #task/work címkére is illeszkedik. Csak a jelölőnégyzet sorában lévő címkék számítanak, a jegyzet címkéi nem. Az új soron belüli feladatok automatikusan megkapják ezt a címkét.",
     'tray.quickAdd': "Gyors hozzáadás",
     'tray.show': "Mindwtr megjelenítése",
     'tray.quit': "Kilépés",

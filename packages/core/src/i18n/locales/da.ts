@@ -1,5 +1,7 @@
 // Danish translation. Keep at full key parity with en.ts.
 export const daOverrides: Record<string, string> = {
+    'settings.obsidianRequiredInlineTag': "Påkrævet tag for opgaver i tekst",
+    'settings.obsidianRequiredInlineTagHint': "Lad feltet stå tomt for at vise alle opgaver i teksten. #task matcher også #task/work. Kun tags på afkrydsningsfeltets linje tæller, ikke notens tags. Nye opgaver i teksten får automatisk dette tag.",
     'tray.quickAdd': "Hurtig tilføjelse",
     'tray.show': "Vis Mindwtr",
     'tray.quit': "Afslut",

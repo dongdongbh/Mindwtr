@@ -2,6 +2,8 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Spanish.
 export const esOverrides: Record<string, string> = {
+    'settings.obsidianRequiredInlineTag': "Etiqueta obligatoria para tareas en línea",
+    'settings.obsidianRequiredInlineTagHint': "Deja vacío para mostrar todas las tareas en línea. #task también coincide con #task/work. Solo cuentan las etiquetas de la línea de la casilla, no las de la nota. Las nuevas tareas en línea reciben esta etiqueta automáticamente.",
     'tray.quickAdd': "Añadir rápidamente",
     'tray.show': "Mostrar Mindwtr",
     'tray.quit': "Salir",

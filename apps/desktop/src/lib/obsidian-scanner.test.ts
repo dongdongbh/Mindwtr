@@ -242,6 +242,7 @@ describe('scanObsidianVault', () => {
             vaultPath: fixtureRoot,
             enabled: true,
             scanFolders: ['TaskNotes'],
+            requiredInlineTag: '',
             taskNotesIncludeArchived: true,
         }, nodeFsDeps);
 
@@ -282,6 +283,7 @@ describe('normalizeObsidianConfig', () => {
             vaultName: '',
             scanFolders: ['/'],
             inboxFile: DEFAULT_OBSIDIAN_INBOX_FILE,
+            requiredInlineTag: '',
             taskNotesIncludeArchived: false,
             dataviewMetadataEnabled: false,
             newTaskFormat: 'auto',
@@ -299,9 +301,31 @@ describe('normalizeObsidianConfig', () => {
             enabled: true,
             scanFolders: ['Projects', 'Daily'],
             inboxFile: DEFAULT_OBSIDIAN_INBOX_FILE,
+            requiredInlineTag: '',
             taskNotesIncludeArchived: false,
             dataviewMetadataEnabled: false,
             newTaskFormat: 'auto',
         });
     });
+});
+
+
+it('applies the same inline tag filter on full scans and live file reads', async () => {
+    let markdown = '---\ntags: [task]\n---\n- [ ] Checklist\n- [ ] Action #task/work\n- [ ] Other #tasks';
+    const deps: ObsidianScannerDependencies = {
+        exists: async () => true,
+        readDir: async () => [{ name: 'Inbox.md', isFile: true }],
+        readTextFile: async () => markdown,
+        stat: async () => ({ isFile: true, size: 100, mtime: new Date('2026-10-07') }),
+    };
+    const config = normalizeObsidianConfig({ vaultPath: '/Vault', enabled: true, requiredInlineTag: '#task' });
+    const full = await scanObsidianVault(config, deps);
+    const live = await scanObsidianFile(config, 'Inbox.md', deps);
+    expect(full.tasks).toEqual(live.tasks);
+    expect(live.tasks.map((task) => [task.text, task.source.lineNumber])).toEqual([['Action #task/work', 5]]);
+    markdown = markdown.replace('#task/work', '#plain');
+    expect((await scanObsidianFile(config, 'Inbox.md', deps)).tasks).toEqual([]);
+    const taskNotes = await scanObsidianVault({ vaultPath: fixtureRoot, enabled: true, requiredInlineTag: '#not-present' }, nodeFsDeps);
+    expect(taskNotes.tasks).toHaveLength(3);
+    expect(taskNotes.tasks.every((task) => task.format === 'tasknotes')).toBe(true);
 });

@@ -10,6 +10,8 @@
 //   パーサのコマンドトークン (/due:, @context, #tag, +Project…) は英語のまま。
 // - 数値プレースホルダは詰める ({{count}}件)、英単語は前後に半角スペースを入れる (Dropbox に接続)。
 export const jaOverrides: Record<string, string> = {
+    'settings.obsidianRequiredInlineTag': "インラインタスクの必須タグ",
+    'settings.obsidianRequiredInlineTagHint': "空欄の場合はすべてのインラインタスクを表示します。#task は #task/work にも一致します。チェックボックス行のタグのみが対象で、ノートのタグは含みません。新しいインラインタスクにはこのタグが自動で追加されます。",
     'tray.quickAdd': "クイック追加",
     'tray.show': "Mindwtrを表示",
     'tray.quit': "終了",

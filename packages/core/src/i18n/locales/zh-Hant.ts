@@ -1,5 +1,7 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const zhHant: Record<string, string> = {
+    'settings.obsidianRequiredInlineTag': "行內任務必要標籤",
+    'settings.obsidianRequiredInlineTagHint': "留空以顯示所有行內任務。#task 也符合 #task/work。只比對核取方塊所在行的標籤，不使用筆記標籤。新建行內任務會自動加入此標籤。",
     'tray.quickAdd': "快速新增",
     'tray.show': "顯示Mindwtr",
     'tray.quit': "結束",

@@ -727,6 +727,8 @@ struct ObsidianConfigPayload {
     #[serde(default)]
     task_notes_include_archived: bool,
     #[serde(default)]
+    required_inline_tag: String,
+    #[serde(default)]
     dataview_metadata_enabled: bool,
     #[serde(default = "default_obsidian_new_task_format")]
     new_task_format: String,
@@ -742,6 +744,7 @@ impl Default for ObsidianConfigPayload {
             scan_folders: default_obsidian_scan_folders(),
             inbox_file: default_obsidian_inbox_file(),
             task_notes_include_archived: false,
+            required_inline_tag: String::new(),
             dataview_metadata_enabled: false,
             new_task_format: default_obsidian_new_task_format(),
             last_scanned_at: None,

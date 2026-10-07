@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+    appendObsidianRequiredInlineTag,
+    normalizeObsidianRequiredInlineTag,
     buildObsidianFileTaskId,
     buildObsidianTaskId,
     normalizeObsidianRelativePath,
@@ -142,5 +144,43 @@ describe('parseObsidianTasksFromMarkdown', () => {
     it('normalizes non-finite or negative line numbers in task ids', () => {
         expect(buildObsidianTaskId('Projects/Alpha.md', -4)).toMatch(/^obsidian-0-/);
         expect(buildObsidianTaskId('Projects/Alpha.md', Number.NaN)).toMatch(/^obsidian-0-/);
+    });
+});
+
+
+describe('required inline task tag', () => {
+    const markdown = [
+        '---', 'tags: [task]', '---',
+        '- [ ] Pack charger', '- [ ] Email venue #task',
+        '- [ ] Call venue #task/work', '- [ ] Read article #tasks',
+        '- [ ] Metadata only [tags:: task]', '- [ ] Suffix text#task',
+        '- [x] Finished #task', '- [ ] Case #Task',
+    ].join('\n');
+
+    it('filters only checkbox tags and preserves source text, ids and positions', () => {
+        const options = { ...createOptions('Inbox.md'), dataviewMetadataEnabled: true };
+        const all = parseObsidianTasksFromMarkdown(markdown, options).tasks;
+        expect(parseObsidianTasksFromMarkdown(markdown, { ...options, requiredInlineTag: '  ' }).tasks).toEqual(all);
+        const filtered = parseObsidianTasksFromMarkdown(markdown, { ...options, requiredInlineTag: '#task' }).tasks;
+        expect(filtered).toEqual(all.filter((task) => [5, 6, 10].includes(task.source.lineNumber)));
+        expect(filtered.map((task) => task.text)).toEqual(['Email venue #task', 'Call venue #task/work', 'Finished #task']);
+    });
+
+    it('normalizes one tag and rejects malformed filters instead of broadening discovery', () => {
+        expect(normalizeObsidianRequiredInlineTag(' task/work ')).toBe('#task/work');
+        expect(normalizeObsidianRequiredInlineTag('#任务')).toBe('#任务');
+        for (const value of ['#', '#task #other', 'task/work/', 'task//work']) {
+            expect(() => normalizeObsidianRequiredInlineTag(value)).toThrow();
+        }
+    });
+
+    it('appends only when necessary and leaves newly created tasks discoverable', () => {
+        for (const text of ['Call venue', 'Call venue #tasks', 'Call venue #task', 'Call venue #task/work']) {
+            const marked = appendObsidianRequiredInlineTag(text, '#task');
+            expect(appendObsidianRequiredInlineTag(marked, '#task')).toBe(marked);
+            expect(parseObsidianTasksFromMarkdown(`- [ ] ${marked}`, { ...createOptions('Inbox.md'), requiredInlineTag: '#task' }).tasks).toHaveLength(1);
+        }
+        expect(appendObsidianRequiredInlineTag('Call #task/work', '#task')).toBe('Call #task/work');
+        expect(appendObsidianRequiredInlineTag('Call', '')).toBe('Call');
     });
 });

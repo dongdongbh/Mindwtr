@@ -1,5 +1,7 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const en: Record<string, string> = {
+    'settings.obsidianRequiredInlineTag': "Required inline task tag",
+    'settings.obsidianRequiredInlineTagHint': "Leave empty to show all inline tasks. #task also matches #task/work. Only tags on the checkbox line count; note tags do not. New inline tasks receive this tag automatically.",
     'tray.quickAdd': "Quick Add",
     'tray.show': "Show Mindwtr",
     'tray.quit': "Quit",

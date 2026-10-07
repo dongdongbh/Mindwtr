@@ -49,6 +49,7 @@ export const useObsidianSettings = ({
     const [vaultPath, setVaultPath] = useState('');
     const [enabled, setEnabled] = useState(false);
     const [scanFoldersText, setScanFoldersText] = useState('/');
+    const [requiredInlineTag, setRequiredInlineTag] = useState('');
     const [inboxFile, setInboxFile] = useState('Mindwtr/Inbox.md');
     const [taskNotesIncludeArchived, setTaskNotesIncludeArchived] = useState(false);
     const [dataviewMetadataEnabled, setDataviewMetadataEnabled] = useState(false);
@@ -65,10 +66,11 @@ export const useObsidianSettings = ({
         setEnabled(config.enabled);
         setScanFoldersText(config.scanFolders.join('\n'));
         setInboxFile(config.inboxFile);
+        setRequiredInlineTag(config.requiredInlineTag);
         setTaskNotesIncludeArchived(config.taskNotesIncludeArchived);
         setDataviewMetadataEnabled(config.dataviewMetadataEnabled);
         setNewTaskFormat(config.newTaskFormat);
-    }, [config.dataviewMetadataEnabled, config.enabled, config.inboxFile, config.newTaskFormat, config.scanFolders, config.taskNotesIncludeArchived, config.vaultPath]);
+    }, [config.requiredInlineTag, config.dataviewMetadataEnabled, config.enabled, config.inboxFile, config.newTaskFormat, config.scanFolders, config.taskNotesIncludeArchived, config.vaultPath]);
 
     const hasConfiguredVault = Boolean((vaultPath || '').trim());
 
@@ -96,22 +98,28 @@ export const useObsidianSettings = ({
     const handleSave = useCallback(async () => {
         setIsSaving(true);
         try {
-            await saveConfig({
+            const saved = await saveConfig({
                 vaultPath: vaultPath.trim() || null,
                 enabled,
                 scanFolders: parseScanFoldersInput(scanFoldersText),
                 inboxFile,
+                requiredInlineTag,
                 taskNotesIncludeArchived,
                 dataviewMetadataEnabled,
                 newTaskFormat,
             });
+            if (saved.requiredInlineTag !== config.requiredInlineTag && saved.enabled && saved.vaultPath) {
+                await scan();
+                const scanError = useObsidianStore.getState().error;
+                if (scanError) throw new Error(scanError);
+            }
             showSaved();
         } catch (error) {
             showToast(toErrorMessage(error, messages.saveFailed), 'error');
         } finally {
             setIsSaving(false);
         }
-    }, [dataviewMetadataEnabled, enabled, inboxFile, messages.saveFailed, newTaskFormat, saveConfig, scanFoldersText, showSaved, showToast, taskNotesIncludeArchived, vaultPath]);
+    }, [config.requiredInlineTag, scan, requiredInlineTag, dataviewMetadataEnabled, enabled, inboxFile, messages.saveFailed, newTaskFormat, saveConfig, scanFoldersText, showSaved, showToast, taskNotesIncludeArchived, vaultPath]);
 
     const handleRemove = useCallback(async () => {
         try {
@@ -120,6 +128,7 @@ export const useObsidianSettings = ({
             setEnabled(false);
             setScanFoldersText('/');
             setInboxFile('Mindwtr/Inbox.md');
+            setRequiredInlineTag('');
             setTaskNotesIncludeArchived(false);
             setDataviewMetadataEnabled(false);
             setNewTaskFormat('auto');
@@ -154,6 +163,8 @@ export const useObsidianSettings = ({
         onObsidianEnabledChange: setEnabled,
         obsidianScanFoldersText: scanFoldersText,
         onObsidianScanFoldersTextChange: setScanFoldersText,
+        obsidianRequiredInlineTag: requiredInlineTag,
+        onObsidianRequiredInlineTagChange: setRequiredInlineTag,
         obsidianInboxFile: inboxFile,
         onObsidianInboxFileChange: setInboxFile,
         obsidianTaskNotesIncludeArchived: taskNotesIncludeArchived,
