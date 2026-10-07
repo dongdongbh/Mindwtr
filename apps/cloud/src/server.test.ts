@@ -1006,7 +1006,7 @@ describe('cloud server utils', () => {
         const parsed = await readJsonBody(req, 10);
         expect(isBodyReadError(parsed)).toBe(true);
         if (!isBodyReadError(parsed)) throw new Error('Expected body read error');
-        expect(parsed.__mindwtrError.message).toBe('Payload too large');
+        expect(parsed.__mindwtrError.message).toBe('Payload too large: the limit is 10 bytes');
         expect(parsed.__mindwtrError.status).toBe(413);
     });
 
@@ -2010,6 +2010,47 @@ describe('cloud server api', () => {
         }
         dataDir = '';
         baseUrl = '';
+    });
+
+    test('accepts a sync document larger than the small JSON limit and refuses the same size elsewhere', async () => {
+        const iso = '2026-10-07T00:00:00.000Z';
+        const tasks = Array.from({ length: 3_000 }, (_, index) => makeTestTask({
+            id: `large-library-${index}`,
+            title: `Large library task ${index} ${'x'.repeat(900)}`,
+            createdAt: iso,
+            updatedAt: iso,
+        }));
+        const body = JSON.stringify({ tasks, projects: [], sections: [], areas: [], people: [], settings: {} });
+        expect(body.length).toBeGreaterThan(3_000_000);
+
+        const dataResponse = await fetch(`${baseUrl}/v1/data`, {
+            method: 'PUT',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body,
+        });
+        expect(dataResponse.status).toBe(200);
+
+        const taskResponse = await fetch(`${baseUrl}/v1/tasks`, {
+            method: 'POST',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body: JSON.stringify({ title: 'Too big', description: 'x'.repeat(3_000_000) }),
+        });
+        expect(taskResponse.status).toBe(413);
+        expect(await taskResponse.json()).toEqual({ error: 'Payload too large: the limit is 2000000 bytes' });
+    });
+
+    test('refuses a sync document over the data limit with the limit in the JSON answer', async () => {
+        const body = JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], settings: { pad: 'x'.repeat(50_000_000) } });
+        const response = await fetch(`${baseUrl}/v1/data`, {
+            method: 'PUT',
+            headers: { ...authHeaders, 'content-type': 'application/json' },
+            body,
+        });
+        expect(response.status).toBe(413);
+        expect(await response.json()).toEqual({
+            error: 'Payload too large: the limit is 50000000 bytes',
+            limitBytes: 50_000_000,
+        });
     });
 
     test('search tolerates stored malformed assignees without rewriting data (#1233)', async () => {

@@ -1122,6 +1122,7 @@ type CloudServerOptions = {
     maxPerWindow?: number;
     maxAttachmentPerWindow?: number;
     maxBodyBytes?: number;
+    maxDataBodyBytes?: number;
     maxAttachmentBytes?: number;
     requestTimeoutMs?: number;
     allowedAuthTokens?: AllowedAuthTokenInput;
@@ -1149,6 +1150,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
         rateMax: options.maxPerWindow,
         attachmentRateMax: options.maxAttachmentPerWindow,
         maxBodyBytes: options.maxBodyBytes,
+        maxDataBodyBytes: options.maxDataBodyBytes,
         maxAttachmentBytes: options.maxAttachmentBytes,
         anyTokenMaxNamespaces: options.maxAnyTokenNamespaces,
         requestTimeoutMs: options.requestTimeoutMs,
@@ -1163,6 +1165,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
     const maxPerWindow = runtimeConfig.rateMax;
     const maxAttachmentPerWindow = runtimeConfig.attachmentRateMax;
     const maxBodyBytes = runtimeConfig.maxBodyBytes;
+    const maxDataBodyBytes = runtimeConfig.maxDataBodyBytes;
     const maxAttachmentBytes = runtimeConfig.maxAttachmentBytes;
     const allowedAuthTokens = normalizeAllowedAuthTokens(
         options.allowedAuthTokens === undefined
@@ -1631,10 +1634,17 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                         // Namespace admission has already reserved a valid empty
                         // document, so body streaming and validation never hold the
                         // global admission lock.
-                        const body = await readJsonBody(req, maxBodyBytes, requestAbortController.signal);
+                        const body = await readJsonBody(req, maxDataBodyBytes, requestAbortController.signal);
                         if (isBodyReadError(body)) {
                             const err = body.__mindwtrError;
-                            return errorResponse(String(err?.message || 'Payload too large'), Number(err?.status) || 413);
+                            const status = Number(err?.status) || 413;
+                            // limitBytes lets a client name the server's limit without parsing the message.
+                            return jsonResponse(
+                                status === 413
+                                    ? { error: String(err?.message), limitBytes: maxDataBodyBytes }
+                                    : { error: String(err?.message) },
+                                { status },
+                            );
                         }
                         if (!body) return errorResponse('Missing body');
                         if (typeof body !== 'object') return errorResponse('Invalid JSON body');

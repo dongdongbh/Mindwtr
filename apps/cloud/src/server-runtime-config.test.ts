@@ -16,6 +16,7 @@ describe('resolveCloudRuntimeConfig', () => {
         'MINDWTR_CLOUD_RATE_MAX',
         'MINDWTR_CLOUD_ATTACHMENT_RATE_MAX',
         'MINDWTR_CLOUD_MAX_BODY_BYTES',
+        'MINDWTR_CLOUD_MAX_DATA_BODY_BYTES',
         'MINDWTR_CLOUD_MAX_ATTACHMENT_BYTES',
         'MINDWTR_CLOUD_ANY_TOKEN_MAX_NAMESPACES',
         'MINDWTR_CLOUD_RATE_CLEANUP_MS',
@@ -54,6 +55,7 @@ describe('resolveCloudRuntimeConfig', () => {
             rateMax: 120,
             attachmentRateMax: 120,
             maxBodyBytes: 2_000_000,
+            maxDataBodyBytes: 50_000_000,
             maxAttachmentBytes: 50_000_000,
             anyTokenMaxNamespaces: 32,
             rateCleanupMs: 60_000,
@@ -69,6 +71,23 @@ describe('resolveCloudRuntimeConfig', () => {
             authFailureRateMax: 30,
         });
         expect(resolveCloudRuntimeConfig({ MINDWTR_CLOUD_RATE_MAX: '77' }).attachmentRateMax).toBe(77);
+    });
+
+    test('gives the sync document its own limit that never drops below a raised small limit', () => {
+        expect(resolveCloudRuntimeConfig({ MINDWTR_CLOUD_MAX_BODY_BYTES: '3000000' }).maxDataBodyBytes).toBe(50_000_000);
+        expect(resolveCloudRuntimeConfig({ MINDWTR_CLOUD_MAX_BODY_BYTES: '64000000' }).maxDataBodyBytes).toBe(64_000_000);
+        expect(resolveCloudRuntimeConfig({ MINDWTR_CLOUD_MAX_BODY_BYTES: '64000000' }).maxBodyBytes).toBe(64_000_000);
+        expect(resolveCloudRuntimeConfig({
+            MINDWTR_CLOUD_MAX_BODY_BYTES: '64000000',
+            MINDWTR_CLOUD_MAX_DATA_BODY_BYTES: '10000000',
+        }).maxDataBodyBytes).toBe(10_000_000);
+        expect(resolveCloudRuntimeConfig({}, { maxBodyBytes: 70_000_000 }).maxDataBodyBytes).toBe(70_000_000);
+        expect(resolveCloudRuntimeConfig(
+            { MINDWTR_CLOUD_MAX_DATA_BODY_BYTES: '10000000' },
+            { maxDataBodyBytes: 1_000 },
+        ).maxDataBodyBytes).toBe(1_000);
+        expect(() => resolveCloudRuntimeConfig({ MINDWTR_CLOUD_MAX_DATA_BODY_BYTES: '0' }))
+            .toThrow('MINDWTR_CLOUD_MAX_DATA_BODY_BYTES');
     });
 
     test('allows zero only for port, namespace capacity, and the slow-request log threshold', () => {

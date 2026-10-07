@@ -599,7 +599,7 @@ describe('POST /v1/capture', () => {
                 audio: { bytes: new Uint8Array(4096), type: 'audio/mp4', name: 'long.m4a' },
             });
         expect(response.status).toBe(413);
-        expect(((await response.json()) as { error: string }).error).toBe('Payload too large');
+        expect(((await response.json()) as { error: string }).error).toBe('Payload too large: the limit is 1024 bytes');
         expect(await readStoredTasks()).toHaveLength(0);
     });
 
