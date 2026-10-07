@@ -28,14 +28,14 @@ import {
     validateNativeAttachmentDraftBeginV2,
     validateNativeAttachmentDraftLineageV2,
     prepareNativeAttachmentDraftAddV2,
-    validateNativeAttachmentDraftBeginV3, validateNativeAttachmentDraftBeginV4,
-    validateNativeAttachmentDraftLineageV3, validateNativeAttachmentDraftLineageV4,
+    validateNativeAttachmentDraftBeginV3, validateNativeAttachmentDraftBeginV4, validateNativeAttachmentDraftBeginV5,
+    validateNativeAttachmentDraftLineageV3, validateNativeAttachmentDraftLineageV4, validateNativeAttachmentDraftLineageV5,
     prepareNativeAttachmentDraftAddV3, prepareNativeAttachmentDraftAddV4,
     prepareNativeAttachmentDraftRemoveV3, prepareNativeAttachmentDraftRemoveV4,
     readNativeAttachmentDraftRemoveFrozen,
     completeNativeAttachmentDraftAdd, completeNativeAttachmentDraftAddV4,
     prepareNativeAttachmentDraftDiscardCandidates,
-    prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4,
+    prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4, prepareNativeAttachmentDraftDiscardCandidatesV5,
     prepareNativeAttachmentCleanupWitness,
     isNativeAttachmentCleanupWitnessEligible,
     isAttachmentFileInUse,
@@ -1116,7 +1116,7 @@ const settledAttachmentSaveState = () => {
 type AttachmentFileEditSaveEnvelope = Parameters<typeof contract.validatePreparedOwnedEditorFileEditTaskDraftSave>[0]
     | Parameters<typeof contract.validatePreparedOwnedEditorCompleteTaskDraftSave>[0];
 const validateAttachmentFileEditSave = (input: AttachmentFileEditSaveEnvelope) => {
-    if ((input?.request?.version === 2 || input?.request?.version === 3) && input.prepared?.version === input.request.version) {
+    if ((input?.request?.version === 2 || input?.request?.version === 3 || input?.request?.version === 4) && input.prepared?.version === input.request.version) {
         return contract.validatePreparedOwnedEditorCompleteTaskDraftSave(input as Parameters<typeof contract.validatePreparedOwnedEditorCompleteTaskDraftSave>[0]);
     }
     if (input?.request?.version === 1 && input.prepared?.version === 1) {
@@ -1165,7 +1165,7 @@ const retireAttachmentFileEditSave = (json: string, referencedCallback: () => st
             const envelope = attachmentDraftJson(input.envelopeJSON) as AttachmentFileEditSaveEnvelope;
             const checked = validateAttachmentFileEditSave(envelope);
             if (!checked.ok || index >= checked.value.settlementPlan.length) throw attachmentSaveInvalid();
-            const complete = (envelope.request.version === 2 || envelope.request.version === 3)
+            const complete = (envelope.request.version === 2 || envelope.request.version === 3 || envelope.request.version === 4)
                 ? envelope as Parameters<typeof contract.validatePreparedOwnedEditorCompleteTaskDraftSave>[0] : null;
             const legacy = envelope as Parameters<typeof contract.validatePreparedOwnedEditorFileEditTaskDraftSave>[0];
             const afterTask = complete ? complete.prepared.decision.kind === 'changed'
@@ -3054,7 +3054,7 @@ globalThis.MindwtrHost = {
             requireSaved();
             if (globalThis.__mindwtrHostPlatform === 'ios') {
                 const input = attachmentDraftJson(json) as Parameters<typeof contract.prepareOwnedEditorCompleteTaskCancellationUndo>[0];
-                if ((input?.cancel?.request?.version === 2 || input?.cancel?.request?.version === 3)) return unwrap(await contract.prepareOwnedEditorCompleteTaskCancellationUndo(input));
+                if ((input?.cancel?.request?.version === 2 || input?.cancel?.request?.version === 3 || input?.cancel?.request?.version === 4)) return unwrap(await contract.prepareOwnedEditorCompleteTaskCancellationUndo(input));
             }
             return unwrap(await contract.prepareTaskCancellationUndo(editorJson(json) as Parameters<typeof contract.prepareTaskCancellationUndo>[0]));
         });
@@ -3485,6 +3485,21 @@ globalThis.MindwtrHost = {
             return result;
         });
     },
+    attachmentDraftBeginV5(json: string): string {
+        return submit(async () => validateNativeAttachmentDraftBeginV5(attachmentDraftJson(json), attachmentDraftDependencies));
+    },
+    attachmentDraftValidateLineageV5(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: Attachment draft capability is unavailable');
+            return validateNativeAttachmentDraftLineageV5(attachmentDraftJson(json));
+        });
+    },
+    attachmentDraftDiscardCandidatesV5(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: Attachment draft capability is unavailable');
+            return prepareNativeAttachmentDraftDiscardCandidatesV5(attachmentDraftJson(json));
+        });
+    },
     attachmentDraftValidateLineageV4(json: string): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: Attachment draft capability is unavailable');
@@ -3596,7 +3611,7 @@ globalThis.MindwtrHost = {
             requireSaved();
             const input = attachmentDraftJson(json) as Parameters<typeof contract.prepareOwnedEditorFileEditTaskDraftSave>[0]
                 | Parameters<typeof contract.prepareOwnedEditorCompleteTaskDraftSave>[0];
-            if (input?.version === 2 || input?.version === 3) return unwrap(await contract.prepareOwnedEditorCompleteTaskDraftSave(input));
+            if (input?.version === 2 || input?.version === 3 || input?.version === 4) return unwrap(await contract.prepareOwnedEditorCompleteTaskDraftSave(input));
             if (input?.version === 1) return unwrap(await contract.prepareOwnedEditorFileEditTaskDraftSave(input));
             throw new Error('INVALID_INPUT');
         });
@@ -3611,7 +3626,7 @@ globalThis.MindwtrHost = {
         return submit(async () => {
             requireOwnedAttachmentSave();
             const input = attachmentDraftJson(json) as AttachmentFileEditSaveEnvelope;
-            if ((input?.request?.version === 2 || input?.request?.version === 3) && input.prepared?.version === input.request.version) return unwrap(await contract.commitPreparedOwnedEditorCompleteTaskDraftSave(input as Parameters<typeof contract.commitPreparedOwnedEditorCompleteTaskDraftSave>[0]));
+            if ((input?.request?.version === 2 || input?.request?.version === 3 || input?.request?.version === 4) && input.prepared?.version === input.request.version) return unwrap(await contract.commitPreparedOwnedEditorCompleteTaskDraftSave(input as Parameters<typeof contract.commitPreparedOwnedEditorCompleteTaskDraftSave>[0]));
             if (input?.request?.version === 1 && input.prepared?.version === 1) return unwrap(await contract.commitPreparedOwnedEditorFileEditTaskDraftSave(input as Parameters<typeof contract.commitPreparedOwnedEditorFileEditTaskDraftSave>[0]));
             throw new Error('INVALID_INPUT');
         });

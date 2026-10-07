@@ -80,6 +80,13 @@ export type NativeAttachmentDraftLineageInputV4 = Omit<NativeAttachmentDraftLine
     version: 4; priorOperations: readonly NativeAttachmentDraftOperationV4[];
 };
 export type NativeAttachmentDraftLineageV4 = Omit<NativeAttachmentDraftLineage, 'version'> & { version: 4 };
+export type NativeAttachmentDraftOperationV5 = Readonly<{
+    kind: 'availability'; operation: NativeAttachmentDraftAvailabilityPrepared;
+}>;
+export type NativeAttachmentDraftLineageInputV5 = Omit<NativeAttachmentDraftLineageInputV3, 'version' | 'priorOperations'> & {
+    version: 5; priorOperations: readonly NativeAttachmentDraftOperationV5[];
+};
+export type NativeAttachmentDraftLineageV5 = Omit<NativeAttachmentDraftLineage, 'version'> & { version: 5 };
 export type NativeAttachmentDraftAddedV2 = Omit<NativeAttachmentDraftAdded, 'version' | 'attachment'> & Readonly<{
     version: 2; attachment: NativeAttachmentDraftHashedFile;
 }>;
@@ -709,4 +716,53 @@ export function readNativeAttachmentDraftAvailabilityFrozen(input: unknown): Nat
     jsonBytes(result, PREPARED_BYTES);
     if (afterPayloadJSON !== availabilityAfterPayload(captured)) invalid();
     return result;
+}
+
+/** Availability-only selection; historical Add/Remove grammars remain sealed. */
+const captureLineageV5 = (value: unknown): NativeAttachmentDraftLineageInputV5 => {
+    if (!exact(value, LINEAGE_V3_FIELDS)) invalid();
+    const input = value as Record<string, unknown>, operations = input.priorOperations;
+    if (input.version !== 5 || !Array.isArray(operations) || Object.getPrototypeOf(operations) !== Array.prototype
+        || operations.length > 128 || Reflect.ownKeys(operations).length !== operations.length + 1) invalid();
+    const captured = { version: 5 as const, taskID: text(input.taskID, 500, true),
+        initialPayloadJSON: text(input.initialPayloadJSON, PAYLOAD_BYTES, true),
+        beforePayloadJSON: text(input.beforePayloadJSON, PAYLOAD_BYTES, true),
+        managedDirectoryURI: fileURI(input.managedDirectoryURI, true), priorOperations: [] };
+    const copied: NativeAttachmentDraftOperationV5[] = [];
+    let bytes = jsonBytes(captured, PREPARE_BYTES);
+    for (let index = 0; index < (operations as unknown[]).length; index++) {
+        const descriptor = Object.getOwnPropertyDescriptor(operations, String(index));
+        if (!descriptor?.enumerable || !own(descriptor, 'value') || !exact(descriptor.value, ['kind', 'operation'])) invalid();
+        const entry = descriptor!.value as Record<string, unknown>;
+        if (entry.kind !== 'availability') invalid();
+        const operation = Object.freeze({ kind: 'availability' as const,
+            operation: readNativeAttachmentDraftAvailabilityFrozen(entry.operation) });
+        bytes += jsonBytes(operation, PREPARED_BYTES) + (index ? 1 : 0);
+        if (bytes > PREPARE_BYTES) invalid();
+        copied.push(operation);
+    }
+    return { ...captured, priorOperations: Object.freeze(copied) };
+};
+
+export function validateNativeAttachmentDraftBeginV5(input: unknown, deps: NativeAttachmentDraftDependencies): NativeAttachmentDraftLineageV5 {
+    const begin = validateNativeAttachmentDraftBeginV3(input, deps);
+    return Object.freeze({ ...begin, version: 5 });
+}
+
+/** Pure metadata lineage; native resolver, installation and retirement authority remain separate. */
+export function validateNativeAttachmentDraftLineageV5(input: unknown): NativeAttachmentDraftLineageV5 {
+    const captured = captureLineageV5(input), initial = payloadV3(captured.initialPayloadJSON, captured.taskID);
+    if (!linkOnlyGapV3(initial.object.attachmentsBase, initial.attachments)) invalid();
+    let previous = initial.attachments;
+    const ids = new Set<string>();
+    for (const { operation } of captured.priorOperations) {
+        const before = payloadV3(operation.beforePayloadJSON, captured.taskID);
+        if (operation.taskID !== captured.taskID || ids.has(operation.requestId)
+            || !same(before.object.attachmentsBase, initial.object.attachmentsBase) || !linkOnlyGapV3(previous, before.attachments)) invalid();
+        ids.add(operation.requestId);
+        previous = payloadV3(operation.afterPayloadJSON, captured.taskID).attachments;
+    }
+    const latest = payloadV3(captured.beforePayloadJSON, captured.taskID);
+    if (!same(latest.object.attachmentsBase, initial.object.attachmentsBase) || !linkOnlyGapV3(previous, latest.attachments)) invalid();
+    return Object.freeze({ version: 5, taskID: captured.taskID, payloadJSON: captured.beforePayloadJSON });
 }

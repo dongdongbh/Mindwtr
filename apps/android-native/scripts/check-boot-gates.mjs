@@ -3538,10 +3538,11 @@ import { logInfo as realLogInfo, setLogger as setRealLogger } from ${JSON.string
 export { createDiagnosticsLog, diagnosticsEntryFromLogPayload, isDiagnosticsLoggingEnabled } from ${JSON.stringify(resolve(app, '../../packages/core/src/diagnostics-log.ts'))};
 export { validateNativeAttachmentDraftBeginV3, validateNativeAttachmentDraftLineageV3,
     validateNativeAttachmentDraftBeginV4, validateNativeAttachmentDraftLineageV4,
+    validateNativeAttachmentDraftBeginV5, validateNativeAttachmentDraftLineageV5,
     prepareNativeAttachmentDraftAddV4, prepareNativeAttachmentDraftRemoveV4, completeNativeAttachmentDraftAddV4,
     prepareNativeAttachmentDraftAddV3, prepareNativeAttachmentDraftRemoveV3,
     readNativeAttachmentDraftRemoveFrozen } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft.ts'))};
-export { prepareNativeAttachmentDraftDiscardCandidates, prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4 } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft-discard.ts'))};
+export { prepareNativeAttachmentDraftDiscardCandidates, prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4, prepareNativeAttachmentDraftDiscardCandidatesV5 } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft-discard.ts'))};
 export { prepareNativeAttachmentCleanupWitness, isNativeAttachmentCleanupWitnessEligible } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};
 import { createOwnedEditorFileEditTaskDraftSaveMethods as createRealMixedSaveMethods } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract-owned-file-edit-save.ts'))};
 import { createNativeHostContract as createRealCompleteContract } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract.ts'))};
@@ -4578,6 +4579,43 @@ export function createNativeSync() {
         const wrong = structuredClone(full); wrong.priorOperations[0].operation.sourceSha256 = 'b'.repeat(64);
         assert.equal((await call(local, 'attachmentDraftValidateLineageV4', wrong)).ok, false);
     });
+    // Selected availability metadata retains a baseline ID while acquiring a different URI.
+    await check(async () => {
+        const missing = { ...baseline, uri: '', cloudKey: 'attachments/baseline.pdf',
+            fileHash: 'a'.repeat(64), localStatus: 'missing' };
+        const before = { ...JSON.parse(opening), attachmentsBase: [missing], attachments: [missing] };
+        const beforePayloadJSON = JSON.stringify(before);
+        const resolved = { ...missing, uri: ROOT + 'baseline.pdf', localStatus: 'available' };
+        const afterPayloadJSON = JSON.stringify({ ...before, attachments: [resolved] });
+        const operation = { version: 1, kind: 'prepared-file-availability', taskID: 'task257',
+            requestId: '35600000-0000-4000-8000-000000000001', attachmentId: missing.id,
+            identity: JSON.stringify([missing.id, missing.cloudKey, missing.fileHash, 0]),
+            beforePayloadJSON, afterPayloadJSON, status: 'available', resolvedAttachmentJSON: JSON.stringify(resolved) };
+        const selected = { ...lineage, version: 5, initialPayloadJSON: beforePayloadJSON,
+            beforePayloadJSON: afterPayloadJSON, priorOperations: [{ kind: 'availability', operation }] };
+        const beforeFiles = structuredClone(local.fileCalls), beforeSaves = local.saveCount;
+        assert.deepEqual(await call(local, 'attachmentDraftBeginV5', { ...begin, payloadJSON: beforePayloadJSON }),
+            { ok: true, value: { version: 5, taskID: 'task257', payloadJSON: beforePayloadJSON } });
+        assert.deepEqual(await call(local, 'attachmentDraftValidateLineageV5', selected),
+            { ok: true, value: { version: 5, taskID: 'task257', payloadJSON: afterPayloadJSON } });
+        for (const method of ['attachmentDraftValidateLineageV3', 'attachmentDraftValidateLineageV4']) {
+            assert.equal((await call(local, method, selected)).ok, false);
+        }
+        const discarded = { version: 4, historyVersion: 5, taskID: 'task257', managedDirectoryURI: ROOT,
+            initialPayloadJSON: beforePayloadJSON, checkpointPayloadJSON: afterPayloadJSON,
+            operations: [{ kind: 'availability', phase: 'checkpointed', preparedJSON: JSON.stringify(operation) }] };
+        const planned = await call(local, 'attachmentDraftDiscardCandidatesV5', discarded);
+        assert.equal(planned.ok, true);
+        assert.equal(planned.value.kind, 'owned-availability-discard-candidates');
+        assert.deepEqual(planned.value.candidates, [{ requestId: operation.requestId,
+            attachmentId: missing.id, targetURI: resolved.uri, reason: 'uncommitted-draft' }]);
+        assert.equal((await call(local, 'attachmentDraftDiscardCandidatesV4', discarded)).ok, false);
+        assert.deepEqual(local.fileCalls, beforeFiles, 'metadata continuity never installs or retires bytes');
+        assert.equal(local.saveCount, beforeSaves, 'metadata continuity never saves the Task');
+        const forged = structuredClone(selected);
+        forged.priorOperations[0].operation.afterPayloadJSON = afterPayloadJSON.replace('Retain opaque checkpoint', 'forged');
+        assert.equal((await call(local, 'attachmentDraftValidateLineageV5', forged)).ok, false);
+    });
     // Historical retry has no optional capability, current editable task or fresh clock.
     const historical = makeState(0, [], 'ios'); historical.localTaskReadOnly = true;
     historical.sandbox = true; historical.workspaceTransition = true;
@@ -4588,7 +4626,7 @@ export function createNativeSync() {
     await check(async () => assert.deepEqual(await call(historical, 'attachmentDraftValidateRemove', removed), { ok: true, value: removed }));
     await check(async () => assert.deepEqual(await call(historical, 'attachmentDraftValidateLineageV3', mixed),
         { ok: true, value: { version: 3, taskID: 'task257', payloadJSON: removed.afterPayloadJSON } }));
-    for (const method of ['attachmentDraftValidateRemove', 'attachmentDraftValidateLineageV3', 'attachmentFileEditSaveValidate']) {
+    for (const method of ['attachmentDraftValidateRemove', 'attachmentDraftValidateLineageV3', 'attachmentDraftValidateLineageV5', 'attachmentDraftDiscardCandidatesV5', 'attachmentFileEditSaveValidate']) {
         await check(async () => assert.match((await call(makeState(0), method, {})).error, /^NOT_READY:/));
     }
     for (const variant of ['nonIOS', 'noCapability', 'sandbox', 'workspace', 'readOnly', 'taskMissing', 'persistence']) {
@@ -4598,7 +4636,7 @@ export function createNativeSync() {
         if (variant === 'readOnly') state.localTaskReadOnly = true;
         if (variant === 'taskMissing') state.localTaskViewFailure = { ok: false, error: { code: 'TASK_NOT_FOUND', message: 'Not found' } };
         if (variant === 'persistence') state.persistenceFailure = { message: 'failed' };
-        for (const [method, input] of [['attachmentDraftBeginV3', begin], ['attachmentDraftBeginV4', begin], ['attachmentDraftPrepareV3', addInput], ['attachmentDraftRemovePrepareV3', removeInput]]) {
+        for (const [method, input] of [['attachmentDraftBeginV3', begin], ['attachmentDraftBeginV4', begin], ['attachmentDraftBeginV5', begin], ['attachmentDraftPrepareV3', addInput], ['attachmentDraftRemovePrepareV3', removeInput]]) {
             await check(async () => assert.equal((await call(state, method, input)).ok, false, `${variant}/${method}`));
         }
         if (variant !== 'readOnly' && variant !== 'taskMissing') {
@@ -5044,10 +5082,11 @@ export function createNativeSync() {
     const databases = []; let cases = 0;
     const check = async (work) => { await work(); cases++; };
     const call = (state, method, input) => poll(state, state.MindwtrHost[method](JSON.stringify(input)));
-    const fixture = async ({ empty = false, noop = false, recurring = false, cancel = false, large = false, withAdd = false,
+    const fixture = async ({ empty = false, noop = false, recurring = false, cancel = false, large = false, withAdd = false, availability = false,
         managedDirectoryURI = ROOT } = {}) => {
         const baseline = Array.from({ length: 2 }, (_, n) => ({ id: `file${n}`, kind: 'file', title: 'File', uri: managedDirectoryURI + `${n}.pdf`,
             size: 3, localStatus: 'available', createdAt: AT, updatedAt: AT }));
+        if (availability) Object.assign(baseline[0], { uri: '', cloudKey: 'attachments/file0.pdf', fileHash: 'a'.repeat(64), localStatus: 'missing' });
         baseline.push({ ...baseline[0], id: 'old-tombstone', uri: managedDirectoryURI + 'old.pdf', deletedAt: AT });
         const source = { id: 'task268', title: 'Task', status: 'next', taskMode: 'list', tags: [], contexts: [], checklist: [],
             description: large ? 'x'.repeat(270_000) : 'Notes', attachments: baseline, createdAt: AT, updatedAt: AT, rev: 8, revBy: 'before',
@@ -5070,9 +5109,9 @@ export function createNativeSync() {
                 relativeAmount: '', relativeUnit: '', relativeOwned: false, relativeCommitRequested: false,
                 recurrenceInputs: {}, recurrenceOwned: [], recurrenceCommitRequested: [] }, scheduleEdits: [], scheduleFailedID: null,
             attachmentsOwned: true, attachmentsBase: baseline, attachments: baseline, linkSheet: {} });
-        const ownedDraft = { version: 3, taskID: source.id, initialPayloadJSON, beforePayloadJSON: initialPayloadJSON,
+        const ownedDraft = { version: availability ? 5 : 3, taskID: source.id, initialPayloadJSON, beforePayloadJSON: initialPayloadJSON,
             priorOperations: [], managedDirectoryURI };
-        if (!empty) for (let index = 0; index < (recurring || cancel ? 1 : 2); index++) {
+        if (!empty && !availability) for (let index = 0; index < (recurring || cancel ? 1 : 2); index++) {
             const removed = await call(state, 'attachmentDraftRemovePrepareV3', { ...ownedDraft,
                 requestId: `26800000-0000-4000-8000-${String(index + 3).padStart(12, '0')}`, attachmentId: `file${index}` });
             assert.equal(removed.ok, true); ownedDraft.beforePayloadJSON = removed.value.afterPayloadJSON;
@@ -5086,9 +5125,18 @@ export function createNativeSync() {
             ownedDraft.beforePayloadJSON = added.value.afterPayloadJSON;
             ownedDraft.priorOperations.push({ kind: 'add', operation: added.value });
         }
+        if (availability) {
+            const resolved = { ...baseline[0], uri: managedDirectoryURI + '0.pdf', localStatus: 'available' };
+            const afterPayloadJSON = JSON.stringify({ ...JSON.parse(initialPayloadJSON), attachments: [resolved, ...baseline.slice(1)] });
+            ownedDraft.priorOperations.push({ kind: 'availability', operation: { version: 1, kind: 'prepared-file-availability',
+                taskID: source.id, requestId: '35600000-0000-4000-8000-000000000002', attachmentId: baseline[0].id,
+                identity: JSON.stringify([baseline[0].id, baseline[0].cloudKey, baseline[0].fileHash, 0]),
+                beforePayloadJSON: initialPayloadJSON, afterPayloadJSON, status: 'available', resolvedAttachmentJSON: JSON.stringify(resolved) } });
+            ownedDraft.beforePayloadJSON = afterPayloadJSON;
+        }
         const draft = JSON.parse(ownedDraft.beforePayloadJSON).attachments;
         if (noop && !empty) source.attachments = draft;
-        const request = { version: 2, kind: 'owned-editor-file-edit-save',
+        const request = { version: availability ? 4 : 2, kind: 'owned-editor-file-edit-save',
             checkpoint: { version: 1, sessionID: SESSION, taskID: source.id, generation: ownedDraft.priorOperations.length + 1, payloadJSON: ownedDraft.beforePayloadJSON },
             ownedDraft, saveRequest: { id: source.id, requestId: REQUEST, base: touchedBase, patch: edited,
                 scheduleBase: { startTime: null, dueDate: recurring ? '2026-10-05' : null, relativeStartOffset: null, reviewAt: null },
@@ -5123,6 +5171,34 @@ export function createNativeSync() {
             assert.equal(f.state.fileEditSaveInputs.at(-1)[0], 'completeCommit'); syncLive(f);
             if (!options.empty) assert.deepEqual(invoke(f), { result: { outcome: 'removed' }, seen: ['removed'] });
             if (options.empty && options.noop) assert.equal(f.db.prepare('SELECT rev FROM tasks WHERE id = ?').get('task268').rev, 8);
+        });
+        await check(async () => {
+            const f = await fixture({ availability: true });
+            assert.equal(f.envelope.prepared.version, 4);
+            assert.equal(JSON.parse(f.db.prepare('SELECT attachments FROM tasks WHERE id = ?').get('task268').attachments)[0].uri, '',
+                'selected download proof and Save preparation leave stored Task unchanged');
+            const resumed = await call(f.state, 'attachmentDraftResumeCheckV3', { version: 3, kind: 'owned-editor-resume',
+                checkpoint: f.request.checkpoint, ownedDraft: f.request.ownedDraft });
+            assert.equal(resumed.ok, true, JSON.stringify(resumed));
+            assert.equal((await call(f.state, 'attachmentFileEditSaveCommit', f.envelope)).ok, true);
+            syncLive(f);
+            const row = f.db.prepare('SELECT title, attachments FROM tasks WHERE id = ?').get('task268');
+            assert.equal(row.title, 'Edited'); assert.equal(JSON.parse(row.attachments)[0].uri, ROOT + '0.pdf');
+            assert.equal(f.state.fileEditSaveInputs.at(-1)[0], 'completeCommit');
+            assert(f.plan.length > 0);
+            assert.deepEqual(invoke(f), { result: { outcome: 'removed' }, seen: ['removed'] },
+                'outer4 uses complete result classification at the existing retirement fence');
+        });
+        await check(async () => {
+            const f = await fixture({ availability: true, cancel: true });
+            assert.equal((await call(f.state, 'attachmentFileEditSaveCommit', f.envelope)).ok, true);
+            const request = { requestId: '35600000-0000-4000-8000-000000000099', cancelRequestId: REQUEST };
+            const prepared = await call(f.state, 'taskCancellationUndoPrepare', { request, cancel: f.envelope });
+            assert.equal(prepared.ok, true, JSON.stringify(prepared));
+            assert.equal(f.state.fileEditSaveInputs.at(-1)[0], 'completeUndoPrepare');
+            assert.equal((await call(f.state, 'taskCancellationUndoCommit', { request, prepared: prepared.value.prepared })).ok, true);
+            const row = f.db.prepare('SELECT status, attachments FROM tasks WHERE id = ?').get('task268');
+            assert.equal(row.status, 'next'); assert.equal(JSON.parse(row.attachments)[0].uri, ROOT + '0.pdf');
         });
         const recurring = await fixture({ recurring: true });
         await check(async () => {

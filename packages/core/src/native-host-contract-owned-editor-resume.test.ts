@@ -4,6 +4,8 @@ import { createNativeHostContract } from './native-host-contract';
 import { createOwnedTaskEditorResumeMethods } from './native-host-contract-task-editor-resume';
 import { prepareNativeAttachmentDraftAddV3, prepareNativeAttachmentDraftRemoveV3, prepareNativeAttachmentDraftAddV4, prepareNativeAttachmentDraftRemoveV4,
     type NativeAttachmentDraftOperationV3, type NativeAttachmentDraftOperationV4 } from './native-attachment-draft';
+import { prepareNativeAttachmentDraftAvailability } from './native-attachment-draft';
+import { getAttachmentDownloadIdentity } from './mobile-attachment-availability';
 import { NativeReceiptSqliteAdapter } from './native-request-receipts';
 import { flushPendingSave, getPersistenceStatus, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { createTaskDraft, type TaskDraftField } from './task-draft';
@@ -233,5 +235,61 @@ describe('selected owned editor resume', () => {
         expect(await env.owned.checkOwnedTaskEditorResume(input)).toMatchObject({ ok: true });
         expect(await env.ordinary.checkTaskEditorResume({ id: input.checkpoint.taskID, touchedBase: payload.touchedBase,
             attachmentsBase: payload.attachmentsBase, attachments: payload.attachmentsBase })).toMatchObject({ ok: true }); expect(env.writes()).toBe(0);
+    });
+});
+
+
+const missingFile: Attachment = { ...file, uri: '', localStatus: 'missing', cloudKey: 'attachments/file.pdf', fileHash: 'a'.repeat(64), contentRev: 7 };
+async function availabilityResume(status: 'available' | 'unrecoverable' | 'empty' = 'available') {
+    const input = await request({ events: [], groups: ['schedule', 'recurrence', 'lifecycle'], checklist: true });
+    const initialPayloadJSON = input.checkpoint.payloadJSON, selected: Attachment = JSON.parse(initialPayloadJSON).attachments[0];
+    const operation = status === 'empty' ? null : prepareNativeAttachmentDraftAvailability({ version: 1, taskID: 'owned-resume',
+        requestId: '35500000-2222-4222-8222-222222222222', attachmentId: selected.id, identity: getAttachmentDownloadIdentity(selected),
+        beforePayloadJSON: initialPayloadJSON, status, resolvedAttachmentJSON: JSON.stringify(status === 'available'
+            ? { ...selected, uri: ROOT + 'downloaded.pdf', localStatus: 'available' }
+            : { ...selected, cloudKey: undefined, fileHash: undefined, localStatus: 'missing', deletedAt: '2026-10-07T01:00:00.000Z', updatedAt: '2026-10-07T01:00:00.000Z' }) });
+    const payloadJSON = operation?.afterPayloadJSON ?? initialPayloadJSON;
+    return { ...input, version: 3, checkpoint: { ...input.checkpoint, generation: operation ? 2 : 1, payloadJSON }, ownedDraft: {
+        version: 5, taskID: 'owned-resume', initialPayloadJSON, beforePayloadJSON: payloadJSON, managedDirectoryURI: ROOT,
+        priorOperations: operation ? [{ kind: 'availability', operation }] : [] } };
+}
+describe('Resume3/history5 availability selection', () => {
+    beforeEach(async () => { env = await open(task({ attachments: [missingFile, link, { ...file, id: 'old', uri: ROOT + 'old.pdf', deletedAt: AT }] })); });
+    it.each(['available', 'unrecoverable', 'empty'] as const)('resumes %s with all unresolved raw/checklist/schedule buffers byte-exact and zero writes', async (status) => {
+        const input = await availabilityResume(status), retained = JSON.stringify(input), rows = env.rows(), persistence = getPersistenceStatus();
+        expect(await env.owned.checkOwnedTaskEditorResume(input)).toMatchObject({ ok: true, value: { kind: 'ready', freshDraft: { title: 'Opening' },
+            freshChecklistBase: [{ id: 'duplicate', title: 'One' }, { id: 'duplicate', title: 'Two' }] } });
+        expect(JSON.stringify(input)).toBe(retained); expect(env.rows()).toEqual(rows); expect(env.writes()).toBe(0); expect(getPersistenceStatus()).toEqual(persistence);
+        expect(JSON.parse(input.checkpoint.payloadJSON).raw.title).toBe('Unresolved raw title 🧪\n');
+        expect(JSON.parse(input.checkpoint.payloadJSON).scheduleFailedID).toBe('pending');
+    });
+    it.each(['tombstone', 'H2'] as const)('reads current %s metadata without replacing the retained availability checkpoint', async (mode) => {
+        const input = await availabilityResume(), retained = input.checkpoint.payloadJSON;
+        const fresh = { ...missingFile, ...(mode === 'tombstone' ? { deletedAt: '2026-10-06T00:00:00.000Z' }
+            : { cloudKey: 'attachments/H2.pdf', fileHash: 'b'.repeat(64), contentRev: 8 }) };
+        env.external({ attachments: [fresh, link], description: 'Fresh external notes' }); const before = env.rows();
+        expect(await env.owned.checkOwnedTaskEditorResume(input)).toMatchObject({ ok: true, value: { freshDraft: { description: 'Fresh external notes' }, freshAttachmentsBase: [fresh, link] } });
+        expect(input.checkpoint.payloadJSON).toBe(retained); expect(env.rows()).toEqual(before); expect(env.writes()).toBe(0);
+    });
+    it('rejects crosswired versions, checkpoint and repeated/count proofs before storage reads', async () => {
+        const input = await availabilityResume(), reads = env.reads();
+        for (const change of [(value: any) => { value.version = 1; }, (value: any) => { value.version = 2; },
+            (value: any) => { value.ownedDraft.version = 4; }, (value: any) => { value.checkpoint.generation = 1; },
+            (value: any) => { value.checkpoint.payloadJSON += ' '; }, (value: any) => { value.checkpoint.taskID = 'other'; },
+            (value: any) => { value.ownedDraft.priorOperations.push(clone(value.ownedDraft.priorOperations[0])); },
+            (value: any) => { value.ownedDraft.priorOperations = Array.from({ length: 129 }, () => clone(value.ownedDraft.priorOperations[0])); }]) {
+            const wrong = clone(input); change(wrong); expect(await env.owned.checkOwnedTaskEditorResume(wrong)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(env.reads()).toBe(reads); expect(env.writes()).toBe(0);
+    });
+    it('retains actual awaited-row freshness and ordinary link-only refusal for an availability file change', async () => {
+        const input = await availabilityResume(), payload = JSON.parse(input.checkpoint.payloadJSON);
+        expect(await env.ordinary.checkTaskEditorResume({ id: 'owned-resume', touchedBase: payload.touchedBase,
+            attachmentsBase: payload.attachmentsBase, attachments: payload.attachments })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        let release!: () => void, entered!: () => void;
+        const waiting = new Promise<void>((resolve) => { release = resolve; }), reached = new Promise<void>((resolve) => { entered = resolve; });
+        env.control.onRead = async () => { entered(); await waiting; };
+        const result = env.owned.checkOwnedTaskEditorResume(input); await reached; env.external({ title: 'Changed during read' }); const before = env.rows(); release();
+        expect(await result).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } }); expect(env.rows()).toEqual(before); expect(env.writes()).toBe(0);
     });
 });

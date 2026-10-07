@@ -2,7 +2,7 @@ import type { NativeHostResult } from './native-host-contract';
 import { createOwnedFileTaskDraftSaveAuthority, LIFECYCLE, readNativeTaskDraftSaveRequest,
     type NativeTaskDraftSaveDependencies, type NativeTaskDraftSaveRequest,
     type NativePreparedTaskDraftSaveV2, type NativeOwnedTaskDraftNoopDecision } from './native-host-contract-task-save';
-import { validateNativeAttachmentDraftLineageV3, validateNativeAttachmentDraftLineageV4, type NativeAttachmentDraftLineageInputV3, type NativeAttachmentDraftLineageInputV4 } from './native-attachment-draft';
+import { validateNativeAttachmentDraftLineageV3, validateNativeAttachmentDraftLineageV4, validateNativeAttachmentDraftLineageV5, type NativeAttachmentDraftLineageInputV3, type NativeAttachmentDraftLineageInputV4, type NativeAttachmentDraftLineageInputV5 } from './native-attachment-draft';
 import { captureNativeOwnedFileAddSaveData } from './native-host-contract-owned-file-save';
 import { readNativeAttachments, type NativeTaskLinkHalf } from './native-host-contract-attachments';
 import { mergeTaskDraftAttachments } from './attachment-editor-model';
@@ -140,18 +140,18 @@ export function createOwnedEditorFileEditTaskDraftSaveMethods(deps: NativeTaskDr
 }
 
 export type OwnedEditorCompleteSaveRequest = {
-    version: 2 | 3; kind: typeof KIND; checkpoint: OwnedEditorFileEditSaveRequest['checkpoint'];
-    ownedDraft: NativeAttachmentDraftLineageInputV3 | NativeAttachmentDraftLineageInputV4; saveRequest: NativeOwnedCompleteChecklistSaveRequest;
+    version: 2 | 3 | 4; kind: typeof KIND; checkpoint: OwnedEditorFileEditSaveRequest['checkpoint'];
+    ownedDraft: NativeAttachmentDraftLineageInputV3 | NativeAttachmentDraftLineageInputV4 | NativeAttachmentDraftLineageInputV5; saveRequest: NativeOwnedCompleteChecklistSaveRequest;
 };
 export type PreparedOwnedEditorCompleteSave = {
-    version: 2 | 3; kind: typeof KIND; request: OwnedEditorCompleteSaveRequest; decision: NativeOwnedCompleteChecklistDecision;
+    version: 2 | 3 | 4; kind: typeof KIND; request: OwnedEditorCompleteSaveRequest; decision: NativeOwnedCompleteChecklistDecision;
 };
 export type OwnedEditorCompleteSaveEnvelope = { request: OwnedEditorCompleteSaveRequest; prepared: PreparedOwnedEditorCompleteSave };
 export type OwnedEditorCompleteSaveResult = Result & {
     cancellation?: { cancelledAt: string; undoEnabled: boolean; message: string; undoLabel: string };
 };
 export type OwnedEditorCompleteSaveValidation = {
-    version: 2 | 3; kind: typeof KIND; result: OwnedEditorCompleteSaveResult; settlementPlan: AttachmentDraftCleanupCandidate[];
+    version: 2 | 3 | 4; kind: typeof KIND; result: OwnedEditorCompleteSaveResult; settlementPlan: AttachmentDraftCleanupCandidate[];
 };
 export type PreparedOwnedEditorCompleteCancellationUndo = NativePreparedOwnedCompleteCancellationUndo & { cancel: OwnedEditorCompleteSaveEnvelope };
 export type OwnedEditorCompleteCancellationUndoEnvelope = {
@@ -163,14 +163,14 @@ export function createOwnedEditorCompleteTaskDraftSaveMethods(deps: NativeTaskCh
     const authority = createOwnedCompleteTaskChecklistSaveAuthority(deps);
     const readRequest = (input: unknown): OwnedEditorCompleteSaveRequest | null => {
         const value = captureNativeOwnedFileAddSaveData(input, REQUEST_BYTES);
-        if (!exact(value, ['version', 'kind', 'checkpoint', 'ownedDraft', 'saveRequest']) || (value.version !== 2 && value.version !== 3) || value.kind !== KIND
+        if (!exact(value, ['version', 'kind', 'checkpoint', 'ownedDraft', 'saveRequest']) || (value.version !== 2 && value.version !== 3 && value.version !== 4) || value.kind !== KIND
             || !exact(value.checkpoint, ['version', 'sessionID', 'taskID', 'generation', 'payloadJSON'])) return null;
         const checkpoint = value.checkpoint;
         if (checkpoint.version !== 1 || typeof checkpoint.sessionID !== 'string' || checkpoint.sessionID.length !== 36 || !UUID.test(checkpoint.sessionID)
             || typeof checkpoint.generation !== 'number' || !Number.isSafeInteger(checkpoint.generation) || checkpoint.generation < 1
             || typeof checkpoint.payloadJSON !== 'string') return null;
         try {
-            const lineage = (value.version === 3 ? validateNativeAttachmentDraftLineageV4 : validateNativeAttachmentDraftLineageV3)(value.ownedDraft);
+            const lineage = (value.version === 4 ? validateNativeAttachmentDraftLineageV5 : value.version === 3 ? validateNativeAttachmentDraftLineageV4 : validateNativeAttachmentDraftLineageV3)(value.ownedDraft);
             const history = value.ownedDraft as NativeAttachmentDraftLineageInputV3;
             if (checkpoint.generation < history.priorOperations.length + 1 || checkpoint.taskID !== lineage.taskID
                 || checkpoint.payloadJSON !== lineage.payloadJSON) return null;
@@ -183,7 +183,7 @@ export function createOwnedEditorCompleteTaskDraftSaveMethods(deps: NativeTaskCh
     const readEnvelope = (input: unknown): { envelope: OwnedEditorCompleteSaveEnvelope; validation: OwnedEditorCompleteSaveValidation } | null => {
         const value = captureNativeOwnedFileAddSaveData(input, REQUEST_BYTES + PREPARED_BYTES + 128);
         if (!exact(value, ['request', 'prepared']) || !exact(value.prepared, ['version', 'kind', 'request', 'decision'])
-            || !record(value.request) || value.prepared.version !== value.request.version || (value.prepared.version !== 2 && value.prepared.version !== 3) || value.prepared.kind !== KIND || !isNativeJsonWithinBytes(value.prepared, PREPARED_BYTES)) return null;
+            || !record(value.request) || value.prepared.version !== value.request.version || (value.prepared.version !== 2 && value.prepared.version !== 3 && value.prepared.version !== 4) || value.prepared.kind !== KIND || !isNativeJsonWithinBytes(value.prepared, PREPARED_BYTES)) return null;
         const request = readRequest(value.request), repeated = readRequest(value.prepared.request), decision = authority.readDecision(value.prepared.decision);
         if (!request || !repeated || !decision || !taskEditValuesEqual(request, repeated)
             || !taskEditValuesEqual(decision.prepared.request, request.saveRequest)) return null;
