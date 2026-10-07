@@ -4,7 +4,13 @@ import { prepareNativeAttachmentDraftAvailability, readNativeAttachmentDraftAvai
     validateNativeAttachmentDraftLineage, validateNativeAttachmentDraftLineageV2,
     validateNativeAttachmentDraftLineageV3, validateNativeAttachmentDraftLineageV4,
     type NativeAttachmentDraftAvailabilityInput } from './native-attachment-draft';
-import { getAttachmentDownloadIdentity } from './mobile-attachment-availability';
+import { getAttachmentAvailabilityPatch, getAttachmentDownloadIdentity } from './mobile-attachment-availability';
+import { computeSha256Hex } from './attachment-hash';
+import { createMobileAttachmentCommon } from './mobile-attachment-common';
+import { createMobileAttachmentFiles } from './mobile-attachment-files';
+import { readNativeAttachments } from './native-host-contract-attachments';
+import { defaultSyncCryptoPrimitives } from './sync-crypto';
+import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 import type { Attachment } from './types';
 
 const AT = '2026-10-07T00:00:00.000Z', LATER = '2026-10-07T01:00:00.000Z';
@@ -82,6 +88,58 @@ describe('selected metadata-only Task availability proof', () => {
             { fileHash: 'b'.repeat(64) }, { fileHash: undefined }]) {
             expect(() => prepareNativeAttachmentDraftAvailability({ ...captured,
                 resolvedAttachmentJSON: JSON.stringify({ ...available(selected), ...patch }) })).toThrow('INVALID_INPUT');
+        }
+    });
+
+    it('accepts the common installer lowercase digest while preserving a known uppercase draft hash', async () => {
+        const bytes = new TextEncoder().encode('abc'), digest = await computeSha256Hex(bytes);
+        expect(digest).toMatch(/^[a-f0-9]{64}$/);
+        const selected = { ...remote, fileHash: digest!.toUpperCase() };
+        expect(readNativeAttachments([selected])?.[0].fileHash).toBe(selected.fileHash);
+        const memory = createMemoryFileSystem(), { log } = createRecordingLog();
+        const files = createMobileAttachmentFiles({ fs: memory.fs, storage: createMemoryStorage().storage,
+            getSecureConfigValue: async () => null, log, fetch: vi.fn() as unknown as typeof fetch,
+            dropboxAuth: { getValidAccessToken: async () => '', forceRefreshAccessToken: async () => '' },
+            core: { isSandboxMode: () => false } });
+        const install = vi.fn(async (staged: string, target: string) => {
+            await memory.fs.move(staged, target); return { status: 'installed' as const };
+        });
+        const common = createMobileAttachmentCommon({ fs: memory.fs, files, crypto: defaultSyncCryptoPrimitives,
+            encryption: { logSyncEncryptionEvent: async () => undefined },
+            installer: { installAttachmentFileGeneration: install }, installerMayBeMissing: () => false,
+            timersPaused: () => false, uploads: { createUploadTask: () => null } });
+        const target = MANAGED + 'synced-file.pdf', downloaded = copy(selected);
+        await expect(common.installAttachmentDownloadBytes(downloaded, MANAGED, target, bytes, { kind: 'absent' }))
+            .resolves.toBe(true);
+        expect(install).toHaveBeenCalledOnce();
+        expect(install.mock.calls[0]).toEqual([expect.any(String), target, { kind: 'absent' }, digest]);
+        expect(memory.read(target)).toEqual(bytes);
+        expect(downloaded.fileHash).toBe(digest);
+        const resolved: Attachment = { ...downloaded, uri: target, localStatus: 'available' };
+        const patch = getAttachmentAvailabilityPatch(selected, resolved);
+        expect(patch).not.toHaveProperty('fileHash');
+        const captured = { ...input('available', selected), resolvedAttachmentJSON: JSON.stringify(resolved) };
+        const proof = prepareNativeAttachmentDraftAvailability(captured);
+        const after = JSON.parse(proof.afterPayloadJSON), before = JSON.parse(captured.beforePayloadJSON);
+        expect(after).toEqual({ ...before, attachments: [link, { ...selected, ...patch }, tombstone, other] });
+        expect(selected.fileHash).toBe(digest!.toUpperCase());
+        expect(readNativeAttachmentDraftAvailabilityFrozen(copy(proof))).toEqual(proof);
+        expect(() => prepareNativeAttachmentDraftAvailability({ ...captured,
+            identity: getAttachmentDownloadIdentity({ ...selected, fileHash: digest! }) })).toThrow('INVALID_INPUT');
+        after.attachments[1].fileHash = digest;
+        expect(() => readNativeAttachmentDraftAvailabilityFrozen({ ...proof, afterPayloadJSON: JSON.stringify(after) }))
+            .toThrow('INVALID_INPUT');
+    });
+
+    it('keeps non-SHA hash agreement exact instead of normalizing legacy strings', () => {
+        for (const hash of ['legacy-hash', ` ${HASH}`, `${HASH} `]) {
+            const selected = { ...remote, fileHash: hash }, captured = input('available', selected);
+            expect(JSON.parse(prepareNativeAttachmentDraftAvailability(captured).afterPayloadJSON).attachments[1].fileHash)
+                .toBe(hash);
+            for (const changed of [hash.toUpperCase(), HASH, undefined]) {
+                expect(() => prepareNativeAttachmentDraftAvailability({ ...captured,
+                    resolvedAttachmentJSON: JSON.stringify({ ...available(selected), fileHash: changed }) })).toThrow('INVALID_INPUT');
+            }
         }
     });
 

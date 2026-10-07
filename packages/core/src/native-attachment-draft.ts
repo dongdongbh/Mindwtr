@@ -684,7 +684,9 @@ const availabilityAfterPayload = (captured: NativeAttachmentDraftAvailabilityInp
     if (captured.status === 'available') {
         if (resolved.deletedAt !== undefined || resolved.localStatus !== 'available'
             || resolved.cloudKey !== current.cloudKey
-            || current.fileHash && resolved.fileHash !== current.fileHash
+            || current.fileHash && (isSha256Hex(current.fileHash)
+                ? !isSha256Hex(resolved.fileHash) || resolved.fileHash.toLowerCase() !== current.fileHash.toLowerCase()
+                : resolved.fileHash !== current.fileHash)
             || !current.fileHash && resolved.fileHash !== undefined && !isSha256Hex(resolved.fileHash)) invalid();
         fileURI(resolved.uri);
     } else {
