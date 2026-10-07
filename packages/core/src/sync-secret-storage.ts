@@ -108,6 +108,21 @@ export type SecureSyncConfigStoreDeps = {
     vault: SyncSecretVault;
 };
 
+/** Selected read-only lookup: preserve legacy/session copies without migrating them.
+ * Native port admission and current-owner checks remain the caller's responsibility. */
+export const getSecureConfigValueReadOnly = async (
+    { storage, secrets, vault }: SecureSyncConfigStoreDeps,
+    key: string,
+): Promise<string | null> => {
+    const secureKey = secureKeyFor(key);
+    if (await vault.isSecureStoreAvailable()) {
+        const secureValue = await secrets.getItem(secureKey);
+        return secureValue !== null ? secureValue : storage.getItem(key);
+    }
+    const sessionValue = vault.getSessionSecret(secureKey);
+    return sessionValue !== null ? sessionValue : storage.getItem(key);
+};
+
 /** Reads and writes the secret sync config keys (`isSecretConfigKey`). Secrets are written
  *  `after-first-unlock`: background sync can run while the device is locked. */
 export const createSecureSyncConfigStore = ({ storage, secrets, vault }: SecureSyncConfigStoreDeps): SecureSyncConfigStore => {
