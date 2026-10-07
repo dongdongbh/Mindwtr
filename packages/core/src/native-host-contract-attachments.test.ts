@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { getAttachmentLinkEditText } from './attachment-editor-model';
 import { globalProgressTracker } from './attachment-progress';
 import { setLogger } from './logger';
-import type { AttachmentAvailabilityOutcome } from './mobile-attachment-availability';
+import { getAttachmentDownloadIdentity, type AttachmentAvailabilityOutcome } from './mobile-attachment-availability';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
 import type { NativeAttachmentOwner, NativeAttachmentsHost } from './native-host-contract-attachments';
 import { requestRowId, taskRevisionOf } from './native-request-receipts';
@@ -497,9 +497,9 @@ describe('native host contract: attachments, the list and the editor\'s helpers'
         try {
             const task = ok(host.getAttachmentList({ owner: { kind: 'task', taskId: 't1', attachments }, downloading: ['f1'] }));
             expect(task).toEqual({ canEdit: true, rows: [
-                { id: 'f1', kind: 'file', title: 'f1.pdf', missing: false, canDownload: false, downloading: true, editText: null, progress: null },
-                { id: 'r1', kind: 'file', title: 'r1.pdf', missing: true, canDownload: true, downloading: false, editText: null, progress: null },
-                { id: 'l1', kind: 'link', title: 'Docs', missing: false, canDownload: false, downloading: false, editText: getAttachmentLinkEditText(attachments[2]), progress: null },
+                { id: 'f1', kind: 'file', title: 'f1.pdf', missing: false, canDownload: false, downloading: true, downloadIdentity: getAttachmentDownloadIdentity(attachments[0]), editText: null, progress: null },
+                { id: 'r1', kind: 'file', title: 'r1.pdf', missing: true, canDownload: true, downloading: false, downloadIdentity: getAttachmentDownloadIdentity(attachments[1]), editText: null, progress: null },
+                { id: 'l1', kind: 'link', title: 'Docs', missing: false, canDownload: false, downloading: false, downloadIdentity: null, editText: getAttachmentLinkEditText(attachments[2]), progress: null },
             ] });
             const project = ok(host.getAttachmentList({ owner: { kind: 'project', projectId: 'p1' } }));
             expect(project.rows.map((row) => [row.id, row.progress, row.editText])).toEqual([['f1', null, null], ['r1', { percentage: 25 }, null], ['l1', null, null]]);
@@ -508,6 +508,27 @@ describe('native host contract: attachments, the list and the editor\'s helpers'
         }
         expect(host.getAttachmentList({ owner: { kind: 'task', taskId: 't1' } as never })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(host.getAttachmentList({ owner: { kind: 'project', projectId: 'missing' } })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+    });
+
+    it('projects the captured raw file identity without changing it for a Loading row or persisting display fields', async () => {
+        const { host, attachments } = await open();
+        const before = JSON.stringify(useTaskStore.getState()._tasksById.get('t1')?.attachments);
+        const owner: NativeAttachmentOwner = { kind: 'task', taskId: 't1', attachments };
+        const first = ok(host.getAttachmentList({ owner }));
+        const loading = ok(host.getAttachmentList({ owner, downloading: ['r1'] }));
+        expect(loading.rows.find((row) => row.id === 'r1')?.downloadIdentity)
+            .toBe(first.rows.find((row) => row.id === 'r1')?.downloadIdentity);
+        expect(loading.rows.find((row) => row.id === 'r1')?.downloading).toBe(true);
+        const changed = attachments.map((attachment) => attachment.id === 'r1'
+            ? { ...attachment, fileHash: 'new-content-generation' } : attachment);
+        const next = ok(host.getAttachmentList({ owner: { ...owner, attachments: changed } }));
+        expect(next.rows.find((row) => row.id === 'r1')?.downloadIdentity)
+            .not.toBe(first.rows.find((row) => row.id === 'r1')?.downloadIdentity);
+        expect(first.rows.find((row) => row.id === 'l1')?.downloadIdentity).toBeNull();
+        expect(ok(host.getAttachmentList({ owner: { kind: 'project', projectId: 'p1' } })).rows
+            .map((row) => row.downloadIdentity)).toEqual(first.rows.map((row) => row.downloadIdentity));
+        expect(JSON.stringify(useTaskStore.getState()._tasksById.get('t1')?.attachments)).toBe(before);
+        expect(useTaskStore.getState()._tasksById.get('t1')?.attachments?.some((attachment) => 'downloadIdentity' in attachment)).toBe(false);
     });
 
     it('checks the link sheet\'s text as React Native\'s sheet does while typing: the first line that is not a link', async () => {

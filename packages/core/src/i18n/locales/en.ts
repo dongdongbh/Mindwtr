@@ -431,6 +431,7 @@ export const en: Record<string, string> = {
         'attachments.addLink': 'Add link',
         'attachments.open': 'Open',
         'attachments.download': 'Download',
+        "attachments.finishDraftBeforeChanges": "Save or discard this draft before making other attachment changes.",
         'attachments.missing': 'Missing file',
         'attachments.downloadConflict': 'This attachment changed during download. Your local file was kept. Sync again to resolve the conflict.',
         'attachments.unrecoverable': 'This attachment is no longer available in synced storage. Its broken reference was removed.',

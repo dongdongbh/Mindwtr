@@ -412,6 +412,7 @@ export const huOverrides: Record<string, string> = {
     'attachments.addLink': 'Hivatkozás hozzáadása',
     'attachments.open': 'Megnyitás',
     'attachments.download': 'Letöltés',
+    "attachments.finishDraftBeforeChanges": "Mentsd vagy vesd el ezt a piszkozatot, mielőtt más mellékletmódosításokat végzel.",
     'attachments.missing': 'Hiányzó fájl',
     'attachments.downloadConflict': 'Ez a melléklet megváltozott letöltés közben. A helyi fájlja megmaradt. Szinkronizáljon újra az ütközés feloldásához.',
     'attachments.unrecoverable': 'Ez a melléklet már nem érhető el a szinkronizált tárhelyen. A törött hivatkozás eltávolításra került.',

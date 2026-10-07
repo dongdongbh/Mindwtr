@@ -460,6 +460,7 @@ export const zhHant: Record<string, string> = {
         'attachments.addLink': '添加鏈接',
         'attachments.open': '打開',
         'attachments.download': '下載',
+        "attachments.finishDraftBeforeChanges": "請先儲存或捨棄此草稿，再對附件進行其他變更。",
         'attachments.missing': '文件缺失',
         'attachments.downloadConflict': '此附件在下載期間發生了變更。本機檔案已保留。請再次同步以解決衝突。',
         'attachments.unrecoverable': '此附件已無法從同步儲存空間取得。已移除失效的參照。',

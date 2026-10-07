@@ -1006,6 +1006,28 @@ final class CoreModel: ObservableObject {
     private var taskFileImportClaim: TaskFileImportClaim?
     private var taskFileImportTask: Task<Void, Never>?
     private var taskFileImportAdmission = UUID()
+    private struct TaskAttachmentDownloadOwner {
+        let id: UUID
+        let host: CoreHost
+        let taskID: String
+        let attachmentID: String
+        let identity: String
+        let session: String
+        let admission: UUID
+        let requestID: String
+        var requestJSON: String? = nil
+        var dispatched = false
+    }
+    private var taskAttachmentDownloadOwner: TaskAttachmentDownloadOwner?
+    private var taskAttachmentDownloadTask: Task<Void, Never>?
+    private var taskAttachmentDownloadAdmission = UUID()
+    private var taskAttachmentDownloadUnconfirmedRequest: String?
+    @Published private(set) var taskAttachmentDownloadingID: String?
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    private var taskAttachmentDownloadTestThrowOnce = false
+    private var taskAttachmentDownloadTestDelayOnce = false
+    private var taskAttachmentDownloadTestMalformedOnce = false
+    #endif
     var taskFileImporterKind: TaskAttachmentPickerKind? { taskFileImportClaim?.kind }
     private enum TaskAttachmentImportSource {
         case file(URL)
@@ -2703,17 +2725,43 @@ final class CoreModel: ObservableObject {
         taskHasAttachmentOwner && [.interrupted, .blocked, .savedCleanup].contains(taskAttachmentState)
     }
 
-    var canAddTaskFile: Bool {
+    private var taskAttachmentActionReady: Bool {
         ready && taskPresented && !taskEditor.isEmpty && !taskEditor.flag("readOnly")
-            && !appLock.concealed && !busy && !retryNeeded && !taskRecoverySaving
+            && !appLock.concealed && !settingsSyncRestartRequired && !busy && !retryNeeded && !taskRecoverySaving
             && !taskAttachmentWorking && taskFileImporterID == nil && !taskFileImporterPresented && !taskLinkSheetActive
             && !taskAttachmentOpening && taskFileOpenPresentation == nil
             && !taskScheduleUpdating && !taskChecklistReadPending && taskChecklistWriteKind == nil
             && !taskPersonCreateOwed && !taskPersonCreateNeedsReview
-            && (taskAttachmentState == .none || (taskHasActiveAttachmentOwner && taskAttachmentState == .active))
+            && !taskSavePending && !taskReferenceOpening && taskSharePayload == nil
+            && taskAttachmentDownloadOwner == nil && taskAttachmentDownloadUnconfirmedRequest == nil
+    }
+
+    var canAddTaskFile: Bool {
+        taskAttachmentActionReady && (taskAttachmentState == .none
+            || (taskHasActiveAttachmentOwner && taskAttachmentState == .active
+                && [3, 4].contains(taskAttachmentSummary.number("version"))))
     }
 
     var canRemoveTaskFile: Bool { canAddTaskFile }
+
+    var taskAttachmentListChangesAllowed: Bool {
+        !taskHasActiveAttachmentOwner || [3, 4].contains(taskAttachmentSummary.number("version"))
+    }
+
+    var taskAttachmentChangesNeedSettlement: Bool {
+        taskHasActiveAttachmentOwner && (taskAttachmentSummary.number("version") == 5
+            || ([3, 4].contains(taskAttachmentSummary.number("version"))
+                && taskAttachmentRows.contains(where: { $0.flag("canDownload") })))
+    }
+
+    func canDownloadTaskAttachment(_ attachmentID: String) -> Bool {
+        taskAttachmentActionReady && taskChecklistLoaded && taskDestinationKind.isEmpty
+            && taskAttachmentRows.filter({ $0.text("id") == attachmentID }).count == 1
+            && taskAttachmentRows.contains(where: { $0.text("id") == attachmentID && $0.text("kind") == "file"
+                && $0.flag("canDownload") && !$0.flag("downloading") && ($0["downloadIdentity"] as? String)?.isEmpty == false })
+            && (taskAttachmentState == .none || (taskHasActiveAttachmentOwner && taskAttachmentState == .active
+                && taskAttachmentSummary.number("version") == 5))
+    }
 
     private func taskAttachmentClaimIsCurrent(_ claim: TaskFileImportClaim, requireGeneration: Bool = true) -> Bool {
         host === claim.host && ready && !appLock.concealed && taskPresented
@@ -2724,27 +2772,29 @@ final class CoreModel: ObservableObject {
 
     /// Informational inventory. Only the host decides whether this evidence
     /// permits a new editor, exact recovery, Save or Discard.
-    private func readTaskAttachmentInventory(_ currentHost: CoreHost, adoptEditor: Bool = false) async throws {
+    @discardableResult
+    private func readTaskAttachmentInventory(_ currentHost: CoreHost, adoptEditor: Bool = false,
+                                             ownedGuard: (() -> Bool)? = nil) async throws -> EditorDraftSnapshot? {
         let encoded = try await currentHost.readAttachmentDraft()
-        guard host === currentHost else { throw CancellationError() }
+        guard host === currentHost, ownedGuard?() != false else { throw CancellationError() }
         let summary: CoreObject
         if encoded == "null" { summary = [:] }
         else {
             summary = try decode(encoded)
             guard Set(summary.keys) == Set(["version", "status", "sessionID", "checkpoint", "operations", "discard"]),
-                  [1, 2, 3, 4].contains(summary.number("version")),
+                  [1, 2, 3, 4, 5].contains(summary.number("version")),
                   summary["operations"] is [CoreObject], !summary.text("sessionID").isEmpty else {
                 throw CocoaError(.coderReadCorrupt)
             }
         }
         let editor = try await currentHost.readEditorDraft()
-        guard host === currentHost else { throw CancellationError() }
+        guard host === currentHost, ownedGuard?() != false else { throw CancellationError() }
         taskAttachmentSummary = summary
         if summary.isEmpty { taskAttachmentState = .none }
         else if summary.object("discard").text("phase") == "detached" { taskAttachmentState = .discardedCleanup }
         else if !summary.object("discard").isEmpty { taskAttachmentState = .interrupted }
         else if summary.text("status") == "cleanupPending" { taskAttachmentState = .savedCleanup }
-        else if ![3, 4].contains(summary.number("version")) { taskAttachmentState = .blocked }
+        else if ![3, 4, 5].contains(summary.number("version")) { taskAttachmentState = .blocked }
         else if summary.text("status") != "active"
             || summary.objects("operations").contains(where: { $0.text("phase") != "checkpointed" }) {
             taskAttachmentState = .interrupted
@@ -2761,20 +2811,21 @@ final class CoreModel: ObservableObject {
         if !summary.isEmpty && editor == nil && taskAttachmentState != .discardedCleanup {
             taskRecoveryGateVisible = true
         }
+        return editor
     }
 
     private func adoptTaskAttachmentCheckpoint(_ currentHost: CoreHost, session: String, taskID: String,
-                                               expectedGeneration: Int? = nil) async throws {
+                                               expectedGeneration: Int? = nil, ownedGuard: (() -> Bool)? = nil) async throws {
         let snapshot = try await currentHost.readEditorDraft()
         guard host === currentHost, taskPresented, taskRecoverySession == session, viewedTaskID == taskID,
-              !appLock.concealed, !Task.isCancelled,
+              !appLock.concealed, !Task.isCancelled, ownedGuard?() != false,
               let snapshot, snapshot.sessionID == session, snapshot.taskID == taskID,
               expectedGeneration == nil || snapshot.generation == expectedGeneration else {
             throw CancellationError()
         }
-        try await readTaskAttachmentInventory(currentHost)
+        try await readTaskAttachmentInventory(currentHost, ownedGuard: ownedGuard)
         guard host === currentHost, taskPresented, taskRecoverySession == session, viewedTaskID == taskID,
-              !appLock.concealed, !Task.isCancelled, taskAttachmentSummary.text("sessionID") == session,
+              !appLock.concealed, !Task.isCancelled, ownedGuard?() != false, taskAttachmentSummary.text("sessionID") == session,
               let checkpoint = try? JSONDecoder().decode(EditorDraftSnapshot.self,
                 from: Data(try json(taskAttachmentSummary.object("checkpoint")).utf8)), checkpoint == snapshot else {
             throw CancellationError()
@@ -2790,7 +2841,169 @@ final class CoreModel: ObservableObject {
         taskRecoveryCheckpointedGeneration = snapshot.generation
         taskRecoveryCheckpointError = nil
         taskRecoveryHydrating = false
-        try await refreshTaskAttachmentRows()
+        try await refreshTaskAttachmentRows(ownedGuard: ownedGuard)
+    }
+
+    func downloadTaskAttachment(_ attachmentID: String) {
+        guard canDownloadTaskAttachment(attachmentID), let currentHost = host,
+              let row = taskAttachmentRows.first(where: { $0.text("id") == attachmentID }),
+              let identity = row["downloadIdentity"] as? String, !identity.isEmpty else { return }
+        let owner = TaskAttachmentDownloadOwner(id: UUID(), host: currentHost, taskID: viewedTaskID,
+            attachmentID: attachmentID, identity: identity, session: taskRecoverySession,
+            admission: taskAttachmentDownloadAdmission, requestID: UUID().uuidString.lowercased())
+        observeDiagnosticsConcealment()
+        taskAttachmentDownloadOwner = owner
+        taskAttachmentDownloadingID = attachmentID
+        taskAttachmentWorking = true
+        taskAttachmentError = nil
+        taskAttachmentOpenError = nil
+        busy = true
+        taskAttachmentDownloadTask = Task { await performTaskAttachmentDownload(owner) }
+    }
+
+    // Existing background/conceal/close paths call cancelTaskFileImport. They
+    // revoke this delivery too, while the awaited native owner keeps busy.
+    private func cancelTaskAttachmentDownload() {
+        guard taskAttachmentDownloadOwner != nil else { return }
+        taskAttachmentDownloadAdmission = UUID()
+        taskAttachmentDownloadTask?.cancel()
+    }
+
+    private func taskAttachmentDownloadCurrent(_ owner: TaskAttachmentDownloadOwner,
+                                                requireIdentity: Bool = true) -> Bool {
+        let selected = taskAttachmentRows.filter { $0.text("id") == owner.attachmentID }
+        let identity = selected.first?["downloadIdentity"] as? String
+        return host === owner.host && taskAttachmentDownloadOwner?.id == owner.id
+            && taskAttachmentDownloadAdmission == owner.admission && !Task.isCancelled
+            && ready && !appLock.concealed && !settingsSyncRestartRequired
+            && foregroundSyncSceneActive && UIApplication.shared.applicationState == .active
+            && taskPresented && viewedTaskID == owner.taskID && taskRecoverySession == owner.session
+            && (!requireIdentity || (selected.count == 1 && identity.map({ $0.utf8.elementsEqual(owner.identity.utf8) }) == true))
+    }
+
+    private func validateTaskAttachmentDownloadReply(_ encoded: String, owner: TaskAttachmentDownloadOwner,
+                                                     generation: Int) throws -> (status: String, generation: Int) {
+        guard encoded.utf8.count <= 64 * 1024 else { throw CocoaError(.coderReadCorrupt) }
+        let reply = try decode(encoded)
+        guard Set(reply.keys) == Set(["version", "status", "requestId", "sessionID", "generation", "attachmentId"]),
+              let version = reply["version"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(), version.doubleValue == 1,
+              let resultGeneration = reply["generation"] as? NSNumber, CFGetTypeID(resultGeneration) != CFBooleanGetTypeID(),
+              resultGeneration.doubleValue.isFinite, resultGeneration.doubleValue.rounded(.down) == resultGeneration.doubleValue,
+              resultGeneration.doubleValue > 0, resultGeneration.doubleValue <= 9_007_199_254_740_991,
+              let requestID = reply["requestId"] as? String, requestID.utf8.elementsEqual(owner.requestID.utf8),
+              let session = reply["sessionID"] as? String, session.utf8.elementsEqual(owner.session.utf8),
+              let attachment = reply["attachmentId"] as? String, attachment.utf8.elementsEqual(owner.attachmentID.utf8),
+              let status = reply["status"] as? String,
+              ["draftAvailable", "draftUnrecoverable", "unavailable", "generation-conflict"].contains(status),
+              resultGeneration.intValue == generation + (["draftAvailable", "draftUnrecoverable"].contains(status) ? 1 : 0) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return (status, resultGeneration.intValue)
+    }
+
+    private func performTaskAttachmentDownload(_ owner: TaskAttachmentDownloadOwner) async {
+        defer {
+            if taskAttachmentDownloadOwner?.id == owner.id {
+                taskAttachmentDownloadOwner = nil
+                taskAttachmentDownloadTask = nil
+                taskAttachmentDownloadingID = nil
+                if host === owner.host {
+                    taskRecoverySaving = false
+                    taskAttachmentWorking = false
+                    finishOperation()
+                }
+            }
+        }
+        let current = { [self] in taskAttachmentDownloadCurrent(owner) }
+        let scope = { [self] in taskAttachmentDownloadCurrent(owner, requireIdentity: false) }
+        do {
+            try await resolveTaskEditorInputs()
+            guard current() else { return }
+            try await flushTaskChecklistInputs(id: owner.taskID, session: taskChecklistSession)
+            guard current() else { return }
+            taskRecoveryOwn(attachments: true)
+            checkpointTaskDraft(force: true)
+            await flushTaskDraftCheckpoint()
+            guard current(), taskRecoveryProtected, taskAttachmentCheckpointFailed == nil,
+                  let snapshot = taskRecoverySnapshot, snapshot.sessionID == owner.session,
+                  snapshot.taskID == owner.taskID, snapshot.generation > 0,
+                  snapshot.generation < 9_007_199_254_740_991 else { return }
+            try await refreshTaskAttachmentRows(ownedGuard: current)
+            guard current(), taskRecoveryGeneration == snapshot.generation,
+                  taskAttachmentRows.contains(where: { $0.text("id") == owner.attachmentID && $0.flag("canDownload")
+                    && !$0.flag("downloading") }),
+                  taskAttachmentState == .none || (taskHasActiveAttachmentOwner && taskAttachmentState == .active
+                    && taskAttachmentSummary.number("version") == 5) else { return }
+            let request = try json(["version": 1, "requestId": owner.requestID, "sessionID": owner.session,
+                "generation": snapshot.generation, "attachmentId": owner.attachmentID, "identity": owner.identity])
+            guard request.utf8.count <= 64 * 1024 else { throw CocoaError(.coderInvalidValue) }
+            taskAttachmentDownloadOwner?.requestJSON = request
+            taskAttachmentDownloadOwner?.dispatched = true
+            taskAttachmentDownloadUnconfirmedRequest = request
+            taskRecoverySaving = true
+            let encoded: String
+            do {
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                if taskAttachmentDownloadTestThrowOnce {
+                    taskAttachmentDownloadTestThrowOnce = false
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                #endif
+                var result = try await owner.host.downloadTaskAttachmentV5(requestJSON: request)
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                if taskAttachmentDownloadTestDelayOnce {
+                    taskAttachmentDownloadTestDelayOnce = false
+                    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { continuation.resume() }
+                    }
+                }
+                if taskAttachmentDownloadTestMalformedOnce {
+                    taskAttachmentDownloadTestMalformedOnce = false
+                    result = "{\"version\":1,\"status\":\"draftAvailable\"}"
+                }
+                #endif
+                encoded = result
+            } catch {
+                requireSettingsSyncRestart(owner.host)
+                if host === owner.host, taskRecoverySession == owner.session, viewedTaskID == owner.taskID { taskAttachmentState = .interrupted }
+                return
+            }
+            let reply = try validateTaskAttachmentDownloadReply(encoded, owner: owner, generation: snapshot.generation)
+            guard current(), taskRecoveryGeneration == snapshot.generation else {
+                requireSettingsSyncRestart(owner.host)
+                return
+            }
+            if ["draftAvailable", "draftUnrecoverable"].contains(reply.status) {
+                try await adoptTaskAttachmentCheckpoint(owner.host, session: owner.session, taskID: owner.taskID,
+                    expectedGeneration: reply.generation, ownedGuard: scope)
+                guard scope(), taskAttachmentSummary.number("version") == 5, taskAttachmentState == .active else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+            } else {
+                let actual = try await readTaskAttachmentInventory(owner.host, ownedGuard: current)
+                guard current(), let actual, actual.sessionID == snapshot.sessionID, actual.taskID == snapshot.taskID,
+                      actual.generation == snapshot.generation, actual.payloadJSON.utf8.elementsEqual(snapshot.payloadJSON.utf8),
+                      taskAttachmentSummary.isEmpty || (taskAttachmentSummary.number("version") == 5
+                        && taskAttachmentState == .active
+                        && taskAttachmentSummary.object("checkpoint").number("generation") == snapshot.generation) else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                try await refreshTaskAttachmentRows(ownedGuard: current)
+                guard current() else { throw CancellationError() }
+            }
+            taskAttachmentDownloadUnconfirmedRequest = nil
+            if reply.status == "draftUnrecoverable" { taskAttachmentOpenError = label("attachments.unrecoverable") }
+            else if reply.status == "generation-conflict" { taskAttachmentOpenError = label("attachments.downloadConflict") }
+            else if reply.status == "unavailable" { taskAttachmentOpenError = label("attachments.missing") }
+        } catch {
+            guard host === owner.host else { return }
+            if taskAttachmentDownloadOwner?.dispatched == true {
+                // A valid native ACK followed by a failed inventory read is still
+                // an unknown App adoption. Keep the request; never replay a new one.
+                requireSettingsSyncRestart(owner.host)
+                if taskRecoverySession == owner.session, viewedTaskID == owner.taskID { taskAttachmentState = .interrupted }
+            } else if scope() { taskAttachmentError = error.localizedDescription }
+        }
     }
 
     private func beginTaskAttachmentOwner(_ currentHost: CoreHost, importAdmission: UUID? = nil) async throws {
@@ -2871,6 +3084,7 @@ final class CoreModel: ObservableObject {
     }
 
     func cancelTaskFileImport() {
+        cancelTaskAttachmentDownload()
         taskFileImportAdmission = UUID()
         taskFileImporterID = nil
         taskFileImporterPresented = false
@@ -3024,7 +3238,7 @@ final class CoreModel: ObservableObject {
                 let discard = summary.object("discard")
                 if !discard.isEmpty {
                     let reply: String
-                    if [3, 4].contains(summary.number("version")) {
+                    if [3, 4, 5].contains(summary.number("version")) {
                         reply = try await currentHost.finishAttachmentDraftDiscardV3(expectedSession: session, requestId: discard.text("requestId"))
                     } else {
                         reply = try await currentHost.finishAttachmentDraftDiscard(expectedSession: session, requestId: discard.text("requestId"))
@@ -3038,7 +3252,7 @@ final class CoreModel: ObservableObject {
                         taskRecoveryGateVisible = taskRecoverySnapshot != nil || taskRecoveryCorrupt
                     }
                 } else {
-                    if [3, 4].contains(summary.number("version")) {
+                    if [3, 4, 5].contains(summary.number("version")) {
                         _ = try await currentHost.recoverAttachmentDraftV3(expectedSession: session)
                     } else {
                         _ = try await currentHost.recoverAttachmentDraft(expectedSession: session)
@@ -3711,6 +3925,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func invalidateTaskAttachmentOpen() {
+        cancelTaskAttachmentDownload()
         // Stop the original owner synchronously before publishing its removal.
         taskAudioPlayer?.retire()
         taskAudioPlayer = nil
@@ -3795,11 +4010,13 @@ final class CoreModel: ObservableObject {
         taskAttachmentOpenError = label("settings.feedback.actionFailed")
     }
 
-    private func refreshTaskAttachmentRows() async throws {
+    private func refreshTaskAttachmentRows(ownedGuard: (() -> Bool)? = nil) async throws {
         let id = viewedTaskID, session = taskRecoverySession
+        let currentHost = host
         let current = try json(taskAttachments)
         let result = try await query("taskAttachmentList", [try json(["owner": taskAttachmentOwner()])])
-        guard taskPresented, viewedTaskID == id, taskRecoverySession == session,
+        guard ownedGuard?() != false else { throw CancellationError() }
+        guard host === currentHost, taskPresented, viewedTaskID == id, taskRecoverySession == session,
               try json(taskAttachments) == current,
               let rows = result["rows"] as? [CoreObject] else { return }
         taskAttachmentRows = rows
@@ -3807,7 +4024,7 @@ final class CoreModel: ObservableObject {
 
     func openTaskLinkSheet(_ attachmentID: String? = nil) {
         guard taskPresented, !taskEditor.flag("readOnly"), !busy, !retryNeeded, !taskRecoverySaving,
-              !taskAttachmentOpening,
+              !taskAttachmentOpening, taskAttachmentListChangesAllowed,
               taskLinkSheet.isEmpty else { return }
         var sheet: CoreObject = ["id": UUID().uuidString.lowercased(), "text": ""]
         if let attachmentID {
@@ -3838,7 +4055,7 @@ final class CoreModel: ObservableObject {
 
     func submitTaskLinkSheet() async {
         guard taskPresented, taskLinkSheetActive, !taskLinkSubmitting, !taskEditor.flag("readOnly"),
-              !taskAttachmentOpening,
+              !taskAttachmentOpening, taskAttachmentListChangesAllowed,
               !busy, !retryNeeded, !taskRecoverySaving else { return }
         taskLinkSubmitting = true
         defer { taskLinkSubmitting = false }
@@ -3874,7 +4091,7 @@ final class CoreModel: ObservableObject {
 
     func removeTaskLink(_ attachmentID: String) async {
         guard taskPresented, !taskEditor.flag("readOnly"), !busy, !retryNeeded, !taskRecoverySaving,
-              !taskAttachmentOpening,
+              !taskAttachmentOpening, taskAttachmentListChangesAllowed,
               taskLinkSheet.isEmpty,
               taskAttachmentRows.contains(where: { $0.text("id") == attachmentID && $0.text("kind") == "link" }) else { return }
         let id = viewedTaskID, session = taskRecoverySession
@@ -4077,6 +4294,9 @@ final class CoreModel: ObservableObject {
                     projectAttachmentDownloadTestThrowOnce = arguments.contains("--native-project-download-command-throw-once")
                     projectAttachmentDownloadTestDelayOnce = arguments.contains("--native-project-download-delay-reply-once")
                     projectAttachmentDownloadTestMalformedOnce = arguments.contains("--native-project-download-malformed-reply-once")
+                    taskAttachmentDownloadTestThrowOnce = arguments.contains("--native-task-download-command-throw-once")
+                    taskAttachmentDownloadTestDelayOnce = arguments.contains("--native-task-download-delay-reply-once")
+                    taskAttachmentDownloadTestMalformedOnce = arguments.contains("--native-task-download-malformed-reply-once")
                     host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
                         deviceStorage: (directory, "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased()),
                         isolatedTestID: identifier)
@@ -19923,7 +20143,7 @@ final class CoreModel: ObservableObject {
             let reply: String
             if !discard.isEmpty {
                 requestID = discard.text("requestId")
-                if [3, 4].contains(summary.number("version")) {
+                if [3, 4, 5].contains(summary.number("version")) {
                     reply = try await currentHost.finishAttachmentDraftDiscardV3(expectedSession: session, requestId: requestID)
                 } else { reply = try await currentHost.finishAttachmentDraftDiscard(expectedSession: session, requestId: requestID) }
             } else {
@@ -19938,7 +20158,7 @@ final class CoreModel: ObservableObject {
                         "generation": checkpoint.number("generation")])
                     taskAttachmentDiscardRequest = request
                 }
-                if [3, 4].contains(summary.number("version")) { reply = try await currentHost.discardAttachmentDraftV3(requestJSON: request) }
+                if [3, 4, 5].contains(summary.number("version")) { reply = try await currentHost.discardAttachmentDraftV3(requestJSON: request) }
                 else { reply = try await currentHost.discardAttachmentDraft(requestJSON: request) }
             }
             let value = try decode(reply)
@@ -20055,7 +20275,7 @@ final class CoreModel: ObservableObject {
         defer { finishOperation() }
         do {
             if owned {
-                guard [3, 4].contains(taskAttachmentSummary.number("version")),
+                guard [3, 4, 5].contains(taskAttachmentSummary.number("version")),
                       taskAttachmentSummary.object("discard").isEmpty,
                       taskAttachmentState != .savedCleanup else { throw CocoaError(.coderReadCorrupt) }
                 _ = try await host.recoverAttachmentDraftV3(expectedSession: snapshot.sessionID)
@@ -21003,7 +21223,7 @@ final class CoreModel: ObservableObject {
               taskChecklistWriteKind == nil, !taskChecklistReadPending else { return }
         guard !taskAttachmentWorking, taskFileImporterID == nil else { return }
         let ownedSave = taskHasActiveAttachmentOwner
-        guard !ownedSave || (taskAttachmentState == .active && [3, 4].contains(taskAttachmentSummary.number("version"))) else {
+        guard !ownedSave || (taskAttachmentState == .active && [3, 4, 5].contains(taskAttachmentSummary.number("version"))) else {
             taskAttachmentError = "Finish the interrupted attachment change before saving."
             return
         }
@@ -22224,6 +22444,8 @@ final class CoreModel: ObservableObject {
                     "recurrence.weekdayMonFri", "recurrence.ordinal.first", "recurrence.ordinal.second",
                     "recurrence.ordinal.third", "recurrence.ordinal.fourth", "recurrence.ordinal.last",
                     "attachments.title", "attachments.addLink", "attachments.addFile", "attachments.addPhoto", "attachments.remove",
+                    "attachments.download", "attachments.missing", "attachments.downloadConflict", "attachments.unrecoverable",
+                    "attachments.finishDraftBeforeChanges", "common.loading",
                     "attachments.linkPlaceholder", "attachments.linkBatchHint", "common.edit", "common.ok"]
         keys += options.objects("recurrences").map { $0.text("labelKey") }
         keys += (options["statuses"] as? [String] ?? []).map { "status." + $0 }

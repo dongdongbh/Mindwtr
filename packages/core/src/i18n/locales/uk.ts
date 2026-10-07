@@ -411,6 +411,7 @@ export const ukOverrides: Record<string, string> = {
     "attachments.addLink": "Додайте посилання",
     "attachments.open": "відкритий",
     "attachments.download": "Завантажити",
+    "attachments.finishDraftBeforeChanges": "Збережіть або відхиліть цю чернетку, перш ніж вносити інші зміни у вкладення.",
     "attachments.missing": "Відсутній файл",
     "attachments.downloadConflict": "Цей вкладений файл змінено під час завантаження. Ваш локальний файл збережено. Синхронізуйте ще раз, щоб вирішити конфлікт.",
     "attachments.unrecoverable": "Цей вкладений файл більше не доступний у синхронізованому сховищі. Його пошкоджене посилання було видалено.",

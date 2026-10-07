@@ -421,6 +421,7 @@ export const svOverrides: Record<string, string> = {
         'attachments.addLink': 'Lägg till länk',
         'attachments.open': 'Öppna',
         'attachments.download': 'Ladda ned',
+        "attachments.finishDraftBeforeChanges": "Spara eller kasta detta utkast innan du gör andra ändringar av bilagor.",
         'attachments.missing': 'Saknad fil',
         'attachments.downloadConflict': 'Den här bilagan ändrades under hämtningen. Den lokala filen behölls. Synkronisera igen för att lösa konflikten.',
         'attachments.unrecoverable': 'Den här bilagan är inte längre tillgänglig i det synkroniserade lagringsutrymmet. Den trasiga referensen togs bort.',

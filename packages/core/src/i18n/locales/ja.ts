@@ -441,6 +441,7 @@ export const jaOverrides: Record<string, string> = {
         'attachments.addLink': 'リンクを追加',
         'attachments.open': '開く',
         'attachments.download': 'ダウンロード',
+        "attachments.finishDraftBeforeChanges": "添付ファイルをさらに変更する前に、この下書きを保存するか破棄してください。",
         'attachments.missing': 'ファイルが見つかりません',
         'attachments.downloadConflict': 'ダウンロード中にこの添付ファイルが変更されました。ローカルのファイルは保持されています。競合を解決するには、もう一度同期してください。',
         'attachments.unrecoverable': 'この添付ファイルは同期ストレージで利用できなくなりました。無効な参照は削除されました。',

@@ -323,6 +323,7 @@ export const arOverrides: Record<string, string> = {
         'attachments.addLink': 'إضافة رابط',
         'attachments.open': 'يفتح',
         'attachments.download': 'تحميل',
+        "attachments.finishDraftBeforeChanges": "احفظ هذه المسودة أو تجاهلها قبل إجراء تغييرات أخرى على المرفقات.",
         'attachments.missing': 'ملف مفقود',
         'attachments.downloadConflict': 'تغيّر هذا المرفق أثناء التنزيل. تم الاحتفاظ بملفك المحلي. زامِن مرة أخرى لحل التعارض.',
         'attachments.unrecoverable': 'لم يعد هذا المرفق متاحًا في مساحة التخزين المتزامنة. تمت إزالة مرجعه المعطّل.',

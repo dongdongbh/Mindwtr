@@ -467,6 +467,7 @@ export const koOverrides: Record<string, string> = {
         'attachments.addLink': '링크 추가',
         'attachments.open': '열기',
         'attachments.download': '다운로드',
+        "attachments.finishDraftBeforeChanges": "첨부 파일을 추가로 변경하기 전에 이 초안을 저장하거나 버리세요.",
         'attachments.missing': '누락된 파일',
         'attachments.downloadConflict': '다운로드 중에 이 첨부 파일이 변경되었습니다. 로컬 파일은 유지되었습니다. 충돌을 해결하려면 다시 동기화하세요.',
         'attachments.unrecoverable': '이 첨부 파일은 더 이상 동기화된 저장소에서 사용할 수 없습니다. 끊어진 참조가 제거되었습니다.',

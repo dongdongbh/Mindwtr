@@ -543,6 +543,198 @@ final class FoundationUITests: XCTestCase {
         task350ColdNotes(app, library: library, text: final)
     }
 
+    private let task364AttachmentID = "9592d24c-d0f6-4281-8d2f-386bc9de9988"
+
+    private func task364Title(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+    }
+
+    private func task364RevealTitle(_ app: XCUIApplication) {
+        let title = task364Title(app), scroll = app.scrollViews["task-editor-scroll"]
+        // Reuse the existing topward gutter gesture, with the editor's actual
+        // type-agnostic title lookup (the control may be a multiline text view).
+        for _ in 0..<8 {
+            if title.exists && title.isHittable && scroll.frame.contains(title.frame) { return }
+            let frame = scroll.frame.intersection(app.frame)
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: frame.minX + 4, dy: frame.minY + frame.height * 0.25))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(
+                    CGVector(dx: frame.minX + 4, dy: frame.minY + frame.height * 0.8)))
+        }
+        XCTAssertTrue(title.exists && title.isHittable)
+    }
+
+    private func task364OpenEditor(_ app: XCUIApplication) {
+        boardEnabled(app.buttons["Task364 Remote file"], timeout: 30)
+        app.buttons["Task364 Remote file"].tap(); boardTap(app, "task-mode-edit")
+        boardEnabled(task364Title(app), timeout: 30)
+    }
+
+    private func task364Details(_ app: XCUIApplication) {
+        let details = app.buttons["task-editor-section-details"]
+        task364RevealTitle(app)
+        revealPagedElement(app, details, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        if details.value as? String == "Expand" { details.tap() }
+    }
+
+    private func task364EditDraft(_ app: XCUIApplication, title: String, notes: String, checklist: String) {
+        task364RevealTitle(app)
+        replaceProjectNotesText(task364Title(app), with: title)
+        task364Details(app)
+        let note = app.textViews["task-editor-note"], item = app.textFields["task-checklist-input-0"]
+        revealPagedElement(app, note, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        replaceProjectNotesText(note, with: notes)
+        revealPagedElement(app, item, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        replaceProjectNotesText(item, with: checklist)
+    }
+
+    private func task364Download(_ app: XCUIApplication) -> XCUIElement {
+        let button = app.buttons["task-attachment-download-" + task364AttachmentID]
+        revealPagedElement(app, button, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        boardEnabled(button)
+        XCTAssertGreaterThanOrEqual(button.frame.height, 44 - 0.01)
+        XCTAssertEqual(button.label, "Download Task364 remote.txt")
+        return button
+    }
+
+    private func task364NoFilePresentation(_ app: XCUIApplication) {
+        XCTAssertFalse(app.buttons["task-attachment-preview-done"].exists)
+        XCTAssertFalse(app.otherElements["task-audio-player"].exists)
+        // The Task editor itself has a Close label, with task-view-close ID.
+        // Check the system viewer identifier rather than that shared label.
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier == %@", "Close")).firstMatch.exists)
+    }
+
+    private func task364KnownOffRefusal(_ app: XCUIApplication) {
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 15))
+        XCTAssertTrue(alert.staticTexts["Missing file"].exists)
+        let dismiss = alert.buttons["task-attachment-open-dismiss"].firstMatch
+        boardEnabled(dismiss); dismiss.tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
+        boardEnabled(app.buttons["task-attachment-download-" + task364AttachmentID], timeout: 30)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        task364NoFilePresentation(app)
+    }
+
+    private func task364AssertDraft(_ app: XCUIApplication, title: String, notes: String, checklist: String) {
+        task364RevealTitle(app)
+        boardEnabled(task364Title(app), timeout: 30)
+        XCTAssertEqual(task364Title(app).value as? String, title)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        task364Details(app)
+        let note = app.textViews["task-editor-note"], item = app.textFields["task-checklist-input-0"]
+        revealPagedElement(app, note, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        XCTAssertEqual(note.value as? String, notes)
+        revealPagedElement(app, item, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        XCTAssertEqual(item.value as? String, checklist)
+        _ = task364Download(app)
+        task364NoFilePresentation(app)
+    }
+
+    private func task364ColdResume(_ app: XCUIApplication, library: String, title: String, notes: String, checklist: String) {
+        app.terminate(); app.launchArguments = task350Arguments(library); app.launch()
+        boardEnabled(task364Title(app), timeout: 30)
+        task364AssertDraft(app, title: title, notes: notes, checklist: checklist)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+    }
+
+    func testTaskDownloadKnownOffRefusalPreservesDirtyDraftThroughKeepColdResumeAndSave() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = "bfa04966-0c33-4c1a-bd13-6f29f47e79a7"
+        let title = "Task364 Off draft saved", notes = "Task364 Notes before Off refusal", checklist = "Task364 checklist before Download"
+        // Root stages a saved mutable Task with one real RN remote-only file,
+        // stored Off, no credential, local bytes, or owned attachment history.
+        app.launchArguments = task350Arguments(library); app.launch(); defer { app.terminate() }
+        task364OpenEditor(app)
+        task364EditDraft(app, title: title, notes: notes, checklist: checklist)
+        task364Download(app).tap(); task364KnownOffRefusal(app)
+        task364AssertDraft(app, title: title, notes: notes, checklist: checklist)
+        task364RevealTitle(app)
+        boardTap(app, "task-view-close"); boardTap(app, "task-editor-keep-for-later")
+        boardEnabled(app.buttons["Task364 Remote file"], timeout: 30)
+        XCTAssertFalse(app.buttons[title].exists, "Download and Keep must not save the descriptive draft")
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task364ColdResume(app, library: library, title: title, notes: notes, checklist: checklist)
+        task364RevealTitle(app); boardTap(app, "task-editor-save")
+        boardEnabled(app.buttons[title], timeout: 30)
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons[title], timeout: 30)
+        XCTAssertFalse(app.buttons["task-recovery-open"].exists)
+        app.buttons[title].tap(); boardTap(app, "task-mode-edit")
+        task364Details(app)
+        let note = app.textViews["task-editor-note"], item = app.textFields["task-checklist-input-0"]
+        revealPagedElement(app, note, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        XCTAssertEqual(note.value as? String, notes)
+        revealPagedElement(app, item, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        XCTAssertEqual(item.value as? String, checklist)
+        _ = task364Download(app) // Off refusal never claims installed availability.
+        task364NoFilePresentation(app)
+    }
+
+    func testTaskDownloadUnknownThrowAndMalformedReplyRequireColdRestartWithExactDraft() {
+        continueAfterFailure = false
+        for (library, hook, title) in [
+            ("de10cc6a-2119-4b93-a967-38b0a7d297bd", "--native-task-download-command-throw-once", "Task364 unknown throw draft"),
+            ("82674b1c-b846-4256-beda-201d3447e3b7", "--native-task-download-malformed-reply-once", "Task364 malformed reply draft")
+        ] {
+            let app = XCUIApplication(), notes = title + " exact Notes", checklist = title + " checklist"
+            app.launchArguments = task350Arguments(library, hook: hook); app.launch()
+            task364OpenEditor(app)
+            task364EditDraft(app, title: title, notes: notes, checklist: checklist)
+            task364Download(app).tap()
+            // Throw runs before native dispatch; malformed substitutes only
+            // after the real Off refusal. Neither path may retry a fresh UUID.
+            task322RestartGate(app)
+            for id in ["task-view-close", "task-editor-save", "task-attachment-download-" + task364AttachmentID,
+                       "task-attachment-open-" + task364AttachmentID, "task-attachment-add-file", "task-attachment-add-link"] {
+                XCTAssertFalse(app.buttons[id].exists)
+            }
+            XCTAssertFalse(task364Title(app).exists)
+            task364NoFilePresentation(app)
+            task364ColdResume(app, library: library, title: title, notes: notes, checklist: checklist)
+            task364RevealTitle(app)
+            boardTap(app, "task-view-close"); boardTap(app, "task-editor-discard")
+            boardEnabled(app.buttons["Task364 Remote file"], timeout: 30)
+            XCTAssertFalse(app.buttons[title].exists)
+            XCTAssertFalse(app.buttons["task-recovery-open"].exists)
+            app.terminate(); app.launch()
+            boardEnabled(app.buttons["Task364 Remote file"], timeout: 30)
+            XCTAssertFalse(app.buttons["task-recovery-open"].exists)
+            app.terminate()
+        }
+    }
+
+    func testTaskDownloadDelayedOffReplyRetainsBusyThroughObservedBackgroundUntilRecoveryGate() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = "523421f1-03da-4018-8276-02f4853ad656"
+        let title = "Task364 delayed reply draft", notes = title + " exact Notes", checklist = title + " checklist"
+        app.launchArguments = task350Arguments(library, hook: "--native-task-download-delay-reply-once")
+        app.launch(); defer { app.terminate() }
+        task364OpenEditor(app)
+        task364EditDraft(app, title: title, notes: notes, checklist: checklist)
+        let download = task364Download(app), began = ProcessInfo.processInfo.systemUptime
+        download.tap()
+        let loading = app.descendants(matching: .any).matching(identifier: "task-attachment-downloading-" + task364AttachmentID).firstMatch
+        XCTAssertTrue(loading.waitForExistence(timeout: 10))
+        XCTAssertFalse(download.isEnabled)
+        XCTAssertFalse(app.buttons["task-attachment-open-" + task364AttachmentID].isEnabled)
+        XCTAssertFalse(app.buttons["task-editor-save"].isEnabled)
+        XCTAssertFalse(app.buttons["task-view-close"].isEnabled)
+        // This holds App delivery after a real Off reply, not a network task.
+        task344BackgroundAndActivate(app)
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - began, 8,
+            "Actual background and reactivation must occur inside the reply-delay window")
+        XCTAssertTrue(loading.exists, "Cancel cannot release the retained owner before its awaited reply drains")
+        XCTAssertFalse(app.buttons["task-editor-save"].isEnabled)
+        XCTAssertFalse(app.buttons["task-view-close"].isEnabled)
+        task322RestartGate(app)
+        XCTAssertFalse(app.alerts.firstMatch.exists, "A revoked reply must not publish the stale Off error")
+        task364NoFilePresentation(app)
+        task364ColdResume(app, library: library, title: title, notes: notes, checklist: checklist)
+    }
+
     private func task147Mode(_ app: XCUIApplication, _ value: String) {
         task144Open(app)
         let option = app.buttons["gtd-taskOpenMode-" + value]

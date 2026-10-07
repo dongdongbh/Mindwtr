@@ -418,6 +418,7 @@ export const daOverrides: Record<string, string> = {
     'attachments.addLink': 'Tilføj link',
     'attachments.open': 'Åbn',
     'attachments.download': 'Hent',
+    "attachments.finishDraftBeforeChanges": "Gem eller kassér denne kladde, før du foretager andre ændringer af vedhæftninger.",
     'attachments.missing': 'Manglende fil',
     'attachments.downloadConflict':
         'Den vedhæftede fil blev ændret under overførslen. Din lokale fil blev bevaret. Synkroniser igen for at løse konflikten.',

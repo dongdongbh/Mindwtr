@@ -328,6 +328,7 @@ export const hiOverrides: Record<string, string> = {
         'attachments.addLink': 'लिंक जोड़ें',
         'attachments.open': 'खुला',
         'attachments.download': 'डाउनलोड करना',
+        "attachments.finishDraftBeforeChanges": "अटैचमेंट में अन्य बदलाव करने से पहले इस ड्राफ़्ट को सहेजें या छोड़ दें।",
         'attachments.missing': 'गुम फ़ाइल',
         'attachments.downloadConflict': 'डाउनलोड के दौरान यह अटैचमेंट बदल गया। आपकी स्थानीय फ़ाइल सुरक्षित रखी गई। टकराव सुलझाने के लिए फिर से सिंक करें।',
         'attachments.unrecoverable': 'यह अटैचमेंट अब सिंक किए गए स्टोरेज में उपलब्ध नहीं है। इसका टूटा हुआ संदर्भ हटा दिया गया।',

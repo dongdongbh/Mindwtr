@@ -421,6 +421,7 @@ export const faOverrides: Record<string, string> = {
         'attachments.addLink': 'افزودن پیوند',
         'attachments.open': 'باز کردن',
         'attachments.download': 'دانلود',
+        "attachments.finishDraftBeforeChanges": "پیش از تغییرات دیگر در پیوست‌ها، این پیش‌نویس را ذخیره یا کنار بگذارید.",
         'attachments.missing': 'فایل موجود نیست',
         'attachments.downloadConflict': 'این پیوست هنگام دانلود تغییر کرد. فایل محلی شما حفظ شد. برای رفع تعارض دوباره همگام‌سازی کنید.',
         'attachments.unrecoverable': 'این پیوست دیگر در فضای ذخیره‌سازی همگام‌شده در دسترس نیست. ارجاع خراب آن حذف شد.',

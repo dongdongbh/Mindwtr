@@ -373,6 +373,7 @@ export const deOverrides: Record<string, string> = {
         'attachments.addLink': 'Verknüpfung hinzufügen',
         'attachments.open': 'Öffnen',
         'attachments.download': 'Herunterladen',
+        "attachments.finishDraftBeforeChanges": "Speichere oder verwirf diesen Entwurf, bevor du weitere Änderungen an Anhängen vornimmst.",
         'attachments.missing': 'Fehlende Datei',
         'attachments.downloadConflict': 'Dieser Anhang wurde während des Downloads geändert. Die lokale Datei wurde beibehalten. Synchronisiere erneut, um den Konflikt zu lösen.',
         'attachments.unrecoverable': 'Dieser Anhang ist im synchronisierten Speicher nicht mehr verfügbar. Der ungültige Verweis wurde entfernt.',

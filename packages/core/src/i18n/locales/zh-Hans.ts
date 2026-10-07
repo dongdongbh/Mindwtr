@@ -460,6 +460,7 @@ export const zhHans: Record<string, string> = {
         'attachments.addLink': '添加链接',
         'attachments.open': '打开',
         'attachments.download': '下载',
+        "attachments.finishDraftBeforeChanges": "请先保存或放弃此草稿，再对附件进行其他更改。",
         'attachments.missing': '文件缺失',
         'attachments.downloadConflict': '此附件在下载期间发生了更改。本地文件已保留。请再次同步以解决冲突。',
         'attachments.unrecoverable': '此附件已无法从同步存储中获取。已移除失效的引用。',

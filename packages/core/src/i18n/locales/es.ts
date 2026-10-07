@@ -412,6 +412,7 @@ export const esOverrides: Record<string, string> = {
 'attachments.addLink': "Añadir enlace",
 'attachments.open': "Abrir",
 'attachments.download': "Descargar",
+"attachments.finishDraftBeforeChanges": "Guarda o descarta este borrador antes de hacer otros cambios en los archivos adjuntos.",
 'attachments.missing': "Falta el archivo",
 'attachments.downloadConflict': "Este archivo adjunto cambió durante la descarga. Se conservó el archivo local. Vuelve a sincronizar para resolver el conflicto.",
 'attachments.unrecoverable': "Este archivo adjunto ya no está disponible en el almacenamiento sincronizado. Se eliminó su referencia rota.",

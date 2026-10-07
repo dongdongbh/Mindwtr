@@ -421,6 +421,7 @@ export const csOverrides: Record<string, string> = {
         'attachments.addLink': 'Přidat odkaz',
         'attachments.open': 'Otevřít',
         'attachments.download': 'Stáhnout',
+        "attachments.finishDraftBeforeChanges": "Před dalšími změnami příloh tento koncept uložte nebo zahoďte.",
         'attachments.missing': 'Chybějící soubor',
         'attachments.downloadConflict': 'Tato příloha se během stahování změnila. Místní soubor byl zachován. Pro vyřešení konfliktu znovu synchronizujte.',
         'attachments.unrecoverable': 'Tato příloha už není dostupná v synchronizovaném úložišti. Její nefunkční odkaz byl odstraněn.',

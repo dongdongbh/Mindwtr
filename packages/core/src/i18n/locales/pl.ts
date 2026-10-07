@@ -328,6 +328,7 @@ export const plOverrides: Record<string, string> = {
         'attachments.addLink': 'Dodaj link',
         'attachments.open': 'Otwórz',
         'attachments.download': 'Pobierz',
+        "attachments.finishDraftBeforeChanges": "Zapisz lub odrzuć ten szkic przed wprowadzeniem innych zmian w załącznikach.",
         'attachments.missing': 'Brakujący plik',
         'attachments.downloadConflict': 'Ten załącznik zmienił się podczas pobierania. Plik lokalny został zachowany. Zsynchronizuj ponownie, aby rozwiązać konflikt.',
         'attachments.unrecoverable': 'Ten załącznik nie jest już dostępny w synchronizowanej pamięci. Usunięto jego nieprawidłowe odwołanie.',
