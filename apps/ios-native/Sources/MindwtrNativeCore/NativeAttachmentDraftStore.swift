@@ -870,6 +870,328 @@ struct NativeAttachmentDraftStore {
         }
     }
 
+
+    /// Selected history5 structural evidence; deliberately excluded from VersionedRecord/ordinary boot.
+    struct AvailabilityRecord: Codable, Sendable, Equatable {
+        let version: Int
+        let session: Session
+        let operations: [AvailabilityOperation]
+        let discard: Discard?
+        let checkpointAdvance: CheckpointAdvance?
+        init(version: Int = 5, session: Session, operations: [AvailabilityOperation], discard: Discard? = nil,
+             checkpointAdvance: CheckpointAdvance? = nil) {
+            self.version = version; self.session = session; self.operations = operations
+            self.discard = discard; self.checkpointAdvance = checkpointAdvance
+        }
+        private enum CodingKeys: String, CodingKey, CaseIterable { case version, session, operations, discard, checkpointAdvance }
+        init(from decoder: Decoder) throws {
+            let c = try NativeAttachmentDraftStore.container(CodingKeys.self, from: decoder)
+            version = try c.decode(Int.self, forKey: .version)
+            try NativeAttachmentDraftStore.require(version == 5)
+            session = try c.decode(Session.self, forKey: .session)
+            operations = try c.decode([AvailabilityOperation].self, forKey: .operations)
+            discard = try c.decodeIfPresent(Discard.self, forKey: .discard)
+            checkpointAdvance = try c.decodeIfPresent(CheckpointAdvance.self, forKey: .checkpointAdvance)
+        }
+        func encode(to encoder: Encoder) throws {
+            try NativeAttachmentDraftStore.require(version == 5)
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(version, forKey: .version); try c.encode(session, forKey: .session)
+            try c.encode(operations, forKey: .operations); try c.encode(discard, forKey: .discard)
+            try c.encode(checkpointAdvance, forKey: .checkpointAdvance)
+        }
+    }
+    enum AvailabilityResource: Codable, Sendable, Equatable {
+        case none
+        // Published is a generation descriptor here, never creation/deletion authority.
+        case borrowed(proof: Published)
+        case owned(source: Source, stage: Stage?, filled: Filled?, published: Published?)
+        private enum CodingKeys: String, CodingKey { case kind, proof, source, stage, filled, published }
+        private enum Kind: String, Codable { case none, borrowed, owned }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let fields = try decoder.container(keyedBy: Field.self)
+            let kind = try c.decode(Kind.self, forKey: .kind)
+            let expected: Set<String>
+            switch kind {
+            case .none: expected = ["kind"]
+            case .borrowed: expected = ["kind", "proof"]
+            case .owned: expected = ["kind", "source", "stage", "filled", "published"]
+            }
+            try NativeAttachmentDraftStore.require(Set(fields.allKeys.map(\.stringValue)) == expected)
+            switch kind {
+            case .none: self = .none
+            case .borrowed: self = .borrowed(proof: try c.decode(Published.self, forKey: .proof))
+            case .owned: self = .owned(source: try c.decode(Source.self, forKey: .source),
+                stage: try c.decodeIfPresent(Stage.self, forKey: .stage), filled: try c.decodeIfPresent(Filled.self, forKey: .filled),
+                published: try c.decodeIfPresent(Published.self, forKey: .published))
+            }
+        }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case .none: try c.encode(Kind.none, forKey: .kind)
+            case .borrowed(let proof): try c.encode(Kind.borrowed, forKey: .kind); try c.encode(proof, forKey: .proof)
+            case .owned(let source, let stage, let filled, let published):
+                try c.encode(Kind.owned, forKey: .kind); try c.encode(source, forKey: .source)
+                try c.encode(stage, forKey: .stage); try c.encode(filled, forKey: .filled); try c.encode(published, forKey: .published)
+            }
+        }
+    }
+    struct AvailabilityOperation: Codable, Sendable, Equatable {
+        let requestId: String
+        let requestJSON: String
+        let attachmentId: String
+        let identity: String
+        let phase: Phase
+        let reason: Reason?
+        let before: EditorDraftSnapshot
+        let after: EditorDraftSnapshot
+        let preparedJSON: String
+        let targetURI: String?
+        let resource: AvailabilityResource
+        let replyJSON: String?
+        init(requestId: String, requestJSON: String, attachmentId: String, identity: String, phase: Phase,
+             reason: Reason? = nil, before: EditorDraftSnapshot, after: EditorDraftSnapshot, preparedJSON: String,
+             targetURI: String?, resource: AvailabilityResource, replyJSON: String? = nil) {
+            self.requestId = requestId; self.requestJSON = requestJSON; self.attachmentId = attachmentId; self.identity = identity
+            self.phase = phase; self.reason = reason; self.before = before; self.after = after; self.preparedJSON = preparedJSON
+            self.targetURI = targetURI; self.resource = resource; self.replyJSON = replyJSON
+        }
+        private enum CodingKeys: String, CodingKey, CaseIterable {
+            case requestId, requestJSON, attachmentId, identity, phase, reason, before, after, preparedJSON, targetURI, resource, replyJSON
+        }
+        init(from decoder: Decoder) throws {
+            let c = try NativeAttachmentDraftStore.container(CodingKeys.self, from: decoder)
+            requestId = try c.decode(String.self, forKey: .requestId); requestJSON = try c.decode(String.self, forKey: .requestJSON)
+            attachmentId = try c.decode(String.self, forKey: .attachmentId); identity = try c.decode(String.self, forKey: .identity)
+            phase = try c.decode(Phase.self, forKey: .phase); reason = try c.decodeIfPresent(Reason.self, forKey: .reason)
+            before = try NativeAttachmentDraftStore.snapshot(c, forKey: .before); after = try NativeAttachmentDraftStore.snapshot(c, forKey: .after)
+            preparedJSON = try c.decode(String.self, forKey: .preparedJSON); targetURI = try c.decodeIfPresent(String.self, forKey: .targetURI)
+            resource = try c.decode(AvailabilityResource.self, forKey: .resource); replyJSON = try c.decodeIfPresent(String.self, forKey: .replyJSON)
+        }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(requestId, forKey: .requestId); try c.encode(requestJSON, forKey: .requestJSON)
+            try c.encode(attachmentId, forKey: .attachmentId); try c.encode(identity, forKey: .identity)
+            try c.encode(phase, forKey: .phase); try c.encode(reason, forKey: .reason)
+            try c.encode(before, forKey: .before); try c.encode(after, forKey: .after); try c.encode(preparedJSON, forKey: .preparedJSON)
+            try c.encode(targetURI, forKey: .targetURI); try c.encode(resource, forKey: .resource); try c.encode(replyJSON, forKey: .replyJSON)
+        }
+    }
+    private struct AvailabilityRequest: Decodable {
+        let version: Int, generation: Int
+        let requestId: String, sessionID: String, attachmentId: String, identity: String
+        private enum CodingKeys: String, CodingKey, CaseIterable { case version, requestId, sessionID, generation, attachmentId, identity }
+        init(from decoder: Decoder) throws {
+            let c = try NativeAttachmentDraftStore.container(CodingKeys.self, from: decoder)
+            version = try c.decode(Int.self, forKey: .version); generation = try c.decode(Int.self, forKey: .generation)
+            requestId = try c.decode(String.self, forKey: .requestId); sessionID = try c.decode(String.self, forKey: .sessionID)
+            attachmentId = try c.decode(String.self, forKey: .attachmentId); identity = try c.decode(String.self, forKey: .identity)
+        }
+    }
+    private struct AvailabilityFrozen: Decodable {
+        let version: Int
+        let kind: String, taskID: String, requestId: String, attachmentId: String, identity: String
+        let beforePayloadJSON: String, afterPayloadJSON: String, status: String, resolvedAttachmentJSON: String
+        private enum CodingKeys: String, CodingKey, CaseIterable {
+            case version, kind, taskID, requestId, attachmentId, identity, beforePayloadJSON, afterPayloadJSON, status, resolvedAttachmentJSON
+        }
+        init(from decoder: Decoder) throws {
+            let c = try NativeAttachmentDraftStore.container(CodingKeys.self, from: decoder)
+            version = try c.decode(Int.self, forKey: .version); kind = try c.decode(String.self, forKey: .kind)
+            taskID = try c.decode(String.self, forKey: .taskID); requestId = try c.decode(String.self, forKey: .requestId)
+            attachmentId = try c.decode(String.self, forKey: .attachmentId); identity = try c.decode(String.self, forKey: .identity)
+            beforePayloadJSON = try c.decode(String.self, forKey: .beforePayloadJSON); afterPayloadJSON = try c.decode(String.self, forKey: .afterPayloadJSON)
+            status = try c.decode(String.self, forKey: .status); resolvedAttachmentJSON = try c.decode(String.self, forKey: .resolvedAttachmentJSON)
+        }
+    }
+    private static func sameAvailabilityIdentity(_ a: AvailabilityOperation, _ b: AvailabilityOperation) -> Bool {
+        equal(a.requestId, b.requestId) && equal(a.requestJSON, b.requestJSON) && equal(a.attachmentId, b.attachmentId)
+            && equal(a.identity, b.identity) && same(a.before, b.before) && same(a.after, b.after)
+            && equal(a.preparedJSON, b.preparedJSON) && sameOptionalString(a.targetURI, b.targetURI)
+    }
+    private static func retainedResource(_ old: AvailabilityResource, in new: AvailabilityResource) throws {
+        switch (old, new) {
+        case (.none, .none): break
+        case (.borrowed(let a), .borrowed(let b)): try require(a == b)
+        case (.owned(let a, let stage, let filled, let published), .owned(let b, let nextStage, let nextFilled, let nextPublished)):
+            try require(sameSource(a, b))
+            if let stage { try require(nextStage.map { sameStage(stage, $0) } == true) }
+            if let filled { try require(nextFilled == filled) }
+            if let published { try require(nextPublished == published) }
+        default: throw NativeAttachmentDraftStoreError.corrupt
+        }
+    }
+    private static func sameAvailabilityOperation(_ a: AvailabilityOperation, _ b: AvailabilityOperation) -> Bool {
+        guard sameAvailabilityIdentity(a, b), a.phase == b.phase, a.reason == b.reason,
+              sameOptionalString(a.replyJSON, b.replyJSON) else { return false }
+        switch (a.resource, b.resource) {
+        case (.none, .none): return true
+        case (.borrowed(let a), .borrowed(let b)): return a == b
+        case (.owned(let a, let stage, let filled, let published), .owned(let b, let otherStage, let otherFilled, let otherPublished)):
+            let exactStage: Bool
+            switch (stage, otherStage) {
+            case (nil, nil): exactStage = true
+            case (let a?, let b?): exactStage = sameStage(a, b)
+            default: exactStage = false
+            }
+            return sameSource(a, b) && exactStage && filled == otherFilled && published == otherPublished
+        default: return false
+        }
+    }
+    private static func validate(_ record: AvailabilityRecord) throws {
+        let session = record.session
+        try require(record.version == 5 && record.operations.count <= 128)
+        try validate(Record(version: 2, session: session, operations: [], discard: record.discard, checkpointAdvance: record.checkpointAdvance))
+        var ids = Set<String>(), prior: EditorDraftSnapshot?, rawBytes = 0
+        func account(_ texts: [String]) throws {
+            for text in texts { try require(text.utf8.count <= maximumBytes - rawBytes); rawBytes += text.utf8.count }
+        }
+        func accountSnapshot(_ snapshot: EditorDraftSnapshot) throws { try account([snapshot.sessionID, snapshot.taskID, snapshot.payloadJSON]) }
+        try account([session.sessionID, session.taskID]); try accountSnapshot(session.checkpoint)
+        for (index, op) in record.operations.enumerated() {
+            let next = op.before.generation.addingReportingOverflow(1)
+            try require(uuid(op.requestId) && ids.insert(op.requestId).inserted
+                && !op.attachmentId.isEmpty && op.attachmentId.utf16.count <= 500 && op.attachmentId.utf8.count <= 2000
+                && !op.identity.isEmpty && op.identity.utf8.count <= 1_000_000
+                && object(op.requestJSON, limit: 64 * 1024) && object(op.preparedJSON, limit: 2 * 1024 * 1024)
+                && valid(op.before, safeGeneration: true) && valid(op.after, safeGeneration: true)
+                && !next.overflow && op.after.generation == next.partialValue
+                && equal(op.before.sessionID, session.sessionID) && equal(op.after.sessionID, session.sessionID)
+                && equal(op.before.taskID, session.taskID) && equal(op.after.taskID, session.taskID))
+            if let prior { try require(op.before.generation >= prior.generation && (op.before.generation != prior.generation || same(op.before, prior))) }
+            if index < record.operations.count - 1 { try require(op.phase == .checkpointed && op.reason == nil) }
+            if op.phase == .checkpointed { try require(op.reason == nil) }
+            try require((op.replyJSON != nil) == (op.phase.rank >= Phase.resultDurable.rank))
+            let request: AvailabilityRequest, frozen: AvailabilityFrozen
+            do {
+                request = try JSONDecoder().decode(AvailabilityRequest.self, from: Data(op.requestJSON.utf8))
+                frozen = try JSONDecoder().decode(AvailabilityFrozen.self, from: Data(op.preparedJSON.utf8))
+            } catch { throw NativeAttachmentDraftStoreError.corrupt }
+            try require(request.version == 1 && equal(request.requestId, op.requestId) && equal(request.sessionID, op.before.sessionID)
+                && request.generation == op.before.generation && equal(request.attachmentId, op.attachmentId) && equal(request.identity, op.identity)
+                && frozen.version == 1 && frozen.kind == "prepared-file-availability" && equal(frozen.taskID, session.taskID)
+                && equal(frozen.requestId, op.requestId) && equal(frozen.attachmentId, op.attachmentId) && equal(frozen.identity, op.identity)
+                && equal(frozen.beforePayloadJSON, op.before.payloadJSON) && equal(frozen.afterPayloadJSON, op.after.payloadJSON)
+                && object(frozen.resolvedAttachmentJSON, limit: 1_000_000))
+            let resolved = try JSONSerialization.jsonObject(with: Data(frozen.resolvedAttachmentJSON.utf8)) as! [String: Any]
+            try require((resolved["id"] as? String).map { equal($0, op.attachmentId) } == true && resolved["kind"] as? String == "file")
+            try account([op.requestId, op.requestJSON, op.attachmentId, op.identity, op.preparedJSON]); try accountSnapshot(op.before); try accountSnapshot(op.after)
+            switch op.resource {
+            case .none:
+                try require(frozen.status == "unrecoverable" && op.targetURI == nil
+                    && [.intent, .resultDurable, .checkpointed].contains(op.phase))
+            case .borrowed(let proof):
+                try require(digest(proof.sha256) && size(proof.size) && identity(proof.identity) && identity(proof.directoryIdentity)
+                    && [.intent, .resultDurable, .checkpointed].contains(op.phase))
+                try validateAvailable(frozen, resolved: resolved, targetURI: op.targetURI, sha256: proof.sha256)
+                try account([proof.sha256, proof.identity, proof.directoryIdentity])
+            case .owned(let source, let stage, let filled, let published):
+                let structural = Operation(requestId: op.requestId, requestJSON: op.requestJSON, phase: op.phase, reason: op.reason,
+                    before: op.before, after: op.after, preparedJSON: op.preparedJSON, targetURI: op.targetURI ?? "",
+                    source: source, stage: stage, filled: filled, published: published, replyJSON: op.replyJSON)
+                try validate(Record(version: 2, session: Session(sessionID: session.sessionID, taskID: session.taskID,
+                    state: .active, checkpoint: op.phase == .checkpointed ? op.after : op.before), operations: [structural]))
+                try validateAvailable(frozen, resolved: resolved, targetURI: op.targetURI, sha256: source.sha256)
+                try account([source.sourceURI, source.sha256, source.identity, source.cacheRootIdentity, source.parentIdentity])
+                if let stage { try account([stage.uri, stage.identity, stage.directoryIdentity, stage.privateDirectoryIdentity]) }
+                if let filled { try account([filled.sha256, filled.identity]) }
+                if let published { try account([published.sha256, published.identity, published.directoryIdentity]) }
+            }
+            if let targetURI = op.targetURI { try account([targetURI]) }
+            if let reply = op.replyJSON { try require(object(reply, limit: 64 * 1024)); try account([reply]) }
+            prior = op.after
+        }
+        if let last = record.operations.last {
+            if last.phase == .checkpointed {
+                try require(session.checkpoint.generation >= last.after.generation
+                    && (session.checkpoint.generation != last.after.generation || same(session.checkpoint, last.after)))
+            } else { try require(same(session.checkpoint, last.before)) }
+        }
+        if let advance = record.checkpointAdvance { try require(record.operations.allSatisfy { $0.phase == .checkpointed }); try accountSnapshot(advance.before); try accountSnapshot(advance.after) }
+        if let discard = record.discard {
+            try require(ids.insert(discard.requestId).inserted); try account([discard.requestId, discard.requestJSON]); try accountSnapshot(discard.expected)
+            if let reply = discard.replyJSON { try account([reply]) }
+        }
+    }
+    private static func validateAvailable(_ frozen: AvailabilityFrozen, resolved: [String: Any], targetURI: String?, sha256: String) throws {
+        guard let targetURI, let hash = resolved["fileHash"] as? String else { throw NativeAttachmentDraftStoreError.corrupt }
+        // Only validated ASCII SHA256 may ignore case; retained metadata text stays exact.
+        try require(frozen.status == "available" && uri(targetURI) && (resolved["uri"] as? String).map { equal($0, targetURI) } == true
+            && hash.utf8.count == 64 && hash.utf8.allSatisfy { (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }
+            && hash.lowercased() == sha256)
+    }
+    private static func retained(_ previous: AvailabilityRecord, in current: AvailabilityRecord) throws {
+        try require(previous.version == current.version && equal(previous.session.sessionID, current.session.sessionID)
+            && equal(previous.session.taskID, current.session.taskID) && current.operations.count >= previous.operations.count
+            && current.operations.count <= previous.operations.count + 1)
+        if previous.checkpointAdvance != nil || current.checkpointAdvance != nil {
+            try require(previous.operations.count == current.operations.count
+                && zip(previous.operations, current.operations).allSatisfy { sameAvailabilityOperation($0.0, $0.1) })
+            try retainedAdvance(Record(version: 2, session: previous.session, operations: [], discard: previous.discard, checkpointAdvance: previous.checkpointAdvance),
+                in: Record(version: 2, session: current.session, operations: [], discard: current.discard, checkpointAdvance: current.checkpointAdvance))
+            return
+        }
+        for (old, new) in zip(previous.operations, current.operations) {
+            try require(sameAvailabilityIdentity(old, new) && new.phase.rank >= old.phase.rank)
+            try retainedResource(old.resource, in: new.resource)
+            if let reply = old.replyJSON { try require(new.replyJSON.map { equal(reply, $0) } == true) }
+        }
+        if current.operations.count > previous.operations.count {
+            try require(previous.session.state == .active && current.session.state == .active && previous.discard == nil && current.discard == nil
+                && previous.operations.allSatisfy { $0.phase == .checkpointed }
+                && same(current.operations[previous.operations.count].before, previous.session.checkpoint))
+        } else if previous.operations.isEmpty { try require(same(previous.session.checkpoint, current.session.checkpoint)) }
+        if !same(previous.session.checkpoint, current.session.checkpoint) {
+            guard previous.operations.count == current.operations.count, let old = previous.operations.last, let new = current.operations.last else {
+                throw NativeAttachmentDraftStoreError.corrupt
+            }
+            try require(old.phase != .checkpointed && new.phase == .checkpointed && same(current.session.checkpoint, new.after))
+        }
+        if let old = previous.discard {
+            guard let new = current.discard else { throw NativeAttachmentDraftStoreError.corrupt }
+            try require(equal(old.requestId, new.requestId) && equal(old.requestJSON, new.requestJSON) && same(old.expected, new.expected)
+                && (old.phase == .decided || new.phase == .detached))
+            if let reply = old.replyJSON { try require(new.replyJSON.map { equal(reply, $0) } == true) }
+        }
+    }
+    struct AvailabilitySnapshot: Sendable {
+        let record: AvailabilityRecord
+        let bytes: Data
+        let device: UInt64
+        let inode: UInt64
+        func matches(_ other: AvailabilitySnapshot) -> Bool { device == other.device && inode == other.inode && bytes == other.bytes }
+    }
+    func readAvailabilitySnapshot() throws -> AvailabilitySnapshot? {
+        guard let read = try readBytes(bound: true) else { return nil }
+        let record: AvailabilityRecord
+        do {
+            try Self.require(read.links == 1)
+            record = try JSONDecoder().decode(AvailabilityRecord.self, from: read.data)
+            try Self.validate(record)
+        } catch { throw NativeAttachmentDraftStoreError.corrupt }
+        return AvailabilitySnapshot(record: record, bytes: read.data, device: read.device, inode: read.inode)
+    }
+    func readAvailability() throws -> AvailabilityRecord? { try readAvailabilitySnapshot()?.record }
+    private func encodedForWrite(_ record: AvailabilityRecord) throws -> Data {
+        let previous = try readAvailability()
+        try Self.validate(record)
+        if let previous { try Self.retained(previous, in: record) }
+        let data: Data
+        do { data = try JSONEncoder().encode(record) } catch { throw NativeAttachmentDraftStoreError.corrupt }
+        try Self.require(data.count <= Self.maximumBytes)
+        return data
+    }
+    func preflightAvailability(_ record: AvailabilityRecord) throws { _ = try encodedForWrite(record) }
+    func writeAvailabilityAcknowledged(_ record: AvailabilityRecord) throws -> AvailabilitySnapshot {
+        let data = try encodedForWrite(record)
+        do { try DurableFile.write(data, to: url, privateDraft: true) } catch { throw NativeAttachmentDraftStoreError.io }
+        guard let binding = try readAvailabilitySnapshot(), binding.bytes == data else { throw NativeAttachmentDraftStoreError.corrupt }
+        return binding
+    }
+    static func availabilityFingerprint(_ record: AvailabilityRecord) throws -> String { try validate(record); return try canonicalFingerprint(record) }
+
     enum VersionedRecord: Sendable { case legacy(Record), mixed(MixedRecord) }
     struct VersionedSnapshot: Sendable {
         let record: VersionedRecord

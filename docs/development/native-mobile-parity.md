@@ -2269,3 +2269,11 @@ Shared availability proofs now preserve the complete editor payload while applyi
 Validation: 268 lineage/proof tests and 249 Save/Resume/Discard tests passed, along with core typecheck, scoped lint and the full embedded-host boot gates. Node VM checks exercised actual SQLite Save, Resume, cancellation Undo and retirement routing. Existing complete-writer normalization of `pendingContentUpload:false` to an absent member is unchanged across old and new selectors; stored raw attachments remain unchanged during preparation and Resume. Independent source review found no blocking issues.
 
 Task Download remains disabled in the native App. Native recovery must bind newly published files to exact installer stage/publication receipts and preserve pre-existing files reused by a download. Native history decoding, physical ownership, interrupted publication recovery, port admission and device validation remain pending before activation.
+
+### iOS Task download recovery record (2026-10-07, Task357)
+
+The selected native availability record now distinguishes terminal metadata-only resolution, a borrowed existing file, and a newly owned publication. It binds the frozen shared proof to the exact editor snapshots and retained native receipts, forbids promotion from borrowed to owned, and preserves acknowledged receipt fields through retries. Acknowledgments include the sidecar bytes and filesystem identity; replacing a sidecar with identical bytes does not preserve its owner. Corrupt, opposite-version and unsafe sidecars remain untouched.
+
+Validation: 152 Mac tests passed, including 134 historical Store controls and 18 new cases. The 18 new cases also passed on the physical iPhone 12. Tests cover strict decoding, receipt and phase continuity, checkpoint/Discard progression, escaped-byte bounds, and inode/hardlink replacement. Independent review found no blocking issues. The receipts in these Store tests are structural fixtures, not proof of installer ownership.
+
+Ordinary boot still rejects this new record version, and Task Download remains disabled. Shared-policy recomputation, native Save/Resume/Discard consumers, physical publication recovery and download admission must be complete before activation.
