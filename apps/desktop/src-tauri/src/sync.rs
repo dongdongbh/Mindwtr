@@ -3746,16 +3746,38 @@ fn cloud_put_json_blocking(
     let token = token.unwrap_or_default();
     let payload = serde_json::to_string_pretty(data)
         .map_err(|e| format!("Failed to encode Cloud payload: {e}"))?;
-    let payload_len = payload.len();
     let client = cloud_blocking_http_client(config.proxy_url.as_deref(), allow_insecure_http)?;
-    let response = cloud_request_builder(&client, reqwest::Method::PUT, &url, &token)
+    cloud_put_payload(&client, &url, &token, payload)
+}
+
+/// Same ceiling as core's `MAX_ERROR_BODY_BYTES`: an error body is read only this far.
+const CLOUD_ERROR_BODY_MAX_BYTES: usize = 64 * 1024;
+
+fn cloud_put_payload(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    token: &str,
+    payload: String,
+) -> Result<RemoteJsonWriteResult, String> {
+    let payload_len = payload.len();
+    let response = cloud_request_builder(client, reqwest::Method::PUT, url, token)
         .header("Content-Type", "application/json")
         .body(payload)
         .send()
         .map_err(|e| format_reqwest_send_error("Cloud request failed", &e))?;
 
     if response.status() == reqwest::StatusCode::PAYLOAD_TOO_LARGE {
-        let body = response.text().unwrap_or_default();
+        use std::io::Read;
+        let mut body = Vec::new();
+        let _ = response
+            .take(CLOUD_ERROR_BODY_MAX_BYTES as u64 + 1)
+            .read_to_end(&mut body);
+        // Over the cap: not the cloud server's small JSON answer, so no limit is named.
+        let body = if body.len() > CLOUD_ERROR_BODY_MAX_BYTES {
+            String::new()
+        } else {
+            String::from_utf8_lossy(&body).into_owned()
+        };
         return Err(cloud_data_too_large_message(payload_len, &body));
     }
     if !response.status().is_success() {
@@ -4043,6 +4065,45 @@ mod tests {
             cloud_data_too_large_message(1234, "<html>nginx</html>"),
             "Cloud PUT failed (413): the sync data (1234 bytes) is larger than the server's limit. Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server (and any proxy body limit)."
         );
+    }
+
+    #[test]
+    fn cloud_put_reads_a_413_body_up_to_the_error_body_cap() {
+        use std::io::{Read, Write};
+
+        fn serve_413(body: String) -> (String, std::thread::JoinHandle<()>) {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind cloud test server");
+            let address = listener.local_addr().expect("server address");
+            let handle = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept cloud request");
+                let mut request = [0u8; 4096];
+                let _ = stream.read(&mut request);
+                let response = format!(
+                    "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                let _ = stream.write_all(response.as_bytes());
+            });
+            (format!("http://{address}/v1/data"), handle)
+        }
+
+        let client = cloud_blocking_http_client(None, true).expect("client");
+        let refusal = r#"{"error":"Payload too large: the limit is 2000000 bytes","limitBytes":2000000}"#;
+        let (url, server) = serve_413(refusal.to_string());
+        let error = cloud_put_payload(&client, &url, "", "{}".to_string()).expect_err("413");
+        server.join().expect("server thread");
+        assert_eq!(error, cloud_data_too_large_message(2, refusal));
+        assert!(error.contains("(2000000 bytes)"), "unexpected error: {error}");
+
+        // An error body over the cap is not read whole; the message falls back to no limit.
+        let oversized = format!(
+            r#"{{"limitBytes":2000000,"pad":"{}"}}"#,
+            "x".repeat(CLOUD_ERROR_BODY_MAX_BYTES)
+        );
+        let (url, server) = serve_413(oversized);
+        let error = cloud_put_payload(&client, &url, "", "{}".to_string()).expect_err("413");
+        server.join().expect("server thread");
+        assert_eq!(error, cloud_data_too_large_message(2, ""));
     }
 
     #[test]
