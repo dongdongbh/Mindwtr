@@ -586,7 +586,7 @@ jobs:
       matrix: ${{ fromJSON(needs.changes.outputs.ios_matrix) }}
     runs-on: ${{ matrix.runner }}
     name: iOS SwiftUI client and JavaScriptCore host (${{ matrix.label }})
-    # The full Swift host suite takes about 42 minutes before the isolated app build.
+    # Recent full Swift host suites take about 64 minutes before the isolated app build.
     # Keep the job allowance separate from individual test and performance limits.
     timeout-minutes: 75
     steps:

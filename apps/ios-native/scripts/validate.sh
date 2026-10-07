@@ -14,7 +14,13 @@ export MINDWTR_CORE_BUNDLE="$app/Resources/core-host.js"
 export MINDWTR_CRYPTO_TEST_BUNDLE="$app/.build/crypto-test-host.js"
 export MINDWTR_ATTACHMENT_UPLOAD_TEST_BUNDLE="$app/.build/attachment-upload-test-host.js"
 export TZ=America/New_York
-swift test --package-path "$app" --jobs 2
+# CI pipes this output through tee. Flush each XCTest line so a timeout does
+# not leave a buffered, misleading last test in the uploaded evidence.
+test_command=(swift test --package-path "$app" --jobs 2)
+if command -v stdbuf >/dev/null 2>&1; then
+  test_command=(stdbuf -oL -eL "${test_command[@]}")
+fi
+"${test_command[@]}"
 xcodebuild -project "$app/MindwtrNative.xcodeproj" -scheme MindwtrNative \
   -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath "$app/.build/DerivedData" -jobs 2 CODE_SIGNING_ALLOWED=NO build
