@@ -89,7 +89,7 @@ final class NativeForegroundSyncTests: XCTestCase {
         let model = try XCTUnwrap(opened["value"] as? [String: Any])
         let backend = try XCTUnwrap(model["backend"] as? [String: Any])
         let options = try XCTUnwrap(backend["options"] as? [[String: Any]])
-        XCTAssertEqual(options.compactMap { $0["option"] as? String }, ["off", "webdav"])
+        XCTAssertEqual(options.compactMap { $0["option"] as? String }, ["off", "webdav", "selfhosted"])
         XCTAssertFalse(state.recorded.isEmpty, "Shared settings read the existing secret adapter")
         XCTAssertTrue(state.recorded.allSatisfy { $0 == "get" })
         XCTAssertEqual(try Data(contentsOf: manifest), before)

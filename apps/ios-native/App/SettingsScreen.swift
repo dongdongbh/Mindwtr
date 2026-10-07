@@ -23,7 +23,7 @@ struct SettingsScreen: View {
     @State private var areaDeleteConfirmAnswered = false
     @State private var syncReloadConfirmPresented = false
     @State private var syncBackendPending: String?
-    private enum SyncField: Hashable { case url, username, password, encryption(String) }
+    private enum SyncField: Hashable { case url, username, password, token, encryption(String) }
     @FocusState private var syncField: SyncField?
 
     var body: some View {
@@ -267,8 +267,9 @@ struct SettingsScreen: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
                     }
-                    if model.settingsSync.object("panel").text("kind") == "webdav" { syncWebDavContent }
-                    if !model.settingsSync.object("encryption").isEmpty { syncEncryptionContent }
+                    if ["webdav", "selfhosted"].contains(model.settingsSync.object("panel").text("kind")) { syncRemoteContent }
+                    if model.settingsSync.object("panel").text("kind") != "selfhosted",
+                       !model.settingsSync.object("encryption").isEmpty { syncEncryptionContent }
                     if let failure = model.settingsSyncError {
                         Text(failure).rnFont(14).foregroundStyle(palette.danger)
                             .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-error")
@@ -348,10 +349,11 @@ struct SettingsScreen: View {
         }
     }
 
-    private var syncWebDavContent: some View {
+    private var syncRemoteContent: some View {
         let panel = model.settingsSync.object("panel")
+        let webdav = panel.text("kind") == "webdav"
         return VStack(alignment: .leading, spacing: 16) {
-            Text(panel.text("title")).rnFont(17, .semibold).accessibilityAddTraits(.isHeader)
+            if webdav { Text(panel.text("title")).rnFont(17, .semibold).accessibilityAddTraits(.isHeader) }
             VStack(alignment: .leading, spacing: 8) {
                 Text(panel.object("url").text("label")).rnFont(14, .semibold)
                 TextField(panel.object("url").text("placeholder"), text: Binding(
@@ -360,8 +362,14 @@ struct SettingsScreen: View {
                     .focused($syncField, equals: .url).rnFont(16).padding(12).frame(minHeight: 44)
                     .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
                     .accessibilityLabel(panel.object("url").text("label")).accessibilityIdentifier("sync-url")
-                Text(panel.object("url").text("hint")).rnFont(12).foregroundStyle(palette.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if webdav {
+                    Text(panel.object("url").text("hint")).rnFont(12).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(panel.object("url")["hints"] as? [String] ?? [], id: \.self) {
+                        Text($0).rnFont(12).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 if let invalid = panel.object("url")["invalid"] as? String, !invalid.isEmpty {
                     Text(invalid).rnFont(13).foregroundStyle(palette.danger)
                         .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-url-invalid")
@@ -373,20 +381,38 @@ struct SettingsScreen: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }.frame(minHeight: 44).accessibilityIdentifier("sync-allow-insecure")
-                Text(panel.object("username").text("label")).rnFont(14, .semibold)
-                TextField(panel.object("username").text("placeholder"), text: Binding(
-                    get: { model.settingsSyncUsername }, set: { model.setSettingsSyncUsername($0) }))
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.username)
-                    .focused($syncField, equals: .username).rnFont(16).padding(12).frame(minHeight: 44)
-                    .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
-                    .accessibilityLabel(panel.object("username").text("label")).accessibilityIdentifier("sync-username")
-                Text(panel.object("password").text("label")).rnFont(14, .semibold)
-                SecureField(panel.object("password").text("placeholder"), text: Binding(
-                    get: { model.settingsSyncPassword }, set: { model.setSettingsSyncPassword($0) }))
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.password)
-                    .focused($syncField, equals: .password).rnFont(16).padding(12).frame(minHeight: 44)
-                    .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
-                    .accessibilityLabel(panel.object("password").text("label")).accessibilityIdentifier("sync-password")
+                if webdav {
+                    Text(panel.object("username").text("label")).rnFont(14, .semibold)
+                    TextField(panel.object("username").text("placeholder"), text: Binding(
+                        get: { model.settingsSyncUsername }, set: { model.setSettingsSyncUsername($0) }))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.username)
+                        .focused($syncField, equals: .username).rnFont(16).padding(12).frame(minHeight: 44)
+                        .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
+                        .accessibilityLabel(panel.object("username").text("label")).accessibilityIdentifier("sync-username")
+                    Text(panel.object("password").text("label")).rnFont(14, .semibold)
+                    SecureField(panel.object("password").text("placeholder"), text: Binding(
+                        get: { model.settingsSyncPassword }, set: { model.setSettingsSyncPassword($0) }))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.password)
+                        .focused($syncField, equals: .password).rnFont(16).padding(12).frame(minHeight: 44)
+                        .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
+                        .accessibilityLabel(panel.object("password").text("label")).accessibilityIdentifier("sync-password")
+                } else {
+                    let token = panel.object("token")
+                    Text(token.text("label")).rnFont(14, .semibold)
+                    SecureField(token.text("mask").isEmpty ? token.text("placeholder") : token.text("mask"), text: Binding(
+                        get: { model.settingsSyncToken }, set: { model.setSettingsSyncToken($0) }))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .focused($syncField, equals: .token).submitLabel(.done).onSubmit { syncField = nil }
+                        .rnFont(16).padding(12).frame(minHeight: 44)
+                        .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
+                        .accessibilityLabel(token.text("label")).accessibilityIdentifier("sync-token")
+                    Text(token.text("hint")).rnFont(12).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let invalid = token["invalid"] as? String, !invalid.isEmpty {
+                        Text(invalid).rnFont(13).foregroundStyle(palette.danger)
+                            .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-token-invalid")
+                    }
+                }
             }.disabled(!model.settingsSyncCanEdit)
             ForEach(["save", "syncNow", "test"], id: \.self) { action in
                 let state = panel.object(action)

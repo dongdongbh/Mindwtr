@@ -5,6 +5,7 @@ import {
     PENDING_CAPTURE_LAST_APPLIED_STORAGE_KEY,
     NATIVE_HOST_CONTRACT_VERSION,
     NativeAttachmentCleanupUnconfirmedError,
+    CLOUD_PROVIDER_KEY,
     SYNC_BACKEND_KEY,
     generateUUID,
     NATIVE_REMINDER_STATE_STORAGE_KEY,
@@ -93,7 +94,7 @@ import { createNativeAI } from './host-ai';
 import { createNativeLocalAttachmentsForHost, nativeFileChannels, prepareNativeTaskAttachmentAvailabilityPreflight,
     prepareNativeTaskAttachmentAvailability } from './host-attachments';
 import { createNativeReminders } from './host-reminders';
-import { createNativeSync, createHostSyncCrypto, type NativeSync, type NativeSyncBindings } from './host-sync';
+import { createNativeSync, createHostSyncCrypto, isNativeIosSelfHostedProvider, type NativeSync, type NativeSyncBindings } from './host-sync';
 import { createWidgetPublisher, type WidgetInputs } from './host-widgets';
 
 type NativeBridge = {
@@ -3885,18 +3886,35 @@ globalThis.MindwtrHost = {
             }
             const refused = { ok: false as const, error: { code: 'ACTION_FAILED' as const,
                 message: 'This sync provider is not available in native iOS yet; the stored configuration is unchanged' } };
-            if (name === 'selectSyncBackend' && input.option !== 'off' && input.option !== 'webdav'
-                || ['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name)
-                    && (!input.webdav || input.selfHosted !== undefined)) return refused;
+            if (name === 'selectSyncBackend' && !['off', 'webdav', 'selfhosted'].includes(input.option as string)) return refused;
+            if (['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name)) {
+                const webdav = input.webdav;
+                const selfHosted = input.selfHosted;
+                const fields = webdav !== undefined ? webdav : selfHosted;
+                const self = selfHosted !== undefined;
+                if ((webdav !== undefined) === self || !fields || typeof fields !== 'object' || Array.isArray(fields)) {
+                    throw new Error('INVALID_INPUT: Exactly one foreground sync form is required');
+                }
+                const form = fields as Record<string, unknown>;
+                const text = (value: unknown, max: number) => typeof value === 'string' && value.length <= max;
+                if (Object.keys(form).some((field) => !(self ? ['url', 'token', 'allowInsecureHttp'] : ['url', 'username', 'password', 'allowInsecureHttp']).includes(field))
+                    || !text(form.url, 2000) || typeof form.allowInsecureHttp !== 'boolean'
+                    || (self ? form.token !== null && !text(form.token, 2000)
+                        : !text(form.username, 500) || form.password !== null && !text(form.password, 2000))) {
+                    throw new Error('INVALID_INPUT: Invalid foreground sync form fields');
+                }
+            }
             requireSaved();
             const persistence = getPersistenceStatus();
             if (persistence.failed || persistence.queued || persistence.inFlight || persistence.immediate || persistence.retrying) throw unavailable();
             iosCleanupCallback = cleanup as (requestJSON: string) => unknown;
             try {
                 const stored = (await keyValue.get(SYNC_BACKEND_KEY))?.trim();
-                if (stored && stored !== 'off' && stored !== 'webdav') return refused;
-                if (['syncStored', 'syncResume'].includes(name) && stored !== 'webdav') return { ok: true as const, value: { success: true, skipped: true } };
+                const selfHosted = stored === 'cloud' && isNativeIosSelfHostedProvider(await keyValue.get(CLOUD_PROVIDER_KEY));
+                if (stored && stored !== 'off' && stored !== 'webdav' && !selfHosted) return refused;
+                if (['syncStored', 'syncResume'].includes(name) && stored !== 'webdav' && !selfHosted) return { ok: true as const, value: { success: true, skipped: true } };
                 if (name === 'projectAttachmentDownload' && stored !== 'webdav') return refused;
+                if (name === 'runSyncEncryptionAction' && selfHosted) return refused;
                 let downloadResult: Awaited<ReturnType<typeof contract.downloadAttachment>> | null = null;
                 if (name === 'projectAttachmentDownload') {
                     const options = contract.getProjectAttachmentEditOptions({ projectId: input.projectId as string });
@@ -3926,6 +3944,16 @@ globalThis.MindwtrHost = {
                     },
                 });
                 if (iosManualSync) iosManualSync.settingsHost.encryption.mode = 'saved-webdav-or-local';
+                if (name === 'selectSyncBackend' && input.option === 'selfhosted'
+                    || ['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name) && input.selfHosted !== undefined
+                    || ['syncStored', 'syncResume'].includes(name) && selfHosted) {
+                    try { await iosManualSync!.assertSelfHostedSyncAdmission(); }
+                    catch (error) {
+                        if (error instanceof NativeAttachmentCleanupUnconfirmedError) throw error;
+                        return { ok: false as const, error: { code: 'ACTION_FAILED' as const,
+                            message: error instanceof Error ? error.message : 'Self-hosted encryption admission is unavailable' } };
+                    }
+                }
                 if (name === 'projectAttachmentDownload') {
                     if (!downloadResult) {
                         // The original contract remains local-only outside this owned call.
@@ -3963,7 +3991,7 @@ globalThis.MindwtrHost = {
                     // The command union includes non-view replies; only the two view commands reach this branch.
                     if (name === 'syncSettings' || name === 'openSyncSettings') {
                         const model = result.value as import('../../../packages/core/src/native-host-contract-settings-sync').NativeSyncSettings;
-                        model.backend.options = model.backend.options.filter(({ option }) => option === 'off' || option === 'webdav');
+                        model.backend.options = model.backend.options.filter(({ option }) => option === 'off' || option === 'webdav' || option === 'selfhosted');
                     }
                 }
                 if (currentTargetURI === undefined && (name !== 'projectAttachmentDownload' || result.ok && result.value && typeof result.value === 'object'

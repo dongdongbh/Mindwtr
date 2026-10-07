@@ -307,6 +307,8 @@ final class CoreModel: ObservableObject {
     @Published private(set) var settingsSyncURL = ""
     @Published private(set) var settingsSyncUsername = ""
     @Published private(set) var settingsSyncPassword = ""
+    @Published private(set) var settingsSyncToken = ""
+    private var settingsSyncTokenEdited = false
     @Published private(set) var settingsSyncAllowInsecure = false
     @Published private var settingsSyncPassphrases: [String: String] = [:]
     @Published private(set) var settingsSyncError: String?
@@ -329,6 +331,7 @@ final class CoreModel: ObservableObject {
     private var settingsSyncEncryptionTask: Task<Void, Never>?
     private var settingsSyncOpeningRevision = ""
     private var settingsSyncValidatedURL = ""
+    private var settingsSyncValidatedTokenDraft: String?
     private var settingsSyncOpeningURL = ""
     private var settingsSyncOpeningUsername = ""
     private var settingsSyncOpeningAllowInsecure = false
@@ -349,7 +352,13 @@ final class CoreModel: ObservableObject {
     var settingsSyncDraftDirty: Bool {
         settingsSyncURL != settingsSyncOpeningURL || settingsSyncUsername != settingsSyncOpeningUsername
             || settingsSyncAllowInsecure != settingsSyncOpeningAllowInsecure || !settingsSyncPassword.isEmpty
+            || settingsSyncTokenEdited
     }
+    private enum SettingsSyncFormKind: String { case webdav, selfhosted }
+    private var settingsSyncFormKind: SettingsSyncFormKind? {
+        SettingsSyncFormKind(rawValue: settingsSync.object("panel").text("kind"))
+    }
+    private var settingsSyncTokenDraft: String? { settingsSyncTokenEdited ? settingsSyncToken : nil }
     var settingsSyncCanEdit: Bool {
         ready && settingsSyncPresented && !busy && !retryNeeded && !settingsSyncNeedsReload
             && !settingsSyncRestartRequired && !appLock.concealed && settingsSyncAvailable && !settingsSync.isEmpty
@@ -358,6 +367,8 @@ final class CoreModel: ObservableObject {
     var settingsSyncCanClose: Bool { !busy && !settingsSyncChecking && !settingsSyncRestartRequired && settingsSyncEncryptionOwner == nil }
     func settingsSyncActionEnabled(_ action: String) -> Bool {
         settingsSyncCanEdit && !settingsSyncChecking && settingsSyncURL == settingsSyncValidatedURL
+            && (settingsSyncFormKind == .webdav || (settingsSyncFormKind == .selfhosted
+                && settingsSyncTokenDraft == settingsSyncValidatedTokenDraft))
             && settingsSync.object("panel").object(action).flag("enabled")
     }
     @Published private(set) var manageSettings: CoreObject = [:]
@@ -5082,11 +5093,27 @@ final class CoreModel: ObservableObject {
         return value
     }
 
+    private func validSettingsSyncPanel(_ value: Any?) -> Bool {
+        if value is NSNull { return true }
+        guard let panel = value as? CoreObject, let kind = SettingsSyncFormKind(rawValue: panel.text("kind")) else { return false }
+        if kind == .webdav { return true }
+        let url = panel.object("url"), token = panel.object("token")
+        return Set(panel.keys) == Set(["kind", "url", "allowInsecureHttp", "token", "save", "syncNow", "test", "lastSync"])
+            && Set(url.keys) == Set(["label", "placeholder", "value", "hints", "invalid"])
+            && url["label"] is String && (url["placeholder"] is String || url["placeholder"] is NSNull)
+            && url["value"] is String && url["hints"] is [String] && (url["invalid"] is String || url["invalid"] is NSNull)
+            && Set(token.keys) == Set(["label", "placeholder", "mask", "hint", "invalid"])
+            && token["label"] is String && token["placeholder"] is String && token["mask"] is String
+            && token.text("mask").allSatisfy({ $0 == "•" })
+            && token["hint"] is String && (token["invalid"] is String || token["invalid"] is NSNull)
+    }
+
     private func adoptSettingsSync(_ view: CoreObject, resetDraft: Bool, host capturedHost: CoreHost) -> Bool {
         guard !view.text("title").isEmpty, !view.text("configRevision").isEmpty,
               view.object("backend")["options"] is [CoreObject],
-              view.object("backend").objects("options").allSatisfy({ ["off", "webdav"].contains($0.text("option")) }),
-              view["panel"] is NSNull || view.object("panel").text("kind") == "webdav",
+              view.object("backend").objects("options").allSatisfy({ ["off", "webdav", "selfhosted"].contains($0.text("option")) }),
+              validSettingsSyncPanel(view["panel"]),
+              view.object("panel").text("kind") != "selfhosted" || view["encryption"] is NSNull,
               validSettingsSyncEncryption(view["encryption"]) else {
             requireSettingsSyncRestart(capturedHost)
             return false
@@ -5097,12 +5124,15 @@ final class CoreModel: ObservableObject {
             settingsSyncURL = panel.object("url").text("value")
             settingsSyncUsername = panel.object("username").text("value")
             settingsSyncPassword = ""
+            settingsSyncToken = ""
+            settingsSyncTokenEdited = false
             settingsSyncAllowInsecure = panel.object("allowInsecureHttp").flag("value")
             settingsSyncOpeningURL = settingsSyncURL
             settingsSyncOpeningUsername = settingsSyncUsername
             settingsSyncOpeningAllowInsecure = settingsSyncAllowInsecure
             settingsSyncOpeningRevision = view.text("configRevision")
             settingsSyncValidatedURL = settingsSyncURL
+            settingsSyncValidatedTokenDraft = nil
             settingsSyncNeedsReload = false
         }
         return true
@@ -5186,12 +5216,15 @@ final class CoreModel: ObservableObject {
         settingsSyncURL = ""
         settingsSyncUsername = ""
         settingsSyncPassword = ""
+        settingsSyncToken = ""
+        settingsSyncTokenEdited = false
         settingsSyncAllowInsecure = false
         settingsSyncOpeningURL = ""
         settingsSyncOpeningUsername = ""
         settingsSyncOpeningAllowInsecure = false
         settingsSyncOpeningRevision = ""
         settingsSyncValidatedURL = ""
+        settingsSyncValidatedTokenDraft = nil
         settingsSync = [:]
         settingsSyncStatus = nil
         settingsSyncError = nil
@@ -5424,6 +5457,14 @@ final class CoreModel: ObservableObject {
         settingsSyncPassword = value
         settingsSyncError = nil
     }
+    func setSettingsSyncToken(_ value: String) {
+        guard settingsSyncCanEdit, settingsSyncFormKind == .selfhosted else { return }
+        settingsSyncToken = value
+        settingsSyncTokenEdited = true
+        settingsSyncGeneration += 1
+        settingsSyncError = nil
+        scheduleSettingsSyncRead()
+    }
     func setSettingsSyncAllowInsecure(_ value: Bool) {
         guard settingsSyncCanEdit else { return }
         settingsSyncAllowInsecure = value
@@ -5446,17 +5487,27 @@ final class CoreModel: ObservableObject {
         guard settingsSyncPresented, !settingsSyncChecking, !settingsSyncNeedsReload,
               !settingsSyncRestartRequired, !appLock.concealed, let capturedHost = host else { return }
         let session = settingsSyncSession, generation = settingsSyncGeneration
-        let url = settingsSyncURL
+        let url = settingsSyncURL, token = settingsSyncTokenDraft, form = settingsSyncFormKind
+        var draft: CoreObject = ["url": url]
+        if form == .selfhosted { draft["token"] = token.map { $0 as Any } ?? NSNull() }
         settingsSyncChecking = true
         defer {
             settingsSyncChecking = false
             if settingsSyncCurrent(capturedHost, session), generation != settingsSyncGeneration,
                !busy, !settingsSyncNeedsReload { scheduleSettingsSyncRead() }
         }
-        guard let result = await callSettingsSync("syncSettings", input: ["draft": ["url": url]], host: capturedHost),
+        guard let result = await callSettingsSync("syncSettings", input: ["draft": draft], host: capturedHost),
               settingsSyncCurrent(capturedHost, session), generation == settingsSyncGeneration,
               let view = settingsSyncValue(result) else { return }
-        if adoptSettingsSync(view, resetDraft: resetDraft, host: capturedHost) { settingsSyncValidatedURL = resetDraft ? settingsSyncURL : url }
+        // Validation for one credential shape cannot admit another panel's fields.
+        guard resetDraft || SettingsSyncFormKind(rawValue: view.object("panel").text("kind")) == form else {
+            settingsSyncNeedsReload = true
+            return
+        }
+        if adoptSettingsSync(view, resetDraft: resetDraft, host: capturedHost) {
+            settingsSyncValidatedURL = resetDraft ? settingsSyncURL : url
+            settingsSyncValidatedTokenDraft = resetDraft ? nil : token
+        }
     }
 
     func selectSettingsSyncBackend(_ option: String) async {
@@ -5478,13 +5529,20 @@ final class CoreModel: ObservableObject {
 
     func performSettingsSync(_ action: String) async {
         guard ["save", "syncNow", "test"].contains(action), settingsSyncActionEnabled(action),
-              let capturedHost = host, !settingsSyncOpeningRevision.isEmpty else { return }
+              let capturedHost = host, let form = settingsSyncFormKind, !settingsSyncOpeningRevision.isEmpty else { return }
         let session = settingsSyncSession
-        let fields: CoreObject = ["url": settingsSyncURL, "username": settingsSyncUsername,
-            "password": settingsSyncPassword.isEmpty ? NSNull() : settingsSyncPassword as Any,
-            "allowInsecureHttp": settingsSyncAllowInsecure]
         let command = action == "save" ? "saveSyncBackend" : action == "test" ? "testSyncConnection" : "syncNow"
-        var input: CoreObject = ["webdav": fields]
+        var input: CoreObject
+        switch form {
+        case .webdav:
+            input = ["webdav": ["url": settingsSyncURL, "username": settingsSyncUsername,
+                "password": settingsSyncPassword.isEmpty ? NSNull() : settingsSyncPassword as Any,
+                "allowInsecureHttp": settingsSyncAllowInsecure]]
+        case .selfhosted:
+            input = ["selfHosted": ["url": settingsSyncURL,
+                "token": settingsSyncTokenDraft.map { $0 as Any } ?? NSNull(),
+                "allowInsecureHttp": settingsSyncAllowInsecure]]
+        }
         if action != "test" {
             input["requestId"] = UUID().uuidString.lowercased()
             input["revision"] = settingsSyncOpeningRevision

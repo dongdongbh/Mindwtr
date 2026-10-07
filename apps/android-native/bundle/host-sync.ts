@@ -18,8 +18,8 @@
  *
  * Not on this host yet, and refused the way core refuses an unbound port: Dropbox (S4) and File Sync's folder (S5). The fence
  * owner stays `mindwtr-mobile` and the device keys keep RN's names, so an upgraded RN user's configuration and deviceId carry over.
- * iOS construction is explicit and foreground-only; host-entry's activation gate remains closed. A future entry must admit
- * supported stored providers before opening settings or executing requests. This factory does not alter those stored choices.
+ * iOS construction is explicit and foreground-only; the entry admits Off, WebDAV and self-hosted settings. Both admission
+ * and actual self-hosted cycles refuse unfinished encryption transitions. This factory does not alter stored provider choices.
  */
 import { DOMParser } from '@xmldom/xmldom';
 import { createNativeAttachments, nativeFileChannels, type NativeAttachmentBindings } from './host-attachments';
@@ -27,9 +27,11 @@ import {
     MOBILE_BACKGROUND_SYNC_DEADLINE_MS,
     NativeAttachmentCleanupUnconfirmedError,
     SETTINGS_SYNC_BADGE_COLORS,
+    CLOUD_PROVIDER_KEY,
     SYNC_BACKEND_KEY,
     SyncCryptoAuthError,
     SyncEncryptionArtifactCapacityError,
+    SyncEncryptionTransitionIncompleteError,
     buildDiagnosticsErrorEntry,
     buildDiagnosticsLogEntry,
     classifySyncFailure,
@@ -52,6 +54,7 @@ import {
     loadWebDavSyncConfig,
     nameNotifyListener,
     normalizeExternalCalendarColor,
+    normalizeCloudProvider,
     readSyncLocationScope,
     resolveBackend,
     resolveSyncBadgeState,
@@ -162,6 +165,12 @@ export const createDeadlineFetch = (send: typeof fetch) => {
 
 const unavailable = (what: string) => async (): Promise<never> => {
     throw new Error(`${what} is not available on this build yet`);
+};
+
+/** Missing provider is RN's legacy self-hosted default; explicit unbound providers stay closed. */
+export const isNativeIosSelfHostedProvider = (value: string | null | undefined): boolean => {
+    const provider = value?.trim() || null;
+    return (provider === null || provider === 'selfhosted') && normalizeCloudProvider(provider) === 'selfhosted';
 };
 
 export const createNativeSync = (bindings: NativeSyncBindings) => {
@@ -394,12 +403,41 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     };
 
     let iosAutomaticController: AutoSyncController | null = null;
+    let iosAutomaticBackend: 'webdav' | 'cloud' = 'webdav';
     type AutomaticFrame = { result: Awaited<ReturnType<NativeSyncSettingsHost['performSync']>> | null };
     let iosAutomaticFrame: AutomaticFrame | null = null;
+
+    const assertSelfHostedSyncAdmission = async () => {
+        if (platform !== 'ios') return;
+        if (fatalCleanupError) throw fatalCleanupError;
+        try {
+            const status = await encryptionState.getSyncEncryptionStatus();
+            const incomplete = await encryptionState.getIncompleteSyncEncryptionTransition();
+            if ((status.incompleteTransition ?? null) !== incomplete) throw new Error('Sync encryption transition state is inconsistent');
+            if (incomplete) throw new SyncEncryptionTransitionIncompleteError(incomplete);
+        } catch (error) {
+            try {
+                await logLine('warn', 'Native iOS self-hosted encryption admission refused', { scope: 'native-ios', force: true,
+                    extra: { releaseCheck: 'v1.3.5/ios-selfhosted-encryption-guard', operation: 'admission', outcome: 'refused' } });
+            } catch { /* Diagnostics cannot replace the admission refusal. */ }
+            throw error;
+        }
+    };
+    const readIosForegroundBackend = async (override?: Parameters<NativeSyncSettingsHost['performSync']>[1]['configOverride']) => {
+        const backend = override?.backend ?? ((await keyValue.get(SYNC_BACKEND_KEY))?.trim() || 'off');
+        if (backend !== 'off' && backend !== 'webdav' && backend !== 'cloud') throw new Error('This sync provider is not available in native iOS yet');
+        if (backend === 'cloud') {
+            const provider = override?.cloudProvider ?? await keyValue.get(CLOUD_PROVIDER_KEY);
+            if (!isNativeIosSelfHostedProvider(provider)) throw new Error('This sync provider is not available in native iOS yet');
+            await assertSelfHostedSyncAdmission();
+        }
+        return backend;
+    };
 
     /** Every cycle, automatic or from the Sync screen, goes through here, so Kotlin reads its lists again once one ends. */
     const performSync: NativeSyncSettingsHost['performSync'] = async (syncPathOverride, options) => {
         if (fatalCleanupError) throw fatalCleanupError;
+        if (platform === 'ios') await readIosForegroundBackend(options.configOverride);
         try {
             const before = platform === 'ios' && options.manual && !options.activationProbe
                 ? useTaskStore.getState().settings : null;
@@ -428,7 +466,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     const automaticController = () => iosAutomaticController ??= createAutoSyncController({
         allowDeferredWork: false,
         periodicSyncIntervalMs: null,
-        getCadence: () => getMobileAutoSyncCadence('webdav'),
+        getCadence: () => getMobileAutoSyncCadence(iosAutomaticBackend),
         adaptivePacing: { durationMultiplier: 9, maxIntervalMs: 5 * 60_000 },
         isRuntimeActive: () => !fatalCleanupError && iosAutomaticFrame !== null,
         isIgnorableFailure: (error) => !error || isLikelyOfflineSyncError(error),
@@ -461,9 +499,10 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         const frame: AutomaticFrame = { result: null };
         iosAutomaticFrame = frame;
         try {
-            const backend = (await keyValue.get(SYNC_BACKEND_KEY))?.trim();
+            const backend = await readIosForegroundBackend();
             if (fatalCleanupError) throw fatalCleanupError;
-            if (backend !== 'webdav') throw new Error('Stored automatic sync requires WebDAV');
+            if (backend !== 'webdav' && backend !== 'cloud') throw new Error('Stored automatic sync requires a remote provider');
+            iosAutomaticBackend = backend;
             const controller = automaticController();
             if (reason === 'resume' && Date.now() - controller.getLastAutoSyncAt()
                 <= getMobileAutoSyncCadence(backend).foregroundMinIntervalMs) return { success: true, skipped: true };
@@ -638,6 +677,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     return {
         settingsHost,
+        assertSelfHostedSyncAdmission,
         performStoredAutomaticSync,
         /** The editor's and the project screen's attachment IO (core's NativeAttachmentsHost); null without app files. */
         attachmentsHost: attachments?.contractHost ?? null,

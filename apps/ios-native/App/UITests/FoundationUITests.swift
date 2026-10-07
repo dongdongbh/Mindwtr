@@ -590,6 +590,68 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.secureTextFields["sync-password"].exists)
     }
 
+    func testNativeSelfHostedTokenValidationDiscardAndColdPrivacy() throws {
+        let library = try task371Library("INPUT", prefix: "MINDWTR_SELFHOSTED_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication(), typed = "synthetic-selfhosted-ui-399"
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task322OpenSync(app)
+        let option = app.buttons["sync-option-selfhosted"]
+        boardEnabled(option, timeout: 30); revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-option-selfhosted")
+        let token = app.secureTextFields["sync-token"]
+        boardEnabled(token, timeout: 30)
+        XCTAssertTrue(option.isSelected); XCTAssertFalse(app.textFields["sync-token"].exists)
+        XCTAssertFalse(app.secureTextFields["sync-password"].exists); XCTAssertFalse(app.textFields["sync-username"].exists)
+        XCTAssertFalse(app.buttons["sync-encryption-open-enable"].exists); XCTAssertFalse(app.buttons["sync-encryption-open"].exists)
+        task322Type(app, "sync-url", "https://native-ui.invalid/v1/data")
+        task322Type(app, "sync-token", typed, secure: true)
+        boardEnabled(app.buttons["sync-save"], timeout: 30)
+        task322Type(app, "sync-token", "!", secure: true)
+        XCTAssertTrue(app.staticTexts["sync-token-invalid"].waitForExistence(timeout: 15))
+        revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
+        for id in ["sync-save", "sync-now", "sync-test"] {
+            let action = app.buttons[id]
+            XCTAssertTrue(action.exists); XCTAssertFalse(action.isEnabled)
+            XCTAssertGreaterThanOrEqual(action.frame.height, 44 - 0.01)
+        }
+        boardTap(app, "sync-reload")
+        boardTap(app, "sync-reload-cancel")
+        XCTAssertTrue(option.isSelected); XCTAssertTrue(app.staticTexts["sync-token-invalid"].exists)
+        XCTAssertFalse((token.value as? String ?? "").isEmpty); XCTAssertNotEqual(token.value as? String, token.placeholderValue)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", typed + "!", typed + "!")).firstMatch.exists)
+
+        // An explicitly edited empty token is accepted by the shared form for
+        // unauthenticated servers; it must not be treated as untouched authority.
+        revealPagedElement(app, token, in: app.scrollViews["sync-screen"])
+        token.tap(); token.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count + 1))
+        boardEnabled(app.buttons["sync-save"], timeout: 30)
+        XCTAssertFalse(app.staticTexts["sync-token-invalid"].exists)
+        XCTAssertTrue((token.value as? String ?? "").isEmpty || (token.value as? String) == token.placeholderValue)
+        revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-reload"); boardTap(app, "sync-reload-confirm")
+        boardEnabled(app.buttons["sync-option-off"], timeout: 30)
+        XCTAssertTrue(app.buttons["sync-option-off"].isSelected); XCTAssertFalse(token.exists)
+
+        for cold in [false, true] {
+            boardEnabled(option, timeout: 30); revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+            boardTap(app, "sync-option-selfhosted"); boardEnabled(token, timeout: 30)
+            let url = app.textFields["sync-url"]
+            XCTAssertTrue((url.value as? String ?? "").isEmpty || (url.value as? String) == url.placeholderValue)
+            XCTAssertTrue((token.value as? String ?? "").isEmpty || (token.value as? String) == token.placeholderValue)
+            task322Type(app, "sync-token", typed, secure: true)
+            boardEnabled(app.buttons["sync-back"], timeout: 30); boardTap(app, "sync-back")
+            if cold { app.terminate(); app.launch() }
+            task322OpenSync(app); XCTAssertFalse(token.exists)
+        }
+        boardEnabled(option, timeout: 30); revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-option-selfhosted"); boardEnabled(token, timeout: 30)
+        XCTAssertTrue((token.value as? String ?? "").isEmpty || (token.value as? String) == token.placeholderValue)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", typed, typed)).firstMatch.exists)
+        // Save/Sync/Test are never invoked; this case requires no server.
+    }
+
     func testNativeSyncInvalidDraftDiscardsToOffAndColdReopenHasNoPlaintext() {
         continueAfterFailure = false
         let app = XCUIApplication(), library = UUID().uuidString.lowercased()

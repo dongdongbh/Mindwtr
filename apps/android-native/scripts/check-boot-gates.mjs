@@ -3529,7 +3529,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 }
 
 const fakeCore = `
-export { SYNC_BACKEND_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-storage-keys.ts'))};
+export { SYNC_BACKEND_KEY, CLOUD_PROVIDER_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-storage-keys.ts'))};
 export { getBaseSyncUrl } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-paths.ts'))};
 import { NativeAttachmentCleanupUnconfirmedError as RealCleanupError } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};
 export { RealCleanupError as NativeAttachmentCleanupUnconfirmedError };
@@ -3756,6 +3756,12 @@ export function createNativeHostContract(bindings = {}) {
           || bindings.syncSettings.encryption.unlockOnly !== undefined) throw new Error('Missing selected WebDAV or local encryption capability');
       return globalThis.encryptionReply ?? { ok: true, value: { toasts: [], passphrase: null } };
     },
+    getSyncSettings() { return { ok: true, value: { backend: { options: ['off', 'webdav', 'selfhosted', 'dropbox', 'cloudkit', 'file'].map(option => ({ option })) } } }; },
+    async openSyncSettings(input) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['openSyncSettings', input]); return this.getSyncSettings(); },
+    async selectSyncBackend(input) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['selectSyncBackend', input]); return globalThis.foregroundReply ?? { ok: true, value: { toasts: [] } }; },
+    async saveSyncBackend(input) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['saveSyncBackend', input]); return globalThis.foregroundReply ?? { ok: true, value: { toasts: [] } }; },
+    async syncNow(input) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['syncNow', input]); return globalThis.foregroundReply ?? { ok: true, value: { toasts: [] } }; },
+    async testSyncConnection(input) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['testSyncConnection', input]); return globalThis.foregroundReply ?? { ok: true, value: { toasts: [] } }; },
     async downloadAttachment(input) {
       globalThis.attachmentInputs.push(['downloadAttachment', input]);
       globalThis.downloadHosts.push(bindings.attachments);
@@ -4266,9 +4272,14 @@ for (const [bridge, receipt, operation] of [
 {
     const syncFixture = `
 export function createHostSyncCrypto() { throw new Error('Task Download crypto is not bound in Project entry fixture'); }
+export function isNativeIosSelfHostedProvider(value) { return !value?.trim() || value.trim() === 'selfhosted'; }
 export function createNativeSync() {
   globalThis.syncFactoryCalls++;
-  return { attachmentsHost: globalThis.remoteAttachmentHost, settingsHost: { encryption: {} } };
+  return { attachmentsHost: globalThis.remoteAttachmentHost, settingsHost: { encryption: {} },
+    async assertSelfHostedSyncAdmission() { globalThis.admissionChecks = (globalThis.admissionChecks ?? 0) + 1;
+      if (globalThis.incompleteTransition) throw new Error('Sync encryption transition is incomplete'); },
+    async performStoredAutomaticSync(reason) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['stored', reason]);
+      return globalThis.storedReply ?? { success: true, skipped: false }; } };
 }
 `;
     const downloadBuilt = await build({
@@ -4293,7 +4304,8 @@ export function createNativeSync() {
         state.storedBackend = 'webdav';
         // On non-iOS, avoid eager normal Sync so the explicit entry itself is tested.
         if (platform === 'ios') state.__mindwtrNative.kvMultiGet = () => { throw new Error('Unexpected multi-read'); };
-        state.__mindwtrNative.kvGet = () => { state.storedReads++; return JSON.stringify([state.storedBackend ?? null]); };
+        state.__mindwtrNative.kvGet = (key) => { state.storedReads++; return JSON.stringify([
+            key === '@mindwtr_cloud_provider' ? state.storedProvider ?? null : state.storedBackend ?? null]); };
         state.__mindwtrSyncSecrets = { getSecret: () => { state.secretReads++; throw new Error('Unexpected secret read'); } };
         state.attachmentReply = { ok: true, value: { status: 'available', message: null, update: null } };
         state.settings = { diagnostics: { loggingEnabled: false } };
@@ -4380,6 +4392,69 @@ export function createNativeSync() {
     assert.equal(encrypted.secretReads, 0, 'Entry fixture reads no credentials');
     assert(!(encrypted.logText ?? '').includes('synthetic'), 'Passphrase never enters entry diagnostics');
     console.log(`Selected encryption: ${invalidEncryptionInputs.length} invalid envelopes refused before storage; ${unsupportedEncryptionBackends.length} providers refused before factory; ${selectedEncryptionActions.length} WebDAV and ${localEncryptionActions.length * locallyRoutedBackends.length} local envelopes routed with exact mode and UUID ownership; ${locallyRoutedBackends.length} core refusals preserved (NodeVM)`);
+    const foreground = create();
+    assert.equal((await boot(foreground)).ok, true);
+    const foregroundCommand = (name, value) => poll(foreground,
+        foreground.MindwtrHost.iosForegroundSync(name, JSON.stringify(value), () => ''));
+    const selfHostedFields = { url: 'https://synthetic398.invalid/v1/data', token: null, allowInsecureHttp: false };
+    const webdavFields = { url: 'https://synthetic398.invalid/data.json', username: 'synthetic', password: null, allowInsecureHttp: false };
+    const request = { requestId: '11111111-1111-1111-1111-111111111111', revision: 'config-398' };
+    const malformedForms = [{}, { webdav: webdavFields, selfHosted: selfHostedFields }, { selfHosted: null },
+        { selfHosted: [] }, { selfHosted: { ...selfHostedFields, password: 'synthetic' } },
+        { webdav: { ...webdavFields, token: null } }, { selfHosted: { ...selfHostedFields, token: 1 } }];
+    for (const name of ['saveSyncBackend', 'syncNow', 'testSyncConnection']) for (const fields of malformedForms) {
+        assert.match((await foregroundCommand(name, { ...request, ...fields })).error, /^INVALID_INPUT:/);
+    }
+    assert.equal(foreground.storedReads, 0, 'Malformed/mixed forms never read configuration');
+    assert.equal(foreground.syncFactoryCalls, 0, 'Malformed/mixed forms never construct a service');
+    assert.equal(foreground.secretReads, 0);
+    foreground.storedBackend = 'cloud';
+    for (const provider of ['dropbox', 'cloudkit', 'file', 'unknown']) {
+        foreground.storedProvider = provider;
+        const refusal = await foregroundCommand('openSyncSettings', {});
+        assert.equal(refusal.value.error.code, 'ACTION_FAILED');
+        assert.equal(foreground.storedProvider, provider, 'Unsupported provider authority is never rewritten');
+    }
+    assert.equal(foreground.syncFactoryCalls, 0);
+    for (const provider of [undefined, '', 'selfhosted', ' selfhosted ']) {
+        foreground.storedProvider = provider;
+        const model = await foregroundCommand('openSyncSettings', {});
+        assert.deepEqual(JSON.parse(JSON.stringify(model.value.value.backend.options.map(({ option }) => option))), ['off', 'webdav', 'selfhosted']);
+        for (const name of ['saveSyncBackend', 'syncNow', 'testSyncConnection']) {
+            const value = { ...request, selfHosted: selfHostedFields };
+            assert.equal((await foregroundCommand(name, value)).value.ok, true);
+            assert.deepEqual(JSON.parse(JSON.stringify(foreground.foregroundInputs.at(-1))), [name, value]);
+        }
+        for (const [name, reason] of [['syncStored', 'startup'], ['syncResume', 'resume']]) {
+            assert.deepEqual((await foregroundCommand(name, {})).value.value, { success: true, skipped: false });
+            assert.deepEqual(JSON.parse(JSON.stringify(foreground.foregroundInputs.at(-1))), ['stored', reason]);
+        }
+    }
+    assert.equal(foreground.syncFactoryCalls, 1, 'All self-hosted foreground commands retain one owned factory');
+    assert.equal(foreground.secretReads, 0, 'Entry never reads credentials itself');
+    assert(!(foreground.logText ?? '').includes('synthetic398'), 'Owned command marker contains no endpoint or token');
+    for (const [name, value] of [['selectSyncBackend', { requestId: request.requestId, option: 'selfhosted' }],
+        ...['saveSyncBackend', 'syncNow', 'testSyncConnection'].map(name => [name, { ...request, selfHosted: selfHostedFields }]),
+        ['syncStored', {}], ['syncResume', {}]]) {
+        foreground.incompleteTransition = true;
+        const prior = foreground.foregroundInputs.length;
+        const priorDownloads = foreground.attachmentInputs.length;
+        const priorLog = foreground.logText;
+        const refusal = await foregroundCommand(name, value);
+        assert.deepEqual(refusal.value, { ok: false, error: { code: 'ACTION_FAILED', message: 'Sync encryption transition is incomplete' } });
+        assert.equal(foreground.foregroundInputs.length, prior, 'Incomplete transition refuses before shared settings dispatch');
+        assert.equal(foreground.attachmentInputs.length, priorDownloads, 'Incomplete transition refuses before availability bytes');
+        assert.equal(foreground.logText, priorLog, 'Refused admission emits no settled-command marker');
+    }
+    foreground.incompleteTransition = false;
+    assert.equal((await foregroundCommand('selectSyncBackend', { requestId: request.requestId, option: 'selfhosted' })).value.ok, true);
+    const downloadsBefore = foreground.attachmentInputs.length;
+    assert.equal((await foregroundCommand('projectAttachmentDownload', input)).value.error.code, 'ACTION_FAILED');
+    assert.equal(foreground.attachmentInputs.length, downloadsBefore, 'Self-hosted Project availability waits for native attachment authority');
+    foreground.foregroundReply = { ok: false, error: { code: 'STALE_REVISION', message: 'Synthetic shared stale refusal' } };
+    assert.deepEqual((await foregroundCommand('saveSyncBackend', { ...request, selfHosted: selfHostedFields })).value,
+        foreground.foregroundReply, 'Shared revision/admission refusal survives routing');
+    console.log(`Self-hosted entry: ${malformedForms.length * 3} invalid/mixed forms before storage; 4 unsupported providers before factory; 4 legacy/provider forms routed; 6 incomplete-transition commands before dispatch; Project availability remains closed (NodeVM)`);
     const malformed = create();
     assert.match((await command(malformed)).error, /^NOT_READY:/);
     const bootMalformed = await boot(malformed);
