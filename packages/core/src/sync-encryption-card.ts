@@ -202,6 +202,15 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         }, { done: Promise.all([read, pending]).then(() => undefined) });
     };
 
+    /** Retires staged plaintext without dismissing its flow or inline outcome. */
+    const clearPassphrases = () => set({
+        currentPassphrase: '',
+        nextPassphrase: '',
+        confirmPassphrase: '',
+        revealed: false,
+        generated: false,
+    });
+
     const closeFlow = () => {
         set({
             flow: 'none',
@@ -373,6 +382,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         refresh,
         openFlow,
         closeFlow,
+        clearPassphrases,
         generate,
         setField,
         toggleRevealed,

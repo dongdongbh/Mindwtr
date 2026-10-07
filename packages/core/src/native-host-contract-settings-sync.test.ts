@@ -16,6 +16,7 @@ import {
 } from './native-host-contract-settings-sync';
 import { flushPendingSave, getPersistenceStatus, getStorageAdapter, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { SyncEncryptionCleanupDeferredError } from './sync-encryption-service';
+import * as syncEncryptionCard from './sync-encryption-card';
 import {
     CLOUD_PROVIDER_KEY,
     CLOUD_TOKEN_KEY,
@@ -857,7 +858,7 @@ describe('native Settings › Sync unlock-only admission', () => {
         expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
     });
 
-    it('requires a bounded nonempty revision before any field or transition mutation', async () => {
+    it('requires a bounded revision before field entry or transitions and retires stale owned submit text', async () => {
         const { dev, contract } = await start(locked);
         const before = rows(contract), at = mark(dev);
         for (const revision of [undefined, null, 1, '', 'x'.repeat(101)]) {
@@ -873,6 +874,8 @@ describe('native Settings › Sync unlock-only admission', () => {
                 .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         }
         expect(since(dev, at).calls).toEqual([]);
+        expect(rows(contract).find((row) => row.kind === 'action' && row.action.type === 'submit')).toMatchObject({ enabled: false });
+        value(await act(contract, { type: 'typed', field: 'current', value: 'retained phrase' }));
         value(await act(contract, { type: 'submit', flow: 'unlock' }, undefined, generateUUID()));
         expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toEqual([['provideSyncEncryptionPassphrase', 'retained phrase']]);
     });
@@ -909,6 +912,7 @@ describe('native Settings › Sync unlock-only admission', () => {
         value(await act(contract, { type: 'submit', flow: 'unlock' }, undefined, generateUUID()));
         expect(rows(contract)).toContainEqual(expect.objectContaining({ kind: 'text', tone: 'danger', text: en['settings.syncEncryptionErrorWrongPassphrase'] }));
         expect(rows(contract)).toContainEqual(expect.objectContaining({ kind: 'field', field: 'current', secure: true }));
+        expect(rows(contract).find((row) => row.kind === 'action' && row.action.type === 'submit')).toMatchObject({ enabled: false });
         value(await act(contract, { type: 'typed', field: 'current', value: 'right phrase' }));
         const request = { requestId: generateUUID(), revision: view(contract).configRevision, action: { type: 'submit' as const, flow: 'unlock' as const } };
         value(await contract.runSyncEncryptionAction(request));
@@ -990,11 +994,95 @@ describe('native Settings › Sync unlock-only admission', () => {
         const before = rows(contract), at = mark(dev);
         release();
         expect(await delayed).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
-        expect(rows(contract)).toEqual(before);
+        expect(rows(contract)).toEqual(before.map((row) => row.kind === 'action' && row.action.type === 'submit' ? { ...row, enabled: false } : row));
         expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
         expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toEqual([]);
+        // The owned refusal retires the staged text; a retry requires explicit retyping.
+        value(await act(contract, { type: 'typed', field: 'current', value: 'changed phrase' }, revision));
         value(await act(contract, { type: 'submit', flow: 'unlock' }, revision, generateUUID()));
         expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toEqual([['provideSyncEncryptionPassphrase', 'changed phrase']]);
+    });
+
+    it('retires only the owned submit after rejected collisions and exact concurrent joins', async () => {
+        const { dev, contract } = await start({ ...locked, queues: { provide: ['wrong-passphrase'] } });
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        value(await act(contract, { type: 'typed', field: 'current', value: 'owned phrase' }));
+        const request = { requestId: generateUUID(), revision: view(contract).configRevision, action: { type: 'submit' as const, flow: 'unlock' as const } };
+        const read = dev.host.storage.multiGet;
+        let entered!: () => void, release!: () => void;
+        const reached = new Promise<void>((resolve) => { entered = resolve; });
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        let once = true;
+        dev.host.storage.multiGet = async (keys) => {
+            if (once && keys.length > 1) { once = false; entered(); await held; }
+            return read(keys);
+        };
+        const first = contract.runSyncEncryptionAction(request);
+        let joined: ReturnType<typeof contract.runSyncEncryptionAction> | undefined;
+        try {
+            await reached;
+            const before = rows(contract);
+            expect(before.find((row) => row.kind === 'action' && row.action.type === 'submit')).toMatchObject({ enabled: true });
+            expect(await contract.runSyncEncryptionAction({ ...request, revision: 'collision' }))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            expect(rows(contract)).toEqual(before);
+            joined = contract.runSyncEncryptionAction(request);
+            expect(rows(contract)).toEqual(before);
+            release();
+            expect(await joined).toEqual(await first);
+            expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toEqual([['provideSyncEncryptionPassphrase', 'owned phrase']]);
+            expect(rows(contract)).toContainEqual(expect.objectContaining({ kind: 'text', tone: 'danger', text: en['settings.syncEncryptionErrorWrongPassphrase'] }));
+            expect(rows(contract).find((row) => row.kind === 'action' && row.action.type === 'submit')).toMatchObject({ enabled: false });
+        } finally {
+            release();
+            await first;
+            if (joined) await joined;
+        }
+    });
+
+    it('close/reopen isolates a running unlock result from the new card', async () => {
+        const createCard = syncEncryptionCard.createSyncEncryptionCard;
+        const cards: ReturnType<typeof createCard>[] = [];
+        const factory = vi.spyOn(syncEncryptionCard, 'createSyncEncryptionCard').mockImplementation((host) => {
+            const card = createCard(host);
+            cards.push(card);
+            return card;
+        });
+        try {
+            const { dev, contract } = await start({ ...locked, queues: { provide: ['hold', 'wrong-passphrase'] } });
+            value(await act(contract, { type: 'open', flow: 'unlock' }));
+            value(await act(contract, { type: 'typed', field: 'current', value: 'closed visit phrase' }));
+            const request = { requestId: generateUUID(), revision: view(contract).configRevision, action: { type: 'submit' as const, flow: 'unlock' as const } };
+            let entered!: () => void;
+            const reached = new Promise<void>((resolve) => { entered = resolve; });
+            device.holdStarted = entered;
+            const first = contract.runSyncEncryptionAction(request), joined = contract.runSyncEncryptionAction(request);
+            try {
+                await reached;
+                value(contract.closeSyncSettings());
+                expect(cards[0].getState()).toMatchObject({ flow: 'none', currentPassphrase: '', nextPassphrase: '', confirmPassphrase: '', revealed: false, generated: false });
+                value(await contract.openSyncSettings());
+                value(await act(contract, { type: 'open', flow: 'unlock' }));
+                expect(rows(contract).find((row) => row.kind === 'action' && row.action.type === 'submit')).toMatchObject({ enabled: false });
+                value(await act(contract, { type: 'typed', field: 'current', value: 'new visit phrase' }));
+                const before = rows(contract);
+                device.held.splice(0).forEach((release) => release());
+                const result = await first, snapshot = JSON.stringify(result);
+                expect(await joined).toEqual(result);
+                expect(rows(contract)).toEqual(before);
+                expect(rows(contract).find((row) => row.kind === 'action' && row.action.type === 'submit')).toMatchObject({ enabled: true });
+                expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toEqual([['provideSyncEncryptionPassphrase', 'closed visit phrase']]);
+                value(await act(contract, { type: 'typed', field: 'current', value: 'newer visit phrase' }));
+                expect(JSON.stringify(result)).toBe(snapshot);
+                expect(JSON.stringify(storedConfig(dev))).not.toContain('visit phrase');
+            } finally {
+                device.held.splice(0).forEach((release) => release());
+                device.holdStarted = null;
+                await Promise.all([first, joined]);
+            }
+        } finally {
+            factory.mockRestore();
+        }
     });
 
     it('joins exact concurrent submit requests and binds UUID collisions to revision and fields', async () => {

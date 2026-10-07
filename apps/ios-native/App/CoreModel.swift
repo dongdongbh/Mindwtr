@@ -308,6 +308,7 @@ final class CoreModel: ObservableObject {
     @Published private(set) var settingsSyncUsername = ""
     @Published private(set) var settingsSyncPassword = ""
     @Published private(set) var settingsSyncAllowInsecure = false
+    @Published private(set) var settingsSyncPassphrase = ""
     @Published private(set) var settingsSyncError: String?
     @Published private(set) var settingsSyncStatus: String?
     @Published private(set) var settingsSyncChecking = false
@@ -317,6 +318,15 @@ final class CoreModel: ObservableObject {
     private var settingsSyncSession = UUID()
     private var settingsSyncGeneration = 0
     private var settingsSyncReadTask: Task<Void, Never>?
+    private struct SettingsSyncEncryptionOwner {
+        let id: UUID
+        let host: CoreHost
+        let session: UUID
+        let generation: Int
+        let revision: String
+    }
+    private var settingsSyncEncryptionOwner: SettingsSyncEncryptionOwner?
+    private var settingsSyncEncryptionTask: Task<Void, Never>?
     private var settingsSyncOpeningRevision = ""
     private var settingsSyncValidatedURL = ""
     private var settingsSyncOpeningURL = ""
@@ -324,7 +334,17 @@ final class CoreModel: ObservableObject {
     private var settingsSyncOpeningAllowInsecure = false
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var settingsSyncTestThrowOnce = false
+    private var settingsSyncEncryptionTypedThrowOnce = false
+    private var settingsSyncEncryptionTypedDelayOnce = false
+    @Published private var settingsSyncEncryptionTypedHolding = false
     #endif
+    var settingsSyncEncryptionTypedHeld: Bool {
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        return settingsSyncEncryptionTypedHolding
+        #else
+        return false
+        #endif
+    }
     var settingsSyncUnavailable: Bool { !settingsSyncAvailable }
     var settingsSyncDraftDirty: Bool {
         settingsSyncURL != settingsSyncOpeningURL || settingsSyncUsername != settingsSyncOpeningUsername
@@ -333,8 +353,9 @@ final class CoreModel: ObservableObject {
     var settingsSyncCanEdit: Bool {
         ready && settingsSyncPresented && !busy && !retryNeeded && !settingsSyncNeedsReload
             && !settingsSyncRestartRequired && !appLock.concealed && settingsSyncAvailable && !settingsSync.isEmpty
+            && settingsSyncEncryptionOwner == nil
     }
-    var settingsSyncCanClose: Bool { !busy && !settingsSyncChecking && !settingsSyncRestartRequired }
+    var settingsSyncCanClose: Bool { !busy && !settingsSyncChecking && !settingsSyncRestartRequired && settingsSyncEncryptionOwner == nil }
     func settingsSyncActionEnabled(_ action: String) -> Bool {
         settingsSyncCanEdit && !settingsSyncChecking && settingsSyncURL == settingsSyncValidatedURL
             && settingsSync.object("panel").object(action).flag("enabled")
@@ -4289,6 +4310,8 @@ final class CoreModel: ObservableObject {
                     taskRecoveryResolverTestFailure = arguments.contains("--native-task116-resolver-failure-once")
                     #endif
                     settingsSyncTestThrowOnce = arguments.contains("--native-sync-command-throw-once")
+                    settingsSyncEncryptionTypedThrowOnce = arguments.contains("--native-encryption-typed-throw-once")
+                    settingsSyncEncryptionTypedDelayOnce = arguments.contains("--native-encryption-typed-delay-once")
                     startupSyncTestThrowOnce = arguments.contains("--native-startup-sync-command-throw-once")
                     resumeSyncTestThrowOnce = arguments.contains("--native-resume-sync-command-throw-once")
                     projectAttachmentDownloadTestThrowOnce = arguments.contains("--native-project-download-command-throw-once")
@@ -5063,7 +5086,8 @@ final class CoreModel: ObservableObject {
         guard !view.text("title").isEmpty, !view.text("configRevision").isEmpty,
               view.object("backend")["options"] is [CoreObject],
               view.object("backend").objects("options").allSatisfy({ ["off", "webdav"].contains($0.text("option")) }),
-              view["panel"] is NSNull || view.object("panel").text("kind") == "webdav" else {
+              view["panel"] is NSNull || view.object("panel").text("kind") == "webdav",
+              validSettingsSyncEncryption(view["encryption"]) else {
             requireSettingsSyncRestart(capturedHost)
             return false
         }
@@ -5097,7 +5121,7 @@ final class CoreModel: ObservableObject {
     func openSyncSettings() async {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !settingsSyncPresented,
               !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
-              !settingsSyncRestartRequired, !appLock.concealed else { return }
+              !settingsSyncRestartRequired, !appLock.concealed, settingsSyncEncryptionOwner == nil else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsSyncPresented = true
@@ -5151,6 +5175,10 @@ final class CoreModel: ObservableObject {
     }
 
     func clearSettingsSyncForPrivacy() {
+        // Revoke delivery and local text synchronously; the captured owner keeps
+        // busy until its accepted bridge call and any required host close settle.
+        settingsSyncEncryptionTask?.cancel()
+        settingsSyncPassphrase = ""
         settingsSyncReadTask?.cancel()
         settingsSyncReadTask = nil
         settingsSyncGeneration += 1
@@ -5168,6 +5196,193 @@ final class CoreModel: ObservableObject {
         settingsSyncStatus = nil
         settingsSyncError = nil
         if settingsSyncPresented { settingsSyncNeedsReload = true }
+    }
+
+    private func settingsSyncWireBool(_ value: Any?) -> Bool? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
+    private func settingsSyncEncryptionActionAllowed(_ action: CoreObject) -> Bool {
+        switch action.text("type") {
+        case "open", "submit": return Set(action.keys) == Set(["type", "flow"]) && action.text("flow") == "unlock"
+        case "cancel", "decline", "retry": return Set(action.keys) == Set(["type"])
+        default: return false
+        }
+    }
+
+    // Rendering admits only the selected shared Unlock wire, never another flow
+    // or a returned plaintext field/reveal control.
+    private func validSettingsSyncEncryption(_ value: Any?) -> Bool {
+        if value is NSNull { return true }
+        guard let card = value as? CoreObject, Set(card.keys) == Set(["title", "guide", "rows"]),
+              card["title"] is String, let rows = card["rows"] as? [CoreObject], rows.count <= 128,
+              card["guide"] is NSNull || card["guide"] is CoreObject else { return false }
+        var fields = 0
+        for row in rows {
+            switch row.text("kind") {
+            case "text":
+                guard Set(row.keys) == Set(["kind", "text", "tone"]), row["text"] is String,
+                      ["label", "description", "warning", "danger"].contains(row.text("tone")) else { return false }
+            case "field":
+                fields += 1
+                guard fields == 1, Set(row.keys) == Set(["kind", "field", "label", "secure", "maxLength", "tooLong"]),
+                      row.text("field") == "current", row["label"] is String, row["tooLong"] is String,
+                      settingsSyncWireBool(row["secure"]) == true, let limit = row["maxLength"] as? NSNumber,
+                      CFGetTypeID(limit) != CFBooleanGetTypeID(), limit.doubleValue == Double(limit.intValue),
+                      limit.intValue > 0, limit.intValue <= 1000 else { return false }
+            case "action":
+                guard Set(row.keys) == Set(["kind", "label", "action", "enabled", "busy"]), row["label"] is String,
+                      let action = row["action"] as? CoreObject, settingsSyncEncryptionActionAllowed(action),
+                      settingsSyncWireBool(row["enabled"]) != nil, settingsSyncWireBool(row["busy"]) != nil else { return false }
+            default: return false
+            }
+        }
+        return true
+    }
+
+    private var settingsSyncEncryptionField: CoreObject? {
+        settingsSync.object("encryption").objects("rows").first { $0.text("kind") == "field" }
+    }
+    var settingsSyncPassphraseTooLong: String? {
+        guard let field = settingsSyncEncryptionField, settingsSyncPassphrase.utf16.count > field.number("maxLength") else { return nil }
+        return field.text("tooLong")
+    }
+    func setSettingsSyncPassphrase(_ value: String) {
+        guard settingsSyncCanEdit, !settingsSyncDraftDirty, !settingsSyncChecking, settingsSyncEncryptionField != nil else { return }
+        settingsSyncPassphrase = value
+    }
+    func settingsSyncEncryptionActionID(_ action: CoreObject) -> String {
+        action.text("type") == "submit" ? "unlock" : action.text("type")
+    }
+    private func settingsSyncEncryptionOffered(_ action: CoreObject, enabled: Bool) -> Bool {
+        settingsSync.object("encryption").objects("rows").contains {
+            $0.text("kind") == "action" && (!enabled || $0.flag("enabled")) && !$0.flag("busy")
+                && $0.object("action").text("type") == action.text("type")
+                && $0.object("action").text("flow") == action.text("flow")
+        }
+    }
+    func settingsSyncEncryptionActionEnabled(_ action: CoreObject) -> Bool {
+        guard settingsSyncCanEdit, !settingsSyncChecking, !settingsSyncDraftDirty,
+              foregroundSyncSceneActive, UIApplication.shared.applicationState == .active,
+              settingsSyncEncryptionActionAllowed(action), !settingsSyncOpeningRevision.isEmpty,
+              settingsSync.text("configRevision") == settingsSyncOpeningRevision else { return false }
+        if action.text("type") == "submit" {
+            return settingsSyncEncryptionOffered(action, enabled: false) && settingsSyncEncryptionField != nil
+                && !settingsSyncPassphrase.isEmpty && settingsSyncPassphraseTooLong == nil
+        }
+        return settingsSyncEncryptionOffered(action, enabled: true)
+    }
+
+    private func settingsSyncEncryptionCurrent(_ owner: SettingsSyncEncryptionOwner) -> Bool {
+        settingsSyncEncryptionOwner?.id == owner.id && settingsSyncCurrent(owner.host, owner.session)
+            && settingsSyncGeneration == owner.generation && !Task.isCancelled
+            && foregroundSyncSceneActive && UIApplication.shared.applicationState == .active && !settingsSyncNeedsReload
+    }
+
+    private func settingsSyncEncryptionReply(_ encoded: String, action: Bool) throws -> CoreObject {
+        let reply = try decode(encoded)
+        guard let ok = settingsSyncWireBool(reply["ok"]) else { throw CocoaError(.coderReadCorrupt) }
+        if !ok {
+            let error = reply.object("error")
+            guard Set(reply.keys) == Set(["ok", "error"]), Set(error.keys) == Set(["code", "message"]),
+                  error["code"] is String, error["message"] is String else { throw CocoaError(.coderReadCorrupt) }
+        } else {
+            guard Set(reply.keys) == Set(["ok", "value"]), let value = reply["value"] as? CoreObject else { throw CocoaError(.coderReadCorrupt) }
+            if action {
+                guard Set(value.keys) == Set(["toasts", "passphrase"]), value["passphrase"] is NSNull,
+                      let toasts = value["toasts"] as? [CoreObject], toasts.allSatisfy({
+                          $0["title"] is String && $0["message"] is String && ["warning", "error", "success", "info"].contains($0.text("tone"))
+                      }) else { throw CocoaError(.coderReadCorrupt) }
+            }
+        }
+        return reply
+    }
+
+    func performSettingsSyncEncryption(_ action: CoreObject) async {
+        guard settingsSyncEncryptionActionEnabled(action), let capturedHost = host, settingsSyncEncryptionTask == nil else { return }
+        settingsSyncReadTask?.cancel()
+        settingsSyncReadTask = nil
+        settingsSyncGeneration += 1
+        let owner = SettingsSyncEncryptionOwner(id: UUID(), host: capturedHost, session: settingsSyncSession,
+            generation: settingsSyncGeneration, revision: settingsSyncOpeningRevision)
+        settingsSyncEncryptionOwner = owner
+        settingsSyncError = nil
+        settingsSyncStatus = nil
+        busy = true
+        let passphrase = settingsSyncPassphrase
+        let task = Task { await runSettingsSyncEncryption(owner, action: action, passphrase: passphrase) }
+        settingsSyncEncryptionTask = task
+        await task.value
+    }
+
+    private func runSettingsSyncEncryption(_ owner: SettingsSyncEncryptionOwner, action: CoreObject, passphrase: String) async {
+        var staged = false
+        do {
+            guard settingsSyncEncryptionCurrent(owner), settingsSyncOpeningRevision == owner.revision, !settingsSyncDraftDirty else { throw CancellationError() }
+            if action.text("type") == "submit" {
+                // Typed may mutate before an acknowledgement is lost. From this
+                // point only confirmed Submit retirement or closing this host is safe.
+                staged = true
+                let typed = try settingsSyncEncryptionReply(try await owner.host.foregroundSync(command: "runSyncEncryptionAction",
+                    requestJSON: try json(["revision": owner.revision, "action": ["type": "typed", "field": "current", "value": passphrase]])), action: true)
+                guard settingsSyncEncryptionCurrent(owner), typed.flag("ok") else { throw CocoaError(.coderReadCorrupt) }
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                if settingsSyncEncryptionTypedThrowOnce {
+                    settingsSyncEncryptionTypedThrowOnce = false
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                if settingsSyncEncryptionTypedDelayOnce {
+                    settingsSyncEncryptionTypedDelayOnce = false
+                    settingsSyncEncryptionTypedHolding = true
+                    await withCheckedContinuation { continuation in
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { continuation.resume() }
+                    }
+                    settingsSyncEncryptionTypedHolding = false
+                }
+                #endif
+                guard settingsSyncEncryptionCurrent(owner), typed.flag("ok") else { throw CocoaError(.coderReadCorrupt) }
+                let fresh = try settingsSyncEncryptionReply(try await owner.host.foregroundSync(command: "syncSettings",
+                    requestJSON: try json(["draft": ["url": settingsSyncURL]])), action: false)
+                guard settingsSyncEncryptionCurrent(owner), fresh.flag("ok"), let view = fresh["value"] as? CoreObject,
+                      view.text("configRevision") == owner.revision,
+                      adoptSettingsSync(view, resetDraft: false, host: owner.host),
+                      settingsSyncEncryptionOffered(action, enabled: true) else { throw CocoaError(.coderReadCorrupt) }
+            }
+            guard settingsSyncEncryptionCurrent(owner), settingsSyncOpeningRevision == owner.revision, !settingsSyncDraftDirty else { throw CancellationError() }
+            var input: CoreObject = ["revision": owner.revision, "action": action]
+            if ["submit", "decline"].contains(action.text("type")) { input["requestId"] = owner.id.uuidString.lowercased() }
+            let reply = try settingsSyncEncryptionReply(try await owner.host.foregroundSync(command: "runSyncEncryptionAction", requestJSON: try json(input)), action: true)
+            if action.text("type") == "submit", reply.flag("ok") { staged = false }
+            guard settingsSyncEncryptionCurrent(owner) else { throw CancellationError() }
+            settingsSyncPassphrase = ""
+            guard let value = settingsSyncValue(reply) else {
+                if staged { throw CocoaError(.coderReadCorrupt) }
+                return finishSettingsSyncEncryption(owner)
+            }
+            _ = adoptSettingsSyncToasts(value)
+            let read = try settingsSyncEncryptionReply(try await owner.host.foregroundSync(command: "syncSettings",
+                requestJSON: try json(["draft": ["url": settingsSyncURL]])), action: false)
+            guard settingsSyncEncryptionCurrent(owner) else { throw CancellationError() }
+            if let view = settingsSyncValue(read) { _ = adoptSettingsSync(view, resetDraft: true, host: owner.host) }
+        } catch {
+            if !Task.isCancelled { requireSettingsSyncRestart(owner.host) }
+        }
+        if staged {
+            requireSettingsSyncRestart(owner.host)
+            // The last accepted native call above has returned/drained. Close
+            // even an old captured host, while never gating its replacement.
+            await owner.host.close()
+        }
+        finishSettingsSyncEncryption(owner)
+    }
+
+    private func finishSettingsSyncEncryption(_ owner: SettingsSyncEncryptionOwner) {
+        guard settingsSyncEncryptionOwner?.id == owner.id else { return }
+        settingsSyncEncryptionOwner = nil
+        settingsSyncEncryptionTask = nil
+        settingsSyncPassphrase = ""
+        if host === owner.host { finishOperation() }
     }
 
     func setSettingsSyncURL(_ value: String) {

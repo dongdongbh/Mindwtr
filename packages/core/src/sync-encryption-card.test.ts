@@ -81,11 +81,69 @@ describe('sync encryption card', () => {
         card.openFlow('unlock');
         card.setField('current', 'wrong');
         await card.submitUnlock();
-        expect(card.getState()).toMatchObject({ flow: 'unlock', error: 'wrong-passphrase', state: 'remote-encrypted-no-key' });
+        expect(card.getState()).toMatchObject({ flow: 'unlock', error: 'wrong-passphrase', state: 'remote-encrypted-no-key', currentPassphrase: 'wrong' });
 
         const failing = setup({ getStatus: async () => { throw new Error('unreadable'); } });
         await failing.card.refresh().done;
         expect(failing.card.getState()).toMatchObject({ state: null, stateUnavailable: true });
+    });
+
+    it('clearPassphrases preserves an inline failure and flow while blanking sensitive fields', async () => {
+        const { card, setState } = setup();
+        setState('remote-encrypted-no-key');
+        await card.refresh().done;
+        card.openFlow('unlock');
+        card.generate();
+        card.setField('current', 'wrong');
+        await card.submitUnlock();
+        const before = card.getState();
+        expect(before).toMatchObject({ flow: 'unlock', error: 'wrong-passphrase', currentPassphrase: 'wrong', revealed: true, generated: true });
+        expect(before.nextPassphrase).not.toBe('');
+        expect(before.confirmPassphrase).not.toBe('');
+        card.clearPassphrases();
+        expect(card.getState()).toEqual({
+            ...before, currentPassphrase: '', nextPassphrase: '', confirmPassphrase: '', revealed: false, generated: false,
+        });
+    });
+
+    it('clearPassphrases preserves accepted busy work and a deferred-cleanup warning', async () => {
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const supplied: string[] = [];
+        const { card, setState } = setup({ provide: async (phrase) => { supplied.push(phrase); await held; return 'wrong-passphrase'; } });
+        setState('remote-encrypted-no-key');
+        await card.refresh().done;
+        card.openFlow('unlock');
+        card.setField('current', 'accepted phrase');
+        const pending = card.submitUnlock();
+        try {
+            const before = card.getState();
+            expect(before).toMatchObject({ busy: true, flow: 'unlock', currentPassphrase: 'accepted phrase' });
+            card.clearPassphrases();
+            expect(card.getState()).toEqual({
+                ...before, currentPassphrase: '', nextPassphrase: '', confirmPassphrase: '', revealed: false, generated: false,
+            });
+        } finally {
+            release();
+            await pending;
+        }
+        expect(supplied).toEqual(['accepted phrase']);
+        expect(card.getState()).toMatchObject({ busy: false, error: 'wrong-passphrase', flow: 'unlock', currentPassphrase: '' });
+
+        const deferred = setup({ enable: async () => { throw new SyncEncryptionCleanupDeferredError(undefined, new Error('lock'), 0, 'file-lock'); } }).card;
+        await deferred.refresh().done;
+        deferred.openFlow('enable');
+        deferred.setField('next', 'phrase');
+        deferred.setField('confirm', 'phrase');
+        await deferred.submitEnable();
+        deferred.setField('current', 'later draft');
+        deferred.toggleRevealed();
+        const warning = deferred.getState();
+        expect(warning.warning).toBe('file-cleanup-deferred');
+        deferred.clearPassphrases();
+        expect(deferred.getState()).toEqual({
+            ...warning, currentPassphrase: '', nextPassphrase: '', confirmPassphrase: '', revealed: false, generated: false,
+        });
     });
 
     it.each([

@@ -23,7 +23,7 @@ struct SettingsScreen: View {
     @State private var areaDeleteConfirmAnswered = false
     @State private var syncReloadConfirmPresented = false
     @State private var syncBackendPending: String?
-    private enum SyncField: Hashable { case url, username, password }
+    private enum SyncField: Hashable { case url, username, password, encryption }
     @FocusState private var syncField: SyncField?
 
     var body: some View {
@@ -268,6 +268,7 @@ struct SettingsScreen: View {
                         }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
                     }
                     if model.settingsSync.object("panel").text("kind") == "webdav" { syncWebDavContent }
+                    if !model.settingsSync.object("encryption").isEmpty { syncEncryptionContent }
                     if let failure = model.settingsSyncError {
                         Text(failure).rnFont(14).foregroundStyle(palette.danger)
                             .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-error")
@@ -289,10 +290,62 @@ struct SettingsScreen: View {
                             .frame(minHeight: 44).contentShape(Rectangle())
                     }.disabled(!model.settingsSyncCanClose)
                         .accessibilityIdentifier("sync-reload")
-                    if model.busy || model.settingsSyncChecking { ProgressView().frame(maxWidth: .infinity).padding(8) }
+                    if model.busy || model.settingsSyncChecking {
+                        ProgressView().frame(maxWidth: .infinity).padding(8)
+                            .accessibilityIdentifier(model.settingsSyncEncryptionTypedHeld ? "sync-encryption-typed-held" : "sync-progress")
+                    }
                 }
             }.padding(16).foregroundStyle(palette.text)
         }.accessibilityIdentifier("sync-screen")
+    }
+
+    private var syncEncryptionContent: some View {
+        let card = model.settingsSync.object("encryption")
+        let rows = card.objects("rows")
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(card.text("title")).rnFont(17, .semibold).accessibilityAddTraits(.isHeader)
+            ForEach(rows.indices, id: \.self) { index in
+                syncEncryptionRow(rows[index], index: index)
+            }
+        }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder private func syncEncryptionRow(_ row: CoreObject, index: Int) -> some View {
+        switch row.text("kind") {
+        case "text":
+            Text(row.text("text")).rnFont(row.text("tone") == "label" ? 15 : 14,
+                row.text("tone") == "label" ? .semibold : .regular)
+                .foregroundStyle(row.text("tone") == "danger" ? palette.danger
+                    : row.text("tone") == "label" ? palette.text : palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("sync-encryption-" + row.text("tone") + "-" + String(index))
+        case "field":
+            VStack(alignment: .leading, spacing: 8) {
+                Text(row.text("label")).rnFont(14, .semibold)
+                SecureField(row.text("label"), text: Binding(get: { model.settingsSyncPassphrase },
+                    set: { model.setSettingsSyncPassphrase($0) }))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
+                    .focused($syncField, equals: .encryption).submitLabel(.done).onSubmit { syncField = nil }
+                    .rnFont(16).padding(12).frame(minHeight: 44)
+                    .background(palette.bg, in: RoundedRectangle(cornerRadius: 8))
+                    .disabled(!model.settingsSyncCanEdit || model.settingsSyncChecking || model.settingsSyncDraftDirty)
+                    .accessibilityLabel(row.text("label")).accessibilityIdentifier("sync-encryption-current")
+                if let tooLong = model.settingsSyncPassphraseTooLong {
+                    Text(tooLong).rnFont(14).foregroundStyle(palette.danger)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("sync-encryption-too-long")
+                }
+            }
+        case "action":
+            let action = row.object("action")
+            Button { syncField = nil; Task { await model.performSettingsSyncEncryption(action) } } label: {
+                Text(row.text("label")).rnFont(15, .semibold)
+                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.bordered).tint(palette.tint)
+                .disabled(!model.settingsSyncEncryptionActionEnabled(action))
+                .accessibilityIdentifier("sync-encryption-" + model.settingsSyncEncryptionActionID(action))
+        default:
+            EmptyView() // Unsupported rows are refused by CoreModel before adoption.
+        }
     }
 
     private var syncWebDavContent: some View {

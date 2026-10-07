@@ -1,6 +1,146 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
+    // These cases require a fresh locked saved-WebDAV library staged externally
+    // through the real settings writer. No backend address or credential lives here.
+    private func task371Library(_ suffix: String) throws -> String {
+        guard let raw = ProcessInfo.processInfo.environment["MINDWTR_UNLOCK_UI_" + suffix + "_LIBRARY"] else {
+            throw XCTSkip("A fresh externally staged locked WebDAV library is required")
+        }
+        guard let id = UUID(uuidString: raw), id.uuidString.lowercased() == raw else {
+            XCTFail("The isolated library must be a canonical lowercase UUID")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return raw
+    }
+
+    private func task371OpenSync(_ app: XCUIApplication) {
+        if !app.buttons["settings-back"].exists {
+            boardEnabled(app.buttons["tab-menu"], timeout: 30)
+            boardTap(app, "tab-menu")
+            let settings = app.buttons["menu-settings"]
+            if !settings.isHittable {
+                revealPagedElement(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+            }
+            boardTap(app, "menu-settings")
+        }
+        revealPagedElement(app, app.buttons["settings-sync"], in: app.scrollViews["settings-scroll"])
+        boardTap(app, "settings-sync")
+        boardEnabled(app.buttons["sync-option-webdav"], timeout: 30)
+        XCTAssertTrue(app.buttons["sync-option-webdav"].isSelected)
+        let open = app.buttons["sync-encryption-open"]
+        revealPagedElement(app, open, in: app.scrollViews["sync-screen"])
+        boardEnabled(open, timeout: 30)
+        XCTAssertGreaterThanOrEqual(open.frame.height, 44 - 0.01)
+        boardTap(app, "sync-encryption-open")
+        let field = app.secureTextFields["sync-encryption-current"]
+        boardEnabled(field, timeout: 30)
+        let value = field.value as? String ?? ""
+        XCTAssertTrue(value.isEmpty || value == field.placeholderValue)
+        XCTAssertFalse(app.textFields["sync-encryption-current"].exists)
+        XCTAssertFalse(app.buttons["sync-encryption-reveal"].exists)
+        XCTAssertFalse(app.buttons["sync-encryption-generate"].exists)
+        XCTAssertFalse(app.buttons["sync-encryption-unlock"].isEnabled)
+    }
+
+    private func task371Type(_ app: XCUIApplication, _ text: String) {
+        task322Type(app, "sync-encryption-current", text, secure: true)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch.exists)
+    }
+
+    private func task371Restart(_ app: XCUIApplication) {
+        task322RestartGate(app)
+        XCTAssertFalse(app.secureTextFields["sync-encryption-current"].exists)
+        for id in ["open", "unlock", "cancel", "decline", "retry"] {
+            XCTAssertFalse(app.buttons["sync-encryption-" + id].exists)
+        }
+    }
+
+    func testNativeEncryptionLocalFieldBoundsDirtyFormAndCancelNeverSubmit() throws {
+        let library = try task371Library("MASK")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app)
+        task371Type(app, "synthetic-local-371")
+        boardEnabled(app.buttons["sync-encryption-unlock"], timeout: 15)
+        let username = app.textFields["sync-username"]
+        revealPagedElement(app, username, in: app.scrollViews["sync-screen"])
+        username.tap(); username.typeText(" draft")
+        revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
+        for id in ["unlock", "cancel", "decline"] { XCTAssertFalse(app.buttons["sync-encryption-" + id].isEnabled) }
+        revealPagedElement(app, username, in: app.scrollViews["sync-screen"])
+        username.tap(); username.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6))
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        XCTAssertTrue(app.secureTextFields["sync-encryption-current"].waitForNonExistence(timeout: 15))
+        boardEnabled(app.buttons["sync-encryption-open"], timeout: 15)
+        boardTap(app, "sync-encryption-open")
+        task371Type(app, String(repeating: "a", count: 1001))
+        XCTAssertTrue(app.staticTexts["sync-encryption-too-long"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["sync-encryption-unlock"].isEnabled)
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        boardTap(app, "sync-back"); task371OpenSync(app)
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel"); boardTap(app, "sync-back")
+        app.terminate(); app.launch(); task371OpenSync(app)
+    }
+
+    func testNativeEncryptionUnknownTypedCompletionRequiresColdRestart() throws {
+        let library = try task371Library("UNKNOWN")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-encryption-typed-throw-once",
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app); task371Type(app, "synthetic-unknown-371")
+        revealPagedElement(app, app.buttons["sync-encryption-unlock"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-unlock"); task371Restart(app)
+        app.terminate()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); task371OpenSync(app)
+    }
+
+    func testNativeEncryptionBackgroundDuringTypedReplyDelayRetainsOwnerUntilClose() throws {
+        let library = try task371Library("BACKGROUND")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-encryption-typed-delay-once",
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app); task371Type(app, "synthetic-background-371")
+        revealPagedElement(app, app.buttons["sync-encryption-unlock"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-unlock")
+        let held = app.descendants(matching: .any).matching(identifier: "sync-encryption-typed-held").firstMatch
+        XCTAssertTrue(held.waitForExistence(timeout: 15), "Actual successful Typed must reach the bounded reply-delay hook")
+        XCTAssertFalse(app.buttons["sync-back"].isEnabled)
+        #if targetEnvironment(simulator)
+        XCUIDevice.shared.press(.home)
+        #else
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+        #endif
+        let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed)
+        app.activate()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "sync-encryption-typed-held").firstMatch.exists,
+            "Return while the actual typed reply is still held; a later phase is not this boundary")
+        XCTAssertFalse(app.buttons["sync-back"].isEnabled)
+        XCTAssertFalse(app.buttons["sync-reload"].isEnabled)
+        XCTAssertTrue(app.secureTextFields["sync-encryption-current"].waitForNonExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["synthetic-background-371"].exists)
+        // No editable reload/new operation may replace the retained delayed owner.
+        if app.buttons["sync-reload"].exists { XCTAssertFalse(app.buttons["sync-reload"].isEnabled) }
+        task371Restart(app)
+        app.terminate()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); task371OpenSync(app)
+    }
+
     private func task322OpenSync(_ app: XCUIApplication) {
         if !app.buttons["settings-back"].exists {
             boardEnabled(app.buttons["tab-menu"], timeout: 30)
@@ -41,7 +181,7 @@ final class FoundationUITests: XCTestCase {
         if secure {
             XCTAssertFalse((field.value as? String ?? "").isEmpty)
             XCTAssertNotEqual(field.value as? String, field.placeholderValue)
-            XCTAssertFalse(app.staticTexts[text].exists, "Synthetic password must not be rendered as plaintext")
+            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch.exists, "Synthetic password must not be rendered as plaintext")
         } else { XCTAssertEqual(field.value as? String, text) }
     }
 

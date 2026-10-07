@@ -643,6 +643,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         if (!screen) return;
         screen.unsubscribe();
         for (const cancel of [...screen.cancels, ...screen.cardCancels]) cancel();
+        screen.card?.closeFlow();
         screen = null;
     }
 
@@ -1497,11 +1498,16 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                     const identity = ['encryption', target, ...capturedFields,
                         ...(input.revision === undefined ? [] : [input.revision])];
                     const result = await runScreenAction(input.requestId!, identity, current, async () => {
-                        if (unlockOnly || input.revision !== undefined) {
-                            const refused = await refuseUnlockConfiguration();
-                            if (refused) return refused;
+                        try {
+                            if (unlockOnly || input.revision !== undefined) {
+                                const refused = await refuseUnlockConfiguration();
+                                if (refused) return refused;
+                            }
+                            await run();
+                        } finally {
+                            // Only the owned submit retires text; joined or rejected callers do not own it.
+                            if (unlockOnly && type === 'submit') card.clearPassphrases();
                         }
-                        await run();
                     });
                     return result.ok ? { ok: true, value: { ...result.value, passphrase: null } } : result;
                 }

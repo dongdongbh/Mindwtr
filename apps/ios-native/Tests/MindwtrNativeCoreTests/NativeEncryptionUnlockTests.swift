@@ -378,10 +378,13 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertNil(try cachedKey()); XCTAssertEqual(try storedState()["state"] as? String, "remote-encrypted-no-key")
         let denied = try await encryptionRows(host)
         XCTAssertTrue(denied.contains { $0["tone"] as? String == "danger" }, "A live peer lease must keep retry visibly paused")
+        XCTAssertTrue(denied.contains { ($0["action"] as? [String: Any])?["type"] as? String == "submit" && $0["enabled"] as? Bool == false },
+            "A settled attempt retires its passphrase before another submission")
         XCTAssertEqual(remote.bytes(path), bytes); assertRemoteDomainUnchanged(before); XCTAssertEqual(try markers(), 0); assertDrained()
         // Expiry is established by the same authority; no fixture deletes the
         // lease. Shared conditional acquisition performs its ordinary CAS.
         remote.advanceServerTime(to: Date(timeIntervalSince1970: (expires + 1_000) / 1_000))
+        _ = try await action(host, ["type": "typed", "field": "current", "value": passphrase])
         _ = try await action(host, ["type": "submit", "flow": "unlock"], requestID: UUID().uuidString.lowercased())
         XCTAssertEqual(try cachedKey(), key()); XCTAssertEqual(try storedState()["state"] as? String, "enabled")
         XCTAssertEqual(try markers(), 1); XCTAssertNil(remote.bytes(path))
