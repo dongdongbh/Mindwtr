@@ -83,6 +83,34 @@ describe('withNamespace body read before admission', () => {
         expect(handlerBody.__mindwtrError.status).toBe(413);
     });
 
+    test('a body read that fails during blocked admission is not an unhandled rejection', async () => {
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+        process.on('unhandledRejection', onUnhandled);
+        try {
+            const { req } = endlessChunkedPut();
+            const response = await withNamespace(req, new URL(req.url), config({
+                runWithNamespaceAdmission: async (handler) => {
+                    await new Promise((resolve) => setTimeout(resolve, 50));
+                    return handler();
+                },
+                readBodyBeforeAdmission: () => Promise.reject(new Error('stream failed')),
+            }), async (ctx) => {
+                try {
+                    await ctx.body;
+                    return new Response('unexpected');
+                } catch (error) {
+                    return new Response((error as Error).message, { status: 500 });
+                }
+            });
+            expect(response?.status).toBe(500);
+            expect(await response?.text()).toBe('stream failed');
+            expect(unhandled).toEqual([]);
+        } finally {
+            process.off('unhandledRejection', onUnhandled);
+        }
+    });
+
     test('cancels the body read when admission refuses the namespace', async () => {
         const { req, cancelled } = endlessChunkedPut();
         const response = await withNamespace(req, new URL(req.url), config({

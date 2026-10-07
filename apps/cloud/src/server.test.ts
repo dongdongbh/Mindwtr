@@ -2041,9 +2041,11 @@ describe('cloud server api', () => {
         const captureResponse = await fetch(`${baseUrl}/v1/capture`, {
             method: 'POST',
             headers: { ...authHeaders, 'content-type': 'application/json' },
-            body: JSON.stringify({ transcription: 'x'.repeat(3_000_000) }),
+            // A short transcription: only the small JSON cap refuses this, not the attachment cap.
+            body: JSON.stringify({ transcription: 'Short note', pad: 'x'.repeat(3_000_000) }),
         });
         expect(captureResponse.status).toBe(413);
+        expect(await captureResponse.json()).toEqual({ error: 'Payload too large: the limit is 2000000 bytes' });
     });
 
     test('uses the configured sync document limit for the data write only', async () => {
@@ -2073,21 +2075,8 @@ describe('cloud server api', () => {
         });
     });
 
-    test('lets the app answer a body above the Bun default transport limit with JSON', async () => {
-        stopServer?.();
-        const isolatedServer = await startCloudServer({
-            host: '127.0.0.1',
-            port: 0,
-            dataDir,
-            maxDataBodyBytes: 140_000_000,
-            allowedAuthTokens: new Set([integrationToken]),
-        });
-        baseUrl = `http://127.0.0.1:${isolatedServer.port}`;
-        stopServer = isolatedServer.stop;
-        const serverPort = isolatedServer.port;
-
-        // 139 MB is above Bun's 128 MiB default but inside the largest configured
-        // limit, so the small-endpoint check must be the one that refuses it.
+    /** Sends only the headers and one byte of a large POST /v1/tasks; returns the raw reply. */
+    const postOversizedTaskHeaders = async (serverPort: number, contentLength: number): Promise<string> => {
         const socket = connect({ host: '127.0.0.1', port: serverPort });
         let rawResponse = '';
         socket.setEncoding('utf8');
@@ -2104,7 +2093,7 @@ describe('cloud server api', () => {
                 `Host: 127.0.0.1:${serverPort}`,
                 `Authorization: Bearer ${integrationToken}`,
                 'Content-Type: application/json',
-                'Content-Length: 139000000',
+                `Content-Length: ${contentLength}`,
                 'Connection: close',
                 '',
                 '{',
@@ -2115,8 +2104,37 @@ describe('cloud server api', () => {
         } finally {
             socket.destroy();
         }
+        return rawResponse;
+    };
+
+    const restartWithLimits = async (limits: { maxBodyBytes?: number; maxDataBodyBytes?: number; maxAttachmentBytes?: number }) => {
+        stopServer?.();
+        const isolatedServer = await startCloudServer({
+            host: '127.0.0.1',
+            port: 0,
+            dataDir,
+            allowedAuthTokens: new Set([integrationToken]),
+            ...limits,
+        });
+        baseUrl = `http://127.0.0.1:${isolatedServer.port}`;
+        stopServer = isolatedServer.stop;
+        return isolatedServer.port;
+    };
+
+    test('lets the app answer a body above the Bun default transport limit with JSON', async () => {
+        // 139 MB is above Bun's 128 MiB default but inside the largest configured
+        // limit, so the small-endpoint check must be the one that refuses it.
+        const port = await restartWithLimits({ maxDataBodyBytes: 140_000_000 });
+        const rawResponse = await postOversizedTaskHeaders(port, 139_000_000);
         expect(rawResponse.startsWith('HTTP/1.1 413')).toBe(true);
         expect(rawResponse).toContain('"error": "Payload too large: the limit is 2000000 bytes"');
+    });
+
+    test('keeps the app JSON 413 up to Bun default when every configured limit is small', async () => {
+        const port = await restartWithLimits({ maxBodyBytes: 100, maxDataBodyBytes: 1_000, maxAttachmentBytes: 1_000 });
+        const rawResponse = await postOversizedTaskHeaders(port, 100_000_000);
+        expect(rawResponse.startsWith('HTTP/1.1 413')).toBe(true);
+        expect(rawResponse).toContain('"error": "Payload too large: the limit is 100 bytes"');
     });
 
     test('refuses a sync document over the data limit with the limit in the JSON answer', async () => {

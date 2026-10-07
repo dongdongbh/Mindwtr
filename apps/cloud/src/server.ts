@@ -277,6 +277,8 @@ type BunRuntime = {
     }) => BunServer;
 };
 
+const BUN_DEFAULT_MAX_REQUEST_BODY_BYTES = 128 * 1024 * 1024;
+
 const getBunRuntime = (): BunRuntime | undefined => (
     (globalThis as typeof globalThis & { Bun?: BunRuntime }).Bun
 );
@@ -1365,9 +1367,12 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
         hostname: host,
         port,
         // Bun refuses a larger Content-Length with an empty 413 before the handler
-        // runs (default 128 MiB). Sit just above the largest app limit so the app's
-        // own capped reads answer with JSON naming the limit.
-        maxRequestBodySize: Math.max(maxBodyBytes, maxDataBodyBytes, maxAttachmentBytes) + 1_048_576,
+        // runs. Keep Bun's own 128 MiB default as the floor and sit just above the
+        // largest app limit, so the app's capped reads answer with JSON naming the limit.
+        maxRequestBodySize: Math.max(
+            BUN_DEFAULT_MAX_REQUEST_BODY_BYTES,
+            Math.max(maxBodyBytes, maxDataBodyBytes, maxAttachmentBytes) + 1_048_576,
+        ),
         async fetch(req: Request) {
             const requestId = generateRequestId();
             const requestStartedAt = performance.now();

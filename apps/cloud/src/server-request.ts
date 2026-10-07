@@ -146,6 +146,9 @@ export async function withNamespace(
         req,
         signal ? AbortSignal.any([signal, bodyAbort.signal]) : bodyAbort.signal,
     );
+    // Observe a failure at once so it is never unhandled while admission waits;
+    // the handler still sees it when it awaits `body`.
+    void body?.catch(() => undefined);
     let bodyHandedOff = false;
     try {
         const refusal = await admitNamespaceWrite(cfg, key, scope, req.method, signal);
@@ -157,7 +160,6 @@ export async function withNamespace(
         if (!bodyHandedOff && body) {
             // A RequestAbortError reason: the body reader reuses it as its error.
             bodyAbort.abort(createRequestAbortError('Request refused before its body was read'));
-            void body.catch(() => undefined);
         }
     }
 }
