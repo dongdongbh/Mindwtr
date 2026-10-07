@@ -23,7 +23,7 @@ import { CLOUD_PROVIDER_KEY, SYNC_BACKEND_KEY, SYNC_PATH_KEY, type SyncKeyValueS
 import { webdavGetFile } from './webdav';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './mobile-sync-utils';
 import { isHttpAttachmentUri, type MobileAttachmentFiles } from './mobile-attachment-files';
-import type { MobileAttachmentCommon } from './mobile-attachment-common';
+import { assertAttachmentSyncNotAborted, type MobileAttachmentCommon, type PreparedAttachmentDownloadBytes } from './mobile-attachment-common';
 import type { MobileSyncEncryptionPort } from './mobile-sync-service';
 
 export type AttachmentAvailabilityOutcome =
@@ -31,6 +31,15 @@ export type AttachmentAvailabilityOutcome =
   | { status: 'generation-conflict' }
   | { status: 'unrecoverable'; attachment: Attachment }
   | { status: 'unavailable' };
+
+/** Private candidate only. Its source is not installed or checkpointed availability. */
+export type PreparedAttachmentAvailabilityOutcome = AttachmentAvailabilityOutcome | {
+  status: 'prepared';
+  attachment: Attachment;
+  sourceToken: string;
+  sha256: string;
+  size: number;
+};
 
 const GENERATION_CONFLICT = Symbol('attachment-generation-conflict');
 type InternalUnrecoverableOutcome = {
@@ -42,6 +51,11 @@ type InternalAvailabilityOutcome =
   | InternalUnrecoverableOutcome
   | null
   | typeof GENERATION_CONFLICT;
+type InternalPreparedOutcome = PreparedAttachmentDownloadBytes & {
+  availabilityStatus: 'prepared';
+  attachment: Attachment;
+};
+type InternalPreparationOutcome = InternalAvailabilityOutcome | InternalPreparedOutcome;
 
 /** A download may only be shared while it represents the same immutable remote bytes. */
 export const getAttachmentDownloadIdentity = (attachment: Attachment): string => JSON.stringify([
@@ -122,6 +136,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     ...host.core,
   };
   const { files, common } = host;
+  const prepareAttachmentDownloadBytes = common.prepareAttachmentDownloadBytes;
   const downloadLocks = new Map<string, Promise<AttachmentAvailabilityOutcome>>();
 
   /**
@@ -158,12 +173,18 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
   const resolveMatchingManagedTarget = async (
     attachment: Attachment,
     targetUri: string,
+    signal?: AbortSignal,
   ): Promise<InternalAvailabilityOutcome> => {
+    assertAttachmentSyncNotAborted(signal);
     if (!isSha256Hex(attachment.fileHash)) return GENERATION_CONFLICT;
     try {
-      await validateAttachmentHash(attachment, await files.readFileAsBytes(targetUri));
+      const bytes = await files.readFileAsBytes(targetUri);
+      assertAttachmentSyncNotAborted(signal);
+      await validateAttachmentHash(attachment, bytes);
+      assertAttachmentSyncNotAborted(signal);
       return { ...attachment, uri: targetUri, localStatus: 'available' };
     } catch (error) {
+      assertAttachmentSyncNotAborted(signal);
       files.logAttachmentWarn(`Managed attachment ${attachment.id} does not match the requested generation`, error);
       return GENERATION_CONFLICT;
     }
@@ -179,7 +200,18 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     attachmentsDir: string,
     targetUri: string,
     bytes: Uint8Array,
-  ): Promise<InternalAvailabilityOutcome> => {
+    purpose: 'install' | 'prepare' = 'install',
+    signal?: AbortSignal,
+  ): Promise<InternalPreparationOutcome> => {
+    if (purpose === 'prepare') {
+      if (!prepareAttachmentDownloadBytes) throw new Error('Attachment download preparation is unavailable');
+      const prepared = await prepareAttachmentDownloadBytes(attachment, targetUri, bytes, signal);
+      return {
+        ...prepared,
+        availabilityStatus: 'prepared',
+        attachment: { ...attachment, uri: targetUri, localStatus: 'available', fileHash: prepared.sha256 },
+      };
+    }
     const installed = await common.installAttachmentDownloadBytes(
       attachment,
       attachmentsDir,
@@ -342,20 +374,33 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     }
   };
 
-  const ensureAttachmentAvailableInternal = async (
+  function ensureAttachmentAvailableInternal(attachment: Attachment): Promise<InternalAvailabilityOutcome>;
+  function ensureAttachmentAvailableInternal(attachment: Attachment, purpose: 'prepare', signal?: AbortSignal): Promise<InternalPreparationOutcome>;
+  async function ensureAttachmentAvailableInternal(
     attachment: Attachment,
-  ): Promise<InternalAvailabilityOutcome> => {
-    if (attachment.kind !== 'file') return attachment;
+    purpose: 'install' | 'prepare' = 'install',
+    signal?: AbortSignal,
+  ): Promise<InternalPreparationOutcome> {
+    const preparing = purpose === 'prepare';
+    assertAttachmentSyncNotAborted(signal);
+    if (attachment.kind !== 'file') return preparing ? null : attachment;
     const localAttachment = { ...attachment };
+    if (preparing && (!localAttachment.cloudKey || localAttachment.deletedAt)) return null;
+    const preparedBackend = preparing ? await host.storage.getItem(SYNC_BACKEND_KEY) : undefined;
+    assertAttachmentSyncNotAborted(signal);
+    if (preparing && preparedBackend !== 'webdav') return null;
     const uri = localAttachment.uri || '';
     if (uri && isHttpAttachmentUri(uri)) {
+      if (preparing) return null;
       return { ...localAttachment, localStatus: 'available' };
     }
 
     if (uri) {
       const sourcePresence = await files.getLocalAttachmentPresence(uri);
+      assertAttachmentSyncNotAborted(signal);
       if (sourcePresence === 'unreadable') return null;
       if (sourcePresence === 'present') {
+        if (preparing) return resolveMatchingManagedTarget(localAttachment, uri, signal);
         if (await files.ensureAttachmentStoredLocally(localAttachment)) {
           return localAttachment;
         }
@@ -363,7 +408,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       }
     }
 
-    const backend = await host.storage.getItem(SYNC_BACKEND_KEY);
+    const backend = preparing ? preparedBackend : await host.storage.getItem(SYNC_BACKEND_KEY);
     if (backend === 'file') {
       const syncPath = await host.storage.getItem(SYNC_PATH_KEY);
       if (syncPath) {
@@ -453,41 +498,56 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
 
     if (localAttachment.cloudKey) {
       const config = await files.loadWebDavConfig();
+      assertAttachmentSyncNotAborted(signal);
       if (!config?.url) return null;
       const baseSyncUrl = getBaseSyncUrl(config.url);
-      const attachmentsDir = await files.getAttachmentsDir();
+      const attachmentsDir = preparing ? files.getManagedAttachmentsDir() : await files.getAttachmentsDir();
+      assertAttachmentSyncNotAborted(signal);
       if (!attachmentsDir) return null;
       const filename = localAttachment.cloudKey.split('/').pop() || `${localAttachment.id}${extractExtension(localAttachment.title)}`;
       const targetUri = `${attachmentsDir}${filename}`;
       const targetPresence = await files.getLocalAttachmentPresence(targetUri);
+      assertAttachmentSyncNotAborted(signal);
       if (targetPresence === 'unreadable') return null;
       if (targetPresence === 'present') {
-        return resolveMatchingManagedTarget(localAttachment, targetUri);
+        return resolveMatchingManagedTarget(localAttachment, targetUri, signal);
       }
       try {
-        const data = await core.withRetry(() =>
-          core.webdavGetFile(`${baseSyncUrl}/${localAttachment.cloudKey}`, {
+        const data = await core.withRetry(() => {
+          assertAttachmentSyncNotAborted(signal);
+          return core.webdavGetFile(`${baseSyncUrl}/${localAttachment.cloudKey}`, {
             ...getMobileWebDavRequestOptions(config.allowInsecureHttp),
             username: config.username,
             password: config.password,
+            ...(preparing ? { signal } : {}),
             onProgress: (loaded, total) => reportProgress(localAttachment.id, 'download', loaded, total, 'active'),
-          })
-        );
+          });
+        });
+        assertAttachmentSyncNotAborted(signal);
+        const wireBytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer);
+        const material = await host.encryption.getSyncEncryptionMaterial();
+        assertAttachmentSyncNotAborted(signal);
         const bytes = await common.openAttachmentBytesFromDownload(
-          data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
-          await host.encryption.getSyncEncryptionMaterial(),
+          wireBytes,
+          material,
         );
+        assertAttachmentSyncNotAborted(signal);
         const installedAttachment = await installMissingAttachmentBytes(
           localAttachment,
           attachmentsDir,
           targetUri,
           bytes,
+          purpose,
+          signal,
         );
+        assertAttachmentSyncNotAborted(signal);
         if (installedAttachment === GENERATION_CONFLICT) return GENERATION_CONFLICT;
         if (!installedAttachment) return null;
+        if ('availabilityStatus' in installedAttachment && installedAttachment.availabilityStatus === 'prepared') return installedAttachment;
         reportProgress(localAttachment.id, 'download', bytes.length, bytes.length, 'completed');
         return installedAttachment;
       } catch (error) {
+        assertAttachmentSyncNotAborted(signal);
         return downloadFailed(localAttachment, error, getErrorStatus(error) === 404, {
           message: `WebDAV attachment ${localAttachment.id} is no longer available`,
           releaseCheck: 'v1.3.4/webdav-download-not-found',
@@ -496,7 +556,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     }
 
     return null;
-  };
+  }
 
   const ensureAttachmentAvailableDetailed = async (
     attachment: Attachment,
@@ -528,9 +588,33 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     return outcome.status === 'available' ? outcome.attachment : null;
   };
 
+  const prepareAttachmentAvailableDetailed = prepareAttachmentDownloadBytes ? async (
+    attachment: Attachment,
+    signal?: AbortSignal,
+  ): Promise<PreparedAttachmentAvailabilityOutcome> => {
+    assertAttachmentSyncNotAborted(signal);
+    if (core.isSandboxMode()) return { status: 'unavailable' };
+    // A source token belongs to this invocation; never use ordinary downloadLocks.
+    const result = await ensureAttachmentAvailableInternal(attachment, 'prepare', signal);
+    assertAttachmentSyncNotAborted(signal);
+    if (result === GENERATION_CONFLICT) return { status: 'generation-conflict' };
+    if (!result) return { status: 'unavailable' };
+    if ('availabilityStatus' in result) {
+      if (result.availabilityStatus === 'prepared') {
+        return {
+          status: 'prepared', attachment: result.attachment, sourceToken: result.sourceToken,
+          sha256: result.sha256, size: result.size,
+        };
+      }
+      return { status: 'unrecoverable', attachment: result.attachment };
+    }
+    return { status: 'available', attachment: result };
+  } : undefined;
+
   return {
     ensureAttachmentAvailableDetailed,
     ensureAttachmentAvailable,
+    ...(prepareAttachmentAvailableDetailed ? { prepareAttachmentAvailableDetailed } : {}),
   };
 };
 

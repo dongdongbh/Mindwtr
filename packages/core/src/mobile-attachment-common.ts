@@ -142,6 +142,43 @@ type InstallStagedAttachmentDownloadOptions = {
   expectedStagedHash?: string;
 };
 
+export type PreparedPlaintextDownloadInput = Readonly<{
+  attachmentId: string;
+  targetURI: string;
+  expectation: Readonly<{ kind: 'absent' }>;
+  sha256: string;
+  size: number;
+}>;
+
+/** A private live native receipt handle, never a file path or publication result. */
+export type PreparedPlaintextDownloadSource = Readonly<{
+  kind: 'prepared-source';
+  sourceToken: string;
+}>;
+
+export type PreparedAttachmentDownloadBytes = Readonly<{
+  kind: 'prepared-plaintext';
+  sourceToken: string;
+  sha256: string;
+  size: number;
+}>;
+
+const assertExpectedAttachmentDownloadHash = (attachment: Attachment, sha256: string): void => {
+  if (isSha256Hex(attachment.fileHash) && attachment.fileHash.toLowerCase() !== sha256) {
+    throw new Error('Integrity validation failed');
+  }
+};
+
+const isPreparedPlaintextDownloadSource = (value: unknown): value is PreparedPlaintextDownloadSource => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== 2 || !keys.includes('kind') || !keys.includes('sourceToken')) return false;
+  const source = value as Record<string, unknown>;
+  return source.kind === 'prepared-source'
+    && typeof source.sourceToken === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(source.sourceToken);
+};
+
 /** A present expectation was hashed from attachment.uri, so publication must
  * CAS that exact path even when remote metadata now suggests another suffix. */
 export const resolveAttachmentDownloadTargetPath = (
@@ -211,10 +248,18 @@ export type MobileAttachmentCommonHost = {
   /** True while the platform has JavaScript timers paused (Android, in the background). */
   timersPaused(): boolean;
   uploads: MobileAttachmentUploadPort;
+  /** Selected preparation only: the adapter owns bounded plaintext and its live receipt.
+   * Ordinary installation never calls this port. */
+  preparePlaintextDownload?: (
+    input: PreparedPlaintextDownloadInput,
+    bytes: Uint8Array,
+    signal?: AbortSignal,
+  ) => Promise<PreparedPlaintextDownloadSource>;
 };
 
 export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) => {
   const { fs, files } = host;
+  const preparePlaintextDownload = host.preparePlaintextDownload;
   let uploadSnapshotSequence = 0;
   let downloadStageSequence = 0;
 
@@ -417,9 +462,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
       let actualStagedHash: string;
       if (isSha256Hex(expectedStagedHash)) {
         actualStagedHash = expectedStagedHash.toLowerCase();
-        if (isSha256Hex(attachment.fileHash) && attachment.fileHash.toLowerCase() !== actualStagedHash) {
-          throw new Error('Integrity validation failed');
-        }
+        assertExpectedAttachmentDownloadHash(attachment, actualStagedHash);
       } else {
         const stagedBytes = await readAttachmentDownloadStageBytes(stagedPath);
         const computedStagedHash = await computeSha256Hex(stagedBytes);
@@ -506,6 +549,33 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
       expectedStagedHash,
     });
   };
+
+  /** Preparation never creates JS scratch or acknowledges installed availability.
+   * A rejected/canceled reply leaves source ownership with the adapter. */
+  const prepareAttachmentDownloadBytes = preparePlaintextDownload ? async (
+    attachment: Attachment,
+    targetURI: string,
+    bytes: Uint8Array,
+    signal?: AbortSignal,
+  ): Promise<PreparedAttachmentDownloadBytes> => {
+    assertAttachmentSyncNotAborted(signal);
+    const size = bytes.byteLength;
+    assertAttachmentDownloadSize(size);
+    const sha256 = await computeSha256Hex(bytes);
+    assertAttachmentSyncNotAborted(signal);
+    if (!sha256) throw new Error('Attachment download hash is unavailable');
+    assertExpectedAttachmentDownloadHash(attachment, sha256);
+    const source = await preparePlaintextDownload({
+      attachmentId: attachment.id,
+      targetURI,
+      expectation: { kind: 'absent' },
+      sha256,
+      size,
+    }, bytes, signal);
+    assertAttachmentSyncNotAborted(signal);
+    if (!isPreparedPlaintextDownloadSource(source)) throw new Error('Attachment download source is invalid');
+    return { kind: 'prepared-plaintext', sourceToken: source.sourceToken, sha256, size };
+  } : undefined;
 
   const createMobileAttachmentUploadSnapshotWithLimit = async (
     sourcePath: string,
@@ -1064,6 +1134,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     readAttachmentDownloadStageBytes,
     installStagedAttachmentDownload,
     installAttachmentDownloadBytes,
+    ...(prepareAttachmentDownloadBytes ? { prepareAttachmentDownloadBytes } : {}),
     /** CloudKit's native fetch must receive scratch, never the canonical target. */
     createAttachmentDownloadStagePath: buildAttachmentDownloadStagePath,
     createMobileAttachmentUploadSnapshot,

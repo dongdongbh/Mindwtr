@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Attachment } from './types';
 import { computeSha256Hex } from './attachment-hash';
 import { createMobileAttachmentFiles } from './mobile-attachment-files';
-import { createMobileAttachmentCommon } from './mobile-attachment-common';
-import { createMobileAttachmentAvailability, type MobileAttachmentCloudKitPort } from './mobile-attachment-availability';
+import { createMobileAttachmentCommon, type MobileAttachmentCommonHost } from './mobile-attachment-common';
+import { createMobileAttachmentAvailability, type MobileAttachmentAvailabilityCoreFunctions, type MobileAttachmentCloudKitPort } from './mobile-attachment-availability';
+import { defaultSyncCryptoPrimitives, SYNC_CRYPTO_DEFAULT_KDF_PARAMS, type SyncKeyMaterial } from './sync-crypto';
+import { globalProgressTracker } from './attachment-progress';
 import { CLOUD_PROVIDER_KEY, CLOUD_URL_KEY, SYNC_BACKEND_KEY, SYNC_PATH_KEY, WEBDAV_PASSWORD_KEY, WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY } from './sync-storage-keys';
 import { DropboxFileNotFoundError } from './dropbox';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
@@ -28,9 +30,11 @@ const setup = (options: {
   storage?: Record<string, string>;
   sandbox?: boolean;
   cloudKit?: MobileAttachmentCloudKitPort;
+  preparePlaintextDownload?: MobileAttachmentCommonHost['preparePlaintextDownload'];
+  material?: SyncKeyMaterial;
 } = {}) => {
   const memory = createMemoryFileSystem();
-  const { storage } = createMemoryStorage(options.storage);
+  const { storage, values } = createMemoryStorage(options.storage);
   const { log, lines } = createRecordingLog();
   const secrets: Record<string, string> = { [WEBDAV_PASSWORD_KEY]: 'pw' };
   const files = createMobileAttachmentFiles({
@@ -49,21 +53,22 @@ const setup = (options: {
   const common = createMobileAttachmentCommon({
     fs: memory.fs,
     files,
-    crypto: {} as never,
+    crypto: defaultSyncCryptoPrimitives,
     encryption: { logSyncEncryptionEvent: async () => undefined },
     installer: { installAttachmentFileGeneration },
     installerMayBeMissing: () => false,
     timersPaused: () => false,
     uploads: { createUploadTask: () => null },
+    preparePlaintextDownload: options.preparePlaintextDownload,
   });
-  const webdavGetFile = vi.fn(async () => toArrayBuffer(REMOTE));
+  const webdavGetFile = vi.fn<MobileAttachmentAvailabilityCoreFunctions['webdavGetFile']>(async () => toArrayBuffer(REMOTE));
   const cloudGetFile = vi.fn(async () => toArrayBuffer(REMOTE));
   const downloadDropboxFile = vi.fn(async () => toArrayBuffer(REMOTE));
   const availability = createMobileAttachmentAvailability({
     files,
     common,
     storage,
-    encryption: { getSyncEncryptionMaterial: async () => null },
+    encryption: { getSyncEncryptionMaterial: async () => options.material ?? null },
     getDropboxClientId: async () => 'app-key',
     cloudKit: options.cloudKit,
     core: {
@@ -74,7 +79,7 @@ const setup = (options: {
       downloadDropboxFile,
     },
   });
-  return { availability, memory, lines, installAttachmentFileGeneration, webdavGetFile, cloudGetFile, downloadDropboxFile };
+  return { availability, common, files, storage, values, memory, lines, installAttachmentFileGeneration, webdavGetFile, cloudGetFile, downloadDropboxFile };
 };
 
 const webdav = {
@@ -86,6 +91,271 @@ const webdav = {
 const deletesOutsideScratch = (calls: string[]) => calls.filter((call) => (
   call.startsWith('delete ') && !call.includes('.mindwtr-download-')
 ));
+
+const SOURCE_TOKEN = '27bc6994-c737-48ea-8e69-8c2f963858c5';
+const SECOND_SOURCE_TOKEN = 'ab20c8d8-d42c-4f71-9a16-2d43bc6b51a6';
+const sourceReply = () => ({ kind: 'prepared-source' as const, sourceToken: SOURCE_TOKEN });
+const mutations = (calls: string[]) => calls.filter((call) => /^(makeDirectory|writeBytes|copy|move|delete) /.test(call));
+
+describe('mobile attachment availability: private WebDAV preparation', () => {
+  it('omits the selected method without an adapter', () => {
+    expect(setup({ storage: webdav }).availability).not.toHaveProperty('prepareAttachmentAvailableDetailed');
+  });
+
+  it('returns only a prepared candidate with no file/config mutation or completed progress', async () => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, files, values, memory, webdavGetFile, installAttachmentFileGeneration } = setup({ storage: webdav, preparePlaintextDownload });
+    const requested = Object.freeze(remoteAttachment({ title: 'Renamed title.txt', mimeType: 'text/plain', contentRev: 3, pendingContentUpload: false }));
+    const before = { ...requested };
+    const configBefore = [...values.entries()];
+    const ensureLocal = vi.spyOn(files, 'ensureAttachmentStoredLocally');
+    const statuses: string[] = [];
+    globalProgressTracker.clear(requested.id);
+    const unsubscribe = globalProgressTracker.subscribe(requested.id, (progress) => statuses.push(progress.status));
+    webdavGetFile.mockImplementationOnce(async (_url, options) => {
+      options.onProgress?.(REMOTE.length, REMOTE.length);
+      return toArrayBuffer(REMOTE);
+    });
+    try {
+      const outcome = await availability.prepareAttachmentAvailableDetailed!(requested);
+
+      expect(outcome).toEqual({
+        status: 'prepared', sourceToken: SOURCE_TOKEN, sha256: await computeSha256Hex(REMOTE), size: REMOTE.length,
+        attachment: { ...requested, uri: `${MANAGED}att-1.txt`, localStatus: 'available', fileHash: await computeSha256Hex(REMOTE) },
+      });
+      expect(requested).toEqual(before);
+      expect([...values.entries()]).toEqual(configBefore);
+      expect(memory.files.size).toBe(0);
+      expect(mutations(memory.calls)).toEqual([]);
+      expect(ensureLocal).not.toHaveBeenCalled();
+      expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
+      expect(statuses).toEqual(['active']);
+      expect(preparePlaintextDownload).toHaveBeenCalledWith(expect.objectContaining({
+        attachmentId: requested.id, targetURI: `${MANAGED}att-1.txt`, expectation: { kind: 'absent' },
+      }), REMOTE, undefined);
+    } finally {
+      unsubscribe();
+      globalProgressTracker.clear(requested.id);
+    }
+  });
+
+  it.each([
+    ['Off', { storage: { ...webdav, [SYNC_BACKEND_KEY]: 'off' } }, {}],
+    ['absent backend', { storage: { [WEBDAV_URL_KEY]: webdav[WEBDAV_URL_KEY] } }, {}],
+    ['File Sync', { storage: { ...webdav, [SYNC_BACKEND_KEY]: 'file' } }, {}],
+    ['CloudKit', { storage: { ...webdav, [SYNC_BACKEND_KEY]: 'cloudkit' } }, {}],
+    ['cloud', { storage: { ...webdav, [SYNC_BACKEND_KEY]: 'cloud' } }, {}],
+    ['sandbox', { storage: webdav, sandbox: true }, {}],
+    ['non-file', { storage: webdav }, { kind: 'link' as const }],
+    ['no remote identity', { storage: webdav }, { cloudKey: undefined }],
+    ['terminal attachment', { storage: webdav }, { deletedAt: now }],
+  ])('refuses %s before any local/provider/source action', async (_name, options, overrides) => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, memory, files, webdavGetFile, cloudGetFile, downloadDropboxFile, installAttachmentFileGeneration } = setup({ ...options, preparePlaintextDownload });
+    const repair = vi.spyOn(files, 'ensureAttachmentStoredLocally');
+    const config = vi.spyOn(files, 'loadWebDavConfig');
+
+    await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment({ uri: `${MANAGED}att-1.txt`, ...overrides })))
+      .resolves.toEqual({ status: 'unavailable' });
+    expect(memory.calls).toEqual([]);
+    expect(repair).not.toHaveBeenCalled();
+    expect(config).not.toHaveBeenCalled();
+    expect(webdavGetFile).not.toHaveBeenCalled();
+    expect(cloudGetFile).not.toHaveBeenCalled();
+    expect(downloadDropboxFile).not.toHaveBeenCalled();
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it.each(['', `${MANAGED}att-1.txt`])('borrows only matching present bytes (%s) without copying or creating a directory', async (uri) => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, memory, files, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
+    memory.put(`${MANAGED}att-1.txt`, REMOTE);
+    const repair = vi.spyOn(files, 'ensureAttachmentStoredLocally');
+
+    await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment({ uri, fileHash: await computeSha256Hex(REMOTE) })))
+      .resolves.toMatchObject({ status: 'available', attachment: { uri: `${MANAGED}att-1.txt` } });
+    await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment({ uri })))
+      .resolves.toEqual({ status: 'generation-conflict' });
+    await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment({ uri, fileHash: 'a'.repeat(64) })))
+      .resolves.toEqual({ status: 'generation-conflict' });
+    expect(memory.read(`${MANAGED}att-1.txt`)).toEqual(REMOTE);
+    expect(mutations(memory.calls)).toEqual([]);
+    expect(repair).not.toHaveBeenCalled();
+    expect(webdavGetFile).not.toHaveBeenCalled();
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+  });
+
+  it('keeps terminal404 policy without a source and leaves the original metadata/bytes intact', async () => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, memory, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
+    const requested = remoteAttachment({ fileHash: 'a'.repeat(64) });
+    const before = { ...requested };
+    memory.put(`${MANAGED}unrelated.txt`, REMOTE);
+    webdavGetFile.mockRejectedValueOnce(Object.assign(new Error('Not found'), { status: 404 }));
+
+    const outcome = await availability.prepareAttachmentAvailableDetailed!(requested);
+
+    expect(outcome).toMatchObject({ status: 'unrecoverable', attachment: { cloudKey: undefined, fileHash: undefined, deletedAt: expect.any(String) } });
+    expect(requested).toEqual(before);
+    expect(memory.read(`${MANAGED}unrelated.txt`)).toEqual(REMOTE);
+    expect(mutations(memory.calls)).toEqual([]);
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    if (outcome.status !== 'unrecoverable') throw new Error('Expected terminal outcome');
+    await expect(availability.prepareAttachmentAvailableDetailed!(outcome.attachment)).resolves.toEqual({ status: 'unavailable' });
+    expect(webdavGetFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a plaintext hash mismatch before preparing a source', async () => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, memory, installAttachmentFileGeneration } = setup({ storage: webdav, preparePlaintextDownload });
+
+    await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment({ fileHash: 'a'.repeat(64) })))
+      .resolves.toEqual({ status: 'unavailable' });
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    expect(mutations(memory.calls)).toEqual([]);
+    expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it('decrypts before the single plaintext hash/source handoff', async () => {
+    const material: SyncKeyMaterial = { key: new Uint8Array(32).fill(7), salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS };
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, common, memory, webdavGetFile } = setup({ storage: webdav, material, preparePlaintextDownload });
+    const sealed = await common.sealAttachmentBytesForUpload(REMOTE, material);
+    webdavGetFile.mockResolvedValueOnce(toArrayBuffer(sealed));
+    const hash = (await computeSha256Hex(REMOTE))!;
+
+    await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment({ fileHash: hash })))
+      .resolves.toMatchObject({ status: 'prepared', sha256: hash, size: REMOTE.length });
+    expect(preparePlaintextDownload).toHaveBeenCalledOnce();
+    expect(preparePlaintextDownload.mock.calls[0]?.[1]).toEqual(REMOTE);
+    expect(sealed).not.toEqual(REMOTE);
+    expect(mutations(memory.calls)).toEqual([]);
+  });
+
+  it('never prepares ciphertext when the encrypted location is locked', async () => {
+    const material: SyncKeyMaterial = { key: new Uint8Array(32).fill(7), salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS };
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, common, memory, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
+    const sealed = await common.sealAttachmentBytesForUpload(REMOTE, material);
+    webdavGetFile.mockResolvedValueOnce(toArrayBuffer(sealed));
+
+    await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment())).resolves.toEqual({ status: 'unavailable' });
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    expect(mutations(memory.calls)).toEqual([]);
+  });
+
+  it.each(['malformed', 'rejected'])('keeps a %s adapter retryable without falling back to install', async (failure) => {
+    const preparePlaintextDownload: NonNullable<MobileAttachmentCommonHost['preparePlaintextDownload']> = async () => {
+      if (failure === 'rejected') throw new Error('Source refused');
+      return { kind: 'installed', sourceToken: SOURCE_TOKEN } as never;
+    };
+    const { availability, memory, installAttachmentFileGeneration } = setup({ storage: webdav, preparePlaintextDownload });
+
+    await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment())).resolves.toEqual({ status: 'unavailable' });
+    expect(mutations(memory.calls)).toEqual([]);
+    expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it('does not coalesce selected source tokens across concurrent invocations', async () => {
+    let sourceCount = 0;
+    const preparePlaintextDownload = vi.fn(async () => ({
+      kind: 'prepared-source' as const, sourceToken: ++sourceCount === 1 ? SOURCE_TOKEN : SECOND_SOURCE_TOKEN,
+    }));
+    const { availability, memory, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
+    const requested = remoteAttachment();
+
+    const outcomes = await Promise.all([
+      availability.prepareAttachmentAvailableDetailed!(requested),
+      availability.prepareAttachmentAvailableDetailed!({ ...requested }),
+    ]);
+
+    expect(outcomes.map((outcome) => outcome.status === 'prepared' ? outcome.sourceToken : null))
+      .toEqual([SOURCE_TOKEN, SECOND_SOURCE_TOKEN]);
+    expect(webdavGetFile).toHaveBeenCalledTimes(2);
+    expect(preparePlaintextDownload).toHaveBeenCalledTimes(2);
+    expect(mutations(memory.calls)).toEqual([]);
+  });
+
+  it('keeps ordinary bound-adapter downloads installed/coalesced and Off fallback unchanged', async () => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, memory, webdavGetFile, installAttachmentFileGeneration } = setup({ storage: { ...webdav, [SYNC_BACKEND_KEY]: 'off' }, preparePlaintextDownload });
+    const [first, second] = await Promise.all([
+      availability.ensureAttachmentAvailableDetailed(remoteAttachment()),
+      availability.ensureAttachmentAvailableDetailed(remoteAttachment()),
+    ]);
+
+    expect(first).toMatchObject({ status: 'available' });
+    expect(second).toBe(first);
+    expect(memory.read(`${MANAGED}att-1.txt`)).toEqual(REMOTE);
+    expect(webdavGetFile).toHaveBeenCalledTimes(1);
+    expect(installAttachmentFileGeneration).toHaveBeenCalledTimes(1);
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+  });
+
+  it('checks post-fetch cancellation before decrypt/source handoff', async () => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, memory, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
+    const controller = new AbortController();
+    const reason = new Error('Canceled selected fetch');
+    let release!: (bytes: ArrayBuffer) => void;
+    let reached!: () => void;
+    const entered = new Promise<void>((resolve) => { reached = resolve; });
+    const reply = new Promise<ArrayBuffer>((resolve) => { release = resolve; });
+    webdavGetFile.mockImplementationOnce(async (_url, options) => {
+      expect(options.signal).toBe(controller.signal);
+      reached();
+      return reply;
+    });
+    const operation = availability.prepareAttachmentAvailableDetailed!(remoteAttachment(), controller.signal);
+    await entered;
+    controller.abort(reason);
+    release(toArrayBuffer(REMOTE));
+
+    await expect(operation).rejects.toBe(reason);
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    expect(mutations(memory.calls)).toEqual([]);
+    await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment(), controller.signal)).rejects.toBe(reason);
+    expect(webdavGetFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks cancellation after the backend read before local/config/network work', async () => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, storage, files, memory, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
+    const controller = new AbortController();
+    const reason = new Error('Canceled selected config');
+    vi.spyOn(storage, 'getItem').mockImplementationOnce(async () => {
+      controller.abort(reason);
+      return 'webdav';
+    });
+    const config = vi.spyOn(files, 'loadWebDavConfig');
+
+    await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment(), controller.signal)).rejects.toBe(reason);
+    expect(config).not.toHaveBeenCalled();
+    expect(memory.calls).toEqual([]);
+    expect(webdavGetFile).not.toHaveBeenCalled();
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+  });
+
+  it('keeps the invocation metadata captured before an awaited backend read', async () => {
+    const preparePlaintextDownload = vi.fn(async () => sourceReply());
+    const { availability, storage, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
+    const requested = remoteAttachment({ title: 'Original title.txt', fileHash: (await computeSha256Hex(REMOTE))! });
+    const captured = { ...requested };
+    vi.spyOn(storage, 'getItem').mockImplementationOnce(async () => {
+      Object.assign(requested, { cloudKey: 'attachments/later.txt', fileHash: 'a'.repeat(64), title: 'Later title.txt' });
+      return 'webdav';
+    });
+
+    await expect(availability.prepareAttachmentAvailableDetailed!(requested)).resolves.toMatchObject({
+      status: 'prepared', attachment: { ...captured, uri: `${MANAGED}att-1.txt`, localStatus: 'available' },
+    });
+    expect(webdavGetFile).toHaveBeenCalledWith('https://dav.example/Mindwtr/attachments/att-1.txt', expect.anything());
+    expect(preparePlaintextDownload).toHaveBeenCalledOnce();
+    // Current-owner freshness is separately checked by the future native353 lease.
+    expect(requested.title).toBe('Later title.txt');
+  });
+});
 
 describe('mobile attachment availability', () => {
   it('downloads a WebDAV attachment into <files>/attachments/ through the installer', async () => {

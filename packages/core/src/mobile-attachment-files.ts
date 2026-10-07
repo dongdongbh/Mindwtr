@@ -1023,6 +1023,7 @@ export const createMobileAttachmentFiles = (host: MobileAttachmentFilesHost) => 
     runDropboxAuthorized,
     loadWebDavConfig,
     loadCloudConfig,
+    getManagedAttachmentsDir,
     getAttachmentsDir,
     deleteManagedAttachmentFile,
     cleanupAttachmentTempFiles,
