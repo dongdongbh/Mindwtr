@@ -216,6 +216,20 @@ const abandonIfStranded = async () => {
     return true;
 };
 
+/**
+ * A failed earlier run can leave the phone asking for its folder's passphrase (a no-key discovery that run's folder made; each
+ * run uses a new folder). Take RN's stale-lock exit, as a user would: Enter passphrase at this plaintext folder answers "no
+ * encrypted files here" and turns encryption off. True when it did.
+ */
+const clearStaleLock = async () => {
+    await openSync();
+    try { await reveal((current) => withText(current, en['settings.syncEncryptionLockedTitle']), 'the locked card'); } catch { return false; }
+    await tapThenFind((current) => tagged(current, 'sync-encryption-open'), (current) => tagged(current, 'sync-passphrase-current'), 'the unlock flow (stale)');
+    await fillTag('sync-passphrase-current', PASSPHRASE);
+    await tapThenFind((current) => tagged(current, 'sync-encryption-submit'), (current) => withText(current, en['settings.syncEncryptionNoEncryptedRemote']), 'the stale-lock exit', 60_000);
+    return true;
+};
+
 /** How many times the Sync screen's [operation] answered, whatever its outcome. */
 const answered = (operation) => logs().replace(/\\/g, '').split('\n').filter((line) => line.includes(`"operation":"${operation}"`) && line.includes('"outcome":')).length;
 const syncNow = async () => {
@@ -282,6 +296,7 @@ try {
     await saveWebdav(WEBDAV_PORT);
     await until('the phone\'s plaintext document in the folder', () => remoteArtifacts(dav, FOLDER).plain.some((file) => file.path.endsWith('/data.json') && file.text.includes(titles.phone)), 60_000);
     check(true, '(1) WebDAV saved; the first sync uploaded the phone\'s capture in plaintext');
+    if (await clearStaleLock()) console.log('info - an earlier run\'s passphrase request was cleared through RN\'s stale-lock exit ("no encrypted files here")');
 
     // (2) Enable, with a tap answered during the Argon2id derivation.
     await tapThenFind(action(en['settings.syncEncryptionEnable']), (current) => tagged(current, 'sync-passphrase-next'), 'the Enable flow');
@@ -371,6 +386,8 @@ try {
     await syncNow();
     await cardShows(en['settings.syncEncryptionLockedTitle']);
     check(true, '(4) after the change on the other device the phone asks for the passphrase');
+    // Leaves the phone as a run failing here does (asking for this folder's passphrase), to prove clearStaleLock on the next run.
+    if (process.env.MINDWTR_ENC_STOP_LOCKED === '1') throw new Stopped('stopped while locked on purpose (MINDWTR_ENC_STOP_LOCKED=1)');
     const folderBefore = remoteArtifacts(dav, FOLDER).fingerprint;
     const tasksBefore = JSON.stringify(phoneTasks());
     await tapThenFind((current) => tagged(current, 'sync-encryption-open'), (current) => tagged(current, 'sync-passphrase-current'), 'the unlock flow');
