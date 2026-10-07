@@ -44,7 +44,7 @@ private final class EncryptionDAVProtocol: URLProtocol {
 }
 
 private final class EncryptionDAVStore: @unchecked Sendable {
-    struct Request: Equatable { let method: String; let path: String; let condition: String?; let status: Int; let serverDate: String; let responseEtag: String?; let encryptedBody: Bool }
+    struct Request: Equatable { let method: String; let path: String; let condition: String?; let status: Int; let serverDate: String; let responseEtag: String?; let encryptedBody: Bool; let encryptedBytes: Data? }
     struct Reply { let status: Int; let headers: [String: String]; let body: Data }
     private struct Object { let bytes: Data; let etag: String }
     private let lock = NSLock()
@@ -82,13 +82,14 @@ private final class EncryptionDAVStore: @unchecked Sendable {
         let match = request.value(forHTTPHeaderField: "If-Match")
         let none = request.value(forHTTPHeaderField: "If-None-Match")
         let condition = match.map { "match:" + $0 } ?? none.map { "none:" + $0 }
+        let encryptedBody = method == "PUT" && body.prefix(8) == (Data("MWENC1".utf8) + Data([1, 1]))
         let date = DateFormatter(); date.locale = Locale(identifier: "en_US_POSIX"); date.timeZone = TimeZone(secondsFromGMT: 0)
         date.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
         func reply(_ status: Int, _ bytes: Data = Data(), etag: String? = nil, type: String = "application/octet-stream") -> Reply {
             let serverDate = date.string(from: serverTime ?? Date())
             var headers = ["Date": serverDate, "Content-Length": String(bytes.count), "Content-Type": type]
             if let etag, !omitEtags { headers["ETag"] = unquotedEtags ? "fixture-unquoted-validator" : etag }
-            requests.append(Request(method: method, path: path, condition: condition, status: status, serverDate: serverDate, responseEtag: headers["ETag"], encryptedBody: method == "PUT" && body.prefix(8) == (Data("MWENC1".utf8) + Data([1, 1]))))
+            requests.append(Request(method: method, path: path, condition: condition, status: status, serverDate: serverDate, responseEtag: headers["ETag"], encryptedBody: encryptedBody, encryptedBytes: encryptedBody ? body : nil))
             return Reply(status: status, headers: headers, body: method == "HEAD" ? Data() : bytes)
         }
         // Never retain or report a received credential. Every accepted DAV
@@ -796,6 +797,98 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertFalse(offered.contains { let action = $0["action"] as? [String: Any]; return ["enable", "unlock", "abandon"].contains(action?["flow"] as? String ?? "") || action?["type"] as? String == "recheck" || $0["kind"] as? String == "field" })
         XCTAssertEqual(try cachedKey(), material); XCTAssertEqual(remote.snapshot, completed); XCTAssertEqual(remote.recorded.count, network)
         XCTAssertEqual(try Data(contentsOf: localFile), localBytes); assertDrained(); await cold.close()
+    }
+
+    func testLocalEnableFirstWebDAVSaveUploadsEncryptedAttachmentBeforePublishingItsMetadata() async throws {
+        remote = EncryptionDAVStore(expectedAuthorization: "Basic " + Data(("synthetic:" + password).utf8).base64EncodedString())
+        EncryptionDAVProtocol.install(hostname, store: remote)
+        let seed = core(); try await seedAndOpen(seed)
+        let attachmentID = "first390", cloudKey = "attachments/first390.txt", blobPath = "/sync/" + cloudKey
+        let attachment: [String: Any] = ["id": attachmentID, "kind": "file", "uri": localFile.absoluteString,
+            "title": "First encrypted390.txt", "mimeType": "text/plain", "size": localBytes.count,
+            "createdAt": at, "updatedAt": at, "localStatus": "available"]
+        let db = try SQLiteBridge(url: database)
+        _ = try db.execute("UPDATE tasks SET attachments=? WHERE id=?", parametersJSON: json([try json([attachment]), taskID])); db.close()
+        let host = core(); _ = try await host.start(); _ = try await command(host, "openSyncSettings")
+        let before = try rows(), files = try FileManager.default.contentsOfDirectory(atPath: localFile.deletingLastPathComponent().path).sorted()
+        let backup = try object(await host.call("menuRead", argumentsJSON: json(["dataBackup", "{}"])))
+        let expected = try object(XCTUnwrap(backup["content"] as? String)), seededTasks = try XCTUnwrap(expected["tasks"] as? [[String: Any]])
+        XCTAssertEqual(seededTasks.count, 1); XCTAssertEqual(seededTasks.first?["id"] as? String, taskID)
+        XCTAssertEqual(try json(XCTUnwrap(seededTasks.first?["attachments"])), try json([attachment]))
+        let digest = SHA256.hash(data: localBytes).map { String(format: "%02x", $0) }.joined()
+        var remoteAttachment = attachment
+        remoteAttachment["uri"] = ""; remoteAttachment.removeValue(forKey: "localStatus")
+        remoteAttachment["cloudKey"] = cloudKey; remoteAttachment["fileHash"] = digest
+        var expectedTask = try XCTUnwrap(seededTasks.first); expectedTask["attachments"] = [remoteAttachment]
+        try await enterEnable(host, passphrase)
+        _ = try await action(host, ["type": "submit", "flow": "enable"], requestID: UUID().uuidString.lowercased())
+        let material = try XCTUnwrap(cachedKey()), preparedState = try storedState()
+        XCTAssertEqual(material.count, 32); XCTAssertEqual(preparedState["state"] as? String, "enabled")
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(try Data(contentsOf: localFile), localBytes)
+        XCTAssertTrue(remote.recorded.isEmpty); XCTAssertTrue(remote.snapshot.isEmpty)
+        let cache = localFile.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("cache")
+        let cacheFiles = try FileManager.default.contentsOfDirectory(atPath: cache.path).sorted()
+        _ = try await command(host, "selectSyncBackend", ["requestId": UUID().uuidString.lowercased(), "option": "webdav"])
+        _ = try await command(host, "saveSyncBackend", ["requestId": UUID().uuidString.lowercased(), "revision": try await revision(host), "webdav": fields])
+        XCTAssertEqual(try stored()["@mindwtr_sync_backend"] as? String, "webdav")
+        let requests = remote.recorded
+        let blobWrites = requests.enumerated().filter { $0.element.method == "PUT" && $0.element.path.hasPrefix("/sync/attachments/") }
+        let firstBlob = try XCTUnwrap(blobWrites.first)
+        XCTAssertEqual(firstBlob.element.path, blobPath); XCTAssertEqual(firstBlob.element.status, 201)
+        XCTAssertEqual(firstBlob.element.condition, "none:*")
+        for (_, request) in blobWrites {
+            XCTAssertEqual(request.path, blobPath); XCTAssertTrue((200..<300).contains(request.status)); XCTAssertTrue(request.encryptedBody)
+            XCTAssertEqual(try independentlyDecrypted(XCTUnwrap(request.encryptedBytes), key: material), localBytes)
+        }
+        XCTAssertEqual(try independentlyDecrypted(XCTUnwrap(remote.bytes(blobPath)), key: material), localBytes)
+        let canonicalPaths = ["/sync/data.json", "/sync/data.json.enc", "/sync/data.json.bak", "/sync/data.json.enc.bak"]
+        let documents = requests.enumerated().filter { $0.element.method == "PUT" && canonicalPaths.contains($0.element.path) }
+        let firstDocument = try XCTUnwrap(documents.first)
+        XCTAssertEqual(firstDocument.element.path, "/sync/data.json.enc"); XCTAssertEqual(firstDocument.element.status, 201)
+        XCTAssertEqual(firstDocument.element.condition, "none:*")
+        for (index, request) in documents {
+            XCTAssertTrue(["/sync/data.json.enc", "/sync/data.json.enc.bak"].contains(request.path)); XCTAssertTrue(request.encryptedBody)
+            XCTAssertTrue((200..<300).contains(request.status))
+            let document = try object(String(decoding: independentlyDecrypted(XCTUnwrap(request.encryptedBytes), key: material), as: UTF8.self))
+            XCTAssertEqual(try json(XCTUnwrap(document["tasks"])), try json([expectedTask]))
+            for name in ["projects", "sections", "areas", "people"] { XCTAssertEqual(try json(document[name] ?? []), try json(expected[name] ?? [])) }
+            // Every publishing snapshot must follow a successful ciphertext upload of the exact referenced bytes.
+            XCTAssertLessThan(firstBlob.offset, index)
+        }
+        let finalDocument = try object(String(decoding: independentlyDecrypted(XCTUnwrap(remote.bytes("/sync/data.json.enc")), key: material), as: UTF8.self))
+        XCTAssertEqual(try json(XCTUnwrap(finalDocument["tasks"])), try json([expectedTask]))
+        XCTAssertFalse(requests.contains { $0.method == "PUT" && ["/sync/data.json", "/sync/data.json.bak"].contains($0.path) })
+        XCTAssertFalse(requests.contains { $0.method == "DELETE" && $0.path == blobPath })
+        let acquired = try XCTUnwrap(requests.firstIndex { $0.path == "/sync/.mindwtr-sync-fence-v1.json" && $0.method == "PUT" && $0.status == 201 })
+        let released = try XCTUnwrap(requests.lastIndex { $0.path == "/sync/.mindwtr-sync-fence-v1.json" && $0.method == "DELETE" && $0.status == 204 })
+        XCTAssertLessThan(acquired, firstBlob.offset); XCTAssertLessThan(firstDocument.offset, released)
+        XCTAssertEqual(requests[acquired].condition, "none:*"); XCTAssertTrue(requests[released].condition?.hasPrefix("match:") == true)
+        XCTAssertNil(remote.bytes("/sync/.mindwtr-sync-fence-v1.json")); XCTAssertNil(remote.bytes("/sync/data.json")); XCTAssertNil(remote.bytes("/sync/data.json.bak"))
+        XCTAssertEqual(try cachedKey(), material); XCTAssertEqual(try storedState()["discoveredSalt"] as? String, preparedState["discoveredSalt"] as? String)
+        XCTAssertEqual(try storedState()["state"] as? String, "enabled"); XCTAssertNil(try storedState()["incompleteTransition"])
+        let saved = try object(await host.call("menuRead", argumentsJSON: json(["dataBackup", "{}"])))
+        let savedDocument = try object(XCTUnwrap(saved["content"] as? String)), savedTasks = try XCTUnwrap(savedDocument["tasks"] as? [[String: Any]])
+        let savedAttachment = try XCTUnwrap((savedTasks.first?["attachments"] as? [[String: Any]])?.first)
+        XCTAssertEqual(savedAttachment["id"] as? String, attachmentID); XCTAssertEqual(savedAttachment["uri"] as? String, localFile.absoluteString)
+        XCTAssertEqual(savedAttachment["cloudKey"] as? String, cloudKey); XCTAssertEqual(savedAttachment["fileHash"] as? String, digest)
+        XCTAssertEqual(savedAttachment["localStatus"] as? String, "available"); XCTAssertNil(savedAttachment["pendingContentUpload"]); XCTAssertNil(savedAttachment["deletedAt"])
+        XCTAssertEqual(try Data(contentsOf: localFile), localBytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: localFile.deletingLastPathComponent().path).sorted(), files)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path).sorted(), cacheFiles)
+        XCTAssertEqual(try markers("v1.3.5/ios-encryption-selected"), 1); assertDrained()
+        let completed = remote.snapshot, network = requests.count, domain = try rows(), configuration = try stored()
+        await host.close()
+        let cold = core(); _ = try await cold.start(); _ = try await command(cold, "openSyncSettings")
+        let offered = try await encryptionRows(cold)
+        for flow in ["change", "disable"] { XCTAssertTrue(offered.contains { let action = $0["action"] as? [String: Any]; return action?["type"] as? String == "open" && action?["flow"] as? String == flow && $0["enabled"] as? Bool == true }) }
+        XCTAssertFalse(offered.contains { let action = $0["action"] as? [String: Any]; return ["enable", "unlock", "abandon"].contains(action?["flow"] as? String ?? "") || action?["type"] as? String == "recheck" || $0["kind"] as? String == "field" })
+        XCTAssertEqual(try cachedKey(), material); XCTAssertEqual(try storedState()["state"] as? String, "enabled"); XCTAssertNil(try storedState()["incompleteTransition"])
+        XCTAssertEqual(try rows(), domain); XCTAssertEqual(try changedStoredCells(configuration, stored()), [])
+        XCTAssertEqual(remote.snapshot, completed); XCTAssertEqual(remote.recorded.count, network)
+        XCTAssertEqual(try Data(contentsOf: localFile), localBytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: localFile.deletingLastPathComponent().path).sorted(), files)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path).sorted(), cacheFiles)
+        assertDrained(); await cold.close()
     }
 
     func testLocalEnablePromotedStateWithLostKVReplyNeverConfirmsAndColdPairStaysEnabled() async throws {
