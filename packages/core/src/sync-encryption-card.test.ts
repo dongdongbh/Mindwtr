@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createSyncEncryptionCard, getSyncEncryptionCardMessages, type SyncEncryptionCardHost } from './sync-encryption-card';
-import { SyncEncryptionBackendIncompatibleError, SyncEncryptionRemoteVersionUnavailableError } from './sync-encryption';
+import { SyncEncryptionBackendIncompatibleError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError } from './sync-encryption';
+import { SyncCryptoUnsupportedError } from './sync-crypto';
 import { SyncEncryptionCleanupDeferredError, isSyncEncryptionCleanupDeferredError } from './sync-encryption-service';
 
 function setup(overrides: Partial<SyncEncryptionCardHost> = {}) {
@@ -85,6 +86,21 @@ describe('sync encryption card', () => {
         const failing = setup({ getStatus: async () => { throw new Error('unreadable'); } });
         await failing.card.refresh().done;
         expect(failing.card.getState()).toMatchObject({ state: null, stateUnavailable: true });
+    });
+
+    it.each([
+        new SyncCryptoUnsupportedError('Unsupported MWENC1 format_version'),
+        new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError('Unsupported MWENC1 format_version')),
+    ])('does not label an unsupported encrypted container as a wrong passphrase: %s', async (failure) => {
+        const { card, setState } = setup({ provide: async () => { throw failure; } });
+        setState('remote-encrypted-no-key');
+        await card.refresh().done;
+        card.openFlow('unlock');
+        card.setField('current', 'right');
+        await card.submitUnlock();
+        expect(card.getState()).toMatchObject({
+            flow: 'unlock', state: 'remote-encrypted-no-key', error: 'generic', busy: false,
+        });
     });
 
     it('offers "Abandon setup" only while a change is unfinished, and it clears the unfinished change', async () => {

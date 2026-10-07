@@ -101,6 +101,7 @@ type Device = {
     storage?: Record<string, string>;
     secrets?: Record<string, string>;
     dropboxConnected?: boolean;
+    unlockOnly?: boolean;
     encryption?: { state?: SyncEncryptionState; unavailable?: boolean; pending?: boolean; incomplete?: string | null; partly?: boolean };
     queues?: Record<string, unknown[]>;
 };
@@ -263,6 +264,7 @@ function createDevice(input: Device): { state: DeviceState; host: NativeSyncSett
         },
         rememberWebdavCapabilityProof: async (config) => { calls.push(['rememberWebdavCapabilityProof', config]); },
         encryption: {
+            unlockOnly: input.unlockOnly,
             getStatus: async () => {
                 if (device.encryption.unavailable) throw new Error('Sync encryption state is unavailable');
                 return {
@@ -770,6 +772,254 @@ const since = (dev: ReturnType<typeof createDevice>, at: ReturnType<typeof mark>
 });
 const storedConfig = (dev: ReturnType<typeof createDevice>) => ({ storage: Object.fromEntries(dev.state.storage), secrets: Object.fromEntries(dev.state.secrets) });
 const webdavFields = { url: 'https://dav.example.com/mindwtr', username: 'alice', password: null, allowInsecureHttp: false };
+
+describe('native Settings › Sync unlock-only admission', () => {
+    const locked = { ...WEBDAV_STORED, unlockOnly: true, encryption: { state: 'remote-encrypted-no-key' as const } };
+    const view = (contract: Host) => value(contract.getSyncSettings());
+    const rows = (contract: Host) => view(contract).encryption!.rows;
+    const act = (contract: Host, action: unknown, revision: unknown = view(contract).configRevision, requestId?: string) =>
+        contract.runSyncEncryptionAction({ action, revision, ...(requestId ? { requestId } : {}) } as never);
+
+    it('offers only secure unlock controls, and cancel wipes the current field', async () => {
+        const { dev, contract } = await start(locked);
+        expect(rows(contract).filter((row) => row.kind !== 'text')).toEqual([
+            expect.objectContaining({ kind: 'action', action: { type: 'open', flow: 'unlock' } }),
+        ]);
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        const controls = rows(contract).filter((row) => row.kind !== 'text');
+        expect(controls.map((row) => row.kind === 'action' ? row.action : row.kind)).toEqual([
+            'field', { type: 'submit', flow: 'unlock' }, { type: 'decline' }, { type: 'cancel' },
+        ]);
+        expect(controls[0]).toMatchObject({ field: 'current', secure: true, maxLength: 1000 });
+        value(await act(contract, { type: 'typed', field: 'current', value: 'synthetic phrase' }));
+        value(await act(contract, { type: 'cancel' }));
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        expect(rows(contract).find((row) => row.kind === 'action' && row.action.type === 'submit')).toMatchObject({ enabled: false });
+        expect(since(dev, { device: 0, writes: 0, calls: 0 }).calls.some((call) => call[0] === 'provideSyncEncryptionPassphrase')).toBe(false);
+        expect(JSON.stringify(storedConfig(dev))).not.toContain('synthetic phrase');
+    });
+
+    it.each([false, true])('accepts reordered encryption action properties (unlockOnly=%s)', async (unlockOnly) => {
+        const { dev, contract } = await start({ ...locked, unlockOnly });
+        const command = (action: unknown, requestId?: string) => unlockOnly
+            ? act(contract, action, undefined, requestId)
+            : contract.runSyncEncryptionAction({ action, ...(requestId ? { requestId } : {}) } as never);
+        const before = rows(contract), at = mark(dev);
+        for (const flow of ['enable', 'change', 'disable', 'abandon']) {
+            for (const type of ['open', 'submit']) {
+                expect(await command({ flow, type }, type === 'submit' ? generateUUID() : undefined))
+                    .toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+            }
+        }
+        for (const action of [{ flow: 'unsupported', type: 'open' }, { flow: 'unlock', type: 'open', extra: true }]) {
+            expect(await command(action)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(rows(contract)).toEqual(before);
+        expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+        value(await command(JSON.parse('{"flow":"unlock","type":"open"}')));
+        value(await command({ value: 'reordered phrase', field: 'current', type: 'typed' }));
+        value(await command(JSON.parse('{"flow":"unlock","type":"submit"}'), generateUUID()));
+        expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase'))
+            .toEqual([['provideSyncEncryptionPassphrase', 'reordered phrase']]);
+        expect(device.encryption.state).toBe('enabled');
+        expect(JSON.stringify(storedConfig(dev))).not.toContain('reordered phrase');
+    });
+
+    it('filters full-card actions in every state and refuses programmatic bypasses', async () => {
+        for (const encryption of [
+            { state: 'off' as const }, { state: 'enabled' as const }, { state: 'remote-plaintext' as const },
+            { state: 'off' as const, partly: true }, { state: 'remote-encrypted-no-key' as const, incomplete: 'enable' },
+        ]) {
+            const { dev, contract } = await start({ ...locked, encryption });
+            expect(rows(contract).every((row) => row.kind === 'text')).toBe(true);
+            const at = mark(dev);
+            for (const action of [
+                { type: 'open', flow: 'enable' }, { type: 'open', flow: 'change' }, { type: 'open', flow: 'disable' },
+                { type: 'open', flow: 'abandon' }, { type: 'generate' }, { type: 'reveal' }, { type: 'recheck' },
+                { type: 'open', flow: 'unlock' }, { type: 'typed', field: 'next', value: 'unsupported' },
+                { type: 'submit', flow: 'unlock' }, { type: 'decline' },
+            ]) {
+                const request = ['submit', 'decline'].includes(action.type) ? generateUUID() : undefined;
+                expect(await act(contract, action, undefined, request)).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+            }
+            expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+        }
+    });
+
+    it('rejects unsupported fields and reveal without changing a valid unlock flow', async () => {
+        const { dev, contract } = await start(locked);
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        const before = rows(contract), at = mark(dev);
+        for (const action of [{ type: 'reveal' }, { type: 'generate' }, { type: 'typed', field: 'confirm', value: 'hidden' }]) {
+            expect(await act(contract, action)).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        }
+        expect(rows(contract)).toEqual(before);
+        expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+    });
+
+    it('requires a bounded nonempty revision before any field or transition mutation', async () => {
+        const { dev, contract } = await start(locked);
+        const before = rows(contract), at = mark(dev);
+        for (const revision of [undefined, null, 1, '', 'x'.repeat(101)]) {
+            const input = { action: { type: 'open', flow: 'unlock' }, ...(revision === undefined ? {} : { revision }) };
+            expect(await contract.runSyncEncryptionAction(input as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(rows(contract)).toEqual(before);
+        expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        value(await act(contract, { type: 'typed', field: 'current', value: 'retained phrase' }));
+        for (const action of [{ type: 'typed', field: 'current', value: 'changed phrase' }, { type: 'submit', flow: 'unlock' }, { type: 'decline' }]) {
+            expect(await act(contract, action, 'stale', ['submit', 'decline'].includes(action.type) ? generateUUID() : undefined))
+                .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        }
+        expect(since(dev, at).calls).toEqual([]);
+        value(await act(contract, { type: 'submit', flow: 'unlock' }, undefined, generateUUID()));
+        expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toEqual([['provideSyncEncryptionPassphrase', 'retained phrase']]);
+    });
+
+    it('binds the revision to actual persisted configuration, not just the displayed token', async () => {
+        const { dev, contract } = await start(locked);
+        const revision = view(contract).configRevision;
+        const before = rows(contract), at = mark(dev);
+        dev.state.storage.set(WEBDAV_URL_KEY, 'https://dav.example.com/other');
+        expect(await act(contract, { type: 'open', flow: 'unlock' }, revision)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(rows(contract)).toEqual(before);
+        expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+    });
+
+    it('refuses a saved non-WebDAV backend and a staged WebDAV selection', async () => {
+        const file = await start({ ...locked, storage: { [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: '/sync' } });
+        expect(rows(file.contract).every((row) => row.kind === 'text')).toBe(true);
+        const fileAt = mark(file.dev);
+        expect(await act(file.contract, { type: 'open', flow: 'unlock' })).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        expect(since(file.dev, fileAt)).toEqual({ device: [], writes: [], calls: [] });
+        const staged = await start({ ...locked, storage: { [SYNC_BACKEND_KEY]: 'off' } });
+        value(await staged.contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
+        expect(rows(staged.contract).every((row) => row.kind === 'text')).toBe(true);
+        const stagedAt = mark(staged.dev);
+        expect(await act(staged.contract, { type: 'open', flow: 'unlock' })).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        expect(since(staged.dev, stagedAt)).toEqual({ device: [], writes: [], calls: [] });
+        expect(staged.dev.state.storage.get(SYNC_BACKEND_KEY)).toBe('off');
+    });
+
+    it('keeps a wrong passphrase inline and retryable, then preserves finished-flow refusal', async () => {
+        const { dev, contract } = await start({ ...locked, queues: { provide: ['wrong-passphrase', 'ok'] } });
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        value(await act(contract, { type: 'typed', field: 'current', value: 'wrong phrase' }));
+        value(await act(contract, { type: 'submit', flow: 'unlock' }, undefined, generateUUID()));
+        expect(rows(contract)).toContainEqual(expect.objectContaining({ kind: 'text', tone: 'danger', text: en['settings.syncEncryptionErrorWrongPassphrase'] }));
+        expect(rows(contract)).toContainEqual(expect.objectContaining({ kind: 'field', field: 'current', secure: true }));
+        value(await act(contract, { type: 'typed', field: 'current', value: 'right phrase' }));
+        const request = { requestId: generateUUID(), revision: view(contract).configRevision, action: { type: 'submit' as const, flow: 'unlock' as const } };
+        value(await contract.runSyncEncryptionAction(request));
+        expect(device.encryption.state).toBe('enabled');
+        expect(rows(contract).every((row) => row.kind === 'text')).toBe(true);
+        const at = mark(dev);
+        expect((await contract.runSyncEncryptionAction(request)).ok).toBe(false);
+        expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+    });
+
+    it('keeps Not now paused, wipes the field, and refuses its finished-flow replay', async () => {
+        const { dev, contract } = await start(locked);
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        value(await act(contract, { type: 'typed', field: 'current', value: 'private draft' }));
+        const request = { requestId: generateUUID(), revision: view(contract).configRevision, action: { type: 'decline' as const } };
+        value(await contract.runSyncEncryptionAction(request));
+        expect(device.encryption.state).toBe('remote-encrypted-no-key');
+        expect(device.calls.filter((call) => call[0] === 'declineSyncEncryptionPassphrase')).toHaveLength(1);
+        expect((await contract.runSyncEncryptionAction(request)).ok).toBe(false);
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        expect(rows(contract).find((row) => row.kind === 'action' && row.action.type === 'submit')).toMatchObject({ enabled: false });
+        expect(JSON.stringify(storedConfig(dev))).not.toContain('private draft');
+    });
+
+    it('permits unavailable-state retry without inventing Off or an unlock field', async () => {
+        const { dev, contract } = await start({ ...locked, encryption: { ...locked.encryption, unavailable: true } });
+        expect(rows(contract).filter((row) => row.kind !== 'text')).toEqual([
+            expect.objectContaining({ kind: 'action', action: { type: 'retry' } }),
+        ]);
+        expect((await act(contract, { type: 'open', flow: 'unlock' })).ok).toBe(false);
+        dev.apply({ encryption: { unavailable: false } });
+        value(await act(contract, { type: 'retry' }));
+        expect(rows(contract)).toContainEqual(expect.objectContaining({ kind: 'action', action: { type: 'open', flow: 'unlock' } }));
+    });
+
+    it('refuses a late typed mutation after its CAS visit closed and reopened', async () => {
+        const { dev, contract } = await start(locked);
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        const revision = view(contract).configRevision;
+        const read = dev.host.storage.multiGet;
+        let entered!: () => void, release!: () => void;
+        const reached = new Promise<void>((resolve) => { entered = resolve; });
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        let once = true;
+        dev.host.storage.multiGet = async (keys) => {
+            if (once && keys.length > 1) { once = false; entered(); await held; }
+            return read(keys);
+        };
+        const delayed = act(contract, { type: 'typed', field: 'current', value: 'late phrase' }, revision);
+        await reached;
+        value(contract.closeSyncSettings());
+        value(await contract.openSyncSettings());
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        const before = rows(contract), at = mark(dev);
+        release();
+        expect(await delayed).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        expect(rows(contract)).toEqual(before);
+        expect(rows(contract).find((row) => row.kind === 'action' && row.action.type === 'submit')).toMatchObject({ enabled: false });
+        expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+    });
+
+    it('does not submit a changed field under the UUID identity captured before CAS', async () => {
+        const { dev, contract } = await start(locked);
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        value(await act(contract, { type: 'typed', field: 'current', value: 'original phrase' }));
+        const revision = view(contract).configRevision;
+        const read = dev.host.storage.multiGet;
+        let entered!: () => void, release!: () => void;
+        const reached = new Promise<void>((resolve) => { entered = resolve; });
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        let once = true;
+        dev.host.storage.multiGet = async (keys) => {
+            if (once && keys.length > 1) { once = false; entered(); await held; }
+            return read(keys);
+        };
+        const delayed = act(contract, { type: 'submit', flow: 'unlock' }, revision, generateUUID());
+        await reached;
+        value(await act(contract, { type: 'typed', field: 'current', value: 'changed phrase' }, revision));
+        const before = rows(contract), at = mark(dev);
+        release();
+        expect(await delayed).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        expect(rows(contract)).toEqual(before);
+        expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+        expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toEqual([]);
+        value(await act(contract, { type: 'submit', flow: 'unlock' }, revision, generateUUID()));
+        expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toEqual([['provideSyncEncryptionPassphrase', 'changed phrase']]);
+    });
+
+    it('joins exact concurrent submit requests and binds UUID collisions to revision and fields', async () => {
+        const { dev, contract } = await start({ ...locked, queues: { provide: ['hold', 'wrong-passphrase', 'wrong-passphrase'] } });
+        value(await act(contract, { type: 'open', flow: 'unlock' }));
+        value(await act(contract, { type: 'typed', field: 'current', value: 'first phrase' }));
+        const request = { requestId: generateUUID(), revision: view(contract).configRevision, action: { type: 'submit' as const, flow: 'unlock' as const } };
+        let started!: () => void;
+        const reached = new Promise<void>((resolve) => { started = resolve; });
+        device.holdStarted = started;
+        const first = contract.runSyncEncryptionAction(request), joined = contract.runSyncEncryptionAction(request);
+        await reached;
+        expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toHaveLength(1);
+        device.held.splice(0).forEach((release) => release());
+        expect(await joined).toEqual(await first);
+        device.holdStarted = null;
+        value(await act(contract, { type: 'typed', field: 'current', value: 'second phrase' }));
+        expect(await contract.runSyncEncryptionAction(request)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        // Restoring the original field still cannot reuse the UUID with a different revision.
+        value(await act(contract, { type: 'typed', field: 'current', value: 'first phrase' }));
+        expect(await contract.runSyncEncryptionAction({ ...request, revision: 'different-revision' }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(device.calls.filter((call) => call[0] === 'provideSyncEncryptionPassphrase')).toHaveLength(1);
+    });
+});
 
 describe('native Settings › Sync Off durable acknowledgement', () => {
     const methodsWithSave = async (host: NativeSyncSettingsHost, save: () => Promise<NativeHostResult<null>>) => {

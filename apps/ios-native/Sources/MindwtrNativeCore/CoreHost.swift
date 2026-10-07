@@ -647,6 +647,17 @@ private final class Engine: @unchecked Sendable {
         guard turn.live else { throw Self.foregroundSyncFailure }
         try turn.requireOwner()
     }
+    private final class EncryptionUnlockTurn {
+        let requireOwner: () throws -> Void
+        var live = true
+        init(requireOwner: @escaping () throws -> Void) { self.requireOwner = requireOwner }
+    }
+    private var encryptionUnlockTurn: EncryptionUnlockTurn?
+    private func requireEncryptionUnlockTurn() throws {
+        guard let turn = encryptionUnlockTurn else { return }
+        guard turn.live else { throw Self.foregroundSyncFailure }
+        try turn.requireOwner()
+    }
     #if DEBUG
     var projectFileAddHooks: ProjectFileAddHostHooks?
     #endif
@@ -2134,6 +2145,7 @@ private final class Engine: @unchecked Sendable {
         NativeAttachmentDraftCoordinator.hasEvidence(databaseURL: databaseURL)
     }
     private func requireNoAttachmentDraft() throws {
+        try requireEncryptionUnlockTurn()
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil else { throw Self.taskDownloadFailure }
         try denyCleanupOwner()
         guard pending?.method != Self.projectFileAddMethod, projectFileAddTurn == nil else { throw Self.projectFileAddFailure }
@@ -2323,6 +2335,7 @@ private final class Engine: @unchecked Sendable {
         try requireRetainedOrdinaryTurn()
     }
     private func requireRawAttachmentRead(_ json: String, installer: Bool = false) throws {
+        try requireEncryptionUnlockTurn()
         try denyCleanupOwner()
         if let turn = projectAvailabilityTurn {
             try requireProjectAvailabilityTurn()
@@ -16113,7 +16126,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         do {
             try denyCleanupOwner()
-            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "syncNow", "testSyncConnection", "syncStored", "syncResume", "projectAttachmentDownload"].contains(command),
+            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "syncNow", "testSyncConnection", "syncStored", "syncResume", "projectAttachmentDownload", "runSyncEncryptionAction"].contains(command),
                   requestJSON.utf8.count <= 128 * 1024,
                   (try? NativeJSON.jsonObject(with: Data(requestJSON.utf8))) is [String: Any],
                   started, !closed, lockFD >= 0, !recoveryActivationPending, !invoking,
@@ -16152,11 +16165,63 @@ private final class Engine: @unchecked Sendable {
                let relocated = try relocatedProjectAvailability(requestJSON: requestJSON, callback: callback, cancellation: cancellation) {
                 try denyCleanupOwner(); return relocated
             }
+            if command == "runSyncEncryptionAction" {
+                try Self.validateEncryptionUnlockRequest(requestJSON)
+                let storage = try requireDeviceStorageAdmission()
+                let saved = try storage.multiGet(Self.encryptionUnlockConfigKeys)
+                let turn = EncryptionUnlockTurn(requireOwner: { [unowned self] in
+                    try cancellation.check(); try self.denyCleanupOwner()
+                    guard scopeLive, self.started, !self.closed, self.lockFD >= 0, !self.recoveryActivationPending,
+                          self.context === runtime, self.attachmentGeneration == generation, self.deviceStorage === storage,
+                          self.foregroundCleanupCancellation === cancellation, !self.foregroundCleanupActive,
+                          self.pending == nil, self.projectFileAddTurn == nil, self.retainedOrdinaryTurn == nil,
+                          self.providerCopy == nil, self.taskDownloadTurn == nil, self.projectAvailabilityTurn == nil,
+                          self.ordinaryMutationDepth == 0, !self.attachmentDraftEvidence,
+                          try self.mixedSaveFileBinding(self.journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
+                          try self.mixedSaveFileBinding(self.editorDrafts.url, maximumBytes: 3_000_000) == nil,
+                          try self.mixedSaveFileBinding(NativeAttachmentDraftStore(databaseURL: self.databaseURL).url,
+                              maximumBytes: Self.ownedSaveMaximumBytes) == nil else { throw Self.foregroundSyncFailure }
+                    let actual = try storage.multiGet(Self.encryptionUnlockConfigKeys)
+                    guard actual.count == saved.count, zip(actual, saved).allSatisfy({
+                        Self.ownedEqual($0.0.0, $0.1.0) && Self.taskDownloadOptionalEqual($0.0.1, $0.1.1)
+                    }) else { throw Self.foregroundSyncFailure }
+                })
+                encryptionUnlockTurn = turn
+                defer { turn.live = false; encryptionUnlockTurn = nil; scheduleAttachmentIdle(immediate: true) }
+                try requireEncryptionUnlockTurn()
+                let result = try invoke("iosForegroundSync", arguments: [command, requestJSON, callback], localCancellation: cancellation)
+                try requireEncryptionUnlockTurn()
+                return result
+            }
             let result = try invoke("iosForegroundSync", arguments: [command, requestJSON, callback], localCancellation: cancellation)
             try denyCleanupOwner()
             return result
         } catch {
             throw cleanupOwed ? Self.cleanupFailure : Self.foregroundSyncFailure
+        }
+    }
+
+    private static let encryptionUnlockConfigKeys = ["@mindwtr_sync_backend", "@mindwtr_webdav_url",
+        "@mindwtr_webdav_username", "@mindwtr_webdav_allow_insecure_http", "@mindwtr_webdav_allow_weak_fingerprint"]
+    private static func validateEncryptionUnlockRequest(_ text: String) throws {
+        guard let input = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any],
+              let revision = input["revision"] as? String, !revision.isEmpty, revision.utf16.count <= 100,
+              let action = input["action"] as? [String: Any], let type = action["type"] as? String else { throw foregroundSyncFailure }
+        let takesRequest = type == "submit" || type == "decline"
+        guard Set(input.keys) == (takesRequest ? Set(["revision", "action", "requestId"]) : Set(["revision", "action"])) else { throw foregroundSyncFailure }
+        if takesRequest {
+            guard let id = input["requestId"] as? String, id.utf8.count == 36,
+                  UUID(uuidString: id)?.uuidString.lowercased() == id.lowercased() else { throw foregroundSyncFailure }
+        }
+        switch type {
+        case "open", "submit":
+            guard Set(action.keys) == Set(["type", "flow"]), action["flow"] as? String == "unlock" else { throw foregroundSyncFailure }
+        case "typed":
+            guard Set(action.keys) == Set(["type", "field", "value"]), action["field"] as? String == "current",
+                  let value = action["value"] as? String, value.utf16.count <= 1000 else { throw foregroundSyncFailure }
+        case "cancel", "decline", "retry":
+            guard Set(action.keys) == Set(["type"]) else { throw foregroundSyncFailure }
+        default: throw foregroundSyncFailure
         }
     }
 
@@ -17306,7 +17371,7 @@ private final class Engine: @unchecked Sendable {
         catch { throw HostFailure("Local attachment operation failed") }
     }
 
-    private func settleTaskDownloadTicket(_ id: String, terminalConsumed: Bool, turn: TaskDownloadTurn?,
+    private func settleSelectedTicket(_ id: String, terminalConsumed: Bool, turn: TaskDownloadTurn?,
                                           runtime: JSContext, host: JSValue) {
         // Failure retires only this submission. Ports stay revoked while the
         // accepted workers and the exact shared ticket reach terminal state.
@@ -17343,16 +17408,19 @@ private final class Engine: @unchecked Sendable {
         try requireProjectFileAddTurn()
         try requireTaskDownloadTurn(before: taskDownloadTurn?.preparing == true)
         try requireProjectAvailabilityTurn()
+        try requireEncryptionUnlockTurn()
         guard let context, let host = context.objectForKeyedSubscript("MindwtrHost") else { throw HostFailure("Core runtime unavailable") }
         invoking = true
         defer { invoking = false; scheduleAttachmentIdle(immediate: true) }
         let selectedTurn = taskDownloadTurn
         let selectedProject = projectAvailabilityTurn
+        let selectedEncryption = encryptionUnlockTurn
         var selectedTicket: String?, selectedSucceeded = false, terminalConsumed = false
         defer {
-            if !selectedSucceeded, let selectedTicket, selectedTurn != nil || selectedProject != nil {
+            if !selectedSucceeded, let selectedTicket, selectedTurn != nil || selectedProject != nil || selectedEncryption != nil {
                 selectedProject?.live = false
-                settleTaskDownloadTicket(selectedTicket, terminalConsumed: terminalConsumed, turn: selectedTurn, runtime: context, host: host)
+                selectedEncryption?.live = false
+                settleSelectedTicket(selectedTicket, terminalConsumed: terminalConsumed, turn: selectedTurn, runtime: context, host: host)
             }
         }
         context.exception = nil
@@ -17369,7 +17437,7 @@ private final class Engine: @unchecked Sendable {
         }
         // Capture a trusted submitted ticket before observing a synchronous
         // exception so an accepted selected call is still cancelled and polled.
-        if selectedTurn != nil || selectedProject != nil, let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true {
+        if selectedTurn != nil || selectedProject != nil || selectedEncryption != nil, let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true {
             selectedTicket = id
         }
         try checkException()
@@ -17380,7 +17448,7 @@ private final class Engine: @unchecked Sendable {
         // Promise jobs drain whenever JSC returns from a call; timers share this queue.
         var cancelled = false
         defer {
-            if cancelled && selectedTurn == nil {
+            if cancelled && selectedTurn == nil && selectedProject == nil && selectedEncryption == nil {
                 attachmentJobs?.cancelAndDrain()
                 httpJobs?.cancelAndDrain()
                 secretJobs?.drain()
@@ -17405,7 +17473,7 @@ private final class Engine: @unchecked Sendable {
                     attachmentJobs?.cancelAndDrain()
                     httpJobs?.cancelAndDrain()
                     secretJobs?.drain()
-                    if selectedTurn != nil { cryptoJobs?.drain() }
+                    if selectedTurn != nil || selectedEncryption != nil { cryptoJobs?.drain() }
                 }
             }
             if reply == nil || reply!.isNull || reply!.isUndefined {
@@ -17433,6 +17501,7 @@ private final class Engine: @unchecked Sendable {
         try requireProjectFileAddTurn()
                 try requireTaskDownloadTurn(before: taskDownloadTurn?.preparing == true)
                 try requireProjectAvailabilityTurn()
+                try requireEncryptionUnlockTurn()
                 let result = String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]), as: UTF8.self)
                 selectedSucceeded = true
                 return result
@@ -17441,6 +17510,7 @@ private final class Engine: @unchecked Sendable {
         try requireProjectFileAddTurn()
             try requireTaskDownloadTurn(before: taskDownloadTurn?.preparing == true)
             try requireProjectAvailabilityTurn()
+            try requireEncryptionUnlockTurn()
             let delay = context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? 1
             try checkException()
             Thread.sleep(forTimeInterval: delay.isFinite && delay > 0 ? min(delay, 10) / 1_000 : 0.001)
@@ -17449,7 +17519,7 @@ private final class Engine: @unchecked Sendable {
 
     private func scheduleAttachmentIdle(immediate: Bool = false) {
         guard started, !closed, !invoking, !recoveryActivationPending, pending == nil,
-              !cleanupOwed, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              !cleanupOwed, taskDownloadTurn == nil, projectAvailabilityTurn == nil, encryptionUnlockTurn == nil,
               attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil, let context else { return }
         let delay = immediate ? 0 : context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? -1
         guard delay.isFinite, delay >= 0 else { return }
@@ -17467,7 +17537,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         guard generation == attachmentGeneration else { return }
         attachmentIdlePump = nil
-        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, taskDownloadTurn == nil, projectAvailabilityTurn == nil, let context else { return }
+        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, taskDownloadTurn == nil, projectAvailabilityTurn == nil, encryptionUnlockTurn == nil, let context else { return }
         _ = context.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
         // No arbitrary JS exception content enters diagnostics.
         if context.exception != nil { context.exception = nil }
@@ -17483,6 +17553,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func ordinaryGuardedSQL(_ sql: String, parameters: String? = nil) throws -> String {
+        try requireEncryptionUnlockTurn()
         try denyCleanupOwner()
         guard taskDownloadTurn == nil else { throw Self.taskDownloadFailure }
         try requireRetainedOrdinaryTurn(requirePreparation: true)
@@ -17491,6 +17562,7 @@ private final class Engine: @unchecked Sendable {
         let result: String
         if let parameters { result = try requireDatabase().execute(sql, parametersJSON: parameters) }
         else { result = try requireDatabase().execute(sql) }
+        try requireEncryptionUnlockTurn()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
         try requireProjectAvailabilityTurn()
@@ -17502,6 +17574,7 @@ private final class Engine: @unchecked Sendable {
     private static let deviceStorageFrameLimit = 12 * 1024 * 1024
 
     private func requireDeviceStorageAdmission() throws -> NativeDeviceKV {
+        try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil else { throw Self.deviceStorageUnavailable }
         try denyCleanupOwner()
@@ -17568,7 +17641,8 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         do {
             let result = try work()
-            if taskDownloadTurn != nil || projectAvailabilityTurn != nil { return result }
+            try requireEncryptionUnlockTurn()
+            if taskDownloadTurn != nil || projectAvailabilityTurn != nil || encryptionUnlockTurn != nil { return result }
             let retiredSecret = legacySecretRemoval()
             guard let runtime = context else { throw Self.deviceStorageUnavailable }
             let generation = attachmentGeneration
@@ -17597,6 +17671,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireHTTPAdmission(_ input: String) throws {
+        try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
         try denyCleanupOwner()
@@ -17617,6 +17692,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireSecretAdmission(_ input: String) throws {
+        try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
         try denyCleanupOwner()
@@ -17637,6 +17713,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireCryptoAdmission(_ input: String) throws {
+        try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
         try denyCleanupOwner()
@@ -18036,6 +18113,7 @@ private final class Engine: @unchecked Sendable {
         providerCopy = nil
         taskDownloadTurn = nil
         projectAvailabilityTurn = nil
+        encryptionUnlockTurn = nil
         started = false
         recoveryActivationPending = false
         startupBoardResult = nil

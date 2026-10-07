@@ -553,7 +553,14 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                 enable: (passphrase, options) => transitions.enableSyncEncryption(passphrase, options),
                 change: (current, next, options) => transitions.changeSyncEncryptionPassphrase(current, next, options),
                 disable: (options) => transitions.disableSyncEncryption(options),
-                provide: (passphrase) => transitions.provideSyncEncryptionPassphrase(passphrase),
+                provide: async (passphrase) => {
+                    const outcome = await transitions.provideSyncEncryptionPassphrase(passphrase);
+                    if (platform === 'ios' && settingsHost.encryption.unlockOnly && outcome === 'ok') {
+                        await logLine('info', 'Native iOS encrypted unlock service completed', { scope: 'native-ios', force: true,
+                            extra: { releaseCheck: 'v1.3.5/ios-encryption-unlock', operation: 'unlock', outcome: 'confirmed' } });
+                    }
+                    return outcome;
+                },
                 decline: () => transitions.declineSyncEncryptionPassphrase(),
                 abandon: () => transitions.abandonSyncEncryptionTransition(),
                 recheck: () => transitions.recheckPartlyEncryptedLocation(),

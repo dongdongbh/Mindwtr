@@ -157,6 +157,8 @@ export type NativeSyncSettingsHost = {
     reconcileBackgroundSync(): Promise<unknown>;
     rememberWebdavCapabilityProof(config: SyncSettingsWebDavFields): Promise<void>;
     encryption: {
+        /** Selected host capability: only unlock an existing saved WebDAV location. */
+        unlockOnly?: boolean;
         getStatus(): Promise<SyncEncryptionStatus>;
         getIncompleteTransition(): Promise<SyncEncryptionTransitionKind | null>;
         /** True while no durable sync backend exists (transitions then run local-only). */
@@ -832,6 +834,20 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         return null;
     };
 
+    const isUnlockOnlyAction = (target: { type?: unknown; flow?: unknown; field?: unknown }) => (
+        target.type === 'open' || target.type === 'submit' ? target.flow === 'unlock'
+            : target.type === 'typed' ? target.field === 'current'
+                : target.type === 'cancel' || target.type === 'decline' || target.type === 'retry'
+    );
+    const hasProvenWebDavBackend = (current: Screen) => {
+        const proven = current.transport.getProven();
+        return current.transport.getState().syncBackend === 'webdav' && proven.backend === 'webdav' && !proven.pending;
+    };
+    const canUnlock = (current: Screen) => {
+        const card = current.card?.getState();
+        return card?.state === 'remote-encrypted-no-key' && !card.incompleteTransition;
+    };
+
     const buildEncryption = (current: Screen): NativeSyncEncryptionCard | null => {
         const card = current.card?.getState();
         if (!card) return null;
@@ -839,14 +855,20 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         const language = deps.language();
         const rows: NativeSyncEncryptionRow[] = [];
         const text = (value: string, tone: 'label' | 'description' | 'warning' | 'danger' = 'description') => rows.push({ kind: 'text', text: value, tone });
-        const act = (label: string, target: NativeSyncEncryptionAction, disabled = false) => rows.push({
-            kind: 'action', label, action: target, enabled: !(disabled || card.busy), busy: card.busy,
-        });
-        const field = (label: string, name: SyncEncryptionPassphraseField) => rows.push({
-            kind: 'field', field: name, label, secure: !card.revealed,
-            maxLength: SYNC_ENCRYPTION_PASSPHRASE_MAX_LENGTH, tooLong: t('settings.syncEncryptionPassphraseTooLong'),
-        });
-        const reveal = () => rows.push({ kind: 'reveal', label: t('settings.syncEncryptionShowPassphrase'), revealed: card.revealed, action: { type: 'reveal' } });
+        const unlockOnly = current.host.encryption.unlockOnly === true;
+        const act = (label: string, target: NativeSyncEncryptionAction, disabled = false) => {
+            if (unlockOnly && (!isUnlockOnlyAction(target) || !hasProvenWebDavBackend(current)
+                || !canUnlock(current) && target.type !== 'retry' && target.type !== 'cancel')) return;
+            rows.push({ kind: 'action', label, action: target, enabled: !(disabled || card.busy), busy: card.busy });
+        };
+        const field = (label: string, name: SyncEncryptionPassphraseField) => {
+            if (unlockOnly && (name !== 'current' || !hasProvenWebDavBackend(current) || !canUnlock(current))) return;
+            rows.push({ kind: 'field', field: name, label, secure: unlockOnly || !card.revealed,
+                maxLength: SYNC_ENCRYPTION_PASSPHRASE_MAX_LENGTH, tooLong: t('settings.syncEncryptionPassphraseTooLong') });
+        };
+        const reveal = () => {
+            if (!unlockOnly) rows.push({ kind: 'reveal', label: t('settings.syncEncryptionShowPassphrase'), revealed: card.revealed, action: { type: 'reveal' } });
+        };
         const { errorMessage, progressLabel, warningMessage } = getSyncEncryptionCardMessages(card, t);
         const error = () => {
             if (errorMessage) text(errorMessage, 'danger');
@@ -928,6 +950,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 reveal();
                 act(t('settings.syncEncryptionUnlock'), { type: 'submit', flow: 'unlock' }, !card.currentPassphrase);
                 act(t('settings.syncEncryptionDecline'), { type: 'decline' });
+                if (unlockOnly) act(t('common.cancel'), { type: 'cancel' });
             }
         }
         if (card.flow === 'abandon') {
@@ -1369,6 +1392,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
          */
         async runSyncEncryptionAction(input: {
             requestId?: string;
+            revision?: string;
             action: NativeSyncEncryptionAction | { type: 'typed'; field: SyncEncryptionPassphraseField; value: string };
         }): Promise<NativeHostResult<NativeSyncCommandResult & { passphrase: string | null }>> {
             const opened = openedScreen();
@@ -1389,15 +1413,54 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             if (!valid || (needsRequest ? !isRequestId(input.requestId) : input.requestId !== undefined)) {
                 return fail('INVALID_INPUT', 'An encryption card action is required; a submit or decline takes a request UUID');
             }
+            const unlockOnly = current.host.encryption.unlockOnly === true;
+            if ((unlockOnly || input.revision !== undefined) && (!isText(input.revision, 100) || !input.revision)) {
+                return fail('INVALID_INPUT', 'An encryption action requires a nonempty configuration revision of at most 100 characters');
+            }
             if (!card) return fail('ACTION_FAILED', 'This backend has no encryption card; read the screen again');
+            if (unlockOnly && !isUnlockOnlyAction(target!)) {
+                return fail('ACTION_FAILED', 'This host only supports unlocking saved WebDAV encryption');
+            }
+            const printCardFields = () => {
+                const fields = card.getState();
+                return [secretPrint(fields.currentPassphrase), secretPrint(fields.nextPassphrase), secretPrint(fields.confirmPassphrase)];
+            };
+            const capturedFields = printCardFields(), capturedFlow = card.getState().flow;
+            const refuseUnlockConfiguration = async (): Promise<NativeHostResult<never> | null> => {
+                if (input.revision !== undefined) {
+                    const stale = await refuseStaleConfiguration(current, input.revision);
+                    if (stale) return stale;
+                }
+                if (unlockOnly) {
+                    const [[, stored]] = await current.host.storage.multiGet([SYNC_BACKEND_KEY]);
+                    if (stored?.trim() !== 'webdav' || !hasProvenWebDavBackend(current)) {
+                        return fail('ACTION_FAILED', 'Unlock requires a saved WebDAV backend without a staged selection');
+                    }
+                    if (type !== 'retry' && type !== 'cancel' && !canUnlock(current)) {
+                        return fail('ACTION_FAILED', 'This WebDAV location is not available for passphrase unlock');
+                    }
+                }
+                const actualFields = printCardFields();
+                if (screen !== current || current.card !== card || card.getState().flow !== capturedFlow
+                    || capturedFields.some((print, index) => print !== actualFields[index])) {
+                    return fail('ACTION_FAILED', 'The encryption card changed while its configuration was checked; read the screen again');
+                }
+                return null;
+            };
             const offered = (buildEncryption(current)?.rows ?? []).some((row) => (
-                (row.kind === 'action' && row.enabled) || row.kind === 'reveal') && JSON.stringify(row.action) === JSON.stringify(target));
+                (row.kind === 'action' && row.enabled) || row.kind === 'reveal')
+                && row.action.type === type
+                && (!('flow' in row.action) || ('flow' in target! && row.action.flow === target!.flow)));
             if (type !== 'typed' && !offered) return fail('ACTION_FAILED', 'That encryption action is not showing; read the screen again');
             if (type === 'typed' && !(buildEncryption(current)?.rows ?? []).some((row) => row.kind === 'field' && row.field === target!.field)) {
                 return fail('ACTION_FAILED', 'That field is not showing; read the screen again');
             }
             if ((type === 'generate' || type === 'submit' || type === 'decline' || type === 'recheck') && !current.host.encryption.transitions) {
                 return fail('ACTION_FAILED', 'Sync encryption is not available on this host yet');
+            }
+            if (!needsRequest && (unlockOnly || input.revision !== undefined)) {
+                const refused = await refuseUnlockConfiguration();
+                if (refused) return refused;
             }
             const answer = (passphrase: string | null = null) => ({ ok: true as const, value: { toasts: takeToasts(), passphrase } });
             switch (type) {
@@ -1431,9 +1494,15 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                                     : target!.flow === 'abandon' ? () => card.submitAbandon()
                                         : () => card.submitUnlock();
                     // The passphrases the submit runs with are part of its identity, as fingerprints.
-                    const fields = card.getState();
-                    const identity = ['encryption', target, secretPrint(fields.currentPassphrase), secretPrint(fields.nextPassphrase), secretPrint(fields.confirmPassphrase)];
-                    const result = await runScreenAction(input.requestId!, identity, current, async () => { await run(); });
+                    const identity = ['encryption', target, ...capturedFields,
+                        ...(input.revision === undefined ? [] : [input.revision])];
+                    const result = await runScreenAction(input.requestId!, identity, current, async () => {
+                        if (unlockOnly || input.revision !== undefined) {
+                            const refused = await refuseUnlockConfiguration();
+                            if (refused) return refused;
+                        }
+                        await run();
+                    });
                     return result.ok ? { ok: true, value: { ...result.value, passphrase: null } } : result;
                 }
             }

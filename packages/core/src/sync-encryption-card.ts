@@ -11,9 +11,11 @@
  * logs them.
  */
 import { generateDicewarePassphrase } from './diceware';
+import { SyncCryptoUnsupportedError } from './sync-crypto';
 import type { AppData } from './types';
 import {
     SYNC_ENCRYPTION_BACKEND_INCOMPATIBLE,
+    SyncEncryptionTerminalError,
     isSyncEncryptionRemoteVersionUnavailableError,
     type SyncEncryptionState,
     type SyncEncryptionStatus,
@@ -107,6 +109,8 @@ export const classifySyncEncryptionCardFailure = (error: unknown, terminal: Sync
     if (message.includes('SYNC_ENCRYPTION_TRANSITION_INCOMPLETE')) return 'transition-incomplete';
     if (message.includes(SYNC_ENCRYPTION_BACKEND_INCOMPATIBLE)) return 'backend-incompatible';
     if (isSyncEncryptionRemoteVersionUnavailableError(error)) return 'transition-incomplete';
+    if (error instanceof SyncCryptoUnsupportedError
+        || error instanceof SyncEncryptionTerminalError && error.cause instanceof SyncCryptoUnsupportedError) return 'generic';
     if (/MWENC1|SYNC_ENCRYPTION|passphrase/i.test(message)) return terminal;
     return 'generic';
 };

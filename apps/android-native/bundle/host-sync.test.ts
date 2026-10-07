@@ -58,6 +58,51 @@ const host = (stored: Record<string, string> = {}, refuseSchedule = false, getDa
     return { sync, kv, schedules, lines, traces, calls, bindings };
 };
 
+it('records bounded iOS unlock only after the shared service confirms completion', async () => {
+    const create = core.createSyncEncryptionService;
+    let outcome: 'ok' | 'wrong-passphrase' | 'no-encrypted-remote' | Error = 'ok';
+    let release: (() => void) | undefined;
+    let held: Promise<void> | undefined;
+    spyOn(core, 'createSyncEncryptionService').mockImplementation((options) => ({
+        ...create(options),
+        provideSyncEncryptionPassphrase: async () => {
+            await held;
+            if (outcome instanceof Error) throw outcome;
+            return outcome;
+        },
+    }));
+    for (const platform of ['ios', 'android']) {
+        if (platform === 'ios') iosFiles();
+        globals.__mindwtrHostPlatform = platform;
+        const { sync, bindings } = host({}, false, undefined, async () => false);
+        const entries: Parameters<typeof bindings.appendLog>[0][] = [];
+        bindings.appendLog = async (entry) => { entries.push(entry); return null; };
+        const provide = sync.settingsHost.encryption.transitions!.provide;
+        sync.settingsHost.encryption.unlockOnly = true;
+        for (outcome of ['wrong-passphrase', 'no-encrypted-remote', new Error('synthetic failure')] as const) {
+            try { await provide('synthetic secret'); } catch { /* Shared failure stays a failure. */ }
+            expect(entries.filter((entry) => entry.message === 'Native iOS encrypted unlock service completed')).toHaveLength(0);
+        }
+        outcome = 'ok';
+        held = new Promise<void>((resolve) => { release = resolve; });
+        const pending = provide('synthetic secret');
+        await Promise.resolve();
+        expect(entries).toHaveLength(0);
+        release!();
+        expect(await pending).toBe('ok');
+        held = undefined;
+        expect(entries).toHaveLength(platform === 'ios' ? 1 : 0);
+        if (platform === 'ios') expect(entries[0]!.context).toEqual({
+            releaseCheck: 'v1.3.5/ios-encryption-unlock', operation: 'unlock', outcome: 'confirmed',
+        });
+        expect(JSON.stringify(entries)).not.toContain('synthetic secret');
+        entries.length = 0;
+        sync.settingsHost.encryption.unlockOnly = false;
+        expect(await provide('synthetic secret')).toBe('ok');
+        expect(entries).toHaveLength(0);
+    }
+});
+
 const fetches: string[] = [];
 /** A server that refuses the password: a failure core does not retry, so a cycle fails at once. */
 const failingFetch = (async (input: RequestInfo | URL) => {

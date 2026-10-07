@@ -3848,7 +3848,7 @@ globalThis.MindwtrHost = {
                 || iosCleanupCallback || iosTaskAttachmentPreparation || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
                 || typeof native().kvMultiGet !== 'function' || !globalThis.__mindwtrSyncSecrets) throw unavailable();
             const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
-                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'projectAttachmentDownload'];
+                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'projectAttachmentDownload', 'runSyncEncryptionAction'];
             if (currentTargetURI !== undefined && (name !== 'projectAttachmentDownload' || typeof currentTargetURI !== 'string'
                 || !currentTargetURI.startsWith('file:///') || currentTargetURI.length > 16_384 || !currentTargetURI.includes('/'))) {
                 throw new Error('INVALID_INPUT: Invalid selected Project availability target');
@@ -3866,6 +3866,23 @@ globalThis.MindwtrHost = {
                     const value = input[field];
                     return typeof value !== 'string' || !value || value.length > (field === 'revision' ? 200 : 500);
                 }))) throw new Error('INVALID_INPUT: Invalid Project attachment download request');
+            if (name === 'runSyncEncryptionAction') {
+                const action = input.action;
+                const invalid = () => new Error('INVALID_INPUT: Invalid encrypted unlock request');
+                if (!action || typeof action !== 'object' || Array.isArray(action)
+                    || typeof input.revision !== 'string' || !input.revision || input.revision.length > 100) throw invalid();
+                const target = action as Record<string, unknown>;
+                const needsRequest = target.type === 'submit' || target.type === 'decline';
+                if (Object.keys(input).length !== (needsRequest ? 3 : 2)
+                    || needsRequest && (typeof input.requestId !== 'string' || !/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i.test(input.requestId))
+                    || !needsRequest && input.requestId !== undefined) throw invalid();
+                const valid = target.type === 'open' || target.type === 'submit'
+                    ? Object.keys(target).length === 2 && target.flow === 'unlock'
+                    : target.type === 'typed' ? Object.keys(target).length === 3 && target.field === 'current'
+                        && typeof target.value === 'string' && target.value.length <= 1000
+                        : ['cancel', 'decline', 'retry'].includes(target.type as string) && Object.keys(target).length === 1;
+                if (!valid) throw invalid();
+            }
             const refused = { ok: false as const, error: { code: 'ACTION_FAILED' as const,
                 message: 'This sync provider is not available in native iOS yet; the stored configuration is unchanged' } };
             if (name === 'selectSyncBackend' && input.option !== 'off' && input.option !== 'webdav'
@@ -3879,7 +3896,7 @@ globalThis.MindwtrHost = {
                 const stored = (await keyValue.get(SYNC_BACKEND_KEY))?.trim();
                 if (stored && stored !== 'off' && stored !== 'webdav') return refused;
                 if (['syncStored', 'syncResume'].includes(name) && stored !== 'webdav') return { ok: true as const, value: { success: true, skipped: true } };
-                if (name === 'projectAttachmentDownload' && stored !== 'webdav') return refused;
+                if (['projectAttachmentDownload', 'runSyncEncryptionAction'].includes(name) && stored !== 'webdav') return refused;
                 let downloadResult: Awaited<ReturnType<typeof contract.downloadAttachment>> | null = null;
                 if (name === 'projectAttachmentDownload') {
                     const options = contract.getProjectAttachmentEditOptions({ projectId: input.projectId as string });
@@ -3908,6 +3925,7 @@ globalThis.MindwtrHost = {
                         } catch { throw new NativeAttachmentCleanupUnconfirmedError(); }
                     },
                 });
+                if (iosManualSync) iosManualSync.settingsHost.encryption.unlockOnly = true;
                 if (name === 'projectAttachmentDownload') {
                     if (!downloadResult) {
                         // The original contract remains local-only outside this owned call.

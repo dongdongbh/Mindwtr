@@ -3749,6 +3749,12 @@ export function createNativeHostContract(bindings = {}) {
         ? { ok: true, value: { revision: 'project-revision', project, canEdit: project.status !== 'archived' } }
         : { ok: false, error: { code: 'STALE_REVISION', message: 'Project unavailable' } };
     },
+    async runSyncEncryptionAction(input) {
+      globalThis.encryptionInputs ??= [];
+      globalThis.encryptionInputs.push(input);
+      if (bindings.syncSettings?.encryption?.unlockOnly !== true) throw new Error('Missing unlock-only capability');
+      return { ok: true, value: { toasts: [], passphrase: null } };
+    },
     async downloadAttachment(input) {
       globalThis.attachmentInputs.push(['downloadAttachment', input]);
       globalThis.downloadHosts.push(bindings.attachments);
@@ -4261,7 +4267,7 @@ for (const [bridge, receipt, operation] of [
 export function createHostSyncCrypto() { throw new Error('Task Download crypto is not bound in Project entry fixture'); }
 export function createNativeSync() {
   globalThis.syncFactoryCalls++;
-  return { attachmentsHost: globalThis.remoteAttachmentHost, settingsHost: {} };
+  return { attachmentsHost: globalThis.remoteAttachmentHost, settingsHost: { encryption: {} } };
 }
 `;
     const downloadBuilt = await build({
@@ -4299,6 +4305,41 @@ export function createNativeSync() {
     const command = (state, value = input) => poll(state,
         state.MindwtrHost.iosForegroundSync('projectAttachmentDownload', JSON.stringify(value), () => ''));
     const markerLines = (state) => (state.logText ?? '').split('\n').filter((line) => line.includes('v1.3.5/ios-project-file-download'));
+    // Task370 exercises admission before any configured service or secret read.
+    const encrypted = create();
+    const unlock = { revision: 'saved-location', action: { type: 'open', flow: 'unlock' } };
+    const unlockCommand = (value) => poll(encrypted,
+        encrypted.MindwtrHost.iosForegroundSync('runSyncEncryptionAction', JSON.stringify(value), () => ''));
+    assert.equal((await boot(encrypted)).ok, true);
+    for (const value of [null, [], {}, { ...unlock, revision: '' }, { ...unlock, revision: 'r'.repeat(101) },
+        { ...unlock, requestId: '11111111-1111-1111-1111-111111111111' }, { ...unlock, extra: true },
+        ...['enable', 'change', 'disable', 'abandon'].map((flow) => ({ ...unlock, action: { type: 'open', flow } })),
+        ...['generate', 'reveal', 'recheck'].map((type) => ({ ...unlock, action: { type } })),
+        { ...unlock, action: { type: 'typed', field: 'next', value: 'synthetic' } },
+        { ...unlock, action: { type: 'typed', field: 'current', value: 'x'.repeat(1001) } },
+        { ...unlock, action: { type: 'submit', flow: 'unlock' } },
+        { ...unlock, action: { type: 'decline' }, requestId: 'invalid' }]) {
+        assert.match((await unlockCommand(value)).error, /^INVALID_INPUT:/);
+    }
+    assert.equal(encrypted.storedReads, 0);
+    assert.equal(encrypted.syncFactoryCalls, 0);
+    assert.equal(encrypted.secretReads, 0);
+    for (const backend of [undefined, '', 'off', 'dropbox']) {
+        encrypted.storedBackend = backend;
+        assert.equal((await unlockCommand(unlock)).value.ok, false);
+    }
+    assert.equal(encrypted.syncFactoryCalls, 0);
+    encrypted.storedBackend = 'webdav';
+    for (const action of [{ type: 'open', flow: 'unlock' }, { type: 'typed', field: 'current', value: 'synthetic' },
+        { type: 'submit', flow: 'unlock' }, { type: 'decline' }, { type: 'cancel' }, { type: 'retry' }]) {
+        const value = { revision: unlock.revision, action,
+            ...(['submit', 'decline'].includes(action.type) ? { requestId: '11111111-1111-1111-1111-111111111111' } : {}) };
+        assert.equal((await unlockCommand(value)).value.ok, true);
+        assert.deepEqual(JSON.parse(JSON.stringify(encrypted.encryptionInputs.at(-1))), value);
+    }
+    assert.equal(encrypted.syncFactoryCalls, 1, 'Unlock uses the retained foreground service');
+    assert.equal(encrypted.secretReads, 0, 'Entry fixture reads no credentials');
+    assert(!(encrypted.logText ?? '').includes('synthetic'), 'Passphrase never enters entry diagnostics');
     const malformed = create();
     assert.match((await command(malformed)).error, /^NOT_READY:/);
     const bootMalformed = await boot(malformed);
