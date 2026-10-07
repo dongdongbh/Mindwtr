@@ -563,7 +563,8 @@ const sqliteBridge = readFileSync(resolve(app, 'android/app/src/main/java/tech/d
 const hostEntry = readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8');
 assert.match(hostEntry, /new ValidatedSqliteAdapter\(sqlite, \{ rejectConcurrentWrites: true \}\)/);
 // Review 11: sync's service, its Save commit and its screen use the secrets no other call's deadline refuses.
-assert.equal(/createNativeSync\(\{[\s\S]*?localData:/.exec(hostEntry)[0].match(/__mindwtrSyncSecrets/g)?.length, 3, 'sync binds the unrefused secrets');
+assert.equal(/const nativeSyncBindings: NativeSyncBindings = \{[\s\S]*?localData:/.exec(hostEntry)?.[0].match(/__mindwtrSyncSecrets/g)?.length, 3, 'sync binds the unrefused secrets');
+assert.match(hostEntry, /createNativeSync\(nativeSyncBindings\)/);
 // Durable request receipts: core's adapter commits a write's receipt in its data's transaction (the hook right before
 // COMMIT in both data saves, into native_request_receipts), and boot loads them before activation and the journal's replay.
 {
@@ -1188,7 +1189,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
-    assert.match(hostEntry, /createNativeHostContract\(\{ \.\.\.\(nativeSync \? \{ syncSettings: nativeSync\.settingsHost \} : \{\}\), \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*\.\.\.\(attachmentsHost \? \{ attachments: attachmentsHost \} : \{\}\) \}\)/);
+    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*\.\.\.\(attachmentsHost \? \{ attachments: attachmentsHost \} : \{\}\) \}\)/);
     assert.match(host, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];/);
     // An entry replays only while it fits its write as host-entry takes it (WriteJournal.SHAPES): a JSON object for `json`, a
     // boolean for a boolean, a Menu command for menuCommand's name, text for the rest; MENU names exactly host-entry's
@@ -4056,7 +4057,7 @@ const poll = async (state, id) => {
         state.__mindwtrNative.ioBody = () => '';
     };
     const local = makeState(0, [], 'ios', configureHTTP);
-    assert.deepEqual(Object.keys(local.contractBindings), []);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), []);
     assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
     local.MindwtrHost.nativeHTTPDelivered();
     assert.equal(local.logText, null, 'No preboot transport receipt');
@@ -4098,7 +4099,7 @@ for (const [bridge, receipt, operation] of [
         state.__mindwtrNative.ioBody = () => '';
     };
     const local = makeState(0, [], 'ios', configurePort);
-    assert.deepEqual(Object.keys(local.contractBindings), []);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), []);
     assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
     local.MindwtrHost[receipt]();
     assert.equal(local.logText, null, 'No preboot native primitive receipt');
@@ -4142,7 +4143,7 @@ for (const [bridge, receipt, operation] of [
         };
     };
     const local = makeState(0, [], 'ios', configureKV);
-    assert.deepEqual(Object.keys(local.contractBindings), [], 'KV does not enable iOS Sync or AI');
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), [], 'KV does not enable iOS Sync or AI');
     for (const name of names) assert.equal(typeof local.__mindwtrNative[name], 'function');
     for (const [method] of receipts) local.MindwtrHost[method]();
     assert.equal(local.logText, null, 'No preboot device storage receipt');
@@ -4190,7 +4191,7 @@ for (const [bridge, receipt, operation] of [
         state.__mindwtrInstallerCall = async () => null;
     };
     const local = makeState(0, [], 'ios', configureLocal);
-    assert.deepEqual(Object.keys(local.contractBindings), ['attachments'], 'local capability enables neither Sync nor AI');
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['attachments'], 'local capability enables neither Sync nor AI');
     assert.equal(local.localShaInstallCount, 1, 'successful local construction installs native SHA once');
     assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
     const owner = { kind: 'task', taskId: 'task215', attachments: [] };
@@ -4236,7 +4237,7 @@ for (const [bridge, receipt, operation] of [
             if (variant === 'partial') delete state.__mindwtrNative.ioBody;
             if (variant === 'refused') state.__mindwtrNative.fileDirectories = () => '!MindwtrNativeError:fixed unavailable';
         });
-        assert.deepEqual(Object.keys(unavailable.contractBindings), [], `${variant} capability offers no local fallback`);
+        assert.deepEqual(Object.keys(unavailable.contractBindings).filter((name) => unavailable.contractBindings[name] !== undefined), [], `${variant} capability offers no local fallback`);
         assert.equal(unavailable.localShaInstallCount, 0, 'failed optional discovery leaves SHA binding unchanged');
         assert.equal((await poll(unavailable, unavailable.MindwtrHost.boot())).ok, true, 'optional local failure does not fail boot');
     }
@@ -5466,7 +5467,7 @@ for (const [bridge, receipt, operation] of [
                 state.__mindwtrNative[name] = () => { calls++; throw new Error('Unexpected device service activation'); };
             }
         });
-        assert.deepEqual(Object.keys(local.contractBindings), ['attachments']);
+        assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['attachments']);
         assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
         assert.equal(local.localShaInstallCount, 1);
         assert.equal(call(local), '{"outcome":"removed"}', 'existing synchronous local Discard remains admitted');

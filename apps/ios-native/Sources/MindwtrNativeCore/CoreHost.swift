@@ -63,6 +63,14 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     #if DEBUG
+    /// UI fixtures must isolate Keychain accounts as well as their database and device settings.
+    public convenience init(databaseURL: URL, bundleURL: URL,
+                            deviceStorage: (containerURL: URL, bundleIdentifier: String), isolatedTestID: UUID) {
+        let faults = HostIOFaults()
+        faults.secretService = "mindwtr.native-keychain.fixture." + isolatedTestID.uuidString.lowercased()
+        self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: faults, deviceStorage: deviceStorage)
+    }
+
     public convenience init(databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage,
                             deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
         self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: HostIOFaults(),
@@ -87,6 +95,17 @@ public final class CoreHost: @unchecked Sendable {
         if Task.isCancelled { token.cancel() }
         return try await withTaskCancellationHandler(operation: {
             try await perform { try $0.retireAttachmentCleanup(requestJSON, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
+    /// One unjournaled foreground Sync invocation with a scoped cleanup owner.
+    public func foregroundSync(command: String, requestJSON: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.foregroundSync(command: command, requestJSON: requestJSON, cancellation: token) }
         }, onCancel: { token.cancel() })
     }
 
@@ -790,6 +809,8 @@ private final class Engine: @unchecked Sendable {
     private var providerCopy: ProviderCopyTurn?
     private var attachmentIdlePump: DispatchWorkItem?
     private var invoking = false
+    private var foregroundCleanupCancellation: NativeAttachmentCancellation?
+    private var foregroundCleanupActive = false
     #if DEBUG
     var attachmentHooks: NativeAttachmentHostHooks?
     var attachmentDraftHooks: AttachmentDraftHostHooks?
@@ -15007,7 +15028,9 @@ private final class Engine: @unchecked Sendable {
     private func denyCleanupOwner() throws { if cleanupOwed { throw Self.cleanupFailure } }
     private func captureCleanupTurn(command: PendingCommand? = nil, requestJSON: String? = nil) throws -> CleanupTurn {
         if let turn = cleanupTurn { try requireCleanupTurn(); return turn }
-        guard !closed, lockFD >= 0, !invoking, let runtime = context, let jobs = attachmentJobs, let db = database,
+        guard !closed, lockFD >= 0,
+              !invoking || (foregroundCleanupActive && foregroundCleanupCancellation != nil),
+              let runtime = context, let jobs = attachmentJobs, let db = database,
               projectFileAddTurn == nil, retainedOrdinaryTurn == nil, providerCopy == nil, ordinaryMutationDepth == 0,
               try mixedSaveFileBinding(editorDrafts.url, maximumBytes: 3_000_000) == nil,
               try mixedSaveFileBinding(NativeAttachmentDraftStore(databaseURL: databaseURL).url, maximumBytes: Self.ownedSaveMaximumBytes) == nil else { throw Self.cleanupFailure }
@@ -15080,8 +15103,10 @@ private final class Engine: @unchecked Sendable {
     }
     private func cleanupDirect(_ method: String, arguments: [Any], turn: CleanupTurn) throws -> String {
         try requireCleanupTurn()
-        guard !invoking, let host = turn.runtime.objectForKeyedSubscript("MindwtrHost") else { throw Self.cleanupFailure }
-        invoking = true; defer { invoking = false }
+        guard !invoking || (foregroundCleanupActive && foregroundCleanupCancellation != nil),
+              let host = turn.runtime.objectForKeyedSubscript("MindwtrHost") else { throw Self.cleanupFailure }
+        let wasInvoking = invoking
+        invoking = true; defer { invoking = wasInvoking }
         turn.runtime.exception = nil
         let returned = host.invokeMethod(method, withArguments: arguments)
         let failed = turn.runtime.exception != nil; turn.runtime.exception = nil
@@ -15163,7 +15188,7 @@ private final class Engine: @unchecked Sendable {
         return result
     }
     private func emitCleanupAcknowledgement() {
-        guard !cleanupOwed, started, !closed, let outcome = cleanupAcknowledgement else { return }
+        guard !cleanupOwed, !invoking, started, !closed, let outcome = cleanupAcknowledgement else { return }
         cleanupAcknowledgement = nil
         _ = try? invoke("attachmentDraftAcknowledged", arguments: ["cleanup-owned-retirement", outcome])
     }
@@ -15263,6 +15288,54 @@ private final class Engine: @unchecked Sendable {
             } else { turn = try captureCleanupTurn(requestJSON: requestJSON) }
             return try executeCleanup(turn, cancellation: cancellation)
         } catch { throw Self.cleanupFailure }
+    }
+
+    private static let foregroundSyncFailure = HostFailure("Foreground sync could not be confirmed")
+    func foregroundSync(command: String, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        dispatchPrecondition(condition: .onQueue(queue))
+        do {
+            try denyCleanupOwner()
+            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "syncNow", "testSyncConnection"].contains(command),
+                  requestJSON.utf8.count <= 128 * 1024,
+                  (try? NativeJSON.jsonObject(with: Data(requestJSON.utf8))) is [String: Any],
+                  started, !closed, lockFD >= 0, !recoveryActivationPending, !invoking,
+                  foregroundCleanupCancellation == nil, !foregroundCleanupActive,
+                  pending == nil, projectFileAddTurn == nil, retainedOrdinaryTurn == nil, providerCopy == nil, ordinaryMutationDepth == 0,
+                  try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
+                  try mixedSaveFileBinding(editorDrafts.url, maximumBytes: 3_000_000) == nil,
+                  try mixedSaveFileBinding(NativeAttachmentDraftStore(databaseURL: databaseURL).url, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
+                  let runtime = context else { throw Self.foregroundSyncFailure }
+            try cancellation.check()
+            let generation = attachmentGeneration
+            var scopeLive = true
+            foregroundCleanupCancellation = cancellation
+            defer {
+                scopeLive = false
+                foregroundCleanupCancellation = nil
+                foregroundCleanupActive = false
+                emitCleanupAcknowledgement()
+            }
+            let cleanup: @convention(block) (JSValue) -> String = { [weak self, weak runtime] value in
+                guard let self, let runtime, scopeLive, self.invoking,
+                      self.foregroundCleanupCancellation === cancellation, !self.foregroundCleanupActive, !self.cleanupOwed,
+                      self.context === runtime, self.attachmentGeneration == generation, value.context === runtime,
+                      value.isString, let request = value.toString() else {
+                    return "!MindwtrNativeError:" + Self.cleanupFailure.message
+                }
+                self.foregroundCleanupActive = true
+                defer { self.foregroundCleanupActive = false }
+                do {
+                    try cancellation.check()
+                    return try self.retireAttachmentCleanup(request, cancellation: cancellation)
+                } catch { return "!MindwtrNativeError:" + Self.cleanupFailure.message }
+            }
+            guard let callback = JSValue(object: cleanup, in: runtime) else { throw Self.foregroundSyncFailure }
+            let result = try invoke("iosForegroundSync", arguments: [command, requestJSON, callback], localCancellation: cancellation)
+            try denyCleanupOwner()
+            return result
+        } catch {
+            throw cleanupOwed ? Self.cleanupFailure : Self.foregroundSyncFailure
+        }
     }
 
     // Project Add is one concrete owner in the existing command journal. The
@@ -16866,6 +16939,8 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func releaseRuntime() {
+        foregroundCleanupCancellation = nil
+        foregroundCleanupActive = false
         cleanupTurn = nil
         projectFileAddTurn = nil
         retainedOrdinaryTurn = nil

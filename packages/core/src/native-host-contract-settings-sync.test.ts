@@ -6,6 +6,7 @@ import { NATIVE_UNJOURNALED_COMMANDS } from './native-request-receipts';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import { en } from './i18n/locales/en';
 import {
+    createSyncSettingsMethods,
     NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS,
     SYNC_ENCRYPTION_PASSPHRASE_MAX_LENGTH,
     type NativeSyncEncryptionAction,
@@ -13,7 +14,7 @@ import {
     type NativeSyncSettingsHost,
     type NativeSyncWebDavFields,
 } from './native-host-contract-settings-sync';
-import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
+import { flushPendingSave, getPersistenceStatus, getStorageAdapter, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { SyncEncryptionCleanupDeferredError } from './sync-encryption-service';
 import {
     CLOUD_PROVIDER_KEY,
@@ -769,6 +770,233 @@ const since = (dev: ReturnType<typeof createDevice>, at: ReturnType<typeof mark>
 });
 const storedConfig = (dev: ReturnType<typeof createDevice>) => ({ storage: Object.fromEntries(dev.state.storage), secrets: Object.fromEntries(dev.state.secrets) });
 const webdavFields = { url: 'https://dav.example.com/mindwtr', username: 'alice', password: null, allowInsecureHttp: false };
+
+describe('native Settings › Sync Off durable acknowledgement', () => {
+    const methodsWithSave = async (host: NativeSyncSettingsHost, save: () => Promise<NativeHostResult<null>>) => {
+        const methods = createSyncSettingsMethods({
+            readiness: () => ({ ok: true, value: null }), save,
+            t: () => (key) => en[key as keyof typeof en] ?? key,
+            language: () => 'en', systemLocale: () => 'en-US', dataRevision: () => 'fixture',
+            requestIdPattern: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+            host: () => host,
+        });
+        value(await methods.openSyncSettings());
+        return methods;
+    };
+
+    it('joins the Off UUID and waits for the queued status write before acknowledging it', async () => {
+        const { dev, contract } = await start({ ...WEBDAV_STORED, os: 'ios' }, { lastSyncStatus: 'error', lastSyncError: 'synthetic prior failure' });
+        let release!: () => void;
+        let entered!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const saving = new Promise<void>((resolve) => { entered = resolve; });
+        let saves = 0;
+        let persistedSettings: AppSettings | undefined;
+        const adapter = getStorageAdapter();
+        const saveData = adapter.saveData;
+        adapter.saveData = async (data) => {
+            saves += 1;
+            entered();
+            await held;
+            await saveData(data);
+            persistedSettings = data.settings;
+        };
+        const input = { requestId: generateUUID(), option: 'off' as const };
+        let acknowledged = false;
+        const first = contract.selectSyncBackend(input).then((result) => { acknowledged = true; return result; });
+        const joined = contract.selectSyncBackend(input);
+        try {
+            expect(await Promise.race([first.then(() => 'receipt'), saving.then(() => 'flush')])).toBe('flush');
+            expect(acknowledged).toBe(false);
+            expect(dev.state.storage.get(SYNC_BACKEND_KEY)).toBe('off');
+            expect(getPersistenceStatus().inFlight).toBe(true);
+            expect(device.calls.filter((call) => call[0] === 'logInfo')).toEqual([]);
+            release();
+            const result = await first;
+            expect(result).toEqual({ ok: true, value: { toasts: [] } });
+            expect(await joined).toBe(result);
+            expect(persistedSettings).toMatchObject({ lastSyncStatus: 'idle' });
+            expect(persistedSettings?.lastSyncError).toBeUndefined();
+            expect(getPersistenceStatus()).toMatchObject({ queued: 0, inFlight: false, immediate: 0, retrying: false, failed: false });
+            expect(saves).toBe(1);
+            expect(device.calls.filter((call) => call[0] === 'logInfo')).toEqual([
+                ['logInfo', 'Native Sync Off durably acknowledged', {
+                    releaseCheck: 'v1.3.5/native-sync-off-durable', operation: 'off', outcome: 'confirmed',
+                }],
+            ]);
+            const at = mark(dev);
+            expect(await contract.selectSyncBackend(input)).toEqual(result);
+            expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+        } finally {
+            release();
+            await Promise.all([first, joined]);
+            await flushPendingSave();
+        }
+    });
+
+    it('drains the queued status reset before returning a known KV failure', async () => {
+        const { dev, contract } = await start({ ...WEBDAV_STORED, os: 'ios' }, { lastSyncStatus: 'error' });
+        dev.state.failKeys.add(SYNC_BACKEND_KEY);
+        let release!: () => void;
+        let entered!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const saving = new Promise<void>((resolve) => { entered = resolve; });
+        let persistedSettings: AppSettings | undefined;
+        const adapter = getStorageAdapter();
+        const saveData = adapter.saveData;
+        adapter.saveData = async (data) => {
+            entered();
+            await held;
+            await saveData(data);
+            persistedSettings = data.settings;
+        };
+        const input = { requestId: generateUUID(), option: 'off' as const };
+        const command = contract.selectSyncBackend(input);
+        try {
+            expect(await Promise.race([command.then(() => 'failure'), saving.then(() => 'flush')])).toBe('flush');
+            expect(dev.state.storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+            release();
+            expect(await command).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED', message: 'The device store refused the write' } });
+            expect(persistedSettings?.lastSyncStatus).toBe('idle');
+            expect(getPersistenceStatus()).toMatchObject({ queued: 0, inFlight: false, failed: false });
+            expect(value(contract.getSyncSettings()).panel?.kind).toBe('webdav');
+            expect(device.calls.filter((call) => call[0] === 'logInfo')).toEqual([]);
+        } finally {
+            release();
+            await command;
+            await flushPendingSave();
+        }
+    });
+    it('does not cache a failed flush, and drains it on exact already-Off retry', async () => {
+        const { dev } = await start({ ...WEBDAV_STORED, os: 'ios' }, { lastSyncStatus: 'error' });
+        let saves = 0;
+        const methods = await methodsWithSave(dev.host, async () => {
+            saves += 1;
+            if (saves === 1) return { ok: false, error: { code: 'SAVE_FAILED', message: 'synthetic flush refusal' } };
+            await flushPendingSave();
+            return { ok: true, value: null };
+        });
+        const input = { requestId: generateUUID(), option: 'off' as const };
+        try {
+            expect(await methods.selectSyncBackend(input)).toEqual({ ok: false, error: { code: 'SAVE_FAILED', message: 'synthetic flush refusal' } });
+            expect(getPersistenceStatus().queued).toBeGreaterThan(0);
+            expect(device.calls.filter((call) => call[0] === 'logInfo')).toEqual([]);
+            expect(await methods.selectSyncBackend(input)).toEqual({ ok: true, value: { toasts: [] } });
+            expect(saves).toBe(2);
+            expect(getPersistenceStatus()).toMatchObject({ queued: 0, inFlight: false, failed: false });
+            const at = mark(dev);
+            expect(await methods.selectSyncBackend(input)).toEqual({ ok: true, value: { toasts: [] } });
+            expect(saves).toBe(2);
+            expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+            expect(dev.state.log.filter((entry) => entry[0] === 'setItem' && entry[1] === SYNC_BACKEND_KEY)).toHaveLength(1);
+        } finally {
+            await flushPendingSave();
+        }
+    });
+
+    it('redacts failed Off flush messages on both fresh and already-Off UUID retries', async () => {
+        const { dev } = await start({ ...WEBDAV_STORED, os: 'ios' });
+        const secret = WEBDAV_STORED.secrets[WEBDAV_PASSWORD_KEY];
+        let saves = 0;
+        const methods = await methodsWithSave(dev.host, async () => {
+            saves += 1;
+            return { ok: false, error: { code: 'SAVE_FAILED', message: `synthetic flush refusal ${secret}` } };
+        });
+        const input = { requestId: generateUUID(), option: 'off' as const };
+        try {
+            for (const phase of ['fresh Off', 'already-Off retry']) {
+                const result = await methods.selectSyncBackend(input);
+                expect(result, phase).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+                if (result.ok) throw new Error('Expected the synthetic flush refusal');
+                expect(result.error.message, phase).toContain('synthetic flush refusal');
+                expect(result.error.message, phase).not.toContain(secret);
+                expect(JSON.stringify(result), phase).not.toContain(secret);
+            }
+            expect(saves).toBe(2);
+            expect(device.calls.filter((call) => call[0] === 'logInfo')).toEqual([]);
+        } finally {
+            await flushPendingSave();
+        }
+    });
+
+    it('forces and awaits the iOS Off diagnostic append before acknowledging success', async () => {
+        const { dev, contract } = await start({ ...WEBDAV_STORED, os: 'ios' });
+        let release!: () => void;
+        let entered!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const appending = new Promise<void>((resolve) => { entered = resolve; });
+        const info = vi.spyOn(dev.host.log, 'info').mockImplementation(() => { entered(); return held; });
+        let acknowledged = false;
+        const command = contract.selectSyncBackend({ requestId: generateUUID(), option: 'off' }).then((result) => {
+            acknowledged = true;
+            return result;
+        });
+        try {
+            await appending;
+            // A full event-loop turn lets an unawaited action incorrectly finish.
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            expect(acknowledged).toBe(false);
+            expect(getPersistenceStatus()).toMatchObject({ queued: 0, inFlight: false, failed: false });
+            expect(info).toHaveBeenCalledExactlyOnceWith('Native Sync Off durably acknowledged', {
+                scope: 'native-sync', force: true,
+                extra: { releaseCheck: 'v1.3.5/native-sync-off-durable', operation: 'off', outcome: 'confirmed' },
+            });
+            release();
+            expect(await command).toEqual({ ok: true, value: { toasts: [] } });
+        } finally {
+            release();
+            await command;
+        }
+    });
+
+    it.each(['throws', 'rejects'] as const)('keeps a confirmed Off acknowledgement when its diagnostic sink %s', async (failure) => {
+        const { dev, contract } = await start({ ...WEBDAV_STORED, os: 'ios' });
+        const info = vi.spyOn(dev.host.log, 'info').mockImplementation(() => {
+            const error = new Error('synthetic log refusal');
+            if (failure === 'rejects') return Promise.reject(error);
+            throw error;
+        });
+        expect(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'off' })).toEqual({ ok: true, value: { toasts: [] } });
+        expect(info).toHaveBeenCalledOnce();
+        expect(getPersistenceStatus()).toMatchObject({ queued: 0, inFlight: false, failed: false });
+        expect(dev.state.storage.get(SYNC_BACKEND_KEY)).toBe('off');
+    });
+
+    it.each(['save', 'retry'] as const)('preserves the exact fatal object at the Off %s barrier with no post-fatal work', async (boundary) => {
+        const { dev } = await start({ ...WEBDAV_STORED, os: 'ios' }, { lastSyncStatus: 'error' });
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        const read = vi.spyOn(dev.host.storage, 'multiGet');
+        let at!: ReturnType<typeof mark>;
+        let reads = 0;
+        let saves = 0;
+        const methods = await methodsWithSave(dev.host, async () => {
+            saves += 1;
+            at = mark(dev);
+            reads = read.mock.calls.length;
+            throw fatal;
+        });
+        const retryPersistence = useTaskStore.getState().retryPersistence;
+        if (boundary === 'retry') {
+            useTaskStore.setState({ persistenceFailure: { message: 'synthetic retry needed' }, retryPersistence: async () => {
+                at = mark(dev);
+                reads = read.mock.calls.length;
+                throw fatal;
+            } } as never);
+        }
+        try {
+            await expect(methods.selectSyncBackend({ requestId: generateUUID(), option: 'off' })).rejects.toBe(fatal);
+            expect(saves).toBe(boundary === 'save' ? 1 : 0);
+            expect(read.mock.calls.length).toBe(reads);
+            expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+            expect(device.calls.filter((call) => call[0] === 'logInfo')).toEqual([]);
+            expect(getPersistenceStatus().queued).toBeGreaterThan(0);
+        } finally {
+            // Test teardown only; the fatal action itself never drains or retries.
+            useTaskStore.setState({ persistenceFailure: null, retryPersistence });
+            await flushPendingSave();
+        }
+    });
+});
 
 describe('native Settings › Sync fatal cleanup boundary', () => {
     it.each(['verification', 'first sync', 'sync now'] as const)('keeps the exact fatal object and does no post-fatal settings work during WebDAV %s', async (phase) => {

@@ -440,6 +440,8 @@ const CLOUDKIT_UNAVAILABLE: MobileSyncCloudKitPort = {
 };
 
 export type MobileSyncServiceHost<Lease> = {
+  /** Defaults to true. False leaves any later cycle to a fresh caller-owned invocation. */
+  allowQueuedFollowUp?: boolean;
   /** The device key-value store (React Native: AsyncStorage). */
   storage: SyncKeyValueStoragePort;
   /** Reads a secret sync key (`isSecretConfigKey`) from the keystore. */
@@ -476,6 +478,7 @@ export type MobileSyncServiceHost<Lease> = {
 };
 
 export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease>) => {
+  const allowQueuedFollowUp = host.allowQueuedFollowUp !== false;
   // Only a new host/service after native journal recovery may resume sync.
   let fatalCleanupError: NativeAttachmentCleanupUnconfirmedError | null = null;
   const core: MobileSyncCoreFunctions = { ...CORE_FUNCTIONS, ...host.core };
@@ -1045,6 +1048,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     }
 
     private queueFollowUp(): void {
+      if (!allowQueuedFollowUp) return;
       this.requestFollowUp({
         syncPathOverride: this.syncPathOverride,
         manual: this.manual,
@@ -1059,6 +1063,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       delayMs: number,
       fileSyncLockBusyRetryAttempt = 0,
     ): void {
+      if (!allowQueuedFollowUp) return;
       this.requestFollowUpAfter(delayMs, {
         syncPathOverride: this.syncPathOverride,
         manual: this.manual,
@@ -2503,9 +2508,9 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       return { success: true, skipped: 'disabled' };
     }
     const wasInFlight = mobileSyncOrchestrator.getState().inFlight;
-    if (wasInFlight && options?.activationProbe) {
-      // The caller that owns this session-only config must observe its proof.
-      // Never leave transient credentials queued after returning a requeue result.
+    if (wasInFlight && (!allowQueuedFollowUp || options?.activationProbe)) {
+      // A caller-owned invocation cannot queue work beyond its current owner.
+      // A session-only activation config must also observe its own proof.
       return { success: true, skipped: 'requeued' };
     }
     const result = mobileSyncOrchestrator.run({

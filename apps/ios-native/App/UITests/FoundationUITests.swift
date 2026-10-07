@@ -1,6 +1,173 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
+    private func task322OpenSync(_ app: XCUIApplication) {
+        if !app.buttons["settings-back"].exists {
+            boardEnabled(app.buttons["tab-menu"], timeout: 30)
+            boardTap(app, "tab-menu")
+            let settings = app.buttons["menu-settings"]
+            if !settings.isHittable {
+                revealPagedElement(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+            }
+            boardTap(app, "menu-settings")
+        }
+        let entry = app.buttons["settings-sync"]
+        revealPagedElement(app, entry, in: app.scrollViews["settings-scroll"])
+        boardTap(app, "settings-sync")
+        boardEnabled(app.buttons["sync-option-off"], timeout: 30)
+        expectation(for: NSPredicate(format: "selected == true AND enabled == true"), evaluatedWith: app.buttons["sync-option-off"])
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(app.textFields["sync-url"].exists)
+        XCTAssertFalse(app.secureTextFields["sync-password"].exists)
+        XCTAssertFalse(app.buttons["tab-menu"].exists, "Sync remains on its explicit Back-owned settings surface")
+        XCTAssertGreaterThanOrEqual(app.buttons["sync-reload"].frame.height, 44 - 0.01)
+    }
+
+    private func task322WebDav(_ app: XCUIApplication) {
+        let option = app.buttons["sync-option-webdav"]
+        revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-option-webdav")
+        boardEnabled(app.textFields["sync-url"], timeout: 30)
+        expectation(for: NSPredicate(format: "selected == true AND enabled == true"), evaluatedWith: option)
+        waitForExpectations(timeout: 15)
+    }
+
+    private func task322Type(_ app: XCUIApplication, _ id: String, _ text: String, secure: Bool = false) {
+        let field = secure ? app.secureTextFields[id] : app.textFields[id]
+        boardEnabled(field, timeout: 30)
+        revealPagedElement(app, field, in: app.scrollViews["sync-screen"])
+        XCTAssertGreaterThanOrEqual(field.frame.height, 44 - 0.01)
+        field.tap(); field.typeText(text)
+        if secure {
+            XCTAssertFalse((field.value as? String ?? "").isEmpty)
+            XCTAssertNotEqual(field.value as? String, field.placeholderValue)
+            XCTAssertFalse(app.staticTexts[text].exists, "Synthetic password must not be rendered as plaintext")
+        } else { XCTAssertEqual(field.value as? String, text) }
+    }
+
+    private func task322EmptyWebDavFields(_ app: XCUIApplication) {
+        for field in [app.textFields["sync-url"], app.textFields["sync-username"], app.secureTextFields["sync-password"]] {
+            boardEnabled(field, timeout: 30)
+            let value = field.value as? String ?? ""
+            XCTAssertTrue(value.isEmpty || value == field.placeholderValue, "A new WebDAV form must not recover the discarded fields")
+        }
+    }
+
+    private func task322RestartGate(_ app: XCUIApplication) {
+        let gate = app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch
+        XCTAssertTrue(gate.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["Sync could not be confirmed. Close and reopen Mindwtr before trying again."].exists)
+        for id in ["tab-menu", "tab-inbox", "capture-open", "settings-back", "sync-back", "sync-save", "sync-now", "sync-test",
+                   "sync-reload", "persistence-retry", "task-attachment-retry", "task-recovery-retry-checkpoint"] {
+            XCTAssertFalse(app.buttons[id].exists, "Unknown Sync completion cannot expose editing or same-host retry")
+        }
+        XCTAssertFalse(app.textFields["sync-url"].exists)
+        XCTAssertFalse(app.textFields["sync-username"].exists)
+        XCTAssertFalse(app.secureTextFields["sync-password"].exists)
+    }
+
+    func testNativeSyncInvalidDraftDiscardsToOffAndColdReopenHasNoPlaintext() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task322OpenSync(app); task322WebDav(app)
+        task322Type(app, "sync-url", "not-a-webdav-url")
+        XCTAssertTrue(app.staticTexts["sync-url-invalid"].waitForExistence(timeout: 15))
+        boardEnabled(app.buttons["sync-back"], timeout: 30)
+        task322Type(app, "sync-username", "fixture-322")
+        task322Type(app, "sync-password", "synthetic-invalid-draft-322", secure: true)
+        // The shared reveal helper requires an enabled target. Use Reload as
+        // the anchor, then inspect disabled actions without trying to tap them.
+        revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
+        for id in ["sync-save", "sync-now", "sync-test"] {
+            let action = app.buttons[id]
+            XCTAssertTrue(action.exists); XCTAssertFalse(action.isEnabled)
+            XCTAssertGreaterThanOrEqual(action.frame.height, 44 - 0.01)
+        }
+        boardTap(app, "sync-back"); task322OpenSync(app); task322WebDav(app); task322EmptyWebDavFields(app)
+        boardTap(app, "sync-back"); app.terminate(); app.launch()
+        task322OpenSync(app); task322WebDav(app); task322EmptyWebDavFields(app)
+    }
+
+    func testNativeSyncBackgroundClearsPasswordWithAppLockOffAndReloadKeepsSavedOff() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task97Open(app); XCTAssertEqual(task102LockToggle(app).value as? String, "0")
+        boardTap(app, "general-back"); task322OpenSync(app); task322WebDav(app)
+        task322Type(app, "sync-password", "synthetic-background-draft-322", secure: true)
+        #if targetEnvironment(simulator)
+        XCUIDevice.shared.press(.home)
+        #else
+        // On the iPhone 12, the synthetic Home button leaves this form foreground.
+        // Use its actual Home gesture, then require observed background state.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+        #endif
+        let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed, "The app must reach actual background before activation")
+        app.activate()
+        boardEnabled(app.buttons["sync-reload"], timeout: 30)
+        let password = app.secureTextFields["sync-password"]
+        let cleared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: password)
+        let clearedResult = XCTWaiter.wait(for: [cleared], timeout: 10)
+        if clearedResult != .completed {
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Task322 synthetic background privacy failure"; screenshot.lifetime = .keepAlways; add(screenshot)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "Task322 synthetic background privacy hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+        }
+        XCTAssertEqual(clearedResult, .completed, "Background must remove the secure password field")
+        XCTAssertFalse(app.buttons["app-lock-unlock"].exists)
+        XCTAssertFalse(app.secureTextFields["sync-password"].exists)
+        XCTAssertFalse(app.textFields["sync-url"].exists)
+        XCTAssertFalse(app.textFields["sync-username"].exists)
+        XCTAssertFalse(app.staticTexts["synthetic-background-draft-322"].exists)
+        revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-reload")
+        boardEnabled(app.buttons["sync-option-off"], timeout: 30)
+        XCTAssertTrue(app.buttons["sync-option-off"].isSelected)
+        task322WebDav(app); task322EmptyWebDavFields(app)
+    }
+
+    func testNativeSyncUnknownCompletionBlocksEditingUntilColdRestart() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-sync-command-throw-once", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        #if targetEnvironment(simulator)
+        // Existing simulator authentication hook only; physical devices retain
+        // their real security state and run this test with the fresh AppLock off.
+        app.launchArguments += ["--native-app-lock-auth", "success,cancel,success"]
+        #endif
+        app.launch(); defer { app.terminate() }
+        #if targetEnvironment(simulator)
+        task97Open(app); task102LockToggle(app).tap()
+        XCTAssertEqual(task102LockToggle(app).value as? String, "1")
+        boardTap(app, "general-back")
+        #endif
+        task322OpenSync(app); task322WebDav(app)
+        task322Type(app, "sync-url", "https://native-ui.invalid/data.json")
+        boardEnabled(app.buttons["sync-back"], timeout: 30)
+        task322Type(app, "sync-username", "fixture-322")
+        task322Type(app, "sync-password", "synthetic-unknown-draft-322", secure: true)
+        revealPagedElement(app, app.buttons["sync-test"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-test") // DEBUG throws before any actual HTTP call.
+        task322RestartGate(app)
+        #if targetEnvironment(simulator)
+        XCUIDevice.shared.press(.home); app.activate(); task102Gate(app)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        boardTap(app, "app-lock-unlock"); task322RestartGate(app)
+        #endif
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        task322OpenSync(app)
+    }
+
     private func task147Mode(_ app: XCUIApplication, _ value: String) {
         task144Open(app)
         let option = app.buttons["gtd-taskOpenMode-" + value]

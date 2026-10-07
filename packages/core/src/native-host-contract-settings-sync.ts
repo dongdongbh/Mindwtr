@@ -165,7 +165,7 @@ export type NativeSyncSettingsHost = {
         transitions?: Pick<SyncEncryptionCardHost, 'enable' | 'change' | 'disable' | 'provide' | 'decline' | 'abandon' | 'recheck' | 'randomBytes'>;
     };
     /** The app log: an info line (no secrets are ever passed) and an error. */
-    log: { info(message: string, context: { scope: string; extra: Record<string, string> }): unknown; error(error: unknown): void };
+    log: { info(message: string, context: { scope: string; extra: Record<string, string>; force?: boolean }): unknown; error(error: unknown): void };
     addBreadcrumb?(message: string): void;
     /** The system folder picker (File Sync); absent until the host has it. */
     pickSyncFolder?(): Promise<{ uri: string; bookmark?: string | null } | null>;
@@ -420,6 +420,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         try {
             if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
         } catch (error) {
+            if (error instanceof NativeAttachmentCleanupUnconfirmedError) throw error;
             return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error));
         }
         return deps.save();
@@ -1045,7 +1046,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             let cleanupUnconfirmed = false;
             try {
                 const refused = await run();
-                if (refused && !refused.ok) return refused;
+                if (refused && !refused.ok) return fail(refused.error.code, current.transport.redactText(refused.error.message));
             } catch (error) {
                 if (error instanceof NativeAttachmentCleanupUnconfirmedError) {
                     cleanupUnconfirmed = true;
@@ -1157,8 +1158,38 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 return fail('INVALID_INPUT', 'A request UUID and a backend option the screen offers are required');
             }
             return runScreenAction(input.requestId, ['selectSyncBackend', input.option], current, async () => {
-                if (input.option === 'off' && await isOffAlready(current)) return undefined;
+                if (input.option === 'off' && await isOffAlready(current)) {
+                    const saved = await durableSave();
+                    return saved.ok ? undefined : saved;
+                }
                 switch (input.option) {
+                    case 'off': {
+                        let writeFailed = false;
+                        let writeError: unknown;
+                        try {
+                            await current.transport.handleSelectSyncBackend('off');
+                        } catch (error) {
+                            if (error instanceof NativeAttachmentCleanupUnconfirmedError) throw error;
+                            writeFailed = true;
+                            writeError = error;
+                        }
+                        // Off resets status before its KV write, including a refused write.
+                        // Acknowledge only after that queued store change is durable.
+                        const saved = await durableSave();
+                        if (writeFailed) throw writeError;
+                        if (!saved.ok) return saved;
+                        if (current.host.platform.os === 'ios') {
+                            try {
+                                await current.host.log.info('Native Sync Off durably acknowledged', {
+                                    scope: 'native-sync', force: true,
+                                    extra: { releaseCheck: 'v1.3.5/native-sync-off-durable', operation: 'off', outcome: 'confirmed' },
+                                });
+                            } catch {
+                                // Diagnostics are best-effort after the durable acknowledgement.
+                            }
+                        }
+                        return undefined;
+                    }
                     case 'dropbox':
                     case 'selfhosted':
                     case 'cloudkit':

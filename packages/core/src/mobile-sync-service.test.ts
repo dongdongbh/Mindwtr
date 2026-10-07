@@ -4,6 +4,8 @@ import { createMobileSyncService, type MobileSyncServiceHost } from './mobile-sy
 import { classifySyncFailure } from './mobile-sync-utils';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import { LocalSyncAbort } from './sync-client-helpers';
+import { SyncRemoteMutationFenceBusyError } from './sync-remote-fence';
+import { SyncRemoteWriteConflict } from './sync-run-ports';
 import { performSyncCycle } from './sync';
 import { createSyncEncryptionStateStore, readSyncLocationScope } from './sync-encryption-local-state';
 import { createWebdavCapabilityProofStore } from './webdav-capability-proof';
@@ -726,5 +728,135 @@ describe('mobile sync service behind fake ports', () => {
     await expect(service.performMobileSync()).resolves.toEqual({ success: true, skipped: 'disabled' });
     await expect(service.getMobileSyncConfigurationStatus()).resolves.toEqual({ backend: 'off', configured: false });
     expect(fake.host.storage.getItem).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('caller-owned sync follow-up', () => {
+  for (const reason of ['remote-fence-busy', 'remote-cas-conflict', 'fence-release'] as const) {
+    it.each([false, true])(`settles ${reason} without a delayed cycle (manual: %s)`, async (manual) => {
+      vi.useFakeTimers();
+      const fake = createFakeHost({ values: WEBDAV_VALUES });
+      if (reason === 'remote-fence-busy') {
+        vi.mocked(fake.host.core!.acquireSyncRemoteMutationFence!).mockRejectedValueOnce(new SyncRemoteMutationFenceBusyError(5_000));
+      } else if (reason === 'remote-cas-conflict') {
+        vi.mocked(fake.host.core!.webdavPutSyncDocument!).mockRejectedValueOnce(new SyncRemoteWriteConflict());
+      } else {
+        vi.mocked(fake.host.core!.acquireSyncRemoteMutationFence!).mockResolvedValueOnce({
+          assertHeld: async () => undefined, renew: async () => undefined, retryAfterMs: () => 5_000,
+          release: async () => { throw new Error('Synthetic conditional release failed'); },
+        } as never);
+      }
+      const service = createMobileSyncService({ ...fake.host, allowQueuedFollowUp: false });
+      try {
+        const result = await service.performMobileSync(undefined, { manual });
+        expect(result).toMatchObject(reason === 'remote-fence-busy'
+          ? { success: true, skipped: 'remoteFenceBusy', retryAfterMs: 5_000 }
+          : reason === 'remote-cas-conflict'
+            ? { success: true, skipped: 'requeued' }
+            : { success: true, remoteFenceDeferred: 'cleanup', retryAfterMs: 5_000 });
+        const at = JSON.stringify({
+          reads: fake.host.storage.getItem.mock.calls,
+          cycles: vi.mocked(fake.host.core!.performSyncCycle!).mock.calls.length,
+          fences: vi.mocked(fake.host.core!.acquireSyncRemoteMutationFence!).mock.calls.length,
+          saves: fake.saved, logs: fake.logs,
+        });
+        await vi.advanceTimersByTimeAsync(300_001);
+        expect(JSON.stringify({
+          reads: fake.host.storage.getItem.mock.calls,
+          cycles: vi.mocked(fake.host.core!.performSyncCycle!).mock.calls.length,
+          fences: vi.mocked(fake.host.core!.acquireSyncRemoteMutationFence!).mock.calls.length,
+          saves: fake.saved, logs: fake.logs,
+        })).toBe(at);
+        let idle = false;
+        void service.waitForMobileSyncIdle().then(() => { idle = true; });
+        await Promise.resolve();
+        expect(idle).toBe(true);
+        expect(fake.logs.some((line) => line.message === 'Sync follow-up scheduled')).toBe(false);
+      } finally {
+        service.__mobileSyncTestUtils.reset();
+        vi.useRealTimers();
+      }
+    });
+  }
+
+  it.each(['stored', 'session-config'] as const)('refuses to queue a concurrent %s request or return the active cycle as its proof', async (kind) => {
+    vi.useFakeTimers();
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    let entered!: () => void, release!: () => void;
+    const reached = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const cycle = vi.mocked(fake.host.core!.performSyncCycle!);
+    const original = cycle.getMockImplementation()!;
+    cycle.mockImplementationOnce(async (io) => { entered(); await gate; return original(io); });
+    const service = createMobileSyncService({ ...fake.host, allowQueuedFollowUp: false });
+    const active = service.performMobileSync(undefined, { manual: false });
+    await reached;
+    const options = kind === 'session-config'
+      ? { manual: true, configOverride: { backend: 'webdav' as const, webdav: { url: 'https://other.example.invalid', username: '', password: '' } } }
+      : { manual: true };
+    const concurrent = service.performMobileSync(undefined, options);
+    let returned: unknown;
+    void concurrent.then((result) => { returned = result; });
+    try {
+      await Promise.resolve(); await Promise.resolve();
+      expect(returned).toEqual({ success: true, skipped: 'requeued' });
+      release();
+      await expect(active).resolves.toMatchObject({ success: true });
+      await expect(concurrent).resolves.toEqual({ success: true, skipped: 'requeued' });
+      let idle = false;
+      void service.waitForMobileSyncIdle().then(() => { idle = true; });
+      await Promise.resolve();
+      expect(idle).toBe(true);
+      await vi.advanceTimersByTimeAsync(300_001);
+      expect(cycle).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(fake.host.core!.probeWebdavSyncCompatibility!).mock.calls.map(([url]) => url)).not.toContain('https://other.example.invalid');
+    } finally {
+      release();
+      await Promise.allSettled([active, concurrent]);
+      service.__mobileSyncTestUtils.reset();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not schedule the usual lifecycle follow-up under caller-owned policy', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    const service = createMobileSyncService({ ...fake.host, allowQueuedFollowUp: false });
+    const cycle = vi.mocked(fake.host.core!.performSyncCycle!);
+    cycle.mockImplementationOnce(async () => {
+      expect(service.abortMobileSync()).toBe(true);
+      throw new Error('Synthetic lifecycle abort');
+    });
+    try {
+      await expect(service.performMobileSync()).resolves.toEqual({ success: true });
+      await vi.advanceTimersByTimeAsync(300_001);
+      expect(cycle).toHaveBeenCalledTimes(1);
+      let idle = false;
+      void service.waitForMobileSyncIdle().then(() => { idle = true; });
+      await Promise.resolve();
+      expect(idle).toBe(true);
+    } finally {
+      service.__mobileSyncTestUtils.reset(); vi.useRealTimers();
+    }
+  });
+
+  it('retains fatal cleanup quarantine with caller-owned follow-up disabled', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    const fatal = new NativeAttachmentCleanupUnconfirmedError();
+    fake.host.attachments.runCleanup = vi.fn(async () => { throw fatal; });
+    const service = createMobileSyncService({ ...fake.host, allowQueuedFollowUp: false });
+    try {
+      await expect(service.performMobileSync(undefined, { manual: true })).rejects.toBe(fatal);
+      const at = JSON.stringify({ saved: fake.saved, logs: fake.logs, reads: fake.host.storage.getItem.mock.calls });
+      await expect(service.waitForMobileSyncIdle()).rejects.toBe(fatal);
+      await expect(service.performMobileSync()).rejects.toBe(fatal);
+      await vi.advanceTimersByTimeAsync(300_001);
+      expect(JSON.stringify({ saved: fake.saved, logs: fake.logs, reads: fake.host.storage.getItem.mock.calls })).toBe(at);
+      expect(fake.host.attachments.runCleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      service.__mobileSyncTestUtils.reset(); vi.useRealTimers();
+    }
   });
 });

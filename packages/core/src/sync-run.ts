@@ -1192,6 +1192,21 @@ class SharedSyncRunMachine {
         }
     }
 
+    private hasPendingCycleSideEffects(data: AppData): boolean {
+        if (hasPendingSyncSideEffects(data)) return true;
+        if (!this.policy.attachmentPhasesEnabled
+            || !this.hooks.runAttachmentCleanup
+            || !hasFreshAttachmentCleanupWork(data)) return false;
+        try {
+            this.notifier.logInfo('Sync fast check retained fresh attachment cleanup', {
+                releaseCheck: 'v1.3.5/sync-cleanup-fast-check',
+                operation: 'attachment-cleanup',
+                outcome: 'required',
+            });
+        } catch { /* Diagnostics must not suppress required cleanup. */ }
+        return true;
+    }
+
     private async trySkipUnchangedFastSync(): Promise<SyncRunResult | null> {
         // User-initiated sync: never trust the cached fingerprint pair, so a
         // stale cached fingerprint can't hide remote data.
@@ -1203,7 +1218,7 @@ class SharedSyncRunMachine {
         if (this.state.preSyncedLocalData || this.hooks.hasDeferredAttachmentWork?.()) return null;
         const localData = await this.readLocalDataForSyncCycle();
         this.ensureLocalSnapshotFresh();
-        if (hasPendingSyncSideEffects(localData)) return null;
+        if (this.hasPendingCycleSideEffects(localData)) return null;
 
         const localFingerprint = this.localDocumentFingerprint(localData);
         const cached = await this.readFastSyncState(scope);
@@ -1303,7 +1318,7 @@ class SharedSyncRunMachine {
         this.ensureLocalSnapshotFresh();
         // Pending remote write marker, pending attachment uploads, pending
         // remote deletes: all need the full cycle's read.
-        if (hasPendingSyncSideEffects(localData)) return false;
+        if (this.hasPendingCycleSideEffects(localData)) return false;
 
         const cached = await this.readFastSyncState(scope);
         if (!cached) return false;
@@ -1344,7 +1359,7 @@ class SharedSyncRunMachine {
         if (this.state.preSyncedLocalData || this.hooks.hasDeferredAttachmentWork?.()) return null;
         const localData = await this.readLocalDataForSyncCycle();
         this.ensureLocalSnapshotFresh();
-        if (hasPendingSyncSideEffects(localData)) return null;
+        if (this.hasPendingCycleSideEffects(localData)) return null;
 
         const remoteData = await this.readRemoteForCycle();
         this.ensureLocalSnapshotFresh();
@@ -1375,7 +1390,7 @@ class SharedSyncRunMachine {
         options: { allowRemoteFingerprintRead?: boolean } = {},
     ): Promise<void> {
         const scope = this.state.fastSyncScope;
-        if (!scope || hasPendingSyncSideEffects(data)) return;
+        if (!scope || this.hasPendingCycleSideEffects(data)) return;
         if (this.store.getLastDataChangeAt() > this.state.localSnapshotChangeAt) return;
         if (this.state.lastRemoteWriteMergedServerData) return;
 
