@@ -183,6 +183,11 @@ final class NativeForegroundWebDAVTests: XCTestCase {
     private var remote: ForegroundDAVStore!
     private var unexpectedBefore = 0
     private var traceBusyLease = false
+    #if os(macOS)
+    private let secretLock = NSLock()
+    private var nativeSecretOperations = 0
+    private var fixtureSecrets: URL { root.appendingPathComponent("attachment-files/cache/foreground-fixture-secrets.json") }
+    #endif
     private let taskID = UUID().uuidString.lowercased(), attachmentID = UUID().uuidString.lowercased()
     private let originalBytes = Data("Private synthetic foreground cleanup bytes".utf8)
     private let unknownValue = "Unknown current namespace value 🧠"
@@ -206,6 +211,73 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true)
         guard let physical = Darwin.realpath(fixture.path, nil) else { throw HostFailure("Foreground fixture root is unavailable") }
         defer { free(physical) }; root = URL(fileURLWithPath: String(cString: physical), isDirectory: true)
+        #if os(macOS)
+        // Workflow tests use durable synthetic credentials without entering the
+        // interactive macOS Keychain. iOS keeps the actual Security port below.
+        let suffix = """
+        ;(() => {
+            const file = globalThis.__mindwtrFileCall;
+            if (typeof file !== 'function') throw new Error('Synthetic credential fixture unavailable');
+            const directories = JSON.parse(globalThis.__mindwtrNative.fileDirectories());
+            const uri = directories.cache.replace(/\\/$/, '') + '/foreground-fixture-secrets.json';
+            const accounts = ['mindwtr_webdav_password', 'mindwtr_cloud_token', 'mindwtr_sync_encryption_key_v1'];
+            const maximumBytes = 16 * 1024;
+            const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true });
+            const owns = (record, account) => Object.prototype.hasOwnProperty.call(record, account);
+            const account = (name) => {
+                if (typeof name !== 'string' || !accounts.includes(name)) throw new Error('Synthetic credential fixture unavailable');
+            };
+            const read = async () => {
+                const info = await file({ op: 'getInfo', uri });
+                if (!info || typeof info.exists !== 'boolean') throw new Error('Synthetic credential fixture unavailable');
+                if (!info.exists) return Object.create(null);
+                if (info.isDirectory !== false || !Number.isSafeInteger(info.size) || info.size < 0 || info.size > maximumBytes) {
+                    throw new Error('Synthetic credential fixture unavailable');
+                }
+                const bytes = await file({ op: 'readBytes', uri });
+                if (!(bytes instanceof Uint8Array) || bytes.byteLength > maximumBytes) throw new Error('Synthetic credential fixture unavailable');
+                const record = JSON.parse(decoder.decode(bytes));
+                if (!record || Array.isArray(record) || typeof record !== 'object'
+                    || Object.keys(record).some((name) => !accounts.includes(name) || typeof record[name] !== 'string'
+                        || encoder.encode(record[name]).byteLength > 4096)) throw new Error('Synthetic credential fixture unavailable');
+                return record;
+            };
+            const write = async (record) => {
+                const bytes = encoder.encode(JSON.stringify(record));
+                if (bytes.byteLength > maximumBytes) throw new Error('Synthetic credential fixture unavailable');
+                await file({ op: 'writeBytes', uri }, bytes);
+            };
+            let pending = Promise.resolve();
+            const serial = (work) => {
+                const next = pending.then(work);
+                pending = next.catch(() => {});
+                return next;
+            };
+            globalThis.__mindwtrSyncSecrets = {
+                getSecret: (name) => serial(async () => {
+                    account(name);
+                    const record = await read();
+                    return owns(record, name) ? record[name] : null;
+                }),
+                setSecret: (name, value) => serial(async () => {
+                    account(name);
+                    if (typeof value !== 'string' || encoder.encode(value).byteLength > 4096) throw new Error('Synthetic credential fixture unavailable');
+                    const record = await read();
+                    record[name] = value;
+                    await write(record);
+                }),
+                deleteSecret: (name) => serial(async () => {
+                    account(name);
+                    const record = await read();
+                    if (owns(record, name)) { delete record[name]; await write(record); }
+                }),
+            };
+        })();
+        """
+        let fixtureBundle = root.appendingPathComponent("foreground-fixture-core-host.js")
+        try (String(contentsOf: bundle, encoding: .utf8) + "\n" + suffix).write(to: fixtureBundle, atomically: true, encoding: .utf8)
+        bundle = fixtureBundle
+        #endif
         hostname = "foreground-" + UUID().uuidString.lowercased() + ".invalid"
         service = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased()
         namespace = "tech.dongdongbh.mindwtr.foreground." + UUID().uuidString.lowercased()
@@ -216,6 +288,10 @@ final class NativeForegroundWebDAVTests: XCTestCase {
     override func tearDownWithError() throws {
         XCTAssertEqual(ForegroundDAVProtocol.unexpectedCount, unexpectedBefore, "No request may escape the private endpoint")
         if let remote { XCTAssertEqual(remote.unexpectedCount, 0, "The fixture refused an unsupported request") }
+        #if os(macOS)
+        secretLock.lock(); let operations = nativeSecretOperations; secretLock.unlock()
+        XCTAssertEqual(operations, 0, "macOS workflow credentials never enter NativeSecretJobs")
+        #else
         if let service {
             // createSecureSyncConfigStore's secureKeyFor removes the storage '@'.
             for account in ["mindwtr_webdav_password", "mindwtr_cloud_token", "mindwtr_sync_encryption_key_v1"] {
@@ -232,6 +308,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
                 }
             }
         }
+        #endif
         if let hostname { ForegroundDAVProtocol.remove(hostname) }
         if let root { try FileManager.default.removeItem(at: root) }
     }
@@ -242,10 +319,20 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         let faults = supplied ?? HostIOFaults(), configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ForegroundDAVProtocol.self]; faults.httpConfiguration = configuration
         faults.secretService = service
+        #if os(macOS)
+        faults.secretBeforeOperation = { [weak self] operation, _ in
+            guard let self else { return }
+            self.secretLock.lock(); self.nativeSecretOperations += 1; self.secretLock.unlock()
+            if self.traceBusyLease { NSLog("Native WebDAV CI phase=secure-before operation=%@", operation) }
+        }
+        // A missing decorator fails the test without reaching platform Security.
+        faults.secretStatus = { _, _ in errSecNotAvailable }
+        #else
         if traceBusyLease {
             faults.secretBeforeOperation = { operation, _ in NSLog("Native WebDAV CI phase=secure-before operation=%@", operation) }
             faults.secretAfterOperation = { operation, _ in NSLog("Native WebDAV CI phase=secure-after operation=%@", operation) }
         }
+        #endif
         if let boundary { faults.cleanupBoundary = { name in try boundary.visit(name) { try self.captureBoundary() } } }
         let value = CoreHost(databaseURL: database, bundleURL: bundle, faults: faults,
             deviceStorage: (containerURL: container, bundleIdentifier: namespace))
@@ -343,6 +430,13 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertEqual(stored["@mindwtr_sync_backend"] as? String, "webdav")
         XCTAssertEqual(stored["unknown"] as? String, unknownValue)
         XCTAssertNil(stored["@mindwtr_webdav_password"], "No plaintext credential is written to device storage")
+        #if os(macOS)
+        if traceBusyLease { NSLog("Native WebDAV CI phase=fixture-read-before") }
+        let fixture = try object(String(decoding: Data(contentsOf: fixtureSecrets), as: UTF8.self))
+        if traceBusyLease { NSLog("Native WebDAV CI phase=fixture-read-after") }
+        XCTAssertTrue(Set(fixture.keys).isSubset(of: ["mindwtr_webdav_password", "mindwtr_cloud_token", "mindwtr_sync_encryption_key_v1"]))
+        XCTAssertEqual(fixture["mindwtr_webdav_password"] as? String, password, "The accepted Save durably stores the exact synthetic credential for cold VMs")
+        #else
         let bytes = Data("mindwtr_webdav_password".utf8)
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service + ":no-auth",
             kSecAttrAccount as String: bytes, kSecAttrGeneric as String: bytes, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
@@ -352,6 +446,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertEqual(SecItemCopyMatching(query as CFDictionary, &result), errSecSuccess)
         if traceBusyLease { NSLog("Native WebDAV CI phase=fixture-read-after") }
         XCTAssertEqual(result as? Data, Data(password.utf8), "The accepted Save uses actual isolated Security storage")
+        #endif
     }
     private func assertCleaned(original: [String: Any]) throws {
         var expected = original; expected["localStatus"] = "missing"
