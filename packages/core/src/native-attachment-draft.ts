@@ -1,5 +1,7 @@
-import { preparePickedAttachment, persistPreparedPickedAttachment, softDeleteAttachment, type PreparedPickedAttachment } from './attachment-editor-model';
+import { preparePickedAttachment, persistPreparedPickedAttachment, softDeleteAttachment, patchAttachment, type PreparedPickedAttachment } from './attachment-editor-model';
 import { getManagedAttachmentFileName } from './mobile-attachment-files';
+import { getAttachmentAvailabilityPatch, getAttachmentDownloadIdentity, getAttachmentUnrecoverablePatch } from './mobile-attachment-availability';
+import { isSha256Hex } from './attachment-hash';
 import { readNativeAttachments, readNativeTaskLinkHalf } from './native-host-contract-attachments';
 import { taskEditValuesEqual } from './json-value-equality';
 import { validateAttachmentForUpload } from './attachment-validation';
@@ -41,6 +43,14 @@ export type NativeAttachmentDraftLineageV2 = Omit<NativeAttachmentDraftLineage, 
 export type NativeAttachmentDraftRemovePrepared = Readonly<{
     version: 1; kind: 'prepared-file-remove'; taskID: string; requestId: string; attachmentId: string;
     removedAt: string; beforePayloadJSON: string; afterPayloadJSON: string;
+}>;
+/** Selected metadata continuity only; neither a download nor file-retirement permission. */
+export type NativeAttachmentDraftAvailabilityInput = Readonly<{
+    version: 1; taskID: string; requestId: string; attachmentId: string; identity: string;
+    beforePayloadJSON: string; status: 'available' | 'unrecoverable'; resolvedAttachmentJSON: string;
+}>;
+export type NativeAttachmentDraftAvailabilityPrepared = NativeAttachmentDraftAvailabilityInput & Readonly<{
+    kind: 'prepared-file-availability'; afterPayloadJSON: string;
 }>;
 export type NativeAttachmentDraftOperationV3 = Readonly<
     { kind: 'add'; operation: NativeAttachmentDraftPrepared }
@@ -638,4 +648,65 @@ export function prepareNativeAttachmentDraftRemoveV4(input: unknown, deps: Nativ
     const captured = { ...captureLineageV3(object, fields, 4), ...fields };
     if (captured.priorOperations.length >= 128 || validateLineageV3(captured).has(captured.requestId)) invalid();
     return prepareCapturedRemove(captured, deps);
+}
+
+const AVAILABILITY_FIELDS = ['version', 'taskID', 'requestId', 'attachmentId', 'identity',
+    'beforePayloadJSON', 'status', 'resolvedAttachmentJSON'];
+const availabilityShape = (value: unknown, frozen: boolean): NativeAttachmentDraftAvailabilityInput => {
+    if (!exact(value, frozen ? [...AVAILABILITY_FIELDS, 'kind', 'afterPayloadJSON'] : AVAILABILITY_FIELDS)) invalid();
+    const input = value as Record<string, unknown>;
+    if (input.version !== 1 || input.status !== 'available' && input.status !== 'unrecoverable'
+        || frozen && input.kind !== 'prepared-file-availability') invalid();
+    return Object.freeze({ version: 1, taskID: text(input.taskID, 500, true), requestId: requestIDV3(input.requestId),
+        attachmentId: attachmentIDV3(input.attachmentId), identity: text(input.identity, PAYLOAD_BYTES, true),
+        beforePayloadJSON: text(input.beforePayloadJSON, PAYLOAD_BYTES, true), status: input.status,
+        resolvedAttachmentJSON: text(input.resolvedAttachmentJSON, PAYLOAD_BYTES, true) }) as NativeAttachmentDraftAvailabilityInput;
+};
+const availabilityAfterPayload = (captured: NativeAttachmentDraftAvailabilityInput): string => {
+    const before = payloadV3(captured.beforePayloadJSON, captured.taskID);
+    const current = before.attachments.find((item) => item.id === captured.attachmentId) ?? invalid();
+    if (current.kind !== 'file' || current.deletedAt !== undefined
+        || getAttachmentDownloadIdentity(current) !== captured.identity) invalid();
+    let value: unknown;
+    try { value = JSON.parse(captured.resolvedAttachmentJSON); } catch { return invalid(); }
+    const rows = readNativeAttachments([value]);
+    if (!rows) invalid();
+    const resolved = rows![0];
+    if (resolved.kind !== 'file' || resolved.id !== current.id
+        || (resolved.contentRev ?? 0) !== (current.contentRev ?? 0)) invalid();
+    if (captured.status === 'available') {
+        if (resolved.deletedAt !== undefined || resolved.localStatus !== 'available'
+            || resolved.cloudKey !== current.cloudKey
+            || current.fileHash && resolved.fileHash !== current.fileHash
+            || !current.fileHash && resolved.fileHash !== undefined && !isSha256Hex(resolved.fileHash)) invalid();
+        fileURI(resolved.uri);
+    } else {
+        if (resolved.cloudKey !== undefined || resolved.fileHash !== undefined || resolved.localStatus !== 'missing'
+            || !resolved.deletedAt || resolved.updatedAt !== resolved.deletedAt) invalid();
+        try { if (new Date(resolved.deletedAt!).toISOString() !== resolved.deletedAt) invalid(); } catch { return invalid(); }
+    }
+    const patch = captured.status === 'available'
+        ? getAttachmentAvailabilityPatch(current, resolved) : getAttachmentUnrecoverablePatch(resolved);
+    // Apply undefined lifecycle fields before JSON encoding; a serialized patch would lose deletions.
+    const after = JSON.stringify({ ...before.object, attachments: patchAttachment(before.attachments, current.id, patch) });
+    return text(after, PAYLOAD_BYTES, true);
+};
+
+/** Pure selected outcome projection. Native must separately prove the resolver and installed generation. */
+export function prepareNativeAttachmentDraftAvailability(input: unknown): NativeAttachmentDraftAvailabilityPrepared {
+    const captured = availabilityShape(input, false);
+    const result = Object.freeze({ ...captured, kind: 'prepared-file-availability' as const,
+        afterPayloadJSON: availabilityAfterPayload(captured) });
+    jsonBytes(result, PREPARED_BYTES);
+    return result;
+}
+
+/** Frozen replay never calls current policy, a clock, UUID creation, filesystem or network. */
+export function readNativeAttachmentDraftAvailabilityFrozen(input: unknown): NativeAttachmentDraftAvailabilityPrepared {
+    const captured = availabilityShape(input, true);
+    const afterPayloadJSON = text((input as Record<string, unknown>).afterPayloadJSON, PAYLOAD_BYTES, true);
+    const result = Object.freeze({ ...captured, kind: 'prepared-file-availability' as const, afterPayloadJSON });
+    jsonBytes(result, PREPARED_BYTES);
+    if (afterPayloadJSON !== availabilityAfterPayload(captured)) invalid();
+    return result;
 }
