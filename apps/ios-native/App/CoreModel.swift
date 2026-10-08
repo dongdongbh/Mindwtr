@@ -1140,7 +1140,7 @@ final class CoreModel: ObservableObject {
     private var foregroundSyncOwner: ForegroundSyncOwner?
     private var foregroundSyncTask: Task<Void, Never>?
     private var foregroundSyncGeneration = 0
-    private var foregroundSyncSceneActive = false
+    @Published private var foregroundSyncSceneActive = false
     private var foregroundSyncBackgroundObserved = false
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var startupSyncTestThrowOnce = false
@@ -4802,8 +4802,22 @@ final class CoreModel: ObservableObject {
     // changes to busy or the view tree cannot abandon an admitted invocation.
     func requestForegroundSync(token: UUID?, active: Bool) {
         guard !Task.isCancelled, let token, token == completedStartupToken else { return }
+        let wasActive = foregroundSyncSceneActive
         foregroundSyncSceneActive = active && UIApplication.shared.applicationState == .active
         guard foregroundSyncSceneActive else { cancelForegroundSync(); return }
+        if !wasActive && !appLock.concealed, let currentHost = host {
+            let generation = foregroundSyncGeneration
+            Task { [weak self, weak currentHost] in
+                guard let self, let currentHost, self.host === currentHost,
+                      self.completedStartupToken == token, self.foregroundSyncGeneration == generation,
+                      self.foregroundSyncSceneActive, !self.appLock.concealed,
+                      UIApplication.shared.applicationState == .active else { return }
+                _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+                    "Native iOS foreground activation refreshed",
+                    #"{"releaseCheck":"v1.3.5/ios-foreground-activation","outcome":"refreshed"}"#,
+                ]))
+            }
+        }
         guard foregroundSyncIntent != nil else { return }
         foregroundSyncIntent?.foregroundRequested = true
         admitForegroundSync()

@@ -157,15 +157,26 @@ final class AppLockController: ObservableObject {
 }
 
 private struct AppLockRoot: View {
+    private struct ForegroundState: Equatable {
+        let token: UUID?
+        let active: Bool
+        let concealed: Bool
+    }
     @ObservedObject var model: CoreModel
     @ObservedObject var lock: AppLockController
     @State private var confirmingCorruptDraftDiscard = false
+    @State private var observedApplicationActive: Bool?
     @Environment(\.scenePhase) private var phase
     @Environment(\.colorScheme) private var scheme
     private var palette: AppPalette { AppPalette(theme: model.theme, system: scheme) }
+    // Match RN AppState: refresh the initial snapshot until a lifecycle event supersedes it.
+    private var applicationActive: Bool {
+        observedApplicationActive ?? (UIApplication.shared.applicationState == .active)
+    }
 
     var body: some View {
         let startupToken = model.completedStartupToken
+        let foreground = ForegroundState(token: startupToken, active: applicationActive, concealed: lock.concealed)
         Group {
             if model.ready && !lock.concealed {
                 if model.settingsSyncRestartRequired {
@@ -273,8 +284,17 @@ private struct AppLockRoot: View {
             }
         }
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
-        .onAppear { lock.sceneChanged(phase) }
+        .onAppear {
+            lock.sceneChanged(phase)
+            model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            observedApplicationActive = true
+            guard !lock.concealed else { return }
+            model.requestForegroundSync(token: model.completedStartupToken, active: true)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            observedApplicationActive = false
             model.cancelForegroundSync()
             model.cancelProjectAttachmentDownload()
             model.clearSettingsSyncForPrivacy()
@@ -300,6 +320,7 @@ private struct AppLockRoot: View {
             if next != .active && model.appLockActive && !lock.authenticating { lock.readFailed() }
             lock.sceneChanged(next)
             if next == .active && !lock.concealed { Task { await model.refresh() } }
+            model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
@@ -313,9 +334,8 @@ private struct AppLockRoot: View {
             }
             if !concealed && phase == .active { Task { await model.refresh() } }
         }
-        .task(id: "\(startupToken?.uuidString ?? "")-\(phase == .active)-\(lock.concealed)") {
-            guard !Task.isCancelled else { return }
-            model.requestForegroundSync(token: startupToken, active: phase == .active)
+        .onChange(of: foreground) { next in
+            model.requestForegroundSync(token: next.token, active: next.active)
         }
         .task(id: "\(model.ready)-\(lock.nonce)-\(phase == .active)-\(lock.authenticating)") {
             guard model.ready, phase == .active else { return }
