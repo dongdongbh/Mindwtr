@@ -56,6 +56,11 @@ class CoreHost(
     private val scheduleBackgroundSync: ((Boolean) -> Unit)? = null,
     /** The build as Settings › About reports it (AboutSettings.kt aboutAppInfo, JSON); null: this host has no About. */
     private val appInfo: String? = null,
+    /**
+     * RN's `RKStorage` byte copy (LegacyRnStoreGuard.checkpointRnState), taken before the first write any core call makes to RN's
+     * AsyncStorage (About's prompt state at first paint, a setting's key), so an RN recovery build still has RN's own copy.
+     */
+    private val checkpointRnState: () -> Unit = {},
 ) {
     /**
      * Reminder alarms on the platform (pilot/Reminders.kt): core's plan applied in core's order, the notification permission as RN
@@ -339,12 +344,12 @@ class CoreHost(
         // RN's AsyncStorage (RnKeyValue): reads answer JSON (a value, or AsyncStorage's [[key, value]] pairs); a write is on disk
         // when it returns.
         bridge.setProperty("kvGet", guarded { args -> JSONArray().put(keyValue.get(args[0] as String) ?: JSONObject.NULL).toString() })
-        bridge.setProperty("kvSet", guarded { args -> kvFault(); keyValue.set(args[0] as String, args[1] as String); null })
-        bridge.setProperty("kvRemove", guarded { args -> keyValue.remove(args[0] as String); null })
+        bridge.setProperty("kvSet", guarded { args -> kvFault(); checkpointRnState(); keyValue.set(args[0] as String, args[1] as String); null })
+        bridge.setProperty("kvRemove", guarded { args -> checkpointRnState(); keyValue.remove(args[0] as String); null })
         bridge.setProperty("kvMultiGet", guarded { args -> keyValuePairs(keyValue.multiGet(stringList(args[0] as String))) })
-        bridge.setProperty("kvMultiSet", guarded { args -> keyValue.multiSet(JSONArray(args[0] as String).let { pairs ->
+        bridge.setProperty("kvMultiSet", guarded { args -> checkpointRnState(); keyValue.multiSet(JSONArray(args[0] as String).let { pairs ->
             List(pairs.length()) { pairs.getJSONArray(it).let { pair -> pair.getString(0) to pair.getString(1) } } }); null })
-        bridge.setProperty("kvMultiRemove", guarded { args -> keyValue.multiRemove(stringList(args[0] as String)); null })
+        bridge.setProperty("kvMultiRemove", guarded { args -> checkpointRnState(); keyValue.multiRemove(stringList(args[0] as String)); null })
         // Debug builds only (check-ai-device.mjs): RN's AI consent record goes before boot, so the check sees RN's question again.
         if (debugFault("ai_consent_reset") == "1") keyValue.remove("mindwtr-ai-provider-consent-v1")
         // Debug builds only (check-about-device.mjs): the day's heartbeat and the update check's day go before boot, so the check
