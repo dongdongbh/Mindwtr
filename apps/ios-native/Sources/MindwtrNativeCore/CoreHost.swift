@@ -129,6 +129,21 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    public func feedbackConfiguration(endpointURL: String) async throws -> String {
+        try await perform { try $0.feedbackConfiguration(endpointURL: endpointURL) }
+    }
+
+    /// One explicit, unjournaled submission. Cancellation cannot unsend a POST.
+    public func submitFeedback(requestJSON: String, endpointURL: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.submitFeedback(requestJSON: requestJSON, endpointURL: endpointURL, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
     public func readAboutUpdateState() async throws -> String {
         try await perform { try $0.readAboutUpdateState() }
     }
@@ -2313,6 +2328,38 @@ private final class Engine: @unchecked Sendable {
         }
         try requireNoAttachmentDraft()
         return try invoke("iosAboutAppStoreInfo", arguments: [bundleIdentifier, currentVersion], localCancellation: cancellation)
+    }
+
+    private func requireFeedbackAdmission() throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        do {
+            guard started, !closed, !recoveryActivationPending, pending == nil, lockFD >= 0,
+                  retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil else {
+                throw HostFailure("feedback_not_ready")
+            }
+            try requireNoAttachmentDraft()
+        } catch { throw HostFailure("feedback_not_ready") }
+    }
+
+    func feedbackConfiguration(endpointURL: String) throws -> String {
+        try requireFeedbackAdmission()
+        let endpoint = endpointURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try invoke("iosFeedbackConfiguration", arguments: [endpoint == "https://feedback.mindwtr.app" ? endpoint : ""])
+    }
+
+    func submitFeedback(requestJSON: String, endpointURL: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        try cancellation.check()
+        try requireFeedbackAdmission()
+        let endpoint = endpointURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard endpoint == "https://feedback.mindwtr.app" else { throw HostFailure("feedback_not_configured") }
+        guard requestJSON.utf8.count <= 256_000 else { throw HostFailure("feedback_invalid_request") }
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        var metadata: [String: String] = ["platform": "ios", "installChannel": "app-store",
+            "os": "ios \(version.majorVersion).\(version.minorVersion).\(version.patchVersion)", "locale": Locale.current.identifier]
+        if let value = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String { metadata["appVersion"] = value }
+        if let value = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String { metadata["build"] = value }
+        let encoded = String(decoding: try JSONSerialization.data(withJSONObject: metadata), as: UTF8.self)
+        return try invoke("iosSubmitFeedback", arguments: [requestJSON, encoded, endpoint], localCancellation: cancellation)
     }
 
     func readAboutUpdateState() throws -> String {

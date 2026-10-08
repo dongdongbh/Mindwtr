@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { build } from 'esbuild';
+import ts from 'typescript';
 
 const app = resolve(import.meta.dirname, '..');
 const consoleState = {
@@ -3052,8 +3053,21 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(clearBody, /logInfo\(|logWarn\(|diagnosticsLog\.append\(/, 'Clear cannot append a line that recreates its target');
     assert.match(clearBody, /logClearChecked\(\): string \{\s+return submit\(\(\) => diagnosticsLog\.clearChecked\(\)\);/);
     assert.match(hostEntry, /logClear\(\): string \{\s+return submit\(async \(\) => \{\s+await diagnosticsLog\.clear\(\);/);
-    // The host's diagnostic lines put their fields in the payload's context, the part the log file keeps.
-    assert.doesNotMatch(hostEntry, /\bextra: \{|, extra \}/);
+    // Direct log payloads require context; the shared entry builder accepts extra and sanitizes it into context.
+    const checkDiagnosticFields = (source) => {
+        const visit = (node) => {
+            if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) && node.name.getText() === 'extra') {
+                const object = node.parent, call = object.parent;
+                assert(ts.isCallExpression(call) && call.expression.getText() === 'buildDiagnosticsLogEntry'
+                    && call.arguments[2] === object, 'Direct diagnostic payloads must use context');
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(ts.createSourceFile('host-entry.ts', source, ts.ScriptTarget.Latest, true));
+    };
+    assert.throws(() => checkDiagnosticFields('diagnosticsLog.append({ extra: { outcome: "lost" } });'));
+    assert.throws(() => checkDiagnosticFields('diagnosticsLog.append({ message, extra });'));
+    checkDiagnosticFields(hostEntry);
     assert.match(hostEntry, /^\s+dataSettings: \(\) => contract\.getDataSettings\(\),$/m);
     assert.match(hostEntry, /^\s+dataSetting: \(input\) => contract\.setDataSetting\(input\),$/m);
     // Share log: only the logs folder is shareable, through a private FileProvider and the system share sheet; nothing is sent by the app.
@@ -3538,7 +3552,11 @@ import { mapSqliteTaskRow as hydrateTask285 } from ${JSON.stringify(resolve(app,
 globalThis.hydrateTaskAttachments285 = (attachments) => hydrateTask285({ id: 'task285', attachments: JSON.stringify(attachments) }).attachments;
 export { planAttachmentOpen, getAttachmentResolutionMessage } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-editor-model.ts'))};
 import { logInfo as realLogInfo, setLogger as setRealLogger } from ${JSON.stringify(resolve(app, '../../packages/core/src/logger.ts'))};
-export { createDiagnosticsLog, diagnosticsEntryFromLogPayload, isDiagnosticsLoggingEnabled } from ${JSON.stringify(resolve(app, '../../packages/core/src/diagnostics-log.ts'))};
+export { createDiagnosticsLog, diagnosticsEntryFromLogPayload, isDiagnosticsLoggingEnabled, buildDiagnosticsLogEntry } from ${JSON.stringify(resolve(app, '../../packages/core/src/diagnostics-log.ts'))};
+export { createFeedbackDiagnosticsBuffer, buildFeedbackDiagnostics, FEEDBACK_DIAGNOSTICS_SOURCE_CHARS } from ${JSON.stringify(resolve(app, '../../packages/core/src/feedback-diagnostics.ts'))};
+export { buildFeedbackSubmissionPayload, submitFeedbackSubmission, FEEDBACK_CATEGORIES } from ${JSON.stringify(resolve(app, '../../packages/core/src/feedback.ts'))};
+export { sanitizeForLog, sanitizeLogContext } from ${JSON.stringify(resolve(app, '../../packages/core/src/log-sanitize.ts'))};
+export { getBreadcrumbs } from ${JSON.stringify(resolve(app, '../../packages/core/src/log-breadcrumbs.ts'))};
 export { validateNativeAttachmentDraftBeginV3, validateNativeAttachmentDraftLineageV3,
     validateNativeAttachmentDraftBeginV4, validateNativeAttachmentDraftLineageV4,
     validateNativeAttachmentDraftBeginV5, validateNativeAttachmentDraftLineageV5,

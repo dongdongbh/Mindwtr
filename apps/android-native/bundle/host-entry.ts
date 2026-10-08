@@ -16,6 +16,16 @@ import {
     TASK_PRIORITY_COLORS,
     consoleLogger,
     createDiagnosticsLog,
+    createFeedbackDiagnosticsBuffer,
+    buildFeedbackDiagnostics,
+    buildFeedbackSubmissionPayload,
+    buildDiagnosticsLogEntry,
+    submitFeedbackSubmission,
+    FEEDBACK_CATEGORIES,
+    FEEDBACK_DIAGNOSTICS_SOURCE_CHARS,
+    getBreadcrumbs,
+    sanitizeForLog,
+    sanitizeLogContext,
     buildImmediateNotificationDetails,
     buildNativeBackupDocumentResult,
     buildNativeBackupSnapshotRestoreConfirmation,
@@ -77,6 +87,8 @@ import {
     resolveThemeStatusPreset,
     type AppTheme,
     type DiagnosticsLogFile,
+    type DiagnosticsLogEntry,
+    type FeedbackMetadata,
     type FocusTaskSectionKey,
     type SqliteClient,
     useTaskStore,
@@ -218,10 +230,42 @@ const nativeLogFile: DiagnosticsLogFile = {
         isAbsent: async () => logFile('isAbsent') === '1',
     } : {}),
 };
-const diagnosticsLog = createDiagnosticsLog({
+const diagnosticsFileLog = createDiagnosticsLog({
     isEnabled: () => isDiagnosticsLoggingEnabled(useTaskStore.getState().settings),
     files: [nativeLogFile],
 });
+const feedbackDiagnosticsBuffer = createFeedbackDiagnosticsBuffer();
+/** Only existing sanitized diagnostic fields can enter explicit feedback. */
+const feedbackDiagnosticEntry = (value: unknown): DiagnosticsLogEntry | null => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const entry = value as Record<string, unknown>;
+    if (typeof entry.ts !== 'string' || !Number.isFinite(Date.parse(entry.ts))
+        || !['info', 'warn', 'error'].includes(String(entry.level))
+        || typeof entry.scope !== 'string' || typeof entry.message !== 'string') return null;
+    return {
+        ts: entry.ts, level: entry.level as DiagnosticsLogEntry['level'],
+        scope: sanitizeForLog(entry.scope), message: sanitizeForLog(entry.message),
+        ...(typeof entry.stack === 'string' ? { stack: sanitizeForLog(entry.stack) } : {}),
+        ...(entry.context && typeof entry.context === 'object' && !Array.isArray(entry.context)
+            ? { context: sanitizeLogContext(entry.context as Record<string, unknown>) } : {}),
+    };
+};
+// Keep the current session before the file gate, as RN's app-log does. The file
+// log retains its existing serialization, rotation and detailed-logging policy.
+const diagnosticsLog = {
+    ...diagnosticsFileLog,
+    append: (...args: Parameters<typeof diagnosticsFileLog.append>) => {
+        try {
+            if (globalThis.__mindwtrHostPlatform === 'ios') {
+                const entry = feedbackDiagnosticEntry(args[0]);
+                if (entry) feedbackDiagnosticsBuffer.record(entry);
+            }
+        } catch { /* Volatile feedback capture cannot change ordinary logging. */ }
+        return diagnosticsFileLog.append(...args);
+    },
+    clear: () => { feedbackDiagnosticsBuffer.clear(); return diagnosticsFileLog.clear(); },
+    clearChecked: () => { feedbackDiagnosticsBuffer.clear(); return diagnosticsFileLog.clearChecked(); },
+};
 // Core's logger, as RN's _layout.tsx bridges it: logcat (the console), then the log file with RN's line.
 setLogger((payload) => {
     consoleLogger(payload);
@@ -4024,6 +4068,102 @@ globalThis.MindwtrHost = {
         (globalThis.__cancelHostCalls as (message: string) => void)('The host operation timed out');
         pending.get(Number(idText))?.controller.abort(Object.assign(new Error('The host operation timed out'), { name: 'AbortError' }));
         return null;
+    },
+    iosFeedbackConfiguration(endpointURL: string): string {
+        return submit(async (signal) => {
+            if (signal.aborted) throw new Error('feedback_cancelled');
+            try {
+                if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || getStorageAdapter() !== bootAdapter
+                    || isSandboxMode() || isWorkspaceTransitionActive()) throw new Error();
+                requireSaved();
+                if (!contract.getDataSettings().ok) throw new Error();
+            } catch { throw new Error('feedback_not_ready'); }
+            return { configured: typeof endpointURL === 'string' && endpointURL.trim() === 'https://feedback.mindwtr.app',
+                categories: FEEDBACK_CATEGORIES };
+        });
+    },
+    iosSubmitFeedback(requestJSON: string, metadataJSON: string, endpointURL: string): string {
+        return submit(async (signal) => {
+            const adapter = bootAdapter;
+            const assertReady = () => {
+                if (signal.aborted) throw new Error('feedback_cancelled');
+                try {
+                    if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
+                        || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) throw new Error();
+                    requireSaved();
+                    if (!contract.getDataSettings().ok) throw new Error();
+                } catch { throw new Error('feedback_not_ready'); }
+            };
+            assertReady();
+            if (typeof endpointURL !== 'string' || endpointURL.trim() !== 'https://feedback.mindwtr.app') {
+                throw new Error('feedback_not_configured');
+            }
+            let request: Record<string, unknown>, metadata: FeedbackMetadata;
+            try {
+                if (typeof requestJSON !== 'string' || requestJSON.length > 64_000
+                    || typeof metadataJSON !== 'string' || metadataJSON.length > 8_000) throw new Error();
+                const raw: unknown = JSON.parse(requestJSON), meta: unknown = JSON.parse(metadataJSON);
+                if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+                    || !meta || typeof meta !== 'object' || Array.isArray(meta)) throw new Error();
+                request = raw as Record<string, unknown>;
+                if (!['category', 'message', 'includeDiagnostics'].every((name) => Object.hasOwn(request, name))
+                    || Object.keys(request).some((name) => !['category', 'message', 'includeDiagnostics', 'email'].includes(name))
+                    || typeof request.category !== 'string' || typeof request.message !== 'string'
+                    || typeof request.includeDiagnostics !== 'boolean'
+                    || Object.hasOwn(request, 'email') && typeof request.email !== 'string'
+                    || Object.entries(meta).some(([name, value]) =>
+                        !['appVersion', 'platform', 'os', 'installChannel', 'locale', 'build'].includes(name)
+                        || typeof value !== 'string')) throw new Error();
+                metadata = meta as FeedbackMetadata;
+            } catch { throw new Error('feedback_invalid_request'); }
+            const built = buildFeedbackSubmissionPayload({ category: request.category as typeof FEEDBACK_CATEGORIES[number],
+                message: request.message as string, email: request.email as string | undefined, metadata });
+            if (!built.ok) throw new Error(built.error);
+            let logs: string | null = null;
+            if (built.payload.category === 'bug' && request.includeDiagnostics) {
+                const breadcrumbs = getBreadcrumbs();
+                const snapshot = JSON.stringify(buildDiagnosticsLogEntry('info', 'Feedback diagnostics snapshot', {
+                    scope: 'feedback', extra: {
+                        debugLoggingEnabled: isDiagnosticsLoggingEnabled(useTaskStore.getState().settings),
+                        releaseCheck: 'v1.3.5/ios-feedback', captureMode: 'recent-session-and-saved-log',
+                        breadcrumbCount: breadcrumbs.length, breadcrumbs: breadcrumbs.length ? breadcrumbs.join(';') : 'none',
+                    },
+                }));
+                const saved = await diagnosticsLog.read();
+                assertReady();
+                const sanitized: string[] = [];
+                for (const line of (saved ?? '').slice(-FEEDBACK_DIAGNOSTICS_SOURCE_CHARS).split('\n')) {
+                    try {
+                        const entry = feedbackDiagnosticEntry(JSON.parse(line));
+                        if (entry) sanitized.push(JSON.stringify(entry));
+                    } catch { /* Never export a rotated fragment or an invalid diagnostic line. */ }
+                }
+                logs = buildFeedbackDiagnostics([sanitized.join('\n'), feedbackDiagnosticsBuffer.read()], snapshot);
+            }
+            assertReady();
+            try {
+                await submitFeedbackSubmission(endpointURL.trim(), {
+                    category: built.payload.category, message: built.payload.message, email: built.payload.email, metadata,
+                    ...(logs ? { diagnostics: { logs } } : {}),
+                }, async (input, init) => {
+                    assertReady();
+                    const response = await globalThis.fetch(input, { ...init, signal, redirect: 'error' });
+                    assertReady();
+                    return response;
+                });
+            } catch {
+                assertReady();
+                throw new Error('feedback_failed');
+            }
+            assertReady();
+            try {
+                await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                    message: 'Native iOS feedback submission acknowledged',
+                    context: { releaseCheck: 'v1.3.5/ios-feedback', outcome: 'sent' },
+                }, { force: true });
+            } catch { /* Diagnostics cannot replace an acknowledged submission. */ }
+            return { status: 'sent' };
+        });
     },
     iosAboutUpdateState(): string {
         return submit(async (signal) => {
