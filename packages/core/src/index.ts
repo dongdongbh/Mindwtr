@@ -24,6 +24,7 @@ export * from './resolve-feature-flags';
 export * from './bulk-organize';
 export * from './bulk-organize-create';
 export * from './announcements';
+export * from './app-store-update';
 export * from './user-prompts';
 export * from './share-card';
 export * from './process-inbox-workflow';

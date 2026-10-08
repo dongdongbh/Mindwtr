@@ -1,4 +1,4 @@
-import { isDropboxUnauthorizedError, maskCalendarFeedUrl } from '@mindwtr/core';
+import { compareAppVersions, isDropboxUnauthorizedError, maskCalendarFeedUrl } from '@mindwtr/core';
 import { logError, logWarn } from './app-log';
 
 export const formatError = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -8,29 +8,7 @@ export { isDropboxUnauthorizedError };
 // Core's (calendar-settings-model.ts), shared with the native host.
 export const maskCalendarUrl = maskCalendarFeedUrl;
 
-export const compareVersions = (v1: string, v2: string): number => {
-    const parseVersionParts = (version: string): number[] => (
-        version
-            .trim()
-            .replace(/^v/i, '')
-            .split(/[+-]/)[0]
-            .split('.')
-            .map((part) => {
-                const match = part.match(/\d+/);
-                return match ? Number.parseInt(match[0], 10) : 0;
-            })
-    );
-
-    const parts1 = parseVersionParts(v1);
-    const parts2 = parseVersionParts(v2);
-    for (let i = 0; i < Math.max(parts1.length, parts2.length); i += 1) {
-        const p1 = parts1[i] || 0;
-        const p2 = parts2[i] || 0;
-        if (p1 > p2) return 1;
-        if (p1 < p2) return -1;
-    }
-    return 0;
-};
+export const compareVersions = compareAppVersions;
 
 const buildSettingsExtra = (message?: string, error?: unknown): Record<string, string> | undefined => {
     const extra: Record<string, string> = {};
