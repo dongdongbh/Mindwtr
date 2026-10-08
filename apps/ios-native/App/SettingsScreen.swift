@@ -2601,6 +2601,7 @@ private struct AboutSettingsCard: View {
 private struct FeedbackSettingsForm: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var field: String?
 
     var body: some View {
@@ -2631,7 +2632,7 @@ private struct FeedbackSettingsForm: View {
                     heading("settings.feedbackWhere")
                     Text(model.label("settings.feedbackWherePlaceholder")).rnFont(14).foregroundStyle(palette.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: 8) {
+                    LazyVGrid(columns: [GridItem(dynamicTypeSize.isAccessibilitySize ? .flexible() : .adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: 8) {
                         ForEach(CoreModel.feedbackLocations, id: \.self) { location in
                             choice(model.feedbackLocationLabel(location), selected: model.settingsFeedbackLocation == location,
                                    id: "feedback-location-" + location) { field = nil; model.setFeedbackLocation(location) }
