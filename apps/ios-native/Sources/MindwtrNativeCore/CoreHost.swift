@@ -680,8 +680,23 @@ public final class CoreHost: @unchecked Sendable {
                   Set(actual.map(\.identifier)).union([alarm.identifier]).count <= 64 else { throw NativeReminderEffects.unavailable }
             try await port.add(alarm, namespace: namespace); try await current()
         }
+        // Pending requests stay distinct. Collapse only actual, freshly observed delivered owners.
         try await beforeEffect()
-        return try await perform { try $0.commitReminderReconciliation(owner) }
+        let observed = try await port.delivered(namespace: namespace); try await current()
+        let superseded = try NativeReminderEffects.supersededDelivered(observed)
+        var collapsed = 0
+        if !superseded.isEmpty {
+            let expected = Dictionary(uniqueKeysWithValues: superseded.compactMap { item in item.ownedID.map { (item.identifier, $0) } })
+            let targets = try currentTargets(observed, expected: expected)
+            try await port.removeDelivered(targets); try await current()
+            let after = try await port.delivered(namespace: namespace); try await current()
+            try NativeReminderEffects.checkInventory(after)
+            guard !after.contains(where: { expected[$0.identifier] != nil }) else { throw NativeReminderEffects.unavailable }
+            collapsed = targets.count
+        }
+        try await beforeEffect()
+        let confirmedCollapsed = collapsed
+        return try await perform { try $0.commitReminderReconciliation(owner, collapsed: confirmedCollapsed) }
     }
 
     public func close() async {
@@ -2606,12 +2621,13 @@ private final class Engine: @unchecked Sendable {
         try turn.storage.compareAndSetReminderMaps(expected: before, next: next)
         turn.expected = next; turn.mutation = nil
     }
-    func commitReminderReconciliation(_ id: UUID) throws -> String {
+    func commitReminderReconciliation(_ id: UUID, collapsed: Int) throws -> String {
         try checkReminderReconciliation(id)
-        guard let turn = reminderEffectsTurn, let plan = turn.plan, turn.final.count == 2 else { throw NativeReminderEffects.unavailable }
+        guard let turn = reminderEffectsTurn, let plan = turn.plan, turn.final.count == 2,
+              (0...4096).contains(collapsed) else { throw NativeReminderEffects.unavailable }
         try writeReminderMaps(turn, next: turn.final)
         try checkReminderReconciliation(id)
-        _ = try? reminderInvoke("iosReminderAcknowledged", [turn.session, plan.mode, plan.schedule.count, plan.cancel.count], cancellation: turn.cancellation)
+        _ = try? reminderInvoke("iosReminderAcknowledged", [turn.session, plan.mode, plan.schedule.count, plan.cancel.count, collapsed], cancellation: turn.cancellation)
         try checkReminderReconciliation(id)
         return try Self.ownedJSON(["mode": plan.mode, "scheduled": plan.schedule.count, "cancelled": plan.cancel.count])
     }

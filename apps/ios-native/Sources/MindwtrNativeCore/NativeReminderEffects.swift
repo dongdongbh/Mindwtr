@@ -42,6 +42,21 @@ final class NativeReminderEffects: @unchecked Sendable {
     static func checkInventory(_ observations: [NativeReminderObservation]) throws {
         guard observations.count <= 4096, Set(observations.map(\.identifier)).count == observations.count else { throw unavailable }
     }
+    /// RN keeps the first observed delivery on a tie. Only exact native owners are eligible here.
+    static func supersededDelivered(_ observations: [NativeReminderObservation]) throws -> [NativeReminderObservation] {
+        try checkInventory(observations)
+        var newest: [String: NativeReminderObservation] = [:], superseded: [NativeReminderObservation] = []
+        for item in observations {
+            guard item.ownedID != nil, item.threadIdentifier.hasPrefix("mindwtr-reminder:"),
+                  let date = item.deliveredAtMs, date.isFinite else { continue }
+            if let kept = newest[item.threadIdentifier], let keptDate = kept.deliveredAtMs {
+                if date > keptDate {
+                    superseded.append(kept); newest[item.threadIdentifier] = item
+                } else { superseded.append(item) }
+            } else { newest[item.threadIdentifier] = item }
+        }
+        return superseded
+    }
     static func projectedCapacity(plan: Plan, pending: [NativeReminderObservation]) throws {
         try checkInventory(pending)
         var identifiers = Set(pending.map(\.identifier))

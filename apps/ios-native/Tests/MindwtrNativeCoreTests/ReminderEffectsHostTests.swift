@@ -17,6 +17,8 @@ private actor ReminderEffectsFakePort: NativeReminderPort {
     private var permissionHoldAt: Int?
     private var permissionEntered: XCTestExpectation?
     private var heldPermission: CheckedContinuation<Void, Never>?
+    private var removalEntered: XCTestExpectation?
+    private var heldRemoval: CheckedContinuation<Void, Never>?
     private(set) var mutations: [Mutation] = []
     private(set) var addCount = 0
     private(set) var permissionCount = 0
@@ -41,6 +43,8 @@ private actor ReminderEffectsFakePort: NativeReminderPort {
     func releaseAdd() { held?.resume(); held = nil }
     func holdPermission(at count: Int, entered: XCTestExpectation) { permissionHoldAt = count; permissionEntered = entered }
     func releasePermission() { heldPermission?.resume(); heldPermission = nil }
+    func holdDeliveredRemoval(_ expectation: XCTestExpectation) { removalEntered = expectation }
+    func releaseDeliveredRemoval() { heldRemoval?.resume(); heldRemoval = nil }
     private func record(_ operation: String, _ identifiers: [String]) throws {
         let object = try NativeJSON.jsonObject(with: Data(contentsOf: manifest)) as? [String: String]
         mutations.append(.init(operation: operation, identifiers: identifiers,
@@ -65,6 +69,10 @@ private actor ReminderEffectsFakePort: NativeReminderPort {
     func removeDelivered(_ identifiers: [String]) async throws {
         try record("delivered-remove", identifiers)
         if !ignoreRemoval { deliveredValues.removeAll { identifiers.contains($0.identifier) } }
+        if let removalEntered {
+            self.removalEntered = nil
+            await withCheckedContinuation { continuation in heldRemoval = continuation; removalEntered.fulfill() }
+        }
     }
 }
 
@@ -451,5 +459,153 @@ final class ReminderEffectsHostTests: XCTestCase {
         let pending = try await port.pending(namespace: namespace), tray = try await port.delivered(namespace: namespace), events = await port.mutations
         XCTAssertEqual(pending.map(\.identifier), owned.map(\.identifier)); XCTAssertEqual(tray, [])
         XCTAssertEqual(Array(events.dropFirst(before)).map(\.operation), ["delivered-remove", "add"]); XCTAssertEqual(try rows(), baseline)
+    }
+
+    private func threadDelivery(_ identifier: String, id: Int? = nil, thread: String,
+        at: Double? = 1_800_000_000_000, invalid: Bool = false, foreignNamespace: Bool = false) -> NativeReminderObservation {
+        let content = UNMutableNotificationContent(); content.threadIdentifier = thread
+        if let id {
+            content.userInfo = ["mindwtrNativeReminder": ["version": invalid ? true as Any : 1 as Any,
+                "namespace": foreignNamespace ? "foreign" : namespace!, "id": id]]
+        }
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+        return .read(request, namespace: namespace, deliveredAt: at.map { Date(timeIntervalSince1970: $0 / 1000) })
+    }
+    private func reminderIdentifier(_ id: Int) -> String { "mindwtr-native:\(namespace!):\(id)" }
+    private func collapseMarkers() throws -> [[String: Any]] {
+        _ = try markers() // The same full log privacy checks apply to both fixed markers.
+        let text = (try? String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)) ?? ""
+        let entries = try text.split(separator: "\n").filter { $0.contains("v1.3.5/ios-reminder-thread-collapse") }.map { try object(String($0)) }
+        for entry in entries {
+            XCTAssertEqual(entry["message"] as? String, "Native iOS reminder threads collapsed")
+            let context = try XCTUnwrap(entry["context"] as? [String: String])
+            XCTAssertEqual(Set(context.keys), Set(["releaseCheck", "count"]))
+            let count = try XCTUnwrap(context["count"].flatMap(Int.init)); XCTAssertTrue((1...4096).contains(count))
+        }
+        return entries
+    }
+    func testDeliveredThreadSelectionUsesActualDatesExactOwnershipAndFirstObservedTies() throws {
+        let thread = "mindwtr-reminder:PRIVATE_REMINDER_A"
+        let oldest = threadDelivery(reminderIdentifier(11), id: 11, thread: thread, at: 10)
+        let newest = threadDelivery(reminderIdentifier(12), id: 12, thread: thread, at: 30)
+        let tied = threadDelivery(reminderIdentifier(13), id: 13, thread: thread, at: 30)
+        let snooze = threadDelivery(reminderIdentifier(1_073_741_825), id: 1_073_741_825, thread: thread, at: 20)
+        let foreign = threadDelivery("foreign", thread: thread, at: 100)
+        let prefixOnly = threadDelivery(reminderIdentifier(14), thread: thread, at: 100)
+        let malformed = threadDelivery(reminderIdentifier(15), id: 15, thread: thread, at: 100, invalid: true)
+        let otherNamespace = threadDelivery(reminderIdentifier(16), id: 16, thread: thread, at: 100, foreignNamespace: true)
+        let undated = threadDelivery(reminderIdentifier(17), id: 17, thread: thread, at: nil)
+        let invalidDate = threadDelivery(reminderIdentifier(18), id: 18, thread: thread, at: .infinity)
+        let otherThread = threadDelivery(reminderIdentifier(19), id: 19, thread: "foreign-thread", at: 100)
+        let independent = threadDelivery(reminderIdentifier(20), id: 20, thread: "mindwtr-reminder:PRIVATE_REMINDER_B", at: 1)
+        let inventory = [oldest, foreign, prefixOnly, newest, tied, malformed, otherNamespace, snooze, undated, invalidDate, otherThread, independent]
+        XCTAssertEqual(try NativeReminderEffects.supersededDelivered(inventory).map(\.identifier), [oldest.identifier, tied.identifier, snooze.identifier])
+        XCTAssertThrowsError(try NativeReminderEffects.supersededDelivered([oldest, oldest]))
+    }
+    func testActualThreadCollapseKeepsNewestRepeatOrSnoozeAndPreservesAllPendingRequests() async throws {
+        let value = try await seed(); _ = try await value.reconcileReminders()
+        let pending = try await port.pending(namespace: namespace), first = try XCTUnwrap(pending.first), second = try XCTUnwrap(pending.last)
+        let threadA = "mindwtr-reminder:PRIVATE_REMINDER_A", threadB = "mindwtr-reminder:PRIVATE_REMINDER_B"
+        let old = threadDelivery(first.identifier, id: first.ownedID, thread: threadA, at: 10)
+        let repeatEntry = threadDelivery(reminderIdentifier(123), id: 123, thread: threadA, at: 20)
+        let newest = threadDelivery(reminderIdentifier(1_073_741_825), id: 1_073_741_825, thread: threadA, at: 30)
+        let otherOld = threadDelivery(reminderIdentifier(124), id: 124, thread: threadB, at: 10)
+        let otherNewest = threadDelivery(second.identifier, id: second.ownedID, thread: threadB, at: 20)
+        let foreign = threadDelivery("foreign", thread: threadA, at: 100)
+        let malformed = threadDelivery(reminderIdentifier(125), id: 125, thread: threadA, at: 100, invalid: true)
+        let undated = threadDelivery(reminderIdentifier(126), id: 126, thread: threadA, at: nil)
+        let before = await port.mutations.count, baseline = try rows(), other = try saved().filter { ![alarmName, stateName].contains($0.key) }
+        await port.setDelivered([old, repeatEntry, newest, otherOld, otherNewest, foreign, malformed, undated])
+        let result = try object(try await value.reconcileReminders())
+        XCTAssertEqual(Set(result.keys), Set(["mode", "scheduled", "cancelled"]))
+        XCTAssertEqual(result["scheduled"] as? Int, 0); XCTAssertEqual(result["cancelled"] as? Int, 0)
+        let events = await port.mutations, actualPending = try await port.pending(namespace: namespace), tray = try await port.delivered(namespace: namespace)
+        XCTAssertEqual(Array(events.dropFirst(before)).map(\.operation), ["delivered-remove"])
+        XCTAssertEqual(Set(try XCTUnwrap(events.last).identifiers), Set([old.identifier, repeatEntry.identifier, otherOld.identifier]))
+        XCTAssertEqual(actualPending, pending); XCTAssertEqual(tray, [newest, otherNewest, foreign, malformed, undated])
+        let collapsed = try collapseMarkers(); XCTAssertEqual(collapsed.count, 1)
+        XCTAssertEqual((collapsed[0]["context"] as? [String: String])?["count"], "3")
+        try unchangedDomain(baseline, other: other)
+        _ = try await value.reconcileReminders()
+        let after = await port.mutations.count; XCTAssertEqual(after, events.count); XCTAssertEqual(try collapseMarkers().count, 1)
+        let finalPending = try await port.pending(namespace: namespace); XCTAssertEqual(finalPending, pending)
+    }
+    func testThreadRemovalMustBeObservedBeforeFinalMapsOrMarkerAndRetriesSafely() async throws {
+        let value = try await seed(count: 1); _ = try await value.reconcileReminders()
+        let pending = try await port.pending(namespace: namespace), first = try XCTUnwrap(pending.first)
+        let thread = "mindwtr-reminder:PRIVATE_REMINDER_A"
+        let old = threadDelivery(reminderIdentifier(123), id: 123, thread: thread, at: 10)
+        let newest = threadDelivery(first.identifier, id: first.ownedID, thread: thread, at: 20)
+        await port.setDelivered([old, newest]); await port.configure(ignoreRemoval: true)
+        let before = try maps(), baseline = try rows(), other = try saved().filter { ![alarmName, stateName].contains($0.key) }
+        await unavailable { try await value.reconcileReminders() }
+        XCTAssertEqual(try maps(), before); XCTAssertEqual(try markers().count, 1); XCTAssertEqual(try collapseMarkers().count, 0)
+        let retained = try await port.delivered(namespace: namespace); XCTAssertEqual(retained, [old, newest])
+        try unchangedDomain(baseline, other: other)
+        await port.configure(); _ = try await value.reconcileReminders()
+        let tray = try await port.delivered(namespace: namespace), actualPending = try await port.pending(namespace: namespace)
+        XCTAssertEqual(tray, [newest]); XCTAssertEqual(actualPending, pending)
+        XCTAssertEqual(try markers().count, 2); XCTAssertEqual(try collapseMarkers().count, 1)
+        try unchangedDomain(baseline, other: other)
+    }
+    func testThreadCollapsePreservesForeignUndatedAndNonReminderDuplicatesWithoutEffects() async throws {
+        let value = try await seed(count: 0)
+        let thread = "mindwtr-reminder:PRIVATE_REMINDER_A"
+        let inventory = [threadDelivery("foreign-1", thread: thread), threadDelivery("foreign-2", thread: thread),
+            threadDelivery(reminderIdentifier(11), id: 11, thread: thread, at: nil),
+            threadDelivery(reminderIdentifier(12), id: 12, thread: thread, at: nil),
+            threadDelivery(reminderIdentifier(13), id: 13, thread: "foreign-thread"),
+            threadDelivery(reminderIdentifier(14), id: 14, thread: "foreign-thread")]
+        await port.setDelivered(inventory); let baseline = try rows(), before = try maps()
+        _ = try await value.reconcileReminders()
+        let events = await port.mutations, tray = try await port.delivered(namespace: namespace)
+        XCTAssertEqual(events.count, 0); XCTAssertEqual(tray, inventory); XCTAssertEqual(try maps(), before)
+        XCTAssertEqual(try rows(), baseline); XCTAssertEqual(try collapseMarkers().count, 0); XCTAssertEqual(try markers().count, 1)
+    }
+    func testThreadCollapseUsesPostPermissionInventoryWithoutRemovingForeignReplacement() async throws {
+        let value = try await seed(count: 0), thread = "mindwtr-reminder:PRIVATE_REMINDER_A"
+        let old = threadDelivery(reminderIdentifier(11), id: 11, thread: thread, at: 10)
+        let newest = threadDelivery(reminderIdentifier(12), id: 12, thread: thread, at: 20)
+        await port.setDelivered([old, newest]); let reads = await port.permissionCount
+        let entered = expectation(description: "Permission before fresh collapse inventory")
+        await port.holdPermission(at: reads + 2, entered: entered)
+        let before = try maps(), baseline = try rows(), task = Task { try await value.reconcileReminders() }
+        await fulfillment(of: [entered], timeout: 5)
+        let replacement = threadDelivery(old.identifier, id: old.ownedID, thread: thread, at: 30, invalid: true)
+        await port.setDelivered([replacement, newest]); await port.releasePermission(); _ = try await task.value
+        let events = await port.mutations, tray = try await port.delivered(namespace: namespace)
+        XCTAssertEqual(events.count, 0); XCTAssertEqual(tray, [replacement, newest]); XCTAssertEqual(try maps(), before)
+        XCTAssertEqual(try rows(), baseline); XCTAssertEqual(try collapseMarkers().count, 0)
+    }
+    private func interruptedThreadRemoval(close: Bool) async throws {
+        let value = try await seed(count: 1); _ = try await value.reconcileReminders()
+        let pending = try await port.pending(namespace: namespace), first = try XCTUnwrap(pending.first)
+        let thread = "mindwtr-reminder:PRIVATE_REMINDER_A"
+        let old = threadDelivery(reminderIdentifier(123), id: 123, thread: thread, at: 10)
+        let newest = threadDelivery(first.identifier, id: first.ownedID, thread: thread, at: 20)
+        await port.setDelivered([old, newest]); let before = try maps(), baseline = try rows(), effects = await port.mutations.count
+        let entered = expectation(description: "Accepted delivered removal")
+        await port.holdDeliveredRemoval(entered); let task = Task { try await value.reconcileReminders() }
+        await fulfillment(of: [entered], timeout: 5)
+        await unavailable { try await value.readAboutUpdateState() }
+        if close {
+            let closing = Task { await value.close() }
+            for _ in 0..<20 { await Task.yield() }
+            await port.releaseDeliveredRemoval(); await closing.value
+        } else { task.cancel(); await port.releaseDeliveredRemoval() }
+        await cancelled { try await task.value }
+        let events = await port.mutations, actualPending = try await port.pending(namespace: namespace), tray = try await port.delivered(namespace: namespace)
+        XCTAssertEqual(Array(events.dropFirst(effects)).map(\.operation), ["delivered-remove"])
+        XCTAssertEqual(actualPending, pending); XCTAssertEqual(tray, [newest]); XCTAssertEqual(try maps(), before)
+        XCTAssertEqual(try rows(), baseline); XCTAssertEqual(try markers().count, 1); XCTAssertEqual(try collapseMarkers().count, 0)
+        if !close {
+            _ = try await value.reconcileReminders(); XCTAssertEqual(try markers().count, 2); XCTAssertEqual(try collapseMarkers().count, 0)
+        }
+    }
+    func testCancelledThreadRemovalDrainsWithoutSuccessorOrConfirmedMarker() async throws {
+        try await interruptedThreadRemoval(close: false)
+    }
+    func testCloseWaitsForAcceptedThreadRemovalAndPreservesFuturePendingRequest() async throws {
+        try await interruptedThreadRemoval(close: true)
     }
 }

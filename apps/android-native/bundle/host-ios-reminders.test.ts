@@ -106,7 +106,7 @@ const fixture = () => {
         MindwtrHost: undefined as unknown as { boot(a: string, b: string): string; poll(id: string): string | null;
             iosReminderBegin(id: string): string; iosReminderCurrent(id: string): string; iosReminderEnd(id: string): string;
             iosReminderPrepare(id: string, grant: boolean, pending: string, delivered: string): string;
-            iosReminderAcknowledged(id: string, mode: string, scheduled: number, cancelled: number): string },
+            iosReminderAcknowledged(id: string, mode: string, scheduled: number, cancelled: number, collapsed?: number): string },
         fixture: undefined as unknown as { seed(): void; save(): void; flush(): Promise<void> },
         __mindwtrNative: {
             sqlExec: (sql: string) => { writes.push('SQL'); database.exec(sql); return null; },
@@ -163,5 +163,22 @@ describe('actual iOS effects planning bridge with native-owned storage/effects',
         await f.poll(f.state.MindwtrHost.iosReminderEnd(token));
         expect(await f.poll(f.state.MindwtrHost.iosReminderCurrent(token))).toEqual({ ok: false, error: unavailable });
         expect(f.writes).toEqual([]); expect(f.log()).toBe('');
+    });
+    it('logs only a bounded confirmed collapse count and preserves acknowledgment if its sink fails', async () => {
+        const f = fixture(); await f.boot(); await f.begin();
+        for (const count of [-1, 1.5, 4097]) {
+            expect(await f.poll(f.state.MindwtrHost.iosReminderAcknowledged(token, 'active', 0, 0, count)))
+                .toEqual({ ok: false, error: unavailable });
+        }
+        expect(f.log()).toBe('');
+        expect(await f.poll(f.state.MindwtrHost.iosReminderAcknowledged(token, 'active', 0, 0, 2))).toEqual({ ok: true, value: null });
+        const entries = f.log().trim().split('\n').map((line) => JSON.parse(line));
+        expect(entries).toHaveLength(2);
+        expect(entries[1].message).toBe('Native iOS reminder threads collapsed');
+        expect(entries[1].context).toEqual({ releaseCheck: 'v1.3.5/ios-reminder-thread-collapse', count: '2' });
+        expect(f.log()).not.toContain('PRIVATE'); expect(f.log()).not.toContain('task:one');
+        f.failLog();
+        expect(await f.poll(f.state.MindwtrHost.iosReminderAcknowledged(token, 'active', 0, 0, 1))).toEqual({ ok: true, value: null });
+        expect(f.writes).toEqual([]);
     });
 });

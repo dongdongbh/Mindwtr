@@ -1351,11 +1351,15 @@ const iosReminderEffects = createIosReminderMethods({
     },
     read: () => keyValue.multiGet([REMINDER_ALARM_MAP_STORAGE_KEY, NATIVE_REMINDER_STATE_STORAGE_KEY]),
     plan: (input) => contract.planReminderAlarms(input),
-    acknowledged: async (mode, scheduled, cancelled) => {
+    acknowledged: async (mode, scheduled, cancelled, collapsed) => {
         await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
             message: 'Native iOS reminders reconciled',
             context: { releaseCheck: 'v1.3.5/ios-reminder-apply', outcome: 'confirmed', mode,
                 scheduled: String(scheduled), cancelled: String(cancelled) },
+        }, { force: true });
+        if (collapsed > 0) await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+            message: 'Native iOS reminder threads collapsed',
+            context: { releaseCheck: 'v1.3.5/ios-reminder-thread-collapse', count: String(collapsed) },
         }, { force: true });
     },
 });
@@ -4114,10 +4118,10 @@ globalThis.MindwtrHost = {
             requireReminderSignal(signal); return result;
         });
     },
-    iosReminderAcknowledged(token: string, mode: string, scheduled: number, cancelled: number): string {
+    iosReminderAcknowledged(token: string, mode: string, scheduled: number, cancelled: number, collapsed = 0): string {
         return submit(async (signal) => {
             requireReminderSignal(signal);
-            return iosReminderEffects.acknowledge(token, mode, scheduled, cancelled);
+            return iosReminderEffects.acknowledge(token, mode, scheduled, cancelled, collapsed);
         });
     },
     /** Pure preview only: no alarm bridge, ownership-map write or permission request. */
