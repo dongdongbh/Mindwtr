@@ -830,6 +830,10 @@ describe('canonical local reads contract', () => {
         report("| --- | --- | --- | --- | --- |");
 
         const settled = convergeThroughStorage(buildLargeDocument(150));
+        // Store actions run on the real clock: keep the deleted task inside the 90-day tombstone window there,
+        // or the load purge drops it once daysAgo(10) of NOW_ISO is 90 days behind the real date.
+        const recentlyDeleted = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+        settled.tasks = settled.tasks.map((entry) => entry.deletedAt ? { ...entry, deletedAt: recentlyDeleted } : entry);
 
         type MutationControl = {
             resetBaseline: () => void;

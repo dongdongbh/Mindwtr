@@ -352,6 +352,8 @@ describe('native host contract: reminders', () => {
     });
 
     it('leaves a missing, deleted or finished task alone', async () => {
+        // t-deleted's tombstone (T0) would pass the 90-day purge on a real clock and read as task-not-found.
+        freezeClock();
         await seed();
         const host = await openHost();
         const done = (taskId: string) => host.completeReminderTask({ requestId: generateUUID(), taskId });
