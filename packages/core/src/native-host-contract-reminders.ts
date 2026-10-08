@@ -118,6 +118,7 @@ type ReminderDeps = {
     save: () => Promise<NativeHostResult<null>>;
     language: () => Language;
     requestIdPattern: RegExp;
+    reminderPlatform: 'android' | 'ios';
 };
 
 // Reminder alarms take ids in [1, 2^30), snoozed alarms in [2^30, 2^31 - 1), so the two never meet.
@@ -264,7 +265,7 @@ export function createReminderMethods(deps: ReminderDeps) {
                 projects: state.projects,
                 now: new Date(),
                 translations,
-                maxOneShotReminders: MAX_PENDING_ONE_SHOT_REMINDER_ALARMS.android,
+                maxOneShotReminders: MAX_PENDING_ONE_SHOT_REMINDER_ALARMS[deps.reminderPlatform],
                 alarms: held,
                 permissionGranted: input.permissionGranted,
             });

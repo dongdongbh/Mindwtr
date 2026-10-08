@@ -28,12 +28,12 @@ const saveData = vi.fn(async (_data: unknown) => undefined);
 let realUpdateTask: ((...args: any[]) => Promise<any>) | null = null;
 const updates: unknown[][] = [];
 
-async function seed(settings: Partial<AppSettings> = SETTINGS) {
+async function seed(settings: Partial<AppSettings> = SETTINGS, tasks: Task[] = TASKS) {
     await flushPendingSave();
     resetForTests();
     realUpdateTask ??= useTaskStore.getState().updateTask;
     const real = realUpdateTask;
-    let data = JSON.parse(JSON.stringify({ tasks: TASKS, projects: [], sections: [], areas: [], people: [], settings }));
+    let data = JSON.parse(JSON.stringify({ tasks, projects: [], sections: [], areas: [], people: [], settings }));
     setStorageAdapter({
         getData: async () => data,
         saveData: async (next) => {
@@ -56,8 +56,8 @@ async function seed(settings: Partial<AppSettings> = SETTINGS) {
 }
 
 /** A new host on the loaded store, as after a restart: no receipts, no counters. */
-async function openHost(): Promise<Host> {
-    const host = createNativeHostContract();
+async function openHost(reminderPlatform?: 'android' | 'ios'): Promise<Host> {
+    const host = reminderPlatform ? createNativeHostContract({ reminderPlatform }) : createNativeHostContract();
     expect(await host.setLanguage({ storedLanguage: 'en', systemLocale: 'en-US' })).toMatchObject({ ok: true });
     expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
     return host;
@@ -121,6 +121,47 @@ describe('native host contract: reminders', () => {
         expect(Object.values(JSON.parse(plan.alarms)).some((entry) => (entry as { pending?: true }).pending)).toBe(false);
         expect(plan.topUpDelayMs).toBe(20 * 60_000 + 5_000);
         expect(plan.clearDelivered).toBe(false);
+    });
+
+    it.each([
+        { platform: undefined, cap: 200, label: 'omitted Android default' },
+        { platform: 'android' as const, cap: 200, label: 'explicit Android' },
+        { platform: 'ios' as const, cap: 60, label: 'iOS' },
+    ])('selects the trusted reminder platform cap: $label, with recurring alarms and unchanged top-up', async ({ platform, cap }) => {
+        freezeClock();
+        const timed = Array.from({ length: 205 }, (_, index) => task({
+            id: `cap-${index}`, status: index === 0 ? 'waiting' : index === 1 ? 'someday' : 'next',
+            dueDate: new Date(Date.parse(NOW) + (index + 1) * 60_000).toISOString(),
+        })).reverse();
+        const ineligible = [
+            task({ id: 'cap-date-only', dueDate: '2026-09-29' }),
+            ...(['done', 'archived', 'reference'] as const).map((status) => task({
+                id: `cap-${status}`, status, dueDate: '2026-09-28T10:00:30.000Z',
+            })),
+            task({ id: 'cap-deleted', deletedAt: T0, dueDate: '2026-09-28T10:00:30.000Z' }),
+        ];
+        await seed({ dailyDigestMorningEnabled: true, dailyDigestEveningEnabled: true, weeklyReviewEnabled: true }, [...timed, ...ineligible]);
+        const host = await openHost(platform);
+        const before = JSON.stringify({ tasks: useTaskStore.getState()._allTasks, settings: useTaskStore.getState().settings });
+        const first = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true }));
+        const recurring = ['digest:morning', 'digest:evening', 'digest:weekly-review'];
+        const earliest = Array.from({ length: cap }, (_, index) => `task:cap-${index}`);
+        expect(first.schedule.map((alarm) => alarm.key)).toEqual([...recurring, ...earliest]);
+        expect(first.schedule.map((alarm) => alarm.repeat)).toEqual(['daily', 'daily', 'weekly', ...earliest.map(() => 'once')]);
+        expect(first.topUpDelayMs).toBe(65_000);
+        expect(readReminderAlarmMap(first.alarms).size).toBe(cap + 3);
+        const held = value(await host.planReminderAlarms({ storedAlarms: first.alarms, permissionGranted: true }));
+        expect(held).toMatchObject({ schedule: [], cancel: [], writeAhead: null, alarms: first.alarms, topUpDelayMs: 65_000 });
+
+        // When the earliest fires, the same policy expires it and admits exactly one successor.
+        vi.setSystemTime(new Date('2026-09-28T10:01:05.000Z'));
+        const next = value(await host.planReminderAlarms({ storedAlarms: first.alarms, permissionGranted: true }));
+        expect(next.cancel).toEqual([{ key: 'task:cap-0', id: first.schedule[3].id, reason: 'expired' }]);
+        expect(next.schedule.map((alarm) => alarm.key)).toEqual([`task:cap-${cap}`]);
+        expect(next.topUpDelayMs).toBe(60_000);
+        expect(Array.from(readReminderAlarmMap(next.alarms).keys())).toEqual([...recurring, ...earliest.slice(1), `task:cap-${cap}`]);
+        expect(JSON.stringify({ tasks: useTaskStore.getState()._allTasks, settings: useTaskStore.getState().settings })).toBe(before);
+        expect(saveData).not.toHaveBeenCalled();
     });
 
     it('stores its alarm map under React Native\'s key so that a React Native recovery build makes every alarm again', async () => {

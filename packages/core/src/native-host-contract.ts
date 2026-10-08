@@ -956,6 +956,8 @@ export function createNativeHostContract(options: {
     ai?: NativeAIHost;
     /** Core's mobile attachment modules on the host's file bridge (native-host-contract-attachments.ts). */
     attachments?: NativeAttachmentsHost;
+    /** Trusted host platform selects core's existing reminder window; omitted hosts retain Android's cap. */
+    reminderPlatform?: 'android' | 'ios';
     replayTokens?: NativeReplayTokens;
 } = {}) {
     // A new host: request IDs an earlier one held in memory are not this one's (its disk receipts stay).
@@ -1796,7 +1798,8 @@ export function createNativeHostContract(options: {
         // The pending-captures queue and context automation: native-host-contract-capture-ingest.ts.
         ...createCaptureIngestMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
         // Reminder alarms and notification taps: native-host-contract-reminders.ts.
-        ...createReminderMethods({ readiness, save, language: () => language, requestIdPattern: CAPTURE_ID_PATTERN }),
+        ...createReminderMethods({ readiness, save, language: () => language, requestIdPattern: CAPTURE_ID_PATTERN,
+            reminderPlatform: options.reminderPlatform ?? 'android' }),
         // The task editor's and the project screen's attachments: native-host-contract-attachments.ts.
         ...createAttachmentMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN,
             isReadOnly: isInArchivedProject, host: () => options.attachments ?? null }),
