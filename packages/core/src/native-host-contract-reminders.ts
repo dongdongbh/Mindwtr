@@ -169,8 +169,8 @@ const readNativeReminderState = (raw: string | null | undefined): NativeReminder
                 state.set(key, { kind: 'snooze', id, fireAtMs: entry.fireAtMs as number, details: entry.details, armed: entry.armed === true });
             }
         }
-    } catch (error) {
-        void logWarn('Stored native reminder state unreadable; starting from none', { scope: 'notifications', error });
+    } catch {
+        void logWarn('Stored native reminder state unreadable; starting from none', { scope: 'notifications' });
     }
     return state;
 };
@@ -245,9 +245,9 @@ export function createReminderMethods(deps: ReminderDeps) {
             let held: Map<string, ReminderAlarmEntry>;
             try {
                 held = readNativeAlarmMap(input.storedAlarms);
-            } catch (error) {
+            } catch {
                 // As on React Native: an unreadable map is replaced, since nothing in it can be cancelled.
-                void logWarn('Stored reminder alarm map unreadable; starting from none', { scope: 'notifications', error });
+                void logWarn('Stored reminder alarm map unreadable; starting from none', { scope: 'notifications' });
                 held = new Map();
             }
             const remakeAll = input.remake === 'all';

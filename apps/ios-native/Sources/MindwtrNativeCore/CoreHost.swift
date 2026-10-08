@@ -129,6 +129,29 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    /// Passive permission observation followed by a fresh, read-only shared plan.
+    public func readReminderPlan() async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            do {
+                let admission = try await perform { try $0.admitReminderPlanRead(cancellation: token) }
+                let permission = try await admission.read()
+                try token.check()
+                let result = try await perform {
+                    try $0.readReminderPlan(permission: permission, generation: admission.generation, cancellation: token)
+                }
+                try token.check()
+                return result
+            } catch {
+                if token.isCancelled || Task.isCancelled { throw CancellationError() }
+                throw HostFailure("NOT_READY: Reminder plan is unavailable")
+            }
+        }, onCancel: { token.cancel() })
+    }
+
     public func feedbackConfiguration(endpointURL: String) async throws -> String {
         try await perform { try $0.feedbackConfiguration(endpointURL: endpointURL) }
     }
@@ -2328,6 +2351,31 @@ private final class Engine: @unchecked Sendable {
         }
         try requireNoAttachmentDraft()
         return try invoke("iosAboutAppStoreInfo", arguments: [bundleIdentifier, currentVersion], localCancellation: cancellation)
+    }
+
+    func admitReminderPlanRead(cancellation: NativeAttachmentCancellation) throws -> NativeReminderPlanReadAdmission {
+        try cancellation.check()
+        _ = try requireDeviceStorageAdmission()
+        var reader: NativeNotificationPermission.Reader = { await NativeNotificationPermission.read() }
+        #if DEBUG
+        if let injected = faults?.notificationPermissionRead { reader = injected }
+        #endif
+        return NativeReminderPlanReadAdmission(generation: attachmentGeneration, read: reader)
+    }
+
+    func readReminderPlan(permission: NativeNotificationPermission, generation: UInt64,
+                          cancellation: NativeAttachmentCancellation) throws -> String {
+        try cancellation.check()
+        _ = try requireDeviceStorageAdmission()
+        guard generation == attachmentGeneration else { throw HostFailure("NOT_READY: Reminder plan is unavailable") }
+        let raw = try invoke("iosReadReminderPlan", arguments: [permission.granted], localCancellation: cancellation)
+        try cancellation.check()
+        _ = try requireDeviceStorageAdmission()
+        guard generation == attachmentGeneration,
+              let plan = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else {
+            throw HostFailure("NOT_READY: Reminder plan is unavailable")
+        }
+        return String(decoding: try JSONSerialization.data(withJSONObject: ["permission": permission.json, "plan": plan]), as: UTF8.self)
     }
 
     private func requireFeedbackAdmission() throws {

@@ -6,6 +6,7 @@ import { openSqliteHost, requestId as newRequestId } from './screen-parity.repla
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppSettings, Task } from './types';
 import { generateUUID } from './uuid';
+import { consoleLogger, setLogger, type LogPayload } from './logger';
 
 const NOW = '2026-09-28T10:00:00.000Z';
 const T0 = '2026-09-01T10:00:00.000Z';
@@ -90,6 +91,23 @@ describe('native host contract: reminders', () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(NOW));
     };
+
+    it('keeps malformed saved maps as a pure preview without logging their private parse text', async () => {
+        freezeClock(); await seed(); const host = await openHost();
+        const warnings: LogPayload[] = []; setLogger((payload) => warnings.push(payload));
+        const before = JSON.stringify({ tasks: useTaskStore.getState()._allTasks, settings: useTaskStore.getState().settings });
+        try {
+            const result = value(await host.planReminderAlarms({ storedAlarms: 'PRIVATE', storedState: 'PRIVATE', permissionGranted: true }));
+            expect(result.mode).toBe('active'); expect(result.schedule.length).toBeGreaterThan(0);
+            expect(warnings).toEqual([
+                { level: 'warn', message: 'Stored reminder alarm map unreadable; starting from none', scope: 'notifications' },
+                { level: 'warn', message: 'Stored native reminder state unreadable; starting from none', scope: 'notifications' },
+            ]);
+            expect(JSON.stringify(warnings)).not.toContain('PRIVATE');
+            expect(JSON.stringify({ tasks: useTaskStore.getState()._allTasks, settings: useTaskStore.getState().settings })).toBe(before);
+            expect(saveData).not.toHaveBeenCalled(); expect(updates).toEqual([]);
+        } finally { setLogger(consoleLogger); }
+    });
 
     it('plans what core\'s planner decides for the store, with an id per alarm and the maps to store', async () => {
         freezeClock();

@@ -452,7 +452,7 @@ const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwt
 
 const localAttachments = nativeSync ? null : createNativeLocalAttachmentsForHost();
 const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contractHost;
-const contract = createNativeHostContract({ get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
+const contract = createNativeHostContract({ reminderPlatform: globalThis.__mindwtrHostPlatform === 'ios' ? 'ios' : 'android', get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
     get attachments() {
         const selected = iosProjectAttachmentDownload ? iosSelfHostedProjectAttachments?.contractHost ?? iosManualSync?.attachmentsHost : attachmentsHost;
         if (!iosRelocatedProjectAvailability || !selected) return selected ?? undefined;
@@ -4068,6 +4068,47 @@ globalThis.MindwtrHost = {
         (globalThis.__cancelHostCalls as (message: string) => void)('The host operation timed out');
         pending.get(Number(idText))?.controller.abort(Object.assign(new Error('The host operation timed out'), { name: 'AbortError' }));
         return null;
+    },
+    /** Pure preview only: no alarm bridge, ownership-map write or permission request. */
+    iosReadReminderPlan(permissionGranted: boolean): string {
+        return submit(async (signal) => {
+            const adapter = bootAdapter, generation = getPersistenceStatus().generation;
+            const assertReady = () => {
+                if (signal.aborted) throw new Error('CANCELLED: Reminder plan read was cancelled');
+                try {
+                    if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
+                        || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) throw new Error();
+                    requireSaved();
+                    const persistence = getPersistenceStatus();
+                    if (persistence.failed || persistence.queued || persistence.inFlight || persistence.immediate
+                        || persistence.retrying || persistence.generation !== generation) throw new Error();
+                    if (!contract.getDataSettings().ok) throw new Error();
+                } catch { throw new Error('NOT_READY: Reminder plan is unavailable'); }
+            };
+            assertReady();
+            if (typeof permissionGranted !== 'boolean') throw new Error('INVALID_INPUT: Reminder permission must be a boolean');
+            const names = [REMINDER_ALARM_MAP_STORAGE_KEY, NATIVE_REMINDER_STATE_STORAGE_KEY];
+            let values: [string, string | null][];
+            try {
+                values = await keyValue.multiGet(names);
+                if (!Array.isArray(values) || values.length !== names.length
+                    || values.some((entry, index) => !Array.isArray(entry) || entry.length !== 2
+                        || entry[0] !== names[index] || entry[1] !== null && typeof entry[1] !== 'string')) throw new Error();
+            } catch { assertReady(); throw new Error('NOT_READY: Reminder plan is unavailable'); }
+            assertReady();
+            const result = await contract.planReminderAlarms({ storedAlarms: values[0][1], storedState: values[1][1], permissionGranted })
+                .catch(() => { assertReady(); throw new Error('NOT_READY: Reminder plan is unavailable'); });
+            assertReady();
+            if (!result.ok) throw new Error('NOT_READY: Reminder plan is unavailable');
+            try {
+                await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                    message: 'Native iOS reminder plan inspected',
+                    context: { releaseCheck: 'v1.3.5/ios-reminder-plan', outcome: 'planned' },
+                }, { force: true });
+            } catch { /* Diagnostics cannot change the inspected plan. */ }
+            assertReady();
+            return result.value;
+        });
     },
     iosFeedbackConfiguration(endpointURL: string): string {
         return submit(async (signal) => {
