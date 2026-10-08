@@ -27833,10 +27833,12 @@ final class CoreHostTests: XCTestCase {
     }
 
     func testDoneTask176ForgedDeleteAndUndoJournalsRefuseBeforeSQLite() async throws {
+        // Keep the seeded completion inside Done’s relative date window.
+        let frozen = try dateBundle(at: "2026-10-02T13:00:00.000Z")
         for undo in [false, true] {
             let id = try await seedDoneTask176()
             let method = undo ? "taskDeleteUndo" : "taskDelete"
-            let faults = HostIOFaults(), writer = host(faults)
+            let faults = HostIOFaults(), writer = host(faults, bundleURL: frozen)
             _ = try await writer.start()
             let request = try await doneTask176Request(writer, id: id, undo: undo)
             faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected Done Task176 COMMIT failure") } }
@@ -27870,7 +27872,7 @@ final class CoreHostTests: XCTestCase {
                 let replayFaults = HostIOFaults()
                 var statements = 0
                 replayFaults.beforeSQL = { _ in statements += 1 }
-                let cold = host(replayFaults)
+                let cold = host(replayFaults, bundleURL: frozen)
                 await expectFailure { _ = try await cold.start() }
                 XCTAssertEqual(statements, 0, "\(method), \(part)")
                 XCTAssertEqual(try Data(contentsOf: journal), bytes)
