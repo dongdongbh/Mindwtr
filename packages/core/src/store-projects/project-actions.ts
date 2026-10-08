@@ -1,3 +1,4 @@
+import { getAttachmentUnrecoverablePatch } from '../mobile-attachment-availability';
 import {
     applyProjectLifecycleTransition,
     applyTaskUpdates,
@@ -224,6 +225,41 @@ export const projectFileAvailabilityWritePlan = (before: Project, rawBefore: unk
     targetURI: string, deviceIdBefore: string | null, deviceIdToInitialize: string | null, updateAt: string) =>
     selectedProjectAvailabilityPlan(before, rawBefore, attachmentId, targetURI,
         deviceIdBefore, deviceIdToInitialize, updateAt, true);
+
+/** Private WebDAV outcomes retain RN metadata presence; measured file hashes are proof only. */
+export const projectWebDavAvailabilityWritePlan = (before: Project, rawBefore: unknown[], attachmentId: string,
+    targetURI: string, deviceIdBefore: string | null, deviceIdToInitialize: string | null, updateAt: string,
+    outcome: 'available' | 'unrecoverable'): SelectedProjectAvailabilityWrite | null => {
+    const matches = before.attachments?.filter(item => item.id === attachmentId) ?? [];
+    const selected = matches.length === 1 ? matches[0] : undefined;
+    if (!selected || selected.kind !== 'file' || selected.deletedAt || before.deletedAt || before.purgedAt
+        || rawBefore.length !== PROJECT_SQLITE_COLUMNS.length || !targetURI) return null;
+    if (outcome === 'available') {
+        if (selected.uri !== targetURI || selected.localStatus !== 'available') return projectFileAvailabilityWritePlan(
+            before, rawBefore, attachmentId, targetURI, deviceIdBefore, deviceIdToInitialize, updateAt);
+        if (deviceIdToInitialize !== null || updateAt !== before.updatedAt) return null;
+        return { projectId: before.id, attachmentId, targetURI, outcome: 'noop', before, after: before,
+            rawBefore, rawAfter: [...rawBefore], deviceIdBefore, deviceIdToInitialize: null, updateAt };
+    }
+    if (!Number.isFinite(Date.parse(updateAt)) || new Date(updateAt).toISOString() !== updateAt
+        || (deviceIdBefore === null ? !deviceIdToInitialize : deviceIdToInitialize !== null)) return null;
+    const rev = nextRevision(before.rev);
+    if (!Number.isSafeInteger(rev) || rev <= (before.rev ?? 0)) return null;
+    const patch = getAttachmentUnrecoverablePatch({ ...selected, cloudKey: undefined, fileHash: undefined,
+        localStatus: 'missing', deletedAt: updateAt, updatedAt: updateAt });
+    const after: Project = { ...before, attachments: before.attachments!.map(item => {
+        if (item.id !== attachmentId) return item;
+        const resolved = { ...item, ...patch };
+        // The private JSON envelope preserves RN's persisted absence, not undefined values.
+        delete resolved.cloudKey; delete resolved.fileHash;
+        return resolved;
+    }), rev, revBy: deviceIdBefore ?? deviceIdToInitialize!, updatedAt: updateAt };
+    const rawAfter = [...rawBefore];
+    for (const field of ['attachments', 'rev', 'revBy', 'updatedAt'] as const)
+        rawAfter[PROJECT_SQLITE_COLUMNS.indexOf(field)] = field === 'attachments' ? JSON.stringify(after.attachments) : after[field];
+    return { projectId: before.id, attachmentId, targetURI, outcome: 'unrecoverable', before, after,
+        rawBefore, rawAfter, deviceIdBefore, deviceIdToInitialize, updateAt };
+};
 
 export const sameProjectAvailabilityRawRow = (project: Project, cells: unknown[]): boolean =>
     projectFileAddScalarCellsMatchWriter(project)
@@ -614,8 +650,11 @@ const commitProjectAvailabilityWrite = async (input: SelectedProjectAvailability
     { set, debouncedSave, getSaveGeneration }: Pick<ProjectActionContext, 'set' | 'debouncedSave' | 'getSaveGeneration'>,
     ordinary: boolean): Promise<PreparedTaskEditResult> => {
     let result: PreparedTaskEditResult = { success: false, reason: 'conflict' };
-    const planned = (ordinary ? projectFileAvailabilityWritePlan : projectAvailabilityWritePlan)(input.before, input.rawBefore, input.attachmentId, input.targetURI,
-        input.deviceIdBefore, input.deviceIdToInitialize, input.updateAt);
+    const planned = ordinary && input.outcome !== undefined
+        ? projectWebDavAvailabilityWritePlan(input.before, input.rawBefore, input.attachmentId, input.targetURI,
+            input.deviceIdBefore, input.deviceIdToInitialize, input.updateAt, input.outcome === 'noop' ? 'available' : 'unrecoverable')
+        : (ordinary ? projectFileAvailabilityWritePlan : projectAvailabilityWritePlan)(input.before, input.rawBefore, input.attachmentId, input.targetURI,
+            input.deviceIdBefore, input.deviceIdToInitialize, input.updateAt);
     if (!planned || !taskEditValuesEqual(planned, input)) return result;
     set((state) => {
         const bound = authority.state, durable = authority.snapshot;

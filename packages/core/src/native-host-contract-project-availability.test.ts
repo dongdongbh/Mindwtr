@@ -687,3 +687,112 @@ describe('native journal key ordering during prepared availability commit', () =
         } finally { await env.close(); }
     });
 });
+
+
+describe('private owned WebDAV Project availability compatibility', () => {
+    const api = (env: Awaited<ReturnType<typeof openSqliteHost>>, save = vi.fn(async () => {
+        await flushPendingSave(); return { ok: true as const, value: null };
+    })) => preparedAvailability.createPreparedProjectAvailabilityMethods({ readiness: () => ({ ok: true, value: null }),
+        revision: () => value(env.host.getProjectAttachmentEditOptions({ projectId: 'target' })).revision,
+        save, translate: key => key }, 'webdav');
+
+    it.each([true, false])('retains original hash/size presence after measured download (%s)', async (known) => {
+        const selected = { ...file, uri: '' };
+        if (!known) { delete selected.fileHash; delete selected.size; }
+        const { env, ensure } = await open(undefined, project('target', { status: 'archived', attachments: [selected, sibling] }));
+        try {
+            const before = await allRows(env), envelope = value(await api(env).prepareProjectFileAvailability(downloadRequest(env)));
+            expect(envelope.prepared.attachmentJSON).toBe(JSON.stringify(selected));
+            expect(envelope.prepared.effect.after.attachments).toEqual([{ ...selected, uri: target, localStatus: 'available' }, sibling]);
+            expect(await api(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true, value: { status: 'available' } });
+            const after = await allRows(env);
+            expect(after.tasks).toEqual(before.tasks); expect(after.settings).toEqual(before.settings);
+            expect(ensure).not.toHaveBeenCalled();
+            await env.restart(undefined, { recoveryLoad: true });
+            expect(await api(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
+            expect(await allRows(env)).toEqual(after);
+            const forged = JSON.parse(JSON.stringify(envelope)); forged.request.sha256 = 'b'.repeat(64);
+            if (known) expect(api(env).validatePreparedProjectFileAvailability(forged)).toMatchObject({ ok: false });
+        } finally { await env.close(); }
+    });
+
+    it('restores absent bytes without metadata work when selected canonical metadata is already available', async () => {
+        const selected = { ...file, uri: target, localStatus: 'available' as const }; delete selected.fileHash; delete selected.size;
+        const { env, ensure } = await open(undefined, project('target', { attachments: [selected, sibling] }));
+        try {
+            const settingsRows = await env.sql('SELECT data FROM settings WHERE id=1') as { data: string }[];
+            const settings = JSON.parse(settingsRows[0].data); delete settings.deviceId;
+            await env.client().run('UPDATE settings SET data=? WHERE id=1', [JSON.stringify(settings)]);
+            await env.restart(undefined, { recoveryLoad: true });
+            await env.client().run('UPDATE projects SET attachments=? WHERE id=?', [JSON.stringify([selected, sibling]), 'target']);
+            expect(useTaskStore.getState().settings.deviceId).toBeUndefined();
+            const save = vi.fn(async () => ({ ok: true as const, value: null })), methods = api(env, save);
+            const before = await allRows(env), state = useTaskStore.getState(), persistence = getPersistenceStatus();
+            const envelope = value(await methods.prepareProjectFileAvailability(downloadRequest(env)));
+            expect(envelope.prepared.effect).toMatchObject({ outcome: 'noop', deviceIdToInitialize: null });
+            expect(envelope.prepared.effect.rawAfter).toEqual(envelope.prepared.effect.rawBefore);
+            expect(await methods.commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true, value: { status: 'available' } });
+            expect(await allRows(env)).toEqual(before); expect(save).not.toHaveBeenCalled(); expect(ensure).not.toHaveBeenCalled();
+            expect(useTaskStore.getState()._allProjects).toBe(state._allProjects); expect(getPersistenceStatus()).toEqual(persistence);
+            expect(privateMethods(env).validatePreparedProjectFileAvailability(envelope)).toMatchObject({ ok: false });
+            await env.restart(undefined, { recoveryLoad: true });
+            expect(await api(env, save).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
+            expect(await allRows(env)).toEqual(before); expect(save).not.toHaveBeenCalled();
+        } finally { await env.close(); }
+    });
+
+    it('freezes only the shared 404 lifecycle patch and cold-replays exact after without another save', async () => {
+        const selected = { ...file, uri: '' };
+        const { env, ensure } = await open(undefined, project('target', { attachments: [selected, sibling] }));
+        try {
+            const { sha256: _hash, size: _size, ...selection } = downloadRequest(env), before = await allRows(env);
+            const envelope = value(await api(env).prepareProjectFileUnrecoverable({ ...selection, unrecoverableAt: at }));
+            expect(envelope.prepared).toMatchObject({ version: 2, kind: 'project-file-unrecoverable', expectation: { kind: 'metadata-only' },
+                result: { status: 'unrecoverable', message: 'attachments.unrecoverable', update: null } });
+            const expected = { ...selected, localStatus: 'missing', deletedAt: at, updatedAt: at };
+            delete expected.cloudKey; delete expected.fileHash;
+            expect(envelope.prepared.effect.after.attachments).toEqual([expected, sibling]);
+            expect(await allRows(env)).toEqual(before); expect(ensure).not.toHaveBeenCalled();
+            expect(privateMethods(env).validatePreparedProjectFileAvailability(envelope)).toMatchObject({ ok: false });
+            await env.restart(undefined, { recoveryLoad: true });
+            const differentLocale = preparedAvailability.createPreparedProjectAvailabilityMethods({ readiness: () => ({ ok: true, value: null }),
+                revision: () => request(env).revision, save: async () => { await flushPendingSave(); return { ok: true, value: null }; },
+                translate: () => '已改变的语言' }, 'webdav');
+            expect(differentLocale.validatePreparedProjectFileAvailability(envelope)).toEqual({ ok: true, value: envelope.prepared.result });
+            expect(await differentLocale.commitPreparedProjectFileAvailability(envelope)).toEqual({ ok: true, value: envelope.prepared.result });
+            const after = await allRows(env); expect(after.tasks).toEqual(before.tasks); expect(after.settings).toEqual(before.settings);
+            await env.restart(undefined, { recoveryLoad: true });
+            const save = vi.fn(async () => ({ ok: true as const, value: null }));
+            expect(await api(env, save).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
+            expect(await allRows(env)).toEqual(after); expect(save).not.toHaveBeenCalled();
+            for (const mutate of [(x: typeof envelope) => { x.request.unrecoverableAt = '2026-10-08T12:00:00.000Z'; },
+                (x: typeof envelope) => { x.prepared.effect.rawAfter[0] = 'foreign'; },
+                (x: typeof envelope) => { (x.prepared as unknown as Record<string, unknown>).source = {}; }]) {
+                const forged = structuredClone(envelope); mutate(forged);
+                expect(api(env).validatePreparedProjectFileAvailability(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            }
+            await env.client().run('UPDATE projects SET supportNotes=? WHERE id=?', ['Later real value', 'target']);
+            const edited = await allRows(env);
+            expect(await api(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await allRows(env)).toEqual(edited);
+        } finally { await env.close(); }
+    });
+
+    it.each(['missing', 'available'] as const)('cached hashless current URI is an exact %s metadata effect', async (localStatus) => {
+        const selected = { ...file, uri: target, localStatus }; delete selected.fileHash; delete selected.size;
+        const { env, ensure, attachments } = await open(undefined, project('target', { attachments: [selected, sibling] }));
+        try {
+            const save = vi.fn(async () => { await flushPendingSave(); return { ok: true as const, value: null }; });
+            const methods = createProjectAvailabilityMethods({ readiness: () => ({ ok: true, value: null }),
+                revision: () => value(env.host.getProjectAttachmentEditOptions({ projectId: 'target' })).revision,
+                save, host: () => attachments }, 'cached-webdav');
+            const before = await allRows(env);
+            expect(await methods.downloadRelocatedProjectAttachment(request(env), target)).toMatchObject({ ok: true, value: { status: 'available' } });
+            expect(ensure).toHaveBeenCalledExactlyOnceWith(selected);
+            const after = await allRows(env); expect(after.tasks).toEqual(before.tasks); expect(after.settings).toEqual(before.settings);
+            if (localStatus === 'available') { expect(after).toEqual(before); expect(save).not.toHaveBeenCalled(); }
+            else expect((after.projects as Record<string, unknown>[]).find(row => row.id === 'target')?.attachments)
+                .toBe(JSON.stringify([{ ...selected, localStatus: 'available' }, sibling]));
+        } finally { await env.close(); }
+    });
+});

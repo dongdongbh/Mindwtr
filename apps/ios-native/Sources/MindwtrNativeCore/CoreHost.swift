@@ -213,8 +213,8 @@ public final class CoreHost: @unchecked Sendable {
         _ = try? await perform { $0.projectFileDownloadHooks = hooks }
     }
     /// Existing DEBUG isolated-library fixture only, one known durable boundary.
-    public func configureIsolatedProjectFileDownloadFilledFailureOnce() async throws {
-        try await perform { try $0.configureIsolatedProjectFileDownloadFilledFailureOnce() }
+    public func configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: Bool = false) async throws {
+        try await perform { try $0.configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: metadataOnly) }
     }
     #endif
 
@@ -680,7 +680,8 @@ private final class Engine: @unchecked Sendable {
         let rawBeforeJSON: String
         let deviceBeforeJSON: String
         let config: [String?]
-        let source: ProjectSource
+        let source: ProjectSource?
+        var outcome: String?
         var phase: ProjectDownloadPhase = .intent
         var reservationStarted = false
         var managedDirectoryIdentity: String?
@@ -720,6 +721,8 @@ private final class Engine: @unchecked Sendable {
         var legacy: [(String, String?)] = []
         var cloudToken: String?
         var cloudObserved = false
+        var webdavPassword: String?
+        var webdavObserved = false
         var encryptionKey: String?
         var encryptionObserved = false
         var decryptionAdmitted = false
@@ -989,6 +992,9 @@ private final class Engine: @unchecked Sendable {
         let taskRowsJSON: String
         let config: [(String, String?)]
         let cloudToken: String?
+        var webdavPassword: String?
+        var webdavObserved = false
+        var unadoptedSourceRetired = false
         var encryptionKey: String?
         var encryptionObserved = false
         var decryptionAdmitted = false
@@ -1462,7 +1468,7 @@ private final class Engine: @unchecked Sendable {
             if let command = pending, command.method == Self.projectDownloadMethod {
                 let state = try projectDownloadJournal(command)
                 _ = try captureProjectDownloadTurn(command: command)
-                _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON])
+                _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON, state.config[0] ?? "cloud"])
                 try requireProjectDownloadTurn()
             }
             if let command = pending, command.method == Self.projectFileAddMethod {
@@ -2648,7 +2654,8 @@ private final class Engine: @unchecked Sendable {
               rows[0]["deletedAt"] is NSNull, rows[0]["purgedAt"] is NSNull else { throw Self.taskDownloadFailure }
         return try Self.ownedJSON(rows)
     }
-    private func requireTaskDownloadTurn(before: Bool = false, checkMaterial: Bool = true) throws {
+    private func requireTaskDownloadTurn(before: Bool = false, checkMaterial: Bool = true,
+                                         secureReadCancellation: NativeAttachmentCancellation? = nil) throws {
         guard let turn = taskDownloadTurn else { return }
         dispatchPrecondition(condition: .onQueue(queue))
         if turn.preparing { try turn.cancellation.check() }
@@ -2664,12 +2671,17 @@ private final class Engine: @unchecked Sendable {
             if !checkMaterial && name == "@mindwtr_sync_encryption_key_v1" { continue }
             guard Self.taskDownloadOptionalEqual(try turn.storage.get(name), expected) else { throw Self.taskDownloadFailure }
         }
+        let readCancellation = secureReadCancellation ?? turn.cancellation
         if Self.taskDownloadSelfHosted(turn.config) {
-            guard Self.taskDownloadOptionalEqual(try taskDownloadCloudToken(turn.cancellation), turn.cloudToken) else { throw Self.taskDownloadFailure }
+            guard Self.taskDownloadOptionalEqual(try taskDownloadCloudToken(readCancellation), turn.cloudToken) else { throw Self.taskDownloadFailure }
+        }
+        if turn.webdavObserved {
+            guard let secretJobs, Self.taskDownloadOptionalEqual(
+                try secretJobs.readWebDavPasswordForAttachmentOwner(cancellation: readCancellation), turn.webdavPassword) else { throw Self.taskDownloadFailure }
         }
         if checkMaterial && turn.encryptionObserved {
             guard let secretJobs, Self.taskDownloadOptionalEqual(
-                try secretJobs.readEncryptionKeyForAttachmentOwner(cancellation: turn.cancellation), turn.encryptionKey) else { throw Self.taskDownloadFailure }
+                try secretJobs.readEncryptionKeyForAttachmentOwner(cancellation: readCancellation), turn.encryptionKey) else { throw Self.taskDownloadFailure }
         }
         if before {
             let actual = try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned()
@@ -2679,6 +2691,18 @@ private final class Engine: @unchecked Sendable {
                 throw Self.taskDownloadFailure
             }
         }
+    }
+    private func observeTaskDownloadWebDavPassword(_ turn: TaskDownloadTurn) throws {
+        if turn.webdavObserved { return }
+        try requireTaskDownloadTurn(before: true)
+        guard !Self.taskDownloadSelfHosted(turn.config), turn.config.first?.1 == "webdav", let secretJobs else { throw Self.taskDownloadFailure }
+        let secure = try secretJobs.readWebDavPasswordForAttachmentOwner(cancellation: turn.cancellation)
+        let legacy = try turn.storage.get("@mindwtr_webdav_password")
+        if let prior = turn.legacy.first(where: { $0.0 == "@mindwtr_webdav_password" }) {
+            guard Self.taskDownloadOptionalEqual(prior.1, legacy) else { throw Self.taskDownloadFailure }
+        } else { turn.legacy.append(("@mindwtr_webdav_password", legacy)) }
+        turn.webdavPassword = secure; turn.webdavObserved = true
+        try requireTaskDownloadTurn(before: true)
     }
     private func observeTaskDownloadEncryption(_ turn: TaskDownloadTurn) throws {
         if turn.encryptionObserved { return }
@@ -2739,7 +2763,10 @@ private final class Engine: @unchecked Sendable {
         guard taskDownloadTurn === turn, receipt.matches(source) else { throw Self.taskDownloadFailure }
         // Only an exact unadopted source can retire after material revocation.
         // Config/KV namespace, credentials, editor and record checks still apply.
-        try requireTaskDownloadTurn(checkMaterial: completed)
+        // A settled cancellation still permits fresh secure observations for this
+        // exact retirement; it never waives credential equality or admits work.
+        let readCancellation = completed ? turn.cancellation : NativeAttachmentCancellation()
+        try requireTaskDownloadTurn(checkMaterial: completed, secureReadCancellation: readCancellation)
         let store = NativeAttachmentDraftStore(databaseURL: databaseURL), binding = try store.readVersioned()
         let editor = try editorDrafts.readOwnedCheckpoint()
         guard let editor, editor.attempt == nil else { throw Self.taskDownloadFailure }
@@ -2753,7 +2780,7 @@ private final class Engine: @unchecked Sendable {
                     identity: retained.identity, cacheRootIdentity: retained.cacheRootIdentity, parentIdentity: retained.parentIdentity)) else { throw Self.taskDownloadFailure }
         } else {
             // Lost write acknowledgements never establish absence of intent.
-            try requireTaskDownloadTurn(before: true, checkMaterial: false)
+            try requireTaskDownloadTurn(before: true, checkMaterial: false, secureReadCancellation: readCancellation)
             if let binding {
                 guard case .availability(let record) = binding.record,
                       !record.operations.contains(where: { Self.ownedEqual($0.requestId, turn.request.id) }) else { throw Self.taskDownloadFailure }
@@ -2761,13 +2788,14 @@ private final class Engine: @unchecked Sendable {
         }
         func owner() throws {
             guard taskDownloadTurn === turn, receipt.matches(source) else { throw Self.taskDownloadFailure }
-            try requireTaskDownloadTurn(checkMaterial: completed)
+            try requireTaskDownloadTurn(checkMaterial: completed, secureReadCancellation: readCancellation)
             let actual = try store.readVersioned()
             if let binding { guard let actual, binding.matches(actual) else { throw Self.taskDownloadFailure } }
             else { guard actual == nil else { throw Self.taskDownloadFailure } }
             guard let actualEditor = try editorDrafts.readOwnedCheckpoint(), editor.matches(actualEditor) else { throw Self.taskDownloadFailure }
         }
         try owner(); try turn.jobs.retireProviderSource(receipt, requireOwner: owner); try owner()
+        if !completed && turn.webdavObserved { turn.unadoptedSourceRetired = true }
     }
     func downloadTaskAttachmentV5(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
@@ -2791,7 +2819,14 @@ private final class Engine: @unchecked Sendable {
                 record: try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned())
             if cloud { turn.legacy.append(("@mindwtr_cloud_token", legacyToken)) }
             taskDownloadTurn = turn
-            defer { turn.preparing = false; taskDownloadTurn = nil; scheduleAttachmentIdle(immediate: true) }
+            defer {
+                turn.preparing = false; taskDownloadTurn = nil
+                // Cleanup already proved this exact receipt; delivery no longer belongs to the revoked download.
+                if turn.unadoptedSourceRetired {
+                    _ = try? invoke("attachmentDraftAcknowledged", arguments: ["webdav-task-availability", "source-retired"])
+                }
+                scheduleAttachmentIdle(immediate: true)
+            }
             do {
                 let coordinator = try attachmentDraftCoordinatorV3(cancellation: cancellation, additionalOwner: { [unowned self] in
                     try self.requireTaskDownloadTurn(before: self.taskDownloadTurn?.preparing == true)
@@ -2918,6 +2953,11 @@ private final class Engine: @unchecked Sendable {
                     // availability when captured authority is no longer current.
                     do { try requireTaskDownloadTurn()
                         _ = try? invoke("attachmentDraftAcknowledged", arguments: ["selfhosted-task-availability", "confirmed"])
+                    } catch { }
+                }
+                if turn.webdavObserved && status != "unrecoverable" {
+                    do { try requireTaskDownloadTurn()
+                        _ = try? invoke("attachmentDraftAcknowledged", arguments: ["webdav-task-availability", "confirmed"])
                     } catch { }
                 }
                 if let relocatedProof {
@@ -16398,7 +16438,7 @@ private final class Engine: @unchecked Sendable {
             }
             if command == "projectAttachmentDownload" {
                 let storage = try requireDeviceStorageAdmission(), saved = try storage.multiGet(Self.taskDownloadConfigKeys)
-                if Self.taskDownloadSelfHosted(saved) {
+                if Self.taskDownloadSelfHosted(saved) || saved[0].1 == "webdav" {
                     if let cached = try relocatedProjectAvailability(requestJSON: requestJSON, callback: callback,
                         cancellation: cancellation, cached: true) { return cached }
                     let result = try downloadProjectFile(requestJSON: requestJSON, storage: storage, config: saved, cancellation: cancellation)
@@ -16514,11 +16554,19 @@ private final class Engine: @unchecked Sendable {
         }
         let generation = attachmentGeneration, deviceBefore = try projectAvailabilityDevice()
         let storage = try requireDeviceStorageAdmission(), config = try storage.multiGet(Self.taskDownloadConfigKeys)
-        let cloud = Self.taskDownloadSelfHosted(config)
-        if cached && !cloud { return nil }
+        let cloud = Self.taskDownloadSelfHosted(config), webdav = config[0].1 == "webdav"
+        if cached && !cloud && !webdav { return nil }
+        let credentialName = cached && webdav ? "@mindwtr_webdav_password" : "@mindwtr_cloud_token"
+        func credential() throws -> String? {
+            if cached && webdav {
+                guard let secretJobs = self.secretJobs else { throw Self.foregroundSyncFailure }
+                return try secretJobs.readWebDavPasswordForAttachmentOwner(cancellation: cancellation)
+            }
+            return try self.taskDownloadCloudToken(cancellation)
+        }
         var credentialsObserved = cloud && !cached
-        var legacyToken = credentialsObserved ? try storage.get("@mindwtr_cloud_token") : nil
-        var cloudToken = credentialsObserved ? try taskDownloadCloudToken(cancellation) : nil
+        var legacyToken = credentialsObserved ? try storage.get(credentialName) : nil
+        var cloudToken = credentialsObserved ? try credential() : nil
         var after: [String: Any]?, writesAllowed = false
         func commonOwner() throws {
             try cancellation.check(); try self.denyCleanupOwner()
@@ -16537,8 +16585,8 @@ private final class Engine: @unchecked Sendable {
                 Self.ownedEqual($0.0.0, $0.1.0) && Self.taskDownloadOptionalEqual($0.0.1, $0.1.1)
             }) else { throw Self.foregroundSyncFailure }
             if credentialsObserved {
-                guard Self.taskDownloadOptionalEqual(try storage.get("@mindwtr_cloud_token"), legacyToken),
-                      Self.taskDownloadOptionalEqual(try self.taskDownloadCloudToken(cancellation), cloudToken) else { throw Self.foregroundSyncFailure }
+                guard Self.taskDownloadOptionalEqual(try storage.get(credentialName), legacyToken),
+                      Self.taskDownloadOptionalEqual(try credential(), cloudToken) else { throw Self.foregroundSyncFailure }
             }
         }
         func rowOwner() throws {
@@ -16568,7 +16616,7 @@ private final class Engine: @unchecked Sendable {
         let input = try Self.ownedJSON(["projectId": projectID, "attachmentId": attachmentID,
             "revision": revision, "managedDirectoryURI": projectManagedURI()])
         let raw = try invoke(cached ? "projectAttachmentCachedAvailabilityPreflight" : "projectAttachmentAvailabilityPreflight",
-            arguments: cloud ? [input, config[4].1.map { $0 as Any } ?? NSNull()] : [input], localCancellation: cancellation)
+            arguments: cloud || cached && webdav ? [input, config[4].1.map { $0 as Any } ?? NSNull()] : [input], localCancellation: cancellation)
         try rowOwner()
         guard let preflight = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               Set(preflight.keys) == Set(["revision", "project", "targetURI"]), preflight["revision"] as? String == revision,
@@ -16582,7 +16630,7 @@ private final class Engine: @unchecked Sendable {
         }
         if cached {
             mapped = derived
-            legacyToken = try storage.get("@mindwtr_cloud_token"); cloudToken = try taskDownloadCloudToken(cancellation)
+            legacyToken = try storage.get(credentialName); cloudToken = try credential()
             credentialsObserved = true; try rowOwner()
         }
         let coordinator = try NativeAttachmentDraftCoordinator(databaseURL: databaseURL, jobs: jobs, maximumReadBytes: 8_388_608,
@@ -16592,7 +16640,12 @@ private final class Engine: @unchecked Sendable {
             if cached { try rowOwner(); return nil }
             throw Self.foregroundSyncFailure
         }
-        try relocatedFileOpenProof(proof, selected: selected); try rowOwner()
+        var proofSelected = selected
+        if cached && webdav && selected["fileHash"] == nil {
+            guard Self.ownedEqual(originalURI, mapped) else { throw Self.foregroundSyncFailure }
+            proofSelected["fileHash"] = proof.sha256
+        }
+        try relocatedFileOpenProof(proof, selected: proofSelected); try rowOwner()
         let turn = ProjectAvailabilityTurn(targetURI: mapped, requireOwner: rowOwner, readStorage: { names in
             try rowOwner()
             guard !names.isEmpty, names.count <= Self.taskDownloadConfigKeys.count,
@@ -16614,12 +16667,13 @@ private final class Engine: @unchecked Sendable {
         }
         writesAllowed = true
         let result = try invoke(cached ? "projectAttachmentCachedAvailability" : "iosForegroundSync",
-            arguments: cached ? [input, mapped] : ["projectAttachmentDownload", requestJSON, callback, mapped], localCancellation: cancellation)
+            arguments: cached ? (webdav && selected["fileHash"] == nil
+                ? [input, mapped, try Self.ownedJSON(["sha256": proof.sha256, "size": proof.size])] : [input, mapped]) : ["projectAttachmentDownload", requestJSON, callback, mapped], localCancellation: cancellation)
         try rowOwner()
         guard let answer = try NativeJSON.jsonObject(with: Data(result.utf8)) as? [String: Any] else { throw Self.foregroundSyncFailure }
         if answer["ok"] as? Bool == true, let value = answer["value"] as? [String: Any], value["status"] as? String == "available" {
             guard Set(value.keys) == Set(["status", "message", "update"]), value["message"] is NSNull, value["update"] is NSNull,
-                  after != nil else { throw Self.foregroundSyncFailure }
+                  after != nil || cached && webdav && originalURI == mapped && selected["localStatus"] as? String == "available" else { throw Self.foregroundSyncFailure }
             let final = try coordinator.snapshotFileOpen(attachmentID: attachmentID, targetURI: mapped,
                 cancellation: cancellation)
             try rowOwner(); guard final == proof else { throw Self.foregroundSyncFailure }
@@ -16663,7 +16717,7 @@ private final class Engine: @unchecked Sendable {
         return "\(UInt64(actual.st_dev)):\(UInt64(actual.st_ino))"
     }
     #if DEBUG
-    func configureIsolatedProjectFileDownloadFilledFailureOnce() throws {
+    func configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: Bool = false) throws {
         let directory = databaseURL.deletingLastPathComponent(), identifier = directory.lastPathComponent
         guard !started, !closed, !invoking, pending == nil, projectDownloadTurn == nil, projectFileAddTurn == nil,
               taskDownloadTurn == nil, projectAvailabilityTurn == nil, retainedOrdinaryTurn == nil, providerCopy == nil,
@@ -16676,7 +16730,7 @@ private final class Engine: @unchecked Sendable {
         }
         let hooks = ProjectFileDownloadHostHooks(); var fired = false
         hooks.boundary = { boundary in
-            if boundary == .afterFilled && !fired {
+            if boundary == (metadataOnly ? .afterIntent : .afterFilled) && !fired {
                 fired = true
                 throw HostFailure("Isolated Project download fixture interrupted")
             }
@@ -16690,13 +16744,16 @@ private final class Engine: @unchecked Sendable {
               command.argumentsJSON.utf8.count <= Self.ownedSaveMaximumBytes,
               let values = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], values.count == 1 else { throw Self.projectDownloadFailure }
         let raw = try Self.projectObject(values[0])
-        let required: Set<String> = ["version", "requestId", "requestJSON", "preflightJSON", "envelopeJSON", "columns", "rawBeforeJSON", "deviceBeforeJSON", "config", "source", "phase", "reservationStarted", "abandoned", "targetRetired", "stageRetired", "sourceRetired"]
-        guard required.isSubset(of: Set(raw.keys)), Set(raw.keys).isSubset(of: required.union(["managedDirectoryIdentity", "stage", "filled", "published"])) else { throw Self.projectDownloadFailure }
+        let metadataOnly = raw["version"] as? Int == 2
+        let common: Set<String> = ["version", "requestId", "requestJSON", "preflightJSON", "envelopeJSON", "columns", "rawBeforeJSON", "deviceBeforeJSON", "config", "phase", "reservationStarted", "abandoned", "targetRetired", "stageRetired", "sourceRetired"]
+        let required = common.union(metadataOnly ? ["outcome"] : ["source"])
+        guard required.isSubset(of: Set(raw.keys)),
+              Set(raw.keys).isSubset(of: metadataOnly ? required : required.union(["managedDirectoryIdentity", "stage", "filled", "published"])) else { throw Self.projectDownloadFailure }
         let state = try JSONDecoder().decode(ProjectDownloadState.self, from: Data(values[0].utf8))
         let request = try Self.projectObject(state.requestJSON, maximum: 128 * 1024)
         let preflight = try Self.projectObject(state.preflightJSON), envelope = try Self.projectObject(state.envelopeJSON)
         let before = try Self.projectObject(state.rawBeforeJSON)
-        guard state.version == 1, Self.ownedDiscardUUID(state.requestId) == state.requestId,
+        guard [1, 2].contains(state.version), Self.ownedDiscardUUID(state.requestId) == state.requestId,
               Set(request.keys) == Set(["projectId", "attachmentId", "revision"]),
               let project = request["projectId"] as? String, !project.isEmpty, project.utf8.count <= 2_000,
               let attachment = Self.ownedDiscardUUID(request["attachmentId"]),
@@ -16715,13 +16772,10 @@ private final class Engine: @unchecked Sendable {
               Self.ownedEqual(try Self.ownedJSON(state.columns.map { before[$0]! }), try Self.ownedJSON(rawBefore)),
               Self.ownedEqual(state.deviceBeforeJSON, try Self.ownedJSON([preflight["deviceIdBefore"] as Any])),
               Set(envelope.keys) == Set(["request", "prepared"]), let enriched = envelope["request"] as? [String: Any],
-              Set(enriched.keys) == Set(["version", "requestId", "projectId", "attachmentId", "revision", "managedDirectoryURI", "sha256", "size"]),
               enriched["version"] as? Int == 1, enriched["requestId"] as? String == state.requestId,
               enriched["projectId"] as? String == project, enriched["attachmentId"] as? String == attachment,
               enriched["revision"] as? String == revision, enriched["managedDirectoryURI"] as? String == (try projectManagedURI()),
-              enriched["sha256"] as? String == state.source.sha256, Self.isInteger(enriched["size"]), (enriched["size"] as? NSNumber)?.int64Value == state.source.size,
-              let prepared = envelope["prepared"] as? [String: Any], prepared["version"] as? Int == 1,
-              prepared["kind"] as? String == "project-file-availability", prepared["attachmentJSON"] as? String == original,
+              let prepared = envelope["prepared"] as? [String: Any], prepared["attachmentJSON"] as? String == original,
               prepared["targetURI"] as? String == target,
               let effect = prepared["effect"] as? [String: Any], effect["projectId"] as? String == project,
               effect["attachmentId"] as? String == attachment, effect["targetURI"] as? String == target,
@@ -16729,42 +16783,60 @@ private final class Engine: @unchecked Sendable {
               Self.ownedEqual(try Self.ownedJSON(effect["rawBefore"] as Any), try Self.ownedJSON(rawBefore)),
               Self.ownedEqual(state.deviceBeforeJSON, try Self.ownedJSON([effect["deviceIdBefore"] as Any])),
               state.config.count == Self.taskDownloadConfigKeys.count,
-              Self.taskDownloadSelfHosted(Array(zip(Self.taskDownloadConfigKeys, state.config))),
-              state.config[5]?.isEmpty == false,
-              state.source.size >= 0, state.source.size <= 8_388_608, state.source.sha256.utf8.count == 64,
-              state.source.sha256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
-              [state.source.identity, state.source.cacheRootIdentity, state.source.parentIdentity].allSatisfy(Self.projectToken) else { throw Self.projectDownloadFailure }
-        let root = URL(string: try projectManagedURI())!.deletingLastPathComponent().deletingLastPathComponent()
-        guard let sourceURL = URL(string: state.source.sourceURI),
-              Self.ownedEqual(sourceURL.deletingLastPathComponent().absoluteString, root.appendingPathComponent("cache", isDirectory: true).absoluteString),
-              Self.ownedDiscardUUID(sourceURL.lastPathComponent) != nil else { throw Self.projectDownloadFailure }
+              Self.taskDownloadSelfHosted(Array(zip(Self.taskDownloadConfigKeys, state.config))) || state.config[0] == "webdav",
+              state.config[state.config[0] == "webdav" ? 1 : 5]?.isEmpty == false else { throw Self.projectDownloadFailure }
         let rank = ProjectDownloadPhase.allCases.firstIndex(of: state.phase)!
-        if let directory = state.managedDirectoryIdentity { guard Self.projectToken(directory) else { throw Self.projectDownloadFailure } }
-        if let stage = state.stage {
-            guard state.reservationStarted, state.managedDirectoryIdentity == stage.directoryIdentity,
-                  stage.uri == (try projectManagedURI()) + ".mindwtr-install-" + state.requestId.replacingOccurrences(of: "-", with: "") + ".candidate/stage",
-                  [stage.identity, stage.directoryIdentity, stage.privateDirectoryIdentity].allSatisfy(Self.projectToken) else { throw Self.projectDownloadFailure }
-        }
-        if let filled = state.filled {
-            guard let stage = state.stage, filled.sha256 == state.source.sha256, filled.size == state.source.size, filled.identity == stage.identity else { throw Self.projectDownloadFailure }
-        }
-        if let published = state.published {
-            guard let stage = state.stage, state.filled != nil, published.sha256 == state.source.sha256, published.size == state.source.size,
-                  published.identity == stage.identity, published.directoryIdentity == stage.directoryIdentity else { throw Self.projectDownloadFailure }
-        }
-        guard (state.stage == nil || rank >= 1 || state.abandoned),
-              (rank < 1 || state.stage != nil || state.abandoned && state.phase == .settled),
-              (rank < 2 || state.filled != nil || state.abandoned && state.phase == .settled),
-              (rank < 3 || state.published != nil || state.abandoned && state.phase == .settled),
-              !state.targetRetired || state.abandoned,
-              !state.stageRetired || rank >= 4 || state.abandoned,
-              !state.sourceRetired || rank >= 4 || state.abandoned else { throw Self.projectDownloadFailure }
         let result = try Self.ownedJSON(prepared["result"] as Any)
-        guard Self.ownedEqual(result, "{\"message\":null,\"status\":\"available\",\"update\":null}") else { throw Self.projectDownloadFailure }
+        if metadataOnly {
+            guard state.config[0] == "webdav", state.outcome == "unrecoverable", state.source == nil,
+                  Set(enriched.keys) == Set(["version", "requestId", "projectId", "attachmentId", "revision", "managedDirectoryURI", "unrecoverableAt"]),
+                  let stamp = enriched["unrecoverableAt"] as? String, Self.isCanonicalReviewInstant(stamp),
+                  prepared["version"] as? Int == 2, prepared["kind"] as? String == "project-file-unrecoverable",
+                  effect["outcome"] as? String == "unrecoverable", effect["updateAt"] as? String == stamp,
+                  let expectation = prepared["expectation"] as? [String: Any], Set(expectation.keys) == Set(["kind"]), expectation["kind"] as? String == "metadata-only",
+                  let value = prepared["result"] as? [String: Any], Set(value.keys) == Set(["status", "message", "update"]),
+                  value["status"] as? String == "unrecoverable", let message = value["message"] as? String, !message.isEmpty, message.utf16.count <= 10_000,
+                  value["update"] is NSNull, [.intent, .domainSaved, .settled].contains(state.phase),
+                  !state.reservationStarted, state.managedDirectoryIdentity == nil, state.stage == nil, state.filled == nil, state.published == nil,
+                  !state.targetRetired, !state.stageRetired, !state.sourceRetired else { throw Self.projectDownloadFailure }
+        } else {
+            guard state.outcome == nil, let source = state.source,
+                  Set(enriched.keys) == Set(["version", "requestId", "projectId", "attachmentId", "revision", "managedDirectoryURI", "sha256", "size"]),
+                  enriched["sha256"] as? String == source.sha256, Self.isInteger(enriched["size"]), (enriched["size"] as? NSNumber)?.int64Value == source.size,
+                  prepared["version"] as? Int == 1, prepared["kind"] as? String == "project-file-availability",
+                  source.size >= 0, source.size <= 8_388_608, source.sha256.utf8.count == 64,
+                  source.sha256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                  [source.identity, source.cacheRootIdentity, source.parentIdentity].allSatisfy(Self.projectToken) else { throw Self.projectDownloadFailure }
+            let root = URL(string: try projectManagedURI())!.deletingLastPathComponent().deletingLastPathComponent()
+            guard let sourceURL = URL(string: source.sourceURI),
+                  Self.ownedEqual(sourceURL.deletingLastPathComponent().absoluteString, root.appendingPathComponent("cache", isDirectory: true).absoluteString),
+                  Self.ownedDiscardUUID(sourceURL.lastPathComponent) != nil else { throw Self.projectDownloadFailure }
+            if let directory = state.managedDirectoryIdentity { guard Self.projectToken(directory) else { throw Self.projectDownloadFailure } }
+            if let stage = state.stage {
+                guard state.reservationStarted, state.managedDirectoryIdentity == stage.directoryIdentity,
+                      stage.uri == (try projectManagedURI()) + ".mindwtr-install-" + state.requestId.replacingOccurrences(of: "-", with: "") + ".candidate/stage",
+                      [stage.identity, stage.directoryIdentity, stage.privateDirectoryIdentity].allSatisfy(Self.projectToken) else { throw Self.projectDownloadFailure }
+            }
+            if let filled = state.filled {
+                guard let stage = state.stage, filled.sha256 == source.sha256, filled.size == source.size, filled.identity == stage.identity else { throw Self.projectDownloadFailure }
+            }
+            if let published = state.published {
+                guard let stage = state.stage, state.filled != nil, published.sha256 == source.sha256, published.size == source.size,
+                      published.identity == stage.identity, published.directoryIdentity == stage.directoryIdentity else { throw Self.projectDownloadFailure }
+            }
+            guard (state.stage == nil || rank >= 1 || state.abandoned),
+                  (rank < 1 || state.stage != nil || state.abandoned && state.phase == .settled),
+                  (rank < 2 || state.filled != nil || state.abandoned && state.phase == .settled),
+                  (rank < 3 || state.published != nil || state.abandoned && state.phase == .settled),
+                  !state.targetRetired || state.abandoned,
+                  !state.stageRetired || rank >= 4 || state.abandoned,
+                  !state.sourceRetired || rank >= 4 || state.abandoned else { throw Self.projectDownloadFailure }
+            guard Self.ownedEqual(result, "{\"message\":null,\"status\":\"available\",\"update\":null}"),
+                  state.phase != .settled || state.stageRetired && state.sourceRetired && (!state.abandoned || state.targetRetired) else { throw Self.projectDownloadFailure }
+        }
         if case .success(let terminal) = command.terminal {
             guard rank >= 4, Self.ownedEqual(terminal, state.abandoned && state.phase == .settled ? "{\"abandoned\":true}" : result) else { throw Self.projectDownloadFailure }
         } else { guard command.terminal == nil, rank < 4 else { throw Self.projectDownloadFailure } }
-        guard state.phase != .settled || state.stageRetired && state.sourceRetired && (!state.abandoned || state.targetRetired) else { throw Self.projectDownloadFailure }
         return state
     }
     private func projectDownloadCommand(_ state: ProjectDownloadState) throws -> PendingCommand {
@@ -16805,7 +16877,7 @@ private final class Engine: @unchecked Sendable {
             started: started, activation: recoveryActivationPending, command: command, journal: binding)
         if let command {
             let state = try projectDownloadJournal(command)
-            turn.acknowledged = state; turn.managedDirectoryIdentity = state.managedDirectoryIdentity
+            turn.acknowledged = state; turn.managedDirectoryIdentity = state.version == 2 ? try projectManagedIdentity() : state.managedDirectoryIdentity
             try configureProjectDownloadWitness(state, turn: turn)
         } else { turn.managedDirectoryIdentity = try projectManagedIdentity() }
         projectDownloadTurn = turn
@@ -16845,6 +16917,10 @@ private final class Engine: @unchecked Sendable {
         if turn.cloudObserved {
             guard Self.taskDownloadOptionalEqual(try taskDownloadCloudToken(turn.cancellation), turn.cloudToken) else { throw Self.projectDownloadFailure }
         }
+        if turn.webdavObserved {
+            guard let secretJobs, Self.taskDownloadOptionalEqual(
+                try secretJobs.readWebDavPasswordForAttachmentOwner(cancellation: turn.cancellation), turn.webdavPassword) else { throw Self.projectDownloadFailure }
+        }
         if turn.encryptionObserved {
             guard let secretJobs, Self.taskDownloadOptionalEqual(
                 try secretJobs.readEncryptionKeyForAttachmentOwner(cancellation: turn.cancellation), turn.encryptionKey) else { throw Self.projectDownloadFailure }
@@ -16852,6 +16928,18 @@ private final class Engine: @unchecked Sendable {
         let row = try Self.ownedJSON(projectAvailabilityRow(turn.projectID)), device = try Self.ownedJSON([projectAvailabilityDevice()])
         guard Self.ownedEqual(row, turn.beforeJSON) || turn.allowAfter && Self.ownedEqual(row, turn.afterJSON),
               Self.ownedEqual(device, turn.deviceBeforeJSON) || turn.allowAfter && Self.ownedEqual(device, turn.deviceAfterJSON) else { throw Self.projectDownloadFailure }
+    }
+    private func observeProjectDownloadCredential(_ turn: ProjectDownloadTurn) throws {
+        let webdav = turn.config.first?.1 == "webdav"
+        let name = webdav ? "@mindwtr_webdav_password" : "@mindwtr_cloud_token"
+        turn.legacy = [(name, try turn.storage.get(name))]
+        if webdav {
+            guard let secretJobs else { throw Self.projectDownloadFailure }
+            turn.webdavPassword = try secretJobs.readWebDavPasswordForAttachmentOwner(cancellation: turn.cancellation)
+            turn.webdavObserved = true
+        } else {
+            turn.cloudToken = try taskDownloadCloudToken(turn.cancellation); turn.cloudObserved = true
+        }
     }
     private func observeProjectDownloadEncryption(_ turn: ProjectDownloadTurn) throws {
         if turn.encryptionObserved { return }
@@ -16905,7 +16993,8 @@ private final class Engine: @unchecked Sendable {
                   prior.published == nil || prior.published == state.published,
                   prior.managedDirectoryIdentity == nil || prior.managedDirectoryIdentity == state.managedDirectoryIdentity else { throw Self.projectDownloadFailure }
             let before = ProjectDownloadPhase.allCases.firstIndex(of: prior.phase)!, after = ProjectDownloadPhase.allCases.firstIndex(of: state.phase)!
-            guard after == before || after == before + 1 || state.abandoned && state.phase == .settled else { throw Self.projectDownloadFailure }
+            guard after == before || after == before + 1 || state.version == 2 && prior.phase == .intent && state.phase == .domainSaved
+                || state.abandoned && state.phase == .settled else { throw Self.projectDownloadFailure }
         }
         let command = try projectDownloadCommand(state), data = try ownedEncoded(command)
         #if DEBUG
@@ -16973,7 +17062,10 @@ private final class Engine: @unchecked Sendable {
         let original = try Self.projectObject(requestJSON, maximum: 128 * 1024)
         guard Set(original.keys) == Set(["projectId", "attachmentId", "revision"]), let project = original["projectId"] as? String,
               let attachment = Self.ownedDiscardUUID(original["attachmentId"]), let revision = original["revision"] as? String,
-              Self.taskDownloadSelfHosted(config), let url = config[5].1, !url.isEmpty else { throw Self.projectDownloadFailure }
+              config.count == Self.taskDownloadConfigKeys.count, Self.taskDownloadSelfHosted(config) || config[0].1 == "webdav",
+              let url = config[config[0].1 == "webdav" ? 1 : 5].1, !url.isEmpty else { throw Self.projectDownloadFailure }
+        let backend = config[0].1 == "webdav" ? "webdav" : "cloud"
+        let operation = backend == "webdav" ? "webdav-project-download" : "selfhosted-project-download"
         let turn = try captureProjectDownloadTurn(command: nil)
         projectDownloadAcknowledgedTurn = nil
         do {
@@ -16983,7 +17075,7 @@ private final class Engine: @unchecked Sendable {
             try requireProjectDownloadTurn(strict: true)
             let id = UUID().uuidString.lowercased()
             var request: [String: Any] = ["version": 1, "requestId": id, "projectId": project, "attachmentId": attachment, "revision": revision, "managedDirectoryURI": try projectManagedURI()]
-            let wrapper = try Self.projectObject(invoke("projectFileAvailabilityPreflight", arguments: [Self.ownedJSON(request), config[4].1 as Any? ?? NSNull(), url], localCancellation: cancellation))
+            let wrapper = try Self.projectObject(invoke("projectFileAvailabilityPreflight", arguments: [Self.ownedJSON(request), config[4].1 as Any? ?? NSNull(), url, backend], localCancellation: cancellation))
             let nativeBefore = try Self.projectObject(turn.beforeJSON)
             guard Set(wrapper.keys) == Set(["preflight", "columns", "initialURL"]), let preflight = wrapper["preflight"] as? [String: Any],
                   let columns = wrapper["columns"] as? [String], let initial = wrapper["initialURL"] as? String,
@@ -16995,8 +17087,7 @@ private final class Engine: @unchecked Sendable {
                   taskDownloadManagedPath(target, root: try projectManagedURI()) else { throw Self.projectDownloadFailure }
             turn.targetURI = target; turn.initialURL = initial
             // Eligibility/incomplete refusal precedes all secure reads and local byte proof.
-            turn.legacy = [("@mindwtr_cloud_token", try storage.get("@mindwtr_cloud_token"))]
-            turn.cloudToken = try taskDownloadCloudToken(cancellation); turn.cloudObserved = true
+            try observeProjectDownloadCredential(turn)
             try requireProjectDownloadTurn(strict: true)
             let baseline = try projectDownloadFile(.snapshotBaseline(attachmentID: attachment, targetURI: target), turn: turn, cancellation: cancellation)
             guard baseline["kind"] as? String == "noOwnedGeneration", baseline["targetURI"] as? String == target,
@@ -17009,20 +17100,54 @@ private final class Engine: @unchecked Sendable {
                 catch { return "!MindwtrNativeError:" + Self.projectDownloadFailure.message }
             }
             guard let callbackValue = JSValue(object: callback, in: turn.runtime) else { throw Self.projectDownloadFailure }
-            let configJSON = try Self.ownedJSON(["backend": "cloud", "url": url, "provider": config[6].1 as Any? ?? NSNull(), "allowInsecureHttp": config[7].1 as Any? ?? NSNull(), "encryptionStateJSON": config[4].1 as Any? ?? NSNull()])
+            let configJSON = try Self.ownedJSON(backend == "webdav"
+                ? ["backend": backend, "url": url, "username": config[2].1 as Any? ?? NSNull(), "allowInsecureHttp": config[3].1 as Any? ?? NSNull(), "encryptionStateJSON": config[4].1 as Any? ?? NSNull()]
+                : ["backend": backend, "url": url, "provider": config[6].1 as Any? ?? NSNull(), "allowInsecureHttp": config[7].1 as Any? ?? NSNull(), "encryptionStateJSON": config[4].1 as Any? ?? NSNull()])
             turn.preparing = true
             let preparedSource = try Self.projectObject(invoke("iosProjectFilePrepareAvailability", arguments: [Self.ownedJSON(["version": 1, "requestId": id, "attachmentJSON": attachmentJSON, "targetURI": target, "rawConfigJSON": configJSON]), callbackValue], localCancellation: cancellation))
             turn.preparing = false
+            try requireProjectDownloadTurn(strict: true)
+            if backend == "webdav", let status = preparedSource["status"] as? String, status != "prepared" {
+                guard preparedSource["version"] as? Int == 1, preparedSource["requestId"] as? String == id,
+                      !turn.callbackUsed, turn.source == nil, turn.receipt == nil else { throw Self.projectDownloadFailure }
+                if ["unavailable", "generation-conflict"].contains(status) {
+                    guard Set(preparedSource.keys) == Set(["version", "requestId", "status", "result"]),
+                          let result = preparedSource["result"] as? [String: Any], Set(result.keys) == Set(["status", "message", "update"]),
+                          result["status"] as? String == status, let message = result["message"] as? String, !message.isEmpty, message.utf16.count <= 10_000,
+                          result["update"] is NSNull else { throw Self.projectDownloadFailure }
+                    projectDownloadTurn = nil
+                    return try Self.ownedJSON(result)
+                }
+                guard status == "unrecoverable", Set(preparedSource.keys) == Set(["version", "requestId", "status", "attachmentJSON"]),
+                      let unavailableJSON = preparedSource["attachmentJSON"] as? String else { throw Self.projectDownloadFailure }
+                let unavailable = try Self.projectObject(unavailableJSON, maximum: 1_000_000)
+                guard let stamp = unavailable["updatedAt"] as? String, unavailable["deletedAt"] as? String == stamp,
+                      Self.isCanonicalReviewInstant(stamp) else { throw Self.projectDownloadFailure }
+                request["unrecoverableAt"] = stamp
+                let preparation = try Self.projectObject(invoke("projectFileAvailabilityWritePrepare", arguments: [Self.ownedJSON(request), backend], localCancellation: cancellation))
+                guard let prepared = preparation["prepared"] as? [String: Any], let effect = prepared["effect"] as? [String: Any],
+                      let after = effect["after"] as? [String: Any], let attachments = after["attachments"] as? [[String: Any]],
+                      let updated = attachments.first(where: { $0["id"] as? String == attachment }), Self.equalJSON(updated, unavailable),
+                      Self.ownedEqual(try Self.ownedJSON(preparation["request"] as Any), try Self.ownedJSON(request)) else { throw Self.projectDownloadFailure }
+                var state = ProjectDownloadState(version: 2, requestId: id, requestJSON: requestJSON, preflightJSON: try Self.ownedJSON(preflight),
+                    envelopeJSON: try Self.ownedJSON(preparation), columns: columns, rawBeforeJSON: turn.beforeJSON,
+                    deviceBeforeJSON: turn.deviceBeforeJSON, config: config.map { $0.1 }, source: nil, outcome: "unrecoverable")
+                _ = try projectDownloadCommand(state)
+                _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON, backend])
+                try configureProjectDownloadWitness(state, turn: turn); try requireProjectDownloadTurn(strict: true)
+                try writeProjectDownloadState(state, turn: turn); try projectDownloadBoundary(.afterIntent)
+                return try executeProjectDownload(&state, turn: turn, cancellation: cancellation)
+            }
             guard preparedSource["status"] as? String == "prepared", preparedSource["sourceToken"] as? String == turn.sourceToken,
                   let source = turn.source, let receipt = turn.receipt, receipt.matches(source), preparedSource["sha256"] as? String == source.sha256,
                   (preparedSource["size"] as? NSNumber)?.int64Value == source.size else { throw Self.projectDownloadFailure }
             try requireProjectDownloadTurn(strict: true)
             if turn.decryptionAdmitted {
-                _ = try? invoke("attachmentDraftAcknowledged", arguments: ["selfhosted-project-download", "decrypted"])
+                _ = try? invoke("attachmentDraftAcknowledged", arguments: [operation, "decrypted"])
                 try requireProjectDownloadTurn(strict: true)
             }
             request["sha256"] = source.sha256; request["size"] = source.size
-            let preparation = try Self.projectObject(invoke("projectFileAvailabilityWritePrepare", arguments: [Self.ownedJSON(request)], localCancellation: cancellation))
+            let preparation = try Self.projectObject(invoke("projectFileAvailabilityWritePrepare", arguments: [Self.ownedJSON(request), backend], localCancellation: cancellation))
             guard Set(preparation.keys) == Set(["request", "prepared"]), let prepared = preparation["prepared"] as? [String: Any],
                   Self.ownedEqual(try Self.ownedJSON(preparation["request"] as Any), try Self.ownedJSON(request)) else { throw Self.projectDownloadFailure }
             let adopted = ProjectSource(sourceURI: source.sourceURI, sha256: source.sha256, size: source.size, identity: source.identity, cacheRootIdentity: source.cacheRootIdentity, parentIdentity: source.parentIdentity)
@@ -17030,7 +17155,7 @@ private final class Engine: @unchecked Sendable {
                 envelopeJSON: try Self.ownedJSON(["request": request, "prepared": prepared]), columns: columns, rawBeforeJSON: turn.beforeJSON,
                 deviceBeforeJSON: turn.deviceBeforeJSON, config: config.map { $0.1 }, source: adopted, managedDirectoryIdentity: turn.managedDirectoryIdentity)
             _ = try projectDownloadCommand(state)
-            _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON])
+            _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON, backend])
             try configureProjectDownloadWitness(state, turn: turn)
             try requireProjectDownloadTurn(strict: true)
             try writeProjectDownloadState(state, turn: turn); try projectDownloadBoundary(.afterIntent)
@@ -17041,12 +17166,12 @@ private final class Engine: @unchecked Sendable {
             if turn.command == nil {
                 if let receipt = turn.receipt {
                     do { try turn.jobs.retireProviderSource(receipt, requireOwner: { try self.requireProjectDownloadTurn(strict: false) }); turn.receipt = nil }
-                    catch { _ = try? invoke("attachmentDraftAcknowledged", arguments: ["selfhosted-project-download", "cleanup-pending"]) }
+                    catch { _ = try? invoke("attachmentDraftAcknowledged", arguments: [operation, "cleanup-pending"]) }
                 }
                 projectDownloadTurn = nil
             } else {
                 let cleanupPending = turn.acknowledged.map { $0.abandoned || $0.phase == .domainSaved || $0.phase == .settled } ?? false
-                _ = try? invoke("attachmentDraftAcknowledged", arguments: ["selfhosted-project-download", cleanupPending ? "cleanup-pending" : "refused"])
+                _ = try? invoke("attachmentDraftAcknowledged", arguments: [operation, cleanupPending ? "cleanup-pending" : "refused"])
             }
             throw error
         }
@@ -17061,7 +17186,7 @@ private final class Engine: @unchecked Sendable {
             guard let state = receipt.acknowledged, state.requestId == requestId else { throw Self.projectDownloadFailure }
             if abandon || state.abandoned {
                 if abandon && !state.abandoned {
-                    var settled = state; settled.abandoned = true; settled.targetRetired = true
+                    var settled = state; settled.abandoned = true; if settled.version == 1 { settled.targetRetired = true }
                     receipt.acknowledged = settled
                 }
                 return "{\"abandoned\":true}"
@@ -17074,16 +17199,16 @@ private final class Engine: @unchecked Sendable {
         turn.cancellation = cancellation; turn.strict = false
         var state = try projectDownloadJournal(command)
         guard state.requestId == requestId else { throw Self.projectDownloadFailure }
-        _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON])
+        _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON, state.config[0] ?? "cloud"])
         if turn.unacknowledged { try writeProjectDownloadState(state, turn: turn) }
         if abandon && !state.abandoned && state.phase != .settled {
             state.abandoned = true; try writeProjectDownloadState(state, turn: turn); try projectDownloadBoundary(.afterAbandonDecision)
         }
-        if !state.abandoned && state.phase != .settled {
+        if (!state.abandoned || state.version == 2 && state.phase == .intent) && state.phase != .settled {
             let current = try turn.storage.multiGet(Self.taskDownloadConfigKeys)
             guard current.count == state.config.count, zip(current.map { $0.1 }, state.config).allSatisfy({ Self.taskDownloadOptionalEqual($0.0, $0.1) }) else { throw Self.projectDownloadFailure }
-            turn.legacy = [("@mindwtr_cloud_token", try turn.storage.get("@mindwtr_cloud_token"))]
-            turn.cloudToken = try taskDownloadCloudToken(cancellation); turn.cloudObserved = true; turn.allowAfter = state.phase == .published || state.phase == .domainSaved; turn.strict = true
+            try observeProjectDownloadCredential(turn)
+            turn.allowAfter = state.version == 2 || state.phase == .published || state.phase == .domainSaved; turn.strict = true
             try requireProjectDownloadTurn(strict: true)
             if state.phase == .domainSaved {
                 guard Self.ownedEqual(try Self.ownedJSON(projectAvailabilityRow(turn.projectID)), turn.afterJSON),
@@ -17097,7 +17222,43 @@ private final class Engine: @unchecked Sendable {
         defer { turn.strict = false; turn.preparing = false }
         return try executeProjectDownload(&state, turn: turn, cancellation: cancellation)
     }
+    private func executeProjectDownloadMetadata(_ state: inout ProjectDownloadState, turn: ProjectDownloadTurn,
+                                                cancellation: NativeAttachmentCancellation) throws -> String {
+        guard state.version == 2, state.outcome == "unrecoverable", state.source == nil else { throw Self.projectDownloadFailure }
+        let prepared = try Self.projectObject(state.envelopeJSON)["prepared"] as! [String: Any]
+        if state.phase == .intent {
+            turn.allowAfter = true; turn.strict = true
+            try requireProjectDownloadTurn(strict: true)
+            let row = try Self.ownedJSON(projectAvailabilityRow(turn.projectID))
+            let device = try Self.ownedJSON([projectAvailabilityDevice()])
+            let before = Self.ownedEqual(row, turn.beforeJSON) && Self.ownedEqual(device, turn.deviceBeforeJSON)
+            let after = Self.ownedEqual(row, turn.afterJSON) && Self.ownedEqual(device, turn.deviceAfterJSON)
+            guard before || after else { throw Self.projectDownloadFailure }
+            if state.abandoned && before {
+                state.phase = .settled; try writeProjectDownloadState(state, turn: turn)
+                try projectDownloadBoundary(.afterSettled)
+                return try finishProjectDownload(state, turn: turn, cancellation: cancellation)
+            }
+            // An exact after row is a lost commit acknowledgment, never rollback authority.
+            try projectDownloadBoundary(.beforeCommit)
+            let result = try invoke("projectFileAvailabilityWriteCommit", arguments: [state.envelopeJSON, "webdav"], localCancellation: cancellation)
+            try projectDownloadBoundary(.afterCommit)
+            guard Self.ownedEqual(try Self.ownedJSON(Self.projectObject(result)), try Self.ownedJSON(prepared["result"]!)),
+                  Self.ownedEqual(try Self.ownedJSON(projectAvailabilityRow(turn.projectID)), turn.afterJSON),
+                  Self.ownedEqual(try Self.ownedJSON([projectAvailabilityDevice()]), turn.deviceAfterJSON) else { throw Self.projectDownloadFailure }
+            state.phase = .domainSaved; try writeProjectDownloadState(state, turn: turn)
+            turn.strict = false; try projectDownloadBoundary(.afterDomainSaved)
+        }
+        if state.phase == .domainSaved {
+            turn.strict = false
+            state.phase = .settled; try writeProjectDownloadState(state, turn: turn)
+            try projectDownloadBoundary(.afterSettled)
+        }
+        return try finishProjectDownload(state, turn: turn, cancellation: cancellation)
+    }
     private func executeProjectDownload(_ state: inout ProjectDownloadState, turn: ProjectDownloadTurn, cancellation: NativeAttachmentCancellation) throws -> String {
+        if state.version == 2 { return try executeProjectDownloadMetadata(&state, turn: turn, cancellation: cancellation) }
+        guard let source = state.source else { throw Self.projectDownloadFailure }
         let prepared = try Self.projectObject(state.envelopeJSON)["prepared"] as! [String: Any], target = prepared["targetURI"] as! String
         if state.abandoned { return try abandonProjectDownload(&state, turn: turn, cancellation: cancellation) }
         if state.phase == .intent {
@@ -17117,21 +17278,21 @@ private final class Engine: @unchecked Sendable {
         }
         if state.phase == .stagePrepared {
             try requireProjectDownloadTurn(strict: true)
-            let value = try projectDownloadFile(.fillStage(source: projectSource(state.source), stage: projectStage(state.stage!)), turn: turn, cancellation: cancellation)
+            let value = try projectDownloadFile(.fillStage(source: projectSource(source), stage: projectStage(state.stage!)), turn: turn, cancellation: cancellation)
             state.filled = try JSONDecoder().decode(ProjectFilled.self, from: Data(Self.ownedJSON(value).utf8))
             state.phase = .stageFilled; try writeProjectDownloadState(state, turn: turn); try projectDownloadBoundary(.afterFilled)
         }
         if state.phase == .stageFilled {
-            var publication = try? projectDownloadFile(.verifyPublication(targetURI: target, stage: projectStage(state.stage!), sha256: state.source.sha256, size: state.source.size), turn: turn, cancellation: cancellation)
+            var publication = try? projectDownloadFile(.verifyPublication(targetURI: target, stage: projectStage(state.stage!), sha256: source.sha256, size: source.size), turn: turn, cancellation: cancellation)
             if publication == nil {
                 try requireProjectDownloadTurn(strict: true)
-                let source = try projectDownloadFile(.snapshotSource(sourceURI: state.source.sourceURI), turn: turn, cancellation: cancellation)
-                guard try JSONDecoder().decode(ProjectSource.self, from: Data(Self.ownedJSON(source).utf8)) == state.source else { throw Self.projectDownloadFailure }
-                _ = try projectDownloadFile(.observeFilledStage(stage: projectStage(state.stage!), sha256: state.source.sha256, size: state.source.size), turn: turn, cancellation: cancellation)
+                let observedSource = try projectDownloadFile(.snapshotSource(sourceURI: source.sourceURI), turn: turn, cancellation: cancellation)
+                guard try JSONDecoder().decode(ProjectSource.self, from: Data(Self.ownedJSON(observedSource).utf8)) == source else { throw Self.projectDownloadFailure }
+                _ = try projectDownloadFile(.observeFilledStage(stage: projectStage(state.stage!), sha256: source.sha256, size: source.size), turn: turn, cancellation: cancellation)
                 try projectDownloadBoundary(.beforePublication); try requireProjectDownloadTurn(strict: true)
-                _ = try? projectDownloadFile(.publishStage(stage: projectStage(state.stage!), targetURI: target, sha256: state.source.sha256), turn: turn, cancellation: cancellation)
+                _ = try? projectDownloadFile(.publishStage(stage: projectStage(state.stage!), targetURI: target, sha256: source.sha256), turn: turn, cancellation: cancellation)
                 // Reprove and durably capture the owned publication before a late owner fence.
-                publication = try projectDownloadFile(.verifyPublication(targetURI: target, stage: projectStage(state.stage!), sha256: state.source.sha256, size: state.source.size), turn: turn, cancellation: NativeAttachmentCancellation())
+                publication = try projectDownloadFile(.verifyPublication(targetURI: target, stage: projectStage(state.stage!), sha256: source.sha256, size: source.size), turn: turn, cancellation: NativeAttachmentCancellation())
                 state.published = try JSONDecoder().decode(ProjectPublished.self, from: Data(Self.ownedJSON(publication!).utf8))
                 state.phase = .published; try writeProjectDownloadState(state, turn: turn)
                 try projectDownloadBoundary(.afterPublication)
@@ -17143,11 +17304,11 @@ private final class Engine: @unchecked Sendable {
         }
         if state.phase == .published {
             try requireProjectDownloadTurn(strict: true)
-            let value = try projectDownloadFile(.verifyPublication(targetURI: target, stage: projectStage(state.stage!), sha256: state.source.sha256, size: state.source.size), turn: turn, cancellation: cancellation)
+            let value = try projectDownloadFile(.verifyPublication(targetURI: target, stage: projectStage(state.stage!), sha256: source.sha256, size: source.size), turn: turn, cancellation: cancellation)
             guard try JSONDecoder().decode(ProjectPublished.self, from: Data(Self.ownedJSON(value).utf8)) == state.published else { throw Self.projectDownloadFailure }
             try projectDownloadBoundary(.beforeCommit)
             turn.allowAfter = true
-            let result = try invoke("projectFileAvailabilityWriteCommit", arguments: [state.envelopeJSON], localCancellation: cancellation)
+            let result = try invoke("projectFileAvailabilityWriteCommit", arguments: [state.envelopeJSON, state.config[0] ?? "cloud"], localCancellation: cancellation)
             try projectDownloadBoundary(.afterCommit)
             guard Self.ownedEqual(try Self.ownedJSON(Self.projectObject(result)), try Self.ownedJSON(prepared["result"]!)),
                   Self.ownedEqual(try Self.ownedJSON(projectAvailabilityRow(turn.projectID)), turn.afterJSON),
@@ -17163,6 +17324,7 @@ private final class Engine: @unchecked Sendable {
         return try finishProjectDownload(state, turn: turn, cancellation: cancellation)
     }
     private func abandonProjectDownload(_ state: inout ProjectDownloadState, turn: ProjectDownloadTurn, cancellation: NativeAttachmentCancellation) throws -> String {
+        guard let source = state.source else { throw Self.projectDownloadFailure }
         guard state.abandoned else { throw Self.projectDownloadFailure }
         turn.strict = false; turn.jobs.drain(); try requireProjectDownloadTurn(strict: false); try cancellation.check()
         let target = turn.targetURI
@@ -17171,7 +17333,7 @@ private final class Engine: @unchecked Sendable {
             guard try ownedDiscardIdentity(candidate) == nil else { throw Self.projectDownloadFailure }
         }
         if state.published == nil, let stage = state.stage, state.filled != nil,
-           let value = try? projectDownloadFile(.verifyPublication(targetURI: target, stage: projectStage(stage), sha256: state.source.sha256, size: state.source.size), turn: turn, cancellation: cancellation) {
+           let value = try? projectDownloadFile(.verifyPublication(targetURI: target, stage: projectStage(stage), sha256: source.sha256, size: source.size), turn: turn, cancellation: cancellation) {
             state.published = try JSONDecoder().decode(ProjectPublished.self, from: Data(Self.ownedJSON(value).utf8)); try writeProjectDownloadState(state, turn: turn)
         }
         if !state.targetRetired {
@@ -17228,6 +17390,7 @@ private final class Engine: @unchecked Sendable {
         return outcome
     }
     private func settleProjectDownloadFiles(_ state: inout ProjectDownloadState, turn: ProjectDownloadTurn, cancellation: NativeAttachmentCancellation) throws {
+        guard let source = state.source else { throw Self.projectDownloadFailure }
         try requireProjectDownloadTurn(strict: false); try cancellation.check()
         if !state.stageRetired {
             try projectDownloadBoundary(.beforeStageCleanup)
@@ -17240,13 +17403,13 @@ private final class Engine: @unchecked Sendable {
         if !state.sourceRetired {
             try projectDownloadBoundary(.beforeSourceCleanup)
             turn.jobs.drain()
-            _ = try turn.jobs.retireAdoptedProjectDownloadSource(projectSource(state.source), requireOwner: { try self.requireProjectDownloadTurn(strict: false) })
+            _ = try turn.jobs.retireAdoptedProjectDownloadSource(projectSource(source), requireOwner: { try self.requireProjectDownloadTurn(strict: false) })
             state.sourceRetired = true; turn.receipt = nil
             try writeProjectDownloadState(state, turn: turn); try projectDownloadBoundary(.afterSourceCleanup)
         }
     }
     private func finishProjectDownload(_ state: ProjectDownloadState, turn: ProjectDownloadTurn, cancellation: NativeAttachmentCancellation) throws -> String {
-        guard state.phase == .settled, state.stageRetired, state.sourceRetired else { throw Self.projectDownloadFailure }
+        guard state.phase == .settled, state.version == 2 || state.stageRetired && state.sourceRetired else { throw Self.projectDownloadFailure }
         turn.strict = false; try requireProjectDownloadTurn(strict: false); try cancellation.check(); try projectDownloadBoundary(.beforeClear)
         #if DEBUG
         try faults?.journalRemove?()
@@ -17261,7 +17424,9 @@ private final class Engine: @unchecked Sendable {
             _ = try invoke("resumeActivation", arguments: [])
             recoveryActivationPending = false; turn.activationPending = false
         }
-        _ = try? invoke("attachmentDraftAcknowledged", arguments: ["selfhosted-project-download", state.abandoned ? "abandoned" : "saved"])
+        let effect = (try Self.projectObject(state.envelopeJSON)["prepared"] as! [String: Any])["effect"] as! [String: Any]
+        let outcome = state.abandoned ? "abandoned" : state.version == 2 ? "unrecoverable" : effect["outcome"] as? String == "noop" ? "noop" : "saved"
+        _ = try? invoke("attachmentDraftAcknowledged", arguments: [state.config[0] == "webdav" ? "webdav-project-download" : "selfhosted-project-download", outcome])
         try requireProjectDownloadTurn(strict: false)
         projectDownloadAcknowledgedTurn = turn
         projectDownloadTurn = nil
@@ -18500,7 +18665,7 @@ private final class Engine: @unchecked Sendable {
     }
     private func projectDownloadLegacyRead(_ names: [String]) throws -> [(String, String?)] {
         guard let turn = projectDownloadTurn, turn.preparing, !names.isEmpty, names.count <= 2,
-              Set(names).count == names.count, names.allSatisfy({ Self.taskDownloadCloudLegacyKeys.contains($0) }) else { throw Self.deviceStorageUnavailable }
+              Set(names).count == names.count, names.allSatisfy({ (turn.config.first?.1 == "webdav" ? Self.taskDownloadLegacyKeys : Self.taskDownloadCloudLegacyKeys).contains($0) }) else { throw Self.deviceStorageUnavailable }
         if names.contains("@mindwtr_sync_encryption_key_v1") { try observeProjectDownloadEncryption(turn) }
         try requireProjectDownloadTurn(strict: true)
         let values = try turn.storage.multiGet(names)
@@ -18633,7 +18798,7 @@ private final class Engine: @unchecked Sendable {
             guard turn.preparing, input.utf8.count <= 512 * 1024,
                   let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any], Set(raw.keys) == Set(["op", "key"]),
                   raw["op"] as? String == "get", let account = raw["key"] as? String,
-                  ["mindwtr_cloud_token", "mindwtr_sync_encryption_key_v1"].contains(account) else { throw Self.projectDownloadFailure }
+                  [turn.config.first?.1 == "webdav" ? "mindwtr_webdav_password" : "mindwtr_cloud_token", "mindwtr_sync_encryption_key_v1"].contains(account) else { throw Self.projectDownloadFailure }
             if account == "mindwtr_sync_encryption_key_v1" { try observeProjectDownloadEncryption(turn) }
             return
         }
@@ -18644,6 +18809,7 @@ private final class Engine: @unchecked Sendable {
             guard let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any],
                   Set(raw.keys) == Set(["op", "key"]), raw["op"] as? String == "get", let account = raw["key"] as? String,
                   [Self.taskDownloadSelfHosted(turn.config) ? "mindwtr_cloud_token" : "mindwtr_webdav_password", "mindwtr_sync_encryption_key_v1"].contains(account) else { throw Self.taskDownloadFailure }
+            if account == "mindwtr_webdav_password" { try observeTaskDownloadWebDavPassword(turn) }
             if account == "mindwtr_sync_encryption_key_v1" { try observeTaskDownloadEncryption(turn) }
             return
         }

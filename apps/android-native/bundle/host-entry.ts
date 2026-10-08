@@ -427,7 +427,12 @@ const projectAvailabilityDeps = (projectId: string): Parameters<typeof createPre
         catch { return { ok: false, error: { code: 'SAVE_FAILED', message: 'Selected Project availability could not be confirmed' } }; }
     },
 });
-const preparedProjectAvailability = (projectId: string) => createPreparedProjectAvailabilityMethods(projectAvailabilityDeps(projectId));
+const preparedProjectAvailability = (projectId: string, backend: string = 'cloud') => {
+    if (backend !== 'cloud' && backend !== 'webdav') throw new Error('NOT_READY: Project download is unavailable');
+    return createPreparedProjectAvailabilityMethods({
+    ...projectAvailabilityDeps(projectId), translate: (key) => unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key,
+}, backend === 'webdav' ? 'webdav' : 'strict');
+};
 
 /**
  * Reminder alarms (host-reminders.ts), on a host with the alarm bridges (Android). The iOS host and the gates' stand-in bridge have
@@ -2536,22 +2541,24 @@ globalThis.MindwtrHost = {
                 || iosCleanupCallback || iosTaskAttachmentPreparation || iosProjectFilePreparation || iosCachedProjectAvailability
                 || isSandboxMode() || isWorkspaceTransitionActive()) throw new Error('NOT_READY: Cached Project availability is unavailable');
             requireSaved();
-            if (await keyValue.get(SYNC_BACKEND_KEY) !== 'cloud' || !isNativeIosSelfHostedProvider(await keyValue.get(CLOUD_PROVIDER_KEY))) {
+            const webdav = await keyValue.get(SYNC_BACKEND_KEY) === 'webdav';
+            if (!webdav && (await keyValue.get(SYNC_BACKEND_KEY) !== 'cloud' || !isNativeIosSelfHostedProvider(await keyValue.get(CLOUD_PROVIDER_KEY)))) {
                 throw new Error('NOT_READY: Cached Project availability is unavailable');
             }
             await assertNativeSelfHostedAttachmentEncryptionAdmission(encryptionStateJSON);
             const input = editorJson(json) as Parameters<ReturnType<typeof createProjectAvailabilityMethods>['getProjectAttachmentAvailabilityPreflight']>[0];
-            return unwrap(await createProjectAvailabilityMethods({ ...projectAvailabilityDeps(input.projectId), host: () => null }, 'cached')
+            return unwrap(await createProjectAvailabilityMethods({ ...projectAvailabilityDeps(input.projectId), host: () => null }, webdav ? 'cached-webdav' : 'cached')
                 .getProjectAttachmentAvailabilityPreflight(input));
         });
     },
-    projectAttachmentCachedAvailability(json: string, exactTargetURI: string): string {
+    projectAttachmentCachedAvailability(json: string, exactTargetURI: string, proofJSON?: string): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments || nativeSync || !bootAdapter
                 || iosCleanupCallback || iosTaskAttachmentPreparation || iosProjectFilePreparation || iosCachedProjectAvailability
                 || isSandboxMode() || isWorkspaceTransitionActive()) throw new Error('NOT_READY: Cached Project availability is unavailable');
             requireSaved();
-            if (await keyValue.get(SYNC_BACKEND_KEY) !== 'cloud' || !isNativeIosSelfHostedProvider(await keyValue.get(CLOUD_PROVIDER_KEY))) {
+            const webdav = await keyValue.get(SYNC_BACKEND_KEY) === 'webdav';
+            if (!webdav && (await keyValue.get(SYNC_BACKEND_KEY) !== 'cloud' || !isNativeIosSelfHostedProvider(await keyValue.get(CLOUD_PROVIDER_KEY)))) {
                 throw new Error('NOT_READY: Cached Project availability is unavailable');
             }
             await assertNativeSelfHostedAttachmentEncryptionAdmission(await keyValue.get(SYNC_ENCRYPTION_STATE_KEY));
@@ -2561,17 +2568,31 @@ globalThis.MindwtrHost = {
                 getConfigValue: (name) => keyValue.get(name), getLegacyValue: (name) => keyValue.get(name),
                 getSecret: (account) => (globalThis.__mindwtrSyncSecrets as HostSecrets).getSecret(account),
                 crypto: createHostSyncCrypto((globalThis as { __mindwtrCryptoCall?: Parameters<typeof createHostSyncCrypto>[0] }).__mindwtrCryptoCall),
-            }, channels);
+            }, channels, webdav);
             const readonlyHost = { ...preparedHost.contractHost,
                 ensureAttachmentAvailableDetailed: async (attachment: import('../../../packages/core/src/types').Attachment) => {
-                    const result = await preparedHost.prepareAttachmentAvailableDetailed(attachment);
-                    if (result.status === 'available') return { status: 'available' as const, attachment: result.attachment };
+                    let selected = attachment;
+                    if (webdav && attachment.fileHash === undefined) {
+                        const proof = typeof proofJSON === 'string' ? editorJson(proofJSON) as { sha256?: unknown; size?: unknown } : null;
+                        if (!proof || Object.keys(proof).sort().join(',') !== 'sha256,size'
+                            || typeof proof.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(proof.sha256)
+                            || typeof proof.size !== 'number' || !Number.isSafeInteger(proof.size) || proof.size < 0 || proof.size > 8_388_608
+                            || attachment.size !== undefined && attachment.size !== proof.size
+                            || attachment.uri !== exactTargetURI) throw new Error('NOT_READY: Cached Project availability is unavailable');
+                        selected = { ...attachment, fileHash: proof.sha256 };
+                    }
+                    const result = await preparedHost.prepareAttachmentAvailableDetailed(selected);
+                    if (result.status === 'available') {
+                        const resolved = { ...result.attachment };
+                        if (attachment.fileHash === undefined) delete resolved.fileHash;
+                        return { status: 'available' as const, attachment: resolved };
+                    }
                     return { status: result.status === 'generation-conflict' ? 'generation-conflict' as const : 'unavailable' as const };
                 },
             };
             const input = editorJson(json) as Parameters<ReturnType<typeof createProjectAvailabilityMethods>['downloadRelocatedProjectAttachment']>[0];
             iosCachedProjectAvailability = true;
-            try { return await createProjectAvailabilityMethods({ ...projectAvailabilityDeps(input.projectId), host: () => readonlyHost }, 'cached')
+            try { return await createProjectAvailabilityMethods({ ...projectAvailabilityDeps(input.projectId), host: () => readonlyHost }, webdav ? 'cached-webdav' : 'cached')
                 .downloadRelocatedProjectAttachment(input, exactTargetURI); }
             finally { iosCachedProjectAvailability = false; }
         });
@@ -2620,7 +2641,7 @@ globalThis.MindwtrHost = {
         return submit(async () => unwrap(await contract.commitPreparedProjectFileRemoveWrite(editorJson(json) as Parameters<typeof contract.commitPreparedProjectFileRemoveWrite>[0])));
     },
     // Private native publisher calls; these are not ordinary CoreHost query mutations.
-    projectFileAvailabilityPreflight(json: string, encryptionStateJSON: unknown, cloudURL: string): string {
+    projectFileAvailabilityPreflight(json: string, encryptionStateJSON: unknown, cloudURL: string, backend: string = 'cloud'): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || !localAttachments || nativeSync
                 || iosTaskAttachmentPreparation || iosProjectFilePreparation || iosCleanupCallback
@@ -2628,9 +2649,9 @@ globalThis.MindwtrHost = {
             requireSaved(); await assertNativeSelfHostedAttachmentEncryptionAdmission(encryptionStateJSON);
             const input = editorJson(json) as { projectId?: unknown };
             const id = typeof input.projectId === 'string' ? input.projectId : '';
-            const preflight = unwrap(await preparedProjectAvailability(id).getProjectFileAvailabilityPreflight(input));
+            const preflight = unwrap(await preparedProjectAvailability(id, backend).getProjectFileAvailabilityPreflight(input));
             return { preflight, columns: PROJECT_SQLITE_COLUMNS,
-                initialURL: nativeProjectFileAvailabilityInitialURL(preflight.attachmentJSON, cloudURL) };
+                initialURL: nativeProjectFileAvailabilityInitialURL(preflight.attachmentJSON, cloudURL, backend === 'webdav') };
         });
     },
     projectFileAvailabilityEncryptionAdmission(encryptionStateJSON: unknown): string {
@@ -2639,28 +2660,30 @@ globalThis.MindwtrHost = {
             await assertNativeSelfHostedAttachmentEncryptionAdmission(encryptionStateJSON); return null;
         });
     },
-    projectFileAvailabilityWritePrepare(json: string): string {
+    projectFileAvailabilityWritePrepare(json: string, backend: string = 'cloud'): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || isSandboxMode() || isWorkspaceTransitionActive()) {
                 throw new Error('NOT_READY: Project download is unavailable');
             }
             requireSaved(); const input = editorJson(json) as { projectId?: unknown };
-            return unwrap(await preparedProjectAvailability(typeof input.projectId === 'string' ? input.projectId : '').prepareProjectFileAvailability(input));
+            const methods = preparedProjectAvailability(typeof input.projectId === 'string' ? input.projectId : '', backend);
+            return 'unrecoverableAt' in input ? unwrap(await methods.prepareProjectFileUnrecoverable(input))
+                : unwrap(await methods.prepareProjectFileAvailability(input));
         });
     },
-    projectFileAvailabilityWriteValidate(json: string): string {
+    projectFileAvailabilityWriteValidate(json: string, backend: string = 'cloud'): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: Project download is unavailable');
-            return unwrap(preparedProjectAvailability('').validatePreparedProjectFileAvailability(editorJson(json)));
+            return unwrap(preparedProjectAvailability('', backend).validatePreparedProjectFileAvailability(editorJson(json)));
         });
     },
-    projectFileAvailabilityWriteCommit(json: string): string {
+    projectFileAvailabilityWriteCommit(json: string, backend: string = 'cloud'): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || isSandboxMode() || isWorkspaceTransitionActive()) {
                 throw new Error('NOT_READY: Project download is unavailable');
             }
             const input = editorJson(json) as { request?: { projectId?: unknown } };
-            return unwrap(await preparedProjectAvailability(typeof input.request?.projectId === 'string' ? input.request.projectId : '').commitPreparedProjectFileAvailability(input));
+            return unwrap(await preparedProjectAvailability(typeof input.request?.projectId === 'string' ? input.request.projectId : '', backend).commitPreparedProjectFileAvailability(input));
         });
     },
     projectFileAddWritePrepare(json: string): string {
@@ -3682,7 +3705,7 @@ globalThis.MindwtrHost = {
             let callback: ((metadataJSON: string, plaintextBase64: string) => string) | null = prepareSource as typeof callback;
             iosProjectFilePreparation = true;
             try {
-                return await prepareNativeProjectFileAvailability(json, {
+                const result = await prepareNativeProjectFileAvailability(json, {
                     getLegacyValue: (name) => keyValue.get(name),
                     getSecret: (account) => (globalThis.__mindwtrSyncSecrets as HostSecrets).getSecret(account),
                     crypto: createHostSyncCrypto((globalThis as { __mindwtrCryptoCall?: Parameters<typeof createHostSyncCrypto>[0] }).__mindwtrCryptoCall),
@@ -3690,6 +3713,11 @@ globalThis.MindwtrHost = {
                         if (!callback || signal.aborted) throw unavailable(); return callback(metadata, bytes);
                     },
                 }, channels, signal);
+                if (result.status === 'unavailable' || result.status === 'generation-conflict') {
+                    const t = (key: string) => unwrap(contract.getStrings({ keys: [key] })).strings[key];
+                    return { ...result, result: { status: result.status, message: getAttachmentResolutionMessage(result, t), update: null } };
+                }
+                return result;
             } finally { callback = null; iosProjectFilePreparation = false; }
         });
     },
@@ -3864,9 +3892,11 @@ globalThis.MindwtrHost = {
                 || operation === 'availability-save' && ['domainSaved', 'settled'].includes(outcome)
                 || operation === 'availability-discard' && outcome === 'settled'
                 || operation === 'availability-checkpoint' && outcome === 'confirmed';
-            const projectDownload = operation === 'selfhosted-project-download' && ['saved', 'abandoned', 'refused', 'cleanup-pending', 'decrypted'].includes(outcome);
+            const webdavProjectDownload = operation === 'webdav-project-download' && ['saved', 'unrecoverable', 'noop', 'abandoned', 'refused', 'cleanup-pending', 'decrypted'].includes(outcome);
+            const projectDownload = webdavProjectDownload || operation === 'selfhosted-project-download' && ['saved', 'abandoned', 'refused', 'cleanup-pending', 'decrypted'].includes(outcome);
+            const webdavTaskAvailability = operation === 'webdav-task-availability' && ['confirmed', 'source-retired'].includes(outcome);
             const taskDownloadMaterial = operation === 'task-download-material' && outcome === 'decrypted';
-            const selfHostedAvailability = ['selfhosted-task-availability', 'selfhosted-project-availability'].includes(operation) && outcome === 'confirmed';
+            const selfHostedAvailability = webdavTaskAvailability || ['selfhosted-task-availability', 'selfhosted-project-availability'].includes(operation) && outcome === 'confirmed';
             const preexistingReplay = operation === 'preexisting-journal-replay' && outcome === 'confirmed';
             const containerRecovery = operation === 'container-relocation' && outcome === 'confirmed';
             const fileOpen = operation === 'file-open' && outcome === 'prepared';
@@ -3896,8 +3926,10 @@ globalThis.MindwtrHost = {
                 await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                     message: 'Native iOS attachment draft acknowledged',
                     context: { ...(editorAcknowledged ? { releaseCheck: 'v1.3.5/ios-editor-owned-attachments' }
+                        : webdavProjectDownload ? { releaseCheck: 'v1.3.5/ios-webdav-project-download' }
                         : projectDownload ? { releaseCheck: 'v1.3.5/ios-selfhosted-project-download' }
                         : taskDownloadMaterial ? { releaseCheck: 'v1.3.5/ios-task-download-material' }
+                        : webdavTaskAvailability ? { releaseCheck: 'v1.3.5/ios-webdav-task-availability' }
                         : selfHostedAvailability ? { releaseCheck: 'v1.3.5/ios-selfhosted-file-availability' }
                         : availabilityConsumer ? { releaseCheck: 'v1.3.5/ios-task-availability-consumers' }
                         : ownedCleanup ? { releaseCheck: 'v1.3.5/ios-cleanup-owned-retirement' }

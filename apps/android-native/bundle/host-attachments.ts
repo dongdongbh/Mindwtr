@@ -381,17 +381,19 @@ export const createNativeTaskAttachmentPreparation = (bindings: NativeTaskAttach
 export const createNativeReadOnlySelfHostedAttachments = (
     bindings: Pick<NativeTaskAttachmentPreparationBindings, 'getLegacyValue' | 'getSecret' | 'crypto' | 'fetch'> & {
         getConfigValue(name: string): Promise<string | null>;
-    }, channels: NativeFileChannels,
+    }, channels: NativeFileChannels, webdav = false,
 ) => {
     const refuse = async (): Promise<never> => { throw new Error('Self-hosted attachment authority is unavailable'); };
-    const configNames = [SYNC_BACKEND_KEY, CLOUD_URL_KEY, CLOUD_PROVIDER_KEY, CLOUD_ALLOW_INSECURE_HTTP_KEY, SYNC_ENCRYPTION_STATE_KEY];
+    const configNames = [SYNC_BACKEND_KEY, SYNC_ENCRYPTION_STATE_KEY, ...(webdav
+        ? [WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY, WEBDAV_ALLOW_INSECURE_HTTP_KEY]
+        : [CLOUD_URL_KEY, CLOUD_PROVIDER_KEY, CLOUD_ALLOW_INSECURE_HTTP_KEY])];
     const storage: SyncKeyValueStoragePort = {
         getItem: (name) => configNames.includes(name) ? bindings.getConfigValue(name)
-            : [CLOUD_TOKEN_KEY, SYNC_ENCRYPTION_KEY_KEY].includes(name) ? bindings.getLegacyValue(name) : refuse(),
+            : [webdav ? WEBDAV_PASSWORD_KEY : CLOUD_TOKEN_KEY, SYNC_ENCRYPTION_KEY_KEY].includes(name) ? bindings.getLegacyValue(name) : refuse(),
         setItem: refuse, removeItem: refuse,
     };
     const secrets = { isAvailable: async () => true,
-        getItem: (account: string) => ['mindwtr_cloud_token', 'mindwtr_sync_encryption_key_v1'].includes(account)
+        getItem: (account: string) => [webdav ? 'mindwtr_webdav_password' : 'mindwtr_cloud_token', 'mindwtr_sync_encryption_key_v1'].includes(account)
             ? bindings.getSecret(account) : refuse(), setItem: refuse, deleteItem: refuse };
     const vault = createSyncSecretVault(secrets);
     const secureConfig = { getSecureConfigValue: (name: string) => getSecureConfigValueReadOnly({ storage, secrets, vault }, name),
@@ -404,8 +406,9 @@ export const createNativeReadOnlySelfHostedAttachments = (
         encryption: { getSyncEncryptionMaterial: encryption.getSyncEncryptionMaterial, logSyncEncryptionEvent: async () => {} },
     }, channels, { installSha256Provider: false, preparePlaintextDownload: refuse });
     const admit = async () => {
-        if (await storage.getItem(SYNC_BACKEND_KEY) !== 'cloud'
-            || !taskDownloadSelfHostedProvider(await storage.getItem(CLOUD_PROVIDER_KEY))) return refuse();
+        if (webdav ? await storage.getItem(SYNC_BACKEND_KEY) !== 'webdav'
+            : await storage.getItem(SYNC_BACKEND_KEY) !== 'cloud'
+                || !taskDownloadSelfHostedProvider(await storage.getItem(CLOUD_PROVIDER_KEY))) return refuse();
         await assertSelfHostedAttachmentEncryptionAdmission(encryption);
     };
     return {
@@ -433,10 +436,10 @@ export const prepareNativeTaskAttachmentAvailability = async (json: string,
 };
 
 /** Ordinary saved Project download: prepare bytes without a Task/editor or a domain write. */
-export const nativeProjectFileAvailabilityInitialURL = (attachmentJSON: string, url: string): string => {
+export const nativeProjectFileAvailabilityInitialURL = (attachmentJSON: string, url: string, webdav = false): string => {
     const attachment = readNativeAttachments([taskDownloadObject(attachmentJSON)])?.[0];
     if (!attachment?.cloudKey || attachment.kind !== 'file' || typeof url !== 'string' || !url) return taskDownloadInvalid();
-    return `${getCloudBaseUrl(url)}/${attachment.cloudKey}`;
+    return `${webdav ? getBaseSyncUrl(url) : getCloudBaseUrl(url)}/${attachment.cloudKey}`;
 };
 
 export const prepareNativeProjectFileAvailability = async (json: string,
@@ -449,26 +452,30 @@ export const prepareNativeProjectFileAvailability = async (json: string,
     const attachment = items?.[0];
     if (!attachment || items?.length !== 1 || JSON.stringify(attachment) !== text
         || !uuid.test(attachment.id) || attachment.kind !== 'file' || attachment.deletedAt !== undefined
-        || !attachment.cloudKey || typeof attachment.fileHash !== 'string' || !/^[0-9a-f]{64}$/i.test(attachment.fileHash)
+        || !attachment.cloudKey || attachment.fileHash !== undefined && (typeof attachment.fileHash !== 'string' || !/^[0-9a-f]{64}$/i.test(attachment.fileHash))
         || attachment.size !== undefined && (!Number.isSafeInteger(attachment.size) || attachment.size < 0 || attachment.size > TASK_DOWNLOAD_BYTES)) return taskDownloadInvalid();
     const config = taskDownloadText(input.rawConfigJSON, TASK_DOWNLOAD_BYTES);
-    if (taskDownloadObject(config).backend !== 'cloud') return taskDownloadInvalid();
+    const backend = taskDownloadObject(config).backend;
+    if (backend !== 'cloud' && backend !== 'webdav' || backend === 'cloud' && attachment.fileHash === undefined) return taskDownloadInvalid();
     const target = taskDownloadText(input.targetURI, 16 * 1024);
     const directory = channels.directories.document;
     if (!directory || target !== `${directory.endsWith('/') ? directory : directory + '/'}attachments/${getAttachmentDownloadFileName(attachment)}`
-        || attachment.uri === target && attachment.localStatus === 'available') return taskDownloadInvalid();
+        || backend !== 'webdav' && attachment.uri === target && attachment.localStatus === 'available') return taskDownloadInvalid();
     const selected = createNativeTaskAttachmentPreparation({ ...bindings, rawConfigJSON: config,
         prepareSource: (metadata, base64) => {
             const measured = taskDownloadObject(metadata);
             if (measured.attachmentId !== attachment.id || measured.targetURI !== target
-                || measured.sha256 !== attachment.fileHash!.toLowerCase()
+                || attachment.fileHash !== undefined && measured.sha256 !== attachment.fileHash.toLowerCase()
                 || attachment.size !== undefined && measured.size !== attachment.size) return taskDownloadInvalid();
             return bindings.prepareSource(metadata, base64);
         },
     }, channels);
     const result = await selected.prepareAttachmentAvailableDetailed(attachment, signal);
-    if (result.status !== 'prepared') return { version: 1, requestId: input.requestId, status: 'unavailable' as const };
-    if (!uuid.test(result.sourceToken) || result.sha256 !== attachment.fileHash.toLowerCase()
+    if (backend === 'webdav' && result.status === 'unrecoverable') return { version: 1, requestId: input.requestId,
+        status: 'unrecoverable' as const, attachmentJSON: JSON.stringify(result.attachment) };
+    if (result.status !== 'prepared') return { version: 1, requestId: input.requestId,
+        status: result.status === 'generation-conflict' ? 'generation-conflict' as const : 'unavailable' as const };
+    if (!uuid.test(result.sourceToken) || attachment.fileHash !== undefined && result.sha256 !== attachment.fileHash.toLowerCase()
         || !Number.isSafeInteger(result.size) || result.size < 0 || result.size > TASK_DOWNLOAD_BYTES
         || attachment.size !== undefined && attachment.size !== result.size
         || result.attachment.id !== attachment.id || result.attachment.uri !== target) return taskDownloadInvalid();

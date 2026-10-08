@@ -8,13 +8,14 @@ import XCTest
 private final class ProjectDownloadHTTPState: @unchecked Sendable {
     let lock = NSLock()
     var bytes = Data(), status = 200
+    var expectedAuthorization = "Bearer synthetic-token-405"
     var duringGET: (() -> Void)?
     private var requests = 0, unexpected = 0
     func reply(_ request: URLRequest) -> Data? {
         lock.lock()
         requests += 1
         guard request.httpMethod == "GET", request.url?.path == "/v1/attachments/40500000-1111-4111-8111-111111111111.txt",
-              request.value(forHTTPHeaderField: "Authorization") == "Bearer synthetic-token-405", request.httpBody == nil else { unexpected += 1; lock.unlock(); return nil }
+              request.value(forHTTPHeaderField: "Authorization") == expectedAuthorization, request.httpBody == nil else { unexpected += 1; lock.unlock(); return nil }
         let value = bytes, callback = duringGET
         lock.unlock(); callback?(); return value
     }
@@ -817,6 +818,265 @@ final class ProjectFileDownloadHostTests: XCTestCase {
         #else
         throw XCTSkip("Actual isolated secure-material value changes require iOS; macOS exercises true nil reads and exact legacy changes")
         #endif
+    }
+
+    func testWebDAVEndpointReplacementAfterSuccessfulGETRefusesBeforePublicationAndProgressPersistence() async throws {
+        try await seed()
+        var settings = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
+        for name in ["@mindwtr_cloud_provider", "@mindwtr_cloud_url", "@mindwtr_cloud_allow_insecure_http", "@mindwtr_cloud_token"] { settings.removeValue(forKey: name) }
+        settings["@mindwtr_sync_backend"] = "webdav"
+        settings["@mindwtr_webdav_url"] = "https://" + hostname + "/v1/data.json"
+        settings["@mindwtr_webdav_username"] = "synthetic"
+        settings["@mindwtr_webdav_password"] = "fixture-only"
+        settings["@mindwtr_webdav_allow_insecure_http"] = "false"
+        try Data(json(settings).utf8).write(to: manifest)
+        remote.expectedAuthorization = "Basic " + Data("synthetic:fixture-only".utf8).base64EncodedString()
+        let faults = HostIOFaults(); var fired = false, completions = 0, changedConfiguration: Data?
+        faults.configureHTTPJobs = { jobs in jobs.beforeCompletion = {
+            completions += 1
+            guard !fired else { return }
+            do {
+                XCTAssertEqual(self.remote.counts, [1, 0], "The actual allowed GET must finish before authority changes")
+                var next = try self.object(String(decoding: Data(contentsOf: self.manifest), as: UTF8.self))
+                next["@mindwtr_webdav_url"] = "https://changed-416.invalid/v1/data.json"
+                let bytes = Data(try self.json(next).utf8); try bytes.write(to: self.manifest, options: .atomic)
+                changedConfiguration = bytes; fired = true
+            } catch { XCTFail("Synthetic saved endpoint replacement failed") }
+        } }
+        let hooks = NativeAttachmentHostHooks(); var syncs = 0, installerWork = 0
+        hooks.configureJobs = { jobs in
+            jobs.beforeStageSync = { syncs += 1 }
+            jobs.beforeWork = { _, installer in if installer { installerWork += 1 } }
+        }
+        let core = host(faults: faults); try await core.configureAttachmentHost(hooks); _ = try await core.start()
+        // Warm the ordinary persistence path before taking exact raw-row/config
+        // snapshots, and retain the SAME selection for the post-refusal probe.
+        let filter = try object(await core.call("areaFilter"))
+        let option = try XCTUnwrap((filter["options"] as? [[String: Any]])?.first { $0["id"] as? String == "__none__" })
+        let sameSelection = try json(XCTUnwrap(option["next"]))
+        _ = try await core.call("setAreaFilter", argumentsJSON: json([sameSelection]))
+        let input = try await request(core), before = try rows(), beforeOther = try others(), configuration = try Data(contentsOf: manifest)
+        let initialInstallerWork = installerWork, initialSyncs = syncs, wire = remote.bytes
+        var refused = false
+        do {
+            let response = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input))
+            if response["ok"] as? Bool == true {
+                // Shared on-demand refusal is a successful command envelope
+                // carrying unavailable, never an availability acknowledgment.
+                XCTAssertEqual(Set(response.keys), Set(["ok", "value"]))
+                let value = try XCTUnwrap(response["value"] as? [String: Any])
+                XCTAssertEqual(Set(value.keys), Set(["status", "message", "update"]))
+                XCTAssertEqual(value["status"] as? String, "unavailable"); XCTAssertTrue(value["update"] is NSNull)
+                XCTAssertFalse((value["message"] as? String ?? "").isEmpty)
+                refused = value["status"] as? String == "unavailable"
+            } else {
+                XCTAssertEqual(Set(response.keys), Set(["ok", "error"]))
+                let error = try XCTUnwrap(response["error"] as? [String: Any]); XCTAssertEqual(error["code"] as? String, "ACTION_FAILED")
+                refused = response["ok"] as? Bool == false
+            }
+        } catch { refused = true }
+        XCTAssertTrue(fired); XCTAssertEqual(completions, 1); XCTAssertEqual(remote.counts, [1, 0]); XCTAssertEqual(remote.bytes, wire)
+        XCTAssertTrue(refused, "Changed saved WebDAV authority must not acknowledge Project availability")
+        let external = try XCTUnwrap(changedConfiguration); XCTAssertNotEqual(external, configuration)
+        XCTAssertEqual(try Data(contentsOf: manifest), external); XCTAssertEqual(try rows(), before); XCTAssertEqual(try others(), beforeOther)
+        XCTAssertEqual(syncs, initialSyncs, "No plaintext source or installation stage may be synced after authority loss")
+        XCTAssertEqual(installerWork, initialInstallerWork, "No installer may be admitted after authority loss")
+        XCTAssertEqual(try cacheFiles(), []); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        if FileManager.default.fileExists(atPath: managed.path) { XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: managed.path), []) }
+        try assertNoTaskOwner()
+        var noOpFailed = false
+        do { _ = try await core.call("setAreaFilter", argumentsJSON: json([sameSelection])) } catch { noOpFailed = true }
+        XCTAssertFalse(noOpFailed, "An unchanged ordinary selection must not carry failed Project persistence debt")
+        XCTAssertEqual(try rows(), before, "The warmed no-op must not later persist downloading metadata")
+        XCTAssertEqual(try others(), beforeOther); XCTAssertEqual(try Data(contentsOf: manifest), external)
+        await core.close()
+        let cold = host(); _ = try await cold.start()
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(try others(), beforeOther); XCTAssertEqual(try Data(contentsOf: manifest), external)
+        XCTAssertEqual(try cacheFiles(), []); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        if FileManager.default.fileExists(atPath: managed.path) { XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: managed.path), []) }
+        XCTAssertEqual(remote.counts, [1, 0]); try assertNoTaskOwner()
+    }
+
+    private func seedWebDAV416(status: String = "active", hash: Bool = true, sameURI: Bool = false, available: Bool = false) async throws {
+        try await seed(status: status, sameURI: sameURI, declaredSize: hash)
+        var settings = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
+        for name in ["@mindwtr_cloud_provider", "@mindwtr_cloud_url", "@mindwtr_cloud_allow_insecure_http", "@mindwtr_cloud_token"] { settings.removeValue(forKey: name) }
+        settings["@mindwtr_sync_backend"] = "webdav"; settings["@mindwtr_webdav_url"] = "https://" + hostname + "/v1/data.json"
+        settings["@mindwtr_webdav_username"] = "synthetic"; settings["@mindwtr_webdav_password"] = "fixture-only"
+        settings["@mindwtr_webdav_allow_insecure_http"] = "false"
+        try Data(json(settings).utf8).write(to: manifest)
+        remote.expectedAuthorization = "Basic " + Data("synthetic:fixture-only".utf8).base64EncodedString()
+        try changeSelected { item in if !hash { item.removeValue(forKey: "fileHash") }; if available { item["localStatus"] = "available" } }
+    }
+    private func webdavOutcomes416() throws -> [String] {
+        let url = root.appendingPathComponent("logs/mindwtr.log")
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(text.contains("fixture-only")); XCTAssertFalse(text.contains(remote.expectedAuthorization))
+        return try text.split(separator: "\n").compactMap { line in
+            let context = try object(String(line))["context"] as? [String: String]
+            guard context?["releaseCheck"] == "v1.3.5/ios-webdav-project-download" else { return nil }
+            XCTAssertEqual(Set(context?.keys.map { $0 } ?? []), Set(["releaseCheck", "operation", "outcome"]))
+            XCTAssertEqual(context?["operation"], "webdav-project-download")
+            return context?["outcome"]
+        }
+    }
+    private func projectRows416() throws -> [[String: Any]] { try XCTUnwrap(NativeJSON.jsonObject(with: Data(rows().utf8)) as? [[String: Any]]) }
+    private func assertWebDAVEffect416(_ before: [[String: Any]], original: [String: Any], metadataNoop: Bool = false,
+                                       unrecoverable: Bool = false, file: StaticString = #filePath, line: UInt = #line) throws {
+        let actual = try projectRows416(), old = try XCTUnwrap(before.first { $0["id"] as? String == projectID })
+        let saved = try XCTUnwrap(actual.first { $0["id"] as? String == projectID })
+        if metadataNoop { XCTAssertEqual(try json(actual), try json(before), file: file, line: line); return }
+        XCTAssertEqual(saved["rev"] as? Int, (old["rev"] as? Int ?? 0) + 1, file: file, line: line)
+        let stamp = try XCTUnwrap(saved["updatedAt"] as? String), device = try XCTUnwrap(saved["revBy"] as? String)
+        XCTAssertFalse(device.isEmpty, file: file, line: line)
+        var expected = original
+        if unrecoverable {
+            expected.removeValue(forKey: "cloudKey"); expected.removeValue(forKey: "fileHash")
+            expected["localStatus"] = "missing"; expected["deletedAt"] = stamp; expected["updatedAt"] = stamp
+        } else { expected["uri"] = target.absoluteString; expected["localStatus"] = "available" }
+        XCTAssertEqual(try json(selected()), try json(expected), file: file, line: line)
+        var expectedRow = old
+        expectedRow["attachments"] = saved["attachments"]; expectedRow["rev"] = saved["rev"]
+        expectedRow["revBy"] = device; expectedRow["updatedAt"] = stamp
+        XCTAssertEqual(try json(saved), try json(expectedRow), file: file, line: line)
+        XCTAssertEqual(try json(actual.filter { $0["id"] as? String != projectID }),
+            try json(before.filter { $0["id"] as? String != projectID }), file: file, line: line)
+    }
+
+    func testWebDAVOwnedDownloadPreservesKnownOrAbsentHashAndRestoresAbsentAlreadyAvailableBytesWithoutMetadataChange() async throws {
+        for variant in ["known", "hashless-archived", "available-absent"] {
+            scenario(variant); let count = remote.counts[0], noop = variant == "available-absent"
+            try await seedWebDAV416(status: variant == "hashless-archived" ? "archived" : "active", hash: variant == "known", sameURI: noop, available: noop)
+            if noop {
+                let raw = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql("SELECT data FROM settings WHERE id=1").utf8)) as? [[String: Any]])
+                var settings = try object(XCTUnwrap(raw.first?["data"] as? String)); settings.removeValue(forKey: "deviceId")
+                _ = try sql("UPDATE settings SET data=? WHERE id=1", [json(settings)])
+            }
+            let core = host(); _ = try await core.start(); let input = try await request(core)
+            let original = try selected(), before = try projectRows416(), other = try others(), config = try Data(contentsOf: manifest)
+            var deviceBefore: String?
+            if noop {
+                let raw = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql("SELECT data FROM settings WHERE id=1").utf8)) as? [[String: Any]])
+                deviceBefore = try json([try object(XCTUnwrap(raw.first?["data"] as? String))["deviceId"] ?? NSNull()])
+            }
+            let reply = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input))
+            XCTAssertEqual(reply["ok"] as? Bool, true); XCTAssertEqual((reply["value"] as? [String: Any])?["status"] as? String, "available")
+            XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertEqual(try Data(contentsOf: target), bytes)
+            try assertWebDAVEffect416(before, original: original, metadataNoop: noop)
+            if noop {
+                let raw = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql("SELECT data FROM settings WHERE id=1").utf8)) as? [[String: Any]])
+                XCTAssertEqual(try json([try object(XCTUnwrap(raw.first?["data"] as? String))["deviceId"] ?? NSNull()]), deviceBefore)
+            }
+            XCTAssertEqual(try webdavOutcomes416(), [noop ? "noop" : "saved"])
+            XCTAssertEqual(try others(), other); XCTAssertEqual(try Data(contentsOf: manifest), config)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try cacheFiles(), [])
+            try assertManagedInventory(); try assertNoTaskOwner()
+            let saved = try rows(); await core.close(); let cold = host(); _ = try await cold.start()
+            XCTAssertEqual(try rows(), saved); XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertEqual(try Data(contentsOf: target), bytes)
+            XCTAssertEqual(try others(), other); XCTAssertEqual(try Data(contentsOf: manifest), config); await cold.close()
+        }
+    }
+
+    func testWebDAVCachedHashlessCurrentGenerationRepairsOrNoopsWithoutGETAndUnknownPresentEmptyURIRefuses() async throws {
+        for variant in ["missing", "available", "unknown-empty"] {
+            scenario(variant); let count = remote.counts[0], unknown = variant == "unknown-empty", noop = variant == "available"
+            try await seedWebDAV416(hash: false, sameURI: !unknown, available: noop)
+            try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
+            let identity = try inode(target), core = host(); _ = try await core.start(); let input = try await request(core)
+            let original = try selected(), before = try projectRows416(), other = try others(), config = try Data(contentsOf: manifest)
+            if unknown { await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) } }
+            else {
+                let result = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input))
+                XCTAssertEqual(result["ok"] as? Bool, true); XCTAssertEqual((result["value"] as? [String: Any])?["status"] as? String, "available")
+                try assertWebDAVEffect416(before, original: original, metadataNoop: noop)
+            }
+            if unknown { XCTAssertEqual(try json(projectRows416()), try json(before)) }
+            XCTAssertEqual(try webdavOutcomes416(), [])
+            XCTAssertEqual(remote.counts, [count, 0]); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), identity)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: managed.path), [target.lastPathComponent])
+            XCTAssertEqual(try others(), other); XCTAssertEqual(try Data(contentsOf: manifest), config)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try cacheFiles(), []); try assertNoTaskOwner()
+            let saved = try rows(); await core.close(); let cold = host(); _ = try await cold.start()
+            XCTAssertEqual(try rows(), saved); XCTAssertEqual(remote.counts, [count, 0]); XCTAssertEqual(try inode(target), identity); await cold.close()
+        }
+    }
+
+    func testWebDAVConfirmed404UsesSourceFreeColdRetryAndStopNeverRollsBackLostCommitAcknowledgment() async throws {
+        for variant in ["retry", "stop-before", "retry-after-commit", "stop-after-commit"] {
+            scenario(variant); let count = remote.counts[0]
+            try await seedWebDAV416(hash: false); remote.status = 404
+            let core = host(); _ = try await core.start(); let input = try await request(core)
+            let original = try selected(), before = try projectRows416(), other = try others(), config = try Data(contentsOf: manifest)
+            let fired = await inject(core, variant.hasSuffix("after-commit") ? .afterCommit : .afterIntent)
+            await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }; XCTAssertTrue(fired())
+            let retained = try state(), id = try XCTUnwrap(retained["requestId"] as? String)
+            XCTAssertEqual(retained["version"] as? Int, 2); XCTAssertEqual(retained["outcome"] as? String, "unrecoverable")
+            XCTAssertEqual(retained["phase"] as? String, "intent")
+            for field in ["source", "stage", "filled", "published", "managedDirectoryIdentity"] { XCTAssertNil(retained[field], field) }
+            for field in ["reservationStarted", "targetRetired", "stageRetired", "sourceRetired"] { XCTAssertEqual(retained[field] as? Bool, false, field) }
+            XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path)); XCTAssertEqual(try cacheFiles(), [])
+            if variant.hasSuffix("after-commit") { try assertWebDAVEffect416(before, original: original, unrecoverable: true) }
+            else { XCTAssertEqual(try json(projectRows416()), try json(before)) }
+            let preCold = try rows(); await core.close(); let cold = host(); try await retainedStart(cold)
+            let reply: String
+            if variant.hasPrefix("stop") { reply = try await cold.abandonProjectFileAvailability(requestId: id) }
+            else { reply = try await cold.recoverProjectFileAvailability(requestId: id) }
+            let result = try object(reply)
+            if !variant.hasPrefix("stop") { XCTAssertEqual(result["status"] as? String, "unrecoverable"); try assertWebDAVEffect416(before, original: original, unrecoverable: true) }
+            else { XCTAssertEqual(result["abandoned"] as? Bool, true); XCTAssertEqual(try rows(), preCold) }
+            XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path)); XCTAssertEqual(try cacheFiles(), [])
+            XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try others(), other)
+            let terminal = variant.hasPrefix("stop") ? "abandoned" : "unrecoverable"
+            XCTAssertEqual(try webdavOutcomes416().filter { $0 == terminal }, [terminal])
+            XCTAssertEqual(try Data(contentsOf: manifest), config); try assertNoTaskOwner(); await cold.close()
+            let clean = host(); _ = try await clean.start(); XCTAssertEqual(remote.counts, [count + 1, 0]); await clean.close()
+        }
+    }
+
+    func testWebDAVNativePasswordReadErrorAfterGETRefusesBeforeSourceAndFreshRequestSucceeds() async throws {
+        try await seedWebDAV416()
+        let faults = HostIOFaults(); var fetched = false, refuseReads = true, beforeReads = 0, afterReads = 0
+        faults.secretStatus = { operation, _ in
+            XCTAssertEqual(operation, "get")
+            if fetched && refuseReads { afterReads += 1; return errSecNotAvailable }; beforeReads += 1
+            return errSecItemNotFound
+        }
+        faults.configureHTTPJobs = { jobs in jobs.beforeCompletion = { fetched = true } }
+        let hooks = NativeAttachmentHostHooks(); var stages = 0, installs = 0
+        hooks.configureJobs = { jobs in jobs.beforeStageSync = { stages += 1 }; jobs.beforeWork = { _, installer in if installer { installs += 1 } } }
+        let core = host(faults: faults); try await core.configureAttachmentHost(hooks); _ = try await core.start(); let input = try await request(core)
+        let before = try rows(), other = try others(), config = try Data(contentsOf: manifest)
+        await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
+        XCTAssertTrue(fetched); XCTAssertGreaterThan(beforeReads, 0); XCTAssertGreaterThan(afterReads, 0); XCTAssertEqual(remote.counts, [1, 0])
+        XCTAssertEqual(stages, 0); XCTAssertEqual(installs, 0); try assertUnpublished(before, other, config)
+        XCTAssertEqual(try webdavOutcomes416(), [])
+        let current = try await request(core); refuseReads = false
+        let result = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: current))
+        XCTAssertEqual((result["value"] as? [String: Any])?["status"] as? String, "available"); XCTAssertEqual(remote.counts, [2, 0])
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try others(), other); XCTAssertEqual(try Data(contentsOf: manifest), config)
+        XCTAssertEqual(try webdavOutcomes416(), ["saved"])
+        try assertManagedInventory(); try assertNoTaskOwner()
+    }
+
+    func testWebDAVHashlessFilledSourceColdRetryUsesExistingV1JournalWithoutSecondGET() async throws {
+        try await seedWebDAV416(hash: false)
+        let core = host(); _ = try await core.start(); let input = try await request(core)
+        let original = try selected(), before = try projectRows416(), other = try others(), config = try Data(contentsOf: manifest)
+        let fired = await inject(core, .afterFilled)
+        await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }; XCTAssertTrue(fired())
+        let retained = try state(), id = try XCTUnwrap(retained["requestId"] as? String), source = try sourceURL(retained)
+        XCTAssertEqual(retained["version"] as? Int, 1); XCTAssertNil(retained["outcome"]); XCTAssertEqual(retained["phase"] as? String, "stageFilled")
+        XCTAssertEqual(try Data(contentsOf: source), bytes); XCTAssertEqual(try json(projectRows416()), try json(before)); XCTAssertEqual(remote.counts, [1, 0])
+        let journalText = try String(contentsOf: journal, encoding: .utf8)
+        XCTAssertFalse(journalText.contains("fixture-only")); XCTAssertFalse(journalText.contains(remote.expectedAuthorization))
+        await core.close(); let cold = host(); try await retainedStart(cold)
+        let recovered = try object(await cold.recoverProjectFileAvailability(requestId: id))
+        XCTAssertEqual(recovered["status"] as? String, "available")
+        XCTAssertEqual(remote.counts, [1, 0]); XCTAssertEqual(try Data(contentsOf: target), bytes)
+        try assertWebDAVEffect416(before, original: original); XCTAssertEqual(try others(), other); XCTAssertEqual(try Data(contentsOf: manifest), config)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertEqual(try cacheFiles(), []); try assertManagedInventory(); try assertNoTaskOwner()
     }
 
 }

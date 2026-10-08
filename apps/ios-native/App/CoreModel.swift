@@ -4365,8 +4365,9 @@ final class CoreModel: ObservableObject {
                     host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
                         deviceStorage: (directory, "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased()),
                         isolatedTestID: identifier)
-                    if arguments.contains("--native-project-download-stop-after-filled-once") {
-                        try await host!.configureIsolatedProjectFileDownloadFilledFailureOnce()
+                    let metadataOnlyDownloadFixture = arguments.contains("--native-project-download-stop-after-metadata-intent-once")
+                    if arguments.contains("--native-project-download-stop-after-filled-once") || metadataOnlyDownloadFixture {
+                        try await host!.configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: metadataOnlyDownloadFixture)
                         selectedSurface = .projects // Isolated recovery fixture must not prefetch through Inbox startup Sync.
                     }
                     settingsSyncAvailable = true
@@ -19143,6 +19144,9 @@ final class CoreModel: ObservableObject {
                 return .resolution(status: status, message: nil)
             }
             guard let message = value["message"] as? String else { throw CocoaError(.coderReadCorrupt) }
+            if status == "unrecoverable" {
+                guard !message.isEmpty, message.utf16.count <= 2_000 else { throw CocoaError(.coderReadCorrupt) }
+            }
             return .resolution(status: status, message: message)
         }
         guard Set(result.keys) == Set(["ok", "error"]), let error = result["error"] as? CoreObject,
@@ -19234,7 +19238,7 @@ final class CoreModel: ObservableObject {
             requireSettingsSyncRestart(owner.host)
             return
         }
-        if case let .resolution(status, _) = reply, status == "available" {
+        if case let .resolution(status, _) = reply, status == "available" || status == "unrecoverable" {
             await rememberProjectFileAvailabilityAcknowledgment(owner, requestJSON: request)
         }
         guard projectAttachmentDownloadCurrent(owner) else { return }
@@ -19489,9 +19493,12 @@ final class CoreModel: ObservableObject {
             && (result["abandoned"] as? NSNumber).map {
                 CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue
             } == true
-        let available = Set(result.keys) == Set(["status", "message", "update"])
-            && result.text("status") == "available" && result["message"] is NSNull && result["update"] is NSNull
-        guard abandoned || (!stop && available) else { throw CocoaError(.coderReadCorrupt) }
+        var terminal = false
+        if !stop, !abandoned,
+           case let .resolution(status, _) = try validateProjectAttachmentDownloadReply(["ok": true, "value": result]) {
+            terminal = status == "available" || status == "unrecoverable"
+        }
+        guard abandoned || terminal else { throw CocoaError(.coderReadCorrupt) }
         // Clear only this exact request after settlement, before ordinary refresh.
         projectFileAvailabilityAcknowledged = operation
         projectFileAvailabilityOperation = nil

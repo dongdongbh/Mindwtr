@@ -1029,6 +1029,107 @@ final class FoundationUITests: XCTestCase {
         // Root independently requires exactly two filled-source GETs and zero cold GETs.
     }
 
+    private func task416OpenProject404(_ app: XCUIApplication, expectFile: Bool) {
+        boardEnabled(app.textFields["projects-create-title"], timeout: 30)
+        let row = app.buttons["project-open-project-download-406-active"]
+        revealPagedElement(app, row, in: app.scrollViews["projects-scroll"])
+        boardEnabled(row); row.tap()
+        boardEnabled(app.buttons["project-actions-menu"], timeout: 30)
+        XCTAssertEqual(app.staticTexts["project-detail-title"].label, "Native project download406")
+        boardTap(app, "project-details-toggle")
+        if expectFile {
+            let file = app.buttons["project-attachment-open-40600000-1111-4111-8111-111111111111"]
+            revealPagedElement(app, file, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+            boardEnabled(file, timeout: 30); XCTAssertEqual(file.label, "Native project file406.txt")
+        }
+    }
+
+    private func task416TerminalProject404(_ app: XCUIApplication) {
+        boardEnabled(app.buttons["project-back"], timeout: 30)
+        boardEnabled(app.buttons["project-actions-menu"], timeout: 30)
+        boardEnabled(app.buttons["project-attachment-add-link"], timeout: 30)
+        let fileID = "40600000-1111-4111-8111-111111111111"
+        // RN terminal 404 soft-deletes this broken reference; it stays in SQLite.
+        for action in ["open", "download", "remove"] {
+            XCTAssertFalse(app.buttons["project-attachment-" + action + "-" + fileID].exists)
+        }
+        for id in ["project-file-download-recovery", "sync-restart-gate", "project-attachment-downloading-" + fileID] {
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: id).firstMatch.exists)
+        }
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.staticTexts["project-notes-write-error"].exists)
+        XCTAssertFalse(app.staticTexts["project-attachments-error"].exists)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        task350NoFilePresentation(app)
+    }
+
+    func testNativeWebDAVProject404CompletesAndCreatesColdRetryIntent() throws {
+        let normal = try task371Library("NORMAL", prefix: "MINDWTR_PROJECT_404_PHONE_")
+        let cold = try task371Library("COLD", prefix: "MINDWTR_PROJECT_404_PHONE_")
+        guard normal != cold else {
+            XCTFail("Task416 requires two distinct fresh isolated libraries")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchEnvironment = [:]
+        defer { app.terminate() }
+        // Root stages only the 406 active Project and saved synthetic WebDAV;
+        // its cloudKey names an absent remote file, with no local bytes/journal.
+        // The unchanged filled hook selects Projects and cannot fire for a 404.
+        app.launchArguments = task350Arguments(normal, hook: "--native-project-download-stop-after-filled-once")
+        app.launch(); task416OpenProject404(app, expectFile: true)
+        task350TapProject(app, "project-attachment-download-40600000-1111-4111-8111-111111111111")
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 60))
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label == %@",
+            "This attachment is no longer available in synced storage. Its broken reference was removed.")).firstMatch.exists)
+        let dismiss = alert.buttons["project-attachment-open-dismiss"]
+        boardEnabled(dismiss); dismiss.tap(); XCTAssertTrue(alert.waitForNonExistence(timeout: 15))
+        task416TerminalProject404(app)
+        app.terminate(); app.launch() // Same normal library; no remote-capable file remains.
+        task416OpenProject404(app, expectFile: false); task416TerminalProject404(app)
+        app.terminate()
+
+        app.launchArguments = task350Arguments(cold, hook: "--native-project-download-stop-after-metadata-intent-once")
+        app.launch(); task416OpenProject404(app, expectFile: true)
+        task350TapProject(app, "project-attachment-download-40600000-1111-4111-8111-111111111111")
+        let panel = app.descendants(matching: .any).matching(identifier: "project-file-download-recovery").firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 60))
+        for id in ["project-file-download-retry", "project-file-download-stop"] {
+            let button = app.buttons[id]; boardEnabled(button, timeout: 30)
+            XCTAssertGreaterThanOrEqual(button.frame.height + 0.000001, 44)
+        }
+        XCTAssertTrue(app.buttons["project-back"].exists); XCTAssertFalse(app.buttons["project-back"].isEnabled)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        XCTAssertFalse(app.alerts.firstMatch.exists); task350NoFilePresentation(app)
+        // End before Retry so root can capture the actual device-created,
+        // version2 metadata-only intent and exact unchanged before rows/files.
+    }
+
+    func testNativeWebDAVProject404ColdRetryAcknowledgesTerminalResult() throws {
+        let library = try task371Library("COLD", prefix: "MINDWTR_PROJECT_404_PHONE_")
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchEnvironment = [:]
+        app.launchArguments = task350Arguments(library) // Do not rearm afterIntent.
+        app.launch(); defer { app.terminate() }
+        let panel = app.descendants(matching: .any).matching(identifier: "project-file-download-recovery").firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 60))
+        boardEnabled(app.buttons["project-file-download-retry"], timeout: 30)
+        boardEnabled(app.buttons["project-file-download-stop"], timeout: 30)
+        XCTAssertFalse(app.buttons["tab-menu"].exists); XCTAssertFalse(app.buttons["project-back"].exists)
+        XCTAssertFalse(app.alerts.firstMatch.exists); task350NoFilePresentation(app)
+        boardTap(app, "project-file-download-retry")
+        XCTAssertTrue(panel.waitForNonExistence(timeout: 60))
+        task416OpenProject404(app, expectFile: false); task416TerminalProject404(app)
+        app.terminate()
+        // Only the old filled selector is used to reopen at Projects. No source
+        // exists and no Download is issued, so neither fault can fire here.
+        app.launchArguments = task350Arguments(library, hook: "--native-project-download-stop-after-filled-once")
+        app.launch(); task416OpenProject404(app, expectFile: false); task416TerminalProject404(app)
+        // Root independently verifies exactly one 404 per library, zero cold
+        // requests, exact RN tombstone effects, and no files or retained journal.
+    }
+
     func testNativeSyncInvalidDraftDiscardsToOffAndColdReopenHasNoPlaintext() {
         continueAfterFailure = false
         let app = XCUIApplication(), library = UUID().uuidString.lowercased()

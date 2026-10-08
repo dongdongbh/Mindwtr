@@ -799,6 +799,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         let probe = try object(await live.call("menuRead", argumentsJSON: json(["dataSettings", "{}"]))); XCTAssertEqual(probe["pending"] as? Int, 0); XCTAssertEqual(probe["settled"] as? Int, 1)
         XCTAssertEqual(try store.readAvailability()?.operations.count, 0); XCTAssertEqual(try files(cache), []); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
         XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), settings); XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint)
+        XCTAssertEqual(try webdavTaskOutcomes417(), ["source-retired"])
         hooks.pump = nil
         let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request(UUID().uuidString.lowercased())))
         XCTAssertEqual(reply["status"] as? String, "draftAvailable"); XCTAssertEqual(remote.requests, 2); XCTAssertEqual(syncs, 3)
@@ -1309,6 +1310,20 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
             return context?["outcome"]
         }
     }
+    private func webdavTaskOutcomes417() throws -> [String] {
+        let log = root.appendingPathComponent("logs/mindwtr.log")
+        guard FileManager.default.fileExists(atPath: log.path) else { return [] }
+        let text = try String(contentsOf: log, encoding: .utf8)
+        XCTAssertFalse(text.contains("fixture-only")); XCTAssertFalse(text.contains(Data(count: 32).base64EncodedString()))
+        return try text.split(separator: "\n").compactMap { line in
+            let entry = try object(String(line)), context = entry["context"] as? [String: String]
+            guard context?["releaseCheck"] == "v1.3.5/ios-webdav-task-availability" else { return nil }
+            XCTAssertEqual(Set(context?.keys.map { $0 } ?? []), Set(["releaseCheck", "operation", "outcome"]))
+            XCTAssertEqual(context?["operation"], "webdav-task-availability")
+            XCTAssertTrue(["confirmed", "source-retired"].contains(context?["outcome"] ?? ""))
+            return context?["outcome"]
+        }
+    }
     func testEncryptedSelfHostedTaskAcceptsSharedFormattedMaterialAndEmitsBoundedDiagnostic() async throws {
         try await seed(backend: "cloud", encrypted: true)
         var settings = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
@@ -1392,7 +1407,14 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         let faults = HostIOFaults(); var reject = false, revoked = false, readFailures = 0, syncs = 0, opened = 0
         faults.secretStatus = { operation, _ in
             guard operation == "get" else { XCTFail("Selected download cannot mutate secrets"); return errSecInteractionNotAllowed }
-            if reject { readFailures += 1; return errSecNotAvailable }; return errSecItemNotFound
+            return errSecItemNotFound
+        }
+        faults.configureSecretJobs = { jobs in
+            jobs.beforeRead = { account in
+                if reject && account == "mindwtr_sync_encryption_key_v1" {
+                    readFailures += 1; throw HostFailure("Synthetic material read is unavailable")
+                }
+            }
         }
         faults.cryptoAfterOperation = { if $0 == "aesGcmOpen" { opened += 1 } }
         let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { $0.beforeStageSync = { syncs += 1 } }
@@ -1410,6 +1432,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try rows(), original)
         XCTAssertEqual(try Data(contentsOf: manifest), configuration); XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), identity)
         XCTAssertEqual(try materialOutcomes415(), ["decrypted"], "Authenticated preparation is distinct from checkpoint admission")
+        XCTAssertEqual(try webdavTaskOutcomes417(), ["source-retired"])
         reject = false
         let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request(UUID().uuidString.lowercased())))
         XCTAssertEqual(reply["status"] as? String, "draftAvailable"); XCTAssertEqual(opened, 2); XCTAssertEqual(syncs, 3); XCTAssertEqual(remote.requests, 2)
@@ -1417,6 +1440,53 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
         await live.close(); let cold = host(); _ = try await cold.start()
         XCTAssertEqual(try files(cache), [foreign.lastPathComponent]); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(remote.requests, 2)
+    }
+    func testNativePasswordRevocationAfterSourceRetainsExactScratchAndForeignFileThroughColdRetry() async throws {
+        try await seed(encrypted: true)
+        let faults = HostIOFaults(); var reject = false, revoked = false, readFailures = 0, syncs = 0, opened = 0
+        faults.secretStatus = { operation, _ in
+            guard operation == "get" else { XCTFail("Selected download cannot mutate secrets"); return errSecInteractionNotAllowed }
+            return errSecItemNotFound
+        }
+        faults.configureSecretJobs = { jobs in
+            jobs.beforeRead = { account in
+                if reject && account == "mindwtr_webdav_password" {
+                    readFailures += 1; throw HostFailure("Synthetic credential read is unavailable")
+                }
+            }
+        }
+        faults.cryptoAfterOperation = { if $0 == "aesGcmOpen" { opened += 1 } }
+        let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { $0.beforeStageSync = { syncs += 1 } }
+        let boundary = AttachmentDraftHostHooks()
+        boundary.boundary = { if $0 == .beforeIntent && !revoked { revoked = true; reject = true } }
+        let live = host(faults: faults, secureRead: true); try await live.configureAttachmentHost(hooks)
+        await live.configureAttachmentDraftHost(boundary); _ = try await live.start()
+        let foreign = cache.appendingPathComponent("foreign-417.txt"), foreignBytes = Data("Foreign cache bytes / 文".utf8)
+        try foreignBytes.write(to: foreign); let foreignIdentity = try inode(foreign)
+        let original = try rows(), configuration = try Data(contentsOf: manifest), checkpoint = try Data(contentsOf: editor.url), identity = try inode(editor.url)
+        await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
+        XCTAssertTrue(revoked); XCTAssertGreaterThan(readFailures, 0); XCTAssertEqual(opened, 1); XCTAssertEqual(syncs, 1)
+        let retained = try files(cache), candidates = retained.filter { $0 != foreign.lastPathComponent }
+        XCTAssertEqual(candidates.count, 1)
+        let name = try XCTUnwrap(candidates.first), source = cache.appendingPathComponent(name)
+        XCTAssertEqual(UUID(uuidString: name)?.uuidString.lowercased(), name)
+        let sourceIdentity = try inode(source)
+        XCTAssertEqual(try Data(contentsOf: source), bytes); XCTAssertEqual(try Data(contentsOf: foreign), foreignBytes); XCTAssertEqual(try inode(foreign), foreignIdentity)
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 0); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try rows(), original)
+        XCTAssertEqual(try Data(contentsOf: manifest), configuration); XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), identity)
+        XCTAssertEqual(try materialOutcomes415(), ["decrypted"])
+        XCTAssertEqual(try webdavTaskOutcomes417(), [], "Credential loss cannot authorize source retirement or checkpoint")
+        reject = false
+        let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request(UUID().uuidString.lowercased())))
+        XCTAssertEqual(reply["status"] as? String, "draftAvailable"); XCTAssertEqual(opened, 2); XCTAssertEqual(syncs, 3); XCTAssertEqual(remote.requests, 2)
+        XCTAssertEqual(try files(cache), retained); XCTAssertEqual(try Data(contentsOf: source), bytes); XCTAssertEqual(try inode(source), sourceIdentity)
+        XCTAssertEqual(try Data(contentsOf: foreign), foreignBytes); XCTAssertEqual(try inode(foreign), foreignIdentity)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+        await live.close(); let cold = host(); _ = try await cold.start()
+        XCTAssertEqual(try files(cache), retained); XCTAssertEqual(try Data(contentsOf: source), bytes); XCTAssertEqual(try inode(source), sourceIdentity)
+        XCTAssertEqual(try Data(contentsOf: foreign), foreignBytes); XCTAssertEqual(try inode(foreign), foreignIdentity)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(remote.requests, 2)
     }
     func testEncryptedFilledProofRetainsSourceOnRevocationAndColdReplayNeedsNoMaterialOrGET() async throws {
         try await seed(encrypted: true)
@@ -1484,6 +1554,127 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), identity)
         #else
         throw XCTSkip("Actual isolated Keychain value changes are iOS-only; macOS exercises secure read failures")
+        #endif
+    }
+
+    func testWebDAVNativePasswordReadFailureAfterActualGETRefusesBeforeSourceAndFreshRequestCompletes() async throws {
+        try await seed()
+        let faults = HostIOFaults()
+        var http: NativeHTTPJobs?, secrets: NativeSecretJobs?, crypto: NativeCryptoJobs?, fileJobs: NativeAttachmentFileJobs?
+        var reject = false, completions = 0, preGETReads = 0, postGETReads = 0
+        var sourceSyncs = 0, installerWork = 0, cryptoOperations = [String]()
+        faults.configureHTTPJobs = { jobs in
+            http = jobs
+            jobs.beforeCompletion = { completions += 1; reject = true }
+        }
+        faults.configureSecretJobs = { secrets = $0 }; faults.configureCryptoJobs = { crypto = $0 }
+        faults.secretStatus = { operation, _ in
+            guard operation == "get" else { XCTFail("Selected preparation cannot mutate secure storage"); return errSecInteractionNotAllowed }
+            if reject { postGETReads += 1; return errSecNotAvailable }
+            preGETReads += 1; return errSecItemNotFound
+        }
+        faults.cryptoAfterOperation = { cryptoOperations.append($0) }
+        let hooks = NativeAttachmentHostHooks()
+        hooks.configureJobs = { jobs in
+            fileJobs = jobs; jobs.beforeStageSync = { sourceSyncs += 1 }
+            jobs.beforeWork = { _, installer in if installer { installerWork += 1 } }
+        }
+        let live = host(faults: faults, secureRead: true)
+        try await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let original = try rows(), settings = try Data(contentsOf: manifest), checkpoint = try Data(contentsOf: editor.url)
+        let checkpointIdentity = try inode(editor.url), wire = remote.bytes
+        let initialSyncs = sourceSyncs, initialInstallerWork = installerWork, initialReads = preGETReads
+        var didRefuse = false, reply: String?
+        do { reply = try await live.downloadTaskAttachmentV5(requestJSON: request()) }
+        catch { didRefuse = true; XCTAssertFalse(error.localizedDescription.contains("file:///")) }
+        if let reply {
+            let value = try object(reply)
+            XCTAssertEqual(Set(value.keys), Set(["version", "status", "requestId", "sessionID", "generation", "attachmentId"]))
+            XCTAssertEqual(value["version"] as? Int, 1); XCTAssertEqual(value["status"] as? String, "unavailable")
+            XCTAssertEqual(value["requestId"] as? String, requestID); XCTAssertEqual(value["sessionID"] as? String, before.sessionID)
+            XCTAssertEqual(value["generation"] as? Int, before.generation); XCTAssertEqual(value["attachmentId"] as? String, attachmentID)
+            didRefuse = value["status"] as? String == "unavailable"
+        }
+        XCTAssertEqual(remote.requests, 1); XCTAssertEqual(remote.unexpected, 0); XCTAssertEqual(completions, 1)
+        XCTAssertEqual(wire, bytes); XCTAssertEqual(remote.bytes, wire, "The actual authenticated GET returns unchanged plaintext")
+        XCTAssertGreaterThan(preGETReads, initialReads, "True-nil native password reads must precede the legacy-authenticated GET")
+        XCTAssertGreaterThan(postGETReads, 0, "The selected owner must re-read native WebDAV authority after HTTP completion")
+        XCTAssertTrue(didRefuse, "Loss of native WebDAV password authority must refuse before plaintext source creation")
+        XCTAssertEqual(sourceSyncs, initialSyncs); XCTAssertEqual(installerWork, initialInstallerWork); XCTAssertEqual(cryptoOperations, [])
+        XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), settings)
+        XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), checkpointIdentity)
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 0, "An empty session may remain; no operation or checkpoint may advance")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertEqual(try files(cache), [])
+        if FileManager.default.fileExists(atPath: managed.path) { XCTAssertEqual(try files(managed), []) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertEqual(http?.counters.jobs, 0); XCTAssertEqual(http?.counters.running, 0)
+        XCTAssertEqual(secrets?.counters.jobs, 0); XCTAssertEqual(secrets?.counters.running, 0)
+        XCTAssertEqual(crypto?.counters.jobs, 0); XCTAssertEqual(crypto?.counters.running, 0); XCTAssertEqual(crypto?.counters.bytes, 0)
+        XCTAssertEqual(fileJobs?.counters.jobs, 0); XCTAssertEqual(fileJobs?.counters.bytes, 0)
+        // An unexpected first success already fails the safety checks above.
+        // A fresh successor is meaningful only after the first request refused.
+        guard didRefuse else { return }
+        reject = false; http?.beforeCompletion = { completions += 1 }
+        let successor = try object(await live.downloadTaskAttachmentV5(requestJSON: request(UUID().uuidString.lowercased())))
+        XCTAssertEqual(successor["status"] as? String, "draftAvailable"); XCTAssertEqual(remote.requests, 2); XCTAssertEqual(completions, 2)
+        XCTAssertEqual(sourceSyncs, initialSyncs + 2, "Only the admitted successor syncs its plaintext source and installer stage")
+        XCTAssertGreaterThan(installerWork, initialInstallerWork, "The same pre-start installer hook must witness successful installation")
+        XCTAssertEqual(cryptoOperations, []); XCTAssertEqual(try Data(contentsOf: target), bytes)
+        XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), settings)
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 1); XCTAssertEqual(try store.readAvailability()?.operations.last?.phase, .checkpointed)
+        XCTAssertEqual(try files(cache), []); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertEqual(http?.counters.jobs, 0); XCTAssertEqual(http?.counters.running, 0)
+        XCTAssertEqual(secrets?.counters.jobs, 0); XCTAssertEqual(secrets?.counters.running, 0)
+        XCTAssertEqual(crypto?.counters.jobs, 0); XCTAssertEqual(crypto?.counters.bytes, 0)
+        XCTAssertEqual(fileJobs?.counters.jobs, 0); XCTAssertEqual(fileJobs?.counters.bytes, 0)
+    }
+
+    func testPhysicalWebDAVSecurePasswordValueChangeAfterGETRefusesThenFreshCheckpointUsesCurrentAuthority() async throws {
+        #if os(iOS)
+        try await seed()
+        var settings = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
+        settings.removeValue(forKey: "@mindwtr_webdav_password"); try Data(json(settings).utf8).write(to: manifest)
+        let faults = HostIOFaults(), service = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased()
+        faults.secretService = service
+        let account = Data("mindwtr_webdav_password".utf8)
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service + ":no-auth",
+            kSecAttrAccount as String: account, kSecAttrGeneric as String: account, kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
+        var item = query; item[kSecValueData as String] = Data("fixture-only".utf8)
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        XCTAssertEqual(SecItemAdd(item as CFDictionary, nil), errSecSuccess)
+        defer { let status = SecItemDelete(query as CFDictionary); XCTAssertTrue(status == errSecSuccess || status == errSecItemNotFound) }
+        var changed = false, changeStatus = errSecSuccess, syncs = 0
+        remote.duringGET = {
+            changeStatus = SecItemUpdate(query as CFDictionary, [kSecValueData as String: Data("synthetic-replaced-417".utf8)] as CFDictionary); changed = true
+        }
+        let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { $0.beforeStageSync = { syncs += 1 } }
+        let live = host(faults: faults, secureRead: true); try await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let original = try rows(), configuration = try Data(contentsOf: manifest), checkpoint = try Data(contentsOf: editor.url), identity = try inode(editor.url)
+        do {
+            let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request()))
+            XCTAssertEqual(Set(reply.keys), Set(["version", "status", "requestId", "sessionID", "generation", "attachmentId"]))
+            XCTAssertEqual(reply["version"] as? Int, 1); XCTAssertEqual(reply["status"] as? String, "unavailable")
+            XCTAssertEqual(reply["requestId"] as? String, requestID); XCTAssertEqual(reply["sessionID"] as? String, before.sessionID)
+            XCTAssertEqual(reply["generation"] as? Int, before.generation); XCTAssertEqual(reply["attachmentId"] as? String, attachmentID)
+        } catch { }
+        XCTAssertTrue(changed); XCTAssertEqual(changeStatus, errSecSuccess); XCTAssertEqual(remote.requests, 1); XCTAssertEqual(syncs, 0)
+        XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+        XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), identity)
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 0); XCTAssertEqual(try files(cache), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        let log = root.appendingPathComponent("logs/mindwtr.log")
+        if FileManager.default.fileExists(atPath: log.path) { XCTAssertFalse(try String(contentsOf: log, encoding: .utf8).contains("v1.3.5/ios-webdav-task-availability")) }
+        remote.duringGET = nil
+        XCTAssertEqual(SecItemUpdate(query as CFDictionary, [kSecValueData as String: Data("fixture-only".utf8)] as CFDictionary), errSecSuccess)
+        let result = try object(await live.downloadTaskAttachmentV5(requestJSON: request(UUID().uuidString.lowercased())))
+        XCTAssertEqual(result["status"] as? String, "draftAvailable"); XCTAssertEqual(remote.requests, 2)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 1); XCTAssertEqual(try store.readAvailability()?.operations.last?.phase, .checkpointed)
+        let entries = try String(contentsOf: log, encoding: .utf8).split(separator: "\n").map { try object(String($0)) }
+        let markers = entries.compactMap { $0["context"] as? [String: String] }.filter { $0["releaseCheck"] == "v1.3.5/ios-webdav-task-availability" }
+        XCTAssertEqual(markers.count, 1); XCTAssertEqual(markers.first, ["releaseCheck": "v1.3.5/ios-webdav-task-availability", "operation": "webdav-task-availability", "outcome": "confirmed"])
+        #else
+        throw XCTSkip("Actual isolated WebDAV password value changes require iOS; macOS exercises true-nil secure reads and post-GET read refusal")
         #endif
     }
 

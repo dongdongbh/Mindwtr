@@ -21,6 +21,8 @@ export type PreparedAreaAuthority = { snapshot: AppData; state: Pick<TaskStore,
 /** Invocation-local Project availability effect; never a journal or replay capability. */
 export type SelectedProjectAvailabilityWrite = {
     projectId: string; attachmentId: string; targetURI: string;
+    /** Closed private WebDAV variants; omitted for existing availability writes. */
+    outcome?: 'noop' | 'unrecoverable';
     before: Project; after: Project; rawBefore: unknown[]; rawAfter: unknown[];
     deviceIdBefore: string | null; deviceIdToInitialize: string | null; updateAt: string;
 };
