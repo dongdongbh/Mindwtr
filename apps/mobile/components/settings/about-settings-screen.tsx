@@ -5,7 +5,7 @@ import * as Application from 'expo-application';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { fetchAppStoreInfo, submitFeedbackSubmission } from '@mindwtr/core';
+import { fetchAppStoreInfo, shouldCheckForAppUpdate, submitFeedbackSubmission } from '@mindwtr/core';
 import { useToast } from '@/contexts/toast-context';
 import { getDeviceLocale, resolveMobileAnalyticsVersion } from '@/lib/analytics-heartbeat';
 import { collectFeedbackDiagnostics } from '@/lib/app-log';
@@ -16,7 +16,6 @@ import { compareVersions, logSettingsError, logSettingsWarn } from '@/lib/settin
 import {
     MobileExtraConfig,
     UPDATE_BADGE_AVAILABLE_KEY,
-    UPDATE_BADGE_INTERVAL_MS,
     UPDATE_BADGE_LAST_CHECK_KEY,
     UPDATE_BADGE_LATEST_KEY,
 } from './settings.constants';
@@ -157,8 +156,7 @@ export function AboutSettingsScreen({
             if (isExpoGo || isFossBuild) return;
             try {
                 const lastCheckedRaw = await AsyncStorage.getItem(UPDATE_BADGE_LAST_CHECK_KEY);
-                const lastChecked = Number.parseInt(lastCheckedRaw || '0', 10);
-                if (Date.now() - lastChecked < UPDATE_BADGE_INTERVAL_MS) {
+                if (!shouldCheckForAppUpdate(lastCheckedRaw)) {
                     const storedBadge = await AsyncStorage.getItem(UPDATE_BADGE_AVAILABLE_KEY);
                     if (!cancelled) onUpdateBadgeChange(storedBadge === 'true');
                     return;

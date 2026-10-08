@@ -74,10 +74,12 @@ export {
     MOBILE_WHISPER_MODELS as WHISPER_MODELS,
 } from '@mindwtr/core/ai-settings-model';
 
-export const UPDATE_BADGE_AVAILABLE_KEY = 'mindwtr-update-available';
-export const UPDATE_BADGE_LAST_CHECK_KEY = 'mindwtr-update-last-check';
-export const UPDATE_BADGE_LATEST_KEY = 'mindwtr-update-latest';
-export const UPDATE_BADGE_INTERVAL_MS = 1000 * 60 * 60 * 24;
+export {
+    UPDATE_BADGE_AVAILABLE_KEY,
+    UPDATE_BADGE_LAST_CHECK_KEY,
+    UPDATE_BADGE_LATEST_KEY,
+    UPDATE_BADGE_INTERVAL_MS,
+} from '@mindwtr/core';
 
 export type MobileExtraConfig = {
     analyticsHeartbeatUrl?: string;

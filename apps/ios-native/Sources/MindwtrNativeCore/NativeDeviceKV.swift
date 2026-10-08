@@ -22,6 +22,7 @@ final class NativeDeviceKV {
         "@mindwtr_fast_sync_state_v1", "@mindwtr_local_sync_status_v1",
         "@mindwtr_webdav_capability_proof_v1", "@mindwtr_webdav_legacy_proof_v1",
         "@mindwtr_attachment_presence_reconcile_v1", "mindwtr-external-calendars",
+        "mindwtr-update-available", "mindwtr-update-last-check", "mindwtr-update-latest",
     ].map { Data($0.utf8) })
     private static let removableSecrets: Set<Data> = Set([
         "@mindwtr_webdav_password", "@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1",
@@ -172,13 +173,43 @@ final class NativeDeviceKV {
         try mutate(changes)
     }
 
-    private func mutate(_ changes: [Change]) throws {
+    func recordAboutUpdateCheck(timestamp: String) throws {
+        try Self.validateAboutTimestamp(timestamp)
+        let changes = [Change(key: "mindwtr-update-last-check", bytes: Data("mindwtr-update-last-check".utf8), value: timestamp)]
+        try Self.validateChanges(changes)
+        try mutate(changes, skipUnchanged: true)
+    }
+
+    func storeAboutUpdateResult(available: Bool, latestVersion: String, checkedAt: String? = nil) throws {
+        guard latestVersion.utf16.count <= 200, !latestVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !latestVersion.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw Self.invalid }
+        if let checkedAt { try Self.validateAboutTimestamp(checkedAt) }
+        var changes = [
+            Change(key: "mindwtr-update-available", bytes: Data("mindwtr-update-available".utf8), value: available ? "true" : "false"),
+            Change(key: "mindwtr-update-latest", bytes: Data("mindwtr-update-latest".utf8), value: available ? latestVersion : nil),
+        ]
+        if let checkedAt {
+            changes.append(Change(key: "mindwtr-update-last-check", bytes: Data("mindwtr-update-last-check".utf8), value: checkedAt))
+        }
+        try Self.validateChanges(changes)
+        try mutate(changes, skipUnchanged: true)
+    }
+
+    private static func validateAboutTimestamp(_ timestamp: String) throws {
+        guard !timestamp.isEmpty, timestamp.utf8.count <= 16, let value = UInt64(timestamp),
+              value <= 9_007_199_254_740_991, String(value) == timestamp else { throw invalid }
+    }
+
+    private func mutate(_ changes: [Change], skipUnchanged: Bool = false) throws {
         try requireUsable()
         if let pending {
             guard pending.changes == changes else { throw Self.failure }
         } else {
             var before = try checkedRead()
             if changes.isEmpty { return }
+            if skipUnchanged && changes.allSatisfy({ change in
+                before.values[change.bytes].map { Data($0.utf8) } == change.value.map { Data($0.utf8) }
+            }) { return }
             let object: NSMutableDictionary
             if let bytes = before.manifest?.bytes {
                 guard let parsed = try NativeJSON.jsonObject(with: bytes, options: [.mutableContainers]) as? NSMutableDictionary else {

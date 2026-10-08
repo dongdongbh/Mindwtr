@@ -580,7 +580,7 @@ final class FoundationUITests: XCTestCase {
     private func task322RestartGate(_ app: XCUIApplication) {
         let gate = app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch
         XCTAssertTrue(gate.waitForExistence(timeout: 30))
-        XCTAssertTrue(app.staticTexts["Sync could not be confirmed. Close and reopen Mindwtr before trying again."].exists)
+        XCTAssertTrue(app.staticTexts["The operation could not be confirmed. Close and reopen Mindwtr before trying again."].exists)
         for id in ["tab-menu", "tab-inbox", "capture-open", "settings-back", "sync-back", "sync-save", "sync-now", "sync-test",
                    "sync-reload", "persistence-retry", "task-attachment-retry", "task-recovery-retry-checkpoint"] {
             XCTAssertFalse(app.buttons[id].exists, "Unknown Sync completion cannot expose editing or same-host retry")
@@ -25061,7 +25061,7 @@ extension FoundationUITests {
     private func task423Flow(_ library: String, largest: Bool = false) {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = task192Arguments(library, largest: largest)
+        app.launchArguments = task192Arguments(library, largest: largest) + ["--native-about-lookup-unavailable"]
         app.launch(); task423Settings(app)
         let search = app.textFields["settings-search"]
         search.tap(); search.typeText("About")
@@ -25105,6 +25105,7 @@ extension FoundationUITests {
             ("check-updates", "Check for Updates", "Failed to check for updates"),
             ("rate", "Rate our app", "Could not open the app store rating page. Please try again later.")
         ] {
+            revealPagedElement(app, app.buttons["settings-about"], in: app.scrollViews["settings-scroll"])
             boardTap(app, "settings-about"); boardEnabled(app.buttons["about-back"])
             let scroll = app.scrollViews["about-scroll"]
             let row = app.buttons["about-" + id]
@@ -25126,6 +25127,7 @@ extension FoundationUITests {
             boardTap(app, "about-back"); boardEnabled(app.buttons["settings-about"])
         }
         app.terminate(); app.launch(); task423Settings(app)
+        revealPagedElement(app, app.buttons["settings-about"], in: app.scrollViews["settings-scroll"])
         boardTap(app, "settings-about"); boardEnabled(app.buttons["about-back"])
         XCTAssertFalse(app.staticTexts["about-open-error"].exists)
         XCTAssertFalse(app.staticTexts["about-update-title"].exists)

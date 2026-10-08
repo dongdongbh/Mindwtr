@@ -52,6 +52,10 @@ import {
     getPersistenceStatus,
     compareAppVersions,
     fetchAppStoreInfo,
+    UPDATE_BADGE_AVAILABLE_KEY,
+    UPDATE_BADGE_LAST_CHECK_KEY,
+    UPDATE_BADGE_LATEST_KEY,
+    shouldCheckForAppUpdate,
     getStorageAdapter,
     isSupportedLanguage,
     isDiagnosticsLoggingEnabled,
@@ -4020,6 +4024,37 @@ globalThis.MindwtrHost = {
         (globalThis.__cancelHostCalls as (message: string) => void)('The host operation timed out');
         pending.get(Number(idText))?.controller.abort(Object.assign(new Error('The host operation timed out'), { name: 'AbortError' }));
         return null;
+    },
+    iosAboutUpdateState(): string {
+        return submit(async (signal) => {
+            const adapter = bootAdapter;
+            const assertReady = () => {
+                if (signal.aborted) throw new Error('CANCELLED: About update state read was cancelled');
+                if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
+                    || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) {
+                    throw new Error('NOT_READY: About update state is unavailable');
+                }
+                requireSaved();
+                if (!contract.getDataSettings().ok) throw new Error('NOT_READY: About update state is unavailable');
+            };
+            assertReady();
+            const values = await keyValue.multiGet([UPDATE_BADGE_AVAILABLE_KEY, UPDATE_BADGE_LAST_CHECK_KEY, UPDATE_BADGE_LATEST_KEY]);
+            assertReady();
+            return { updateAvailable: values[0][1] === 'true', shouldCheck: shouldCheckForAppUpdate(values[1][1]) };
+        });
+    },
+    /** The native storage owner calls this only after an acknowledged fixed update-state mutation. */
+    iosAboutUpdateStateAcknowledged(outcome: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !['check-saved', 'badge-saved'].includes(outcome)) return {};
+            try {
+                await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                    message: 'Native iOS About update state saved',
+                    context: { releaseCheck: 'v1.3.5/ios-about-update-state', outcome },
+                }, { force: true });
+            } catch { /* Diagnostics cannot change an acknowledged storage result. */ }
+            return {};
+        });
     },
     /** Read-only About lookup; the native invocation still owns HTTP admission. */
     iosAboutAppStoreInfo(bundleIdentifier: string, currentVersion: string): string {

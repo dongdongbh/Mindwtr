@@ -1,5 +1,15 @@
 export type AppStoreInfo = { version: string; trackViewUrl: string | null };
 
+export const UPDATE_BADGE_AVAILABLE_KEY = 'mindwtr-update-available';
+export const UPDATE_BADGE_LAST_CHECK_KEY = 'mindwtr-update-last-check';
+export const UPDATE_BADGE_LATEST_KEY = 'mindwtr-update-latest';
+export const UPDATE_BADGE_INTERVAL_MS = 1000 * 60 * 60 * 24;
+
+/** Preserve RN's parseInt/NaN and future-clock behavior for device-local checks. */
+export const shouldCheckForAppUpdate = (rawLastCheck: string | null | undefined, now = Date.now()): boolean => (
+    !(now - Number.parseInt(rawLastCheck || '0', 10) < UPDATE_BADGE_INTERVAL_MS)
+);
+
 // Preserve the mobile update checker's numeric comparison, including its
 // treatment of prerelease/build suffixes and omitted version segments.
 export const compareAppVersions = (v1: string, v2: string): number => {

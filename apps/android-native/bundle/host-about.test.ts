@@ -94,6 +94,60 @@ const fixture = () => {
         cancelNext: () => { cancelNext = true; }, failLog: () => { failLog = true; }, logText: () => logText };
 };
 
+describe('actual exported iOS About update-state bridge', () => {
+    const names = ['mindwtr-update-available', 'mindwtr-update-last-check', 'mindwtr-update-latest'];
+    it.each(['true', 'TRUE', 'false', null])('reads only known cells and treats available=%s literally without HTTP or writes', async (available) => {
+        const f = fixture(); await f.boot();
+        const now = 1_800_000_000_000, reads: string[][] = [];
+        f.state.Date = class extends Date { static now() { return now; } };
+        f.state.__mindwtrNative.kvMultiGet = (raw: string) => {
+            const keys = JSON.parse(raw) as string[]; reads.push(keys);
+            return JSON.stringify(keys.map((name, index) => [name, [available, String(now), '2.0.0'][index]]));
+        };
+        expect(await f.poll(f.state.MindwtrHost.iosAboutUpdateState())).toEqual({ ok: true, value: { updateAvailable: available === 'true', shouldCheck: false } });
+        expect(reads).toEqual([names]); expect(f.requests).toEqual([]); expect(f.writes).toEqual([]); expect(f.logText()).toBe('');
+    });
+
+    it('retains malformed last-check expiry and refuses a changed workspace after reading', async () => {
+        const f = fixture(); await f.boot();
+        f.state.__mindwtrNative.kvMultiGet = (raw: string) => JSON.stringify(JSON.parse(raw).map((name: string) => [name, 'invalid']));
+        expect(await f.poll(f.state.MindwtrHost.iosAboutUpdateState())).toEqual({ ok: true, value: { updateAvailable: false, shouldCheck: true } });
+        f.state.__mindwtrNative.kvMultiGet = (raw: string) => {
+            f.state.fixture.transition(); return JSON.stringify(JSON.parse(raw).map((name: string) => [name, null]));
+        };
+        expect(await f.poll(f.state.MindwtrHost.iosAboutUpdateState())).toEqual({ ok: false, error: 'NOT_READY: About update state is unavailable' });
+        expect(f.requests).toEqual([]); expect(f.writes).toEqual([]); expect(f.logText()).toBe('');
+    });
+
+    it.each(['boot', 'platform', 'sandbox', 'transition', 'persistence'])('refuses state read at %s before touching storage', async (guard) => {
+        const f = fixture();
+        if (guard !== 'boot') await f.boot();
+        if (guard === 'platform') f.state.__mindwtrHostPlatform = 'android';
+        if (guard === 'sandbox') f.state.fixture.sandbox();
+        if (guard === 'transition') f.state.fixture.transition();
+        if (guard === 'persistence') f.state.fixture.failSave();
+        let reads = 0;
+        f.state.__mindwtrNative.kvMultiGet = () => { reads += 1; throw new Error('State read must not be admitted'); };
+        const answer = await f.poll(f.state.MindwtrHost.iosAboutUpdateState());
+        expect(answer.ok).toBe(false); expect(answer.error).toStartWith(guard === 'persistence' ? 'SAVE_FAILED:' : 'NOT_READY:');
+        expect(reads).toBe(0); expect(f.requests).toEqual([]); expect(f.writes).toEqual([]);
+    });
+
+    it('limits acknowledged diagnostics to fixed outcomes and preserves acknowledgment if logging fails', async () => {
+        const f = fixture(); await f.boot();
+        for (const outcome of ['check-saved', 'badge-saved']) {
+            expect(await f.poll(f.state.MindwtrHost.iosAboutUpdateStateAcknowledged(outcome))).toEqual({ ok: true, value: {} });
+        }
+        expect(await f.poll(f.state.MindwtrHost.iosAboutUpdateStateAcknowledged('private arbitrary outcome'))).toEqual({ ok: true, value: {} });
+        const entries = f.logText().trim().split('\n').map((line) => JSON.parse(line));
+        expect(entries.map(({ context }) => context)).toEqual(['check-saved', 'badge-saved'].map((outcome) => ({ releaseCheck: 'v1.3.5/ios-about-update-state', outcome })));
+        expect(f.logText()).not.toContain('private arbitrary outcome');
+        f.failLog();
+        expect(await f.poll(f.state.MindwtrHost.iosAboutUpdateStateAcknowledged('badge-saved'))).toEqual({ ok: true, value: {} });
+        expect(f.requests).toEqual([]); expect(f.writes).toEqual([]);
+    });
+});
+
 describe('actual exported iOS About lookup bridge', () => {
     it('stays inactive at initialization/boot, then returns the shared two-region result without domain/config writes', async () => {
         const f = fixture(); expect(f.requests).toEqual([]); await f.boot();

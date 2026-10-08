@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { compareAppVersions, fetchAppStoreInfo } from './app-store-update';
+import {
+    compareAppVersions, fetchAppStoreInfo, shouldCheckForAppUpdate,
+    UPDATE_BADGE_AVAILABLE_KEY, UPDATE_BADGE_INTERVAL_MS, UPDATE_BADGE_LAST_CHECK_KEY, UPDATE_BADGE_LATEST_KEY,
+} from './app-store-update';
+import * as mobileConstants from '../../../apps/mobile/components/settings/settings.constants';
 
 const bundle = 'tech.example.mindwtr.dev';
 const listing = 'https://apps.apple.com/us/app/mindwtr/id123456789';
@@ -10,6 +14,29 @@ const result = (version: unknown, trackViewUrl: unknown = listing) => ({ results
 afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+});
+
+describe('device-local update check expiry inherited from RN', () => {
+    const day = 86_400_000;
+    it.each([
+        [null, day - 1, false], [undefined, day, true], ['', day, true],
+        ['100', day + 99, false], ['100', day + 100, true],
+        ['101', 100, false], ['invalid', 100, true], ['100ms', day + 100, true],
+        ['-5', day, true],
+    ])('last check %s at %i is due: %s', (raw, now, due) => {
+        expect(shouldCheckForAppUpdate(raw, now)).toBe(due);
+    });
+    it('uses the current clock by default and retains the original RN key aliases', () => {
+        vi.spyOn(Date, 'now').mockReturnValue(day);
+        expect(shouldCheckForAppUpdate('0')).toBe(true);
+        expect(UPDATE_BADGE_INTERVAL_MS).toBe(day);
+        expect([UPDATE_BADGE_AVAILABLE_KEY, UPDATE_BADGE_LAST_CHECK_KEY, UPDATE_BADGE_LATEST_KEY]).toEqual([
+            'mindwtr-update-available', 'mindwtr-update-last-check', 'mindwtr-update-latest',
+        ]);
+        for (const name of ['UPDATE_BADGE_AVAILABLE_KEY', 'UPDATE_BADGE_LAST_CHECK_KEY', 'UPDATE_BADGE_LATEST_KEY', 'UPDATE_BADGE_INTERVAL_MS'] as const) {
+            expect(mobileConstants[name]).toBe({ UPDATE_BADGE_AVAILABLE_KEY, UPDATE_BADGE_LAST_CHECK_KEY, UPDATE_BADGE_LATEST_KEY, UPDATE_BADGE_INTERVAL_MS }[name]);
+        }
+    });
 });
 
 describe('compareAppVersions inherited numeric policy', () => {

@@ -183,7 +183,7 @@ private struct AppLockRoot: View {
                     VStack(spacing: 16) {
                         Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
                             .font(.system(size: 32)).accessibilityHidden(true)
-                        Text("Sync could not be confirmed. Close and reopen Mindwtr before trying again.")
+                        Text("The operation could not be confirmed. Close and reopen Mindwtr before trying again.")
                             .rnFont(17, .semibold).multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                     }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)

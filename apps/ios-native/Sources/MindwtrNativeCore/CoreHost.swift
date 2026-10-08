@@ -129,6 +129,18 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    public func readAboutUpdateState() async throws -> String {
+        try await perform { try $0.readAboutUpdateState() }
+    }
+
+    public func recordAboutUpdateCheck(timestamp: String) async throws {
+        try await perform { try $0.recordAboutUpdateCheck(timestamp: timestamp) }
+    }
+
+    public func storeAboutUpdateResult(available: Bool, latestVersion: String, checkedAt: String? = nil) async throws {
+        try await perform { try $0.storeAboutUpdateResult(available: available, latestVersion: latestVersion, checkedAt: checkedAt) }
+    }
+
     public func call(_ method: String, argumentsJSON: String = "[]") async throws -> String {
         try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
@@ -2301,6 +2313,21 @@ private final class Engine: @unchecked Sendable {
         }
         try requireNoAttachmentDraft()
         return try invoke("iosAboutAppStoreInfo", arguments: [bundleIdentifier, currentVersion], localCancellation: cancellation)
+    }
+
+    func readAboutUpdateState() throws -> String {
+        _ = try requireDeviceStorageAdmission()
+        return try invoke("iosAboutUpdateState", arguments: [])
+    }
+
+    func recordAboutUpdateCheck(timestamp: String) throws {
+        try requireDeviceStorageAdmission().recordAboutUpdateCheck(timestamp: timestamp)
+        _ = try? invoke("iosAboutUpdateStateAcknowledged", arguments: ["check-saved"])
+    }
+
+    func storeAboutUpdateResult(available: Bool, latestVersion: String, checkedAt: String?) throws {
+        try requireDeviceStorageAdmission().storeAboutUpdateResult(available: available, latestVersion: latestVersion, checkedAt: checkedAt)
+        _ = try? invoke("iosAboutUpdateStateAcknowledged", arguments: ["badge-saved"])
     }
 
     func call(_ method: String, argumentsJSON: String) throws -> String {

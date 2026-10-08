@@ -5130,13 +5130,28 @@ final class CoreModel: ObservableObject {
     }
 
     private func readSettingsMenu(generation: Int? = nil) async throws {
-        let result = try await query("menuRead", ["settingsMenu", try json(["query": settingsSearch])])
-        guard !result.text("title").isEmpty, result["groups"] is [[CoreObject]],
-              result["searchPlaceholder"] is String else { throw CocoaError(.coderReadCorrupt) }
-        guard !settingsAboutPresented, !settingsSyncPresented, !settingsSyncRestartRequired, selectedSurface == .settings,
-              generation == nil || settingsSearchGeneration == generation else { return }
-        settingsMenu = result
-        settingsReadError = nil
+        guard let currentHost = host else { throw CocoaError(.coderInvalidValue) }
+        let search = settingsSearch, capturedGeneration = generation ?? settingsSearchGeneration
+        func current() -> Bool {
+            host === currentHost && !settingsAboutPresented && settingsAboutTask == nil
+                && !settingsSyncPresented && !settingsSyncRestartRequired && selectedSurface == .settings
+                && !appLock.concealed && !Task.isCancelled
+                && settingsSearchGeneration == capturedGeneration && settingsSearch == search
+        }
+        guard current() else { return }
+        do {
+            let state = try await readAboutUpdateState(host: currentHost)
+            guard current() else { return }
+            let result = try await query("menuRead", ["settingsMenu", try json(["query": search, "updateAvailable": state.available])])
+            guard !result.text("title").isEmpty, result["groups"] is [[CoreObject]],
+                  result["searchPlaceholder"] is String else { throw CocoaError(.coderReadCorrupt) }
+            guard current() else { return }
+            settingsMenu = result
+            settingsReadError = nil
+        } catch {
+            guard current() else { return }
+            throw error
+        }
     }
 
     private func settingsSyncCurrent(_ capturedHost: CoreHost, _ session: UUID) -> Bool {
@@ -6653,12 +6668,16 @@ final class CoreModel: ObservableObject {
         settingsSearchGeneration += 1
         invalidateAboutLinkOpening()
         settingsAboutPresented = true
+        lookupAboutAppStore(automatic: true)
     }
 
     func closeAboutSettings() {
         guard settingsAboutPresented else { return }
         invalidateAboutLinkOpening()
         settingsAboutPresented = false
+        // A canceled owner must drain before menu reads can observe stored state.
+        if settingsAboutTask != nil || busy { refreshRequested = true }
+        else { setSettingsSearch(settingsSearch) }
     }
 
     func invalidateAboutLinkOpening() {
@@ -6673,10 +6692,28 @@ final class CoreModel: ObservableObject {
 
     func dismissAboutUpdate() { settingsAboutUpdate = nil }
 
-    func checkAboutUpdates() { lookupAboutAppStore(rating: false) }
+    private func readAboutUpdateState(host currentHost: CoreHost) async throws -> (available: Bool, shouldCheck: Bool) {
+        let state = try decode(await currentHost.readAboutUpdateState())
+        guard Set(state.keys) == Set(["updateAvailable", "shouldCheck"]),
+              let available = state["updateAvailable"] as? NSNumber, CFGetTypeID(available) == CFBooleanGetTypeID(),
+              let shouldCheck = state["shouldCheck"] as? NSNumber, CFGetTypeID(shouldCheck) == CFBooleanGetTypeID() else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return (available.boolValue, shouldCheck.boolValue)
+    }
+
+    private static func aboutCheckTimestamp() throws -> String {
+        let milliseconds = (Date().timeIntervalSince1970 * 1_000).rounded(.towardZero)
+        guard milliseconds.isFinite, milliseconds >= 0, milliseconds <= 9_007_199_254_740_991 else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        return String(Int64(milliseconds))
+    }
+
+    func checkAboutUpdates() { lookupAboutAppStore() }
     func rateAboutApp() { lookupAboutAppStore(rating: true) }
 
-    private func lookupAboutAppStore(rating: Bool) {
+    private func lookupAboutAppStore(rating: Bool = false, automatic: Bool = false) {
         guard settingsAboutLinksEnabled, let currentHost = host else { return }
         let session = settingsAboutSession
         settingsAboutChecking = true
@@ -6701,6 +6738,20 @@ final class CoreModel: ObservableObject {
                       let identifier = Bundle.main.bundleIdentifier, !identifier.isEmpty,
                       let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
                       !currentVersion.isEmpty else { throw CocoaError(.coderReadCorrupt) }
+                if automatic {
+                    let state = try await readAboutUpdateState(host: currentHost)
+                    guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled,
+                          state.shouldCheck else { return }
+                } else if !rating {
+                    let timestamp = try Self.aboutCheckTimestamp()
+                    do { try await currentHost.recordAboutUpdateCheck(timestamp: timestamp) }
+                    catch {
+                        // Even a lost reply may follow manifest publication.
+                        requireSettingsSyncRestart(currentHost)
+                        return
+                    }
+                    guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                }
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
                 if settingsAboutTestUnavailable { throw CocoaError(.fileReadUnknown) }
                 #endif
@@ -6718,11 +6769,26 @@ final class CoreModel: ObservableObject {
                     settingsAboutOpening = true
                     try await handoffAboutURL(destination, host: currentHost, session: session)
                 } else {
-                    settingsAboutUpdate = AboutAppStoreNotice(currentVersion: currentVersion, latestVersion: version,
-                        updateAvailable: available.boolValue, listing: listing)
+                    let checkedAt: String?
+                    if automatic { checkedAt = try Self.aboutCheckTimestamp() }
+                    else { checkedAt = nil }
+                    guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                    do {
+                        try await currentHost.storeAboutUpdateResult(available: available.boolValue,
+                            latestVersion: version, checkedAt: checkedAt)
+                    } catch {
+                        // Page invalidation cannot hide an uncertain local write.
+                        requireSettingsSyncRestart(currentHost)
+                        return
+                    }
+                    guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                    if !automatic {
+                        settingsAboutUpdate = AboutAppStoreNotice(currentVersion: currentVersion, latestVersion: version,
+                            updateAvailable: available.boolValue, listing: listing)
+                    }
                 }
             } catch {
-                guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                guard !automatic, settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
                 settingsAboutError = label(rating
                     ? "settings.aboutMobile.couldNotOpenTheAppStoreRatingPagePleaseTry" : "settings.checkFailed")
             }
