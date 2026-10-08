@@ -116,6 +116,7 @@ import { PROJECT_SQLITE_COLUMNS } from '../../../packages/core/src/project-sync-
 import { createPreparedProjectAvailabilityMethods, createProjectAvailabilityMethods } from '../../../packages/core/src/native-host-contract-project-availability';
 import { SYNC_ENCRYPTION_STATE_KEY } from '../../../packages/core/src/sync-storage-keys';
 import { createNativeReminders } from './host-reminders';
+import { createIosReminderMethods } from './host-ios-reminders';
 import { createNativeSync, createHostSyncCrypto, isNativeIosSelfHostedProvider, type NativeSync, type NativeSyncBindings } from './host-sync';
 import { createWidgetPublisher, type WidgetInputs } from './host-widgets';
 
@@ -1332,6 +1333,34 @@ const attachmentDraftDependencies = {
         if (!result.ok || result.value.readOnly) throw new Error('INVALID_INPUT: Task draft attachments cannot be edited');
     },
     t(key: string): string { return unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key; },
+};
+
+const iosReminderEffects = createIosReminderMethods({
+    capture: () => {
+        const adapter = bootAdapter, generation = getPersistenceStatus().generation;
+        return () => {
+            try {
+                if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
+                    || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) throw new Error();
+                requireSaved();
+                const status = getPersistenceStatus();
+                if (status.failed || status.queued || status.inFlight || status.immediate || status.retrying
+                    || status.generation !== generation || !contract.getDataSettings().ok) throw new Error();
+            } catch { throw new Error('NOT_READY: Reminder reconciliation is unavailable'); }
+        };
+    },
+    read: () => keyValue.multiGet([REMINDER_ALARM_MAP_STORAGE_KEY, NATIVE_REMINDER_STATE_STORAGE_KEY]),
+    plan: (input) => contract.planReminderAlarms(input),
+    acknowledged: async (mode, scheduled, cancelled) => {
+        await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+            message: 'Native iOS reminders reconciled',
+            context: { releaseCheck: 'v1.3.5/ios-reminder-apply', outcome: 'confirmed', mode,
+                scheduled: String(scheduled), cancelled: String(cancelled) },
+        }, { force: true });
+    },
+});
+const requireReminderSignal = (signal: AbortSignal) => {
+    if (signal.aborted) throw new Error('CANCELLED: Reminder reconciliation was cancelled');
 };
 
 globalThis.MindwtrHost = {
@@ -4068,6 +4097,28 @@ globalThis.MindwtrHost = {
         (globalThis.__cancelHostCalls as (message: string) => void)('The host operation timed out');
         pending.get(Number(idText))?.controller.abort(Object.assign(new Error('The host operation timed out'), { name: 'AbortError' }));
         return null;
+    },
+    iosReminderBegin(token: string): string {
+        return submit(async (signal) => { requireReminderSignal(signal); return iosReminderEffects.begin(token); });
+    },
+    iosReminderCurrent(token: string): string {
+        return submit(async (signal) => { requireReminderSignal(signal); return iosReminderEffects.current(token); });
+    },
+    iosReminderEnd(token: string): string {
+        return submit(async () => iosReminderEffects.end(token));
+    },
+    iosReminderPrepare(token: string, granted: boolean, pendingJSON: string, deliveredJSON: string): string {
+        return submit(async (signal) => {
+            requireReminderSignal(signal);
+            const result = await iosReminderEffects.prepare(token, granted, pendingJSON, deliveredJSON);
+            requireReminderSignal(signal); return result;
+        });
+    },
+    iosReminderAcknowledged(token: string, mode: string, scheduled: number, cancelled: number): string {
+        return submit(async (signal) => {
+            requireReminderSignal(signal);
+            return iosReminderEffects.acknowledge(token, mode, scheduled, cancelled);
+        });
     },
     /** Pure preview only: no alarm bridge, ownership-map write or permission request. */
     iosReadReminderPlan(permissionGranted: boolean): string {

@@ -101,6 +101,7 @@ enum DurableFile {
 // IO boundary only; no fixtures, domain mutation hooks, or release-build knobs.
 final class HostIOFaults {
     var notificationPermissionRead: NativeNotificationPermission.Reader?
+    var reminderPort: (any NativeReminderPort)?
     var beforeSQL: ((String) throws -> Void)?
     var afterSQL: ((String) throws -> Void)?
     var checkpoint: (() throws -> Void)?

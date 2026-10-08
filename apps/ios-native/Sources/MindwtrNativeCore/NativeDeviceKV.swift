@@ -195,6 +195,27 @@ final class NativeDeviceKV {
         try mutate(changes, skipUnchanged: true)
     }
 
+    private static let reminderNames = ["mindwtr:local:alarms:v1", "mindwtr:native:reminders:v1"]
+    var hasPendingReminderMutation: Bool {
+        pending.map { $0.changes.map(\.key) == Self.reminderNames } ?? false
+    }
+    /// Fixed private two-cell CAS; reminder keys remain absent from the generic writable allowlist.
+    func compareAndSetReminderMaps(expected: [String?], next: [String?]) throws {
+        guard expected.count == 2, next.count == 2,
+              (expected + next).allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }) else { throw Self.invalid }
+        try requireUsable()
+        let changes = zip(Self.reminderNames, next).map { Change(key: $0.0, bytes: Data($0.0.utf8), value: $0.1) }
+        let before: Snapshot
+        if let pending {
+            guard pending.changes == changes else { throw Self.failure }
+            before = pending.before
+        } else { before = try checkedRead() }
+        guard zip(Self.reminderNames, expected).allSatisfy({ name, value in
+            before.values[Data(name.utf8)].map { Data($0.utf8) } == value.map { Data($0.utf8) }
+        }) else { throw Self.failure }
+        try mutate(changes, skipUnchanged: true)
+    }
+
     private static func validateAboutTimestamp(_ timestamp: String) throws {
         guard !timestamp.isEmpty, timestamp.utf8.count <= 16, let value = UInt64(timestamp),
               value <= 9_007_199_254_740_991, String(value) == timestamp else { throw invalid }

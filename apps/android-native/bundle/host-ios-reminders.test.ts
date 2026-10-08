@@ -1,0 +1,167 @@
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { Database } from 'bun:sqlite';
+import { build } from 'esbuild';
+import vm from 'node:vm';
+import { createIosReminderMethods, readOwnedIosReminderMaps } from './host-ios-reminders';
+
+const now = 1_800_000_000_000, token = '12345678-1234-1234-1234-123456789abc';
+const names = ['mindwtr:local:alarms:v1', 'mindwtr:native:reminders:v1'];
+const signed = JSON.stringify({ title: 'Private', message: 'Private', fireAt: new Date(now + 3600000).toISOString(),
+    repeatInterval: 'once', hasSnoozeAction: false, data: {} });
+const map = JSON.stringify({ 'task:one': { id: 123, signature: `native:${signed}` } });
+const snoozeName = `snooze:${token}`;
+const snooze = { kind: 'snooze', id: 2 ** 30, fireAtMs: now + 3600000, armed: true,
+    details: { title: 'Private', message: 'Private', tag: 'task:one', play_sound: true, data: { alarmKey: 'task:one' } } };
+const unavailable = 'NOT_READY: Reminder reconciliation is unavailable';
+
+describe('strict native iOS reminder ownership admission', () => {
+    it('accepts empty and exact native alarm/delivered/Snooze schemas without normalizing raw strings', () => {
+        expect(readOwnedIosReminderMaps(null, null)).toEqual({ map: {}, state: {} });
+        const state = JSON.stringify({ 'task:delivered': { kind: 'delivered', id: 456, firedAtMs: now, signature: signed }, [snoozeName]: snooze });
+        expect(Object.keys(readOwnedIosReminderMaps(map, state).state)).toEqual(['task:delivered', snoozeName]);
+    });
+    it.each(['PRIVATE', '[]', 'null', '{"task:one":{"id":123}}',
+        JSON.stringify({ 'task:one': { id: 123, signature: signed } }),
+        JSON.stringify({ 'task:one': { id: 2 ** 30, signature: `native:${signed}` } }),
+        JSON.stringify({ 'task:one': { id: true, signature: `native:${signed}` } }),
+        JSON.stringify({ 'task:one': { id: 123, signature: `native:${signed}`, pending: false } }),
+        JSON.stringify({ 'task:one': { id: 123, signature: `native:${signed}`, extra: 1 } })])('refuses malformed/legacy alarm map %#', (raw) => {
+        expect(() => readOwnedIosReminderMaps(raw, '{}')).toThrow(unavailable);
+    });
+    it.each(['[]', '{"task:one":{"kind":"unknown","id":123}}',
+        JSON.stringify({ [snoozeName]: { ...snooze, id: 123 } }),
+        JSON.stringify({ [snoozeName]: { ...snooze, armed: 1 } }),
+        JSON.stringify({ 'task:other': { kind: 'delivered', id: 123, firedAtMs: now } }),
+        JSON.stringify({ 'task:other': { kind: 'delivered', id: 456, firedAtMs: now, extra: true } })])('refuses unsupported state or duplicate ordinary ownership %#', (raw) => {
+        expect(() => readOwnedIosReminderMaps(map, raw)).toThrow(unavailable);
+    });
+    it('selectively remakes missing ordinary IDs, preserves pending requests and never invents fired evidence', async () => {
+        const inputs: unknown[] = [];
+        const methods = createIosReminderMethods({ capture: () => () => {}, read: async () => [[names[0], map], [names[1], '{}']],
+            plan: async (input) => { inputs.push(input); return { ok: true, value: { mode: 'active', cancel: [], schedule: [],
+                writeAhead: null, alarms: map, state: '{}', topUpDelayMs: null, clearDelivered: false } }; }, acknowledged: async () => {} });
+        methods.begin(token);
+        await methods.prepare(token, true, '[]', '[]');
+        await methods.prepare(token, true, '[123]', '[]');
+        await methods.prepare(token, true, '[]', '[123]');
+        expect(inputs).toEqual([
+            { storedAlarms: map, storedState: '{}', permissionGranted: true, remake: ['task:one'], fired: [], shown: [] },
+            { storedAlarms: map, storedState: '{}', permissionGranted: true, remake: [], fired: [], shown: [] },
+            { storedAlarms: map, storedState: '{}', permissionGranted: true, remake: ['task:one'], fired: [123], shown: [123] },
+        ]);
+    });
+    it('admits only actual shared once/daily/weekly signature time encodings and integral bounded state instants', () => {
+        for (const [repeatInterval, fireAt] of [['once', new Date(now).toISOString()], ['daily', 'daily:23:59'], ['weekly', 'weekly:0:00:00'], ['weekly', 'weekly:6:23:59']]) {
+            const signature = `native:${JSON.stringify({ ...JSON.parse(signed), repeatInterval, fireAt })}`;
+            expect(() => readOwnedIosReminderMaps(JSON.stringify({ 'task:one': { id: 123, signature } }), '{}')).not.toThrow();
+        }
+        for (const [repeatInterval, fireAt] of [['once', 'bad'], ['once', '2027-01-15'], ['daily', 'daily:24:00'],
+            ['weekly', 'weekly:7:09:00'], ['weekly', 'weekly:0:9:00'], ['weekly', 'daily:09:00']]) {
+            const signature = `native:${JSON.stringify({ ...JSON.parse(signed), repeatInterval, fireAt })}`;
+            expect(() => readOwnedIosReminderMaps(JSON.stringify({ 'task:one': { id: 123, signature } }), '{}')).toThrow(unavailable);
+        }
+        for (const fireAtMs of [1.5, 8_640_000_000_000_001]) {
+            expect(() => readOwnedIosReminderMaps('{}', JSON.stringify({ [snoozeName]: { ...snooze, fireAtMs } }))).toThrow(unavailable);
+            expect(() => readOwnedIosReminderMaps('{}', JSON.stringify({ 'task:one': { kind: 'delivered', id: 123, firedAtMs: fireAtMs } }))).toThrow(unavailable);
+        }
+    });
+    it('refuses unsupported missing future armed Snooze rather than remaking all or treating it as fired', async () => {
+        let calls = 0;
+        const methods = createIosReminderMethods({ capture: () => () => {}, read: async () => [[names[0], '{}'],
+            [names[1], JSON.stringify({ [snoozeName]: { ...snooze, fireAtMs: Date.now() + 3600000 } })]],
+            plan: async () => { calls += 1; return { ok: false }; }, acknowledged: async () => {} });
+        methods.begin(token);
+        await expect(methods.prepare(token, true, '[]', '[]')).rejects.toThrow(unavailable); expect(calls).toBe(0);
+    });
+    it.each(['read', 'plan'])('normalizes private %s failures to the fixed content-free refusal', async (failure) => {
+        const methods = createIosReminderMethods({ capture: () => () => {}, read: async () => {
+            if (failure === 'read') throw new Error('PRIVATE_STORED_CONTENT');
+            return [[names[0], '{}'], [names[1], '{}']];
+        }, plan: async () => { throw new Error('PRIVATE_TASK_CONTENT'); }, acknowledged: async () => {} });
+        methods.begin(token); await expect(methods.prepare(token, true, '[]', '[]')).rejects.toThrow(unavailable);
+    });
+});
+
+let source: string;
+const databases: Database[] = [];
+beforeAll(async () => {
+    const built = await build({ stdin: { contents: `import './host-entry';
+        import { useTaskStore, flushPendingSave } from '../../../packages/core/src/store';
+        globalThis.fixture = { seed: () => useTaskStore.setState({ _allTasks: [{ id:'one', title:'PRIVATE_REMINDER', status:'next',
+            tags:[], contexts:[], createdAt:new Date(${now}).toISOString(), updatedAt:new Date(${now}).toISOString(),
+            dueDate:new Date(${now}+3600000).toISOString() }], settings:{ notificationsEnabled:true, dueDateNotificationsEnabled:true } }),
+            save:()=>useTaskStore.getState().addTask('PRIVATE_QUEUED'), flush:flushPendingSave };`,
+        resolveDir: import.meta.dir, loader: 'ts' }, bundle: true, write: false, format: 'iife', target: 'es2022', logLevel: 'silent' });
+    source = built.outputFiles[0].text;
+});
+afterEach(() => { databases.splice(0).forEach((database) => database.close()); });
+const fixture = () => {
+    const database = new Database(':memory:'); databases.push(database);
+    const saved = new Map<string, string | null>(names.map((name) => [name, null])), writes: string[] = [], reads: string[][] = [];
+    let log = '', failLog = false, onRead = () => {};
+    const state = { AbortController, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout,
+        Date: new Proxy(Date, { construct: (target, args) => Reflect.construct(target, args.length ? args : [now]),
+            get: (target, property) => property === 'now' ? () => now : Reflect.get(target, property) }),
+        __mindwtrHostPlatform: 'ios', console: { log() {}, info() {}, warn() {}, error() {} },
+        MindwtrHost: undefined as unknown as { boot(a: string, b: string): string; poll(id: string): string | null;
+            iosReminderBegin(id: string): string; iosReminderCurrent(id: string): string; iosReminderEnd(id: string): string;
+            iosReminderPrepare(id: string, grant: boolean, pending: string, delivered: string): string;
+            iosReminderAcknowledged(id: string, mode: string, scheduled: number, cancelled: number): string },
+        fixture: undefined as unknown as { seed(): void; save(): void; flush(): Promise<void> },
+        __mindwtrNative: {
+            sqlExec: (sql: string) => { writes.push('SQL'); database.exec(sql); return null; },
+            sqlRun: (sql: string, params: string) => { writes.push('SQL'); database.query(sql).run(...JSON.parse(params)); return null; },
+            sqlAll: (sql: string, params: string) => JSON.stringify(database.query(sql).all(...JSON.parse(params))),
+            nowMs: () => now, randomBytes: (n: number) => JSON.stringify(Array(n).fill(7)), log: () => {}, rnStateCommit: () => null,
+            kvGet: () => '[null]', kvMultiGet: (raw: string) => { const keys = JSON.parse(raw) as string[]; reads.push(keys); onRead(); return JSON.stringify(keys.map((name) => [name, saved.get(name) ?? null])); },
+            kvSet: () => { writes.push('KV'); return null; }, kvRemove: () => { writes.push('KV'); return null; },
+            fileList: () => 'null', fileRead: () => '', fileDelete: () => { writes.push('file'); return null; },
+            logFile: (operation: string, text: string) => {
+                if (failLog) throw new Error('PRIVATE_LOG_ERROR');
+                if (['path', 'ensure'].includes(operation)) return 'files/logs/mindwtr.log';
+                if (operation === 'size') return String(log.length); if (operation === 'read') return log;
+                if (operation === 'exists') return log ? '1' : ''; if (operation === 'isAbsent') return log ? '' : '1';
+                if (operation === 'append') { log += text; return ''; } if (operation === 'write') { log = text; return ''; }
+                if (operation === 'delete') { log = ''; return '1'; } throw new Error('Unexpected diagnostic operation');
+            },
+        } };
+    vm.runInNewContext(source, state);
+    const poll = async (id: string) => {
+        for (let step = 0; step < 100; step++) { const value = state.MindwtrHost.poll(id);
+            if (value !== null) return JSON.parse(value); await new Promise((done) => setTimeout(done, 0)); }
+        throw new Error('Reminder effect bridge did not settle');
+    };
+    const boot = async () => { expect(await poll(state.MindwtrHost.boot('', ''))).toMatchObject({ ok: true });
+        state.fixture.seed(); writes.length = 0; reads.length = 0; log = ''; };
+    return { state, saved, writes, reads, poll, boot, log: () => log, failLog: () => { failLog = true; }, onRead: (value: () => void) => { onRead = value; },
+        begin: () => poll(state.MindwtrHost.iosReminderBegin(token)), prepare: (pending = '[]', delivered = '[]') => poll(state.MindwtrHost.iosReminderPrepare(token, true, pending, delivered)) };
+};
+
+describe('actual iOS effects planning bridge with native-owned storage/effects', () => {
+    it('uses real shared plan and keeps preparation read-only; fixed acknowledgment is private and content-free', async () => {
+        const f = fixture(); await f.boot(); expect(await f.begin()).toEqual({ ok: true, value: null });
+        const result = await f.prepare(); expect(result.ok).toBe(true); expect(result.value.plan.schedule).toHaveLength(1);
+        expect(result.value.plan.schedule[0].key).toBe('task:one'); expect(result.value.plan.writeAhead).toContain('"pending":true');
+        expect(f.reads).toEqual([names]); expect(f.writes).toEqual([]); expect(f.log()).toBe('');
+        expect(await f.poll(f.state.MindwtrHost.iosReminderAcknowledged(token, 'active', 1, 0))).toEqual({ ok: true, value: null });
+        const entry = JSON.parse(f.log().trim());
+        expect(entry.context).toEqual({ releaseCheck: 'v1.3.5/ios-reminder-apply', outcome: 'confirmed', mode: 'active', scheduled: '1', cancelled: '0' });
+        expect(f.log()).not.toContain('PRIVATE'); expect(f.log()).not.toContain('task:one');
+    });
+    it('never writes malformed/legacy ownership and accepts neither another owner nor stale saves', async () => {
+        const f = fixture(); await f.boot(); await f.begin();
+        expect(await f.begin()).toEqual({ ok: false, error: unavailable });
+        f.saved.set(names[0], JSON.stringify({ 'task:one': { id: 123, signature: signed } }));
+        expect(await f.prepare()).toEqual({ ok: false, error: unavailable }); expect(f.writes).toEqual([]); expect(f.log()).toBe('');
+        f.saved.set(names[0], null); f.onRead(() => f.state.fixture.save());
+        try { expect(await f.prepare()).toEqual({ ok: false, error: unavailable }); expect(f.writes).toEqual([]); }
+        finally { await f.state.fixture.flush(); }
+    });
+    it('a confirmed native acknowledgment survives logger failure and ended owners cannot publish', async () => {
+        const f = fixture(); await f.boot(); await f.begin(); f.failLog();
+        expect(await f.poll(f.state.MindwtrHost.iosReminderAcknowledged(token, 'inactive', 0, 0))).toEqual({ ok: true, value: null });
+        await f.poll(f.state.MindwtrHost.iosReminderEnd(token));
+        expect(await f.poll(f.state.MindwtrHost.iosReminderCurrent(token))).toEqual({ ok: false, error: unavailable });
+        expect(f.writes).toEqual([]); expect(f.log()).toBe('');
+    });
+});

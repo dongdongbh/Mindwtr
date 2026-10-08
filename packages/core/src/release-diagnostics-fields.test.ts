@@ -96,6 +96,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'requestedShortcut', 'appliedShortcut',
     // cleanup-batch-fresh-first: batch size and how many targets still had work (with total below).
     'limit', 'fresh',
+    // ios-reminder-apply: confirmed native effect counts.
+    'scheduled', 'cancelled',
     // PR1348 native reminder replacement fields.
     'tagged', 'replaced', 'taggedRemoved',
     'releaseCheck', 'backend', 'statusPublished', 'lastSyncAt', 'lastSyncStatus',

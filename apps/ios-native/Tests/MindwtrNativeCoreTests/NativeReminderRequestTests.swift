@@ -65,6 +65,29 @@ final class NativeReminderRequestTests: XCTestCase {
         XCTAssertNil(try NativeReminderRequest.make(alarm: details(input, changing: "play_sound", to: false), namespace: namespace).content.sound)
     }
 
+    func testObservedOwnershipRequiresExactMetadataAndIdentifier() throws {
+        let request = try NativeReminderRequest.make(alarm: alarm(), namespace: namespace)
+        let delivered = Date(timeIntervalSince1970: 1_900_000_000)
+        let observed = NativeReminderObservation.read(request, namespace: namespace, deliveredAt: delivered)
+        XCTAssertEqual(observed.ownedID, 439)
+        XCTAssertEqual(observed.deliveredAtMs, delivered.timeIntervalSince1970 * 1_000)
+        XCTAssertEqual(observed.threadIdentifier, request.content.threadIdentifier)
+        XCTAssertNil(NativeReminderObservation.read(request, namespace: namespace + ".other").ownedID)
+        let metadata = try XCTUnwrap(request.content.userInfo["mindwtrNativeReminder"] as? [String: Any])
+        for (field, value) in [("version", true as Any), ("version", 2), ("id", true),
+                               ("id", "439"), ("id", 439.5), ("id", 440),
+                               ("namespace", "foreign"), ("unexpected", 1)] {
+            var invalid = metadata; invalid[field] = value
+            let content = UNMutableNotificationContent()
+            content.userInfo = ["mindwtrNativeReminder": invalid]
+            let foreign = UNNotificationRequest(identifier: request.identifier, content: content, trigger: request.trigger)
+            XCTAssertNil(NativeReminderObservation.read(foreign, namespace: namespace).ownedID, field)
+        }
+        let bare = UNNotificationRequest(identifier: request.identifier, content: UNMutableNotificationContent(), trigger: request.trigger)
+        XCTAssertNil(NativeReminderObservation.read(bare, namespace: namespace).ownedID)
+        XCTAssertNil(NativeReminderRequest.ownedID(identifier: request.identifier + "0", metadata: metadata, namespace: namespace))
+    }
+
     func testJSONDecodedSharedShapeKeepsBooleanAndNumberTypesDistinct() throws {
         let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONSerialization.data(withJSONObject: alarm())) as? [String: Any])
         XCTAssertEqual(try NativeReminderRequest.make(alarm: decoded, namespace: namespace).identifier, "mindwtr-native:\(namespace):439")

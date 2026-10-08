@@ -7,12 +7,25 @@ enum NativeReminderRequest {
     private static let invalid = "Native reminder alarm is invalid"
     private static let snoozeBase = 1_073_741_824
 
+    /// Ownership is the closed native metadata and exact namespace/ID, never a prefix alone.
+    static func ownedID(identifier: String, metadata: Any?, namespace: String) -> Int? {
+        guard validNamespace(namespace), let value = metadata as? [String: Any],
+              Set(value.keys) == Set(["version", "namespace", "id"]),
+              integer(value["version"], within: 1...1) == 1, value["namespace"] as? String == namespace,
+              let id = integer(value["id"], within: 1...2_147_483_647),
+              identifier == "mindwtr-native:\(namespace):\(id)" else { return nil }
+        return id
+    }
+
+    static func validNamespace(_ namespace: String) -> Bool {
+        !namespace.isEmpty && namespace.utf8.count <= 255 && namespace.utf8.allSatisfy { byte in
+            (65...90).contains(byte) || (97...122).contains(byte) || (48...57).contains(byte)
+                || byte == 46 || byte == 45 || byte == 95
+        }
+    }
+
     static func make(alarm: [String: Any], namespace: String) throws -> UNNotificationRequest {
-        guard !namespace.isEmpty, namespace.utf8.count <= 255,
-              namespace.utf8.allSatisfy({ byte in
-                  (65...90).contains(byte) || (97...122).contains(byte) || (48...57).contains(byte)
-                      || byte == 46 || byte == 45 || byte == 95
-              }),
+        guard validNamespace(namespace),
               let key = alarm["key"] as? String, !key.isEmpty,
               let id = integer(alarm["id"], within: 1...2_147_483_647),
               let milliseconds = integerNumber(alarm["fireAtMs"]), abs(milliseconds) <= 8_640_000_000_000_000,

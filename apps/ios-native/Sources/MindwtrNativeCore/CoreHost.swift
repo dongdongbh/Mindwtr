@@ -65,6 +65,7 @@ public final class CoreHost: @unchecked Sendable {
     private let queue = DispatchQueue(label: "tech.dongdongbh.mindwtr.native-core", qos: .userInitiated)
     private let engine: Engine
     private let localAttachmentRequests = NativeAttachmentLocalRequests()
+    private let reminderEffects = NativeReminderEffects()
 
     public init(databaseURL: URL, bundleURL: URL,
                 deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
@@ -587,10 +588,107 @@ public final class CoreHost: @unchecked Sendable {
 
     public func cancelAppLockRecovery() async throws { try await perform { try $0.cancelAppLockRecovery() } }
 
+    /// Explicit owned effects only. No App lifecycle, permission prompt or caller-supplied policy.
+    public func reconcileReminders() async throws -> String {
+        let token = NativeAttachmentCancellation(), request = UUID()
+        localAttachmentRequests.register(token, id: request)
+        defer { localAttachmentRequests.remove(request) }
+        if Task.isCancelled { token.cancel() }
+        let owner: UUID
+        do { try token.check(); owner = try reminderEffects.begin() }
+        catch { if token.isCancelled { throw CancellationError() }; throw NativeReminderEffects.unavailable }
+        defer { reminderEffects.finish(owner) }
+        return try await withTaskCancellationHandler {
+            do {
+                let result = try await runReminderReconciliation(owner: owner, cancellation: token)
+                _ = try await perform { $0.finishReminderReconciliation(owner) }
+                return result
+            } catch {
+                _ = try? await perform { $0.finishReminderReconciliation(owner) }
+                if token.isCancelled || Task.isCancelled { throw CancellationError() }
+                throw NativeReminderEffects.unavailable
+            }
+        } onCancel: { token.cancel() }
+    }
+
+    private func runReminderReconciliation(owner: UUID, cancellation: NativeAttachmentCancellation) async throws -> String {
+        let admission = try await perform { try $0.beginReminderReconciliation(owner, cancellation: cancellation) }
+        let port = admission.port, namespace = admission.namespace
+        func current() async throws {
+            try cancellation.check()
+            _ = try await perform { try $0.checkReminderReconciliation(owner) }
+        }
+        try await current()
+        let permission = try await port.permission(); try await current()
+        let pending = try await port.pending(namespace: namespace); try await current()
+        let delivered = try await port.delivered(namespace: namespace); try await current()
+        let plan = try await perform {
+            try $0.prepareReminderReconciliation(owner, permission: permission, pending: pending, delivered: delivered)
+        }
+        func beforeEffect() async throws {
+            try await current()
+            let observed = try await port.permission(); try await current()
+            guard observed.granted == permission.granted else { throw NativeReminderEffects.unavailable }
+        }
+        let cancelled = Dictionary(plan.cancel.map { ($0.identifier, $0.id) }, uniquingKeysWith: { first, _ in first })
+        var withdrawn = Dictionary(plan.cancel.filter(\.withdrawn).map { ($0.identifier, $0.id) }
+            + plan.schedule.filter(\.withdrawn).map { ($0.identifier, $0.id) }, uniquingKeysWith: { first, _ in first })
+        if plan.clearDelivered {
+            for item in delivered { if let id = item.ownedID, withdrawn[item.identifier] == nil { withdrawn[item.identifier] = id } }
+        }
+        func currentTargets(_ observed: [NativeReminderObservation], expected: [String: Int]) throws -> [String] {
+            try NativeReminderEffects.checkInventory(observed)
+            var targets: [String] = []
+            for item in observed {
+                if let id = expected[item.identifier] {
+                    guard item.ownedID == id else { throw NativeReminderEffects.unavailable }
+                    targets.append(item.identifier)
+                }
+            }
+            return targets
+        }
+        // Withdrawal removes the tray entry first; expiry deliberately preserves it.
+        if plan.clearDelivered || !withdrawn.isEmpty {
+            try await beforeEffect()
+            let observed = try await port.delivered(namespace: namespace); try await current()
+            if plan.clearDelivered {
+                for item in observed { if let id = item.ownedID, withdrawn[item.identifier] == nil { withdrawn[item.identifier] = id } }
+            }
+            let targets = try currentTargets(observed, expected: withdrawn)
+            if !targets.isEmpty { try await port.removeDelivered(targets); try await current() }
+        }
+        if !cancelled.isEmpty {
+            try await beforeEffect()
+            let observed = try await port.pending(namespace: namespace); try await current()
+            let targets = try currentTargets(observed, expected: cancelled)
+            if !targets.isEmpty { try await port.removePending(targets); try await current() }
+        }
+        if plan.clearDelivered || !withdrawn.isEmpty || !cancelled.isEmpty {
+            let afterPending = try await port.pending(namespace: namespace); try await current()
+            let afterDelivered = try await port.delivered(namespace: namespace); try await current()
+            try NativeReminderEffects.checkInventory(afterPending); try NativeReminderEffects.checkInventory(afterDelivered)
+            guard !afterPending.contains(where: { cancelled[$0.identifier] != nil }),
+                  !afterDelivered.contains(where: { withdrawn[$0.identifier] != nil || plan.clearDelivered && $0.ownedID != nil }) else {
+                throw NativeReminderEffects.unavailable
+            }
+        }
+        for alarm in plan.schedule {
+            try await beforeEffect()
+            let actual = try await port.pending(namespace: namespace); try await current()
+            try NativeReminderEffects.checkInventory(actual)
+            guard !actual.contains(where: { $0.identifier == alarm.identifier && $0.ownedID != alarm.id }),
+                  Set(actual.map(\.identifier)).union([alarm.identifier]).count <= 64 else { throw NativeReminderEffects.unavailable }
+            try await port.add(alarm, namespace: namespace); try await current()
+        }
+        try await beforeEffect()
+        return try await perform { try $0.commitReminderReconciliation(owner) }
+    }
+
     public func close() async {
         // This primitive flag reaches a running local invoke immediately; an
         // ordinary durable command remains governed by its existing journal.
         localAttachmentRequests.close()
+        await reminderEffects.closeAndDrain()
         await withCheckedContinuation { continuation in
             queue.async { [engine] in
                 engine.shutdown()
@@ -1026,6 +1124,32 @@ private final class Engine: @unchecked Sendable {
     private var ioBodySource: IOBodySource?
     private var preferredIO = 1
     private var attachmentGeneration: UInt64 = 0
+    private final class ReminderEffectsTurn {
+        var id: UUID
+        let generation: UInt64
+        let runtime: JSContext
+        let storage: NativeDeviceKV
+        let dataVersion: Int64
+        let namespace: String
+        let port: any NativeReminderPort
+        let session: String
+        var cancellation: NativeAttachmentCancellation
+        var expected: [String?] = []
+        var mutation: (before: [String?], after: [String?])?
+        var final: [String?] = []
+        var plan: NativeReminderEffects.Plan?
+        init(id: UUID, generation: UInt64, runtime: JSContext, storage: NativeDeviceKV, dataVersion: Int64,
+             namespace: String, port: any NativeReminderPort, cancellation: NativeAttachmentCancellation) {
+            self.id = id; self.generation = generation; self.runtime = runtime; self.storage = storage
+            self.dataVersion = dataVersion; self.namespace = namespace; self.port = port
+            self.cancellation = cancellation; session = id.uuidString.lowercased()
+        }
+    }
+    private var reminderEffectsTurn: ReminderEffectsTurn?
+    private var reminderOwnerAccess = false
+    private var reminderSourceStale = false
+    private static let reminderMapNames = ["mindwtr:local:alarms:v1", "mindwtr:native:reminders:v1"]
+    private static let reminderMethods = Set(["iosReminderBegin", "iosReminderCurrent", "iosReminderPrepare", "iosReminderAcknowledged", "iosReminderEnd"])
     private struct ProviderCopyTurn {
         var receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt?
         var photoCaptureID: UUID? = nil
@@ -1421,6 +1545,7 @@ private final class Engine: @unchecked Sendable {
     func start() throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
         guard !closed else { throw HostFailure("Core host is closed") }
+        guard reminderEffectsTurn == nil else { throw NativeReminderEffects.unavailable }
         do {
             if started {
                 try denyCleanupOwner()
@@ -2363,6 +2488,141 @@ private final class Engine: @unchecked Sendable {
         return NativeReminderPlanReadAdmission(generation: attachmentGeneration, read: reader)
     }
 
+    private func reminderDataVersion() throws -> Int64 {
+        let raw = try requireDatabase().execute("PRAGMA data_version")
+        guard let rows = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [[String: Any]], rows.count == 1,
+              let number = rows[0]["data_version"] as? NSNumber else { throw NativeReminderEffects.unavailable }
+        return number.int64Value
+    }
+    private func reminderInvoke(_ method: String, _ arguments: [Any], cancellation: NativeAttachmentCancellation? = nil) throws -> String {
+        guard Self.reminderMethods.contains(method), !reminderOwnerAccess else { throw NativeReminderEffects.unavailable }
+        reminderOwnerAccess = true; defer { reminderOwnerAccess = false }
+        return try invoke(method, arguments: arguments, localCancellation: cancellation)
+    }
+    func beginReminderReconciliation(_ id: UUID, cancellation: NativeAttachmentCancellation) throws -> NativeReminderEffects.Admission {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try cancellation.check()
+        if let retained = reminderEffectsTurn {
+            // Settle only the exact already accepted mutation. It never resumes the old effects plan.
+            guard let mutation = retained.mutation, retained.storage.hasPendingReminderMutation,
+                  started, !closed, context === retained.runtime, deviceStorage === retained.storage,
+                  attachmentGeneration == retained.generation, lockFD >= 0 else { throw NativeReminderEffects.unavailable }
+            retained.id = id; retained.cancellation = cancellation
+            try retained.storage.compareAndSetReminderMaps(expected: mutation.before, next: mutation.after)
+            retained.expected = mutation.after; retained.mutation = nil
+            if try reminderDataVersion() != retained.dataVersion { reminderSourceStale = true }
+            throw NativeReminderEffects.unavailable
+        }
+        let storage = try requireDeviceStorageAdmission()
+        guard !reminderSourceStale, let runtime = context, let namespace = deviceStorageLocation?.bundleIdentifier,
+              NativeReminderRequest.validNamespace(namespace) else {
+            throw NativeReminderEffects.unavailable
+        }
+        let port: any NativeReminderPort
+        #if DEBUG
+        port = faults?.reminderPort ?? NativeSystemReminderPort()
+        #else
+        port = NativeSystemReminderPort()
+        #endif
+        let turn = ReminderEffectsTurn(id: id, generation: attachmentGeneration, runtime: runtime, storage: storage,
+            dataVersion: try reminderDataVersion(), namespace: namespace, port: port, cancellation: cancellation)
+        reminderEffectsTurn = turn
+        _ = try reminderInvoke("iosReminderBegin", [turn.session], cancellation: cancellation)
+        try checkReminderReconciliation(id)
+        return .init(namespace: namespace, port: port)
+    }
+    func checkReminderReconciliation(_ id: UUID) throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard let turn = reminderEffectsTurn, turn.id == id, started, !closed, !recoveryActivationPending,
+              context === turn.runtime, deviceStorage === turn.storage, attachmentGeneration == turn.generation,
+              pending == nil, retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              taskDownloadTurn == nil, projectAvailabilityTurn == nil, encryptionUnlockTurn == nil,
+              lockFD >= 0, !attachmentDraftEvidence else { throw NativeReminderEffects.unavailable }
+        try turn.cancellation.check()
+        guard try reminderDataVersion() == turn.dataVersion else {
+            reminderSourceStale = true; throw NativeReminderEffects.unavailable
+        }
+        _ = try reminderInvoke("iosReminderCurrent", [turn.session], cancellation: turn.cancellation)
+        if !turn.expected.isEmpty {
+            let values = try turn.storage.multiGet(Self.reminderMapNames).map(\.1)
+            guard zip(values, turn.expected).allSatisfy({ Self.taskDownloadOptionalEqual($0.0, $0.1) }) else {
+                throw NativeReminderEffects.unavailable
+            }
+        }
+    }
+    func prepareReminderReconciliation(_ id: UUID, permission: NativeNotificationPermission,
+        pending inventory: [NativeReminderObservation], delivered: [NativeReminderObservation]) throws -> NativeReminderEffects.Plan {
+        try checkReminderReconciliation(id)
+        try NativeReminderEffects.checkInventory(inventory); try NativeReminderEffects.checkInventory(delivered)
+        guard let turn = reminderEffectsTurn else { throw NativeReminderEffects.unavailable }
+        let raw = try reminderInvoke("iosReminderPrepare", [turn.session, permission.granted,
+            Self.ownedJSON(Array(Set(inventory.compactMap(\.ownedID))).sorted()), Self.ownedJSON(Array(Set(delivered.compactMap(\.ownedID))).sorted())], cancellation: turn.cancellation)
+        try checkReminderReconciliation(id)
+        guard let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(envelope.keys) == Set(["storedAlarms", "storedState", "plan"]),
+              let value = envelope["plan"] as? [String: Any],
+              Set(value.keys) == Set(["mode", "cancel", "schedule", "writeAhead", "alarms", "state", "topUpDelayMs", "clearDelivered"]),
+              let mode = value["mode"] as? String, ["active", "inactive", "revoked"].contains(mode),
+              let scheduled = value["schedule"] as? [[String: Any]], scheduled.count <= 64,
+              let cancelled = value["cancel"] as? [[String: Any]], cancelled.count <= 4096,
+              let alarms = value["alarms"] as? String, let state = value["state"] as? String,
+              let clear = value["clearDelivered"] as? Bool else { throw NativeReminderEffects.unavailable }
+        func optional(_ value: Any?) throws -> String? {
+            if value is NSNull { return nil }
+            guard let text = value as? String else { throw NativeReminderEffects.unavailable }; return text
+        }
+        let before = try [optional(envelope["storedAlarms"]), optional(envelope["storedState"])]
+        let schedule = try scheduled.map { alarm -> NativeReminderEffects.Alarm in
+            let request = try NativeReminderRequest.make(alarm: alarm, namespace: turn.namespace)
+            guard let id = NativeReminderRequest.ownedID(identifier: request.identifier,
+                metadata: request.content.userInfo["mindwtrNativeReminder"], namespace: turn.namespace) else { throw NativeReminderEffects.unavailable }
+            return .init(id: id, identifier: request.identifier, json: try Self.ownedJSON(alarm), withdrawn: alarm["replacing"] as? String == "withdrawn")
+        }
+        let cancel = try cancelled.map { item -> NativeReminderEffects.Cancellation in
+            guard Set(item.keys) == Set(["key", "id", "reason"]), let number = item["id"] as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.rounded() == number.doubleValue,
+                  (1...2_147_483_647).contains(number.intValue), let reason = item["reason"] as? String,
+                  ["withdrawn", "expired"].contains(reason) else { throw NativeReminderEffects.unavailable }
+            return .init(id: number.intValue, identifier: "mindwtr-native:\(turn.namespace):\(number.intValue)", withdrawn: reason == "withdrawn")
+        }
+        let plan = NativeReminderEffects.Plan(mode: mode, schedule: schedule, cancel: cancel, clearDelivered: clear,
+            topUpDelayMs: value["topUpDelayMs"] as? Double)
+        try NativeReminderEffects.projectedCapacity(plan: plan, pending: inventory)
+        let affected = Set(schedule.map(\.identifier) + cancel.map(\.identifier))
+        guard !(inventory + delivered).contains(where: { affected.contains($0.identifier) && $0.ownedID == nil }) else {
+            throw NativeReminderEffects.unavailable
+        }
+        turn.expected = before; turn.final = [alarms, state]; turn.plan = plan
+        try checkReminderReconciliation(id)
+        // Unarmed Snooze state stays unarmed until final acknowledgment. Ordinary pending flags come from core.
+        let ahead = try optional(value["writeAhead"]) ?? before[0]
+        try writeReminderMaps(turn, next: [ahead, before[1]])
+        try checkReminderReconciliation(id)
+        return plan
+    }
+    private func writeReminderMaps(_ turn: ReminderEffectsTurn, next: [String?]) throws {
+        let before = turn.expected
+        turn.mutation = (before, next)
+        try turn.storage.compareAndSetReminderMaps(expected: before, next: next)
+        turn.expected = next; turn.mutation = nil
+    }
+    func commitReminderReconciliation(_ id: UUID) throws -> String {
+        try checkReminderReconciliation(id)
+        guard let turn = reminderEffectsTurn, let plan = turn.plan, turn.final.count == 2 else { throw NativeReminderEffects.unavailable }
+        try writeReminderMaps(turn, next: turn.final)
+        try checkReminderReconciliation(id)
+        _ = try? reminderInvoke("iosReminderAcknowledged", [turn.session, plan.mode, plan.schedule.count, plan.cancel.count], cancellation: turn.cancellation)
+        try checkReminderReconciliation(id)
+        return try Self.ownedJSON(["mode": plan.mode, "scheduled": plan.schedule.count, "cancelled": plan.cancel.count])
+    }
+    func finishReminderReconciliation(_ id: UUID) {
+        guard let turn = reminderEffectsTurn, turn.id == id else { return }
+        if turn.storage.hasPendingReminderMutation { return }
+        reminderEffectsTurn = nil
+        _ = try? reminderInvoke("iosReminderEnd", [turn.session])
+        scheduleAttachmentIdle(immediate: true)
+    }
+
     func readReminderPlan(permission: NativeNotificationPermission, generation: UInt64,
                           cancellation: NativeAttachmentCancellation) throws -> String {
         try cancellation.check()
@@ -2433,6 +2693,7 @@ private final class Engine: @unchecked Sendable {
         NativeAttachmentDraftCoordinator.hasEvidence(databaseURL: databaseURL)
     }
     private func requireNoAttachmentDraft() throws {
+        guard reminderEffectsTurn == nil || reminderOwnerAccess else { throw NativeReminderEffects.unavailable }
         try requireEncryptionUnlockTurn()
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil else { throw Self.taskDownloadFailure }
         try denyCleanupOwner()
@@ -6298,6 +6559,7 @@ private final class Engine: @unchecked Sendable {
 
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard reminderEffectsTurn == nil, !Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
         try denyCleanupOwner()
         guard !["projectFileAvailabilityPreflight", "projectFileAvailabilityEncryptionAdmission", "projectFileAvailabilityWritePrepare", "projectFileAvailabilityWriteValidate", "projectFileAvailabilityWriteCommit", "iosProjectFilePrepareAvailability", "projectAttachmentCachedAvailabilityPreflight", "projectAttachmentCachedAvailability"].contains(method) else { throw Self.projectDownloadFailure }
         if started, !closed, pending?.method == Self.projectDownloadMethod || projectDownloadTurn != nil {
@@ -18616,6 +18878,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func invoke(_ method: String, arguments: [Any], localCancellation: NativeAttachmentCancellation? = nil) throws -> String {
+        guard reminderEffectsTurn == nil || reminderOwnerAccess && Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
         try denyCleanupOwner()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
@@ -18755,7 +19018,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         guard generation == attachmentGeneration else { return }
         attachmentIdlePump = nil
-        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil, let context else { return }
+        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, reminderEffectsTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil, let context else { return }
         _ = context.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
         // No arbitrary JS exception content enters diagnostics.
         if context.exception != nil { context.exception = nil }
@@ -18771,6 +19034,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func ordinaryGuardedSQL(_ sql: String, parameters: String? = nil) throws -> String {
+        guard reminderEffectsTurn == nil else { throw NativeReminderEffects.unavailable }
         try requireEncryptionUnlockTurn()
         try denyCleanupOwner()
         guard taskDownloadTurn == nil else { throw Self.taskDownloadFailure }
@@ -18875,7 +19139,7 @@ private final class Engine: @unchecked Sendable {
         do {
             let result = try work()
             try requireEncryptionUnlockTurn()
-            if taskDownloadTurn != nil || projectAvailabilityTurn != nil || projectDownloadTurn != nil || encryptionUnlockTurn != nil { return result }
+            if taskDownloadTurn != nil || projectAvailabilityTurn != nil || projectDownloadTurn != nil || encryptionUnlockTurn != nil || reminderEffectsTurn != nil { return result }
             let retiredSecret = legacySecretRemoval()
             guard let runtime = context else { throw Self.deviceStorageUnavailable }
             let generation = attachmentGeneration
@@ -19256,6 +19520,7 @@ private final class Engine: @unchecked Sendable {
             let get: @convention(block) (JSValue) -> String = { [weak self] key in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.deviceStorageResult {
+                    guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let key = try Self.deviceStorageText(key)
                     let value: String?
                     if self.projectDownloadTurn != nil {
@@ -19272,6 +19537,7 @@ private final class Engine: @unchecked Sendable {
             let set: @convention(block) (JSValue, JSValue) -> String? = { [weak self] key, value in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.deviceStorageResult {
+                    guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let key = try Self.deviceStorageText(key), value = try Self.deviceStorageText(value)
                     try self.requireDeviceStorageAdmission().set(key, value); return nil
                 }
@@ -19280,6 +19546,7 @@ private final class Engine: @unchecked Sendable {
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 var retiredSecret = false
                 return self.deviceStorageResult(legacySecretRemoval: { retiredSecret }) {
+                    guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let key = try Self.deviceStorageText(key)
                     try self.requireDeviceStorageAdmission().remove(key)
                     retiredSecret = NativeDeviceKV.isLegacySecretRemoval([key]); return nil
@@ -19290,7 +19557,10 @@ private final class Engine: @unchecked Sendable {
                 return self.deviceStorageResult {
                     let keys = try Self.deviceStorageKeys(keys)
                     let pairs: [(String, String?)]
-                    if self.projectDownloadTurn != nil {
+                    if let turn = self.reminderEffectsTurn {
+                        guard self.reminderOwnerAccess, keys == Self.reminderMapNames else { throw Self.deviceStorageUnavailable }
+                        pairs = try turn.storage.multiGet(keys)
+                    } else if self.projectDownloadTurn != nil {
                         pairs = try self.projectDownloadLegacyRead(keys)
                     } else if let turn = self.projectAvailabilityTurn {
                         try self.requireProjectAvailabilityTurn(); pairs = try turn.readStorage(keys)
@@ -19305,6 +19575,7 @@ private final class Engine: @unchecked Sendable {
             let multiSet: @convention(block) (JSValue) -> String? = { [weak self] pairs in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.deviceStorageResult {
+                    guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let pairs = try Self.deviceStoragePairs(pairs)
                     try self.requireDeviceStorageAdmission().multiSet(pairs); return nil
                 }
@@ -19313,6 +19584,7 @@ private final class Engine: @unchecked Sendable {
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 var retiredSecret = false
                 return self.deviceStorageResult(legacySecretRemoval: { retiredSecret }) {
+                    guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let keys = try Self.deviceStorageKeys(keys)
                     try self.requireDeviceStorageAdmission().multiRemove(keys)
                     retiredSecret = NativeDeviceKV.isLegacySecretRemoval(keys); return nil
@@ -19368,6 +19640,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func releaseRuntime() {
+        reminderEffectsTurn = nil
+        reminderOwnerAccess = false
+        reminderSourceStale = false
         foregroundCleanupCancellation = nil
         foregroundCleanupActive = false
         cleanupTurn = nil
